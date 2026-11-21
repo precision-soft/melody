@@ -1,11 +1,14 @@
 package httpclient
 
 import (
+    "context"
     "errors"
     "reflect"
     "testing"
 
+    "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     httpclientcontract "github.com/precision-soft/melody/v4/httpclient/contract"
 )
 
@@ -228,4 +231,37 @@ type boundCountingClient struct {
 
 func (instance *boundCountingClient) Get(runtimeInstance containercontract.Runtime, urlString string, options RequestOptions) (httpclientcontract.Response, error) {
     return nil, nil
+}
+
+func TestFromRuntime_BindsTheClientRegisteredUnderTheApplicationsName(t *testing.T) {
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: "http://127.0.0.1:1"})
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    if registerErr := serviceContainer.Register(
+        "app.rates.client",
+        func(resolver containercontract.Resolver) (*HttpClient, error) {
+            return client, nil
+        },
+        container.RegisterOptions{},
+    ); nil != registerErr {
+        t.Fatalf("register: %v", registerErr)
+    }
+
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
+    boundClient := FromRuntime(runtimeInstance, "app.rates.client")
+    if httpclientcontract.Client(client) != boundClient.Client() || runtimeInstance != boundClient.Runtime() {
+        t.Fatalf("expected the registered client bound to the runtime")
+    }
+
+    panicked := func() (recovered bool) {
+        defer func() {
+            recovered = nil != recover()
+        }()
+
+        FromRuntime(runtimeInstance, "app.missing.client")
+
+        return false
+    }()
+    if false == panicked {
+        t.Fatalf("expected a name nothing registered to panic")
+    }
 }

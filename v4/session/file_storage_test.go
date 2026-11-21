@@ -65,7 +65,7 @@ func TestFileStorage_Close_ClosesOwnedFile(t *testing.T) {
     }
 
     saveErr := storage.Save(
-        context.Background(),
+        sessionRuntime(),
         "abc",
         map[string]any{"k": "v"},
         bound.Of(2*time.Second),
@@ -99,7 +99,7 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByPath(t *testing.T) {
     }
 
     saveErr := storage1.Save(
-        context.Background(),
+        sessionRuntime(),
         "abc",
         map[string]any{"k": "v"},
         bound.UnlimitedDuration(),
@@ -108,7 +108,7 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByPath(t *testing.T) {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
-    loadAfterSaveData, loadAfterSaveExists, loadAfterSaveErr := storage1.Load(context.Background(), "abc")
+    loadAfterSaveData, loadAfterSaveExists, loadAfterSaveErr := storage1.Load(sessionRuntime(), "abc")
     if nil != loadAfterSaveErr {
         t.Fatalf("unexpected load error: %s", loadAfterSaveErr.Error())
     }
@@ -131,7 +131,7 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByPath(t *testing.T) {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
 
-    data, exists, loadErr := storage2.Load(context.Background(), "abc")
+    data, exists, loadErr := storage2.Load(sessionRuntime(), "abc")
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -165,7 +165,7 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByInjectedFile(t *testing.T) {
     }
 
     saveErr := storage1.Save(
-        context.Background(),
+        sessionRuntime(),
         "abc",
         map[string]any{"k": "v"},
         bound.UnlimitedDuration(),
@@ -179,7 +179,7 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByInjectedFile(t *testing.T) {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
 
-    data, exists, loadErr := storage2.Load(context.Background(), "abc")
+    data, exists, loadErr := storage2.Load(sessionRuntime(), "abc")
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -218,17 +218,17 @@ func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
     }
     defer storage.CloseWithContext(context.Background())
 
-    if saveErr := storage.Save(context.Background(), "expired", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "expired", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
-    if saveErr := storage.Save(context.Background(), "live", map[string]any{"k": "live"}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "live", map[string]any{"k": "live"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
     expireStoredEntry(t, storage, "expired")
 
-    data, exists, loadErr := storage.Load(context.Background(), "expired")
+    data, exists, loadErr := storage.Load(sessionRuntime(), "expired")
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -245,7 +245,7 @@ func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
         t.Fatalf("expected the expired entry to be dropped from the in-memory state")
     }
 
-    liveData, liveExists, liveErr := storage.Load(context.Background(), "live")
+    liveData, liveExists, liveErr := storage.Load(sessionRuntime(), "live")
     if nil != liveErr {
         t.Fatalf("unexpected live load error: %s", liveErr.Error())
     }
@@ -259,7 +259,7 @@ func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
     }
     defer storage2.CloseWithContext(context.Background())
 
-    _, existsAfterReload, loadAfterReloadErr := storage2.Load(context.Background(), "expired")
+    _, existsAfterReload, loadAfterReloadErr := storage2.Load(sessionRuntime(), "expired")
     if nil != loadAfterReloadErr {
         t.Fatalf("unexpected reload error: %s", loadAfterReloadErr.Error())
     }
@@ -268,7 +268,7 @@ func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
         t.Fatalf("expected expired entry to be persisted as removed")
     }
 
-    _, liveExistsAfterReload, liveReloadErr := storage2.Load(context.Background(), "live")
+    _, liveExistsAfterReload, liveReloadErr := storage2.Load(sessionRuntime(), "live")
     if nil != liveReloadErr {
         t.Fatalf("unexpected live reload error: %s", liveReloadErr.Error())
     }
@@ -288,17 +288,17 @@ func TestFileStorage_Save_PurgesEntriesThatLapsedWithoutBeingLoaded(t *testing.T
     }
     defer storage.CloseWithContext(context.Background())
 
-    if saveErr := storage.Save(context.Background(), "lapsed", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "lapsed", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
-    if saveErr := storage.Save(context.Background(), "keeper", map[string]any{"k": "keeper"}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "keeper", map[string]any{"k": "keeper"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
     expireStoredEntry(t, storage, "lapsed")
 
-    if saveErr := storage.Save(context.Background(), "keeper", map[string]any{"k": "keeper"}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "keeper", map[string]any{"k": "keeper"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
@@ -331,7 +331,7 @@ func TestFileStorage_Delete_RefusesAnEmptySessionId(t *testing.T) {
     }
     defer storage.CloseWithContext(context.Background())
 
-    deleteErr := storage.Delete(context.Background(), "")
+    deleteErr := storage.Delete(sessionRuntime(), "")
     if nil == deleteErr {
         t.Fatalf("expected an empty session id to be refused")
     }
@@ -350,13 +350,13 @@ func TestFileStorage_Delete_AfterCloseReturnsError(t *testing.T) {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
 
-    if saveErr := storage.Save(context.Background(), "abc", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "abc", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
     _ = storage.CloseWithContext(t.Context())
 
-    deleteErr := storage.Delete(context.Background(), "abc")
+    deleteErr := storage.Delete(sessionRuntime(), "abc")
     if nil == deleteErr {
         t.Fatalf("expected delete after close to error")
     }
@@ -375,15 +375,15 @@ func TestFileStorage_Delete_RemovesTheEntryAndSkipsTheFlushForAnAbsentId(t *test
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
 
-    if saveErr := storage.Save(context.Background(), "deleted", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "deleted", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
-    if saveErr := storage.Save(context.Background(), "kept", map[string]any{"k": "kept"}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "kept", map[string]any{"k": "kept"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
-    if deleteErr := storage.Delete(context.Background(), "deleted"); nil != deleteErr {
+    if deleteErr := storage.Delete(sessionRuntime(), "deleted"); nil != deleteErr {
         t.Fatalf("unexpected delete error: %s", deleteErr.Error())
     }
 
@@ -391,7 +391,7 @@ func TestFileStorage_Delete_RemovesTheEntryAndSkipsTheFlushForAnAbsentId(t *test
         t.Fatalf("expected the deleted entry to be gone from the in-memory state")
     }
 
-    _, exists, loadErr := storage.Load(context.Background(), "deleted")
+    _, exists, loadErr := storage.Load(sessionRuntime(), "deleted")
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -421,7 +421,7 @@ func TestFileStorage_Delete_RemovesTheEntryAndSkipsTheFlushForAnAbsentId(t *test
 
     unwritableStorage := newFileStorageOverAReadOnlyHandle(t, readOnlyPath)
 
-    if deleteErr := unwritableStorage.Delete(context.Background(), "never-stored"); nil != deleteErr {
+    if deleteErr := unwritableStorage.Delete(sessionRuntime(), "never-stored"); nil != deleteErr {
         t.Fatalf("expected deleting an absent id to answer success without flushing, got %s", deleteErr.Error())
     }
 }
@@ -444,7 +444,7 @@ func TestFileStorage_Delete_RestoresTheEntryWhenTheFlushFails(t *testing.T) {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
 
-    if saveErr := storage.Save(context.Background(), "doomed", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "doomed", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
@@ -452,7 +452,7 @@ func TestFileStorage_Delete_RestoresTheEntryWhenTheFlushFails(t *testing.T) {
         t.Fatalf("unexpected error closing the handle: %s", closeErr.Error())
     }
 
-    deleteErr := storage.Delete(context.Background(), "doomed")
+    deleteErr := storage.Delete(sessionRuntime(), "doomed")
     if nil == deleteErr {
         t.Fatalf("expected the delete to fail when its flush cannot write")
     }
@@ -511,13 +511,13 @@ func TestFileStorage_Load_AfterCloseReturnsError(t *testing.T) {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
 
-    if saveErr := storage.Save(context.Background(), "abc", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "abc", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
     _ = storage.CloseWithContext(t.Context())
 
-    _, exists, loadErr := storage.Load(context.Background(), "abc")
+    _, exists, loadErr := storage.Load(sessionRuntime(), "abc")
     if nil == loadErr {
         t.Fatalf("expected load after close to error")
     }
@@ -579,7 +579,7 @@ func TestFileStorage_FlushLocked_RefusesWhenTheInjectedHandleIsGone(t *testing.T
 
     storage.file = nil
 
-    saveErr := storage.Save(context.Background(), "abc", map[string]any{"k": "v"}, bound.Of(time.Hour))
+    saveErr := storage.Save(sessionRuntime(), "abc", map[string]any{"k": "v"}, bound.Of(time.Hour))
     if nil == saveErr {
         t.Fatalf("expected the flush to refuse when there is no handle to write through")
     }
@@ -630,7 +630,7 @@ func TestFileStorage_Save_AfterCloseReturnsError(t *testing.T) {
 
     _ = storage.CloseWithContext(t.Context())
 
-    saveErr := storage.Save(context.Background(), "k", map[string]any{"v": 1}, bound.Of(time.Minute))
+    saveErr := storage.Save(sessionRuntime(), "k", map[string]any{"v": 1}, bound.Of(time.Minute))
     if nil == saveErr {
         t.Fatalf("expected save after close to error")
     }
@@ -648,7 +648,7 @@ func TestFileStorage_AtomicWrite_DoesNotLeaveTempFiles(t *testing.T) {
 
     for iteration := 0; iteration < 5; iteration++ {
         saveErr := storage.Save(
-            context.Background(),
+            sessionRuntime(),
             "s"+strconv.Itoa(iteration),
             map[string]any{"iteration": iteration},
             bound.Of(time.Minute),
@@ -958,7 +958,7 @@ func TestNewFileStorage_AcceptsAReadWriteHandleAndSaves(t *testing.T) {
         t.Fatalf("unexpected error over a read-write handle: %s", storageErr.Error())
     }
 
-    if saveErr := storage.Save(context.Background(), "sid-1", map[string]any{"key": "value"}, bound.UnlimitedDuration()); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "sid-1", map[string]any{"key": "value"}, bound.UnlimitedDuration()); nil != saveErr {
         t.Fatalf("unexpected save error over a read-write handle: %s", saveErr.Error())
     }
 }
@@ -1025,7 +1025,7 @@ func TestFileStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
 
     sessionId := "concurrent-session"
 
-    if saveErr := storage.Save(context.Background(), sessionId, map[string]any{"counter": 0}, bound.Of(time.Minute)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), sessionId, map[string]any{"counter": 0}, bound.Of(time.Minute)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
@@ -1038,7 +1038,7 @@ func TestFileStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
             defer waitGroup.Done()
             for index := 0; index < iterations; index++ {
                 _ = storage.Save(
-                    context.Background(),
+                    sessionRuntime(),
                     sessionId,
                     map[string]any{
                         "counter": index,
@@ -1058,7 +1058,7 @@ func TestFileStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
         go func() {
             defer waitGroup.Done()
             for index := 0; index < iterations; index++ {
-                loaded, _, loadErr := storage.Load(context.Background(), sessionId)
+                loaded, _, loadErr := storage.Load(sessionRuntime(), sessionId)
                 if nil != loadErr {
                     t.Errorf("load error: %v", loadErr)
                     return
@@ -1089,7 +1089,7 @@ func TestFileStorage_Save_FailedEncodeDoesNotDestroyPersistedSessions(t *testing
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
 
-    saveErr := storage.Save(context.Background(), "keep", map[string]any{"k": "v"}, bound.UnlimitedDuration())
+    saveErr := storage.Save(sessionRuntime(), "keep", map[string]any{"k": "v"}, bound.UnlimitedDuration())
     if nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
@@ -1102,7 +1102,7 @@ func TestFileStorage_Save_FailedEncodeDoesNotDestroyPersistedSessions(t *testing
         t.Fatalf("expected the persisted session file to be non-empty after a successful save")
     }
 
-    badSaveErr := storage.Save(context.Background(), "bad", map[string]any{"ch": make(chan int)}, bound.UnlimitedDuration())
+    badSaveErr := storage.Save(sessionRuntime(), "bad", map[string]any{"ch": make(chan int)}, bound.UnlimitedDuration())
     if nil == badSaveErr {
         t.Fatalf("expected a non-marshalable session value to fail the save")
     }
@@ -1120,7 +1120,7 @@ func TestFileStorage_Save_FailedEncodeDoesNotDestroyPersistedSessions(t *testing
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
 
-    data, exists, loadErr := reader.Load(context.Background(), "keep")
+    data, exists, loadErr := reader.Load(sessionRuntime(), "keep")
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -1148,23 +1148,23 @@ func TestFileStorage_Save_RollsBackInMemoryEntryWhenFlushFails(t *testing.T) {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
 
-    if saveErr := storage.Save(context.Background(), "existing", map[string]any{"v": "old"}, bound.UnlimitedDuration()); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "existing", map[string]any{"v": "old"}, bound.UnlimitedDuration()); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
-    if newErr := storage.Save(context.Background(), "fresh", map[string]any{"ch": make(chan int)}, bound.UnlimitedDuration()); nil == newErr {
+    if newErr := storage.Save(sessionRuntime(), "fresh", map[string]any{"ch": make(chan int)}, bound.UnlimitedDuration()); nil == newErr {
         t.Fatalf("expected the non-marshalable save to fail")
     }
-    if _, exists, loadErr := storage.Load(context.Background(), "fresh"); nil != loadErr {
+    if _, exists, loadErr := storage.Load(sessionRuntime(), "fresh"); nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     } else if true == exists {
         t.Fatalf("a failed Save of a new id must not be observable via Load")
     }
 
-    if updErr := storage.Save(context.Background(), "existing", map[string]any{"ch": make(chan int)}, bound.UnlimitedDuration()); nil == updErr {
+    if updErr := storage.Save(sessionRuntime(), "existing", map[string]any{"ch": make(chan int)}, bound.UnlimitedDuration()); nil == updErr {
         t.Fatalf("expected the non-marshalable update to fail")
     }
-    data, exists, loadErr := storage.Load(context.Background(), "existing")
+    data, exists, loadErr := storage.Load(sessionRuntime(), "existing")
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -1188,7 +1188,7 @@ func TestFileStorage_Save_KeepsTheNewEntryWhenTheFlushFailsAfterThePersist(t *te
         t.Fatalf("unexpected storage error: %s", storageErr.Error())
     }
 
-    saveErr := storage.Save(context.Background(), "kept", map[string]any{"v": "new"}, bound.UnlimitedDuration())
+    saveErr := storage.Save(sessionRuntime(), "kept", map[string]any{"v": "new"}, bound.UnlimitedDuration())
     if nil == saveErr {
         t.Fatalf("expected the truncation refusal to be reported")
     }
@@ -1197,7 +1197,7 @@ func TestFileStorage_Save_KeepsTheNewEntryWhenTheFlushFailsAfterThePersist(t *te
         t.Fatalf("expected the failure to carry the persisted-despite-flush mark, got %s", saveErr.Error())
     }
 
-    data, exists, loadErr := storage.Load(context.Background(), "kept")
+    data, exists, loadErr := storage.Load(sessionRuntime(), "kept")
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -1222,11 +1222,11 @@ func TestFileStorage_Delete_KeepsTheEntryDeletedWhenTheFlushFailsAfterThePersist
         t.Fatalf("unexpected storage error: %s", storageErr.Error())
     }
 
-    if saveErr := storage.Save(context.Background(), "gone", map[string]any{"v": "old"}, bound.UnlimitedDuration()); false == errors.Is(saveErr, errSessionStoragePersistedDespiteFlushFailure) {
+    if saveErr := storage.Save(sessionRuntime(), "gone", map[string]any{"v": "old"}, bound.UnlimitedDuration()); false == errors.Is(saveErr, errSessionStoragePersistedDespiteFlushFailure) {
         t.Fatalf("expected the seeding save to fail only past the persist, got %v", saveErr)
     }
 
-    deleteErr := storage.Delete(context.Background(), "gone")
+    deleteErr := storage.Delete(sessionRuntime(), "gone")
     if nil == deleteErr {
         t.Fatalf("expected the truncation refusal to be reported")
     }
@@ -1235,7 +1235,7 @@ func TestFileStorage_Delete_KeepsTheEntryDeletedWhenTheFlushFailsAfterThePersist
         t.Fatalf("expected the failure to carry the persisted-despite-flush mark, got %s", deleteErr.Error())
     }
 
-    if _, exists, loadErr := storage.Load(context.Background(), "gone"); nil != loadErr {
+    if _, exists, loadErr := storage.Load(sessionRuntime(), "gone"); nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     } else if true == exists {
         t.Fatalf("expected the entry deleted before the failed flush to stay deleted")
@@ -1252,11 +1252,11 @@ func TestFileStorage_Save_TtlBeyondYear2262IsKeptNotPurged(t *testing.T) {
     }
     defer storage.CloseWithContext(context.Background())
 
-    if saveErr := storage.Save(context.Background(), "forever", map[string]any{"k": "v"}, bound.Of(time.Duration(math.MaxInt64))); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "forever", map[string]any{"k": "v"}, bound.Of(time.Duration(math.MaxInt64))); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
-    data, exists, loadErr := storage.Load(context.Background(), "forever")
+    data, exists, loadErr := storage.Load(sessionRuntime(), "forever")
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -1273,7 +1273,7 @@ func TestFileStorage_Save_TtlBeyondYear2262IsKeptNotPurged(t *testing.T) {
     }
     defer reader.CloseWithContext(context.Background())
 
-    reloadData, reloadExists, reloadErr := reader.Load(context.Background(), "forever")
+    reloadData, reloadExists, reloadErr := reader.Load(sessionRuntime(), "forever")
     if nil != reloadErr {
         t.Fatalf("unexpected reload error: %s", reloadErr.Error())
     }
@@ -1291,12 +1291,12 @@ func TestFileStorage_LoadingAnExpiredSessionRemovesItFromTheFile(t *testing.T) {
         t.Fatalf("unexpected storage error: %v", newErr)
     }
 
-    saveErr := storage.Save(context.Background(), "expired", map[string]any{"user": "alice"}, bound.Of(time.Hour))
+    saveErr := storage.Save(sessionRuntime(), "expired", map[string]any{"user": "alice"}, bound.Of(time.Hour))
     if nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
-    saveErr = storage.Save(context.Background(), "live", map[string]any{"user": "bob"}, bound.Of(time.Hour))
+    saveErr = storage.Save(sessionRuntime(), "live", map[string]any{"user": "bob"}, bound.Of(time.Hour))
     if nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
@@ -1305,7 +1305,7 @@ func TestFileStorage_LoadingAnExpiredSessionRemovesItFromTheFile(t *testing.T) {
     agedEntry.ExpiresAt = time.Now().Add(-time.Hour).UnixNano()
     storage.sessionById["expired"] = agedEntry
 
-    _, exists, loadErr := storage.Load(context.Background(), "expired")
+    _, exists, loadErr := storage.Load(sessionRuntime(), "expired")
     if nil != loadErr {
         t.Fatalf("unexpected load error: %v", loadErr)
     }
@@ -1349,7 +1349,7 @@ func TestFileStorage_LoadOfALapsedEntryAnswersAbsentWhenTheFlushCannotWrite(t *t
         ExpiresAt: time.Now().Add(-time.Hour).UnixNano(),
     }
 
-    data, exists, loadErr := storage.Load(context.Background(), sessionId)
+    data, exists, loadErr := storage.Load(sessionRuntime(), sessionId)
     if nil != loadErr {
         t.Fatalf("expected a lapsed entry to answer absent rather than surface the housekeeping failure, got %v", loadErr)
     }
@@ -1360,7 +1360,7 @@ func TestFileStorage_LoadOfALapsedEntryAnswersAbsentWhenTheFlushCannotWrite(t *t
 
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    if nil != mustSession(manager.Session(context.Background(), sessionId)) {
+    if nil != mustSession(manager.Session(sessionRuntime(), sessionId)) {
         t.Fatalf("expected the manager to answer no session instead of panicking")
     }
 }
@@ -1382,7 +1382,7 @@ func TestFileStorage_InPlaceWrite_AShrinkingSnapshotLeavesNoTailBehind(t *testin
     for index := 0; index < 12; index++ {
         sessionId := strings.Repeat(strconv.Itoa(index%10), 32)
 
-        if saveErr := storage.Save(context.Background(), sessionId, map[string]any{"padding": strings.Repeat("x", 64)}, bound.UnlimitedDuration()); nil != saveErr {
+        if saveErr := storage.Save(sessionRuntime(), sessionId, map[string]any{"padding": strings.Repeat("x", 64)}, bound.UnlimitedDuration()); nil != saveErr {
             t.Fatalf("unexpected save error: %v", saveErr)
         }
     }
@@ -1395,7 +1395,7 @@ func TestFileStorage_InPlaceWrite_AShrinkingSnapshotLeavesNoTailBehind(t *testin
     for index := 0; index < 12; index++ {
         sessionId := strings.Repeat(strconv.Itoa(index%10), 32)
 
-        if deleteErr := storage.Delete(context.Background(), sessionId); nil != deleteErr {
+        if deleteErr := storage.Delete(sessionRuntime(), sessionId); nil != deleteErr {
             t.Fatalf("unexpected delete error: %v", deleteErr)
         }
     }
@@ -1505,19 +1505,19 @@ func TestFileStorage_ExpiryFollowsTheInjectedClock(t *testing.T) {
     }
     defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
-    saveErr := storage.Save(context.Background(), "session-1", map[string]any{"user": "editor"}, bound.Of(time.Hour))
+    saveErr := storage.Save(sessionRuntime(), "session-1", map[string]any{"user": "editor"}, bound.Of(time.Hour))
     if nil != saveErr {
         t.Fatalf("save error: %v", saveErr)
     }
 
-    _, exists, loadErr := storage.Load(context.Background(), "session-1")
+    _, exists, loadErr := storage.Load(sessionRuntime(), "session-1")
     if nil != loadErr || false == exists {
         t.Fatalf("expected the fresh session, got exists=%v err=%v", exists, loadErr)
     }
 
     frozenClock.Advance(2 * time.Hour)
 
-    _, exists, loadErr = storage.Load(context.Background(), "session-1")
+    _, exists, loadErr = storage.Load(sessionRuntime(), "session-1")
     if nil != loadErr {
         t.Fatalf("load error: %v", loadErr)
     }
@@ -1537,15 +1537,15 @@ func TestFileStorage_ThePurgeReadsTheInjectedClockNotTheWallClock(t *testing.T) 
     }
     defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
-    if saveErr := storage.Save(context.Background(), "session-1", map[string]any{"user": "editor"}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "session-1", map[string]any{"user": "editor"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("save error: %v", saveErr)
     }
 
-    if saveErr := storage.Save(context.Background(), "session-2", map[string]any{"user": "admin"}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "session-2", map[string]any{"user": "admin"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("save error: %v", saveErr)
     }
 
-    _, exists, loadErr := storage.Load(context.Background(), "session-1")
+    _, exists, loadErr := storage.Load(sessionRuntime(), "session-1")
     if nil != loadErr {
         t.Fatalf("load error: %v", loadErr)
     }
@@ -1567,13 +1567,13 @@ func TestFileStorage_TreatsTheExpiryInstantItselfAsLapsedAtTheDoor(t *testing.T)
     }
     defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
-    if saveErr := storage.Save(context.Background(), "session-1", map[string]any{"user": "editor"}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "session-1", map[string]any{"user": "editor"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("save error: %v", saveErr)
     }
 
     frozenClock.TravelTo(frozenTime.Add(time.Hour).Add(-time.Nanosecond))
 
-    _, exists, loadErr := storage.Load(context.Background(), "session-1")
+    _, exists, loadErr := storage.Load(sessionRuntime(), "session-1")
     if nil != loadErr {
         t.Fatalf("load error: %v", loadErr)
     }
@@ -1584,7 +1584,7 @@ func TestFileStorage_TreatsTheExpiryInstantItselfAsLapsedAtTheDoor(t *testing.T)
 
     frozenClock.TravelTo(frozenTime.Add(time.Hour))
 
-    _, exists, loadErr = storage.Load(context.Background(), "session-1")
+    _, exists, loadErr = storage.Load(sessionRuntime(), "session-1")
     if nil != loadErr {
         t.Fatalf("load error: %v", loadErr)
     }
@@ -1653,7 +1653,7 @@ func TestFileStorage_SavesUnderABasenameThatFillsTheFilesystemComponent(t *testi
         t.Fatalf("expected the orphan of the long basename swept away, stat answered %v", statErr)
     }
 
-    if saveErr := storage.Save(context.Background(), "session-id", map[string]any{"user": "u"}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "session-id", map[string]any{"user": "u"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("expected a save under a basename of 255 bytes, got %v", saveErr)
     }
 
@@ -1678,12 +1678,12 @@ func TestFileStorage_MaxSessionsRefusesANewIdAtTheCeilingAndKeepsTheStoredOnes(t
     }
 
     for _, sessionId := range []string{"first", "second"} {
-        if saveErr := storage.Save(context.Background(), sessionId, map[string]any{"key": "value"}, bound.Of(time.Hour)); nil != saveErr {
+        if saveErr := storage.Save(sessionRuntime(), sessionId, map[string]any{"key": "value"}, bound.Of(time.Hour)); nil != saveErr {
             t.Fatalf("unexpected save error: %v", saveErr)
         }
     }
 
-    saveErr := storage.Save(context.Background(), "third", map[string]any{}, bound.Of(time.Hour))
+    saveErr := storage.Save(sessionRuntime(), "third", map[string]any{}, bound.Of(time.Hour))
     if nil == saveErr || "the session file storage is full" != saveErr.Error() {
         t.Fatalf("expected the new id refused, got %v", saveErr)
     }
@@ -1692,11 +1692,11 @@ func TestFileStorage_MaxSessionsRefusesANewIdAtTheCeilingAndKeepsTheStoredOnes(t
         t.Fatalf("expected the refusal to name the field, got %v", exception.LogContext(saveErr, exception.LogContextConfig{}))
     }
 
-    if _, found, _ := storage.Load(context.Background(), "third"); true == found {
+    if _, found, _ := storage.Load(sessionRuntime(), "third"); true == found {
         t.Fatalf("expected the refused id not stored")
     }
 
-    if resaveErr := storage.Save(context.Background(), "first", map[string]any{"key": "other"}, bound.Of(time.Hour)); nil != resaveErr {
+    if resaveErr := storage.Save(sessionRuntime(), "first", map[string]any{"key": "other"}, bound.Of(time.Hour)); nil != resaveErr {
         t.Fatalf("expected a stored id saved at the ceiling, got %v", resaveErr)
     }
 }
@@ -1711,7 +1711,7 @@ func TestFileStorage_ASessionLapsedInALoadedFileFreesItsSlotAtTheCeiling(t *test
     }
 
     for sessionId, ttl := range map[string]time.Duration{"short": time.Minute, "long": 2 * time.Hour} {
-        if saveErr := writer.Save(context.Background(), sessionId, map[string]any{}, bound.Of(ttl)); nil != saveErr {
+        if saveErr := writer.Save(sessionRuntime(), sessionId, map[string]any{}, bound.Of(ttl)); nil != saveErr {
             t.Fatalf("unexpected save error: %v", saveErr)
         }
     }
@@ -1723,11 +1723,11 @@ func TestFileStorage_ASessionLapsedInALoadedFileFreesItsSlotAtTheCeiling(t *test
         t.Fatalf("unexpected storage error: %v", storageErr)
     }
 
-    if saveErr := storage.Save(context.Background(), "late", map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "late", map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("expected the lapsed session's slot freed, got %v", saveErr)
     }
 
-    if saveErr := storage.Save(context.Background(), "fuller", map[string]any{}, bound.Of(time.Hour)); nil == saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "fuller", map[string]any{}, bound.Of(time.Hour)); nil == saveErr {
         t.Fatalf("expected the id refused with the table full again")
     }
 
@@ -1737,7 +1737,7 @@ func TestFileStorage_ASessionLapsedInALoadedFileFreesItsSlotAtTheCeiling(t *test
 
     frozenClock.Advance(time.Hour)
 
-    if saveErr := storage.Save(context.Background(), "after", map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "after", map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("expected the sweep's next earliest expiry honoured, got %v", saveErr)
     }
 }
@@ -1768,7 +1768,7 @@ func TestFileStorage_AFileHoldingMoreThanTheCeilingKeepsThemAndRefusesANewId(t *
     }
 
     for _, sessionId := range []string{"first", "second", "third"} {
-        if saveErr := writer.Save(context.Background(), sessionId, map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
+        if saveErr := writer.Save(sessionRuntime(), sessionId, map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
             t.Fatalf("unexpected save error: %v", saveErr)
         }
     }
@@ -1779,16 +1779,16 @@ func TestFileStorage_AFileHoldingMoreThanTheCeilingKeepsThemAndRefusesANewId(t *
     }
 
     for _, sessionId := range []string{"first", "second", "third"} {
-        if _, found, _ := storage.Load(context.Background(), sessionId); false == found {
+        if _, found, _ := storage.Load(sessionRuntime(), sessionId); false == found {
             t.Fatalf("expected %q kept", sessionId)
         }
     }
 
-    if saveErr := storage.Save(context.Background(), "fourth", map[string]any{}, bound.Of(time.Hour)); nil == saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "fourth", map[string]any{}, bound.Of(time.Hour)); nil == saveErr {
         t.Fatalf("expected a new id refused")
     }
 
-    if saveErr := storage.Save(context.Background(), "first", map[string]any{"key": "value"}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "first", map[string]any{"key": "value"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("expected a stored id saved, got %v", saveErr)
     }
 }
@@ -1807,19 +1807,19 @@ func TestFileStorage_TheHandleFormCarriesTheCeiling(t *testing.T) {
         t.Fatalf("unexpected storage error: %v", storageErr)
     }
 
-    if saveErr := storage.Save(context.Background(), "first", map[string]any{}, bound.UnlimitedDuration()); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "first", map[string]any{}, bound.UnlimitedDuration()); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
-    if saveErr := storage.Save(context.Background(), "second", map[string]any{}, bound.UnlimitedDuration()); nil == saveErr || "the session file storage is full" != saveErr.Error() {
+    if saveErr := storage.Save(sessionRuntime(), "second", map[string]any{}, bound.UnlimitedDuration()); nil == saveErr || "the session file storage is full" != saveErr.Error() {
         t.Fatalf("expected the new id refused, got %v", saveErr)
     }
 
-    if deleteErr := storage.Delete(context.Background(), "first"); nil != deleteErr {
+    if deleteErr := storage.Delete(sessionRuntime(), "first"); nil != deleteErr {
         t.Fatalf("unexpected delete error: %v", deleteErr)
     }
 
-    if saveErr := storage.Save(context.Background(), "second", map[string]any{}, bound.UnlimitedDuration()); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "second", map[string]any{}, bound.UnlimitedDuration()); nil != saveErr {
         t.Fatalf("expected the deleted session's slot freed, got %v", saveErr)
     }
 }
@@ -1886,7 +1886,7 @@ func TestFileStorage_SaveAndDeleteReturnOnACyclicChainFromAValue(t *testing.T) {
     value := map[string]any{"custom": failingMarshalValue{failure: &failure}}
 
     for _, sessionId := range []string{"kept", "deleted"} {
-        if saveErr := storage.Save(context.Background(), sessionId, value, bound.Of(time.Minute)); nil != saveErr {
+        if saveErr := storage.Save(sessionRuntime(), sessionId, value, bound.Of(time.Minute)); nil != saveErr {
             t.Fatalf("unexpected save error: %s", saveErr.Error())
         }
     }
@@ -1894,11 +1894,11 @@ func TestFileStorage_SaveAndDeleteReturnOnACyclicChainFromAValue(t *testing.T) {
     failure = newCyclicChainError()
 
     assertReturnsOnACyclicChain(t, func() {
-        if saveErr := storage.Save(context.Background(), "refused", value, bound.Of(time.Minute)); nil == saveErr {
+        if saveErr := storage.Save(sessionRuntime(), "refused", value, bound.Of(time.Minute)); nil == saveErr {
             t.Error("expected the save to carry the value's failure")
         }
 
-        if deleteErr := storage.Delete(context.Background(), "deleted"); nil == deleteErr {
+        if deleteErr := storage.Delete(sessionRuntime(), "deleted"); nil == deleteErr {
             t.Error("expected the delete to carry the value's failure")
         }
     })
@@ -1932,8 +1932,8 @@ func runEveryFileStorageForm(t *testing.T, assertion func(t *testing.T, factory 
     }
 }
 
-func TestFileStorage_EveryDoorRefusesANilAndATypedNilContext(t *testing.T) {
-    runEveryFileStorageForm(t, assertEveryStorageDoorRefusesANilContextFirst)
+func TestFileStorage_EveryDoorRefusesAnAbsentRuntime(t *testing.T) {
+    runEveryFileStorageForm(t, assertEveryStorageDoorRefusesAnAbsentRuntimeFirst)
 }
 
 func TestFileStorage_ADoneContextAnswersItsErrorBeforeTheStoreIsTouched(t *testing.T) {
@@ -1953,11 +1953,11 @@ func TestFileStorage_ADoneContextIsAnsweredBeforeTheFullStorage(t *testing.T) {
         _ = storage.CloseWithContext(context.Background())
     }()
 
-    if seedErr := storage.Save(context.Background(), "first", map[string]any{"key": "value"}, bound.Of(time.Hour)); nil != seedErr {
+    if seedErr := storage.Save(sessionRuntime(), "first", map[string]any{"key": "value"}, bound.Of(time.Hour)); nil != seedErr {
         t.Fatalf("unexpected seed error: %v", seedErr)
     }
 
-    if saveErr := storage.Save(cancelledContext(), "second", map[string]any{}, bound.Of(time.Hour)); false == errors.Is(saveErr, context.Canceled) {
+    if saveErr := storage.Save(sessionRuntimeUnder(cancelledContext()), "second", map[string]any{}, bound.Of(time.Hour)); false == errors.Is(saveErr, context.Canceled) {
         t.Fatalf("expected the done context answered before the ceiling, got %v", saveErr)
     }
 }
@@ -1978,7 +1978,7 @@ func TestFileStorage_AnUnlimitedTtlIsPersistedAsNoExpiry(t *testing.T) {
     path := filepath.Join(t.TempDir(), "sessions.json")
     storage := newJournalStorage(t, FileStorageConfig{Path: path})
 
-    if saveErr := storage.Save(context.Background(), contractTestSessionId, map[string]any{"a": 1}, bound.UnlimitedDuration()); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), contractTestSessionId, map[string]any{"a": 1}, bound.UnlimitedDuration()); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
@@ -2006,7 +2006,7 @@ func TestFileStorage_ADoneContextPaysForNoPendingCompaction(t *testing.T) {
     snapshotBefore, _ := os.ReadFile(path)
     journalBefore := journalSize(t, path)
 
-    if saveErr := storage.Save(cancelledContext(), "other", map[string]any{"k": "v"}, bound.Of(time.Hour)); false == errors.Is(saveErr, context.Canceled) {
+    if saveErr := storage.Save(sessionRuntimeUnder(cancelledContext()), "other", map[string]any{"k": "v"}, bound.Of(time.Hour)); false == errors.Is(saveErr, context.Canceled) {
         t.Fatalf("expected the context error, got %v", saveErr)
     }
 
@@ -2021,7 +2021,7 @@ func TestFileStorage_ADoneContextDeleteOfAnUnknownIdAnswersTheContext(t *testing
         storage := factory(t, clock.NewSystemClock())
         defer storage.CloseWithContext(context.Background())
 
-        if deleteErr := storage.Delete(cancelledContext(), "unknown"); false == errors.Is(deleteErr, context.Canceled) {
+        if deleteErr := storage.Delete(sessionRuntimeUnder(cancelledContext()), "unknown"); false == errors.Is(deleteErr, context.Canceled) {
             t.Fatalf("expected the context error for an unknown id, got %v", deleteErr)
         }
     })
@@ -2040,7 +2040,7 @@ func TestFileStorage_AContextThatEndsDuringTheWriteDoesNotTearIt(t *testing.T) {
         }
     }
 
-    if saveErr := storage.Save(writeContext, contractTestSessionId, map[string]any{"k": "whole"}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntimeUnder(writeContext), contractTestSessionId, map[string]any{"k": "whole"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("expected a write that began to finish, got %v", saveErr)
     }
 
@@ -2054,7 +2054,7 @@ func TestFileStorage_AContextThatEndsDuringTheWriteDoesNotTearIt(t *testing.T) {
     reopened := newJournalStorage(t, FileStorageConfig{Path: path})
     defer reopened.CloseWithContext(context.Background())
 
-    data, exists, loadErr := reopened.Load(context.Background(), contractTestSessionId)
+    data, exists, loadErr := reopened.Load(sessionRuntime(), contractTestSessionId)
     if nil != loadErr || false == exists || "whole" != data["k"] {
         t.Fatalf("expected the replay to read the record whole, got %v, %v and %v", data, exists, loadErr)
     }

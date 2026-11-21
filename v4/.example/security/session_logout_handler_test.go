@@ -19,11 +19,11 @@ func TestSessionLogoutHandlerLeavesEndingTheSessionToTheDoor(t *testing.T) {
 
     manager := melodysession.NewManager(storage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
 
-    sessionInstance := mustSession(manager.NewSession(context.Background()))
+    sessionInstance := mustSession(manager.NewSession(exampleTestRuntime()))
     sessionInstance.Set(SessionKeySecurityUserId, "user-1")
     sessionInstance.Set(SessionKeySecurityRoles, []string{"ROLE_USER"})
 
-    if err := manager.SaveSession(context.Background(), sessionInstance); nil != err {
+    if err := manager.SaveSession(exampleTestRuntime(), sessionInstance); nil != err {
         t.Fatalf("the session was not saved: %v", err)
     }
 
@@ -45,7 +45,7 @@ func TestSessionLogoutHandlerLeavesEndingTheSessionToTheDoor(t *testing.T) {
         t.Fatal("expected the session left for the door to end")
     }
 
-    if _, exists, _ := storage.Load(context.Background(), sessionId); false == exists {
+    if _, exists, _ := storage.Load(exampleTestRuntime(), sessionId); false == exists {
         t.Fatal("expected the entry left for the door's response path")
     }
 }

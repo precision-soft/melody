@@ -28,6 +28,7 @@ func transactionIdFromContext(ctx context.Context) int64 {
     return id
 }
 
+/* BeginTransaction answers the context an audited operation records under, so it takes and answers a context, never a runtime. */
 func BeginTransaction(ctx context.Context, database *bun.DB, actor string, extras map[string]any) (context.Context, int64, error) {
     encodedExtras := ""
     if 0 != len(extras) {

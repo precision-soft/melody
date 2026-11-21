@@ -555,7 +555,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             cookieValue = cookie.Value
         }
 
-        melodyRequest.Attributes().Set(requestAttributeSession, newRequestSession(request.Context(), sessionManager, melodyRequest, requestLogger, cookieValue, nil != cookie, instance.policies.sessionPolicy))
+        melodyRequest.Attributes().Set(requestAttributeSession, newRequestSession(runtimeInstance, sessionManager, melodyRequest, requestLogger, cookieValue, nil != cookie, instance.policies.sessionPolicy))
 
         /* refused after the match and before authorization, so the router, the firewall and the access control read one resource */
         if true == pathRefused {

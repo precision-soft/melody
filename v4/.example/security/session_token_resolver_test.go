@@ -66,12 +66,12 @@ func TestSessionTokenResolverKeepsAnIdentityAcrossARestart(t *testing.T) {
     }
 
     manager := melodysession.NewManager(storage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
-    sessionInstance := mustSession(manager.NewSession(context.Background()))
+    sessionInstance := mustSession(manager.NewSession(exampleTestRuntime()))
     sessionInstance.Set(SessionKeySecurityUserId, "user-7")
     sessionInstance.Set(SessionKeySecurityRoles, []string{"ROLE_USER", "ROLE_EDITOR"})
     withCurrentCredential(sessionInstance)
 
-    if err := manager.SaveSession(context.Background(), sessionInstance); nil != err {
+    if err := manager.SaveSession(exampleTestRuntime(), sessionInstance); nil != err {
         t.Fatalf("the session was not saved: %v", err)
     }
 
@@ -87,7 +87,7 @@ func TestSessionTokenResolverKeepsAnIdentityAcrossARestart(t *testing.T) {
     }
     defer restartedStorage.CloseWithContext(context.Background())
 
-    restoredSession := mustSession(melodysession.NewManager(restartedStorage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)}).Session(context.Background(), sessionId))
+    restoredSession := mustSession(melodysession.NewManager(restartedStorage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)}).Session(exampleTestRuntime(), sessionId))
     if nil == restoredSession {
         t.Fatal("the session did not survive the restart at all")
     }
@@ -356,7 +356,7 @@ func requestCarryingSessionAndJournal(t *testing.T) (melodyhttpcontract.Request,
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/products/", nil), nil, runtimeInstance, nil)
 
     manager := melodysession.NewManager(melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{}), melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
-    sessionInstance := mustSession(manager.NewSession(context.Background()))
+    sessionInstance := mustSession(manager.NewSession(exampleTestRuntime()))
     _ = melodyhttp.SetRequestSession(request, sessionInstance)
 
     return request, sessionInstance, journal
@@ -410,7 +410,7 @@ type outageSessionStorage struct {
     melodysessioncontract.Storage
 }
 
-func (instance *outageSessionStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
+func (instance *outageSessionStorage) Load(runtimeInstance melodycontainercontract.Runtime, sessionId string) (map[string]any, bool, error) {
     return nil, false, errors.New("session store is down")
 }
 

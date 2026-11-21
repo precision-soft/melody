@@ -8,6 +8,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
@@ -96,10 +97,12 @@ type inMemorySessionEntry struct {
     expiresAt *time.Time
 }
 
-func (instance *InMemoryStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
-    if nilErr := sessioncontract.RefuseNilContext(ctx); nil != nilErr {
+func (instance *InMemoryStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         return nil, false, nilErr
     }
+
+    ctx := runtimeInstance.Context()
 
     now := instance.clock.Now()
 
@@ -148,10 +151,12 @@ func (instance *InMemoryStorage) Load(ctx context.Context, sessionId string) (ma
     return result, true, nil
 }
 
-func (instance *InMemoryStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
-    if nilErr := sessioncontract.RefuseNilContext(ctx); nil != nilErr {
+func (instance *InMemoryStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         return nilErr
     }
+
+    ctx := runtimeInstance.Context()
 
     /* copied before the lock, so a large value does not stall every other session's load */
     copyValue := internal.CopyAnyMap(data)
@@ -199,10 +204,12 @@ func (instance *InMemoryStorage) Save(ctx context.Context, sessionId string, dat
     return nil
 }
 
-func (instance *InMemoryStorage) Delete(ctx context.Context, sessionId string) error {
-    if nilErr := sessioncontract.RefuseNilContext(ctx); nil != nilErr {
+func (instance *InMemoryStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         return nilErr
     }
+
+    ctx := runtimeInstance.Context()
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -225,10 +232,12 @@ func (instance *InMemoryStorage) Delete(ctx context.Context, sessionId string) e
 }
 
 /* Clear removes every session, judging the context as the contract doors do. */
-func (instance *InMemoryStorage) Clear(ctx context.Context) error {
-    if nilErr := sessioncontract.RefuseNilContext(ctx); nil != nilErr {
+func (instance *InMemoryStorage) Clear(runtimeInstance containercontract.Runtime) error {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         return nilErr
     }
+
+    ctx := runtimeInstance.Context()
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

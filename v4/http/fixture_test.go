@@ -195,10 +195,10 @@ type countingSessionStorage struct {
     saveCount int
 }
 
-func (instance *countingSessionStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
+func (instance *countingSessionStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
     instance.saveCount = instance.saveCount + 1
 
-    return instance.Storage.Save(ctx, sessionId, data, ttl)
+    return instance.Storage.Save(runtimeInstance, sessionId, data, ttl)
 }
 
 type exceptionListenerCaptureLogger struct {
@@ -549,32 +549,35 @@ func (instance *contextBlockingSessionStorage) block(ctx context.Context, door s
     return ctx.Err()
 }
 
-func (instance *contextBlockingSessionStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
+func (instance *contextBlockingSessionStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
+    ctx := runtimeInstance.Context()
     if true == instance.blockLoad.Load() {
         return nil, false, instance.block(ctx, "Load")
     }
 
-    return instance.inner.Load(ctx, sessionId)
+    return instance.inner.Load(runtimeInstance, sessionId)
 }
 
-func (instance *contextBlockingSessionStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
+func (instance *contextBlockingSessionStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
+    ctx := runtimeInstance.Context()
     instance.saves.Add(1)
 
     if true == instance.blockSave.Load() {
         return instance.block(ctx, "Save")
     }
 
-    return instance.inner.Save(ctx, sessionId, data, ttl)
+    return instance.inner.Save(runtimeInstance, sessionId, data, ttl)
 }
 
-func (instance *contextBlockingSessionStorage) Delete(ctx context.Context, sessionId string) error {
+func (instance *contextBlockingSessionStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
+    ctx := runtimeInstance.Context()
     instance.deletes.Add(1)
 
     if true == instance.blockDelete.Load() {
         return instance.block(ctx, "Delete")
     }
 
-    return instance.inner.Delete(ctx, sessionId)
+    return instance.inner.Delete(runtimeInstance, sessionId)
 }
 
 func (instance *contextBlockingSessionStorage) CloseWithContext(closeContext context.Context) error {
@@ -609,20 +612,28 @@ func awaitClosed(t *testing.T, done <-chan struct{}, what string) {
 func seedStoredSession(t *testing.T, manager sessioncontract.Manager) (string, sessioncontract.Session) {
     t.Helper()
 
-    seeded, newErr := manager.NewSession(context.Background())
+    seeded, newErr := manager.NewSession(sessionRuntime())
     if nil != newErr {
         t.Fatalf("unexpected new session error: %v", newErr)
     }
 
     seeded.Set("userId", "u-1")
-    if saveErr := manager.SaveSession(context.Background(), seeded); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntime(), seeded); nil != saveErr {
         t.Fatalf("unexpected seed error: %v", saveErr)
     }
 
-    copyLoaded, loadErr := manager.Session(context.Background(), seeded.Id())
+    copyLoaded, loadErr := manager.Session(sessionRuntime(), seeded.Id())
     if nil != loadErr || nil == copyLoaded {
         t.Fatalf("expected the seeded session to load, got %v", loadErr)
     }
 
     return seeded.Id(), copyLoaded
+}
+
+func sessionRuntime() containercontract.Runtime {
+    return sessionRuntimeUnder(context.Background())
+}
+
+func sessionRuntimeUnder(ctx context.Context) containercontract.Runtime {
+    return runtime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
 }

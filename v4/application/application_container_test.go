@@ -264,18 +264,18 @@ type ttlRecordingSessionStorage struct {
     savedTtl  bound.Duration
 }
 
-func (instance *ttlRecordingSessionStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
+func (instance *ttlRecordingSessionStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
     return nil, false, nil
 }
 
-func (instance *ttlRecordingSessionStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
+func (instance *ttlRecordingSessionStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
     instance.saveCalls = instance.saveCalls + 1
     instance.savedTtl = ttl
 
     return nil
 }
 
-func (instance *ttlRecordingSessionStorage) Delete(ctx context.Context, sessionId string) error {
+func (instance *ttlRecordingSessionStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
     return nil
 }
 
@@ -353,10 +353,10 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTtlToTheManager(t *tes
 
     manager := session.SessionMustFromResolver(t.Context(), applicationInstance.kernel.ServiceContainer())
 
-    sessionInstance := mustSession(manager.NewSession(context.Background()))
+    sessionInstance := mustSession(manager.NewSession(sessionRuntime()))
     sessionInstance.Set("key", "value")
 
-    saveErr := manager.SaveSession(context.Background(), sessionInstance)
+    saveErr := manager.SaveSession(sessionRuntime(), sessionInstance)
     if nil != saveErr {
         t.Fatalf("unexpected save session error: %v", saveErr)
     }
@@ -405,18 +405,18 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTombstoneRetentionAndT
 
     manager := session.SessionMustFromResolver(t.Context(), applicationInstance.kernel.ServiceContainer())
 
-    sessionInstance := mustSession(manager.NewSession(context.Background()))
+    sessionInstance := mustSession(manager.NewSession(sessionRuntime()))
     sessionInstance.Set("identity", "alice")
-    if saveErr := manager.SaveSession(context.Background(), sessionInstance); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntime(), sessionInstance); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
-    inFlightView := mustSession(manager.Session(context.Background(), sessionInstance.Id()))
+    inFlightView := mustSession(manager.Session(sessionRuntime(), sessionInstance.Id()))
     if nil == inFlightView {
         t.Fatalf("expected the session to load")
     }
 
-    if deleteErr := manager.DeleteSession(context.Background(), sessionInstance.Id()); nil != deleteErr {
+    if deleteErr := manager.DeleteSession(sessionRuntime(), sessionInstance.Id()); nil != deleteErr {
         t.Fatalf("unexpected delete error: %v", deleteErr)
     }
 
@@ -424,7 +424,7 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTombstoneRetentionAndT
 
     inFlightView.Set("lastSeen", "half an hour later")
 
-    if saveErr := manager.SaveSession(context.Background(), inFlightView); false == errors.Is(saveErr, session.ErrSessionDeleted) {
+    if saveErr := manager.SaveSession(sessionRuntime(), inFlightView); false == errors.Is(saveErr, session.ErrSessionDeleted) {
         t.Fatalf("expected the write-back inside the configured one-hour window to be refused, got %v", saveErr)
     }
 
@@ -432,7 +432,7 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTombstoneRetentionAndT
 
     inFlightView.Set("lastSeen", "an hour and a minute later")
 
-    if saveErr := manager.SaveSession(context.Background(), inFlightView); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntime(), inFlightView); nil != saveErr {
         t.Fatalf("expected the configured window to have lapsed on the kernel's clock, got %v", saveErr)
     }
 }
@@ -455,10 +455,10 @@ func TestApplicationRegisterHttpSession_HandsAnUnlimitedTtlToTheStorageAsNoExpir
 
     manager := session.SessionMustFromResolver(t.Context(), applicationInstance.kernel.ServiceContainer())
 
-    sessionInstance := mustSession(manager.NewSession(context.Background()))
+    sessionInstance := mustSession(manager.NewSession(sessionRuntime()))
     sessionInstance.Set("key", "value")
 
-    saveErr := manager.SaveSession(context.Background(), sessionInstance)
+    saveErr := manager.SaveSession(sessionRuntime(), sessionInstance)
     if nil != saveErr {
         t.Fatalf("unexpected save session error: %v", saveErr)
     }

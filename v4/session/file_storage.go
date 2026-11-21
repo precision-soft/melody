@@ -18,6 +18,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
@@ -264,10 +265,12 @@ type fileSessionEntry struct {
     ExpiresAt int64          `json:"expiresAt"`
 }
 
-func (instance *FileStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
-    if nilErr := sessioncontract.RefuseNilContext(ctx); nil != nilErr {
+func (instance *FileStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         return nil, false, nilErr
     }
+
+    ctx := runtimeInstance.Context()
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -306,10 +309,12 @@ func (instance *FileStorage) Load(ctx context.Context, sessionId string) (map[st
     return internal.CopyAnyMap(entry.Data), true, nil
 }
 
-func (instance *FileStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
-    if nilErr := sessioncontract.RefuseNilContext(ctx); nil != nilErr {
+func (instance *FileStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         return nilErr
     }
+
+    ctx := runtimeInstance.Context()
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -446,10 +451,12 @@ func (instance *FileStorage) earliestExpiryLocked() int64 {
     return earliestExpiry
 }
 
-func (instance *FileStorage) Delete(ctx context.Context, sessionId string) error {
-    if nilErr := sessioncontract.RefuseNilContext(ctx); nil != nilErr {
+func (instance *FileStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         return nilErr
     }
+
+    ctx := runtimeInstance.Context()
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

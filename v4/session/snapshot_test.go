@@ -1,7 +1,6 @@
 package session
 
 import (
-    "context"
     "testing"
 
     "github.com/precision-soft/melody/v4/bound"
@@ -30,7 +29,7 @@ func TestSnapshot_AnswersTheSessionsOwnSnapshot(t *testing.T) {
 func TestSnapshot_ReadsTheFrameworkSession(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.UnlimitedDuration()})
 
-    sessionInstance := mustSession(manager.NewSession(context.Background()))
+    sessionInstance := mustSession(manager.NewSession(sessionRuntime()))
     sessionInstance.Set("key", "value")
 
     values, modified, cleared := Snapshot(sessionInstance)

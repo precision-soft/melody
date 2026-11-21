@@ -444,11 +444,11 @@ func TestRegisterHttpSession_TheDefaultStorageHoldsTheConfiguredCount(t *testing
 
     storage := container.MustFromResolver[sessioncontract.Storage](context.Background(), applicationInstance.kernel.ServiceContainer(), session.ServiceSessionStorage)
 
-    if saveErr := storage.Save(context.Background(), "first", map[string]any{"a": 1}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "first", map[string]any{"a": 1}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected first save error: %v", saveErr)
     }
 
-    if saveErr := storage.Save(context.Background(), "second", map[string]any{"a": 1}, bound.Of(time.Hour)); nil == saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "second", map[string]any{"a": 1}, bound.Of(time.Hour)); nil == saveErr {
         t.Fatalf("expected the second session refused at a ceiling of one")
     }
 }
@@ -1874,15 +1874,15 @@ func TestRunHttp_TheDeploymentsUnavailableDelayOutranksAModulesSetter(t *testing
 
 type loadFailingApplicationSessionStorage struct{}
 
-func (instance *loadFailingApplicationSessionStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
+func (instance *loadFailingApplicationSessionStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
     return nil, false, errors.New("session store is down")
 }
 
-func (instance *loadFailingApplicationSessionStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
+func (instance *loadFailingApplicationSessionStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
     return nil
 }
 
-func (instance *loadFailingApplicationSessionStorage) Delete(ctx context.Context, sessionId string) error {
+func (instance *loadFailingApplicationSessionStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
     return nil
 }
 

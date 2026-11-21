@@ -418,7 +418,7 @@ An application that carries its authenticated identity in the session (rather th
 retired either way; what a forgotten republish costs is the identity write, and it shows as a login that logs the user out.
 
 ```go
-rotated, rotateErr := sessionManager.RegenerateSession(runtimeInstance.Context(), sessionInstance)
+rotated, rotateErr := sessionManager.RegenerateSession(runtimeInstance, sessionInstance)
 if nil != rotateErr {
     return nil, rotateErr
 }

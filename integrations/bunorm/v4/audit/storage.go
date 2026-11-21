@@ -12,7 +12,7 @@ import (
     "github.com/uptrace/bun"
 )
 
-/* Storage persists audit entries. Save writes the entries to the table in one call, all or none where the storage can promise it; nil or empty is a no-op. A storage that can ride the caller's transaction declares TransactionRider. */
+/* Storage persists audit entries. Save writes the entries to the table in one call, all or none where the storage can promise it; nil or empty is a no-op. A storage that can ride the caller's transaction declares TransactionRider. Save takes the context of the recording, which carries the transaction, never a runtime. */
 type Storage interface {
     Save(ctx context.Context, table string, entries []Entry) error
 }

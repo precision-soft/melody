@@ -22,6 +22,7 @@ func NewTracker(database *bun.DB, recorder *Recorder) *Tracker {
     return &Tracker{database: database, recorder: recorder}
 }
 
+/* Tracker runs a bun write and records it in one transaction, its doors on the caller's context for the reason Recorder gives. */
 type Tracker struct {
     database *bun.DB
     recorder *Recorder

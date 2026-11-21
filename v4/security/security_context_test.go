@@ -1,9 +1,9 @@
 package security
 
 import (
-    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "testing"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )

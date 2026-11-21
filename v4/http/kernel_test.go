@@ -788,15 +788,15 @@ func TestKernel_ResponseListenerErrorDoesNotDropResponse(t *testing.T) {
 
 type failingSessionStorage struct{}
 
-func (instance *failingSessionStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
+func (instance *failingSessionStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
     return nil, false, nil
 }
 
-func (instance *failingSessionStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
+func (instance *failingSessionStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
     return exception.NewError("session backend down", nil, nil)
 }
 
-func (instance *failingSessionStorage) Delete(ctx context.Context, sessionId string) error {
+func (instance *failingSessionStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
     return exception.NewError("session backend down", nil, nil)
 }
 
@@ -976,11 +976,11 @@ type panicOnceSessionStorage struct {
     panicked atomic.Bool
 }
 
-func (instance *panicOnceSessionStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
+func (instance *panicOnceSessionStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
     return nil, false, nil
 }
 
-func (instance *panicOnceSessionStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
+func (instance *panicOnceSessionStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
     if true == instance.panicked.CompareAndSwap(false, true) {
         panic("session backend exploded")
     }
@@ -988,7 +988,7 @@ func (instance *panicOnceSessionStorage) Save(ctx context.Context, sessionId str
     return nil
 }
 
-func (instance *panicOnceSessionStorage) Delete(ctx context.Context, sessionId string) error {
+func (instance *panicOnceSessionStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
     return nil
 }
 
@@ -1314,15 +1314,15 @@ func TestKernel_PublishesThePolicyResolvedSchemeOnTheRequest(t *testing.T) {
 
 type loadFailingSessionStorage struct{}
 
-func (instance *loadFailingSessionStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
+func (instance *loadFailingSessionStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
     return nil, false, exception.NewError("session backend down", nil, nil)
 }
 
-func (instance *loadFailingSessionStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
+func (instance *loadFailingSessionStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
     return nil
 }
 
-func (instance *loadFailingSessionStorage) Delete(ctx context.Context, sessionId string) error {
+func (instance *loadFailingSessionStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
     return nil
 }
 
@@ -1338,34 +1338,34 @@ type erroringSessionManager struct {
     newSessionCalls    int
 }
 
-func (instance *erroringSessionManager) Session(ctx context.Context, sessionId string) (sessioncontract.Session, error) {
+func (instance *erroringSessionManager) Session(runtimeInstance containercontract.Runtime, sessionId string) (sessioncontract.Session, error) {
     if nil != instance.sessionErr {
         return instance.sessionBesideError, instance.sessionErr
     }
 
-    return instance.inner.Session(ctx, sessionId)
+    return instance.inner.Session(runtimeInstance, sessionId)
 }
 
-func (instance *erroringSessionManager) NewSession(ctx context.Context) (sessioncontract.Session, error) {
+func (instance *erroringSessionManager) NewSession(runtimeInstance containercontract.Runtime) (sessioncontract.Session, error) {
     instance.newSessionCalls = instance.newSessionCalls + 1
 
     if nil != instance.newSessionErr {
         return nil, instance.newSessionErr
     }
 
-    return instance.inner.NewSession(ctx)
+    return instance.inner.NewSession(runtimeInstance)
 }
 
-func (instance *erroringSessionManager) RegenerateSession(ctx context.Context, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
-    return instance.inner.RegenerateSession(ctx, sessionInstance)
+func (instance *erroringSessionManager) RegenerateSession(runtimeInstance containercontract.Runtime, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+    return instance.inner.RegenerateSession(runtimeInstance, sessionInstance)
 }
 
-func (instance *erroringSessionManager) SaveSession(ctx context.Context, sessionInstance sessioncontract.Session) error {
-    return instance.inner.SaveSession(ctx, sessionInstance)
+func (instance *erroringSessionManager) SaveSession(runtimeInstance containercontract.Runtime, sessionInstance sessioncontract.Session) error {
+    return instance.inner.SaveSession(runtimeInstance, sessionInstance)
 }
 
-func (instance *erroringSessionManager) DeleteSession(ctx context.Context, sessionId string) error {
-    return instance.inner.DeleteSession(ctx, sessionId)
+func (instance *erroringSessionManager) DeleteSession(runtimeInstance containercontract.Runtime, sessionId string) error {
+    return instance.inner.DeleteSession(runtimeInstance, sessionId)
 }
 
 func (instance *erroringSessionManager) StorageTimeout() bound.Duration {
@@ -1585,18 +1585,18 @@ type typedNilErrorSessionManager struct {
     sessioncontract.Manager
 }
 
-func (instance *typedNilErrorSessionManager) Session(ctx context.Context, sessionId string) (sessioncontract.Session, error) {
+func (instance *typedNilErrorSessionManager) Session(runtimeInstance containercontract.Runtime, sessionId string) (sessioncontract.Session, error) {
     var typedNil *exception.Error
 
-    sessionInstance, _ := instance.Manager.Session(ctx, sessionId)
+    sessionInstance, _ := instance.Manager.Session(runtimeInstance, sessionId)
 
     return sessionInstance, typedNil
 }
 
-func (instance *typedNilErrorSessionManager) NewSession(ctx context.Context) (sessioncontract.Session, error) {
+func (instance *typedNilErrorSessionManager) NewSession(runtimeInstance containercontract.Runtime) (sessioncontract.Session, error) {
     var typedNil *exception.Error
 
-    sessionInstance, _ := instance.Manager.NewSession(ctx)
+    sessionInstance, _ := instance.Manager.NewSession(runtimeInstance)
 
     return sessionInstance, typedNil
 }
@@ -1618,7 +1618,7 @@ func TestKernel_ATypedNilErrorBesideASessionIsNoError(t *testing.T) {
 func TestKernel_ASessionAnsweredBesideALoadErrorIsNotSavedWhenTheResponsePathPanics(t *testing.T) {
     innerManager := session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{Ttl: bound.Of(30 * time.Minute)})
 
-    halfMade := mustSession(innerManager.NewSession(context.Background()))
+    halfMade := mustSession(innerManager.NewSession(sessionRuntime()))
     halfMade.Set("user", "alice")
 
     sessionManager := &erroringSessionManager{
@@ -1677,7 +1677,7 @@ func TestKernel_EmitsTheCookieOfTheSessionRepublishedOnTheRequest(t *testing.T) 
     router.Handle(
         "/republish",
         func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            replacement := mustSession(sessionManager.NewSession(context.Background()))
+            replacement := mustSession(sessionManager.NewSession(sessionRuntime()))
             replacement.Set("userId", "u-1")
 
             _ = SetRequestSession(request, replacement)
@@ -1723,14 +1723,14 @@ func TestKernel_RotatedSessionEmitsTheNewIdAndDropsTheOldEntry(t *testing.T) {
 
             sessionInstance.Set("userId", "u-1")
 
-            saveErr := sessionManager.SaveSession(context.Background(), sessionInstance)
+            saveErr := sessionManager.SaveSession(sessionRuntime(), sessionInstance)
             if nil != saveErr {
                 return nil, saveErr
             }
 
             preRotationId = sessionInstance.Id()
 
-            rotated, rotateErr := sessionManager.RegenerateSession(context.Background(), sessionInstance)
+            rotated, rotateErr := sessionManager.RegenerateSession(sessionRuntime(), sessionInstance)
             if nil != rotateErr {
                 return nil, rotateErr
             }
@@ -1767,11 +1767,11 @@ func TestKernel_RotatedSessionEmitsTheNewIdAndDropsTheOldEntry(t *testing.T) {
         t.Fatalf("expected a live session cookie for the republished rotation, got MaxAge %d", cookies[0].MaxAge)
     }
 
-    if nil != mustSession(sessionManager.Session(context.Background(), preRotationId)) {
+    if nil != mustSession(sessionManager.Session(sessionRuntime(), preRotationId)) {
         t.Fatalf("expected the pre-rotation session to be gone from storage")
     }
 
-    reloaded := mustSession(sessionManager.Session(context.Background(), rotatedId))
+    reloaded := mustSession(sessionManager.Session(sessionRuntime(), rotatedId))
     if nil == reloaded {
         t.Fatalf("expected the rotated session to be stored")
     }
@@ -1785,10 +1785,10 @@ func TestKernel_RotationWithoutRepublishingClearsTheAbandonedSession(t *testing.
     serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
     sessionManager := session.SessionMustFromResolver(t.Context(), serviceContainer)
 
-    existingSession := mustSession(sessionManager.NewSession(context.Background()))
+    existingSession := mustSession(sessionManager.NewSession(sessionRuntime()))
     existingSession.Set("userId", "anonymous")
 
-    saveErr := sessionManager.SaveSession(context.Background(), existingSession)
+    saveErr := sessionManager.SaveSession(sessionRuntime(), existingSession)
     if nil != saveErr {
         t.Fatalf("unexpected error: %v", saveErr)
     }
@@ -1804,7 +1804,7 @@ func TestKernel_RotationWithoutRepublishingClearsTheAbandonedSession(t *testing.
                 t.Fatal("expected the request to carry a session")
             }
 
-            rotated, rotateErr := sessionManager.RegenerateSession(context.Background(), sessionInstance)
+            rotated, rotateErr := sessionManager.RegenerateSession(sessionRuntime(), sessionInstance)
             if nil != rotateErr {
                 return nil, rotateErr
             }
@@ -1839,7 +1839,7 @@ func TestKernel_RotationWithoutRepublishingClearsTheAbandonedSession(t *testing.
         t.Fatalf("expected a clearing cookie so a forgotten republish logs the client out instead of stranding it on a deleted session, got MaxAge %d", cookies[0].MaxAge)
     }
 
-    if nil != mustSession(sessionManager.Session(context.Background(), existingId)) {
+    if nil != mustSession(sessionManager.Session(sessionRuntime(), existingId)) {
         t.Fatalf("expected the pre-rotation session to be gone from storage")
     }
 }
@@ -2281,26 +2281,26 @@ type typedNilReturningSessionManager struct {
     delegate sessioncontract.Manager
 }
 
-func (instance *typedNilReturningSessionManager) Session(ctx context.Context, sessionId string) (sessioncontract.Session, error) {
+func (instance *typedNilReturningSessionManager) Session(runtimeInstance containercontract.Runtime, sessionId string) (sessioncontract.Session, error) {
     var typedNil *session.Session
 
     return typedNil, nil
 }
 
-func (instance *typedNilReturningSessionManager) NewSession(ctx context.Context) (sessioncontract.Session, error) {
-    return instance.delegate.NewSession(ctx)
+func (instance *typedNilReturningSessionManager) NewSession(runtimeInstance containercontract.Runtime) (sessioncontract.Session, error) {
+    return instance.delegate.NewSession(runtimeInstance)
 }
 
-func (instance *typedNilReturningSessionManager) RegenerateSession(ctx context.Context, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
-    return instance.delegate.RegenerateSession(ctx, sessionInstance)
+func (instance *typedNilReturningSessionManager) RegenerateSession(runtimeInstance containercontract.Runtime, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+    return instance.delegate.RegenerateSession(runtimeInstance, sessionInstance)
 }
 
-func (instance *typedNilReturningSessionManager) SaveSession(ctx context.Context, sessionInstance sessioncontract.Session) error {
-    return instance.delegate.SaveSession(ctx, sessionInstance)
+func (instance *typedNilReturningSessionManager) SaveSession(runtimeInstance containercontract.Runtime, sessionInstance sessioncontract.Session) error {
+    return instance.delegate.SaveSession(runtimeInstance, sessionInstance)
 }
 
-func (instance *typedNilReturningSessionManager) DeleteSession(ctx context.Context, sessionId string) error {
-    return instance.delegate.DeleteSession(ctx, sessionId)
+func (instance *typedNilReturningSessionManager) DeleteSession(runtimeInstance containercontract.Runtime, sessionId string) error {
+    return instance.delegate.DeleteSession(runtimeInstance, sessionId)
 }
 
 func (instance *typedNilReturningSessionManager) StorageTimeout() bound.Duration {
@@ -2690,24 +2690,24 @@ type failingSaveSessionManager struct {
     inner sessioncontract.Manager
 }
 
-func (instance *failingSaveSessionManager) Session(ctx context.Context, sessionId string) (sessioncontract.Session, error) {
-    return instance.inner.Session(ctx, sessionId)
+func (instance *failingSaveSessionManager) Session(runtimeInstance containercontract.Runtime, sessionId string) (sessioncontract.Session, error) {
+    return instance.inner.Session(runtimeInstance, sessionId)
 }
 
-func (instance *failingSaveSessionManager) NewSession(ctx context.Context) (sessioncontract.Session, error) {
-    return instance.inner.NewSession(ctx)
+func (instance *failingSaveSessionManager) NewSession(runtimeInstance containercontract.Runtime) (sessioncontract.Session, error) {
+    return instance.inner.NewSession(runtimeInstance)
 }
 
-func (instance *failingSaveSessionManager) RegenerateSession(ctx context.Context, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
-    return instance.inner.RegenerateSession(ctx, sessionInstance)
+func (instance *failingSaveSessionManager) RegenerateSession(runtimeInstance containercontract.Runtime, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+    return instance.inner.RegenerateSession(runtimeInstance, sessionInstance)
 }
 
-func (instance *failingSaveSessionManager) SaveSession(ctx context.Context, sessionInstance sessioncontract.Session) error {
+func (instance *failingSaveSessionManager) SaveSession(runtimeInstance containercontract.Runtime, sessionInstance sessioncontract.Session) error {
     return exception.NewError("session backend is down", nil, exception.MarkInfrastructureFailure(errors.New("connection refused")))
 }
 
-func (instance *failingSaveSessionManager) DeleteSession(ctx context.Context, sessionId string) error {
-    return instance.inner.DeleteSession(ctx, sessionId)
+func (instance *failingSaveSessionManager) DeleteSession(runtimeInstance containercontract.Runtime, sessionId string) error {
+    return instance.inner.DeleteSession(runtimeInstance, sessionId)
 }
 
 func (instance *failingSaveSessionManager) StorageTimeout() bound.Duration {
@@ -5387,22 +5387,22 @@ type operationCountingSessionStorage struct {
     deletes int64
 }
 
-func (instance *operationCountingSessionStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
+func (instance *operationCountingSessionStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
     atomic.AddInt64(&instance.loads, 1)
 
-    return instance.Storage.Load(ctx, sessionId)
+    return instance.Storage.Load(runtimeInstance, sessionId)
 }
 
-func (instance *operationCountingSessionStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
+func (instance *operationCountingSessionStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
     atomic.AddInt64(&instance.saves, 1)
 
-    return instance.Storage.Save(ctx, sessionId, data, ttl)
+    return instance.Storage.Save(runtimeInstance, sessionId, data, ttl)
 }
 
-func (instance *operationCountingSessionStorage) Delete(ctx context.Context, sessionId string) error {
+func (instance *operationCountingSessionStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
     atomic.AddInt64(&instance.deletes, 1)
 
-    return instance.Storage.Delete(ctx, sessionId)
+    return instance.Storage.Delete(runtimeInstance, sessionId)
 }
 
 func TestKernel_ARouteThatNeverReadsTheSessionCostsTheStorageNothing(t *testing.T) {
@@ -5418,7 +5418,7 @@ func TestKernel_ARouteThatNeverReadsTheSessionCostsTheStorageNothing(t *testing.
 
     for name, testCase := range cases {
         storage := &operationCountingSessionStorage{Storage: session.NewInMemoryStorage(session.InMemoryStorageConfig{})}
-        if saveErr := storage.Storage.Save(context.Background(), sessionOutageTestCookieValue, map[string]any{"userId": "u-1"}, bound.Of(time.Minute)); nil != saveErr {
+        if saveErr := storage.Storage.Save(sessionRuntime(), sessionOutageTestCookieValue, map[string]any{"userId": "u-1"}, bound.Of(time.Minute)); nil != saveErr {
             t.Fatalf("unexpected error seeding the session: %v", saveErr)
         }
 
@@ -5485,17 +5485,17 @@ type outageCountingSessionStorage struct {
     deleteCalls int64
 }
 
-func (instance *outageCountingSessionStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
+func (instance *outageCountingSessionStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
     return nil, false, exception.NewError("session backend down", nil, nil)
 }
 
-func (instance *outageCountingSessionStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
+func (instance *outageCountingSessionStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
     atomic.AddInt64(&instance.saveCalls, 1)
 
     return nil
 }
 
-func (instance *outageCountingSessionStorage) Delete(ctx context.Context, sessionId string) error {
+func (instance *outageCountingSessionStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
     atomic.AddInt64(&instance.deleteCalls, 1)
 
     return nil
@@ -5654,12 +5654,12 @@ func TestKernel_AClientHangupBeforePersistenceStillRecordsTheDelete(t *testing.T
         t.Fatalf("expected the logout's delete recorded after the hangup, got %d deletes", storage.deletes.Load())
     }
 
-    if _, held, _ := storage.inner.Load(context.Background(), sessionId); true == held {
+    if _, held, _ := storage.inner.Load(sessionRuntime(), sessionId); true == held {
         t.Fatalf("expected the storage no longer to hold the session")
     }
 
     copyLoaded.Set("userId", "u-2")
-    if saveErr := manager.SaveSession(context.Background(), copyLoaded); false == exception.ChainIs(saveErr, session.ErrSessionDeleted) {
+    if saveErr := manager.SaveSession(sessionRuntime(), copyLoaded); false == exception.ChainIs(saveErr, session.ErrSessionDeleted) {
         t.Fatalf("expected a copy loaded before the logout refused, got %v", saveErr)
     }
 }
@@ -5688,7 +5688,7 @@ func TestKernel_AClientHangupBeforePersistenceStillStoresTheSave(t *testing.T) {
     request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionId})
     handler.ServeHTTP(httptest.NewRecorder(), request)
 
-    data, held, _ := storage.inner.Load(context.Background(), sessionId)
+    data, held, _ := storage.inner.Load(sessionRuntime(), sessionId)
     if false == held || "written" != data["cart"] {
         t.Fatalf("expected the save stored after the hangup, got %v", data)
     }
@@ -5816,7 +5816,7 @@ func TestKernel_ARetriedLogoutAfterThe503RemovesTheSession(t *testing.T) {
         t.Fatalf("expected the retried logout answered 200 with the expiring cookie, got %d %v", second.Code, cookies)
     }
 
-    if stored, loadErr := manager.Session(context.Background(), sessionId); nil != loadErr || nil != stored {
+    if stored, loadErr := manager.Session(sessionRuntime(), sessionId); nil != loadErr || nil != stored {
         t.Fatalf("expected the retried logout to remove the session, got %v %v", stored, loadErr)
     }
 }
@@ -5915,7 +5915,7 @@ func TestKernel_APersistenceWaitingOnAHeldStripeIsCutByTheStorageTimeout(t *test
     go func() {
         defer close(holderDone)
         holderCopy.Set("holder", true)
-        _ = manager.SaveSession(holderContext, holderCopy)
+        _ = manager.SaveSession(sessionRuntimeUnder(holderContext), holderCopy)
     }()
     awaitStorageDoor(t, storage.entered, "Save")
 

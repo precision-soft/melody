@@ -617,7 +617,7 @@ func publishSignInSession(t *testing.T, request melodyhttpcontract.Request) {
     t.Helper()
 
     manager := melodysession.NewManager(melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{}), melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
-    if publishErr := melodyhttp.SetRequestSession(request, mustSession(manager.NewSession(context.Background()))); nil != publishErr {
+    if publishErr := melodyhttp.SetRequestSession(request, mustSession(manager.NewSession(exampleTestRuntime()))); nil != publishErr {
         t.Fatalf("publish the session: %v", publishErr)
     }
 }
@@ -828,7 +828,7 @@ func (instance *secondFactorLogin) post(t *testing.T, username string, password 
     }
 
     request := melodyhttp.NewRequest(httpRequest, nil, instance.runtimeInstance, melodyhttp.NewRequestContext("login-second-factor-test", time.Now()))
-    _ = melodyhttp.SetRequestSession(request, mustSession(instance.sessionManager.NewSession(context.Background())))
+    _ = melodyhttp.SetRequestSession(request, mustSession(instance.sessionManager.NewSession(exampleTestRuntime())))
 
     response, handlerErr := serveLoginDoor(t, instance.runtimeInstance, request, instance.authentication, instance.sessionIndexLookup)
     if nil != handlerErr {
@@ -1022,7 +1022,7 @@ func (instance *secondFactorLogin) signInAndStore(t *testing.T, username string,
     response, sessionInstance := instance.post(t, username, username, headerList)
     requireLoginAnswer(t, response, nethttp.StatusOK)
 
-    if saveErr := instance.sessionManager.SaveSession(context.Background(), sessionInstance); nil != saveErr {
+    if saveErr := instance.sessionManager.SaveSession(exampleTestRuntime(), sessionInstance); nil != saveErr {
         t.Fatalf("save session: %v", saveErr)
     }
 
@@ -1039,17 +1039,17 @@ func TestLoginHandler_TheSignInPastTheCapEndsTheAccountsOldestSession(t *testing
         sessionIdList = append(sessionIdList, login.signInAndStore(t, "user", nil))
     }
 
-    if nil != mustSession(login.sessionManager.Session(context.Background(), sessionIdList[0])) {
+    if nil != mustSession(login.sessionManager.Session(exampleTestRuntime(), sessionIdList[0])) {
         t.Fatalf("expected the oldest session of the account ended by the sign-in past the cap")
     }
 
     for _, sessionId := range sessionIdList[1:] {
-        if nil == mustSession(login.sessionManager.Session(context.Background(), sessionId)) {
+        if nil == mustSession(login.sessionManager.Session(exampleTestRuntime(), sessionId)) {
             t.Fatalf("expected the account's %d newest sessions kept, %q is gone", repository.UserSessionCap, sessionId)
         }
     }
 
-    if nil == mustSession(login.sessionManager.Session(context.Background(), editorSessionId)) {
+    if nil == mustSession(login.sessionManager.Session(exampleTestRuntime(), editorSessionId)) {
         t.Fatal("expected the session of another account untouched by this account's cap")
     }
 }
@@ -1065,7 +1065,7 @@ func TestLogoutHandler_TheSignOutGivesTheSessionsPlaceBack(t *testing.T) {
     signedOutSessionId := sessionIdList[len(sessionIdList)-1]
 
     logoutRequest := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/logout/", nil), nil, login.runtimeInstance, melodyhttp.NewRequestContext("logout-test", time.Now()))
-    _ = melodyhttp.SetRequestSession(logoutRequest, mustSession(login.sessionManager.Session(context.Background(), signedOutSessionId)))
+    _ = melodyhttp.SetRequestSession(logoutRequest, mustSession(login.sessionManager.Session(exampleTestRuntime(), signedOutSessionId)))
 
     if _, logoutErr := security.NewSessionLogoutHandler(login.sessionIndexLookup).Logout(login.runtimeInstance, logoutRequest, melodysecuritycontract.LogoutInput{}); nil != logoutErr {
         t.Fatalf("logout handler: %v", logoutErr)
@@ -1074,7 +1074,7 @@ func TestLogoutHandler_TheSignOutGivesTheSessionsPlaceBack(t *testing.T) {
     login.signInAndStore(t, "user", nil)
 
     for _, sessionId := range sessionIdList[:len(sessionIdList)-1] {
-        if nil == mustSession(login.sessionManager.Session(context.Background(), sessionId)) {
+        if nil == mustSession(login.sessionManager.Session(exampleTestRuntime(), sessionId)) {
             t.Fatalf("expected the sign-in after the sign-out to end none of the account's other sessions, %q is gone", sessionId)
         }
     }
@@ -1085,7 +1085,7 @@ func TestLoginHandler_SigningInAgainRetiresThePlaceOfTheRotatedSession(t *testin
 
     otherSessionId := login.signInAndStore(t, "user", nil)
 
-    sessionInstance := mustSession(login.sessionManager.NewSession(context.Background()))
+    sessionInstance := mustSession(login.sessionManager.NewSession(exampleTestRuntime()))
     for range repository.UserSessionCap + 1 {
         httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", bytes.NewBufferString(`{"username":"user","password":"user"}`))
         httpRequest.Header.Set("Content-Type", "application/json")
@@ -1099,12 +1099,12 @@ func TestLoginHandler_SigningInAgainRetiresThePlaceOfTheRotatedSession(t *testin
         }
 
         sessionInstance = getSessionFromRequest(request)
-        if saveErr := login.sessionManager.SaveSession(context.Background(), sessionInstance); nil != saveErr {
+        if saveErr := login.sessionManager.SaveSession(exampleTestRuntime(), sessionInstance); nil != saveErr {
             t.Fatalf("save session: %v", saveErr)
         }
     }
 
-    if nil == mustSession(login.sessionManager.Session(context.Background(), otherSessionId)) {
+    if nil == mustSession(login.sessionManager.Session(exampleTestRuntime(), otherSessionId)) {
         t.Fatal("expected the account's other session kept: the sign-ins on one browser hold one place")
     }
 }
@@ -1117,7 +1117,7 @@ func TestLoginHandler_ASessionThatEndedElsewhereGivesItsPlaceBack(t *testing.T) 
         sessionIdList = append(sessionIdList, login.signInAndStore(t, "user", nil))
     }
 
-    if deleteErr := login.sessionStorage.Delete(context.Background(), sessionIdList[2]); nil != deleteErr {
+    if deleteErr := login.sessionStorage.Delete(exampleTestRuntime(), sessionIdList[2]); nil != deleteErr {
         t.Fatalf("unexpected error lapsing the session: %v", deleteErr)
     }
 
@@ -1126,7 +1126,7 @@ func TestLoginHandler_ASessionThatEndedElsewhereGivesItsPlaceBack(t *testing.T) 
     login.signInAndStore(t, "user", nil)
 
     for _, sessionId := range []string{sessionIdList[0], sessionIdList[1], sessionIdList[3], sessionIdList[4]} {
-        if nil == mustSession(login.sessionManager.Session(context.Background(), sessionId)) {
+        if nil == mustSession(login.sessionManager.Session(exampleTestRuntime(), sessionId)) {
             t.Fatalf("expected no live session ended while an ended one held a place, %q is gone", sessionId)
         }
     }
@@ -1145,7 +1145,7 @@ func TestLoginHandler_SignInsNotYetStoredStillMeetTheCap(t *testing.T) {
 
     storedCount := 0
     for _, sessionInstance := range pendingList {
-        if saveErr := login.sessionManager.SaveSession(context.Background(), sessionInstance); nil == saveErr {
+        if saveErr := login.sessionManager.SaveSession(exampleTestRuntime(), sessionInstance); nil == saveErr {
             storedCount++
         }
     }
@@ -1279,9 +1279,9 @@ func TestLoginHandler_RefusesAFormBodyWithoutAnnouncingAFailedSignIn(t *testing.
 func TestLoginHandler_RotatesTheSessionIdAndRetiresThePreLoginOne(t *testing.T) {
     login := newSecondFactorLogin(t)
 
-    preLogin := mustSession(login.sessionManager.NewSession(context.Background()))
+    preLogin := mustSession(login.sessionManager.NewSession(exampleTestRuntime()))
     preLogin.Set("example.cart", "three items")
-    if saveErr := login.sessionManager.SaveSession(context.Background(), preLogin); nil != saveErr {
+    if saveErr := login.sessionManager.SaveSession(exampleTestRuntime(), preLogin); nil != saveErr {
         t.Fatalf("save the pre-login session: %v", saveErr)
     }
     preLoginId := preLogin.Id()
@@ -1290,7 +1290,7 @@ func TestLoginHandler_RotatesTheSessionIdAndRetiresThePreLoginOne(t *testing.T) 
     httpRequest.Header.Set("Content-Type", "application/json")
 
     request := melodyhttp.NewRequest(httpRequest, nil, login.runtimeInstance, melodyhttp.NewRequestContext("login-rotation-test", time.Now()))
-    _ = melodyhttp.SetRequestSession(request, mustSession(login.sessionManager.Session(context.Background(), preLoginId)))
+    _ = melodyhttp.SetRequestSession(request, mustSession(login.sessionManager.Session(exampleTestRuntime(), preLoginId)))
 
     response, handlerErr := serveLoginDoor(t, login.runtimeInstance, request, login.authentication, login.sessionIndexLookup)
     if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
@@ -1302,7 +1302,7 @@ func TestLoginHandler_RotatesTheSessionIdAndRetiresThePreLoginOne(t *testing.T) 
         t.Fatalf("expected the session id rotated away from %q, got %v", preLoginId, rotated)
     }
 
-    if nil != mustSession(login.sessionManager.Session(context.Background(), preLoginId)) {
+    if nil != mustSession(login.sessionManager.Session(exampleTestRuntime(), preLoginId)) {
         t.Fatalf("expected the pre-login session %q retired from the storage", preLoginId)
     }
 
@@ -1382,4 +1382,8 @@ func mustSession(sessionInstance melodysessioncontract.Session, sessionErr error
     }
 
     return sessionInstance
+}
+
+func exampleTestRuntime() melodycontainercontract.Runtime {
+    return melodyruntime.NewRun(context.Background(), melodycontainer.NewContainer(melodycontainer.ContainerConfig{}).NewScope())
 }

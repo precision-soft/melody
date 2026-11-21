@@ -555,9 +555,9 @@ func TestLogoutDoor_EndsTheSessionEvenWhenTheHandlerDidNot(t *testing.T) {
     serviceContainer := servedSecurityContainer(t, fixture.kernel, fixture.logger)
     sessionManager := session.SessionMustFromResolver(t.Context(), serviceContainer)
 
-    live := mustSession(sessionManager.NewSession(context.Background()))
+    live := mustSession(sessionManager.NewSession(sessionRuntime()))
     live.Set("identity", "u1")
-    if saveErr := sessionManager.SaveSession(context.Background(), live); nil != saveErr {
+    if saveErr := sessionManager.SaveSession(sessionRuntime(), live); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
@@ -577,7 +577,7 @@ func TestLogoutDoor_EndsTheSessionEvenWhenTheHandlerDidNot(t *testing.T) {
         t.Fatalf("expected the cookie expired, got %+v", cookie)
     }
 
-    if stored := mustSession(sessionManager.Session(context.Background(), live.Id())); false == internal.IsNilInterface(stored) {
+    if stored := mustSession(sessionManager.Session(sessionRuntime(), live.Id())); false == internal.IsNilInterface(stored) {
         t.Fatalf("expected the session gone, got %+v", stored)
     }
 
@@ -614,9 +614,9 @@ func TestLogoutDoor_AFailedSuccessListenerStillEndsTheSession(t *testing.T) {
     serviceContainer := servedSecurityContainer(t, fixture.kernel, fixture.logger)
     sessionManager := session.SessionMustFromResolver(t.Context(), serviceContainer)
 
-    live := mustSession(sessionManager.NewSession(context.Background()))
+    live := mustSession(sessionManager.NewSession(sessionRuntime()))
     live.Set("identity", "u1")
-    if saveErr := sessionManager.SaveSession(context.Background(), live); nil != saveErr {
+    if saveErr := sessionManager.SaveSession(sessionRuntime(), live); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
@@ -635,7 +635,7 @@ func TestLogoutDoor_AFailedSuccessListenerStillEndsTheSession(t *testing.T) {
         t.Fatalf("expected the error answer to keep the expired cookie, got %+v", cookie)
     }
 
-    if stored := mustSession(sessionManager.Session(context.Background(), live.Id())); false == internal.IsNilInterface(stored) {
+    if stored := mustSession(sessionManager.Session(sessionRuntime(), live.Id())); false == internal.IsNilInterface(stored) {
         t.Fatalf("expected the session gone, got %+v", stored)
     }
 }
@@ -971,7 +971,7 @@ type rotationFailingSessionManager struct {
     sessioncontract.Manager
 }
 
-func (instance *rotationFailingSessionManager) RegenerateSession(ctx context.Context, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+func (instance *rotationFailingSessionManager) RegenerateSession(runtimeInstance containercontract.Runtime, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
     return nil, exception.MarkInfrastructureFailure(exception.NewError("session store is down", nil, nil))
 }
 
@@ -980,10 +980,10 @@ type hangupDuringRotationSessionManager struct {
     hangup context.CancelFunc
 }
 
-func (instance *hangupDuringRotationSessionManager) RegenerateSession(ctx context.Context, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+func (instance *hangupDuringRotationSessionManager) RegenerateSession(runtimeInstance containercontract.Runtime, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
     instance.hangup()
 
-    return instance.Manager.RegenerateSession(ctx, sessionInstance)
+    return instance.Manager.RegenerateSession(runtimeInstance, sessionInstance)
 }
 
 type loadFailingSessionManager struct {
@@ -991,11 +991,11 @@ type loadFailingSessionManager struct {
     err error
 }
 
-func (instance *loadFailingSessionManager) Session(ctx context.Context, sessionId string) (sessioncontract.Session, error) {
+func (instance *loadFailingSessionManager) Session(runtimeInstance containercontract.Runtime, sessionId string) (sessioncontract.Session, error) {
     return nil, instance.err
 }
 
-func (instance *loadFailingSessionManager) NewSession(ctx context.Context) (sessioncontract.Session, error) {
+func (instance *loadFailingSessionManager) NewSession(runtimeInstance containercontract.Runtime) (sessioncontract.Session, error) {
     return nil, instance.err
 }
 
@@ -1286,12 +1286,12 @@ func TestLogoutDoor_EndsTheSessionItsHandlerRotated(t *testing.T) {
     serviceContainer := servedSecurityContainer(t, fixture.kernel, fixture.logger)
     manager := session.SessionMustFromResolver(t.Context(), serviceContainer)
 
-    stored, mintErr := manager.NewSession(context.Background())
+    stored, mintErr := manager.NewSession(sessionRuntime())
     if nil != mintErr {
         t.Fatalf("unexpected error: %v", mintErr)
     }
     stored.Set("identity", "u1")
-    if saveErr := manager.SaveSession(context.Background(), stored); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntime(), stored); nil != saveErr {
         t.Fatalf("unexpected error: %v", saveErr)
     }
 
@@ -1312,7 +1312,7 @@ func TestLogoutDoor_EndsTheSessionItsHandlerRotated(t *testing.T) {
         }
 
         if session.SessionCookieName == cookie.Name && "" != cookie.Value {
-            if rotated, loadErr := manager.Session(context.Background(), cookie.Value); nil == loadErr && nil != rotated && true == rotated.Has("identity") {
+            if rotated, loadErr := manager.Session(sessionRuntime(), cookie.Value); nil == loadErr && nil != rotated && true == rotated.Has("identity") {
                 t.Fatalf("expected the rotated session ended, it still carries the identity")
             }
         }
@@ -1349,7 +1349,7 @@ type unmarkedRotationFailingSessionManager struct {
     sessioncontract.Manager
 }
 
-func (instance *unmarkedRotationFailingSessionManager) RegenerateSession(ctx context.Context, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+func (instance *unmarkedRotationFailingSessionManager) RegenerateSession(runtimeInstance containercontract.Runtime, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
     return nil, exception.NewError("could not generate unique session id", nil, nil)
 }
 
@@ -1483,7 +1483,8 @@ type deleteFailingSessionManager struct {
     hang     bool
 }
 
-func (instance *deleteFailingSessionManager) DeleteSession(ctx context.Context, sessionId string) error {
+func (instance *deleteFailingSessionManager) DeleteSession(runtimeInstance containercontract.Runtime, sessionId string) error {
+    ctx := runtimeInstance.Context()
     if 0 < instance.failures {
         instance.failures--
 
@@ -1496,7 +1497,7 @@ func (instance *deleteFailingSessionManager) DeleteSession(ctx context.Context, 
         return instance.err
     }
 
-    return instance.Manager.DeleteSession(ctx, sessionId)
+    return instance.Manager.DeleteSession(runtimeInstance, sessionId)
 }
 
 type logoutEventRecord struct {
@@ -1511,7 +1512,7 @@ func recordLogoutEvents(fixture *doorFixture, sessionManager sessioncontract.Man
     fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLogoutSuccess, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         record.successes++
 
-        stored, _ := sessionManager.Session(context.Background(), sessionId)
+        stored, _ := sessionManager.Session(sessionRuntime(), sessionId)
         record.storedAtSignal = append(record.storedAtSignal, false == internal.IsNilInterface(stored))
 
         return nil
@@ -1545,9 +1546,9 @@ func newStoredLogoutSession(t *testing.T, fixture *doorFixture, failures int) *s
     }
     serviceContainer.MustOverrideProtectedInstance(session.ServiceSessionManager, manager, container.OverrideOptions{})
 
-    live := mustSession(manager.NewSession(context.Background()))
+    live := mustSession(manager.NewSession(sessionRuntime()))
     live.Set("identity", "u1")
-    if saveErr := manager.SaveSession(context.Background(), live); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntime(), live); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
@@ -1652,7 +1653,7 @@ func TestLogoutDoor_A503ThenARetryRaisesOneSuccess(t *testing.T) {
         t.Fatalf("expected one success over the 503 and its retry, got %d successes and %d failures", record.successes, len(record.failures))
     }
 
-    if remaining := mustSession(stored.manager.Session(context.Background(), stored.sessionId)); false == internal.IsNilInterface(remaining) {
+    if remaining := mustSession(stored.manager.Session(sessionRuntime(), stored.sessionId)); false == internal.IsNilInterface(remaining) {
         t.Fatalf("expected the retry to remove the session, got %+v", remaining)
     }
 }

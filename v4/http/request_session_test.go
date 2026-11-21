@@ -11,6 +11,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -27,7 +28,7 @@ type countingSessionManager struct {
     typedNil        bool
 }
 
-func (instance *countingSessionManager) Session(ctx context.Context, sessionId string) (sessioncontract.Session, error) {
+func (instance *countingSessionManager) Session(runtimeInstance containercontract.Runtime, sessionId string) (sessioncontract.Session, error) {
     atomic.AddInt64(&instance.sessionCalls, 1)
 
     if nil != instance.sessionErr {
@@ -40,17 +41,17 @@ func (instance *countingSessionManager) Session(ctx context.Context, sessionId s
         return typedNil, nil
     }
 
-    return instance.Manager.Session(ctx, sessionId)
+    return instance.Manager.Session(runtimeInstance, sessionId)
 }
 
-func (instance *countingSessionManager) NewSession(ctx context.Context) (sessioncontract.Session, error) {
+func (instance *countingSessionManager) NewSession(runtimeInstance containercontract.Runtime) (sessioncontract.Session, error) {
     atomic.AddInt64(&instance.newSessionCalls, 1)
 
     if nil != instance.newSessionErr {
         return nil, instance.newSessionErr
     }
 
-    return instance.Manager.NewSession(ctx)
+    return instance.Manager.NewSession(runtimeInstance)
 }
 
 func newCountingSessionManager() *countingSessionManager {
@@ -65,7 +66,7 @@ func requestOverHandle(manager sessioncontract.Manager, logger *errorCountingLog
 
 func requestOverHandleWithPolicy(manager sessioncontract.Manager, logger *errorCountingLogger, cookieValue string, cookiePresent bool, policy httpcontract.SessionPolicy) *Request {
     request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, nil, nil)
-    request.Attributes().Set(requestAttributeSession, newRequestSession(context.Background(), manager, request, logger, cookieValue, cookiePresent, policy))
+    request.Attributes().Set(requestAttributeSession, newRequestSession(sessionRuntime(), manager, request, logger, cookieValue, cookiePresent, policy))
 
     return request
 }
@@ -155,7 +156,7 @@ func TestRequestSession_AFailedLoadWithoutALoggerIsNotMarkedLogged(t *testing.T)
     manager := &countingSessionManager{Manager: newCountingSessionManager().Manager, newSessionErr: exception.MarkInfrastructureFailure(errors.New("session store is down"))}
 
     request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, nil, nil)
-    request.Attributes().Set(requestAttributeSession, newRequestSession(context.Background(), manager, request, nil, "", false, httpcontract.SessionPolicy{}))
+    request.Attributes().Set(requestAttributeSession, newRequestSession(sessionRuntime(), manager, request, nil, "", false, httpcontract.SessionPolicy{}))
 
     _, sessionErr := RequestSession(request)
     if false == exception.AnswersUnavailable(sessionErr) || true == exception.IsAlreadyLogged(sessionErr) {
@@ -194,7 +195,7 @@ func TestSetRequestSession_PublishesTheSessionTheDoorAnswers(t *testing.T) {
     manager := newCountingSessionManager()
     request := requestOverHandle(manager, &errorCountingLogger{}, "", false)
 
-    published := mustSession(manager.Manager.NewSession(context.Background()))
+    published := mustSession(manager.Manager.NewSession(sessionRuntime()))
     if publishErr := SetRequestSession(request, published); nil != publishErr {
         t.Fatalf("unexpected error: %v", publishErr)
     }
@@ -220,7 +221,7 @@ func TestSetRequestSession_RefusesANilSession(t *testing.T) {
         }
     }
 
-    if publishErr := SetRequestSession(nil, mustSession(newCountingSessionManager().NewSession(context.Background()))); nil == publishErr {
+    if publishErr := SetRequestSession(nil, mustSession(newCountingSessionManager().NewSession(sessionRuntime()))); nil == publishErr {
         t.Fatalf("expected a nil request refused")
     }
 
@@ -340,7 +341,7 @@ func TestRequestSession_EmptyOnOutageNamesTheSessionTheCookiePointsAt(t *testing
         logger := &warningRecordingLogger{}
 
         request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, nil, nil)
-        request.Attributes().Set(requestAttributeSession, newRequestSession(context.Background(), manager, request, logger, sessionOutageTestCookieValue, cookiePresent, httpcontract.SessionPolicy{EmptyOnOutage: true}))
+        request.Attributes().Set(requestAttributeSession, newRequestSession(sessionRuntime(), manager, request, logger, sessionOutageTestCookieValue, cookiePresent, httpcontract.SessionPolicy{EmptyOnOutage: true}))
 
         if _, sessionErr := RequestSession(request); nil != sessionErr {
             t.Fatalf("unexpected error: %v", sessionErr)
@@ -369,16 +370,18 @@ type contextRecordingSessionManager struct {
     newSessionContext context.Context
 }
 
-func (instance *contextRecordingSessionManager) Session(ctx context.Context, sessionId string) (sessioncontract.Session, error) {
+func (instance *contextRecordingSessionManager) Session(runtimeInstance containercontract.Runtime, sessionId string) (sessioncontract.Session, error) {
+    ctx := runtimeInstance.Context()
     instance.sessionContext = ctx
 
-    return instance.Manager.Session(ctx, sessionId)
+    return instance.Manager.Session(runtimeInstance, sessionId)
 }
 
-func (instance *contextRecordingSessionManager) NewSession(ctx context.Context) (sessioncontract.Session, error) {
+func (instance *contextRecordingSessionManager) NewSession(runtimeInstance containercontract.Runtime) (sessioncontract.Session, error) {
+    ctx := runtimeInstance.Context()
     instance.newSessionContext = ctx
 
-    return instance.Manager.NewSession(ctx)
+    return instance.Manager.NewSession(runtimeInstance)
 }
 
 func TestRequestSession_LoadsUnderTheRequestsContext(t *testing.T) {
@@ -386,7 +389,7 @@ func TestRequestSession_LoadsUnderTheRequestsContext(t *testing.T) {
     requestContext := context.WithValue(context.Background(), requestPlantedKey{}, "planted")
 
     request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, nil, nil)
-    request.Attributes().Set(requestAttributeSession, newRequestSession(requestContext, manager, request, nil, sessionOutageTestCookieValue, true, httpcontract.SessionPolicy{}))
+    request.Attributes().Set(requestAttributeSession, newRequestSession(sessionRuntimeUnder(requestContext), manager, request, nil, sessionOutageTestCookieValue, true, httpcontract.SessionPolicy{}))
 
     if _, sessionErr := RequestSession(request); nil != sessionErr {
         t.Fatalf("unexpected error: %v", sessionErr)
@@ -451,7 +454,7 @@ func TestRequestSession_ALoadTheClientsHangupCancelledIsRecordedAtWarning(t *tes
             logger := &levelRecordingLogger{}
 
             request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, nil, nil)
-            request.Attributes().Set(requestAttributeSession, newRequestSession(row.requestContext, manager, request, logger, sessionOutageTestCookieValue, true, httpcontract.SessionPolicy{}))
+            request.Attributes().Set(requestAttributeSession, newRequestSession(sessionRuntimeUnder(row.requestContext), manager, request, logger, sessionOutageTestCookieValue, true, httpcontract.SessionPolicy{}))
 
             if _, sessionErr := RequestSession(request); false == exception.ChainIs(sessionErr, row.cause) || false == exception.ChainIs(sessionErr, session.ErrSessionUnavailable) {
                 t.Fatalf("expected the load error with its cause, got %v", sessionErr)
@@ -489,7 +492,8 @@ func (instance *boundedSessionManager) recorded() []context.Context {
     return append([]context.Context{}, instance.contextList...)
 }
 
-func (instance *boundedSessionManager) Session(ctx context.Context, sessionId string) (sessioncontract.Session, error) {
+func (instance *boundedSessionManager) Session(runtimeInstance containercontract.Runtime, sessionId string) (sessioncontract.Session, error) {
+    ctx := runtimeInstance.Context()
     instance.record(ctx)
 
     if true == instance.panicLoad {
@@ -503,24 +507,26 @@ func (instance *boundedSessionManager) Session(ctx context.Context, sessionId st
     return nil, nil
 }
 
-func (instance *boundedSessionManager) NewSession(ctx context.Context) (sessioncontract.Session, error) {
+func (instance *boundedSessionManager) NewSession(runtimeInstance containercontract.Runtime) (sessioncontract.Session, error) {
+    ctx := runtimeInstance.Context()
     instance.record(ctx)
 
     if true == instance.hangMint {
         return nil, awaitStorageContext(ctx)
     }
 
-    return instance.Manager.NewSession(ctx)
+    return instance.Manager.NewSession(runtimeInstance)
 }
 
-func (instance *boundedSessionManager) RegenerateSession(ctx context.Context, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+func (instance *boundedSessionManager) RegenerateSession(runtimeInstance containercontract.Runtime, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+    ctx := runtimeInstance.Context()
     instance.record(ctx)
 
     if true == instance.hangRotation {
         return nil, awaitStorageContext(ctx)
     }
 
-    return instance.Manager.RegenerateSession(ctx, sessionInstance)
+    return instance.Manager.RegenerateSession(runtimeInstance, sessionInstance)
 }
 
 func (instance *boundedSessionManager) StorageTimeout() bound.Duration {
@@ -551,7 +557,7 @@ func (instance *messageContextRecordingLogger) Error(message string, context log
 
 func boundedLoadRequest(requestContext context.Context, manager sessioncontract.Manager, logger loggingcontract.Logger, cookiePresent bool, policy httpcontract.SessionPolicy) *Request {
     request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, nil, nil)
-    request.Attributes().Set(requestAttributeSession, newRequestSession(requestContext, manager, request, logger, sessionOutageTestCookieValue, cookiePresent, policy))
+    request.Attributes().Set(requestAttributeSession, newRequestSession(sessionRuntimeUnder(requestContext), manager, request, logger, sessionOutageTestCookieValue, cookiePresent, policy))
 
     return request
 }

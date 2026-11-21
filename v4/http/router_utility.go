@@ -383,14 +383,14 @@ func writeResponse(
         sessionPersistFailed := false
 
         /* released by the defer too, so a panicking foreign door leaves no timer armed */
-        releasePersistenceContext := func() {}
-        defer func() { releasePersistenceContext() }()
+        releasePersistenceRuntime := func() {}
+        defer func() { releasePersistenceRuntime() }()
 
-        openPersistenceContext := func() (context.Context, error) {
-            persistenceContext, release, persistenceContextErr := sessionPersistenceContext(runtimeInstance, request, sessionManager)
-            releasePersistenceContext = release
+        openPersistenceRuntime := func() (containercontract.Runtime, error) {
+            persistenceRuntime, release, persistenceRuntimeErr := sessionPersistenceRuntime(runtimeInstance, sessionManager)
+            releasePersistenceRuntime = release
 
-            return persistenceContext, persistenceContextErr
+            return persistenceRuntime, persistenceRuntimeErr
         }
 
         /* one snapshot decides both branches, so a concurrent Clear cannot land between the flag reads */
@@ -401,16 +401,16 @@ func writeResponse(
             deleteAnsweredUnavailable := false
 
             if true == requestNamesSession(request, sessionInstance.Id()) {
-                persistenceContext, err := openPersistenceContext()
+                persistenceRuntime, err := openPersistenceRuntime()
                 if nil == err {
-                    err = sessionManager.DeleteSession(persistenceContext, sessionInstance.Id())
+                    err = sessionManager.DeleteSession(persistenceRuntime, sessionInstance.Id())
                 }
 
                 if nil != err {
                     sessionPersistFailed = true
 
                     var unavailable bool
-                    err, unavailable = classifySessionPersistenceFailure(persistenceContext, err)
+                    err, unavailable = classifySessionPersistenceFailure(persistenceRuntime, err)
                     persistErr = err
 
                     logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelError, "failed to delete session", err, sessionInstance.Id(), request)
@@ -449,9 +449,9 @@ func writeResponse(
                     )
                 }
             } else {
-                persistenceContext, err := openPersistenceContext()
+                persistenceRuntime, err := openPersistenceRuntime()
                 if nil == err {
-                    err = sessionManager.SaveSession(persistenceContext, sessionInstance)
+                    err = sessionManager.SaveSession(persistenceRuntime, sessionInstance)
                 }
 
                 if nil != err {
@@ -474,7 +474,7 @@ func writeResponse(
                     sessionPersistFailed = true
 
                     var unavailable bool
-                    err, unavailable = classifySessionPersistenceFailure(persistenceContext, err)
+                    err, unavailable = classifySessionPersistenceFailure(persistenceRuntime, err)
                     persistErr = err
 
                     logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelError, "failed to save session", err, sessionInstance.Id(), request)
@@ -493,7 +493,7 @@ func writeResponse(
         }
 
         /* released before the body is written, so the persistence timer does not outlive the persistence */
-        releasePersistenceContext()
+        releasePersistenceRuntime()
 
         if true == isPersistenceRecorder && false == sessionPersistFailed {
             persistenceRecorder.MarkSessionPersisted()
@@ -588,8 +588,8 @@ func sessionUnavailableResponse(unavailableRetryAfter time.Duration) httpcontrac
 }
 
 /* a call the kernel's own bound cut is an outage whatever the manager answered, so a bare deadline from a replaced manager still answers 503 */
-func classifySessionPersistenceFailure(persistenceContext context.Context, err error) (error, bool) {
-    if true == storageBoundExpired(persistenceContext) {
+func classifySessionPersistenceFailure(persistenceRuntime containercontract.Runtime, err error) (error, bool) {
+    if false == internal.IsNilInterface(persistenceRuntime) && true == storageBoundExpired(persistenceRuntime.Context()) {
         return exception.NewError(
             "the session storage call was cut by its bound",
             exceptioncontract.Context{"bound": session.StorageTimeoutRule.Name},
@@ -615,38 +615,29 @@ func storageBoundExpired(ctx context.Context) bool {
     return true == hasDeadline && false == time.Now().Before(deadline)
 }
 
-/* the request's values without its cancellation, so a client that hung up still has its logout recorded */
-func sessionPersistenceContext(
+/* the request's runtime, its scope and kind kept, over the request's values without its cancellation and bounded by StorageTimeout, so a client that hung up still has its logout recorded */
+func sessionPersistenceRuntime(
     runtimeInstance containercontract.Runtime,
-    request httpcontract.Request,
     sessionManager sessioncontract.Manager,
-) (context.Context, context.CancelFunc, error) {
-    timeout, timeoutErr := session.ResolveStorageTimeout(sessionManager)
-    if nil != timeoutErr {
-        return context.Background(), func() {}, timeoutErr
+) (containercontract.Runtime, context.CancelFunc, error) {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+        return nil, func() {}, nilErr
     }
 
-    detached := context.WithoutCancel(requestContextOf(runtimeInstance, request))
+    timeout, timeoutErr := session.ResolveStorageTimeout(sessionManager)
+    if nil != timeoutErr {
+        return nil, func() {}, timeoutErr
+    }
+
+    detached := context.WithoutCancel(runtimeInstance.Context())
 
     if true == timeout.Unlimited {
-        return detached, func() {}, nil
+        return runtime.WithContext(runtimeInstance, detached), func() {}, nil
     }
 
     persistenceContext, cancel := context.WithTimeout(detached, timeout.Value)
 
-    return persistenceContext, cancel, nil
-}
-
-func requestContextOf(runtimeInstance containercontract.Runtime, request httpcontract.Request) context.Context {
-    if false == internal.IsNilInterface(runtimeInstance) && nil != runtimeInstance.Context() {
-        return runtimeInstance.Context()
-    }
-
-    if false == internal.IsNilInterface(request) && nil != request.HttpRequest() {
-        return request.HttpRequest().Context()
-    }
-
-    return context.Background()
+    return runtime.WithContext(runtimeInstance, persistenceContext), cancel, nil
 }
 
 func requestNamesSession(request httpcontract.Request, sessionId string) bool {

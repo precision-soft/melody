@@ -5,6 +5,7 @@ import (
     "errors"
     "reflect"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -251,7 +252,6 @@ func (instance *byTypeProbe) Origin() string {
     return instance.origin
 }
 
-/* a scoped registration is answered only inside a scope, so the doors that find it read the runtime's scope, never the container behind it */
 func newByTypeRuntime(t *testing.T) containercontract.Runtime {
     t.Helper()
 
@@ -344,5 +344,69 @@ func assertByTypePanics(t *testing.T, callback func()) {
 
     if false == panicked {
         t.Fatalf("expected the Must form to panic")
+    }
+}
+
+func TestFromRuntimeByType_EveryDoorWaitsUnderTheRuntimesContext(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+
+    providerEntered := make(chan struct{})
+    releaseProvider := make(chan struct{})
+    if registerErr := serviceContainer.Register(
+        "by.type.held",
+        func(resolver containercontract.Resolver) (*byTypeProbe, error) {
+            close(providerEntered)
+            <-releaseProvider
+
+            return &byTypeProbe{origin: "container"}, nil
+        },
+        container.RegisterOptions{},
+    ); nil != registerErr {
+        t.Fatalf("register: %v", registerErr)
+    }
+
+    ownerDone := make(chan error, 1)
+    go func() {
+        _, ownerErr := serviceContainer.Get(context.Background(), "by.type.held")
+        ownerDone <- ownerErr
+    }()
+
+    <-providerEntered
+
+    runtimeContext, cancel := context.WithCancel(context.Background())
+    cancel()
+    runtimeInstance := NewRun(runtimeContext, serviceContainer.NewScope())
+
+    for doorName, door := range map[string]func() error{
+        "FromRuntimeByType": func() error {
+            _, doorErr := FromRuntimeByType[*byTypeProbe](runtimeInstance)
+            return doorErr
+        },
+        "FromRuntimeByReflectType": func() error {
+            _, doorErr := FromRuntimeByReflectType(runtimeInstance, reflect.TypeFor[*byTypeProbe]())
+            return doorErr
+        },
+        "AllImplementingFromRuntime": func() error {
+            _, doorErr := AllImplementingFromRuntime[byTypeCollected](runtimeInstance)
+            return doorErr
+        },
+    } {
+        answered := make(chan error, 1)
+        go func() { answered <- door() }()
+
+        select {
+        case doorErr := <-answered:
+            if false == errors.Is(doorErr, context.Canceled) {
+                t.Fatalf("%s: expected the cancelled runtime to leave the wait with context.Canceled, got %v", doorName, doorErr)
+            }
+        case <-time.After(5 * time.Second):
+            close(releaseProvider)
+            t.Fatalf("%s: expected the cancelled runtime to leave the wait, it kept waiting", doorName)
+        }
+    }
+
+    close(releaseProvider)
+    if ownerErr := <-ownerDone; nil != ownerErr {
+        t.Fatalf("owner: %v", ownerErr)
     }
 }

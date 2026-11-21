@@ -89,12 +89,12 @@ func admitSession(
         rotatedSession.Id(),
         clockInstance.Now(),
         func(sessionId string) (bool, error) {
-            _, exists, loadErr := sessionStorage.Load(admissionContext, sessionId)
+            _, exists, loadErr := sessionStorage.Load(runtimeInstance, sessionId)
 
             return exists, loadErr
         },
         func(sessionId string) error {
-            return sessionManager.DeleteSession(admissionContext, sessionId)
+            return sessionManager.DeleteSession(runtimeInstance, sessionId)
         },
     )
 }

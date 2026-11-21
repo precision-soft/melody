@@ -373,7 +373,7 @@ func redactAuthorityUserinfo(value string, authorityStart int) string {
         value[authorityStart+userinfoEnd:]
 }
 
-/* Get, like every request door, is bound to the context and refuses a nil one. */
+/* Get, like every request door, is bound to the runtime's context and refuses an absent runtime. */
 func (instance *HttpClient) Get(runtimeInstance containercontract.Runtime, urlString string, options RequestOptions) (httpclientcontract.Response, error) {
     return instance.Request(runtimeInstance, nethttp.MethodGet, urlString, options)
 }

@@ -39,7 +39,7 @@ func requestCarryingSession(t *testing.T) (melodyhttpcontract.Request, melodyses
     request := plainRequest(t)
 
     manager := melodysession.NewManager(melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{}), melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
-    sessionInstance := mustSession(manager.NewSession(context.Background()))
+    sessionInstance := mustSession(manager.NewSession(exampleTestRuntime()))
 
     _ = melodyhttp.SetRequestSession(request, sessionInstance)
 
@@ -195,4 +195,12 @@ func resolveToken(resolver melodysecuritycontract.TokenResolver, request melodyh
     }
 
     return token
+}
+
+func exampleTestRuntime() melodycontainercontract.Runtime {
+    return exampleTestRuntimeUnder(context.Background())
+}
+
+func exampleTestRuntimeUnder(ctx context.Context) melodycontainercontract.Runtime {
+    return melodyruntime.NewRun(ctx, melodycontainer.NewContainer(melodycontainer.ContainerConfig{}).NewScope())
 }

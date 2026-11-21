@@ -5,6 +5,7 @@ import (
     "errors"
     "fmt"
     "strings"
+    "sync"
     "sync/atomic"
     "testing"
     "time"
@@ -588,7 +589,6 @@ type phaseHolder struct {
     handle *container.LazyService[string]
 }
 
-/* a name reserved for the request phase and never registered answers alike through a handle retained at boot, a handle over the container and the caller's scope: not registered under a request, the refusal naming the caller's own kind under a run */
 func TestLazyService_APhaseReservedNameAnswersAlikeThroughEverySource(t *testing.T) {
     for _, finishBootFirst := range []bool{false, true} {
         serviceContainer := container.NewContainer(container.ContainerConfig{})
@@ -640,5 +640,66 @@ func TestLazyService_APhaseReservedNameAnswersAlikeThroughEverySource(t *testing
         }
 
         _ = finishBoot()
+    }
+}
+
+/* unspecifiedKindRuntime answers the zero kind, which only a runtime of another implementation can */
+type unspecifiedKindRuntime struct {
+    containercontract.Runtime
+}
+
+func (instance unspecifiedKindRuntime) Kind() containercontract.Kind {
+    return containercontract.KindUnspecified
+}
+
+func TestLazyService_APhaseReservedNameUnderTheZeroKindIsNotRegisteredAsUnderADetachedOne(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    if reserveErr := serviceContainer.ReservePhaseService("app.phase.request", containercontract.KindRequest); nil != reserveErr {
+        t.Fatalf("reserve: %v", reserveErr)
+    }
+
+    zeroKindRuntime := unspecifiedKindRuntime{Runtime: runtime.NewRun(t.Context(), serviceContainer.NewScope())}
+
+    _, resolveErr := container.Lazy[string](serviceContainer, "app.phase.request").Resolve(zeroKindRuntime)
+    if nil == resolveErr || true == errors.Is(resolveErr, containercontract.ErrRuntimeKindRefused) {
+        t.Fatalf("expected the zero kind answered not registered, got %v", resolveErr)
+    }
+}
+
+func TestLazyService_ConcurrentCallersOfTwoPhasesAreEachAnsweredTheirOwnPhase(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    if reserveErr := serviceContainer.ReservePhaseService("app.phase.request", containercontract.KindRequest); nil != reserveErr {
+        t.Fatalf("reserve: %v", reserveErr)
+    }
+
+    handle := container.Lazy[string](serviceContainer, "app.phase.request")
+    requestRuntime := runtime.NewRequest(t.Context(), serviceContainer.NewScope())
+    runRuntime := runtime.NewRun(t.Context(), serviceContainer.NewScope())
+
+    var mismatches atomic.Int64
+    var waitGroup sync.WaitGroup
+    for worker := 0; worker < 32; worker = worker + 1 {
+        waitGroup.Add(1)
+        go func(worker int) {
+            defer waitGroup.Done()
+
+            for round := 0; round < 400; round = round + 1 {
+                callerRuntime := requestRuntime
+                if 1 == (worker+round)%2 {
+                    callerRuntime = runRuntime
+                }
+
+                _, resolveErr := handle.Resolve(callerRuntime)
+                kindRefused := errors.Is(resolveErr, containercontract.ErrRuntimeKindRefused)
+                if (containercontract.KindRun == callerRuntime.Kind()) != kindRefused {
+                    mismatches.Add(1)
+                }
+            }
+        }(worker)
+    }
+    waitGroup.Wait()
+
+    if 0 != mismatches.Load() {
+        t.Fatalf("expected every caller answered for its own phase, %d were answered another caller's", mismatches.Load())
     }
 }

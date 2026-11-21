@@ -44,16 +44,16 @@ func RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Ses
         return nil, sessionManagerErr
     }
 
-    rotationContext, releaseRotationContext, regenerateErr := storageCallContext(runtimeInstance.Context(), sessionManager)
-    defer releaseRotationContext()
+    rotationRuntime, releaseRotationRuntime, regenerateErr := storageCallRuntime(runtimeInstance, sessionManager)
+    defer releaseRotationRuntime()
 
     if nil != regenerateErr {
         return nil, regenerateErr
     }
 
-    rotatedSession, regenerateErr := sessionManager.RegenerateSession(rotationContext, currentSession)
+    rotatedSession, regenerateErr := sessionManager.RegenerateSession(rotationRuntime, currentSession)
     if nil != regenerateErr {
-        return nil, markSessionUnavailable(namedStorageBound(runtimeInstance.Context(), rotationContext, regenerateErr))
+        return nil, markSessionUnavailable(namedStorageBound(runtimeInstance.Context(), rotationRuntime.Context(), regenerateErr))
     }
 
     if publishErr := SetRequestSession(request, rotatedSession); nil != publishErr {

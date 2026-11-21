@@ -48,16 +48,15 @@ func updateSession(
     runtimeInstance containercontract.Runtime,
     sessionId string,
 ) error {
-    ctx := runtimeInstance.Context()
     manager := session.SessionMustFromRuntime(runtimeInstance)
 
-    sessionInstance, loadErr := manager.Session(ctx, sessionId)
+    sessionInstance, loadErr := manager.Session(runtimeInstance, sessionId)
     if nil != loadErr {
         return loadErr
     }
 
     if nil == sessionInstance {
-        sessionInstance, loadErr = manager.NewSession(ctx)
+        sessionInstance, loadErr = manager.NewSession(runtimeInstance)
         if nil != loadErr {
             return loadErr
         }
@@ -65,7 +64,7 @@ func updateSession(
 
     sessionInstance.Set("userId", "u-123")
 
-    return manager.SaveSession(ctx, sessionInstance)
+    return manager.SaveSession(runtimeInstance, sessionInstance)
 }
 ```
 
@@ -73,9 +72,9 @@ func updateSession(
 
 Session ids are always 32-character lowercase hex strings. Incoming cookies that do not match this shape are rejected by [`Manager.Session`](../../session/manager.go) without touching storage, and [`DeleteSession`](../../session/manager.go) refuses malformed ids. New ids are generated from 16 bytes of `crypto/rand`.
 
-## Contexts and deadlines
+## Runtimes, contexts and deadlines
 
-Every door of [`sessioncontract.Manager`](../../session/contract/manager.go) and [`sessioncontract.Storage`](../../session/contract/storage.go) takes the caller's context first. A nil or typed-nil context is refused with `session context is nil` before anything else is judged, through [`sessioncontract.RefuseNilContext`](../../session/contract/context.go). A storage then judges, in the order the cache contract judges them, a closed storage, the id and the ttl, and answers a context already done its own error before the store is touched.
+Every door of [`sessioncontract.Manager`](../../session/contract/manager.go) and [`sessioncontract.Storage`](../../session/contract/storage.go) takes the runtime it runs under first, every call reading the runtime's context. A nil runtime, a typed nil and one carrying no context are refused with `the runtime is nil or carries no context` before anything else is judged, through [`containercontract.RefuseNilRuntime`](../../container/contract/runtime_refuse.go). The http kernel hands two runtimes on purpose, both the request's scope and kind over a context of their own: the load, the mint and the rotation run under the request's context bounded by `StorageTimeout`, so a client that left still stops them, and the save and the delete at the end of the request under the request's context detached from its cancellation and bounded by `StorageTimeout`, so a client that hung up still has its logout recorded; the manager reads a failed removal back under the same detached bound. A storage then judges, in the order the cache contract judges them, a closed storage, the id and the ttl, and answers a context already done its own error before the store is touched.
 
 The manager answers every outcome a context ended as one error, marked with [`exception.MarkInfrastructureFailure`](../../exception/infrastructure_failure.go) and carrying the context's error in its chain: a context done at the door, one that ended while the door waited for a session another operation holds, and one the storage answered. The http kernel answers it `503` with `Retry-After`. A door that has nothing to do, the save of an unmodified session, the read of a malformed id, stays a no-op under a done context.
 
@@ -133,7 +132,7 @@ The returned session is a **new object marked modified**, and the one passed in 
   to its own length, so two writers interleave whole-file rewrites with no coordination — and must not be opened for appending, which is refused at construction because an appending write ignores the offset the snapshot names, nor read-only, which is refused at construction too, since it would load the sessions and then fail every save (the access mode is read from the descriptor on every Unix system — Linux, macOS, the BSDs, Solaris, illumos and AIX; on Windows, Plan 9 and WebAssembly the first save reports it); values round-trip through JSON, so a session that outlives a restart comes back with every number as a `float64` — an `int64` beyond 2^53 comes back changed; and that same handle door **cannot be atomic across a crash**, because it writes through a handle the caller owns and a rename would unlink the inode that caller still holds. It gives what it can instead: the snapshot is encoded whole before a byte is written, the write names offset zero rather than seeking to it, the write
   precedes the truncation, and the truncation cuts to the length just written, so no kill can leave a zero-length file and log every user out silently. A kill landing inside the write itself can still leave a torn document, and the next construction reports it as a decode failure rather than reading it as an empty session set. Where the atomicity matters, hand the `Path` and let [`NewFileStorage`](../../session/file_storage.go) own the file. [`InMemoryStorage`](../../session/in_memory_storage.go) keeps native types and has none of these, being a single map in one process.
 - **Both storages hold a bounded number of sessions.** At `MaxSessions`, once the lapsed sessions are swept, a `Save` of a new id is refused with `the in-memory session storage is full` or `the session file storage is full`, and a `Save` of a stored id still lands, so no live session is logged out. The kernel answers a refused save with a 503 and no session cookie, and only logs it once the response is committed. A file already holding more than the ceiling keeps what it holds. The framework's fallback storage carries the default, so a public route that writes to the session cannot grow the process past it; its ceiling is `MELODY_HTTP_SESSION_MAX_SESSIONS`, 100,000 by default, unlimited admitted, and an application expecting more sessions raises the key or registers its own storage. Beside `MELODY_HTTP_SESSION_TTL=unlimited` the fallback storage writes the boot warning `http.session.unboundedTtlOnBoundedDefaultStorage`, and an unlimited ceiling there is refused at the http boot (see [CONFIG](CONFIG.md#session-max-sessions)).
-- Both storages refuse `Load`, `Save` and `Delete` after `CloseWithContext`, judged after a nil context and before the id, the ttl and a done context, and both treat the expiry instant itself as lapsed. **They keep the expiry on different clocks, deliberately.** `InMemoryStorage` keeps the expiry as an in-process `time.Time`, which carries Go's monotonic reading: an NTP step neither lapses nor resurrects a session, and no entry survives a restart anyway. `FileStorage` persists `expiresAt` as unix nanoseconds — the wall reading is the only one that can survive a restart — so its expiry follows every step of the wall clock. An application that moves between the two keeps the same boundary (the instant itself is lapsed on both) but trades monotonic stability for restart durability. Every instant comes from the injected clock: the `Clock` of `InMemoryStorageConfig` and `FileStorageConfig`, nil the system clock, and the framework-wired default storage runs on the kernel's clock — so a frozen clock in a test moves session time deterministically. Neither serialises anything across
+- Both storages refuse `Load`, `Save` and `Delete` after `CloseWithContext`, judged after an absent runtime and before the id, the ttl and a done context, and both treat the expiry instant itself as lapsed. **They keep the expiry on different clocks, deliberately.** `InMemoryStorage` keeps the expiry as an in-process `time.Time`, which carries Go's monotonic reading: an NTP step neither lapses nor resurrects a session, and no entry survives a restart anyway. `FileStorage` persists `expiresAt` as unix nanoseconds — the wall reading is the only one that can survive a restart — so its expiry follows every step of the wall clock. An application that moves between the two keeps the same boundary (the instant itself is lapsed on both) but trades monotonic stability for restart durability. Every instant comes from the injected clock: the `Clock` of `InMemoryStorageConfig` and `FileStorageConfig`, nil the system clock, and the framework-wired default storage runs on the kernel's clock — so a frozen clock in a test moves session time deterministically. Neither serialises anything across
   processes: `Storage.Save` is a blind upsert, so two concurrent requests writing different keys of the same session end with whichever wrote last, and a deployment running more than one node needs a storage of its own that makes those writes conditional.
 - A request loads its session at most once: a request that never reads it costs the storage nothing, and a failed load answers the same filed error to every later read, so one outage is one record.
 - `config.DefaultSessionTtl` is bounded on purpose: a request without a session cookie that reads the session mints one, so an unbounded lifetime makes every cookie-less request on a path that writes the session a permanent entry, which the in-memory storage cannot expire. A deployment that wants no expiry writes `unlimited`, and the boot warns on that combination.
@@ -146,37 +145,36 @@ The returned session is a **new object marked modified**, and the one passed in 
 #### Types
 
 - [`type Manager`](../../session/contract/manager.go)
-    - `Session(ctx context.Context, sessionId string) (Session, error)`
-    - `NewSession(ctx context.Context) (Session, error)`
-    - `SaveSession(ctx context.Context, session Session) error`
-    - `DeleteSession(ctx context.Context, sessionId string) error`
-    - `RegenerateSession(ctx context.Context, session Session) (Session, error)`
+    - `Session(runtimeInstance containercontract.Runtime, sessionId string) (Session, error)`
+    - `NewSession(runtimeInstance containercontract.Runtime) (Session, error)`
+    - `SaveSession(runtimeInstance containercontract.Runtime, session Session) error`
+    - `DeleteSession(runtimeInstance containercontract.Runtime, sessionId string) error`
+    - `RegenerateSession(runtimeInstance containercontract.Runtime, session Session) (Session, error)`
     - `StorageTimeout() bound.Duration`
     - `CloseWithContext(closeContext context.Context) error`
 - [`type Storage`](../../session/contract/storage.go)
-    - `Load(ctx context.Context, sessionId string) (map[string]any, bool, error)`
-    - `Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error`
-    - `Delete(ctx context.Context, sessionId string) error`
+    - `Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error)`
+    - `Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error`
+    - `Delete(runtimeInstance containercontract.Runtime, sessionId string) error`
     - `CloseWithContext(closeContext context.Context) error`
 - [`type Session`](../../session/contract/session.go)
     - `Snapshot() (values map[string]any, modified bool, cleared bool)`
 
 #### Functions and variables
 
-- [`func RefuseNilContext(ctx context.Context) error`](../../session/contract/context.go) — the refusal of a nil or typed-nil context every door gives
 - [`var TtlRule`](../../session/contract/ttl.go) — the reading every storage gives the ttl of a `Save`: at least 1s, unlimited admitted, no default
 - [`func ResolveTtl(ttl bound.Duration) (time.Duration, error)`](../../session/contract/ttl.go) — the expiry a storage applies, 0 for unlimited, an absent ttl and one below the minimum refused naming the ttl
 
 ### Types
 
 - [`type Manager`](../../session/manager.go)
-    - [`RegenerateSession(ctx context.Context, session sessioncontract.Session) (sessioncontract.Session, error)`](../../session/manager.go) — rotates the id, carrying the values over; see [Rotating the session id](#rotating-the-session-id)
+    - [`RegenerateSession(runtimeInstance containercontract.Runtime, session sessioncontract.Session) (sessioncontract.Session, error)`](../../session/manager.go) — rotates the id, carrying the values over; see [Rotating the session id](#rotating-the-session-id)
     - [`StorageTimeout() bound.Duration`](../../session/manager.go) — the bound resolved at construction, which the http kernel gives every call to the storage: the load, the mint, the rotation, the save and the delete
 - [`type Session`](../../session/session.go)
     - [`Snapshot() (map[string]any, bool, bool)`](../../session/session.go) — the values, the modified flag and the cleared flag read under one lock acquisition
 - [`func Snapshot(sessionInstance sessioncontract.Session) (map[string]any, bool, bool)`](../../session/snapshot.go) — a session's values and flags, through the session's own `Snapshot`
 - [`type InMemoryStorage`](../../session/in_memory_storage.go)
-    - [`Clear(ctx context.Context) error`](../../session/in_memory_storage.go) — drops every stored session, refusing a nil context, a closed storage and a done context
+    - [`Clear(runtimeInstance containercontract.Runtime) error`](../../session/in_memory_storage.go) — drops every stored session, refusing an absent runtime, a closed storage and a done context
 - [`type FileStorage`](../../session/file_storage.go) — the storage the [durability](#file-storage-durability) section is about, recommended for development only
 - **session.ManagerConfig** ([`session/manager.go`](../../session/manager.go)) — `Ttl`, `TombstoneRetention`, `StorageTimeout`, `Clock` and `OwnsStorage`, the zero value the default
 - **session.InMemoryStorageConfig** ([`session/in_memory_storage.go`](../../session/in_memory_storage.go)) — `CleanupInterval`, 1m by default, at least 1ms, unlimited refused, `MaxSessions`, 100,000 by default, at least 1, unlimited admitted, and `Clock`

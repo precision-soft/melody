@@ -24,10 +24,11 @@ type loadContextRecordingStorage struct {
     loadContexts []context.Context
 }
 
-func (instance *loadContextRecordingStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
+func (instance *loadContextRecordingStorage) Load(runtimeInstance melodycontainercontract.Runtime, sessionId string) (map[string]any, bool, error) {
+    ctx := runtimeInstance.Context()
     instance.loadContexts = append(instance.loadContexts, ctx)
 
-    return instance.Storage.Load(ctx, sessionId)
+    return instance.Storage.Load(runtimeInstance, sessionId)
 }
 
 type deleteContextRecordingManager struct {
@@ -35,10 +36,11 @@ type deleteContextRecordingManager struct {
     deleteContexts []context.Context
 }
 
-func (instance *deleteContextRecordingManager) DeleteSession(ctx context.Context, sessionId string) error {
+func (instance *deleteContextRecordingManager) DeleteSession(runtimeInstance melodycontainercontract.Runtime, sessionId string) error {
+    ctx := runtimeInstance.Context()
     instance.deleteContexts = append(instance.deleteContexts, ctx)
 
-    return instance.Manager.DeleteSession(ctx, sessionId)
+    return instance.Manager.DeleteSession(runtimeInstance, sessionId)
 }
 
 type callbackInvokingSessionIndex struct {
@@ -67,9 +69,9 @@ func TestAdmitSession_ChecksAndReleasesUnderTheRequestsContext(t *testing.T) {
     }, melodycontainer.RegisterOptions{})
     registerAdmissionClock(t, containerInstance)
 
-    victim := mustSession(manager.NewSession(context.Background()))
+    victim := mustSession(manager.NewSession(exampleTestRuntime()))
     victim.Set("userId", "user-1")
-    if saveErr := manager.SaveSession(context.Background(), victim); nil != saveErr {
+    if saveErr := manager.SaveSession(exampleTestRuntime(), victim); nil != saveErr {
         t.Fatalf("unexpected seed error: %v", saveErr)
     }
 
@@ -78,7 +80,7 @@ func TestAdmitSession_ChecksAndReleasesUnderTheRequestsContext(t *testing.T) {
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodPost, "/login", nil), nil, runtimeInstance, nil)
 
     index := &callbackInvokingSessionIndex{victimId: victim.Id()}
-    rotated := mustSession(manager.NewSession(context.Background()))
+    rotated := mustSession(manager.NewSession(exampleTestRuntime()))
     storage.loadContexts = nil
 
     if admitErr := AdmitSession(request, func(request melodyhttpcontract.Request) (SessionIndex, error) { return index, nil }, "user-1", "", rotated); nil != admitErr {

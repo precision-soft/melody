@@ -72,7 +72,7 @@ func runFileStorageWriteWindowChild() {
         return
     }
 
-    if nil != seed.Save(context.Background(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", map[string]any{"userId": "u-1"}, bound.UnlimitedDuration()) {
+    if nil != seed.Save(sessionRuntime(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", map[string]any{"userId": "u-1"}, bound.UnlimitedDuration()) {
         _, _ = os.Stdout.WriteString("seed-save-failed\n")
 
         return
@@ -108,7 +108,7 @@ func runFileStorageWriteWindowChild() {
         return
     }
 
-    saveErr := storage.Save(context.Background(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", map[string]any{"userId": "u-2"}, bound.UnlimitedDuration())
+    saveErr := storage.Save(sessionRuntime(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", map[string]any{"userId": "u-2"}, bound.UnlimitedDuration())
 
     _ = syscall.Setrlimit(syscall.RLIMIT_FSIZE, &previous)
 

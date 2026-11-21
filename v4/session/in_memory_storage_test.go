@@ -21,29 +21,29 @@ func TestInMemoryStorageAndManager(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    sessionInstance := mustSession(manager.NewSession(context.Background()))
+    sessionInstance := mustSession(manager.NewSession(sessionRuntime()))
     if "" == sessionInstance.Id() {
         t.Fatalf("expected session id")
     }
 
-    err := manager.SaveSession(context.Background(), sessionInstance)
+    err := manager.SaveSession(sessionRuntime(), sessionInstance)
     if nil != err {
         t.Fatalf("expected no error")
     }
 
-    loaded := mustSession(manager.Session(context.Background(), sessionInstance.Id()))
+    loaded := mustSession(manager.Session(sessionRuntime(), sessionInstance.Id()))
     if nil != loaded {
         t.Fatalf("expected session not to be persisted without modifications")
     }
 
     sessionInstance.Set("key", "value")
 
-    err = manager.SaveSession(context.Background(), sessionInstance)
+    err = manager.SaveSession(sessionRuntime(), sessionInstance)
     if nil != err {
         t.Fatalf("save error: %v", err)
     }
 
-    loaded = mustSession(manager.Session(context.Background(), sessionInstance.Id()))
+    loaded = mustSession(manager.Session(sessionRuntime(), sessionInstance.Id()))
     if nil == loaded {
         t.Fatalf("expected loaded session")
     }
@@ -54,12 +54,12 @@ func TestInMemoryStorageAndManager(t *testing.T) {
 
     sessionInstance.Clear()
 
-    err = manager.SaveSession(context.Background(), sessionInstance)
+    err = manager.SaveSession(sessionRuntime(), sessionInstance)
     if nil != err {
         t.Fatalf("clear commit error: %v", err)
     }
 
-    deleted := mustSession(manager.Session(context.Background(), sessionInstance.Id()))
+    deleted := mustSession(manager.Session(sessionRuntime(), sessionInstance.Id()))
     if nil != deleted {
         t.Fatalf("expected session to be deleted after clear")
     }
@@ -69,20 +69,20 @@ func TestInMemoryStorage_Delete_RemovesSession(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    sessionInstance := mustSession(manager.NewSession(context.Background()))
+    sessionInstance := mustSession(manager.NewSession(sessionRuntime()))
     sessionInstance.Set("a", "b")
 
-    err := manager.SaveSession(context.Background(), sessionInstance)
+    err := manager.SaveSession(sessionRuntime(), sessionInstance)
     if nil != err {
         t.Fatalf("unexpected error")
     }
 
-    err = manager.DeleteSession(context.Background(), sessionInstance.Id())
+    err = manager.DeleteSession(sessionRuntime(), sessionInstance.Id())
     if nil != err {
         t.Fatalf("unexpected error")
     }
 
-    loaded := mustSession(manager.Session(context.Background(), sessionInstance.Id()))
+    loaded := mustSession(manager.Session(sessionRuntime(), sessionInstance.Id()))
     if nil != loaded {
         t.Fatalf("expected nil after delete")
     }
@@ -156,7 +156,7 @@ func TestInMemoryStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
     initialData := map[string]any{
         "counter": 0,
     }
-    if saveErr := storage.Save(context.Background(), sessionId, initialData, bound.Of(time.Minute)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), sessionId, initialData, bound.Of(time.Minute)); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
@@ -169,7 +169,7 @@ func TestInMemoryStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
             defer waitGroup.Done()
             for index := 0; index < iterations; index++ {
                 _ = storage.Save(
-                    context.Background(),
+                    sessionRuntime(),
                     sessionId,
                     map[string]any{
                         "counter": index,
@@ -186,7 +186,7 @@ func TestInMemoryStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
         go func() {
             defer waitGroup.Done()
             for index := 0; index < iterations; index++ {
-                loaded, _, loadErr := storage.Load(context.Background(), sessionId)
+                loaded, _, loadErr := storage.Load(sessionRuntime(), sessionId)
                 if nil != loadErr {
                     t.Errorf("load error: %v", loadErr)
                     return
@@ -206,13 +206,13 @@ func TestInMemoryStorage_SaveDeepCopiesNestedMaps(t *testing.T) {
     defer storage.CloseWithContext(context.Background())
 
     input := map[string]any{"profile": map[string]any{"name": "original"}}
-    if saveErr := storage.Save(context.Background(), "session", input, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "session", input, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("save failed: %v", saveErr)
     }
 
     input["profile"].(map[string]any)["name"] = "mutated"
 
-    loaded, _, loadErr := storage.Load(context.Background(), "session")
+    loaded, _, loadErr := storage.Load(sessionRuntime(), "session")
     if nil != loadErr {
         t.Fatalf("load failed: %v", loadErr)
     }
@@ -226,11 +226,11 @@ func TestInMemoryStorage_LoadDeepCopiesNestedMaps(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     defer storage.CloseWithContext(context.Background())
 
-    if saveErr := storage.Save(context.Background(), "session", map[string]any{"profile": map[string]any{"name": "original"}}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "session", map[string]any{"profile": map[string]any{"name": "original"}}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("save failed: %v", saveErr)
     }
 
-    loaded, _, loadErr := storage.Load(context.Background(), "session")
+    loaded, _, loadErr := storage.Load(sessionRuntime(), "session")
     if nil != loadErr {
         t.Fatalf("load failed: %v", loadErr)
     }
@@ -241,7 +241,7 @@ func TestInMemoryStorage_LoadDeepCopiesNestedMaps(t *testing.T) {
     }
     nested["name"] = "mutated"
 
-    reloaded, _, reloadErr := storage.Load(context.Background(), "session")
+    reloaded, _, reloadErr := storage.Load(sessionRuntime(), "session")
     if nil != reloadErr {
         t.Fatalf("reload failed: %v", reloadErr)
     }
@@ -255,18 +255,18 @@ func TestInMemoryStorage_LoadDeepCopiesSlicesOfMaps(t *testing.T) {
     store := NewInMemoryStorage(InMemoryStorageConfig{})
     defer store.CloseWithContext(context.Background())
 
-    if saveErr := store.Save(context.Background(), "session", map[string]any{"permissions": []any{map[string]any{"action": "read"}}}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := store.Save(sessionRuntime(), "session", map[string]any{"permissions": []any{map[string]any{"action": "read"}}}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("save failed: %v", saveErr)
     }
 
-    loaded, _, loadErr := store.Load(context.Background(), "session")
+    loaded, _, loadErr := store.Load(sessionRuntime(), "session")
     if nil != loadErr {
         t.Fatalf("load failed: %v", loadErr)
     }
 
     loaded["permissions"].([]any)[0].(map[string]any)["action"] = "write"
 
-    reloaded, _, reloadErr := store.Load(context.Background(), "session")
+    reloaded, _, reloadErr := store.Load(sessionRuntime(), "session")
     if nil != reloadErr {
         t.Fatalf("reload failed: %v", reloadErr)
     }
@@ -285,7 +285,7 @@ func TestInMemoryStorage_LoadDoesNotDeleteConcurrentlySavedEntry(t *testing.T) {
     const loaders = 6
 
     for iteration := 0; iteration < 20000; iteration++ {
-        if saveErr := storage.Save(context.Background(), sessionId, map[string]any{"v": "expired"}, bound.Of(time.Second)); nil != saveErr {
+        if saveErr := storage.Save(sessionRuntime(), sessionId, map[string]any{"v": "expired"}, bound.Of(time.Second)); nil != saveErr {
             t.Fatalf("seed save failed: %v", saveErr)
         }
 
@@ -299,19 +299,19 @@ func TestInMemoryStorage_LoadDoesNotDeleteConcurrentlySavedEntry(t *testing.T) {
             go func() {
                 defer wait.Done()
                 <-start
-                storage.Load(context.Background(), sessionId)
+                storage.Load(sessionRuntime(), sessionId)
             }()
         }
         go func() {
             defer wait.Done()
             <-start
-            storage.Save(context.Background(), sessionId, map[string]any{"v": "fresh"}, bound.Of(time.Hour))
+            storage.Save(sessionRuntime(), sessionId, map[string]any{"v": "fresh"}, bound.Of(time.Hour))
         }()
 
         close(start)
         wait.Wait()
 
-        data, found, loadErr := storage.Load(context.Background(), sessionId)
+        data, found, loadErr := storage.Load(sessionRuntime(), sessionId)
         if nil != loadErr {
             t.Fatalf("iteration %d: final load failed: %v", iteration, loadErr)
         }
@@ -331,19 +331,19 @@ func TestInMemoryStorage_RefusesEveryOperationAfterClose(t *testing.T) {
         t.Fatalf("unexpected error closing the storage: %v", err)
     }
 
-    if _, _, err := storage.Load(context.Background(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); nil == err {
+    if _, _, err := storage.Load(sessionRuntime(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); nil == err {
         t.Fatalf("expected Load to refuse a closed storage")
     }
 
-    if err := storage.Save(context.Background(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", map[string]any{"k": "v"}, bound.Of(time.Minute)); nil == err {
+    if err := storage.Save(sessionRuntime(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", map[string]any{"k": "v"}, bound.Of(time.Minute)); nil == err {
         t.Fatalf("expected Save to refuse a closed storage")
     }
 
-    if err := storage.Delete(context.Background(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); nil == err {
+    if err := storage.Delete(sessionRuntime(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); nil == err {
         t.Fatalf("expected Delete to refuse a closed storage")
     }
 
-    if err := storage.Clear(context.Background()); nil == err {
+    if err := storage.Clear(sessionRuntime()); nil == err {
         t.Fatalf("expected Clear to refuse a closed storage")
     }
 }
@@ -352,7 +352,7 @@ func TestInMemoryStorage_RefusesAnEmptySessionIdOnEveryOperation(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     defer storage.CloseWithContext(context.Background())
 
-    _, exists, loadErr := storage.Load(context.Background(), "")
+    _, exists, loadErr := storage.Load(sessionRuntime(), "")
     if nil == loadErr {
         t.Fatalf("expected Load to refuse an empty id")
     }
@@ -363,12 +363,12 @@ func TestInMemoryStorage_RefusesAnEmptySessionIdOnEveryOperation(t *testing.T) {
         t.Fatalf("expected the load refusal, got %q", loadErr.Error())
     }
 
-    saveErr := storage.Save(context.Background(), "", map[string]any{"k": "v"}, bound.Of(time.Minute))
+    saveErr := storage.Save(sessionRuntime(), "", map[string]any{"k": "v"}, bound.Of(time.Minute))
     if nil == saveErr || "session id is required in save session" != saveErr.Error() {
         t.Fatalf("expected Save to refuse an empty id, got %v", saveErr)
     }
 
-    deleteErr := storage.Delete(context.Background(), "")
+    deleteErr := storage.Delete(sessionRuntime(), "")
     if nil == deleteErr || "session id is required in delete session" != deleteErr.Error() {
         t.Fatalf("expected Delete to refuse an empty id, got %v", deleteErr)
     }
@@ -378,19 +378,19 @@ func TestInMemoryStorage_Clear_DropsEverySessionAndLeavesTheStorageUsable(t *tes
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     defer storage.CloseWithContext(context.Background())
 
-    if saveErr := storage.Save(context.Background(), "first", map[string]any{"k": "v"}, bound.Of(time.Minute)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "first", map[string]any{"k": "v"}, bound.Of(time.Minute)); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
-    if saveErr := storage.Save(context.Background(), "second", map[string]any{"k": "v"}, bound.Of(time.Minute)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "second", map[string]any{"k": "v"}, bound.Of(time.Minute)); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
-    if clearErr := storage.Clear(context.Background()); nil != clearErr {
+    if clearErr := storage.Clear(sessionRuntime()); nil != clearErr {
         t.Fatalf("unexpected clear error: %v", clearErr)
     }
 
     for _, sessionId := range []string{"first", "second"} {
-        _, exists, loadErr := storage.Load(context.Background(), sessionId)
+        _, exists, loadErr := storage.Load(sessionRuntime(), sessionId)
         if nil != loadErr {
             t.Fatalf("unexpected load error: %v", loadErr)
         }
@@ -399,11 +399,11 @@ func TestInMemoryStorage_Clear_DropsEverySessionAndLeavesTheStorageUsable(t *tes
         }
     }
 
-    if saveErr := storage.Save(context.Background(), "after", map[string]any{"k": "v"}, bound.Of(time.Minute)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "after", map[string]any{"k": "v"}, bound.Of(time.Minute)); nil != saveErr {
         t.Fatalf("expected the storage to stay usable after Clear, got %v", saveErr)
     }
 
-    if _, exists, _ := storage.Load(context.Background(), "after"); false == exists {
+    if _, exists, _ := storage.Load(sessionRuntime(), "after"); false == exists {
         t.Fatalf("expected a session saved after Clear to be readable")
     }
 }
@@ -462,7 +462,7 @@ func TestInMemoryStorage_TheSweepDoesNotDropASessionRefreshedSinceTheIdsWereRead
     }
     storage.mutex.Unlock()
 
-    if saveErr := storage.Save(context.Background(), "refreshed", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "refreshed", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected error refreshing the session: %v", saveErr)
     }
 
@@ -554,19 +554,19 @@ func TestInMemoryStorage_ExpiryFollowsTheInjectedClock(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{CleanupInterval: bound.Of(time.Minute), Clock: frozenClock})
     defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
-    saveErr := storage.Save(context.Background(), "session-1", map[string]any{"user": "editor"}, bound.Of(time.Hour))
+    saveErr := storage.Save(sessionRuntime(), "session-1", map[string]any{"user": "editor"}, bound.Of(time.Hour))
     if nil != saveErr {
         t.Fatalf("save error: %v", saveErr)
     }
 
-    _, exists, loadErr := storage.Load(context.Background(), "session-1")
+    _, exists, loadErr := storage.Load(sessionRuntime(), "session-1")
     if nil != loadErr || false == exists {
         t.Fatalf("expected the fresh session, got exists=%v err=%v", exists, loadErr)
     }
 
     frozenClock.Advance(2 * time.Hour)
 
-    _, exists, loadErr = storage.Load(context.Background(), "session-1")
+    _, exists, loadErr = storage.Load(sessionRuntime(), "session-1")
     if nil != loadErr {
         t.Fatalf("load error: %v", loadErr)
     }
@@ -581,13 +581,13 @@ func TestInMemoryStorage_TheSweepReadsTheInjectedClockNotTheWallClock(t *testing
     storage := NewInMemoryStorage(InMemoryStorageConfig{CleanupInterval: bound.Of(time.Minute), Clock: frozenClock})
     defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
-    if saveErr := storage.Save(context.Background(), "session-1", map[string]any{"user": "editor"}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "session-1", map[string]any{"user": "editor"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("save error: %v", saveErr)
     }
 
     storage.cleanupExpired()
 
-    _, exists, loadErr := storage.Load(context.Background(), "session-1")
+    _, exists, loadErr := storage.Load(sessionRuntime(), "session-1")
     if nil != loadErr {
         t.Fatalf("load error: %v", loadErr)
     }
@@ -604,13 +604,13 @@ func TestInMemoryStorage_TreatsTheExpiryInstantItselfAsLapsedAtTheDoor(t *testin
     storage := NewInMemoryStorage(InMemoryStorageConfig{CleanupInterval: bound.Of(time.Minute), Clock: frozenClock})
     defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
-    if saveErr := storage.Save(context.Background(), "session-1", map[string]any{"user": "editor"}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "session-1", map[string]any{"user": "editor"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("save error: %v", saveErr)
     }
 
     frozenClock.TravelTo(frozenTime.Add(time.Hour).Add(-time.Nanosecond))
 
-    _, exists, loadErr := storage.Load(context.Background(), "session-1")
+    _, exists, loadErr := storage.Load(sessionRuntime(), "session-1")
     if nil != loadErr {
         t.Fatalf("load error: %v", loadErr)
     }
@@ -621,7 +621,7 @@ func TestInMemoryStorage_TreatsTheExpiryInstantItselfAsLapsedAtTheDoor(t *testin
 
     frozenClock.TravelTo(frozenTime.Add(time.Hour))
 
-    _, exists, loadErr = storage.Load(context.Background(), "session-1")
+    _, exists, loadErr = storage.Load(sessionRuntime(), "session-1")
     if nil != loadErr {
         t.Fatalf("load error: %v", loadErr)
     }
@@ -722,12 +722,12 @@ func TestInMemoryStorage_MaxSessionsRefusesANewIdAtTheCeilingAndKeepsTheStoredOn
     }()
 
     for _, sessionId := range []string{"first", "second"} {
-        if saveErr := storage.Save(context.Background(), sessionId, map[string]any{"key": "value"}, bound.Of(time.Hour)); nil != saveErr {
+        if saveErr := storage.Save(sessionRuntime(), sessionId, map[string]any{"key": "value"}, bound.Of(time.Hour)); nil != saveErr {
             t.Fatalf("unexpected save error: %v", saveErr)
         }
     }
 
-    saveErr := storage.Save(context.Background(), "third", map[string]any{}, bound.Of(time.Hour))
+    saveErr := storage.Save(sessionRuntime(), "third", map[string]any{}, bound.Of(time.Hour))
     if nil == saveErr || "the in-memory session storage is full" != saveErr.Error() {
         t.Fatalf("expected the new id refused, got %v", saveErr)
     }
@@ -736,11 +736,11 @@ func TestInMemoryStorage_MaxSessionsRefusesANewIdAtTheCeilingAndKeepsTheStoredOn
         t.Fatalf("expected the refusal to name the field, got %v", exception.LogContext(saveErr, exception.LogContextConfig{}))
     }
 
-    if _, found, _ := storage.Load(context.Background(), "third"); true == found {
+    if _, found, _ := storage.Load(sessionRuntime(), "third"); true == found {
         t.Fatalf("expected the refused id not stored")
     }
 
-    if resaveErr := storage.Save(context.Background(), "first", map[string]any{"key": "other"}, bound.Of(time.Hour)); nil != resaveErr {
+    if resaveErr := storage.Save(sessionRuntime(), "first", map[string]any{"key": "other"}, bound.Of(time.Hour)); nil != resaveErr {
         t.Fatalf("expected a stored id saved at the ceiling, got %v", resaveErr)
     }
 }
@@ -752,31 +752,31 @@ func TestInMemoryStorage_ALapsedSessionFreesItsSlotAtTheCeiling(t *testing.T) {
         _ = storage.CloseWithContext(context.Background())
     }()
 
-    if saveErr := storage.Save(context.Background(), "short", map[string]any{}, bound.Of(time.Minute)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "short", map[string]any{}, bound.Of(time.Minute)); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
-    if saveErr := storage.Save(context.Background(), "long", map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "long", map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
-    if saveErr := storage.Save(context.Background(), "early", map[string]any{}, bound.Of(time.Hour)); nil == saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "early", map[string]any{}, bound.Of(time.Hour)); nil == saveErr {
         t.Fatalf("expected the id refused while nothing lapsed")
     }
 
     frozenClock.Advance(time.Minute)
 
-    if saveErr := storage.Save(context.Background(), "late", map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "late", map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("expected the lapsed session's slot freed, got %v", saveErr)
     }
 
-    if saveErr := storage.Save(context.Background(), "fuller", map[string]any{}, bound.Of(time.Hour)); nil == saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "fuller", map[string]any{}, bound.Of(time.Hour)); nil == saveErr {
         t.Fatalf("expected the id refused with the table full again")
     }
 
     frozenClock.Advance(59 * time.Minute)
 
-    if saveErr := storage.Save(context.Background(), "after", map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "after", map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("expected the sweep's next earliest expiry honoured, got %v", saveErr)
     }
 }
@@ -797,7 +797,7 @@ func TestInMemoryStorage_MaxSessionsResolves(t *testing.T) {
     }()
 
     for index := 0; index < 3; index++ {
-        if saveErr := unlimited.Save(context.Background(), fmt.Sprintf("id-%d", index), map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
+        if saveErr := unlimited.Save(sessionRuntime(), fmt.Sprintf("id-%d", index), map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
             t.Fatalf("unexpected save error: %v", saveErr)
         }
     }
@@ -820,7 +820,7 @@ func TestInMemoryStorage_ARefusedFloodDoesNotSweepBeforeAnEntryCanHaveLapsed(t *
     }()
 
     for sessionId, ttl := range map[string]time.Duration{"short": time.Minute, "long": time.Hour} {
-        if saveErr := storage.Save(context.Background(), sessionId, map[string]any{}, bound.Of(ttl)); nil != saveErr {
+        if saveErr := storage.Save(sessionRuntime(), sessionId, map[string]any{}, bound.Of(ttl)); nil != saveErr {
             t.Fatalf("unexpected save error: %v", saveErr)
         }
     }
@@ -828,7 +828,7 @@ func TestInMemoryStorage_ARefusedFloodDoesNotSweepBeforeAnEntryCanHaveLapsed(t *
     lapsedBefore := frozenClock.Now().Add(-time.Second)
     storage.sessions["planted"] = inMemorySessionEntry{data: map[string]any{}, expiresAt: &lapsedBefore}
 
-    if saveErr := storage.Save(context.Background(), "refused", map[string]any{}, bound.Of(time.Hour)); nil == saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "refused", map[string]any{}, bound.Of(time.Hour)); nil == saveErr {
         t.Fatalf("expected the id refused")
     }
 
@@ -838,7 +838,7 @@ func TestInMemoryStorage_ARefusedFloodDoesNotSweepBeforeAnEntryCanHaveLapsed(t *
 
     frozenClock.Advance(time.Minute)
 
-    if saveErr := storage.Save(context.Background(), "after", map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "after", map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("expected the sweep to free the slots, got %v", saveErr)
     }
 
@@ -853,27 +853,27 @@ func TestInMemoryStorage_ADeletedSessionFreesItsSlotAndAClearEmptiesTheTable(t *
         _ = storage.CloseWithContext(context.Background())
     }()
 
-    if saveErr := storage.Save(context.Background(), "first", map[string]any{}, bound.UnlimitedDuration()); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "first", map[string]any{}, bound.UnlimitedDuration()); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
-    if saveErr := storage.Save(context.Background(), "refused", map[string]any{}, bound.UnlimitedDuration()); nil == saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "refused", map[string]any{}, bound.UnlimitedDuration()); nil == saveErr {
         t.Fatalf("expected the id refused beside a session that never lapses")
     }
 
-    if deleteErr := storage.Delete(context.Background(), "first"); nil != deleteErr {
+    if deleteErr := storage.Delete(sessionRuntime(), "first"); nil != deleteErr {
         t.Fatalf("unexpected delete error: %v", deleteErr)
     }
 
-    if saveErr := storage.Save(context.Background(), "second", map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "second", map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("expected the deleted session's slot freed, got %v", saveErr)
     }
 
-    if clearErr := storage.Clear(context.Background()); nil != clearErr {
+    if clearErr := storage.Clear(sessionRuntime()); nil != clearErr {
         t.Fatalf("unexpected clear error: %v", clearErr)
     }
 
-    if saveErr := storage.Save(context.Background(), "third", map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "third", map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("expected the cleared table to admit a session, got %v", saveErr)
     }
 }
@@ -885,19 +885,19 @@ func TestInMemoryStorage_TheSweepKeepsTheEarliestOfManyThatStayed(t *testing.T) 
         _ = storage.CloseWithContext(context.Background())
     }()
 
-    if saveErr := storage.Save(context.Background(), "short", map[string]any{}, bound.Of(time.Minute)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "short", map[string]any{}, bound.Of(time.Minute)); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
     for index := 0; index < 40; index++ {
-        if saveErr := storage.Save(context.Background(), strconv.Itoa(index), map[string]any{}, bound.Of(time.Hour+time.Duration(index)*time.Minute)); nil != saveErr {
+        if saveErr := storage.Save(sessionRuntime(), strconv.Itoa(index), map[string]any{}, bound.Of(time.Hour+time.Duration(index)*time.Minute)); nil != saveErr {
             t.Fatalf("unexpected save error: %v", saveErr)
         }
     }
 
     frozenClock.Advance(time.Minute)
 
-    if saveErr := storage.Save(context.Background(), "after", map[string]any{}, bound.Of(24*time.Hour)); nil != saveErr {
+    if saveErr := storage.Save(sessionRuntime(), "after", map[string]any{}, bound.Of(24*time.Hour)); nil != saveErr {
         t.Fatalf("expected the lapsed session's slot freed, got %v", saveErr)
     }
 
@@ -910,8 +910,8 @@ func inMemoryStorageFactory(t *testing.T, clockInstance clockcontract.Clock) ses
     return NewInMemoryStorage(InMemoryStorageConfig{Clock: clockInstance})
 }
 
-func TestInMemoryStorage_EveryDoorRefusesANilAndATypedNilContext(t *testing.T) {
-    assertEveryStorageDoorRefusesANilContextFirst(t, inMemoryStorageFactory)
+func TestInMemoryStorage_EveryDoorRefusesAnAbsentRuntime(t *testing.T) {
+    assertEveryStorageDoorRefusesAnAbsentRuntimeFirst(t, inMemoryStorageFactory)
 }
 
 func TestInMemoryStorage_ADoneContextAnswersItsErrorBeforeTheStoreIsTouched(t *testing.T) {
@@ -928,11 +928,11 @@ func TestInMemoryStorage_ADoneContextIsAnsweredBeforeTheFullStorage(t *testing.T
         _ = storage.CloseWithContext(context.Background())
     }()
 
-    if seedErr := storage.Save(context.Background(), "first", map[string]any{"key": "value"}, bound.Of(time.Hour)); nil != seedErr {
+    if seedErr := storage.Save(sessionRuntime(), "first", map[string]any{"key": "value"}, bound.Of(time.Hour)); nil != seedErr {
         t.Fatalf("unexpected seed error: %v", seedErr)
     }
 
-    if saveErr := storage.Save(cancelledContext(), "second", map[string]any{}, bound.Of(time.Hour)); false == errors.Is(saveErr, context.Canceled) {
+    if saveErr := storage.Save(sessionRuntimeUnder(cancelledContext()), "second", map[string]any{}, bound.Of(time.Hour)); false == errors.Is(saveErr, context.Canceled) {
         t.Fatalf("expected the done context answered before the ceiling, got %v", saveErr)
     }
 }
@@ -949,33 +949,34 @@ func TestInMemoryStorage_SaveRefusesATtlBelowASecond(t *testing.T) {
     assertStorageRefusesATtlBelowASecond(t, inMemoryStorageFactory)
 }
 
-func TestInMemoryStorage_ClearJudgesItsContextAsTheContractDoorsDo(t *testing.T) {
+func TestInMemoryStorage_ClearJudgesItsRuntimeAsTheContractDoorsDo(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     defer storage.CloseWithContext(context.Background())
 
-    if seedErr := storage.Save(context.Background(), contractTestSessionId, map[string]any{"a": 1}, bound.Of(time.Hour)); nil != seedErr {
+    if seedErr := storage.Save(sessionRuntime(), contractTestSessionId, map[string]any{"a": 1}, bound.Of(time.Hour)); nil != seedErr {
         t.Fatalf("unexpected seed error: %v", seedErr)
     }
 
-    requireErrorMessage(t, storage.Clear(nil), "session context is nil")
-    requireErrorMessage(t, storage.Clear(typedNilContext()), "session context is nil")
+    for _, refused := range refusedSessionRuntimes() {
+        requireErrorMessage(t, storage.Clear(refused), refusedRuntimeMessage)
+    }
 
-    if clearErr := storage.Clear(cancelledContext()); false == errors.Is(clearErr, context.Canceled) {
+    if clearErr := storage.Clear(sessionRuntimeUnder(cancelledContext())); false == errors.Is(clearErr, context.Canceled) {
         t.Fatalf("expected a done context to be answered, got %v", clearErr)
     }
 
-    if _, exists, _ := storage.Load(context.Background(), contractTestSessionId); false == exists {
+    if _, exists, _ := storage.Load(sessionRuntime(), contractTestSessionId); false == exists {
         t.Fatalf("expected a clear under a done context to leave the sessions")
     }
 
-    if clearErr := storage.Clear(context.Background()); nil != clearErr {
+    if clearErr := storage.Clear(sessionRuntime()); nil != clearErr {
         t.Fatalf("unexpected clear error: %v", clearErr)
     }
 
-    if _, exists, _ := storage.Load(context.Background(), contractTestSessionId); true == exists {
+    if _, exists, _ := storage.Load(sessionRuntime(), contractTestSessionId); true == exists {
         t.Fatalf("expected the clear to remove the sessions")
     }
 
     closed := closedStorage(t, inMemoryStorageFactory).(*InMemoryStorage)
-    requireErrorMessage(t, closed.Clear(cancelledContext()), "session storage is closed")
+    requireErrorMessage(t, closed.Clear(sessionRuntimeUnder(cancelledContext())), "session storage is closed")
 }

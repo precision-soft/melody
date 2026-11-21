@@ -11,6 +11,9 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
@@ -18,15 +21,15 @@ import (
 
 type nilMapStorage struct{}
 
-func (instance *nilMapStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
+func (instance *nilMapStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
     return nil, true, nil
 }
 
-func (instance *nilMapStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
+func (instance *nilMapStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
     return nil
 }
 
-func (instance *nilMapStorage) Delete(ctx context.Context, sessionId string) error {
+func (instance *nilMapStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
     return nil
 }
 
@@ -38,17 +41,17 @@ type ttlRecordingStorage struct {
     savedTtl bound.Duration
 }
 
-func (instance *ttlRecordingStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
+func (instance *ttlRecordingStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
     return nil, false, nil
 }
 
-func (instance *ttlRecordingStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
+func (instance *ttlRecordingStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
     instance.savedTtl = ttl
 
     return nil
 }
 
-func (instance *ttlRecordingStorage) Delete(ctx context.Context, sessionId string) error {
+func (instance *ttlRecordingStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
     return nil
 }
 
@@ -60,15 +63,15 @@ type probeFailingStorage struct{}
 
 var errProbeStorageUnavailable = exception.NewError("the probe storage is unavailable", nil, nil)
 
-func (instance *probeFailingStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
+func (instance *probeFailingStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
     return nil, false, errProbeStorageUnavailable
 }
 
-func (instance *probeFailingStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
+func (instance *probeFailingStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
     return nil
 }
 
-func (instance *probeFailingStorage) Delete(ctx context.Context, sessionId string) error {
+func (instance *probeFailingStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
     return nil
 }
 
@@ -80,15 +83,15 @@ type writeFailingStorage struct{}
 
 var errWriteStorageUnavailable = exception.NewError("the write storage is unavailable", nil, nil)
 
-func (instance *writeFailingStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
+func (instance *writeFailingStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
     return nil, false, nil
 }
 
-func (instance *writeFailingStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
+func (instance *writeFailingStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
     return errWriteStorageUnavailable
 }
 
-func (instance *writeFailingStorage) Delete(ctx context.Context, sessionId string) error {
+func (instance *writeFailingStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
     return errWriteStorageUnavailable
 }
 
@@ -115,7 +118,7 @@ func assertMarkedStorageError(t *testing.T, err error, storageErr error) {
 func TestManager_NewSession_TheCollisionExhaustionIsNotMarked(t *testing.T) {
     manager := NewManager(&nilMapStorage{}, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    sessionInstance, mintErr := manager.NewSession(context.Background())
+    sessionInstance, mintErr := manager.NewSession(sessionRuntime())
     if nil != sessionInstance {
         t.Fatalf("expected no session when every candidate id is taken")
     }
@@ -132,7 +135,7 @@ func TestManager_NewSession_TheCollisionExhaustionIsNotMarked(t *testing.T) {
 func TestManager_NewSessionAnswersTheStorageErrorMarked(t *testing.T) {
     manager := NewManager(&probeFailingStorage{}, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    sessionInstance, mintErr := manager.NewSession(context.Background())
+    sessionInstance, mintErr := manager.NewSession(sessionRuntime())
     if nil != sessionInstance {
         t.Fatalf("expected no session when the storage probe fails")
     }
@@ -143,24 +146,24 @@ func TestManager_NewSessionAnswersTheStorageErrorMarked(t *testing.T) {
 func TestManager_SaveAndDeleteAnswerTheStorageErrorMarked(t *testing.T) {
     manager := NewManager(&writeFailingStorage{}, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    sessionInstance := mustSession(manager.NewSession(context.Background()))
+    sessionInstance := mustSession(manager.NewSession(sessionRuntime()))
     sessionInstance.Set("user", "alice")
 
-    assertMarkedStorageError(t, manager.SaveSession(context.Background(), sessionInstance), errWriteStorageUnavailable)
-    assertMarkedStorageError(t, manager.DeleteSession(context.Background(), sessionInstance.Id()), errWriteStorageUnavailable)
+    assertMarkedStorageError(t, manager.SaveSession(sessionRuntime(), sessionInstance), errWriteStorageUnavailable)
+    assertMarkedStorageError(t, manager.DeleteSession(sessionRuntime(), sessionInstance.Id()), errWriteStorageUnavailable)
 }
 
 type deleteFailingStorage struct {
     held map[string]map[string]any
 }
 
-func (instance *deleteFailingStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
+func (instance *deleteFailingStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
     data, exists := instance.held[sessionId]
 
     return data, exists, nil
 }
 
-func (instance *deleteFailingStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
+func (instance *deleteFailingStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
     if nil == instance.held {
         instance.held = make(map[string]map[string]any)
     }
@@ -170,7 +173,7 @@ func (instance *deleteFailingStorage) Save(ctx context.Context, sessionId string
     return nil
 }
 
-func (instance *deleteFailingStorage) Delete(ctx context.Context, sessionId string) error {
+func (instance *deleteFailingStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
     return exception.NewError("the probe storage refuses to delete", nil, nil)
 }
 
@@ -181,7 +184,7 @@ func (instance *deleteFailingStorage) CloseWithContext(closeContext context.Cont
 func TestManager_SessionAnswersTheStorageErrorMarked(t *testing.T) {
     manager := NewManager(&probeFailingStorage{}, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    sessionInstance, loadErr := manager.Session(context.Background(), "0123456789abcdef0123456789abcdef")
+    sessionInstance, loadErr := manager.Session(sessionRuntime(), "0123456789abcdef0123456789abcdef")
     if nil != sessionInstance {
         t.Fatalf("expected no session when the storage cannot answer")
     }
@@ -192,7 +195,7 @@ func TestManager_SessionAnswersTheStorageErrorMarked(t *testing.T) {
 func TestManager_SessionAnswersNoErrorForAnIdTheStorageDoesNotHold(t *testing.T) {
     manager := NewManager(&ttlRecordingStorage{}, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    sessionInstance, loadErr := manager.Session(context.Background(), "0123456789abcdef0123456789abcdef")
+    sessionInstance, loadErr := manager.Session(sessionRuntime(), "0123456789abcdef0123456789abcdef")
     if nil != sessionInstance || nil != loadErr {
         t.Fatalf("expected neither a session nor an error for an id the storage does not hold, got %v, %v", sessionInstance, loadErr)
     }
@@ -201,7 +204,7 @@ func TestManager_SessionAnswersNoErrorForAnIdTheStorageDoesNotHold(t *testing.T)
 func TestManager_Session_AcceptsAStoredSessionWithNoValues(t *testing.T) {
     manager := NewManager(&nilMapStorage{}, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    sessionInstance := mustSession(manager.Session(context.Background(), "0123456789abcdef0123456789abcdef"))
+    sessionInstance := mustSession(manager.Session(sessionRuntime(), "0123456789abcdef0123456789abcdef"))
     if nil == sessionInstance {
         t.Fatalf("expected a session for an id the storage reports as existing")
     }
@@ -216,14 +219,14 @@ func TestManager_Session_AcceptsAStoredSessionWithNoValues(t *testing.T) {
 func TestManager_RegenerateSession_KeepsTheOriginalWhenTheDeleteFails(t *testing.T) {
     manager := NewManager(&deleteFailingStorage{}, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    sessionInstance := mustSession(manager.NewSession(context.Background()))
+    sessionInstance := mustSession(manager.NewSession(sessionRuntime()))
     sessionInstance.Set("user", "alice")
 
-    if saveErr := manager.SaveSession(context.Background(), sessionInstance); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntime(), sessionInstance); nil != saveErr {
         t.Fatalf("unexpected error storing the session: %v", saveErr)
     }
 
-    rotated, rotateErr := manager.RegenerateSession(context.Background(), sessionInstance)
+    rotated, rotateErr := manager.RegenerateSession(sessionRuntime(), sessionInstance)
     if nil == rotateErr {
         t.Fatalf("expected the rotation to fail when the previous entry cannot be removed")
     }
@@ -236,7 +239,7 @@ func TestManager_RegenerateSession_KeepsTheOriginalWhenTheDeleteFails(t *testing
         t.Fatalf("expected the original session to stay usable when the rotation failed")
     }
 
-    if saveErr := manager.SaveSession(context.Background(), sessionInstance); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntime(), sessionInstance); nil != saveErr {
         t.Fatalf("expected the session whose entry could not be removed to stay saveable, got %s", saveErr.Error())
     }
 }
@@ -250,7 +253,7 @@ func TestNewManager_PanicsWhenStorageIsNil(t *testing.T) {
 func TestManager_Session_ReturnsNilWhenIdEmpty(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    value := mustSession(manager.Session(context.Background(), ""))
+    value := mustSession(manager.Session(sessionRuntime(), ""))
     if nil != value {
         t.Fatalf("expected nil")
     }
@@ -259,7 +262,7 @@ func TestManager_Session_ReturnsNilWhenIdEmpty(t *testing.T) {
 func TestManager_Session_ReturnsNilWhenNotFound(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    value := mustSession(manager.Session(context.Background(), "0123456789abcdef0123456789abcdef"))
+    value := mustSession(manager.Session(sessionRuntime(), "0123456789abcdef0123456789abcdef"))
     if nil != value {
         t.Fatalf("expected nil")
     }
@@ -268,20 +271,20 @@ func TestManager_Session_ReturnsNilWhenNotFound(t *testing.T) {
 func TestManager_Session_ReturnsNilWhenIdIsMalformed(t *testing.T) {
     manager := NewManager(&nilMapStorage{}, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    if nil != mustSession(manager.Session(context.Background(), "abc")) {
+    if nil != mustSession(manager.Session(sessionRuntime(), "abc")) {
         t.Fatalf("expected nil for too-short id")
     }
 
-    if nil != mustSession(manager.Session(context.Background(), "0123456789ABCDEF0123456789ABCDEF")) {
+    if nil != mustSession(manager.Session(sessionRuntime(), "0123456789ABCDEF0123456789ABCDEF")) {
         t.Fatalf("expected nil for uppercase hex id")
     }
 
-    if nil != mustSession(manager.Session(context.Background(), "0123456789abcdef0123456789abcdeg")) {
+    if nil != mustSession(manager.Session(sessionRuntime(), "0123456789abcdef0123456789abcdeg")) {
         t.Fatalf("expected nil for non-hex id")
     }
 
     tooLong := "0123456789abcdef0123456789abcdef0"
-    if nil != mustSession(manager.Session(context.Background(), tooLong)) {
+    if nil != mustSession(manager.Session(sessionRuntime(), tooLong)) {
         t.Fatalf("expected nil for too-long id")
     }
 }
@@ -289,7 +292,7 @@ func TestManager_Session_ReturnsNilWhenIdIsMalformed(t *testing.T) {
 func TestManager_Session_NormalizesNilValuesMap(t *testing.T) {
     manager := NewManager(&nilMapStorage{}, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    sessionInstance := mustSession(manager.Session(context.Background(), "0123456789abcdef0123456789abcdef"))
+    sessionInstance := mustSession(manager.Session(sessionRuntime(), "0123456789abcdef0123456789abcdef"))
     if nil == sessionInstance {
         t.Fatalf("expected session")
     }
@@ -318,7 +321,7 @@ func TestManager_NewSession_HasId(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
-    sessionInstance := mustSession(manager.NewSession(context.Background()))
+    sessionInstance := mustSession(manager.NewSession(sessionRuntime()))
     if "" == sessionInstance.Id() {
         t.Fatalf("expected id")
     }
@@ -327,8 +330,8 @@ func TestManager_NewSession_HasId(t *testing.T) {
 func TestManager_NewSession_GeneratesUniqueId(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    s1 := mustSession(manager.NewSession(context.Background()))
-    s2 := mustSession(manager.NewSession(context.Background()))
+    s1 := mustSession(manager.NewSession(sessionRuntime()))
+    s2 := mustSession(manager.NewSession(sessionRuntime()))
 
     if "" == s1.Id() || "" == s2.Id() {
         t.Fatalf("expected ids")
@@ -343,7 +346,7 @@ func TestManager_SaveAndLoad_RoundTrip(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
-    sessionInstance := mustSession(manager.NewSession(context.Background()))
+    sessionInstance := mustSession(manager.NewSession(sessionRuntime()))
 
     sessionInstance.Set("a", "b")
 
@@ -351,12 +354,12 @@ func TestManager_SaveAndLoad_RoundTrip(t *testing.T) {
         t.Fatalf("expected modified")
     }
 
-    err := manager.SaveSession(context.Background(), sessionInstance)
+    err := manager.SaveSession(sessionRuntime(), sessionInstance)
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 
-    loaded := mustSession(manager.Session(context.Background(), sessionInstance.Id()))
+    loaded := mustSession(manager.Session(sessionRuntime(), sessionInstance.Id()))
     if nil == loaded {
         t.Fatalf("expected loaded session")
     }
@@ -369,7 +372,7 @@ func TestManager_SaveAndLoad_RoundTrip(t *testing.T) {
 func TestManager_SaveSession_ReturnsErrorWhenSessionNil(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    err := manager.SaveSession(context.Background(), nil)
+    err := manager.SaveSession(sessionRuntime(), nil)
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -385,7 +388,7 @@ func TestManager_SaveSession_ReturnsErrorWhenSessionIdEmpty(t *testing.T) {
         cleared:  false,
     }
 
-    err := manager.SaveSession(context.Background(), sessionInstance)
+    err := manager.SaveSession(sessionRuntime(), sessionInstance)
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -395,20 +398,20 @@ func TestManager_DeleteSession_RemovesSession(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
-    sessionInstance := mustSession(manager.NewSession(context.Background()))
+    sessionInstance := mustSession(manager.NewSession(sessionRuntime()))
     sessionInstance.Set("a", "b")
 
-    err := manager.SaveSession(context.Background(), sessionInstance)
+    err := manager.SaveSession(sessionRuntime(), sessionInstance)
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 
-    err = manager.DeleteSession(context.Background(), sessionInstance.Id())
+    err = manager.DeleteSession(sessionRuntime(), sessionInstance.Id())
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 
-    loaded := mustSession(manager.Session(context.Background(), sessionInstance.Id()))
+    loaded := mustSession(manager.Session(sessionRuntime(), sessionInstance.Id()))
     if nil != loaded {
         t.Fatalf("expected nil session after delete")
     }
@@ -417,7 +420,7 @@ func TestManager_DeleteSession_RemovesSession(t *testing.T) {
 func TestManager_DeleteSession_ReturnsErrorWhenIdEmpty(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    err := manager.DeleteSession(context.Background(), "")
+    err := manager.DeleteSession(sessionRuntime(), "")
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -426,7 +429,7 @@ func TestManager_DeleteSession_ReturnsErrorWhenIdEmpty(t *testing.T) {
 func TestManager_DeleteSession_ReturnsErrorWhenIdIsMalformed(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    err := manager.DeleteSession(context.Background(), "not-a-valid-hex-id")
+    err := manager.DeleteSession(sessionRuntime(), "not-a-valid-hex-id")
     if nil == err {
         t.Fatalf("expected error for malformed id")
     }
@@ -436,17 +439,17 @@ func TestManager_RegenerateSession_MintsANewIdAndDropsTheOldEntry(t *testing.T) 
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
-    original := mustSession(manager.NewSession(context.Background()))
+    original := mustSession(manager.NewSession(sessionRuntime()))
     original.Set("userId", "u-1")
 
-    saveErr := manager.SaveSession(context.Background(), original)
+    saveErr := manager.SaveSession(sessionRuntime(), original)
     if nil != saveErr {
         t.Fatalf("unexpected error: %v", saveErr)
     }
 
     originalId := original.Id()
 
-    rotated, regenerateErr := manager.RegenerateSession(context.Background(), original)
+    rotated, regenerateErr := manager.RegenerateSession(sessionRuntime(), original)
     if nil != regenerateErr {
         t.Fatalf("unexpected error: %v", regenerateErr)
     }
@@ -463,7 +466,7 @@ func TestManager_RegenerateSession_MintsANewIdAndDropsTheOldEntry(t *testing.T) 
         t.Fatalf("expected the rotated session to be modified so the response path stores it")
     }
 
-    if nil != mustSession(manager.Session(context.Background(), originalId)) {
+    if nil != mustSession(manager.Session(sessionRuntime(), originalId)) {
         t.Fatalf("expected the pre-rotation entry to be gone from storage")
     }
 }
@@ -471,15 +474,15 @@ func TestManager_RegenerateSession_MintsANewIdAndDropsTheOldEntry(t *testing.T) 
 func TestManager_RegenerateSession_MarksTheAbandonedSessionCleared(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
-    original := mustSession(manager.NewSession(context.Background()))
+    original := mustSession(manager.NewSession(sessionRuntime()))
     original.Set("userId", "u-1")
 
-    saveErr := manager.SaveSession(context.Background(), original)
+    saveErr := manager.SaveSession(sessionRuntime(), original)
     if nil != saveErr {
         t.Fatalf("unexpected error: %v", saveErr)
     }
 
-    rotated, regenerateErr := manager.RegenerateSession(context.Background(), original)
+    rotated, regenerateErr := manager.RegenerateSession(sessionRuntime(), original)
     if nil != regenerateErr {
         t.Fatalf("unexpected error: %v", regenerateErr)
     }
@@ -500,7 +503,7 @@ func TestManager_RegenerateSession_MarksTheAbandonedSessionCleared(t *testing.T)
 func TestManager_RegenerateSession_ReturnsErrorWhenSessionIsNil(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    rotated, err := manager.RegenerateSession(context.Background(), nil)
+    rotated, err := manager.RegenerateSession(sessionRuntime(), nil)
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -520,7 +523,7 @@ func TestManager_RegenerateSession_ReturnsErrorWhenIdIsMalformed(t *testing.T) {
         cleared:  false,
     }
 
-    rotated, err := manager.RegenerateSession(context.Background(), sessionInstance)
+    rotated, err := manager.RegenerateSession(sessionRuntime(), sessionInstance)
     if nil == err {
         t.Fatalf("expected error for a malformed id")
     }
@@ -537,17 +540,17 @@ func TestManager_RegenerateSession_ReturnsErrorWhenIdIsMalformed(t *testing.T) {
 func TestManager_RegenerateSession_AbandonmentSurvivesALaterWriteToTheOriginal(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
-    original := mustSession(manager.NewSession(context.Background()))
+    original := mustSession(manager.NewSession(sessionRuntime()))
     original.Set("userId", "anonymous")
 
-    saveErr := manager.SaveSession(context.Background(), original)
+    saveErr := manager.SaveSession(sessionRuntime(), original)
     if nil != saveErr {
         t.Fatalf("unexpected error: %v", saveErr)
     }
 
     originalId := original.Id()
 
-    rotated, regenerateErr := manager.RegenerateSession(context.Background(), original)
+    rotated, regenerateErr := manager.RegenerateSession(sessionRuntime(), original)
     if nil != regenerateErr {
         t.Fatalf("unexpected error: %v", regenerateErr)
     }
@@ -558,11 +561,11 @@ func TestManager_RegenerateSession_AbandonmentSurvivesALaterWriteToTheOriginal(t
         t.Fatalf("expected a write to the abandoned session to leave it cleared, so the rotation cannot be undone")
     }
 
-    if nil != manager.SaveSession(context.Background(), original) {
+    if nil != manager.SaveSession(sessionRuntime(), original) {
         t.Fatalf("unexpected error saving the abandoned session")
     }
 
-    if nil != mustSession(manager.Session(context.Background(), originalId)) {
+    if nil != mustSession(manager.Session(sessionRuntime(), originalId)) {
         t.Fatalf("expected the rotated-away id to stay gone from storage instead of being re-created under the authenticated identity")
     }
 
@@ -572,11 +575,11 @@ func TestManager_RegenerateSession_AbandonmentSurvivesALaterWriteToTheOriginal(t
 
     rotated.Set("userId", "u-1")
 
-    if nil != manager.SaveSession(context.Background(), rotated) {
+    if nil != manager.SaveSession(sessionRuntime(), rotated) {
         t.Fatalf("unexpected error saving the rotated session")
     }
 
-    reloaded := mustSession(manager.Session(context.Background(), rotated.Id()))
+    reloaded := mustSession(manager.Session(sessionRuntime(), rotated.Id()))
     if nil == reloaded {
         t.Fatalf("expected the rotated session to be storable")
     }
@@ -591,7 +594,7 @@ func TestManager_SaveSessionRefusesATypedNilSession(t *testing.T) {
 
     var typedNil *Session
 
-    err := manager.SaveSession(context.Background(), typedNil)
+    err := manager.SaveSession(sessionRuntime(), typedNil)
     if nil == err {
         t.Fatalf("expected a typed nil session to be refused")
     }
@@ -607,12 +610,12 @@ func TestManager_SaveSessionRefusesAnIdTheDeletePathWouldRefuse(t *testing.T) {
 
     foreign := &foreignIdSession{id: "abc", modified: true}
 
-    err := manager.SaveSession(context.Background(), foreign)
+    err := manager.SaveSession(sessionRuntime(), foreign)
     if nil == err {
         t.Fatalf("expected an id the delete path refuses to be refused by the save path too")
     }
 
-    if _, exists, _ := storage.Load(context.Background(), "abc"); true == exists {
+    if _, exists, _ := storage.Load(sessionRuntime(), "abc"); true == exists {
         t.Fatalf("expected nothing to be stored under an id that can never be read back")
     }
 }
@@ -650,9 +653,9 @@ func TestManager_HandsTheStorageItsTtlAsDeclared(t *testing.T) {
             storage := &ttlRecordingStorage{}
             manager := NewManager(storage, row.config)
 
-            created := mustSession(manager.NewSession(context.Background()))
+            created := mustSession(manager.NewSession(sessionRuntime()))
             created.Set("userId", "u-1")
-            if saveErr := manager.SaveSession(context.Background(), created); nil != saveErr {
+            if saveErr := manager.SaveSession(sessionRuntime(), created); nil != saveErr {
                 t.Fatalf("unexpected error: %v", saveErr)
             }
 
@@ -694,32 +697,32 @@ func TestManager_ADeletedSessionCannotBeSavedBackByAnInFlightRequest(t *testing.
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    victim := mustSession(manager.NewSession(context.Background()))
+    victim := mustSession(manager.NewSession(sessionRuntime()))
     victim.Set("userId", "u-42")
 
-    if nil != manager.SaveSession(context.Background(), victim) {
+    if nil != manager.SaveSession(sessionRuntime(), victim) {
         t.Fatalf("unexpected error seeding the session")
     }
 
     sessionId := victim.Id()
 
-    concurrentView := mustSession(manager.Session(context.Background(), sessionId))
+    concurrentView := mustSession(manager.Session(sessionRuntime(), sessionId))
     if nil == concurrentView {
         t.Fatalf("expected the concurrent request to load the session")
     }
 
     victim.Clear()
-    if nil != manager.SaveSession(context.Background(), victim) {
+    if nil != manager.SaveSession(sessionRuntime(), victim) {
         t.Fatalf("unexpected error deleting the session on logout")
     }
 
-    if _, exists, _ := storage.Load(context.Background(), sessionId); true == exists {
+    if _, exists, _ := storage.Load(sessionRuntime(), sessionId); true == exists {
         t.Fatalf("expected the logout to have removed the session")
     }
 
     concurrentView.Set("lastSeen", "now")
 
-    saveErr := manager.SaveSession(context.Background(), concurrentView)
+    saveErr := manager.SaveSession(sessionRuntime(), concurrentView)
     if nil == saveErr {
         t.Fatalf("expected the in-flight request to be refused the write")
     }
@@ -728,7 +731,7 @@ func TestManager_ADeletedSessionCannotBeSavedBackByAnInFlightRequest(t *testing.
         t.Fatalf("expected the refusal to carry ErrSessionDeleted, got %v", saveErr)
     }
 
-    if _, exists, _ := storage.Load(context.Background(), sessionId); true == exists {
+    if _, exists, _ := storage.Load(sessionRuntime(), sessionId); true == exists {
         t.Fatalf("expected the deleted session to stay deleted rather than being resurrected under the same id")
     }
 }
@@ -737,27 +740,27 @@ func TestManager_ARotatedAwayIdCannotBeSavedBackByAnInFlightRequest(t *testing.T
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    original := mustSession(manager.NewSession(context.Background()))
+    original := mustSession(manager.NewSession(sessionRuntime()))
     original.Set("userId", "u-42")
 
-    if nil != manager.SaveSession(context.Background(), original) {
+    if nil != manager.SaveSession(sessionRuntime(), original) {
         t.Fatalf("unexpected error seeding the session")
     }
 
     previousId := original.Id()
 
-    concurrentView := mustSession(manager.Session(context.Background(), previousId))
+    concurrentView := mustSession(manager.Session(sessionRuntime(), previousId))
     if nil == concurrentView {
         t.Fatalf("expected the concurrent request to load the session")
     }
 
-    if _, err := manager.RegenerateSession(context.Background(), original); nil != err {
+    if _, err := manager.RegenerateSession(sessionRuntime(), original); nil != err {
         t.Fatalf("unexpected error rotating the session: %v", err)
     }
 
     concurrentView.Set("lastSeen", "now")
 
-    saveErr := manager.SaveSession(context.Background(), concurrentView)
+    saveErr := manager.SaveSession(sessionRuntime(), concurrentView)
     if nil == saveErr {
         t.Fatalf("expected the in-flight request to be refused the write to the rotated-away id")
     }
@@ -766,7 +769,7 @@ func TestManager_ARotatedAwayIdCannotBeSavedBackByAnInFlightRequest(t *testing.T
         t.Fatalf("expected the refusal to carry ErrSessionDeleted, got %v", saveErr)
     }
 
-    if _, exists, _ := storage.Load(context.Background(), previousId); true == exists {
+    if _, exists, _ := storage.Load(sessionRuntime(), previousId); true == exists {
         t.Fatalf("expected the rotated-away id to stay gone")
     }
 }
@@ -827,15 +830,15 @@ type closeCountingStorage struct {
     closeCount int
 }
 
-func (instance *closeCountingStorage) Load(context.Context, string) (map[string]any, bool, error) {
+func (instance *closeCountingStorage) Load(containercontract.Runtime, string) (map[string]any, bool, error) {
     return nil, false, nil
 }
 
-func (instance *closeCountingStorage) Save(context.Context, string, map[string]any, bound.Duration) error {
+func (instance *closeCountingStorage) Save(containercontract.Runtime, string, map[string]any, bound.Duration) error {
     return nil
 }
 
-func (instance *closeCountingStorage) Delete(context.Context, string) error { return nil }
+func (instance *closeCountingStorage) Delete(containercontract.Runtime, string) error { return nil }
 
 func (instance *closeCountingStorage) CloseWithContext(closeContext context.Context) error {
     instance.closeCount++
@@ -851,10 +854,10 @@ func TestManager_ConcurrentSavesDeletesAndRotationsAreRaceFree(t *testing.T) {
 
     seeded := make([]string, 0, 16)
     for index := 0; index < 16; index++ {
-        sessionInstance := mustSession(manager.NewSession(context.Background()))
+        sessionInstance := mustSession(manager.NewSession(sessionRuntime()))
         sessionInstance.Set("index", index)
 
-        if nil != manager.SaveSession(context.Background(), sessionInstance) {
+        if nil != manager.SaveSession(sessionRuntime(), sessionInstance) {
             t.Fatalf("unexpected error seeding session %d", index)
         }
 
@@ -871,23 +874,23 @@ func TestManager_ConcurrentSavesDeletesAndRotationsAreRaceFree(t *testing.T) {
         go func() {
             defer waitGroup.Done()
 
-            if loaded := mustSession(manager.Session(context.Background(), sessionId)); nil != loaded {
+            if loaded := mustSession(manager.Session(sessionRuntime(), sessionId)); nil != loaded {
                 loaded.Set("touched", true)
-                _ = manager.SaveSession(context.Background(), loaded)
+                _ = manager.SaveSession(sessionRuntime(), loaded)
             }
         }()
 
         go func() {
             defer waitGroup.Done()
 
-            _ = manager.DeleteSession(context.Background(), sessionId)
+            _ = manager.DeleteSession(sessionRuntime(), sessionId)
         }()
 
         go func() {
             defer waitGroup.Done()
 
-            if loaded := mustSession(manager.Session(context.Background(), sessionId)); nil != loaded {
-                _, _ = manager.RegenerateSession(context.Background(), loaded)
+            if loaded := mustSession(manager.Session(sessionRuntime(), sessionId)); nil != loaded {
+                _, _ = manager.RegenerateSession(sessionRuntime(), loaded)
             }
         }()
 
@@ -897,10 +900,10 @@ func TestManager_ConcurrentSavesDeletesAndRotationsAreRaceFree(t *testing.T) {
         go func() {
             defer waitGroup.Done()
 
-            _ = manager.DeleteSession(cutContext, sessionId)
-            if loaded, _ := manager.Session(cutContext, sessionId); nil != loaded {
+            _ = manager.DeleteSession(sessionRuntimeUnder(cutContext), sessionId)
+            if loaded, _ := manager.Session(sessionRuntimeUnder(cutContext), sessionId); nil != loaded {
                 loaded.Set("cut", true)
-                _ = manager.SaveSession(cutContext, loaded)
+                _ = manager.SaveSession(sessionRuntimeUnder(cutContext), loaded)
             }
         }()
 
@@ -915,7 +918,7 @@ func TestManager_ConcurrentSavesDeletesAndRotationsAreRaceFree(t *testing.T) {
 
     for _, sessionId := range seeded {
         if true == manager.isTombstoned(sessionId) {
-            if _, exists, _ := storage.Load(context.Background(), sessionId); true == exists {
+            if _, exists, _ := storage.Load(sessionRuntime(), sessionId); true == exists {
                 t.Fatalf("expected a buried id to stay gone, %q is live again", sessionId)
             }
         }
@@ -933,13 +936,13 @@ func TestInMemoryStorage_CloseConcurrentWithLoadAndSaveIsRaceFree(t *testing.T) 
         go func() {
             defer waitGroup.Done()
 
-            _ = storage.Save(context.Background(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", map[string]any{"k": "v"}, bound.Of(time.Minute))
+            _ = storage.Save(sessionRuntime(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", map[string]any{"k": "v"}, bound.Of(time.Minute))
         }()
 
         go func() {
             defer waitGroup.Done()
 
-            _, _, _ = storage.Load(context.Background(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            _, _, _ = storage.Load(sessionRuntime(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         }()
     }
 
@@ -949,7 +952,7 @@ func TestInMemoryStorage_CloseConcurrentWithLoadAndSaveIsRaceFree(t *testing.T) 
 
     waitGroup.Wait()
 
-    if _, _, err := storage.Load(context.Background(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); nil == err {
+    if _, _, err := storage.Load(sessionRuntime(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); nil == err {
         t.Fatalf("expected the closed storage to refuse a load")
     }
 }
@@ -961,11 +964,11 @@ type blockingSaveStorage struct {
     enterOnce   sync.Once
 }
 
-func (instance *blockingSaveStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
-    return instance.inner.Load(ctx, sessionId)
+func (instance *blockingSaveStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
+    return instance.inner.Load(runtimeInstance, sessionId)
 }
 
-func (instance *blockingSaveStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
+func (instance *blockingSaveStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
     instance.enterOnce.Do(
         func() {
             close(instance.enteredSave)
@@ -973,11 +976,11 @@ func (instance *blockingSaveStorage) Save(ctx context.Context, sessionId string,
         },
     )
 
-    return instance.inner.Save(ctx, sessionId, data, ttl)
+    return instance.inner.Save(runtimeInstance, sessionId, data, ttl)
 }
 
-func (instance *blockingSaveStorage) Delete(ctx context.Context, sessionId string) error {
-    return instance.inner.Delete(ctx, sessionId)
+func (instance *blockingSaveStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
+    return instance.inner.Delete(runtimeInstance, sessionId)
 }
 
 func (instance *blockingSaveStorage) CloseWithContext(closeContext context.Context) error {
@@ -996,14 +999,14 @@ func TestManager_ADeleteCannotInterleaveBetweenTheTombstoneCheckAndTheWrite(t *t
 
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    sessionInstance := mustSession(manager.NewSession(context.Background()))
+    sessionInstance := mustSession(manager.NewSession(sessionRuntime()))
     sessionInstance.Set("userId", "u-42")
 
     sessionId := sessionInstance.Id()
 
     saveDone := make(chan error, 1)
     go func() {
-        saveDone <- manager.SaveSession(context.Background(), sessionInstance)
+        saveDone <- manager.SaveSession(sessionRuntime(), sessionInstance)
     }()
 
     select {
@@ -1017,13 +1020,13 @@ func TestManager_ADeleteCannotInterleaveBetweenTheTombstoneCheckAndTheWrite(t *t
         close(storage.releaseSave)
     }()
 
-    if nil != manager.DeleteSession(context.Background(), sessionId) {
+    if nil != manager.DeleteSession(sessionRuntime(), sessionId) {
         t.Fatalf("unexpected error deleting the session")
     }
 
     <-saveDone
 
-    if _, exists, _ := inner.Load(context.Background(), sessionId); true == exists {
+    if _, exists, _ := inner.Load(sessionRuntime(), sessionId); true == exists {
         t.Fatalf("expected the deleted session to stay deleted: a delete interleaved between the tombstone check and the write, and the write resurrected it")
     }
 }
@@ -1035,22 +1038,22 @@ type heldSaveStorage struct {
     releaseSave chan struct{}
 }
 
-func (instance *heldSaveStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
-    return instance.inner.Load(ctx, sessionId)
+func (instance *heldSaveStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
+    return instance.inner.Load(runtimeInstance, sessionId)
 }
 
-func (instance *heldSaveStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
+func (instance *heldSaveStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
     instance.enteredSave <- sessionId
 
     if sessionId == instance.heldId {
         <-instance.releaseSave
     }
 
-    return instance.inner.Save(ctx, sessionId, data, ttl)
+    return instance.inner.Save(runtimeInstance, sessionId, data, ttl)
 }
 
-func (instance *heldSaveStorage) Delete(ctx context.Context, sessionId string) error {
-    return instance.inner.Delete(ctx, sessionId)
+func (instance *heldSaveStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
+    return instance.inner.Delete(runtimeInstance, sessionId)
 }
 
 func (instance *heldSaveStorage) CloseWithContext(closeContext context.Context) error {
@@ -1069,16 +1072,16 @@ func TestManager_ASaveDoesNotWaitOnTheSaveOfAnotherSession(t *testing.T) {
 
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    heldSession := mustSession(manager.NewSession(context.Background()))
+    heldSession := mustSession(manager.NewSession(sessionRuntime()))
     heldSession.Set("userId", "u-1")
 
-    otherSession := mustSession(manager.NewSession(context.Background()))
+    otherSession := mustSession(manager.NewSession(sessionRuntime()))
     for attempt := 0; manager.sessionStripeOf(heldSession.Id()) == manager.sessionStripeOf(otherSession.Id()); attempt++ {
         if 64 < attempt {
             t.Fatalf("could not mint two session ids on different locks")
         }
 
-        otherSession = mustSession(manager.NewSession(context.Background()))
+        otherSession = mustSession(manager.NewSession(sessionRuntime()))
     }
     otherSession.Set("userId", "u-2")
 
@@ -1086,7 +1089,7 @@ func TestManager_ASaveDoesNotWaitOnTheSaveOfAnotherSession(t *testing.T) {
 
     heldDone := make(chan error, 1)
     go func() {
-        heldDone <- manager.SaveSession(context.Background(), heldSession)
+        heldDone <- manager.SaveSession(sessionRuntime(), heldSession)
     }()
 
     select {
@@ -1100,7 +1103,7 @@ func TestManager_ASaveDoesNotWaitOnTheSaveOfAnotherSession(t *testing.T) {
 
     otherDone := make(chan error, 1)
     go func() {
-        otherDone <- manager.SaveSession(context.Background(), otherSession)
+        otherDone <- manager.SaveSession(sessionRuntime(), otherSession)
     }()
 
     select {
@@ -1232,11 +1235,11 @@ func TestSaveSession_TheBranchDecisionFollowsTheSnapshotNotTheAccessors(t *testi
     sessionInstance.modified = true
     sessionInstance.cleared = false
 
-    if saveErr := manager.SaveSession(context.Background(), sessionInstance); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntime(), sessionInstance); nil != saveErr {
         t.Fatalf("expected the delete branch to answer nil, got %v", saveErr)
     }
 
-    if _, exists, _ := storage.Load(context.Background(), sessionInstance.Id()); true == exists {
+    if _, exists, _ := storage.Load(sessionRuntime(), sessionInstance.Id()); true == exists {
         t.Fatalf("expected the snapshot's cleared flag to have taken the delete branch")
     }
 }
@@ -1246,7 +1249,7 @@ func TestManager_SaveSession_RefusalNamesTheSessionByAOneWayReferenceNotTheRawId
 
     rawId := "not-a-valid-session-id"
 
-    err := manager.SaveSession(context.Background(), &foreignIdSession{id: rawId, modified: true})
+    err := manager.SaveSession(sessionRuntime(), &foreignIdSession{id: rawId, modified: true})
     if nil == err {
         t.Fatalf("expected the malformed id to be refused")
     }
@@ -1305,19 +1308,19 @@ func TestNewManager_ANilClockIsTheSystemClock(t *testing.T) {
 func TestManager_SaveSession_NamesARotationApartFromADeletion(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
-    rotatedAway := mustSession(manager.NewSession(context.Background()))
+    rotatedAway := mustSession(manager.NewSession(sessionRuntime()))
     rotatedAway.Set("userId", "u-1")
-    if saveErr := manager.SaveSession(context.Background(), rotatedAway); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntime(), rotatedAway); nil != saveErr {
         t.Fatalf("unexpected error: %v", saveErr)
     }
 
     rotatedAwayId := rotatedAway.Id()
 
-    if _, regenerateErr := manager.RegenerateSession(context.Background(), rotatedAway); nil != regenerateErr {
+    if _, regenerateErr := manager.RegenerateSession(sessionRuntime(), rotatedAway); nil != regenerateErr {
         t.Fatalf("unexpected error: %v", regenerateErr)
     }
 
-    rotationRefusal := manager.SaveSession(context.Background(), &Session{id: rotatedAwayId, values: map[string]any{}, modified: true})
+    rotationRefusal := manager.SaveSession(sessionRuntime(), &Session{id: rotatedAwayId, values: map[string]any{}, modified: true})
     if false == errors.Is(rotationRefusal, ErrSessionRotated) {
         t.Fatalf("expected the refusal of a rotated-away id to carry ErrSessionRotated, got %v", rotationRefusal)
     }
@@ -1326,19 +1329,19 @@ func TestManager_SaveSession_NamesARotationApartFromADeletion(t *testing.T) {
         t.Fatalf("expected the refusal of a rotated-away id to carry ErrSessionDeleted beside it, got %v", rotationRefusal)
     }
 
-    deleted := mustSession(manager.NewSession(context.Background()))
+    deleted := mustSession(manager.NewSession(sessionRuntime()))
     deleted.Set("userId", "u-2")
-    if saveErr := manager.SaveSession(context.Background(), deleted); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntime(), deleted); nil != saveErr {
         t.Fatalf("unexpected error: %v", saveErr)
     }
 
     deletedId := deleted.Id()
 
-    if deleteErr := manager.DeleteSession(context.Background(), deletedId); nil != deleteErr {
+    if deleteErr := manager.DeleteSession(sessionRuntime(), deletedId); nil != deleteErr {
         t.Fatalf("unexpected error: %v", deleteErr)
     }
 
-    deletionRefusal := manager.SaveSession(context.Background(), &Session{id: deletedId, values: map[string]any{}, modified: true})
+    deletionRefusal := manager.SaveSession(sessionRuntime(), &Session{id: deletedId, values: map[string]any{}, modified: true})
     if false == errors.Is(deletionRefusal, ErrSessionDeleted) {
         t.Fatalf("expected the refusal of a deleted id to carry ErrSessionDeleted, got %v", deletionRefusal)
     }
@@ -1352,16 +1355,16 @@ type removingFailingStorage struct {
     inner *InMemoryStorage
 }
 
-func (instance *removingFailingStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
-    return instance.inner.Load(ctx, sessionId)
+func (instance *removingFailingStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
+    return instance.inner.Load(runtimeInstance, sessionId)
 }
 
-func (instance *removingFailingStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
-    return instance.inner.Save(ctx, sessionId, data, ttl)
+func (instance *removingFailingStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
+    return instance.inner.Save(runtimeInstance, sessionId, data, ttl)
 }
 
-func (instance *removingFailingStorage) Delete(ctx context.Context, sessionId string) error {
-    _ = instance.inner.Delete(ctx, sessionId)
+func (instance *removingFailingStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
+    _ = instance.inner.Delete(runtimeInstance, sessionId)
 
     return exception.NewError("the probe storage removed the entry and failed to flush", nil, nil)
 }
@@ -1375,19 +1378,19 @@ type keepingFailingStorage struct {
     loadFails bool
 }
 
-func (instance *keepingFailingStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
+func (instance *keepingFailingStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
     if true == instance.loadFails {
         return nil, false, exception.NewError("the probe storage cannot read", nil, nil)
     }
 
-    return instance.inner.Load(ctx, sessionId)
+    return instance.inner.Load(runtimeInstance, sessionId)
 }
 
-func (instance *keepingFailingStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
-    return instance.inner.Save(ctx, sessionId, data, ttl)
+func (instance *keepingFailingStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
+    return instance.inner.Save(runtimeInstance, sessionId, data, ttl)
 }
 
-func (instance *keepingFailingStorage) Delete(ctx context.Context, sessionId string) error {
+func (instance *keepingFailingStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
     return exception.NewError("the probe storage refuses to delete", nil, nil)
 }
 
@@ -1405,10 +1408,10 @@ func tombstoneCountOf(manager *Manager) int {
 func seededSessionOf(t *testing.T, manager *Manager) sessioncontract.Session {
     t.Helper()
 
-    seeded := mustSession(manager.NewSession(context.Background()))
+    seeded := mustSession(manager.NewSession(sessionRuntime()))
     seeded.Set("userId", "u-7")
 
-    if saveErr := manager.SaveSession(context.Background(), seeded); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntime(), seeded); nil != saveErr {
         t.Fatalf("unexpected error seeding the session: %v", saveErr)
     }
 
@@ -1420,13 +1423,13 @@ func TestManager_RegenerateSession_RefusesAnIdALogoutBuried(t *testing.T) {
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     seeded := seededSessionOf(t, manager)
-    loadedBeforeTheLogout := mustSession(manager.Session(context.Background(), seeded.Id()))
+    loadedBeforeTheLogout := mustSession(manager.Session(sessionRuntime(), seeded.Id()))
 
-    if deleteErr := manager.DeleteSession(context.Background(), seeded.Id()); nil != deleteErr {
+    if deleteErr := manager.DeleteSession(sessionRuntime(), seeded.Id()); nil != deleteErr {
         t.Fatalf("unexpected error on the logout: %v", deleteErr)
     }
 
-    rotated, rotateErr := manager.RegenerateSession(context.Background(), loadedBeforeTheLogout)
+    rotated, rotateErr := manager.RegenerateSession(sessionRuntime(), loadedBeforeTheLogout)
     if nil == rotateErr {
         t.Fatalf("expected the rotation of a buried id to be refused, got the fresh id %q", rotated.Id())
     }
@@ -1448,14 +1451,14 @@ func TestManager_RegenerateSession_RefusesTheSecondRotationOfOneId(t *testing.T)
     manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     seeded := seededSessionOf(t, manager)
-    firstCopy := mustSession(manager.Session(context.Background(), seeded.Id()))
-    secondCopy := mustSession(manager.Session(context.Background(), seeded.Id()))
+    firstCopy := mustSession(manager.Session(sessionRuntime(), seeded.Id()))
+    secondCopy := mustSession(manager.Session(sessionRuntime(), seeded.Id()))
 
-    if _, rotateErr := manager.RegenerateSession(context.Background(), firstCopy); nil != rotateErr {
+    if _, rotateErr := manager.RegenerateSession(sessionRuntime(), firstCopy); nil != rotateErr {
         t.Fatalf("unexpected error on the first rotation: %v", rotateErr)
     }
 
-    rotated, rotateErr := manager.RegenerateSession(context.Background(), secondCopy)
+    rotated, rotateErr := manager.RegenerateSession(sessionRuntime(), secondCopy)
     if nil == rotateErr {
         t.Fatalf("expected the second rotation of one id to be refused, got the fresh id %q", rotated.Id())
     }
@@ -1470,20 +1473,20 @@ func TestManager_DeleteSession_BuriesAnEntryTheStorageRemovedBeforeFailing(t *te
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     seeded := seededSessionOf(t, manager)
-    inFlight := mustSession(manager.Session(context.Background(), seeded.Id()))
+    inFlight := mustSession(manager.Session(sessionRuntime(), seeded.Id()))
 
-    if deleteErr := manager.DeleteSession(context.Background(), seeded.Id()); nil == deleteErr {
+    if deleteErr := manager.DeleteSession(sessionRuntime(), seeded.Id()); nil == deleteErr {
         t.Fatalf("expected the storage's failure to reach the caller")
     }
 
     inFlight.Set("lastSeen", "now")
 
-    saveErr := manager.SaveSession(context.Background(), inFlight)
+    saveErr := manager.SaveSession(sessionRuntime(), inFlight)
     if false == errors.Is(saveErr, ErrSessionDeleted) {
         t.Fatalf("expected the write-back of a removed entry to be refused with ErrSessionDeleted, got %v", saveErr)
     }
 
-    if _, exists, _ := storage.inner.Load(context.Background(), seeded.Id()); true == exists {
+    if _, exists, _ := storage.inner.Load(sessionRuntime(), seeded.Id()); true == exists {
         t.Fatalf("expected the removed entry to stay removed")
     }
 }
@@ -1494,13 +1497,13 @@ func TestManager_DeleteSession_LeavesAnEntryTheStorageKeptUnburied(t *testing.T)
 
     seeded := seededSessionOf(t, manager)
 
-    if deleteErr := manager.DeleteSession(context.Background(), seeded.Id()); nil == deleteErr {
+    if deleteErr := manager.DeleteSession(sessionRuntime(), seeded.Id()); nil == deleteErr {
         t.Fatalf("expected the storage's refusal to reach the caller")
     }
 
     seeded.Set("lastSeen", "now")
 
-    if saveErr := manager.SaveSession(context.Background(), seeded); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntime(), seeded); nil != saveErr {
         t.Fatalf("expected a session whose entry is still held to stay saveable, got %v", saveErr)
     }
 
@@ -1524,7 +1527,7 @@ func TestManager_DeleteSession_LeavesAnEntryItCannotReReadUnburied(t *testing.T)
     }}
     manager.storage = readingStorage
 
-    if deleteErr := manager.DeleteSession(context.Background(), seeded.Id()); nil == deleteErr {
+    if deleteErr := manager.DeleteSession(sessionRuntime(), seeded.Id()); nil == deleteErr {
         t.Fatalf("expected the storage's refusal to reach the caller")
     }
 
@@ -1538,18 +1541,18 @@ type readCountingStorage struct {
     onRead func()
 }
 
-func (instance *readCountingStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
+func (instance *readCountingStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
     instance.onRead()
 
-    return instance.inner.Load(ctx, sessionId)
+    return instance.inner.Load(runtimeInstance, sessionId)
 }
 
-func (instance *readCountingStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
-    return instance.inner.Save(ctx, sessionId, data, ttl)
+func (instance *readCountingStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
+    return instance.inner.Save(runtimeInstance, sessionId, data, ttl)
 }
 
-func (instance *readCountingStorage) Delete(ctx context.Context, sessionId string) error {
-    return instance.inner.Delete(ctx, sessionId)
+func (instance *readCountingStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
+    return instance.inner.Delete(runtimeInstance, sessionId)
 }
 
 func (instance *readCountingStorage) CloseWithContext(closeContext context.Context) error {
@@ -1559,7 +1562,7 @@ func (instance *readCountingStorage) CloseWithContext(closeContext context.Conte
 func TestManager_DeleteSession_BuriesAnIdItIsHandedForTheWindow(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    if deleteErr := manager.DeleteSession(context.Background(), "0123456789abcdef0123456789abcdef"); nil != deleteErr {
+    if deleteErr := manager.DeleteSession(sessionRuntime(), "0123456789abcdef0123456789abcdef"); nil != deleteErr {
         t.Fatalf("unexpected error deleting an absent id: %v", deleteErr)
     }
 
@@ -1573,23 +1576,23 @@ func TestManager_ALogoutOfAnEntryThatVanishedUnderneathStillBuriesIt(t *testing.
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     seeded := seededSessionOf(t, manager)
-    inFlight := mustSession(manager.Session(context.Background(), seeded.Id()))
+    inFlight := mustSession(manager.Session(sessionRuntime(), seeded.Id()))
 
-    if deleteErr := storage.Delete(context.Background(), seeded.Id()); nil != deleteErr {
+    if deleteErr := storage.Delete(sessionRuntime(), seeded.Id()); nil != deleteErr {
         t.Fatalf("unexpected error evicting the entry: %v", deleteErr)
     }
 
-    if deleteErr := manager.DeleteSession(context.Background(), seeded.Id()); nil != deleteErr {
+    if deleteErr := manager.DeleteSession(sessionRuntime(), seeded.Id()); nil != deleteErr {
         t.Fatalf("unexpected error on the logout: %v", deleteErr)
     }
 
     inFlight.Set("lastSeen", "now")
 
-    if saveErr := manager.SaveSession(context.Background(), inFlight); false == errors.Is(saveErr, ErrSessionDeleted) {
+    if saveErr := manager.SaveSession(sessionRuntime(), inFlight); false == errors.Is(saveErr, ErrSessionDeleted) {
         t.Fatalf("expected the write-back of the ended session refused with ErrSessionDeleted, got %v", saveErr)
     }
 
-    if nil != mustSession(manager.Session(context.Background(), seeded.Id())) {
+    if nil != mustSession(manager.Session(sessionRuntime(), seeded.Id())) {
         t.Fatalf("expected the ended session to stay absent from the storage")
     }
 }
@@ -1599,18 +1602,18 @@ type deleteCountingStorage struct {
     deletes int
 }
 
-func (instance *deleteCountingStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
-    return instance.inner.Load(ctx, sessionId)
+func (instance *deleteCountingStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
+    return instance.inner.Load(runtimeInstance, sessionId)
 }
 
-func (instance *deleteCountingStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
-    return instance.inner.Save(ctx, sessionId, data, ttl)
+func (instance *deleteCountingStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
+    return instance.inner.Save(runtimeInstance, sessionId, data, ttl)
 }
 
-func (instance *deleteCountingStorage) Delete(ctx context.Context, sessionId string) error {
+func (instance *deleteCountingStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
     instance.deletes++
 
-    return instance.inner.Delete(ctx, sessionId)
+    return instance.inner.Delete(runtimeInstance, sessionId)
 }
 
 func (instance *deleteCountingStorage) CloseWithContext(closeContext context.Context) error {
@@ -1621,10 +1624,10 @@ func TestManager_ARotationOfAMintedSessionLeavesNoRecord(t *testing.T) {
     storage := &deleteCountingStorage{inner: NewInMemoryStorage(InMemoryStorageConfig{})}
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    minted := mustSession(manager.NewSession(context.Background()))
+    minted := mustSession(manager.NewSession(sessionRuntime()))
     minted.Set("userId", "u-1")
 
-    rotated, rotateErr := manager.RegenerateSession(context.Background(), minted)
+    rotated, rotateErr := manager.RegenerateSession(sessionRuntime(), minted)
     if nil != rotateErr {
         t.Fatalf("unexpected error rotating a fresh session: %v", rotateErr)
     }
@@ -1633,7 +1636,7 @@ func TestManager_ARotationOfAMintedSessionLeavesNoRecord(t *testing.T) {
         t.Fatalf("expected a fresh id carrying the values, got %q", rotated.Id())
     }
 
-    if _, rotateErr := manager.RegenerateSession(context.Background(), rotated); nil != rotateErr {
+    if _, rotateErr := manager.RegenerateSession(sessionRuntime(), rotated); nil != rotateErr {
         t.Fatalf("unexpected error rotating the rotated session again: %v", rotateErr)
     }
 
@@ -1646,21 +1649,21 @@ func TestManager_ASaveOfAClearedMintedSessionLeavesNoRecord(t *testing.T) {
     storage := &deleteCountingStorage{inner: NewInMemoryStorage(InMemoryStorageConfig{})}
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    original := mustSession(manager.NewSession(context.Background()))
+    original := mustSession(manager.NewSession(sessionRuntime()))
     original.Set("userId", "u-1")
 
-    if _, rotateErr := manager.RegenerateSession(context.Background(), original); nil != rotateErr {
+    if _, rotateErr := manager.RegenerateSession(sessionRuntime(), original); nil != rotateErr {
         t.Fatalf("unexpected error rotating a fresh session: %v", rotateErr)
     }
 
-    if saveErr := manager.SaveSession(context.Background(), original); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntime(), original); nil != saveErr {
         t.Fatalf("unexpected error saving the rotated-away original: %v", saveErr)
     }
 
-    cleared := mustSession(manager.NewSession(context.Background()))
+    cleared := mustSession(manager.NewSession(sessionRuntime()))
     cleared.Clear()
 
-    if saveErr := manager.SaveSession(context.Background(), cleared); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntime(), cleared); nil != saveErr {
         t.Fatalf("unexpected error saving a cleared fresh session: %v", saveErr)
     }
 
@@ -1668,14 +1671,14 @@ func TestManager_ASaveOfAClearedMintedSessionLeavesNoRecord(t *testing.T) {
         t.Fatalf("expected no removal and no record for a cleared minted id, got %d removals and %d records", storage.deletes, tombstoneCountOf(manager))
     }
 
-    stored := mustSession(manager.NewSession(context.Background()))
+    stored := mustSession(manager.NewSession(sessionRuntime()))
     stored.Set("userId", "u-2")
-    if saveErr := manager.SaveSession(context.Background(), stored); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntime(), stored); nil != saveErr {
         t.Fatalf("unexpected error saving: %v", saveErr)
     }
 
     stored.Clear()
-    if saveErr := manager.SaveSession(context.Background(), stored); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntime(), stored); nil != saveErr {
         t.Fatalf("unexpected error saving the cleared stored session: %v", saveErr)
     }
 
@@ -1688,14 +1691,14 @@ func TestManager_ARotationOfASavedSessionBuriesTheRetiredId(t *testing.T) {
     storage := &deleteCountingStorage{inner: NewInMemoryStorage(InMemoryStorageConfig{})}
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    saved := mustSession(manager.NewSession(context.Background()))
+    saved := mustSession(manager.NewSession(sessionRuntime()))
     saved.Set("userId", "u-1")
 
-    if saveErr := manager.SaveSession(context.Background(), saved); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntime(), saved); nil != saveErr {
         t.Fatalf("unexpected error saving: %v", saveErr)
     }
 
-    if _, rotateErr := manager.RegenerateSession(context.Background(), saved); nil != rotateErr {
+    if _, rotateErr := manager.RegenerateSession(sessionRuntime(), saved); nil != rotateErr {
         t.Fatalf("unexpected error rotating: %v", rotateErr)
     }
 
@@ -1708,13 +1711,13 @@ func TestManager_ARotationOfALoadedSessionBuriesTheRetiredId(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
     seeded := seededSessionOf(t, manager)
-    loaded := mustSession(manager.Session(context.Background(), seeded.Id()))
+    loaded := mustSession(manager.Session(sessionRuntime(), seeded.Id()))
 
-    if _, rotateErr := manager.RegenerateSession(context.Background(), loaded); nil != rotateErr {
+    if _, rotateErr := manager.RegenerateSession(sessionRuntime(), loaded); nil != rotateErr {
         t.Fatalf("unexpected error rotating: %v", rotateErr)
     }
 
-    if 1 != tombstoneCountOf(manager) || nil != mustSession(manager.Session(context.Background(), seeded.Id())) {
+    if 1 != tombstoneCountOf(manager) || nil != mustSession(manager.Session(sessionRuntime(), seeded.Id())) {
         t.Fatalf("expected the retired id removed and buried, got %d records", tombstoneCountOf(manager))
     }
 }
@@ -1743,7 +1746,7 @@ func TestManager_SaveSession_AnIdDeletedAfterItsRotationReadsAsDeleted(t *testin
     manager.buryRotationTombstoneAt(sessionId, time.Now().Add(-time.Second))
     manager.buryTombstoneAt(sessionId, time.Now())
 
-    refusal := manager.SaveSession(context.Background(), &Session{id: sessionId, values: map[string]any{}, modified: true})
+    refusal := manager.SaveSession(sessionRuntime(), &Session{id: sessionId, values: map[string]any{}, modified: true})
     if false == errors.Is(refusal, ErrSessionDeleted) {
         t.Fatalf("expected the refusal to carry ErrSessionDeleted, got %v", refusal)
     }
@@ -1757,28 +1760,28 @@ func TestManager_SaveSessionReadsAForeignSessionThroughItsSnapshot(t *testing.T)
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    sessionId := mustSession(manager.NewSession(context.Background())).Id()
+    sessionId := mustSession(manager.NewSession(sessionRuntime())).Id()
 
     foreign := &foreignSession{id: sessionId, values: map[string]any{"user": "ada"}, modified: true}
 
-    saveErr := manager.SaveSession(context.Background(), foreign)
+    saveErr := manager.SaveSession(sessionRuntime(), foreign)
     if nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
-    storedValues, exists, _ := storage.Load(context.Background(), sessionId)
+    storedValues, exists, _ := storage.Load(sessionRuntime(), sessionId)
     if false == exists || "ada" != storedValues["user"] {
         t.Fatalf("expected the session's values read through its snapshot to be stored, got %v %t", storedValues, exists)
     }
 
     foreign.Clear()
 
-    saveErr = manager.SaveSession(context.Background(), foreign)
+    saveErr = manager.SaveSession(sessionRuntime(), foreign)
     if nil != saveErr {
         t.Fatalf("unexpected save error on the cleared session: %v", saveErr)
     }
 
-    if _, exists, _ = storage.Load(context.Background(), sessionId); true == exists {
+    if _, exists, _ = storage.Load(sessionRuntime(), sessionId); true == exists {
         t.Fatalf("expected a session cleared through its accessors to be deleted")
     }
 }
@@ -1791,7 +1794,7 @@ func TestManager_RegenerateSession_ReturnsTheStorageFailureOfTheIdProbe(t *testi
         values: map[string]any{"a": "b"},
     }
 
-    rotated, err := manager.RegenerateSession(context.Background(), sessionInstance)
+    rotated, err := manager.RegenerateSession(sessionRuntime(), sessionInstance)
     if nil != rotated || nil == err {
         t.Fatalf("expected the probe failure to be returned, got session %v and error %v", rotated, err)
     }
@@ -1813,8 +1816,8 @@ func TestManager_RegenerateSession_ReturnsTheStorageFailureOfTheIdProbe(t *testi
 func TestManager_InvalidIdRefusalsOfRegenerateAndDeleteCarryTheReference(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    _, regenerateErr := manager.RegenerateSession(context.Background(), &Session{id: "not-a-valid-hex-id", values: map[string]any{}})
-    deleteErr := manager.DeleteSession(context.Background(), "not-a-valid-hex-id")
+    _, regenerateErr := manager.RegenerateSession(sessionRuntime(), &Session{id: "not-a-valid-hex-id", values: map[string]any{}})
+    deleteErr := manager.DeleteSession(sessionRuntime(), "not-a-valid-hex-id")
 
     for name, err := range map[string]error{"regenerate": regenerateErr, "delete": deleteErr} {
         melodyErr, isMelodyErr := err.(*exception.Error)
@@ -1831,12 +1834,12 @@ func TestManager_InvalidIdRefusalsOfRegenerateAndDeleteCarryTheReference(t *test
 func TestManager_RegenerateSessionAnswersAStorageOutageMarked(t *testing.T) {
     probeManager := NewManager(&probeFailingStorage{}, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    _, probeErr := probeManager.RegenerateSession(context.Background(), &Session{id: "0123456789abcdef0123456789abcdef", values: map[string]any{}})
+    _, probeErr := probeManager.RegenerateSession(sessionRuntime(), &Session{id: "0123456789abcdef0123456789abcdef", values: map[string]any{}})
     assertMarkedStorageError(t, probeErr, errProbeStorageUnavailable)
 
     writeManager := NewManager(&writeFailingStorage{}, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    _, deleteErr := writeManager.RegenerateSession(context.Background(), &Session{id: "0123456789abcdef0123456789abcdef", values: map[string]any{}})
+    _, deleteErr := writeManager.RegenerateSession(sessionRuntime(), &Session{id: "0123456789abcdef0123456789abcdef", values: map[string]any{}})
     assertMarkedStorageError(t, deleteErr, errWriteStorageUnavailable)
 }
 
@@ -1846,19 +1849,19 @@ type storageCallCountingStorage struct {
     deleteCalls int
 }
 
-func (instance *storageCallCountingStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
+func (instance *storageCallCountingStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
     instance.loadCalls++
 
     return nil, false, nil
 }
 
-func (instance *storageCallCountingStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
+func (instance *storageCallCountingStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
     instance.saveCalls++
 
     return nil
 }
 
-func (instance *storageCallCountingStorage) Delete(ctx context.Context, sessionId string) error {
+func (instance *storageCallCountingStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
     instance.deleteCalls++
 
     return nil
@@ -1888,10 +1891,10 @@ func TestManager_SaveSessionRefusesAnUnavailableSession(t *testing.T) {
     unavailable := NewUnavailableSession(cause)
     unavailable.Set("cart", "one line")
 
-    requireUnavailableSessionRefusal(t, manager.SaveSession(context.Background(), unavailable), cause)
+    requireUnavailableSessionRefusal(t, manager.SaveSession(sessionRuntime(), unavailable), cause)
 
     unavailable.Clear()
-    requireUnavailableSessionRefusal(t, manager.SaveSession(context.Background(), unavailable), cause)
+    requireUnavailableSessionRefusal(t, manager.SaveSession(sessionRuntime(), unavailable), cause)
 
     if 0 != storage.saveCalls || 0 != storage.deleteCalls || 0 != storage.loadCalls {
         t.Fatalf("expected no storage call, got load=%d save=%d delete=%d", storage.loadCalls, storage.saveCalls, storage.deleteCalls)
@@ -1904,7 +1907,7 @@ func TestManager_RegenerateSessionRefusesAnUnavailableSession(t *testing.T) {
 
     cause := errors.New("session store is down")
 
-    rotated, refusalErr := manager.RegenerateSession(context.Background(), NewUnavailableSession(cause))
+    rotated, refusalErr := manager.RegenerateSession(sessionRuntime(), NewUnavailableSession(cause))
     if nil != rotated {
         t.Fatalf("expected no rotated session, got %v", rotated)
     }
@@ -1984,11 +1987,11 @@ func storedTestSession(sessionId string) *Session {
     return &Session{id: sessionId, values: map[string]any{"userId": "u-1"}, modified: true}
 }
 
-func TestManager_EveryDoorRefusesANilAndATypedNilContext(t *testing.T) {
+func TestManager_EveryDoorRefusesAnAbsentRuntime(t *testing.T) {
     storage := &storageCallCountingStorage{}
     manager := NewManager(storage, ManagerConfig{})
 
-    for _, refused := range []context.Context{nil, typedNilContext()} {
+    for _, refused := range refusedSessionRuntimes() {
         refusals := []error{}
 
         _, sessionErr := manager.Session(refused, "malformed")
@@ -2004,7 +2007,7 @@ func TestManager_EveryDoorRefusesANilAndATypedNilContext(t *testing.T) {
         refusals = append(refusals, regenerateErr)
 
         for index, refusal := range refusals {
-            requireErrorMessage(t, refusal, "session context is nil")
+            requireErrorMessage(t, refusal, refusedRuntimeMessage)
 
             if true == exception.IsInfrastructureFailure(refusal) {
                 t.Fatalf("expected door %d's refusal unmarked, got %v", index, refusal)
@@ -2022,19 +2025,19 @@ func TestManager_ADoneContextNeverReachesTheStorage(t *testing.T) {
     manager := NewManager(storage, ManagerConfig{})
     sessionId := generateSessionId()
 
-    _, sessionErr := manager.Session(cancelledContext(), sessionId)
+    _, sessionErr := manager.Session(sessionRuntimeUnder(cancelledContext()), sessionId)
     requireContextEnded(t, sessionErr, context.Canceled)
 
-    _, newErr := manager.NewSession(cancelledContext())
+    _, newErr := manager.NewSession(sessionRuntimeUnder(cancelledContext()))
     requireContextEnded(t, newErr, context.Canceled)
 
-    requireContextEnded(t, manager.SaveSession(cancelledContext(), storedTestSession(sessionId)), context.Canceled)
+    requireContextEnded(t, manager.SaveSession(sessionRuntimeUnder(cancelledContext()), storedTestSession(sessionId)), context.Canceled)
 
-    requireContextEnded(t, manager.DeleteSession(cancelledContext(), sessionId), context.Canceled)
+    requireContextEnded(t, manager.DeleteSession(sessionRuntimeUnder(cancelledContext()), sessionId), context.Canceled)
 
     rotated := storedTestSession(sessionId)
     rotated.modified = false
-    _, regenerateErr := manager.RegenerateSession(cancelledContext(), rotated)
+    _, regenerateErr := manager.RegenerateSession(sessionRuntimeUnder(cancelledContext()), rotated)
     requireContextEnded(t, regenerateErr, context.Canceled)
 
     if true == rotated.IsCleared() {
@@ -2050,29 +2053,29 @@ func TestManager_TheArgumentsAreJudgedBeforeADoneContext(t *testing.T) {
     storage := &storageCallCountingStorage{}
     manager := NewManager(storage, ManagerConfig{})
 
-    if loaded, loadErr := manager.Session(cancelledContext(), "malformed"); nil != loaded || nil != loadErr {
+    if loaded, loadErr := manager.Session(sessionRuntimeUnder(cancelledContext()), "malformed"); nil != loaded || nil != loadErr {
         t.Fatalf("expected a malformed id to answer nothing, got %v and %v", loaded, loadErr)
     }
 
-    requireErrorMessage(t, manager.SaveSession(cancelledContext(), nil), "session is nil in save session")
+    requireErrorMessage(t, manager.SaveSession(sessionRuntimeUnder(cancelledContext()), nil), "session is nil in save session")
 
     cause := errors.New("session store is down")
-    unavailableErr := manager.SaveSession(cancelledContext(), NewUnavailableSession(cause))
+    unavailableErr := manager.SaveSession(sessionRuntimeUnder(cancelledContext()), NewUnavailableSession(cause))
     if false == exception.ChainIs(unavailableErr, ErrSessionUnavailable) || true == exception.ChainIs(unavailableErr, context.Canceled) {
         t.Fatalf("expected the unavailable refusal, got %v", unavailableErr)
     }
 
-    requireErrorMessage(t, manager.DeleteSession(cancelledContext(), "malformed"), "session id is invalid in delete session")
+    requireErrorMessage(t, manager.DeleteSession(sessionRuntimeUnder(cancelledContext()), "malformed"), "session id is invalid in delete session")
 
     unmodified := storedTestSession(generateSessionId())
     unmodified.modified = false
-    if saveErr := manager.SaveSession(cancelledContext(), unmodified); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntimeUnder(cancelledContext()), unmodified); nil != saveErr {
         t.Fatalf("expected an unmodified session to be a no-op, got %v", saveErr)
     }
 
     minted := &Session{id: generateSessionId(), values: map[string]any{}, minted: true}
     minted.Clear()
-    if saveErr := manager.SaveSession(cancelledContext(), minted); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntimeUnder(cancelledContext()), minted); nil != saveErr {
         t.Fatalf("expected a minted cleared session to be a no-op, got %v", saveErr)
     }
 
@@ -2090,29 +2093,29 @@ func TestManager_HandsTheStorageTheCallersContext(t *testing.T) {
     manager := NewManager(storage, ManagerConfig{})
     ctx := context.WithValue(context.Background(), plantedContextKey{}, "planted")
 
-    created := mustSession(manager.NewSession(ctx))
+    created := mustSession(manager.NewSession(sessionRuntimeUnder(ctx)))
     created.Set("userId", "u-1")
-    if saveErr := manager.SaveSession(ctx, created); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntimeUnder(ctx), created); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
-    if nil == mustSession(manager.Session(ctx, created.Id())) {
+    if nil == mustSession(manager.Session(sessionRuntimeUnder(ctx), created.Id())) {
         t.Fatalf("expected the saved session to load")
     }
 
-    if deleteErr := manager.DeleteSession(ctx, created.Id()); nil != deleteErr {
+    if deleteErr := manager.DeleteSession(sessionRuntimeUnder(ctx), created.Id()); nil != deleteErr {
         t.Fatalf("unexpected delete error: %v", deleteErr)
     }
 
-    cleared := mustSession(manager.NewSession(ctx))
+    cleared := mustSession(manager.NewSession(sessionRuntimeUnder(ctx)))
     cleared.Set("userId", "u-2")
-    if saveErr := manager.SaveSession(ctx, cleared); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntimeUnder(ctx), cleared); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
-    clearedCopy := mustSession(manager.Session(ctx, cleared.Id()))
+    clearedCopy := mustSession(manager.Session(sessionRuntimeUnder(ctx), cleared.Id()))
     clearedCopy.Clear()
-    if saveErr := manager.SaveSession(ctx, clearedCopy); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntimeUnder(ctx), clearedCopy); nil != saveErr {
         t.Fatalf("unexpected save error of the cleared session: %v", saveErr)
     }
 
@@ -2148,7 +2151,7 @@ func TestManager_ALoadBlockedInTheStorageEndsWithItsContext(t *testing.T) {
 
     result := make(chan error, 1)
     go func() {
-        _, loadErr := manager.Session(ctx, generateSessionId())
+        _, loadErr := manager.Session(sessionRuntimeUnder(ctx), generateSessionId())
         result <- loadErr
     }()
 
@@ -2166,7 +2169,7 @@ func holdStripeWithAHungSave(t *testing.T, manager *Manager, storage *contextBlo
 
     go func() {
         defer close(holderDone)
-        _ = manager.SaveSession(holderContext, storedTestSession(sessionId))
+        _ = manager.SaveSession(sessionRuntimeUnder(holderContext), storedTestSession(sessionId))
     }()
 
     awaitDoor(t, storage.entered, "Save")
@@ -2191,7 +2194,7 @@ func TestManager_AStripeHeldByAHungStorageCutsTheSecondCallerAtItsContext(t *tes
 
     result := make(chan error, 1)
     go func() {
-        result <- manager.DeleteSession(observed, sessionId)
+        result <- manager.DeleteSession(sessionRuntimeUnder(observed), sessionId)
     }()
 
     awaitSignal(t, observed.observed, "the delete to wait for the stripe")
@@ -2218,7 +2221,7 @@ func TestManager_AStripeHeldByAHungStorageCutsTheSecondCallerAtItsContext(t *tes
     }
 
     storage.blockSave = false
-    if saveErr := manager.SaveSession(context.Background(), storedTestSession(sessionId)); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntime(), storedTestSession(sessionId)); nil != saveErr {
         t.Fatalf("expected a fresh copy of the id to save after a cut delete, got %v", saveErr)
     }
 }
@@ -2236,7 +2239,7 @@ func TestManager_AStripeHeldByAHungStorageCutsASecondSaveAtItsDeadline(t *testin
     defer cancel()
 
     second := &Session{id: sessionId, values: map[string]any{"userId": "u-2"}, modified: true, minted: true}
-    requireContextEnded(t, manager.SaveSession(deadlineContext, second), context.DeadlineExceeded)
+    requireContextEnded(t, manager.SaveSession(sessionRuntimeUnder(deadlineContext), second), context.DeadlineExceeded)
 
     if false == second.isMinted() {
         t.Fatalf("expected a save cut before the storage not to mark the session stored")
@@ -2256,7 +2259,7 @@ func TestManager_ACutWaitLeavesTheStripeFree(t *testing.T) {
 
     result := make(chan error, 1)
     go func() {
-        result <- manager.SaveSession(observed, storedTestSession(sessionId))
+        result <- manager.SaveSession(sessionRuntimeUnder(observed), storedTestSession(sessionId))
     }()
 
     awaitSignal(t, observed.observed, "the save to wait for the stripe")
@@ -2269,7 +2272,7 @@ func TestManager_ACutWaitLeavesTheStripeFree(t *testing.T) {
     boundedContext, cancelBounded := context.WithTimeout(context.Background(), time.Second)
     defer cancelBounded()
 
-    if saveErr := manager.SaveSession(boundedContext, storedTestSession(sessionId)); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntimeUnder(boundedContext), storedTestSession(sessionId)); nil != saveErr {
         t.Fatalf("expected a third caller to take the stripe at once, got %v", saveErr)
     }
 }
@@ -2284,6 +2287,7 @@ type burialProbeStorage struct {
     deleteEntered       chan struct{}
     mutex               sync.Mutex
     armedLoadContexts   []context.Context
+    armedLoadRuntimes   []containercontract.Runtime
     armedLoadErrAtEntry []error
 }
 
@@ -2294,10 +2298,12 @@ func newBurialProbeStorage() *burialProbeStorage {
     }
 }
 
-func (instance *burialProbeStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
+func (instance *burialProbeStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
+    ctx := runtimeInstance.Context()
     if true == instance.armed.Load() {
         instance.mutex.Lock()
         instance.armedLoadContexts = append(instance.armedLoadContexts, ctx)
+        instance.armedLoadRuntimes = append(instance.armedLoadRuntimes, runtimeInstance)
         instance.armedLoadErrAtEntry = append(instance.armedLoadErrAtEntry, ctx.Err())
         instance.mutex.Unlock()
 
@@ -2312,21 +2318,22 @@ func (instance *burialProbeStorage) Load(ctx context.Context, sessionId string) 
         }
     }
 
-    return instance.inner.Load(ctx, sessionId)
+    return instance.inner.Load(runtimeInstance, sessionId)
 }
 
-func (instance *burialProbeStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
-    return instance.inner.Save(ctx, sessionId, data, ttl)
+func (instance *burialProbeStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
+    return instance.inner.Save(runtimeInstance, sessionId, data, ttl)
 }
 
-func (instance *burialProbeStorage) Delete(ctx context.Context, sessionId string) error {
+func (instance *burialProbeStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
+    ctx := runtimeInstance.Context()
     instance.deleteEntered <- struct{}{}
 
     if true == instance.failDelete {
         return errors.New("the removal failed")
     }
 
-    if removeErr := instance.inner.Delete(context.Background(), sessionId); nil != removeErr {
+    if removeErr := instance.inner.Delete(sessionRuntime(), sessionId); nil != removeErr {
         return removeErr
     }
 
@@ -2353,13 +2360,13 @@ func (instance *burialProbeStorage) recordedLoads() ([]context.Context, []error)
 func seedBurialProbe(t *testing.T, manager *Manager, storage *burialProbeStorage) (string, sessioncontract.Session) {
     t.Helper()
 
-    seeded := mustSession(manager.NewSession(context.Background()))
+    seeded := mustSession(manager.NewSession(sessionRuntime()))
     seeded.Set("userId", "u-1")
-    if saveErr := manager.SaveSession(context.Background(), seeded); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntime(), seeded); nil != saveErr {
         t.Fatalf("unexpected seed error: %v", saveErr)
     }
 
-    copyLoaded := mustSession(manager.Session(context.Background(), seeded.Id()))
+    copyLoaded := mustSession(manager.Session(sessionRuntime(), seeded.Id()))
     storage.armed.Store(true)
 
     return seeded.Id(), copyLoaded
@@ -2374,15 +2381,25 @@ func TestManager_TheBurialReadOutlivesTheContextThatCutTheRemoval(t *testing.T) 
     ctx, cancel := context.WithCancel(context.WithValue(context.Background(), plantedContextKey{}, "planted"))
     defer cancel()
 
+    callerScope := container.NewContainer(container.ContainerConfig{}).NewScope()
+    callerRuntime := runtime.NewRequest(ctx, callerScope)
+
     result := make(chan error, 1)
     go func() {
-        result <- manager.DeleteSession(ctx, sessionId)
+        result <- manager.DeleteSession(callerRuntime, sessionId)
     }()
 
     awaitSignal(t, storage.deleteEntered, "the removal")
     cancel()
 
     requireContextEnded(t, awaitError(t, result), context.Canceled)
+
+    storage.mutex.Lock()
+    burialRuntime := storage.armedLoadRuntimes[0]
+    storage.mutex.Unlock()
+    if callerScope != burialRuntime.Scope() || containercontract.KindRequest != burialRuntime.Kind() {
+        t.Fatalf("expected the burial read under the caller's scope and kind, got %s", burialRuntime.Kind())
+    }
 
     received, errorsAtEntry := storage.recordedLoads()
     if 1 != len(received) || nil != errorsAtEntry[0] {
@@ -2394,7 +2411,7 @@ func TestManager_TheBurialReadOutlivesTheContextThatCutTheRemoval(t *testing.T) 
     }
 
     copyLoaded.Set("userId", "u-2")
-    if saveErr := manager.SaveSession(context.Background(), copyLoaded); false == exception.ChainIs(saveErr, ErrSessionDeleted) {
+    if saveErr := manager.SaveSession(sessionRuntime(), copyLoaded); false == exception.ChainIs(saveErr, ErrSessionDeleted) {
         t.Fatalf("expected the removed id buried, got %v", saveErr)
     }
 }
@@ -2405,7 +2422,7 @@ func TestManager_TheBurialReadContextIsReleasedOnceTheReadAnswers(t *testing.T) 
     manager := NewManager(storage, ManagerConfig{StorageTimeout: bound.Of(time.Hour)})
     sessionId, _ := seedBurialProbe(t, manager, storage)
 
-    if deleteErr := manager.DeleteSession(context.Background(), sessionId); nil == deleteErr {
+    if deleteErr := manager.DeleteSession(sessionRuntime(), sessionId); nil == deleteErr {
         t.Fatalf("expected the failed removal to be answered")
     }
 
@@ -2429,7 +2446,7 @@ func TestManager_TheBurialReadIsBoundedByTheStorageTimeout(t *testing.T) {
     start := time.Now()
     result := make(chan error, 1)
     go func() {
-        result <- manager.DeleteSession(context.Background(), sessionId)
+        result <- manager.DeleteSession(sessionRuntime(), sessionId)
     }()
 
     if deleteErr := awaitError(t, result); nil == deleteErr {
@@ -2465,7 +2482,7 @@ func TestManager_APanickingBurialReadLeavesNoTimerArmed(t *testing.T) {
     func() {
         defer func() { _ = recover() }()
 
-        _ = manager.DeleteSession(context.Background(), sessionId)
+        _ = manager.DeleteSession(sessionRuntime(), sessionId)
     }()
 
     received, _ := storage.recordedLoads()
@@ -2493,7 +2510,7 @@ func TestManager_AContextEndedAsTheStripeIsWonReachesNoStorage(t *testing.T) {
     sessionId := generateSessionId()
     stripe := manager.sessionStripeOf(sessionId)
 
-    saveErr := manager.SaveSession(&stripeHeldEndsContext{Context: context.Background(), stripe: stripe}, storedTestSession(sessionId))
+    saveErr := manager.SaveSession(sessionRuntimeUnder(&stripeHeldEndsContext{Context: context.Background(), stripe: stripe}), storedTestSession(sessionId))
     requireContextEnded(t, saveErr, context.Canceled)
 
     if calls := storage.loadCalls + storage.saveCalls + storage.deleteCalls; 0 != calls || 0 != len(stripe) {
@@ -2507,7 +2524,7 @@ func TestManager_AnUnlimitedStorageTimeoutGivesTheBurialReadNoDeadline(t *testin
     manager := NewManager(storage, ManagerConfig{StorageTimeout: bound.UnlimitedDuration()})
     sessionId, _ := seedBurialProbe(t, manager, storage)
 
-    if deleteErr := manager.DeleteSession(context.Background(), sessionId); nil == deleteErr {
+    if deleteErr := manager.DeleteSession(sessionRuntime(), sessionId); nil == deleteErr {
         t.Fatalf("expected the failed removal to be answered")
     }
 
@@ -2590,8 +2607,8 @@ type cancellingProbeStorage struct {
     deleteCalls     atomic.Int32
 }
 
-func (instance *cancellingProbeStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
-    data, exists, err := instance.InMemoryStorage.Load(ctx, sessionId)
+func (instance *cancellingProbeStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
+    data, exists, err := instance.InMemoryStorage.Load(runtimeInstance, sessionId)
 
     if cancel := instance.cancelAfterLoad.Swap(nil); nil != cancel {
         (*cancel)()
@@ -2600,40 +2617,71 @@ func (instance *cancellingProbeStorage) Load(ctx context.Context, sessionId stri
     return data, exists, err
 }
 
-func (instance *cancellingProbeStorage) Delete(ctx context.Context, sessionId string) error {
+func (instance *cancellingProbeStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
     instance.deleteCalls.Add(1)
 
-    return instance.InMemoryStorage.Delete(ctx, sessionId)
+    return instance.InMemoryStorage.Delete(runtimeInstance, sessionId)
 }
 
 func TestManager_RegenerateSessionCutBeforeTheRemovalLeavesTheSessionIntact(t *testing.T) {
     storage := &cancellingProbeStorage{InMemoryStorage: NewInMemoryStorage(InMemoryStorageConfig{})}
     manager := NewManager(storage, ManagerConfig{})
 
-    seeded := mustSession(manager.NewSession(context.Background()))
+    seeded := mustSession(manager.NewSession(sessionRuntime()))
     seeded.Set("userId", "u-1")
-    if saveErr := manager.SaveSession(context.Background(), seeded); nil != saveErr {
+    if saveErr := manager.SaveSession(sessionRuntime(), seeded); nil != saveErr {
         t.Fatalf("unexpected seed error: %v", saveErr)
     }
 
-    loaded := mustSession(manager.Session(context.Background(), seeded.Id()))
+    loaded := mustSession(manager.Session(sessionRuntime(), seeded.Id()))
 
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
     storage.cancelAfterLoad.Store(&cancel)
 
-    _, regenerateErr := manager.RegenerateSession(ctx, loaded)
+    _, regenerateErr := manager.RegenerateSession(sessionRuntimeUnder(ctx), loaded)
     requireContextEnded(t, regenerateErr, context.Canceled)
 
     if true == loaded.IsCleared() {
         t.Fatalf("expected the session of a cut rotation not to be cleared")
     }
 
-    if nil == mustSession(manager.Session(context.Background(), seeded.Id())) {
+    if nil == mustSession(manager.Session(sessionRuntime(), seeded.Id())) {
         t.Fatalf("expected the stored entry to survive a cut rotation")
     }
 
     if 0 != storage.deleteCalls.Load() || true == manager.isTombstoned(seeded.Id()) {
         t.Fatalf("expected a cut rotation to remove and bury nothing")
+    }
+}
+
+/* scopelessSessionRuntime carries a context and no scope, which only a runtime of another implementation can */
+type scopelessSessionRuntime struct {
+    containercontract.Runtime
+}
+
+func (instance scopelessSessionRuntime) Context() context.Context {
+    return context.Background()
+}
+
+func (instance scopelessSessionRuntime) Scope() containercontract.Scope {
+    return nil
+}
+
+func TestManager_EveryDoorRefusesARuntimeWithoutAScope(t *testing.T) {
+    storage := &storageCallCountingStorage{}
+    manager := NewManager(storage, ManagerConfig{})
+    scopeless := scopelessSessionRuntime{}
+
+    _, sessionErr := manager.Session(scopeless, "malformed")
+    _, newErr := manager.NewSession(scopeless)
+    _, regenerateErr := manager.RegenerateSession(scopeless, nil)
+
+    for _, refusal := range []error{sessionErr, newErr, manager.SaveSession(scopeless, nil), manager.DeleteSession(scopeless, "malformed"), regenerateErr} {
+        requireErrorMessage(t, refusal, "the runtime carries no scope")
+    }
+
+    if 0 != storage.loadCalls+storage.saveCalls+storage.deleteCalls {
+        t.Fatalf("expected no storage call under a scopeless runtime")
     }
 }

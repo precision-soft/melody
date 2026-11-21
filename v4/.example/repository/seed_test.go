@@ -15,3 +15,9 @@ func TestSeedAll_RefusesARuntimeHoldingNoSeeder(t *testing.T) {
         t.Fatalf("expected a runtime without seeders refused, got %v", seedErr)
     }
 }
+
+func TestSeedAll_RefusesAnAbsentRuntimeAsAnError(t *testing.T) {
+    if seedErr := SeedAll(nil); nil == seedErr {
+        t.Fatalf("expected an absent runtime refused")
+    }
+}

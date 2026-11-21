@@ -568,3 +568,11 @@ var _ securitycontract.Voter = (*fallibleTestVoter)(nil)
 func withItsRuntime(request httpcontract.Request) (containercontract.Runtime, httpcontract.Request) {
     return request.RuntimeInstance(), request
 }
+
+func sessionRuntime() containercontract.Runtime {
+    return sessionRuntimeUnder(context.Background())
+}
+
+func sessionRuntimeUnder(ctx context.Context) containercontract.Runtime {
+    return runtime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
+}

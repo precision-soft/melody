@@ -34,6 +34,7 @@ type stubSessionManager struct {
     deleteErr          error
     storageTimeout     bound.Duration
     saveContext        context.Context
+    saveRuntime        containercontract.Runtime
     deleteContext      context.Context
     saveDeadline       time.Duration
     savePanic          any
@@ -41,21 +42,23 @@ type stubSessionManager struct {
     timeoutAsked       int
 }
 
-func (instance *stubSessionManager) Session(ctx context.Context, sessionId string) (contract.Session, error) {
+func (instance *stubSessionManager) Session(runtimeInstance containercontract.Runtime, sessionId string) (contract.Session, error) {
     return nil, nil
 }
 
-func (instance *stubSessionManager) NewSession(ctx context.Context) (contract.Session, error) {
+func (instance *stubSessionManager) NewSession(runtimeInstance containercontract.Runtime) (contract.Session, error) {
     return nil, nil
 }
 
-func (instance *stubSessionManager) RegenerateSession(ctx context.Context, sessionInstance contract.Session) (contract.Session, error) {
+func (instance *stubSessionManager) RegenerateSession(runtimeInstance containercontract.Runtime, sessionInstance contract.Session) (contract.Session, error) {
     return nil, nil
 }
 
-func (instance *stubSessionManager) SaveSession(ctx context.Context, sessionInstance contract.Session) error {
+func (instance *stubSessionManager) SaveSession(runtimeInstance containercontract.Runtime, sessionInstance contract.Session) error {
+    ctx := runtimeInstance.Context()
     instance.saveCalled++
     instance.saveContext = ctx
+    instance.saveRuntime = runtimeInstance
 
     if deadline, hasDeadline := ctx.Deadline(); true == hasDeadline {
         instance.saveDeadline = time.Until(deadline)
@@ -68,7 +71,8 @@ func (instance *stubSessionManager) SaveSession(ctx context.Context, sessionInst
     return instance.saveErr
 }
 
-func (instance *stubSessionManager) DeleteSession(ctx context.Context, sessionId string) error {
+func (instance *stubSessionManager) DeleteSession(runtimeInstance containercontract.Runtime, sessionId string) error {
+    ctx := runtimeInstance.Context()
     instance.deleteCalled++
     instance.deleteContext = ctx
 
@@ -262,7 +266,7 @@ func TestWriteResponse_SetsSessionCookieWithSecureAndSameSite(t *testing.T) {
     melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
 
     writeResponse(
-        nil,
+        sessionRuntime(),
         melodyRequest,
         writer,
         response,
@@ -335,7 +339,7 @@ func TestWriteResponse_ClearsSessionCookieWithMaxAgeNegative(t *testing.T) {
     melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
 
     writeResponse(
-        nil,
+        sessionRuntime(),
         melodyRequest,
         writer,
         response,
@@ -1135,7 +1139,7 @@ func TestWriteResponse_NilResponsePersistsSessionAndWritesNoContent(t *testing.T
     melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
 
     writeResponse(
-        nil,
+        sessionRuntime(),
         melodyRequest,
         writer,
         nil,
@@ -1195,7 +1199,7 @@ func TestWriteResponse_SkipsPersistenceForATypedNilSession(t *testing.T) {
     melodyRequest.Attributes().Set(requestAttributeSession, typedNilSession)
 
     writeResponse(
-        nil,
+        sessionRuntime(),
         melodyRequest,
         writer,
         response,
@@ -1237,7 +1241,7 @@ func TestWriteResponse_SkipsPersistenceForATypedNilManager(t *testing.T) {
     melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
 
     writeResponse(
-        nil,
+        sessionRuntime(),
         melodyRequest,
         writer,
         response,
@@ -1270,7 +1274,7 @@ func TestWriteResponse_ADeletedSessionExpiresTheCookieAndKeepsTheResponse(t *tes
     melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
 
     writeResponse(
-        nil,
+        sessionRuntime(),
         melodyRequest,
         writer,
         response,
@@ -1328,7 +1332,7 @@ func TestWriteResponse_AnExpiringSessionCookieMarksTheResponsePrivate(t *testing
         melodyRequest.Attributes().Set(requestAttributeSession, arm.sessionInstance)
 
         writeResponse(
-            nil,
+            sessionRuntime(),
             melodyRequest,
             writer,
             response,
@@ -1374,7 +1378,7 @@ func TestWriteResponse_ARotatedAwaySessionKeepsTheCookieAndTheResponse(t *testin
     melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
 
     writeResponse(
-        nil,
+        sessionRuntime(),
         melodyRequest,
         writer,
         response,
@@ -1413,7 +1417,7 @@ func TestWriteResponse_ASaveOutageAnswersServiceUnavailableWithoutACookie(t *tes
     melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
 
     writeResponse(
-        nil,
+        sessionRuntime(),
         melodyRequest,
         writer,
         response,
@@ -1447,7 +1451,7 @@ func TestWriteResponse_ReadsATypedNilResponseAsTheEmptyDefault(t *testing.T) {
     recorder := httptest.NewRecorder()
 
     writeResponse(
-        nil,
+        sessionRuntime(),
         nil,
         recorder,
         unassignedResponse,
@@ -1480,7 +1484,7 @@ func TestWriteResponse_ReturnsTheReplacedServiceUnavailableOnASaveOutage(t *test
     melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
 
     writtenResponse := writeResponse(
-        nil,
+        sessionRuntime(),
         melodyRequest,
         writer,
         response,
@@ -1510,7 +1514,7 @@ func TestWriteResponse_ReturnsTheCallersResponseWhenNothingReplacedIt(t *testing
     writer := httptest.NewRecorder()
 
     writtenResponse := writeResponse(
-        nil,
+        sessionRuntime(),
         melodyRequest,
         writer,
         response,
@@ -1555,7 +1559,7 @@ func TestWriteResponse_TheBranchDecisionFollowsTheSnapshotNotTheAccessors(t *tes
     melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
 
     writeResponse(
-        nil,
+        sessionRuntime(),
         melodyRequest,
         writer,
         EmptyResponse(nethttp.StatusOK),
@@ -1612,7 +1616,7 @@ func TestWriteResponse_RefusesTheOutOfRangeCodeBeforeTheDelegate(t *testing.T) {
     recorder := httptest.NewRecorder()
 
     written := writeResponse(
-        nil,
+        sessionRuntime(),
         melodyRequest,
         recorder,
         EmptyResponse(99),
@@ -1704,7 +1708,7 @@ func TestWriteResponse_ADiscardedResponseReportsTheCommittedStatus(t *testing.T)
     _, _ = writer.Write([]byte("data: hello\n\n"))
 
     reported := writeResponse(
-        nil,
+        sessionRuntime(),
         melodyRequest,
         writer,
         EmptyResponse(nethttp.StatusNoContent),
@@ -1731,7 +1735,7 @@ func TestWriteResponse_AHijackedConnectionKeepsTheSubstituteStatus(t *testing.T)
     }
 
     reported := writeResponse(
-        nil,
+        sessionRuntime(),
         melodyRequest,
         writer,
         EmptyResponse(nethttp.StatusNoContent),
@@ -2307,7 +2311,7 @@ func TestWriteResponse_AClearedSessionTheRequestDoesNotNameIsNotDeleted(t *testi
     sessionRequest.Attributes().Set(requestAttributeSession, &stubSession{id: "0123456789abcdef0123456789abcdef", isCleared: true})
 
     writeResponse(
-        nil,
+        sessionRuntime(),
         sessionRequest,
         writer,
         EmptyResponse(nethttp.StatusOK),
@@ -2333,18 +2337,18 @@ type deleteCountingSessionStorage struct {
     deletes int
 }
 
-func (instance *deleteCountingSessionStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
-    return instance.inner.Load(ctx, sessionId)
+func (instance *deleteCountingSessionStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
+    return instance.inner.Load(runtimeInstance, sessionId)
 }
 
-func (instance *deleteCountingSessionStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
-    return instance.inner.Save(ctx, sessionId, data, ttl)
+func (instance *deleteCountingSessionStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
+    return instance.inner.Save(runtimeInstance, sessionId, data, ttl)
 }
 
-func (instance *deleteCountingSessionStorage) Delete(ctx context.Context, sessionId string) error {
+func (instance *deleteCountingSessionStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
     instance.deletes++
 
-    return instance.inner.Delete(ctx, sessionId)
+    return instance.inner.Delete(runtimeInstance, sessionId)
 }
 
 func (instance *deleteCountingSessionStorage) CloseWithContext(closeContext context.Context) error {
@@ -2396,7 +2400,7 @@ func TestKernel_ALogoutWhoseCookieNamesAStoredSessionDeletesIt(t *testing.T) {
     storage := &deleteCountingSessionStorage{inner: session.NewInMemoryStorage(session.InMemoryStorageConfig{})}
 
     storedId := "0123456789abcdef0123456789abcdef"
-    if saveErr := storage.inner.Save(context.Background(), storedId, map[string]any{"userId": "u-1"}, bound.Of(time.Minute)); nil != saveErr {
+    if saveErr := storage.inner.Save(sessionRuntime(), storedId, map[string]any{"userId": "u-1"}, bound.Of(time.Minute)); nil != saveErr {
         t.Fatalf("unexpected error seeding the session: %v", saveErr)
     }
 
@@ -2406,7 +2410,7 @@ func TestKernel_ALogoutWhoseCookieNamesAStoredSessionDeletesIt(t *testing.T) {
         t.Fatalf("expected the stored session removed once, got %d", storage.deletes)
     }
 
-    if _, held, _ := storage.inner.Load(context.Background(), storedId); true == held {
+    if _, held, _ := storage.inner.Load(sessionRuntime(), storedId); true == held {
         t.Fatalf("expected the stored session gone")
     }
 }
@@ -2582,7 +2586,7 @@ func TestWriteResponse_AnUnmarkedCyclicChainFromTheSessionSaveIsAnsweredWithAnIn
         melodyRequest.Attributes().Set(requestAttributeSession, &stubSession{id: "session-123", isModified: true})
 
         writeResponse(
-            nil,
+            sessionRuntime(),
             melodyRequest,
             writer,
             TextResponse(nethttp.StatusOK, "welcome"),
@@ -2755,10 +2759,11 @@ type errorAtCallContextManager struct {
     errAtCall error
 }
 
-func (instance *errorAtCallContextManager) SaveSession(ctx context.Context, sessionInstance contract.Session) error {
+func (instance *errorAtCallContextManager) SaveSession(runtimeInstance containercontract.Runtime, sessionInstance contract.Session) error {
+    ctx := runtimeInstance.Context()
     instance.errAtCall = ctx.Err()
 
-    return instance.stubSessionManager.SaveSession(ctx, sessionInstance)
+    return instance.stubSessionManager.SaveSession(runtimeInstance, sessionInstance)
 }
 
 func TestWriteResponse_ThePersistenceContextIsLiveAtTheCall(t *testing.T) {
@@ -2905,7 +2910,7 @@ func TestWriteResponse_ASaveOutageAnswersTheKernelsRetryAfter(t *testing.T) {
 
     writer := httptest.NewRecorder()
     writeResponse(
-        nil,
+        sessionRuntime(),
         sessionRequest,
         writer,
         TextResponse(nethttp.StatusOK, "welcome"),
@@ -2926,12 +2931,14 @@ type hangingSessionManager struct {
     stubSessionManager
 }
 
-func (instance *hangingSessionManager) SaveSession(ctx context.Context, sessionInstance contract.Session) error {
+func (instance *hangingSessionManager) SaveSession(runtimeInstance containercontract.Runtime, sessionInstance contract.Session) error {
+    ctx := runtimeInstance.Context()
     instance.saveCalled++
     return awaitStorageContext(ctx)
 }
 
-func (instance *hangingSessionManager) DeleteSession(ctx context.Context, sessionId string) error {
+func (instance *hangingSessionManager) DeleteSession(runtimeInstance containercontract.Runtime, sessionId string) error {
+    ctx := runtimeInstance.Context()
     instance.deleteCalled++
     return awaitStorageContext(ctx)
 }
@@ -3078,5 +3085,71 @@ func TestWriteResponse_ADeleteOutageOnAHijackedConnectionKeepsTheHandlersRespons
 
     if nethttp.StatusOK != response.StatusCode() {
         t.Fatalf("expected the handler's response kept on a committed connection, got %d", response.StatusCode())
+    }
+}
+
+func TestWriteResponse_ThePersistenceRuntimeKeepsTheRequestsScopeAndKind(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest.Attributes().Set(requestAttributeSession, &stubSession{id: "session-123", isModified: true})
+
+    requestScope := container.NewContainer(container.ContainerConfig{}).NewScope()
+    requestRuntime := runtime.NewRequest(netRequest.Context(), requestScope)
+    sessionManager := &stubSessionManager{}
+
+    writeResponse(
+        requestRuntime,
+        melodyRequest,
+        httptest.NewRecorder(),
+        TextResponse(nethttp.StatusOK, "body"),
+        sessionManager,
+        httpcontract.ForwardedHeadersPolicy{},
+        httpcontract.SessionCookiePolicy{Path: "/"},
+        0,
+        nil,
+    )
+
+    if 1 != sessionManager.saveCalled || nil == sessionManager.saveRuntime {
+        t.Fatalf("expected the session saved once")
+    }
+
+    if containercontract.KindRequest != sessionManager.saveRuntime.Kind() || requestScope != sessionManager.saveRuntime.Scope() {
+        t.Fatalf("expected the save under the request's scope and kind, got %s", sessionManager.saveRuntime.Kind())
+    }
+}
+
+func TestWriteResponse_AnAbsentRuntimeRefusesThePersistenceWithoutAPanic(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest.Attributes().Set(requestAttributeSession, &stubSession{id: "session-123", isModified: true})
+
+    sessionManager := &stubSessionManager{}
+    writer := httptest.NewRecorder()
+
+    writeResponse(nil, melodyRequest, writer, TextResponse(nethttp.StatusOK, "body"), sessionManager, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{Path: "/"}, 0, nil)
+
+    if 0 != sessionManager.saveCalled || nethttp.StatusInternalServerError != writer.Result().StatusCode {
+        t.Fatalf("expected no save and a 500 under an absent runtime, got %d saves and %d", sessionManager.saveCalled, writer.Result().StatusCode)
+    }
+}
+
+func TestWriteResponse_ARefusedStorageTimeoutIsNotNamedTheBoundUnderAnExpiredRequest(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest.Attributes().Set(requestAttributeSession, &stubSession{id: "session-123", isModified: true})
+
+    expiredContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    sessionManager := &stubSessionManager{storageTimeout: bound.Of(time.Microsecond)}
+    writer := httptest.NewRecorder()
+
+    writeResponse(runtime.NewRequest(expiredContext, container.NewContainer(container.ContainerConfig{}).NewScope()), melodyRequest, writer, TextResponse(nethttp.StatusOK, "body"), sessionManager, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{Path: "/"}, 0, nil)
+
+    if 0 != sessionManager.saveCalled || nethttp.StatusInternalServerError != writer.Result().StatusCode {
+        t.Fatalf("expected the refused bound answered 500 with no save, got %d saves and %d", sessionManager.saveCalled, writer.Result().StatusCode)
     }
 }

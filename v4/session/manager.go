@@ -11,7 +11,10 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
@@ -151,10 +154,16 @@ func ResolveStorageTimeout(manager sessioncontract.Manager) (bound.Resolved[time
 }
 
 /* Session answers the stored session, nil when the id names none; a storage outage carries exception.MarkInfrastructureFailure. */
-func (instance *Manager) Session(ctx context.Context, sessionId string) (sessioncontract.Session, error) {
-    if nilErr := sessioncontract.RefuseNilContext(ctx); nil != nilErr {
+func (instance *Manager) Session(runtimeInstance containercontract.Runtime, sessionId string) (sessioncontract.Session, error) {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         return nil, nilErr
     }
+
+    if nilErr := refuseScopelessRuntime(runtimeInstance); nil != nilErr {
+        return nil, nilErr
+    }
+
+    ctx := runtimeInstance.Context()
 
     if false == isValidSessionId(sessionId) {
         return nil, nil
@@ -164,7 +173,7 @@ func (instance *Manager) Session(ctx context.Context, sessionId string) (session
         return nil, contextEndedError(ctx, "Session", sessionId)
     }
 
-    data, exists, err := instance.storage.Load(ctx, sessionId)
+    data, exists, err := instance.storage.Load(runtimeInstance, sessionId)
     if nil != err {
         return nil, exception.NewError(
             "could not load the session",
@@ -192,12 +201,16 @@ func (instance *Manager) Session(ctx context.Context, sessionId string) (session
 }
 
 /* NewSession answers a session under an id the storage does not hold; a probe outage is marked as an infrastructure failure, and 128 held ids in a row is an unmarked error. */
-func (instance *Manager) NewSession(ctx context.Context) (sessioncontract.Session, error) {
-    if nilErr := sessioncontract.RefuseNilContext(ctx); nil != nilErr {
+func (instance *Manager) NewSession(runtimeInstance containercontract.Runtime) (sessioncontract.Session, error) {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         return nil, nilErr
     }
 
-    sessionId, mintErr := instance.uniqueSessionId(ctx, "NewSession")
+    if nilErr := refuseScopelessRuntime(runtimeInstance); nil != nilErr {
+        return nil, nilErr
+    }
+
+    sessionId, mintErr := instance.uniqueSessionId(runtimeInstance, "NewSession")
     if nil != mintErr {
         return nil, mintErr
     }
@@ -212,8 +225,12 @@ func (instance *Manager) NewSession(ctx context.Context) (sessioncontract.Sessio
 }
 
 /* RegenerateSession answers the values under a fresh id, marked modified, removes the previous entry and latches the session passed in cleared; a buried id is refused before anything is stored. */
-func (instance *Manager) RegenerateSession(ctx context.Context, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
-    if nilErr := sessioncontract.RefuseNilContext(ctx); nil != nilErr {
+func (instance *Manager) RegenerateSession(runtimeInstance containercontract.Runtime, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+        return nil, nilErr
+    }
+
+    if nilErr := refuseScopelessRuntime(runtimeInstance); nil != nilErr {
         return nil, nilErr
     }
 
@@ -240,7 +257,7 @@ func (instance *Manager) RegenerateSession(ctx context.Context, sessionInstance 
     values := sessionInstance.All()
 
     /* minted before the previous entry is removed, so a probe outage leaves the session in use intact */
-    rotatedId, mintErr := instance.uniqueSessionId(ctx, "RegenerateSession")
+    rotatedId, mintErr := instance.uniqueSessionId(runtimeInstance, "RegenerateSession")
     if nil != mintErr {
         return nil, exception.NewError(
             "session id could not be minted in regenerate session",
@@ -255,7 +272,7 @@ func (instance *Manager) RegenerateSession(ctx context.Context, sessionInstance 
     concreteSession, isConcrete := sessionInstance.(*Session)
     if false == isConcrete || false == concreteSession.isMinted() {
         /* checked, removed and buried in one critical section, so a request that loaded it can neither write it back nor rotate it again */
-        deleteErr := instance.deleteSessionRecordingCause(ctx, previousId, true)
+        deleteErr := instance.deleteSessionRecordingCause(runtimeInstance, previousId, true)
         if nil != deleteErr {
             return nil, deleteErr
         }
@@ -274,10 +291,16 @@ func (instance *Manager) RegenerateSession(ctx context.Context, sessionInstance 
 }
 
 /* SaveSession stores the session under its id, holding the id's stripe across the storage's Save; a context that ends during the wait answers an infrastructure failure. */
-func (instance *Manager) SaveSession(ctx context.Context, sessionInstance sessioncontract.Session) error {
-    if nilErr := sessioncontract.RefuseNilContext(ctx); nil != nilErr {
+func (instance *Manager) SaveSession(runtimeInstance containercontract.Runtime, sessionInstance sessioncontract.Session) error {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         return nilErr
     }
+
+    if nilErr := refuseScopelessRuntime(runtimeInstance); nil != nilErr {
+        return nilErr
+    }
+
+    ctx := runtimeInstance.Context()
 
     /* a typed-nil session would panic in the snapshot below, inside the response path's recovery defer */
     if true == internal.IsNilInterface(sessionInstance) {
@@ -297,7 +320,7 @@ func (instance *Manager) SaveSession(ctx context.Context, sessionInstance sessio
             return nil
         }
 
-        return instance.DeleteSession(ctx, sessionInstance.Id())
+        return instance.DeleteSession(runtimeInstance, sessionInstance.Id())
     }
 
     if false == sessionModified {
@@ -326,7 +349,7 @@ func (instance *Manager) SaveSession(ctx context.Context, sessionInstance sessio
         return refusalErr
     }
 
-    saveErr := instance.storage.Save(ctx, sessionId, values, instance.ttl)
+    saveErr := instance.storage.Save(runtimeInstance, sessionId, values, instance.ttl)
 
     /* once a save was attempted the id may be stored, so a later rotation removes and buries it */
     if concreteSession, isConcrete := sessionInstance.(*Session); true == isConcrete {
@@ -347,15 +370,21 @@ func (instance *Manager) SaveSession(ctx context.Context, sessionInstance sessio
 }
 
 /* DeleteSession removes the session and buries its id under the id's stripe; after a failed removal one bounded read, past the caller's cancellation, decides the burial. */
-func (instance *Manager) DeleteSession(ctx context.Context, sessionId string) error {
-    if nilErr := sessioncontract.RefuseNilContext(ctx); nil != nilErr {
+func (instance *Manager) DeleteSession(runtimeInstance containercontract.Runtime, sessionId string) error {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         return nilErr
     }
 
-    return instance.deleteSessionRecordingCause(ctx, sessionId, false)
+    if nilErr := refuseScopelessRuntime(runtimeInstance); nil != nilErr {
+        return nilErr
+    }
+
+    return instance.deleteSessionRecordingCause(runtimeInstance, sessionId, false)
 }
 
-func (instance *Manager) deleteSessionRecordingCause(ctx context.Context, sessionId string, rotated bool) error {
+func (instance *Manager) deleteSessionRecordingCause(runtimeInstance containercontract.Runtime, sessionId string, rotated bool) error {
+    ctx := runtimeInstance.Context()
+
     if false == isValidSessionId(sessionId) {
         return exception.NewError(
             "session id is invalid in delete session",
@@ -384,13 +413,13 @@ func (instance *Manager) deleteSessionRecordingCause(ctx context.Context, sessio
         }
     }
 
-    deleteErr := instance.storage.Delete(ctx, sessionId)
+    deleteErr := instance.storage.Delete(runtimeInstance, sessionId)
 
     /* a burial over a surviving entry would read as a logout on the next save, so a failed removal is buried only when a fresh read says the entry went */
     removed := nil == deleteErr
     if nil != deleteErr {
         /* outlives the context that may have cut the removal, and is bounded, since the stripe is held across it */
-        removed = instance.entryWentAfterFailedRemoval(ctx, sessionId)
+        removed = instance.entryWentAfterFailedRemoval(runtimeInstance, sessionId)
     }
 
     /* every id gone after the removal is buried, a lapsed or evicted one too, so a held copy cannot write the ended session back */
@@ -487,23 +516,39 @@ func (instance *Manager) acquireSessionStripe(ctx context.Context, door string, 
     }
 }
 
-func (instance *Manager) entryWentAfterFailedRemoval(ctx context.Context, sessionId string) bool {
-    burialContext, releaseBurialContext := instance.burialContext(ctx)
-    defer releaseBurialContext()
+func (instance *Manager) entryWentAfterFailedRemoval(runtimeInstance containercontract.Runtime, sessionId string) bool {
+    burialRuntime, releaseBurialRuntime := instance.burialRuntime(runtimeInstance)
+    defer releaseBurialRuntime()
 
-    _, stillHeld, readErr := instance.storage.Load(burialContext, sessionId)
+    _, stillHeld, readErr := instance.storage.Load(burialRuntime, sessionId)
 
     return nil == readErr && false == stillHeld
 }
 
-func (instance *Manager) burialContext(ctx context.Context) (context.Context, context.CancelFunc) {
-    detached := context.WithoutCancel(ctx)
-
-    if true == instance.storageTimeout.Unlimited {
-        return detached, func() {}
+/* the burial read derives a runtime over the caller's scope, which a runtime of another implementation may not carry */
+func refuseScopelessRuntime(runtimeInstance containercontract.Runtime) error {
+    if true == internal.IsNilInterface(runtimeInstance.Scope()) {
+        return exception.NewError(
+            "the runtime carries no scope",
+            exceptioncontract.Context{"argument": "runtimeInstance"},
+            nil,
+        )
     }
 
-    return context.WithTimeout(detached, instance.storageTimeout.Value)
+    return nil
+}
+
+/* burialRuntime keeps the caller's scope and kind over its context detached from the caller's cancellation and bounded by StorageTimeout */
+func (instance *Manager) burialRuntime(runtimeInstance containercontract.Runtime) (containercontract.Runtime, context.CancelFunc) {
+    detached := context.WithoutCancel(runtimeInstance.Context())
+
+    if true == instance.storageTimeout.Unlimited {
+        return runtime.WithContext(runtimeInstance, detached), func() {}
+    }
+
+    bounded, cancel := context.WithTimeout(detached, instance.storageTimeout.Value)
+
+    return runtime.WithContext(runtimeInstance, bounded), cancel
 }
 
 func (instance *Manager) sessionStripeOf(sessionId string) chan struct{} {
@@ -612,7 +657,9 @@ func (instance *Manager) isTombstonedLocked(sessionId string) bool {
     return instance.tombstoneRetention > instance.clock.Now().Sub(deletedAt)
 }
 
-func (instance *Manager) uniqueSessionId(ctx context.Context, door string) (string, error) {
+func (instance *Manager) uniqueSessionId(runtimeInstance containercontract.Runtime, door string) (string, error) {
+    ctx := runtimeInstance.Context()
+
     maxAttempts := 128
 
     for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -622,7 +669,7 @@ func (instance *Manager) uniqueSessionId(ctx context.Context, door string) (stri
 
         candidateId := generateSessionId()
 
-        _, exists, err := instance.storage.Load(ctx, candidateId)
+        _, exists, err := instance.storage.Load(runtimeInstance, candidateId)
         if nil != err {
             return "", exception.NewError("could not probe a session id", nil, exception.MarkInfrastructureFailure(err))
         }

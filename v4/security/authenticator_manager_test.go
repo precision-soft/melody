@@ -2,10 +2,10 @@ package security
 
 import (
     "errors"
-    containercontract "github.com/precision-soft/melody/v4/container/contract"
     nethttp "net/http"
     "testing"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"

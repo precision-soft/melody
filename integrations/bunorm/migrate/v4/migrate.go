@@ -103,10 +103,12 @@ func RunQueries(ctx context.Context, db *bun.DB, direction string, migrationName
     return nil
 }
 
+/* Up is RunQueries in the up direction, on the context of the bun migration function that calls it. */
 func Up(ctx context.Context, db *bun.DB, migrationName string, queries []Query, option RunnerOption) error {
     return RunQueries(ctx, db, "up", migrationName, queries, option)
 }
 
+/* Down is RunQueries in the down direction, on the context of the bun migration function that calls it. */
 func Down(ctx context.Context, db *bun.DB, migrationName string, queries []Query, option RunnerOption) error {
     return RunQueries(ctx, db, "down", migrationName, queries, option)
 }

@@ -4,6 +4,8 @@ import (
     "context"
     "sync"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
@@ -38,20 +40,33 @@ func markSessionUnavailable(err error) error {
     return &sessionUnavailableError{cause: err}
 }
 
-/* on the request's own context, so a client that left still stops the call */
-func storageCallContext(requestContext context.Context, manager sessioncontract.Manager) (context.Context, context.CancelFunc, error) {
+/* the request's runtime bounded by StorageTimeout, on the request's own context, so a client that left still stops the call */
+func storageCallRuntime(requestRuntime containercontract.Runtime, manager sessioncontract.Manager) (containercontract.Runtime, context.CancelFunc, error) {
+    if nilErr := containercontract.RefuseNilRuntime(requestRuntime); nil != nilErr {
+        return requestRuntime, func() {}, nilErr
+    }
+
     timeout, timeoutErr := session.ResolveStorageTimeout(manager)
     if nil != timeoutErr {
-        return requestContext, func() {}, timeoutErr
+        return requestRuntime, func() {}, timeoutErr
     }
 
     if true == timeout.Unlimited {
-        return requestContext, func() {}, nil
+        return requestRuntime, func() {}, nil
     }
 
-    callContext, cancel := context.WithTimeout(requestContext, timeout.Value)
+    callContext, cancel := context.WithTimeout(requestRuntime.Context(), timeout.Value)
 
-    return callContext, cancel, nil
+    return runtime.WithContext(requestRuntime, callContext), cancel, nil
+}
+
+/* an absent runtime reads as a context that never ends, so the classification of its refusal names no bound */
+func contextOfRuntime(runtimeInstance containercontract.Runtime) context.Context {
+    if true == internal.IsNilInterface(runtimeInstance) || true == internal.IsNilInterface(runtimeInstance.Context()) {
+        return context.Background()
+    }
+
+    return runtimeInstance.Context()
 }
 
 /* a call the bound cut while the request was live is an outage naming the bound; the request's own end stays the manager's answer */
@@ -70,7 +85,7 @@ func namedStorageBound(requestContext context.Context, callContext context.Conte
 /* loaded at most once: a failed load answers the same filed error to every later read */
 type requestSession struct {
     mutex          sync.Mutex
-    requestContext context.Context
+    requestRuntime containercontract.Runtime
     manager        sessioncontract.Manager
     request        httpcontract.Request
     logger         loggingcontract.Logger
@@ -83,7 +98,7 @@ type requestSession struct {
 }
 
 func newRequestSession(
-    requestContext context.Context,
+    requestRuntime containercontract.Runtime,
     manager sessioncontract.Manager,
     request httpcontract.Request,
     logger loggingcontract.Logger,
@@ -92,7 +107,7 @@ func newRequestSession(
     policy httpcontract.SessionPolicy,
 ) *requestSession {
     return &requestSession{
-        requestContext: requestContext,
+        requestRuntime: requestRuntime,
         manager:        manager,
         request:        request,
         logger:         logger,
@@ -112,20 +127,20 @@ func (instance *requestSession) load() (sessioncontract.Session, error) {
 
     var sessionInstance sessioncontract.Session
 
-    loadContext, releaseLoadContext, loadErr := storageCallContext(instance.requestContext, instance.manager)
-    defer releaseLoadContext()
+    loadRuntime, releaseLoadRuntime, loadErr := storageCallRuntime(instance.requestRuntime, instance.manager)
+    defer releaseLoadRuntime()
 
     if nil == loadErr && true == instance.cookiePresent {
-        sessionInstance, loadErr = instance.manager.Session(loadContext, instance.cookieValue)
+        sessionInstance, loadErr = instance.manager.Session(loadRuntime, instance.cookieValue)
     }
 
     /* a replaceable manager may answer a typed-nil session or a typed-nil error, which a bare comparison misreads */
     if true == internal.IsNilInterface(loadErr) && true == internal.IsNilInterface(sessionInstance) {
-        sessionInstance, loadErr = instance.manager.NewSession(loadContext)
+        sessionInstance, loadErr = instance.manager.NewSession(loadRuntime)
     }
 
     if false == internal.IsNilInterface(loadErr) {
-        loadErr = namedStorageBound(instance.requestContext, loadContext, loadErr)
+        loadErr = namedStorageBound(contextOfRuntime(instance.requestRuntime), contextOfRuntime(loadRuntime), loadErr)
     }
 
     if false == internal.IsNilInterface(loadErr) {
@@ -150,7 +165,7 @@ func (instance *requestSession) load() (sessioncontract.Session, error) {
                     instance.request,
                     loadErr,
                     "session could not be loaded",
-                    occurrenceRecordConfig{Warning: true == internal.IsClientHangup(instance.requestContext, loadErr)},
+                    occurrenceRecordConfig{Warning: true == internal.IsClientHangup(contextOfRuntime(instance.requestRuntime), loadErr)},
                 )
             }
         }

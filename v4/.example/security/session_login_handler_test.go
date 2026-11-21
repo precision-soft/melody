@@ -49,7 +49,7 @@ func TestSessionLoginHandlerWritesTheIdentityOnTheSessionTheRequestCarries(t *te
 
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodPost, "/login", nil), nil, runtimeInstance, nil)
 
-    arrivedSession := mustSession(manager.NewSession(context.Background()))
+    arrivedSession := mustSession(manager.NewSession(exampleTestRuntime()))
     arrivedSession.Set("cart", "kept across the login")
     _ = melodyhttp.SetRequestSession(request, arrivedSession)
 
@@ -120,7 +120,7 @@ func loginRequest(t *testing.T) (melodycontainercontract.Runtime, melodyhttpcont
     runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodPost, "/login", nil), nil, runtimeInstance, nil)
-    _ = melodyhttp.SetRequestSession(request, mustSession(manager.NewSession(context.Background())))
+    _ = melodyhttp.SetRequestSession(request, mustSession(manager.NewSession(exampleTestRuntime())))
 
     return runtimeInstance, request
 }

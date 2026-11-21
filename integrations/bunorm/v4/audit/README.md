@@ -18,7 +18,7 @@ Additional fields can be dropped globally or per entity via the `Registry` (see 
 
 ### Automatic capture (recommended)
 
-`Tracker` runs the bun write and records the matching entry in one call. An **update** loads the current row by primary key first (`SELECT ... FOR UPDATE`), so the recorded before-image is the row as the database held it, never the model the caller happened to pass:
+`Tracker` runs the bun write and records the matching entry in one call. Its doors, the recorder's, the storages' and `BeginTransaction` take the context of the operation, not a runtime: the audited write runs inside a bun transaction whose handle is that context (`audit.WithDatabase(ctx, tx)`), and a runtime captured outside the transaction would record outside it; code holding a runtime passes `runtimeInstance.Context()` where no transaction is open yet. An **update** loads the current row by primary key first (`SELECT ... FOR UPDATE`), so the recorded before-image is the row as the database held it, never the model the caller happened to pass:
 
 ```go
 recorder := audit.NewRecorder(audit.NewBunStorage(auditDb), audit.RecorderConfig{})
