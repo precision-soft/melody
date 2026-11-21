@@ -4,7 +4,6 @@ import (
     "context"
     "strings"
     "sync"
-    "testing"
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -94,28 +93,32 @@ func newTestRuntimeWithRecordingLogger() (containercontract.Runtime, *messageRec
     return runtime.NewRun(context.Background(), scope), logger
 }
 
-func mustConsumeSession(command *ConsumeCommand, runtimeInstance containercontract.Runtime) *consumeSession {
+/* consumeSessionSource is a command a test opens a session of: the command itself resolves its collaborators from the run's scope, a consumeCommandOverBus hands the bus the test holds */
+type consumeSessionSource interface {
+    newConsumeSession(runtimeInstance containercontract.Runtime) (*consumeSession, error)
+}
+
+/* consumeCommandOverBus is a consume command whose sessions dispatch to a bus the test holds, so the test needs no container */
+type consumeCommandOverBus struct {
+    *ConsumeCommand
+    bus messagebuscontract.Bus
+}
+
+func newConsumeCommandOver(bus messagebuscontract.Bus, config ConsumeCommandConfig) *consumeCommandOverBus {
+    return &consumeCommandOverBus{ConsumeCommand: NewConsumeCommand(config), bus: bus}
+}
+
+func (instance *consumeCommandOverBus) newConsumeSession(runtimeInstance containercontract.Runtime) (*consumeSession, error) {
+    return instance.sessionOver(instance.bus, nil), nil
+}
+
+func mustConsumeSession(command consumeSessionSource, runtimeInstance containercontract.Runtime) *consumeSession {
     session, sessionErr := command.newConsumeSession(runtimeInstance)
     if nil != sessionErr {
         panic(sessionErr)
     }
 
     return session
-}
-
-func registerConsumeServices(t *testing.T, serviceContainer containercontract.Container, policy RetryPolicy) {
-    t.Helper()
-
-    serviceContainer.MustRegister(ServiceConsumeBus, func(containercontract.Resolver) (messagebuscontract.Bus, error) {
-        return NewManager("consume", nil), nil
-    }, container.RegisterOptions{})
-    serviceContainer.MustRegister(ServiceRetryPolicy, func(containercontract.Resolver) (RetryPolicy, error) {
-        return policy, nil
-    }, container.RegisterOptions{})
-    RegisterTransports(
-        transportRegistrarAdapter{serviceContainer: serviceContainer},
-        map[string]messagebuscontract.Transport{"async": NewInMemoryTransport(InMemoryTransportConfig{})},
-    )
 }
 
 func recoveredPanicContext(callback func()) (context exceptioncontract.Context) {

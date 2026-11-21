@@ -21,6 +21,7 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/kernel"
     "github.com/precision-soft/melody/v4/logging"
+    "github.com/precision-soft/melody/v4/messagebus"
 )
 
 /* ApplicationConfig is what an application is built from. A field left out takes its default: no embedded env files, no embedded public files, and the framework defaults of the limits, a 15s read timeout, a 5s read header timeout, a 30s write timeout, a 60s idle timeout, a 1 MiB header cap, a 10s teardown budget, 1,024 container creation waiters and a 5s unavailable retry after. Each limit is the application's own default for the configuration key of the same name, MELODY_HTTP_READ_TIMEOUT, MELODY_HTTP_READ_HEADER_TIMEOUT, MELODY_HTTP_WRITE_TIMEOUT, MELODY_HTTP_IDLE_TIMEOUT, MELODY_HTTP_MAX_HEADER_BYTES, MELODY_TEARDOWN_TIMEOUT, MELODY_CONTAINER_CREATION_WAITERS and MELODY_HTTP_UNAVAILABLE_RETRY_AFTER: the field is the default of its kernel.* parameter, which reads that key unless ParameterOverrides rewrites the parameter. */
@@ -64,8 +65,17 @@ type ApplicationConfig struct {
     /* EnvironmentKeys are the .env keys the application owns, outside the MELODY_ namespace, each with the default, rule, secret mark, retired spellings and refusals of a module's key. They are declared when the application is built, before any parameter is read. A key in the MELODY_ namespace is refused. */
     EnvironmentKeys []configcontract.EnvironmentKey
 
+    /* MessageBus is what the framework hands the melody:messagebus:consume command it registers. */
+    MessageBus MessageBusConfig
+
     /* ParameterOverrides rewrites, by parameter name, the template of a framework (kernel.*) parameter or of a parameter a module's key feeds: "%env(APP_Y)%", "%app.param%", a literal, or any mix. The override is the parameter's one source: the key that would feed it is not read, and a .env artifact that still sets that key refuses the boot naming the override, unless the override itself reads it. kernel.environment and kernel.project_directory are refused. An override of a kernel.* parameter is resolved when the application is built, so it reads keys, literals and other kernel.* parameters only; a name no framework or module key feeds refuses the boot. */
     ParameterOverrides map[string]string
+}
+
+/* MessageBusConfig is the message bus configuration the application owns; the zero value is the framework's. */
+type MessageBusConfig struct {
+    /* Retry is the retry policy of the consume command the framework registers, its one source; a field outside its rule refuses NewApplication by name. */
+    Retry messagebus.RetryPolicy
 }
 
 func NewApplication(
@@ -161,7 +171,11 @@ func NewApplication(
         configuration,
     )
 
+    /* built here, so a retry policy outside its rule refuses the application before anything boots */
+    consumeCommand := messagebus.NewConsumeCommand(messagebus.ConsumeCommandConfig{Retry: applicationConfig.MessageBus.Retry})
+
     application := &Application{
+        consumeCommand:       consumeCommand,
         ctx:                  ctx,
         applicationConfig:    applicationConfig,
         configuration:        configuration,

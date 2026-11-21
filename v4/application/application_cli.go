@@ -119,12 +119,12 @@ func (instance *Application) registerCoreCliCommands() {
     instance.registerCoreCliCommandIfAbsent(http.NewRouteManifestCommand())
 
     if true == serviceContainer.Has(openapi.ServiceOpenApiRegistry) {
-        instance.registerCoreCliCommandIfAbsent(openapi.NewGenerateCommandFromContainer())
+        instance.registerCoreCliCommandIfAbsent(openapi.NewGenerateCommand())
     }
 
     hasBus := true == serviceContainer.Has(messagebus.ServiceConsumeBus) || true == serviceContainer.Has(messagebus.ServiceBus)
     if true == serviceContainer.Has(messagebus.ServiceTransports) && true == hasBus {
-        instance.registerCoreCliCommandIfAbsent(messagebus.NewConsumeCommandFromContainer(messagebus.ConsumeCommandConfig{}))
+        instance.registerCoreCliCommandIfAbsent(instance.consumeCommand)
     }
 }
 

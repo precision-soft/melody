@@ -5,6 +5,7 @@ import (
     "context"
     "errors"
     "os"
+    "reflect"
     "strings"
     "sync"
     "testing"
@@ -12,6 +13,7 @@ import (
 
     urfavecli "github.com/urfave/cli/v3"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/cli"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
@@ -23,6 +25,7 @@ import (
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    "github.com/precision-soft/melody/v4/messagebus"
 )
 
 type exitCodedProbeApplicationCommand struct{}
@@ -578,5 +581,19 @@ func TestBootCli_TheRegisteredContainerCommandDescribesTheApplicationsContainer(
 
     if false == strings.Contains(buffer.String(), "test.described.probe") {
         t.Fatalf("expected the application's services listed, got %s", buffer.String())
+    }
+}
+
+func TestNewApplication_HandsTheMessageBusRetryToTheConsumeCommandItRegisters(t *testing.T) {
+    retry := messagebus.RetryPolicy{MaxRetries: bound.Of(7), BaseDelay: bound.Of(time.Millisecond)}
+
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), MessageBus: MessageBusConfig{Retry: retry}})
+
+    if false == reflect.DeepEqual(messagebus.NewConsumeCommand(messagebus.ConsumeCommandConfig{Retry: retry}), applicationInstance.consumeCommand) {
+        t.Fatalf("expected the consume command built over the application's retry policy")
+    }
+
+    if true == reflect.DeepEqual(messagebus.NewConsumeCommand(messagebus.ConsumeCommandConfig{}), applicationInstance.consumeCommand) {
+        t.Fatalf("expected the application's retry policy, not the framework's default")
     }
 }

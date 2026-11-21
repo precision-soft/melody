@@ -26,6 +26,7 @@ import (
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    "github.com/precision-soft/melody/v4/messagebus"
     "github.com/precision-soft/melody/v4/openapi"
     "github.com/precision-soft/melody/v4/security"
 )
@@ -39,6 +40,7 @@ type Application struct {
     booting             bool
     ctx                 context.Context
     applicationConfig   ApplicationConfig
+    consumeCommand      *messagebus.ConsumeCommand
     configuration       configcontract.Configuration
     runtimeFlags        *RuntimeFlags
     kernel              kernelcontract.Kernel

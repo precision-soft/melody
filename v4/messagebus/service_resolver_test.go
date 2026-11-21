@@ -58,24 +58,7 @@ func TestConsumeBusFromResolver_FallsBackToSharedBus(t *testing.T) {
     }
 }
 
-func TestRetryPolicyFromResolver_AbsentThenPresent(t *testing.T) {
-    serviceContainer := container.NewContainer(container.ContainerConfig{})
-
-    if _, hasPolicy := RetryPolicyFromResolver(t.Context(), serviceContainer); true == hasPolicy {
-        t.Fatalf("expected no retry policy before one is registered")
-    }
-
-    serviceContainer.MustRegister(ServiceRetryPolicy, func(containercontract.Resolver) (RetryPolicy, error) {
-        return RetryPolicy{MaxRetries: bound.Of(9), BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}, nil
-    }, container.RegisterOptions{})
-
-    resolvedPolicy, hasPolicy := RetryPolicyFromResolver(t.Context(), serviceContainer)
-    if false == hasPolicy || bound.Of(9) != resolvedPolicy.MaxRetries {
-        t.Fatalf("expected the registered retry policy, got %+v (present=%v)", resolvedPolicy, hasPolicy)
-    }
-}
-
-func TestNewConsumeCommandFromResolver_HydratesBusTransportsAndRetryThenConsumes(t *testing.T) {
+func TestNewConsumeCommand_ResolvesTheBusAndTransportsAtRunAndKeepsTheConfigsRetryPolicy(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
@@ -96,15 +79,12 @@ func TestNewConsumeCommandFromResolver_HydratesBusTransportsAndRetryThenConsumes
     serviceContainer.MustRegister(ServiceConsumeBus, func(containercontract.Resolver) (messagebuscontract.Bus, error) {
         return consumeBus, nil
     }, container.RegisterOptions{})
-    serviceContainer.MustRegister(ServiceRetryPolicy, func(containercontract.Resolver) (RetryPolicy, error) {
-        return RetryPolicy{MaxRetries: bound.Of(7), BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}, nil
-    }, container.RegisterOptions{})
     RegisterTransports(
         transportRegistrarAdapter{serviceContainer: serviceContainer},
         map[string]messagebuscontract.Transport{"async": transport},
     )
 
-    command := NewConsumeCommandFromContainer(ConsumeCommandConfig{})
+    command := NewConsumeCommand(ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(7), BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
     session := mustConsumeSession(command, runtimeInstance)
 
     if consumeBus != session.bus {
@@ -114,17 +94,10 @@ func TestNewConsumeCommandFromResolver_HydratesBusTransportsAndRetryThenConsumes
         t.Fatalf("expected the transports map to be resolved from the container")
     }
     if 7 != session.retryPolicy.MaxRetries {
-        t.Fatalf("expected the retry policy to be resolved from the container, got MaxRetries=%d", session.retryPolicy.MaxRetries)
+        t.Fatalf("expected the config's retry policy, got MaxRetries=%d", session.retryPolicy.MaxRetries)
     }
     if 0 >= session.retryPolicy.MaxDelay {
         t.Fatalf("expected the resolved retry policy to be normalized (MaxDelay > 0), got %v", session.retryPolicy.MaxDelay)
-    }
-
-    if command.resolveFromContainer {
-        /* the resolution must land in the run-local session and leave the shared command instance untouched: a run-time write to the singleton's fields races the workers of an overlapping run */
-        if nil != command.bus || nil != command.transports {
-            t.Fatalf("expected the container resolution to leave the command instance unmutated")
-        }
     }
 
     if consumeErr := session.consumeFrom(runtimeInstance, session.transports["async"], 1, 1); nil != consumeErr {

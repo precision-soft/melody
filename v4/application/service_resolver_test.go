@@ -132,7 +132,6 @@ var coreServiceNames = []string{
     messagebus.ServiceHandlerLocator,
     messagebus.ServiceTransports,
     messagebus.ServiceTransportsCloser,
-    messagebus.ServiceRetryPolicy,
     security.ServiceFirewallManager,
     securitycontract.ServiceSecurityContext,
     ServiceProcessRole,
@@ -149,8 +148,8 @@ var coreServiceNames = []string{
 }
 
 func TestServiceNames_OfTheCoreMatchOnePattern(t *testing.T) {
-    if 32 != len(coreServiceNames) {
-        t.Fatalf("expected the 32 core names the list states, got %d", len(coreServiceNames))
+    if 31 != len(coreServiceNames) {
+        t.Fatalf("expected the 31 core names the list states, got %d", len(coreServiceNames))
     }
 
     grammar := regexp.MustCompile(`^service\.[a-z0-9]+(\.[a-z0-9_]+)?$`)

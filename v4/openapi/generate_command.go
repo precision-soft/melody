@@ -18,23 +18,12 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-func NewGenerateCommand(info Info, registry *Registry) *GenerateCommand {
-    return &GenerateCommand{
-        info:     info,
-        registry: registry,
-    }
+/* NewGenerateCommand builds the command so it resolves its Info and Registry from the run's scope, which lets the framework register it without the application wiring either. */
+func NewGenerateCommand() *GenerateCommand {
+    return &GenerateCommand{}
 }
 
-/* NewGenerateCommandFromContainer builds the command so it resolves its Info and Registry from the service container at run time, which lets the framework register it without the application wiring either. */
-func NewGenerateCommandFromContainer() *GenerateCommand {
-    return &GenerateCommand{resolveFromContainer: true}
-}
-
-type GenerateCommand struct {
-    info                 Info
-    registry             *Registry
-    resolveFromContainer bool
-}
+type GenerateCommand struct{}
 
 func (instance *GenerateCommand) Name() string {
     return "melody:openapi:generate"
@@ -72,21 +61,17 @@ func (instance *GenerateCommand) Run(
 
     out := commandContext.String("out")
 
-    info := instance.info
-    registry := instance.registry
-    if true == instance.resolveFromContainer {
-        info = InfoFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
-        registry = RegistryMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+    info := InfoFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+    registry := RegistryMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
-        /* a container with the registry and no info service yields an empty Info; the document is still written and the run warns, on the writer when --out names a file and in the journal when the writer is the document itself */
-        if false == runtimeInstance.Scope().Has(ServiceOpenApiInfo) {
-            warning := "no openapi info service is registered; the document's info block is empty"
+    /* a container with the registry and no info service yields an empty Info; the document is still written and the run warns, on the writer when --out names a file and in the journal when the writer is the document itself */
+    if false == runtimeInstance.Scope().Has(ServiceOpenApiInfo) {
+        warning := "no openapi info service is registered; the document's info block is empty"
 
-            if "" == out {
-                instance.journal(runtimeInstance).Warning(warning, loggingcontract.Context{"command": instance.Name()})
-            } else {
-                fmt.Fprint(commandContext.Writer, warning+"\n")
-            }
+        if "" == out {
+            instance.journal(runtimeInstance).Warning(warning, loggingcontract.Context{"command": instance.Name()})
+        } else {
+            fmt.Fprint(commandContext.Writer, warning+"\n")
         }
     }
 

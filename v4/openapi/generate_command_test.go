@@ -133,11 +133,11 @@ func runOpenApiGenerateCommand(
 /* the documented invocation is relative, and anchoring it at whatever directory the process happened to start in writes the document into a different tree per launcher while reporting success — the sibling wiring command has always anchored at the project directory, and the two flags must mean one thing. The parent directories are created on the way, and the atomic write leaves the 0644 mode and no temp residue. */
 func TestGenerateCommand_AnchorsARelativeOutAtTheProjectDirectory(t *testing.T) {
     projectDirectory := t.TempDir()
-    runtimeInstance := newCommandFixtureRuntime(t, projectDirectory, false, false)
+    runtimeInstance := newCommandFixtureRuntime(t, projectDirectory, true, true)
 
     output, runErr := runOpenApiGenerateCommand(
         t,
-        NewGenerateCommand(Info{Title: "Example", Version: "1.0.0"}, NewRegistry()),
+        NewGenerateCommand(),
         runtimeInstance,
         "--out",
         filepath.Join("docs", "api", "openapi.json"),
@@ -184,11 +184,11 @@ func TestGenerateCommand_AnchorsARelativeOutAtTheProjectDirectory(t *testing.T) 
 /* the stdout branch goes through the writer the cli hands over, not the process stdout: a harness that captures the command's output must see the document. */
 func TestGenerateCommand_PrintsTheDocumentToTheWriterWhenOutIsEmpty(t *testing.T) {
     projectDirectory := t.TempDir()
-    runtimeInstance := newCommandFixtureRuntime(t, projectDirectory, false, false)
+    runtimeInstance := newCommandFixtureRuntime(t, projectDirectory, true, true)
 
     output, runErr := runOpenApiGenerateCommand(
         t,
-        NewGenerateCommand(Info{Title: "Example", Version: "1.0.0"}, NewRegistry()),
+        NewGenerateCommand(),
         runtimeInstance,
     )
     if nil != runErr {
@@ -228,8 +228,8 @@ func TestGenerateCommand_TheStdoutDocumentIsNotWrappedInTheBanner(t *testing.T) 
 func runRegisteredOpenApiGenerateCommand(t *testing.T, arguments []string) string {
     t.Helper()
 
-    runtimeInstance := newCommandFixtureRuntime(t, t.TempDir(), false, false)
-    command := NewGenerateCommand(Info{Title: "Example", Version: "1.0.0"}, NewRegistry())
+    runtimeInstance := newCommandFixtureRuntime(t, t.TempDir(), true, true)
+    command := NewGenerateCommand()
 
     rootCommand := melodycli.NewRoot("app", "desc")
     buffer := &bytes.Buffer{}
@@ -250,7 +250,7 @@ func runRegisteredOpenApiGenerateCommand(t *testing.T, arguments []string) strin
 /* the write replaces the file whole; an existing file that is not a JSON document is someone's source a mistyped --out points at, not a previous output of this command. */
 func TestGenerateCommand_RefusesToOverwriteAForeignFile(t *testing.T) {
     projectDirectory := t.TempDir()
-    runtimeInstance := newCommandFixtureRuntime(t, projectDirectory, false, false)
+    runtimeInstance := newCommandFixtureRuntime(t, projectDirectory, true, true)
 
     foreignPath := filepath.Join(projectDirectory, "module.go")
     if writeErr := os.WriteFile(foreignPath, []byte("package config\n"), 0o644); nil != writeErr {
@@ -259,7 +259,7 @@ func TestGenerateCommand_RefusesToOverwriteAForeignFile(t *testing.T) {
 
     _, runErr := runOpenApiGenerateCommand(
         t,
-        NewGenerateCommand(Info{Title: "Example", Version: "1.0.0"}, NewRegistry()),
+        NewGenerateCommand(),
         runtimeInstance,
         "--out",
         "module.go",
@@ -281,12 +281,12 @@ func TestGenerateCommand_RefusesToOverwriteAForeignFile(t *testing.T) {
 /* a file already holding a JSON document is a previous output and is replaced in place, which is what every regeneration does. */
 func TestGenerateCommand_ReplacesAPreviousDocument(t *testing.T) {
     projectDirectory := t.TempDir()
-    runtimeInstance := newCommandFixtureRuntime(t, projectDirectory, false, false)
+    runtimeInstance := newCommandFixtureRuntime(t, projectDirectory, true, true)
 
     for run := 0; run < 2; run++ {
         _, runErr := runOpenApiGenerateCommand(
             t,
-            NewGenerateCommand(Info{Title: "Example", Version: "1.0.0"}, NewRegistry()),
+            NewGenerateCommand(),
             runtimeInstance,
             "--out",
             "openapi.json",
@@ -304,7 +304,7 @@ func TestGenerateCommand_WarnsOnTheWriterWhenTheInfoServiceIsAbsentAndTheDocumen
 
     withoutInfo := newCommandFixtureRuntime(t, projectDirectory, true, false)
 
-    output, runErr := runOpenApiGenerateCommand(t, NewGenerateCommandFromContainer(), withoutInfo, "--out", out)
+    output, runErr := runOpenApiGenerateCommand(t, NewGenerateCommand(), withoutInfo, "--out", out)
     if nil != runErr {
         t.Fatalf("run without info: %v", runErr)
     }
@@ -315,13 +315,26 @@ func TestGenerateCommand_WarnsOnTheWriterWhenTheInfoServiceIsAbsentAndTheDocumen
 
     withInfo := newCommandFixtureRuntime(t, projectDirectory, true, true)
 
-    output, runErr = runOpenApiGenerateCommand(t, NewGenerateCommandFromContainer(), withInfo, "--out", out)
+    output, runErr = runOpenApiGenerateCommand(t, NewGenerateCommand(), withInfo, "--out", out)
     if nil != runErr {
         t.Fatalf("run with info: %v", runErr)
     }
 
     if true == strings.Contains(output, "no openapi info service is registered") {
         t.Fatalf("expected no warning once the info service is registered, got:\n%s", output)
+    }
+}
+
+func TestGenerateCommand_WritesTheInfoTheRunsScopeRegisters(t *testing.T) {
+    projectDirectory := t.TempDir()
+
+    output, runErr := runOpenApiGenerateCommand(t, NewGenerateCommand(), newCommandFixtureRuntime(t, projectDirectory, true, true))
+    if nil != runErr {
+        t.Fatalf("run: %v", runErr)
+    }
+
+    if false == strings.Contains(output, `"title": "Example"`) || false == strings.Contains(output, `"version": "1.0.0"`) {
+        t.Fatalf("expected the registered info in the document, got:\n%s", output)
     }
 }
 
@@ -340,7 +353,7 @@ func TestGenerateCommand_TheStdoutDocumentStaysValidJsonWithoutTheInfoService(t 
         container.RegisterOptions{},
     )
 
-    output, runErr := runOpenApiGenerateCommand(t, NewGenerateCommandFromContainer(), withoutInfo)
+    output, runErr := runOpenApiGenerateCommand(t, NewGenerateCommand(), withoutInfo)
     if nil != runErr {
         t.Fatalf("run without info: %v", runErr)
     }
@@ -392,7 +405,7 @@ func TestGenerateCommand_AConfigurationThatDoesNotResolveDoesNotFailTheStdoutMod
         container.RegisterOptions{},
     )
 
-    output, runErr := runOpenApiGenerateCommand(t, NewGenerateCommandFromContainer(), withoutInfo)
+    output, runErr := runOpenApiGenerateCommand(t, NewGenerateCommand(), withoutInfo)
     if nil != runErr {
         t.Fatalf("run without a resolvable configuration: %v", runErr)
     }
@@ -444,7 +457,7 @@ func TestGenerateCommand_AConfigurationWithoutAKernelSectionDoesNotFailTheStdout
         container.RegisterOptions{},
     )
 
-    output, runErr := runOpenApiGenerateCommand(t, NewGenerateCommandFromContainer(), withoutKernel)
+    output, runErr := runOpenApiGenerateCommand(t, NewGenerateCommand(), withoutKernel)
     if nil != runErr {
         t.Fatalf("run without a kernel section: %v", runErr)
     }
@@ -544,7 +557,7 @@ func TestGenerateCommand_AStdoutJournalDoesNotCarryTheWarningAheadOfTheDocument(
         logging.CloseEmergencyLogger()
     }()
 
-    output, runErr := runOpenApiGenerateCommand(t, NewGenerateCommandFromContainer(), withoutInfo)
+    output, runErr := runOpenApiGenerateCommand(t, NewGenerateCommand(), withoutInfo)
 
     logging.CloseEmergencyLogger()
     os.Stderr = previousStderr

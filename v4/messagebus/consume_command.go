@@ -48,7 +48,7 @@ type RetryPolicy struct {
 
 /* ConsumeCommandConfig is the configuration of the consume command; the zero value is the framework's. */
 type ConsumeCommandConfig struct {
-    /* Retry is the retry policy; with the container door it applies when the container registers none. */
+    /* Retry is the retry policy, its one source. */
     Retry RetryPolicy
 
     /* ShutdownTimeout is how long an in-flight handler and its ack may run after the stop signal; 30s when left out, at least 1ms, unlimited refused. */
@@ -92,32 +92,8 @@ var consumeCommandShutdownTimeoutRule = bound.Rule[time.Duration]{
     Minimum: bound.TimeoutMinimum,
 }
 
-/* NewConsumeCommand builds the command over the bus and the transports, refusing a nil bus and a configuration field outside its rule by name. */
-func NewConsumeCommand(
-    bus messagebuscontract.Bus,
-    transports map[string]messagebuscontract.Transport,
-    config ConsumeCommandConfig,
-) *ConsumeCommand {
-    if true == internal.IsNilInterface(bus) {
-        exception.Panic(exception.NewError("consume command bus is nil", nil, nil))
-    }
-
-    instance := newConsumeCommand(config)
-    instance.bus = bus
-    instance.transports = transports
-
-    return instance
-}
-
-/* NewConsumeCommandFromContainer builds the command so it resolves the bus, the transport map and an optional retry policy from the service container at run time, which lets the framework register melody:messagebus:consume once the application registers its transports. The config's Retry applies when the container registers no policy, its ShutdownTimeout always. */
-func NewConsumeCommandFromContainer(config ConsumeCommandConfig) *ConsumeCommand {
-    instance := newConsumeCommand(config)
-    instance.resolveFromContainer = true
-
-    return instance
-}
-
-func newConsumeCommand(config ConsumeCommandConfig) *ConsumeCommand {
+/* NewConsumeCommand builds the command so it resolves the bus and the transport map from the run's scope at run time, which lets the framework register melody:messagebus:consume once the application registers its transports; a configuration field outside its rule is refused by name. */
+func NewConsumeCommand(config ConsumeCommandConfig) *ConsumeCommand {
     retryPolicy, retryPolicyErr := resolveRetryPolicy(config.Retry)
     if nil != retryPolicyErr {
         exception.Panic(exception.FromError(retryPolicyErr))
@@ -192,11 +168,8 @@ func resolveRetryPolicy(retryPolicy RetryPolicy) (resolvedRetryPolicy, error) {
 }
 
 type ConsumeCommand struct {
-    bus                  messagebuscontract.Bus
-    transports           map[string]messagebuscontract.Transport
-    retryPolicy          resolvedRetryPolicy
-    shutdownTimeout      time.Duration
-    resolveFromContainer bool
+    retryPolicy     resolvedRetryPolicy
+    shutdownTimeout time.Duration
 }
 
 func (instance *ConsumeCommand) Name() string {
@@ -267,32 +240,24 @@ type consumeSession struct {
 }
 
 func (instance *ConsumeCommand) newConsumeSession(runtimeInstance containercontract.Runtime) (*consumeSession, error) {
-    session := &consumeSession{
-        bus:             instance.bus,
-        transports:      instance.transports,
+    scope := runtimeInstance.Scope()
+
+    return instance.sessionOver(
+        ConsumeBusFromResolver(runtimeInstance.Context(), scope),
+        TransportsMustFromResolver(runtimeInstance.Context(), scope),
+    ), nil
+}
+
+func (instance *ConsumeCommand) sessionOver(
+    bus messagebuscontract.Bus,
+    transports map[string]messagebuscontract.Transport,
+) *consumeSession {
+    return &consumeSession{
+        bus:             bus,
+        transports:      transports,
         retryPolicy:     instance.retryPolicy,
         shutdownTimeout: instance.shutdownTimeout,
     }
-
-    if false == instance.resolveFromContainer {
-        return session, nil
-    }
-
-    scope := runtimeInstance.Scope()
-
-    session.bus = ConsumeBusFromResolver(runtimeInstance.Context(), scope)
-    session.transports = TransportsMustFromResolver(runtimeInstance.Context(), scope)
-
-    if registeredPolicy, hasPolicy := RetryPolicyFromResolver(runtimeInstance.Context(), scope); true == hasPolicy {
-        retryPolicy, retryPolicyErr := resolveRetryPolicy(registeredPolicy)
-        if nil != retryPolicyErr {
-            return nil, retryPolicyErr
-        }
-
-        session.retryPolicy = retryPolicy
-    }
-
-    return session, nil
 }
 
 func (instance *consumeSession) consumeFrom(

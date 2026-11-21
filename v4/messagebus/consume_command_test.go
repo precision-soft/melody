@@ -71,7 +71,7 @@ func TestConsumeFrom_StopsAtLimitAndHandlesMessages(t *testing.T) {
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{})
 
     consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, transport, 2, 1)
     if nil != consumeErr {
@@ -103,7 +103,7 @@ func TestConsumeFrom_DoesNotOvershootLimitWithConcurrency(t *testing.T) {
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{})
 
     consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, transport, 2, 8)
     if nil != consumeErr {
@@ -134,7 +134,7 @@ func TestConsume_ExhaustsRetriesAndRoutesToFailureTransport(t *testing.T) {
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), FailureTransport: failure, BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), FailureTransport: failure, BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
 
     if consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, source, 3, 1); nil != consumeErr {
         t.Fatalf("unexpected consume error: %v", consumeErr)
@@ -176,7 +176,7 @@ func TestConsume_AMessageExhaustedOnTheFailureTransportItselfIsNotSentBackToIt(t
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), FailureTransport: failure, BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), FailureTransport: failure, BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
 
     if consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, failure, 1, 1); nil != consumeErr {
         t.Fatalf("unexpected consume error: %v", consumeErr)
@@ -214,7 +214,7 @@ func TestConsume_ExhaustedWithoutFailureTransportDropsMessage(t *testing.T) {
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
 
     if consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, source, 3, 1); nil != consumeErr {
         t.Fatalf("unexpected consume error: %v", consumeErr)
@@ -287,7 +287,7 @@ func (instance *alwaysFailingTransport) CloseWithContext(closeContext context.Co
     return nil
 }
 
-func newAlwaysFailingConsumeCommand(t *testing.T, policy RetryPolicy) (*ConsumeCommand, containercontract.Runtime) {
+func newAlwaysFailingConsumeCommand(t *testing.T, policy RetryPolicy) (*consumeCommandOverBus, containercontract.Runtime) {
     t.Helper()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
@@ -298,7 +298,7 @@ func newAlwaysFailingConsumeCommand(t *testing.T, policy RetryPolicy) (*ConsumeC
         return exception.NewError("handler always fails", nil, nil)
     })
 
-    return NewConsumeCommand(NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})}), nil, ConsumeCommandConfig{Retry: policy}), runtimeInstance
+    return newConsumeCommandOver(NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})}), ConsumeCommandConfig{Retry: policy}), runtimeInstance
 }
 
 func TestConsume_BoundedDeadLetterStopsRequeueAfterMax(t *testing.T) {
@@ -346,8 +346,8 @@ func TestConsume_UnlimitedDeadLetterAttemptsKeepRequeueing(t *testing.T) {
 
 func TestNewConsumeCommand_AbsentRetryPolicyResolvesTheDefaults(t *testing.T) {
     for name, command := range map[string]*ConsumeCommand{
-        "direct":    NewConsumeCommand(NewManager("test", nil), nil, ConsumeCommandConfig{}),
-        "container": NewConsumeCommandFromContainer(ConsumeCommandConfig{}),
+        "over a bus": newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{}).ConsumeCommand,
+        "container":  NewConsumeCommand(ConsumeCommandConfig{}),
     } {
         policy := command.retryPolicy
         if 3 != policy.MaxRetries || time.Second != policy.BaseDelay || time.Hour != policy.MaxDelay || 5*time.Second != policy.FailureRequeueDelay || 5 != policy.MaxDeadLetterAttempts || true == policy.MaxDeadLetterAttemptsUnlimited {
@@ -360,14 +360,14 @@ func TestNewConsumeCommand_AbsentRetryPolicyResolvesTheDefaults(t *testing.T) {
 }
 
 func TestNewConsumeCommand_ZeroMaxRetriesIsNoRetry(t *testing.T) {
-    command := NewConsumeCommand(NewManager("test", nil), nil, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(0)}})
+    command := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(0)}})
     if 0 != command.retryPolicy.MaxRetries {
         t.Fatalf("expected MaxRetries 0 to be no retry, got %d", command.retryPolicy.MaxRetries)
     }
 }
 
 func TestNewConsumeCommand_UnlimitedMaxDeadLetterAttemptsIsAdmitted(t *testing.T) {
-    command := NewConsumeCommand(NewManager("test", nil), nil, ConsumeCommandConfig{Retry: RetryPolicy{MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+    command := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{MaxDeadLetterAttempts: bound.UnlimitedCount()}})
     if false == command.retryPolicy.MaxDeadLetterAttemptsUnlimited {
         t.Fatalf("expected an unlimited MaxDeadLetterAttempts to be kept")
     }
@@ -394,23 +394,17 @@ func TestNewConsumeCommand_RefusesAFieldOutsideItsRuleByName(t *testing.T) {
     for name, testCase := range cases {
         t.Run(name, func(t *testing.T) {
             testhelper.AssertPanicsWithError(t, func() {
-                NewConsumeCommand(NewManager("test", nil), nil, testCase.config)
+                NewConsumeCommand(testCase.config)
             }, testCase.message)
 
             context := recoveredPanicContext(func() {
-                NewConsumeCommandFromContainer(testCase.config)
+                NewConsumeCommand(testCase.config)
             })
             if testCase.field != context["field"] {
                 t.Fatalf("expected the refusal to name %s, got %v", testCase.field, context)
             }
         })
     }
-}
-
-func TestNewConsumeCommand_RefusesANilBus(t *testing.T) {
-    testhelper.AssertPanicsWithError(t, func() {
-        NewConsumeCommand(nil, nil, ConsumeCommandConfig{})
-    }, "consume command bus is nil")
 }
 
 func TestConsume_AbsentDeadLetterAttemptsStopRequeueAtFive(t *testing.T) {
@@ -434,28 +428,6 @@ func TestConsume_AbsentDeadLetterAttemptsStopRequeueAtFive(t *testing.T) {
     }
 }
 
-func TestNewConsumeSession_AContainerPolicyKeepsTheDefaultsItLeavesOut(t *testing.T) {
-    serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
-    registerConsumeServices(t, serviceContainer, RetryPolicy{FailureTransport: &alwaysFailingTransport{}})
-
-    session := mustConsumeSession(NewConsumeCommandFromContainer(ConsumeCommandConfig{}), runtimeInstance)
-    if 3 != session.retryPolicy.MaxRetries {
-        t.Fatalf("expected a container policy naming only its failure transport to keep 3 retries, got %d", session.retryPolicy.MaxRetries)
-    }
-}
-
-func TestNewConsumeSession_AnswersARefusedContainerPolicyAsTheError(t *testing.T) {
-    serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
-    registerConsumeServices(t, serviceContainer, RetryPolicy{MaxRetries: bound.UnlimitedCount()})
-
-    _, sessionErr := NewConsumeCommandFromContainer(ConsumeCommandConfig{}).newConsumeSession(runtimeInstance)
-    if nil == sessionErr || false == strings.Contains(sessionErr.Error(), "the limit does not admit unlimited") {
-        t.Fatalf("expected the refused container policy as the error, got %v", sessionErr)
-    }
-}
-
 func TestConsumeFrom_AbnormalChannelCloseReturnsError(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
@@ -464,7 +436,7 @@ func TestConsumeFrom_AbnormalChannelCloseReturnsError(t *testing.T) {
     close(queue)
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(NewHandlerLocator(), HandleOptions{})})
-    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{})
 
     consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, &closedQueueTransport{queue: queue}, 0, 1)
     if nil == consumeErr {
@@ -482,7 +454,7 @@ func TestConsumeFrom_AStreamThatEndsWithAReasonAnswersIt(t *testing.T) {
     streamErr := errors.New("the broker connection is gone")
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(NewHandlerLocator(), HandleOptions{})})
-    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{})
 
     consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, &closedQueueTransport{queue: queue, streamErr: streamErr}, 0, 1)
     if false == errors.Is(consumeErr, streamErr) {
@@ -504,7 +476,7 @@ func TestConsumeFrom_AStreamThatEndsAfterTheStopAnswersNilWhateverItsReason(t *t
     close(queue)
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(NewHandlerLocator(), HandleOptions{})})
-    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{})
 
     consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, &closedQueueTransport{queue: queue, streamErr: errors.New("ignored after the stop")}, 0, 1)
     if nil != consumeErr {
@@ -517,7 +489,7 @@ func TestConsumeFrom_ATransportThatAnswersNoSubscriptionIsRefused(t *testing.T) 
     runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     bus := NewManager("default", []messagebuscontract.Middleware{})
-    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{})
 
     consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, &recordingNackTransport{}, 0, 1)
     if nil == consumeErr || false == strings.Contains(consumeErr.Error(), "the transport answered no subscription") {
@@ -548,7 +520,7 @@ func TestConsumeFrom_ShutdownTimeoutTimesOutWedgedHandler(t *testing.T) {
     })
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
 
-    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{ShutdownTimeout: bound.Of(50 * time.Millisecond)})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{ShutdownTimeout: bound.Of(50 * time.Millisecond)})
 
     done := make(chan error, 1)
     go func() {
@@ -639,7 +611,7 @@ func TestConsumeFrom_ShutdownTimeoutKeepsTheHandlerAndAckContextAlive(t *testing
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{ShutdownTimeout: bound.Of(5 * time.Second)})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{ShutdownTimeout: bound.Of(5 * time.Second)})
 
     done := make(chan error, 1)
     go func() {
@@ -698,7 +670,7 @@ func TestConsumeFrom_ShutdownTimeoutKeepsTheNackContextAlive(t *testing.T) {
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}, ShutdownTimeout: bound.Of(5 * time.Second)})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}, ShutdownTimeout: bound.Of(5 * time.Second)})
 
     done := make(chan error, 1)
     go func() {
@@ -737,37 +709,37 @@ func TestConsumeFrom_ShutdownTimeoutKeepsTheNackContextAlive(t *testing.T) {
 }
 
 func TestRetryDelay_IsCappedAndOverflowSafe(t *testing.T) {
-    capped := NewConsumeCommand(NewManager("test", nil), nil, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(5), BaseDelay: bound.Of(time.Hour), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+    capped := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(5), BaseDelay: bound.Of(time.Hour), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
     if retryMaxDelayRule.Default != mustConsumeSession(capped, nil).retryDelay(100) {
         t.Fatalf("expected the linear delay to be capped at %v, got %v", retryMaxDelayRule.Default, mustConsumeSession(capped, nil).retryDelay(100))
     }
 
-    huge := NewConsumeCommand(NewManager("test", nil), nil, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(5), BaseDelay: bound.Of(time.Duration(1) << 60), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+    huge := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(5), BaseDelay: bound.Of(time.Duration(1) << 60), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
     delay := mustConsumeSession(huge, nil).retryDelay(64)
     if 0 > delay || delay > retryMaxDelayRule.Default {
         t.Fatalf("expected a non-negative, capped delay, got %v", delay)
     }
 
-    linear := NewConsumeCommand(NewManager("test", nil), nil, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(3), BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+    linear := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(3), BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
     if 2*time.Millisecond != mustConsumeSession(linear, nil).retryDelay(2) {
         t.Fatalf("expected the delay to grow by BaseDelay per attempt, got %v", mustConsumeSession(linear, nil).retryDelay(2))
     }
 }
 
 func TestFailureRequeueDelay_IsTheConfiguredDelayWhateverTheBackoff(t *testing.T) {
-    absent := NewConsumeCommand(NewManager("test", nil), nil, ConsumeCommandConfig{Retry: RetryPolicy{BaseDelay: bound.Of(time.Hour)}})
+    absent := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{BaseDelay: bound.Of(time.Hour)}})
     if retryFailureRequeueDelayRule.Default != mustConsumeSession(absent, nil).failureRequeueDelay() {
         t.Fatalf("expected the default failure requeue delay beside a long backoff, got %v", mustConsumeSession(absent, nil).failureRequeueDelay())
     }
 
-    configured := NewConsumeCommand(NewManager("test", nil), nil, ConsumeCommandConfig{Retry: RetryPolicy{BaseDelay: bound.Of(time.Second), FailureRequeueDelay: bound.Of(time.Minute)}})
+    configured := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{BaseDelay: bound.Of(time.Second), FailureRequeueDelay: bound.Of(time.Minute)}})
     if time.Minute != mustConsumeSession(configured, nil).failureRequeueDelay() {
         t.Fatalf("expected the configured failure requeue delay, got %v", mustConsumeSession(configured, nil).failureRequeueDelay())
     }
 }
 
 func TestRetryDelay_MaxDelayOverride(t *testing.T) {
-    command := NewConsumeCommand(NewManager("test", nil), nil, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(5), BaseDelay: bound.Of(time.Hour), MaxDelay: bound.Of(10 * time.Minute), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+    command := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(5), BaseDelay: bound.Of(time.Hour), MaxDelay: bound.Of(10 * time.Minute), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
 
     if 10*time.Minute != mustConsumeSession(command, nil).retryDelay(100) {
         t.Fatalf("expected the delay to be capped at the overridden MaxDelay 10m, got %v", mustConsumeSession(command, nil).retryDelay(100))
@@ -775,7 +747,7 @@ func TestRetryDelay_MaxDelayOverride(t *testing.T) {
 }
 
 func TestFailureRequeueDelay_Override(t *testing.T) {
-    command := NewConsumeCommand(NewManager("test", nil), nil, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(3), FailureRequeueDelay: bound.Of(7 * time.Second), BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+    command := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(3), FailureRequeueDelay: bound.Of(7 * time.Second), BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
 
     if 7*time.Second != mustConsumeSession(command, nil).failureRequeueDelay() {
         t.Fatalf("expected the overridden failure requeue delay 7s, got %v", mustConsumeSession(command, nil).failureRequeueDelay())
@@ -801,7 +773,7 @@ func TestConsume_PanickingHandlerFlowsIntoRetryPipeline(t *testing.T) {
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), FailureTransport: failure, BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), FailureTransport: failure, BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
 
     if consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, source, 3, 1); nil != consumeErr {
         t.Fatalf("unexpected consume error: %v", consumeErr)
@@ -834,7 +806,7 @@ func TestDispatchSafely_ConvertsErrorPanicIntoDispatchError(t *testing.T) {
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{})
 
     dispatchErr := mustConsumeSession(command, runtimeInstance).dispatchSafely(runtimeInstance, NewEnvelope(consumeTestMessage{Value: 1}, nil))
     if nil == dispatchErr {
@@ -867,7 +839,7 @@ func TestDispatchSafely_ATypedNilPanicIsAnsweredWithoutACause(t *testing.T) {
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{})
 
     dispatchErr := mustConsumeSession(command, runtimeInstance).dispatchSafely(runtimeInstance, NewEnvelope(consumeTestMessage{Value: 1}, nil))
     melodyErr, isMelodyErr := dispatchErr.(*exception.Error)
@@ -926,7 +898,7 @@ func TestConsumeRecovered_ATypedNilPanicOutsideTheHandlerIsLoggedWithoutACause(t
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{})
 
     mustConsumeSession(command, runtimeInstance).consumeRecovered(runtimeInstance, &typedNilAckPanickingTransport{}, NewEnvelope(consumeTestMessage{Value: 1}, nil))
 
@@ -969,7 +941,7 @@ func TestConsume_MessagesGetIsolatedScopes(t *testing.T) {
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{})
 
     if consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, transport, 2, 1); nil != consumeErr {
         t.Fatalf("unexpected consume error: %v", consumeErr)
@@ -1039,7 +1011,7 @@ func TestConsume_MessageScopeCarriesMessageIdLogger(t *testing.T) {
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{})
 
     if consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, transport, 1, 1); nil != consumeErr {
         t.Fatalf("unexpected consume error: %v", consumeErr)
@@ -1085,7 +1057,7 @@ func TestRun_OverlappingRunsShareNoMutableState(t *testing.T) {
         }
     }
 
-    command := NewConsumeCommandFromContainer(ConsumeCommandConfig{})
+    command := NewConsumeCommand(ConsumeCommandConfig{})
 
     var wait sync.WaitGroup
     for overlap := 0; overlap < 2; overlap++ {
@@ -1238,7 +1210,7 @@ func TestConsumeFrom_AStoppedWorkerTakesNoFurtherDelivery(t *testing.T) {
             return nil
         })
 
-        command := NewConsumeCommand(NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})}), nil, ConsumeCommandConfig{})
+        command := newConsumeCommandOver(NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})}), ConsumeCommandConfig{})
 
         _ = mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, &closedQueueTransport{queue: queue}, 0, 1)
 
@@ -1255,7 +1227,7 @@ func TestConsume_MessageRuntimeOpensAChildScopeAndKeepsTheRunsWhenItsScopeClosed
     runtimeInstance := runtime.NewRun(context.Background(), baseScope)
 
     bus := NewManager("default", []messagebuscontract.Middleware{})
-    session := mustConsumeSession(NewConsumeCommand(bus, nil, ConsumeCommandConfig{}), runtimeInstance)
+    session := mustConsumeSession(newConsumeCommandOver(bus, ConsumeCommandConfig{}), runtimeInstance)
     envelope := NewEnvelope(consumeTestMessage{Value: 1}, nil)
 
     messageRuntime, closeScope := session.messageRuntime(runtimeInstance, envelope)

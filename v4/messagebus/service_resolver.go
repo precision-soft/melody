@@ -21,7 +21,6 @@ const (
     ServiceHandlerLocator   = "service.messagebus.handler_locator"
     ServiceTransports       = "service.messagebus.transports"
     ServiceTransportsCloser = "service.messagebus.transports_closer"
-    ServiceRetryPolicy      = "service.messagebus.retry_policy"
 )
 
 type ServiceRegistrar interface {
@@ -149,15 +148,6 @@ func (instance *TransportsCloser) closeOne(closeContext context.Context, name st
 
 func TransportsMustFromResolver(ctx context.Context, resolver containercontract.Resolver) map[string]messagebuscontract.Transport {
     return container.MustFromResolver[map[string]messagebuscontract.Transport](ctx, resolver, ServiceTransports)
-}
-
-/* RetryPolicyFromResolver returns the application-provided retry policy when one is registered; the second result is false when the consumer should keep the framework defaults. */
-func RetryPolicyFromResolver(ctx context.Context, resolver containercontract.Resolver) (RetryPolicy, bool) {
-    if false == resolver.Has(ServiceRetryPolicy) {
-        return RetryPolicy{}, false
-    }
-
-    return container.MustFromResolver[RetryPolicy](ctx, resolver, ServiceRetryPolicy), true
 }
 
 func HandlerLocatorMustFromResolver(ctx context.Context, resolver containercontract.Resolver) messagebuscontract.HandlerLocator {

@@ -181,8 +181,7 @@ The example application registers a registry (`config/openapi.go`) and the comma
 - [`TypeOf[T any]() reflect.Type`](../../openapi/registry.go)
 - [`DescribeTyped[RequestBody, ResponseBody any](registry *Registry, routeName string, status int, config DescribeConfig)`](../../openapi/describe_typed.go) — [`DescribeConfig`](../../openapi/describe_typed.go) holds `Summary`, `Description`, `Tags` and `Responses`, the zero value adding nothing, and [`Response[T any](status int) ResponseDescription`](../../openapi/describe_typed.go) builds one entry of `Responses`, a status repeating another replacing it
 - [`Generate(info Info, routeDefinitions []httpcontract.RouteDefinition, registry *Registry) *Document`](../../openapi/generator.go)
-- [`NewGenerateCommand(info Info, registry *Registry) *GenerateCommand`](../../openapi/generate_command.go)
-- [`NewGenerateCommandFromContainer() *GenerateCommand`](../../openapi/generate_command.go) — the auto-registered form, resolving the `Info` and the `Registry` from the container at run time
+- [`NewGenerateCommand() *GenerateCommand`](../../openapi/generate_command.go) — resolves the `Info` and the `Registry` from the run's scope at run time; the framework registers it when the registry is registered
 - [`SpecificationHandler(info Info, registry *Registry) httpcontract.Handler`](../../openapi/spec_handler.go)
 - [`RegistryMustFromResolver(...)`](../../openapi/service_resolver.go) — resolve the registry registered under `ServiceOpenApiRegistry`
 - [`InfoFromResolver(ctx context.Context, resolver containercontract.Resolver) Info`](../../openapi/service_resolver.go) — the tolerant reader of `ServiceOpenApiInfo`, answering an empty `Info` when none is registered
