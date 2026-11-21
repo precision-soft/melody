@@ -48,7 +48,7 @@ const DefaultSessionMaxSessions = 100_000
 /* DefaultUnavailableRetryAfter is the Retry-After of an infrastructure-failure 503 when neither MELODY_HTTP_UNAVAILABLE_RETRY_AFTER nor ApplicationConfig names one. */
 const DefaultUnavailableRetryAfter = 5 * time.Second
 
-/* DefaultHttpShutdownTimeout is how long a stopping http server waits for admitted requests when MELODY_HTTP_SHUTDOWN_TIMEOUT says nothing. */
+/* DefaultHttpShutdownTimeout is how long a stopping http server waits for admitted requests when neither MELODY_HTTP_SHUTDOWN_TIMEOUT nor ApplicationConfig.HttpShutdownTimeout names one. */
 const DefaultHttpShutdownTimeout = 5 * time.Second
 
 func newHttpConfiguration(
@@ -65,7 +65,7 @@ func newHttpConfiguration(
     sessionTombstoneRetention bound.Resolved[time.Duration],
     sessionStorageTimeout bound.Resolved[time.Duration],
     sessionMaxSessions bound.Resolved[int],
-    shutdownTimeout bound.Resolved[time.Duration],
+    shutdownTimeout bound.Duration,
     serverLimits httpServerLimits,
 ) (*httpConfiguration, error) {
     if "" == strings.TrimSpace(address) {
@@ -130,7 +130,7 @@ type httpConfiguration struct {
     sessionTombstoneRetention bound.Resolved[time.Duration]
     sessionStorageTimeout     bound.Resolved[time.Duration]
     sessionMaxSessions        bound.Resolved[int]
-    shutdownTimeout           bound.Resolved[time.Duration]
+    shutdownTimeout           bound.Duration
     serverLimits              httpServerLimits
 }
 
@@ -206,8 +206,8 @@ func (instance *httpConfiguration) SessionMaxSessions() bound.Resolved[int] {
     return instance.sessionMaxSessions
 }
 
-/* ShutdownTimeout is how long a stopping http server waits for admitted requests before cutting them, at least 1ms and never unlimited, DefaultHttpShutdownTimeout when MELODY_HTTP_SHUTDOWN_TIMEOUT says nothing. */
-func (instance *httpConfiguration) ShutdownTimeout() bound.Resolved[time.Duration] {
+/* ShutdownTimeout is MELODY_HTTP_SHUTDOWN_TIMEOUT as the deployment set it, absent when unset: at least 1ms and never unlimited. */
+func (instance *httpConfiguration) ShutdownTimeout() bound.Duration {
     return instance.shutdownTimeout
 }
 

@@ -79,6 +79,11 @@ func resolveHttpPublicUrl(configuration configcontract.Configuration, applicatio
     return publicUrl, nil
 }
 
+/* resolveHttpShutdownTimeout answers the key when the deployment set it, the application's field otherwise and the rule's default without either. */
+func resolveHttpShutdownTimeout(configuration configcontract.Configuration, applicationConfig ApplicationConfig) (bound.Resolved[time.Duration], error) {
+    return resolveApplicationLimit(configuration.Http().ShutdownTimeout(), applicationConfig.HttpShutdownTimeout, config.ShutdownTimeoutRule)
+}
+
 func resolveContainerCreationWaiters(configuration configcontract.Configuration, applicationConfig ApplicationConfig) (bound.Resolved[int], error) {
     return resolveApplicationLimit(configuration.Kernel().ContainerCreationWaiters(), applicationConfig.ContainerCreationWaiters, container.CreationWaitersRule)
 }
@@ -128,7 +133,10 @@ func refuseScopeTeardownOutlastingHttpShutdown(configuration configcontract.Conf
         return scopeTeardownTimeoutErr
     }
 
-    httpShutdownTimeout := configuration.Http().ShutdownTimeout()
+    httpShutdownTimeout, httpShutdownTimeoutErr := resolveHttpShutdownTimeout(configuration, applicationConfig)
+    if nil != httpShutdownTimeoutErr {
+        return httpShutdownTimeoutErr
+    }
 
     if false == scopeTeardownTimeout.Unlimited && scopeTeardownTimeout.Value < httpShutdownTimeout.Value {
         return nil

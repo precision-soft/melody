@@ -692,7 +692,7 @@ func (instance *Configuration) buildHttpConfiguration() error {
         return sessionMaxSessionsErr
     }
 
-    shutdownTimeout, shutdownTimeoutErr := resolveParameter(instance.MustGet(KernelHttpShutdownTimeout), HttpShutdownTimeoutKey, ShutdownTimeoutRule)
+    shutdownTimeout, shutdownTimeoutErr := checkedParameterLimit(instance.MustGet(KernelHttpShutdownTimeout), HttpShutdownTimeoutKey, ShutdownTimeoutRule)
     if nil != shutdownTimeoutErr {
         return shutdownTimeoutErr
     }

@@ -82,7 +82,7 @@ app.RegisterModule(melodycron.NewModule(melodycron.ModuleConfig{
 }))
 ```
 
-`RunnerConfig` also carries `Dialect`, `OutputCaptureLimit` (64 KiB), `ClockJumpResetThreshold` (3h, at least 2m, whole minutes) and `GracefulTimeout` (5m); each is its default when left out, and a value below its minimum or an unlimited one where the field refuses it panics at boot naming the field.
+`RunnerConfig` also carries `Dialect`, `OutputCaptureLimit` (64 KiB), `ClockJumpResetThreshold` (3h, at least 2m, whole minutes) and `ShutdownTimeout` (5m); each is its default when left out, and a value below its minimum or an unlimited one where the field refuses it panics at boot naming the field.
 
 `NewModule` is available for the v1, v2, v3 and v4 bindings.
 

@@ -33,6 +33,8 @@ type ApplicationConfig struct {
     PublicFiles fs.FS
     /* HttpPublicUrl is the public base an absolute url is generated behind, the default of MELODY_HTTP_PUBLIC_URL, which wins when a deployment sets it: an http or https url with a host and no user info, query or fragment, its path joined before every route's; empty is none. */
     HttpPublicUrl string
+    /* HttpShutdownTimeout is how long a stopping http server waits for the requests it admitted, the default of MELODY_HTTP_SHUTDOWN_TIMEOUT, which wins when a deployment sets it: 5s when left out, at least 1ms, unlimited refused. */
+    HttpShutdownTimeout bound.Duration
     /* ReadTimeout bounds reading one whole request, headers and body: at least 1ms, unlimited refused. */
     ReadTimeout bound.Duration
     /* ReadHeaderTimeout bounds reading the request headers: at least 1ms, unlimited refused. */
@@ -109,6 +111,10 @@ func NewApplication(
 
     if _, serverLimitsErr := resolveHttpServerLimits(configuration, applicationConfig); nil != serverLimitsErr {
         exception.Panic(exception.NewError("the http server limits are refused", nil, serverLimitsErr))
+    }
+
+    if _, httpShutdownTimeoutErr := resolveHttpShutdownTimeout(configuration, applicationConfig); nil != httpShutdownTimeoutErr {
+        exception.Panic(exception.NewError("the http shutdown timeout is refused", nil, httpShutdownTimeoutErr))
     }
 
     if _, teardownTimeoutErr := resolveTeardownTimeout(configuration, applicationConfig); nil != teardownTimeoutErr {

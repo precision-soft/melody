@@ -345,8 +345,8 @@ func TestNewConsumeCommand_AbsentRetryPolicyResolvesTheDefaults(t *testing.T) {
         if 3 != policy.MaxRetries || time.Second != policy.BaseDelay || time.Hour != policy.MaxDelay || 5*time.Second != policy.FailureRequeueDelay || 5 != policy.MaxDeadLetterAttempts || true == policy.MaxDeadLetterAttemptsUnlimited {
             t.Fatalf("%s: expected the default retry policy, got %+v", name, policy)
         }
-        if 30*time.Second != command.shutdownGrace {
-            t.Fatalf("%s: expected the default shutdown grace 30s, got %v", name, command.shutdownGrace)
+        if 30*time.Second != command.shutdownTimeout {
+            t.Fatalf("%s: expected the default shutdown timeout 30s, got %v", name, command.shutdownTimeout)
         }
     }
 }
@@ -378,8 +378,8 @@ func TestNewConsumeCommand_RefusesAFieldOutsideItsRuleByName(t *testing.T) {
         "max delay below 1ms":             {ConsumeCommandConfig{Retry: RetryPolicy{MaxDelay: bound.Of(time.Microsecond)}}, "the limit is below its minimum", "RetryPolicy.MaxDelay"},
         "failure requeue delay below 1ms": {ConsumeCommandConfig{Retry: RetryPolicy{FailureRequeueDelay: bound.Of(time.Microsecond)}}, "the limit is below its minimum", "RetryPolicy.FailureRequeueDelay"},
         "dead letter attempts zero":       {ConsumeCommandConfig{Retry: RetryPolicy{MaxDeadLetterAttempts: bound.Of(0)}}, "the limit is below its minimum", "RetryPolicy.MaxDeadLetterAttempts"},
-        "shutdown grace below 1ms":        {ConsumeCommandConfig{ShutdownGrace: bound.Of(time.Microsecond)}, "the limit is below its minimum", "ConsumeCommandConfig.ShutdownGrace"},
-        "shutdown grace unlimited":        {ConsumeCommandConfig{ShutdownGrace: bound.UnlimitedDuration()}, "the limit does not admit unlimited", "ConsumeCommandConfig.ShutdownGrace"},
+        "shutdown timeout below 1ms":      {ConsumeCommandConfig{ShutdownTimeout: bound.Of(time.Microsecond)}, "the limit is below its minimum", "ConsumeCommandConfig.ShutdownTimeout"},
+        "shutdown timeout unlimited":      {ConsumeCommandConfig{ShutdownTimeout: bound.UnlimitedDuration()}, "the limit does not admit unlimited", "ConsumeCommandConfig.ShutdownTimeout"},
         "typed nil failure transport":     {ConsumeCommandConfig{Retry: RetryPolicy{FailureTransport: (*InMemoryTransport)(nil)}}, "retry policy failure transport is a typed nil", "RetryPolicy.FailureTransport"},
     }
 
@@ -464,7 +464,7 @@ func TestConsumeFrom_AbnormalChannelCloseReturnsError(t *testing.T) {
     }
 }
 
-func TestConsumeFrom_ShutdownGraceTimesOutWedgedHandler(t *testing.T) {
+func TestConsumeFrom_ShutdownTimeoutTimesOutWedgedHandler(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     consumeContext, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -487,7 +487,7 @@ func TestConsumeFrom_ShutdownGraceTimesOutWedgedHandler(t *testing.T) {
     })
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
 
-    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{ShutdownGrace: bound.Of(50 * time.Millisecond)})
+    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{ShutdownTimeout: bound.Of(50 * time.Millisecond)})
 
     done := make(chan error, 1)
     go func() {
@@ -554,7 +554,7 @@ func (instance *contextAwareTransport) CloseWithContext(closeContext context.Con
     return nil
 }
 
-func TestConsumeFrom_ShutdownGraceKeepsTheHandlerAndAckContextAlive(t *testing.T) {
+func TestConsumeFrom_ShutdownTimeoutKeepsTheHandlerAndAckContextAlive(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     parentContext, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -577,7 +577,7 @@ func TestConsumeFrom_ShutdownGraceKeepsTheHandlerAndAckContextAlive(t *testing.T
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{ShutdownGrace: bound.Of(5 * time.Second)})
+    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{ShutdownTimeout: bound.Of(5 * time.Second)})
 
     done := make(chan error, 1)
     go func() {
@@ -615,7 +615,7 @@ func TestConsumeFrom_ShutdownGraceKeepsTheHandlerAndAckContextAlive(t *testing.T
     }
 }
 
-func TestConsumeFrom_ShutdownGraceKeepsTheNackContextAlive(t *testing.T) {
+func TestConsumeFrom_ShutdownTimeoutKeepsTheNackContextAlive(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     parentContext, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -636,7 +636,7 @@ func TestConsumeFrom_ShutdownGraceKeepsTheNackContextAlive(t *testing.T) {
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}, ShutdownGrace: bound.Of(5 * time.Second)})
+    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}, ShutdownTimeout: bound.Of(5 * time.Second)})
 
     done := make(chan error, 1)
     go func() {

@@ -24,8 +24,8 @@ type EntryConfig struct {
     Instances bound.Count
     /* Timeout bounds one run of this entry under the in-process runner: RunnerConfig.Timeout when left out, at least 1ms, unlimited admitted for a run no deadline should end. The generated manifests ignore it, since an external scheduler bounds its own jobs. */
     Timeout bound.Duration
-    /* GracefulTimeout is how long the entry's command is given to unwind after Timeout or the runner's shutdown cancelled its context, before the runner stops waiting and closes the run's container scope under it: RunnerConfig.GracefulTimeout when left out, at least 1ms, unlimited refused. It is reached only by a command that ignores its cancelled context. */
-    GracefulTimeout bound.Duration
+    /* ShutdownTimeout is how long the entry's command is given to unwind after Timeout or the runner's shutdown cancelled its context, before the runner stops waiting and closes the run's container scope under it: RunnerConfig.ShutdownTimeout when left out, at least 1ms, unlimited refused. It is reached only by a command that ignores its cancelled context. */
+    ShutdownTimeout bound.Duration
 }
 
 type ScheduledCommand struct {

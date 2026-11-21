@@ -129,7 +129,7 @@ command := lock.NewExclusiveCommand(
 )
 ```
 
-[`ExclusiveCommandConfig`](../../lock/exclusive_command.go) carries `LockName`, `Ttl` and `StopRenewalLimit` (set it to the cron runner's `GracefulTimeout` when its commands may wind down longer than 30s), read as `ExclusiveConfig` reads them and resolved when the command is built, a refusal panicking naming the field. `LockName` left empty is `"melody:command:"` plus the wrapped command's name; name one for when two differently-named commands must share one lock or one command needs distinct locks per deployment. `Name`, `Description` and `Flags` delegate to the wrapped command, so the decorator is transparent to the CLI.
+[`ExclusiveCommandConfig`](../../lock/exclusive_command.go) carries `LockName`, `Ttl` and `StopRenewalLimit` (set it to the cron runner's `ShutdownTimeout` when its commands may wind down longer than 30s), read as `ExclusiveConfig` reads them and resolved when the command is built, a refusal panicking naming the field. `LockName` left empty is `"melody:command:"` plus the wrapped command's name; name one for when two differently-named commands must share one lock or one command needs distinct locks per deployment. `Name`, `Description` and `Flags` delegate to the wrapped command, so the decorator is transparent to the CLI.
 
 ### Elect a leader
 

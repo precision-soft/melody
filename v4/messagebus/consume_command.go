@@ -51,8 +51,8 @@ type ConsumeCommandConfig struct {
     /* Retry is the retry policy; with the container door it applies when the container registers none. */
     Retry RetryPolicy
 
-    /* ShutdownGrace is how long an in-flight handler and its ack may run after the stop signal; 30s when left out, at least 1ms, unlimited refused. */
-    ShutdownGrace bound.Duration
+    /* ShutdownTimeout is how long an in-flight handler and its ack may run after the stop signal; 30s when left out, at least 1ms, unlimited refused. */
+    ShutdownTimeout bound.Duration
 }
 
 var retryMaxRetriesRule = bound.Rule[int]{
@@ -86,8 +86,8 @@ var retryMaxDeadLetterAttemptsRule = bound.Rule[int]{
     UnlimitedAdmitted: true,
 }
 
-var consumeCommandShutdownGraceRule = bound.Rule[time.Duration]{
-    Name:    "ConsumeCommandConfig.ShutdownGrace",
+var consumeCommandShutdownTimeoutRule = bound.Rule[time.Duration]{
+    Name:    "ConsumeCommandConfig.ShutdownTimeout",
     Default: 30 * time.Second,
     Minimum: bound.TimeoutMinimum,
 }
@@ -109,7 +109,7 @@ func NewConsumeCommand(
     return instance
 }
 
-/* NewConsumeCommandFromContainer builds the command so it resolves the bus, the transport map and an optional retry policy from the service container at run time, which lets the framework register melody:messagebus:consume once the application registers its transports. The config's Retry applies when the container registers no policy, its ShutdownGrace always. */
+/* NewConsumeCommandFromContainer builds the command so it resolves the bus, the transport map and an optional retry policy from the service container at run time, which lets the framework register melody:messagebus:consume once the application registers its transports. The config's Retry applies when the container registers no policy, its ShutdownTimeout always. */
 func NewConsumeCommandFromContainer(config ConsumeCommandConfig) *ConsumeCommand {
     instance := newConsumeCommand(config)
     instance.resolveFromContainer = true
@@ -123,14 +123,14 @@ func newConsumeCommand(config ConsumeCommandConfig) *ConsumeCommand {
         exception.Panic(exception.FromError(retryPolicyErr))
     }
 
-    shutdownGrace, shutdownGraceErr := bound.Resolve(config.ShutdownGrace, consumeCommandShutdownGraceRule)
-    if nil != shutdownGraceErr {
-        exception.Panic(exception.FromError(shutdownGraceErr))
+    shutdownTimeout, shutdownTimeoutErr := bound.Resolve(config.ShutdownTimeout, consumeCommandShutdownTimeoutRule)
+    if nil != shutdownTimeoutErr {
+        exception.Panic(exception.FromError(shutdownTimeoutErr))
     }
 
     return &ConsumeCommand{
-        retryPolicy:   retryPolicy,
-        shutdownGrace: shutdownGrace.Value,
+        retryPolicy:     retryPolicy,
+        shutdownTimeout: shutdownTimeout.Value,
     }
 }
 
@@ -195,7 +195,7 @@ type ConsumeCommand struct {
     bus                  messagebuscontract.Bus
     transports           map[string]messagebuscontract.Transport
     retryPolicy          resolvedRetryPolicy
-    shutdownGrace        time.Duration
+    shutdownTimeout      time.Duration
     resolveFromContainer bool
 }
 
@@ -260,18 +260,18 @@ func (instance *ConsumeCommand) Run(
 
 /* consumeSession is the run-local view of one Run's collaborators, so a second overlapping Run of the same command instance shares nothing mutable with the first. */
 type consumeSession struct {
-    bus           messagebuscontract.Bus
-    transports    map[string]messagebuscontract.Transport
-    retryPolicy   resolvedRetryPolicy
-    shutdownGrace time.Duration
+    bus             messagebuscontract.Bus
+    transports      map[string]messagebuscontract.Transport
+    retryPolicy     resolvedRetryPolicy
+    shutdownTimeout time.Duration
 }
 
 func (instance *ConsumeCommand) newConsumeSession(runtimeInstance containercontract.Runtime) (*consumeSession, error) {
     session := &consumeSession{
-        bus:           instance.bus,
-        transports:    instance.transports,
-        retryPolicy:   instance.retryPolicy,
-        shutdownGrace: instance.shutdownGrace,
+        bus:             instance.bus,
+        transports:      instance.transports,
+        retryPolicy:     instance.retryPolicy,
+        shutdownTimeout: instance.shutdownTimeout,
     }
 
     if false == instance.resolveFromContainer {
@@ -304,7 +304,7 @@ func (instance *consumeSession) consumeFrom(
     signalContext, stop := signal.NotifyContext(runtimeInstance.Context(), os.Interrupt, syscall.SIGTERM)
     defer stop()
 
-    /* two lifetimes: the signal context stops the pull of new deliveries, while the handler context outlives it, so an in-flight handler and its Ack or Nack run on a live context for the whole shutdownGrace */
+    /* two lifetimes: the signal context stops the pull of new deliveries, while the handler context outlives it, so an in-flight handler and its Ack or Nack run on a live context for the whole shutdownTimeout */
     handlerContext, cancelHandlers := context.WithCancel(context.WithoutCancel(runtimeInstance.Context()))
     defer cancelHandlers()
 
@@ -381,7 +381,7 @@ func (instance *consumeSession) consumeFrom(
     select {
     case <-drained:
         return loopErr
-    case <-time.After(instance.shutdownGrace):
+    case <-time.After(instance.shutdownTimeout):
         /* returning runs the deferred cancelHandlers, so the grace is also the deadline for whatever is still in flight */
         return exception.NewError("consumer shutdown timed out waiting for in-flight handlers", nil, nil)
     }

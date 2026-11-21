@@ -53,7 +53,7 @@ var (
     }
 
     ShutdownTimeoutRule = bound.Rule[time.Duration]{
-        Name:    "HttpConfiguration.ShutdownTimeout",
+        Name:    "ApplicationConfig.HttpShutdownTimeout",
         Default: DefaultHttpShutdownTimeout,
         Minimum: bound.TimeoutMinimum,
     }

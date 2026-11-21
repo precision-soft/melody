@@ -40,8 +40,8 @@ type HttpConfiguration interface {
     /* SessionMaxSessions is how many sessions the framework-wired in-memory storage holds at once. */
     SessionMaxSessions() bound.Resolved[int]
 
-    /* ShutdownTimeout is how long a stopping http server waits for the requests it has admitted. */
-    ShutdownTimeout() bound.Resolved[time.Duration]
+    /* ShutdownTimeout is MELODY_HTTP_SHUTDOWN_TIMEOUT as the deployment set it, absent when unset: how long a stopping http server waits for the requests it has admitted. */
+    ShutdownTimeout() bound.Duration
 
     /* ReadTimeout, ReadHeaderTimeout, WriteTimeout, IdleTimeout and MaxHeaderBytes are the server limit keys as the deployment set them, absent when unset. */
     ReadTimeout() bound.Duration

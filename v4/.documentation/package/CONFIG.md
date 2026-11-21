@@ -67,7 +67,7 @@ Keys and parameters are two tables. A key is not a parameter: `Get("MELODY_HTTP_
 | `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION` | `kernel.http.session_tombstone_retention` | `5m`                                               |
 | `MELODY_HTTP_SESSION_STORAGE_TIMEOUT`     | `kernel.http.session_storage_timeout`     | `5s`                                               |
 | `MELODY_HTTP_SESSION_MAX_SESSIONS`        | `kernel.http.session_max_sessions`        | `100000`                                           |
-| `MELODY_HTTP_SHUTDOWN_TIMEOUT`            | `kernel.http.shutdown_timeout`            | `5s`                                               |
+| `MELODY_HTTP_SHUTDOWN_TIMEOUT`            | `kernel.http.shutdown_timeout`            | `""` (the application's, then `5s`)                |
 | `MELODY_TEARDOWN_TIMEOUT`                 | `kernel.teardown_timeout`                 | `""` (the application's, then `10s`)               |
 | `MELODY_CONTAINER_CREATION_WAITERS`       | `kernel.container_creation_waiters`       | `""` (the application's, then `1024`)              |
 | `MELODY_CONTAINER_TEARDOWN_SEQUENTIAL`    | `kernel.container_teardown_sequential`    | `""` (the application's, then `false`)             |
@@ -230,13 +230,13 @@ The value is a count of at least one, and `unlimited` is admitted. At the count,
 
 ### Http shutdown timeout
 
-How long a stopping http server waits for the requests it has already admitted before cutting them. Read through [`HttpConfiguration.ShutdownTimeout()`](../../config/contract/http.go).
+How long a stopping http server waits for the requests it has already admitted before cutting them. Read through [`HttpConfiguration.ShutdownTimeout()`](../../config/contract/http.go), absent when the key is unset, and resolved by the application over `ApplicationConfig.HttpShutdownTimeout`, which is the key's default.
 
 | Environment key                | Parameter name                 | Default |
 |--------------------------------|--------------------------------|---------|
-| `MELODY_HTTP_SHUTDOWN_TIMEOUT` | `kernel.http.shutdown_timeout` | `5s`    |
+| `MELODY_HTTP_SHUTDOWN_TIMEOUT` | `kernel.http.shutdown_timeout` | `""`    |
 
-The value is a Go duration string of at least 1ms, and `unlimited` is refused: zero and negative values fail the boot. The default is [`DefaultHttpShutdownTimeout`](../../config/http.go), five seconds. The same budget bounds the shutdown of the server and the drain of the request scopes the kernel still holds, so a deployment whose supervisor grants a longer termination grace raises this to match.
+The value is a Go duration string of at least 1ms, and `unlimited` is refused: zero and negative values fail the boot. Without the key and the field the wait is [`DefaultHttpShutdownTimeout`](../../config/http.go), five seconds; a refused value names `ApplicationConfig.HttpShutdownTimeout`, and the key when the key carried it. The same budget bounds the shutdown of the server and the drain of the request scopes the kernel still holds, so a deployment whose supervisor grants a longer termination grace raises this to match.
 
 ### Teardown timeout
 

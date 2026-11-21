@@ -52,8 +52,8 @@ func TestConfigurationHttpLimitsTakeTheirDefaultsWhenLeftOut(t *testing.T) {
     if (bound.Resolved[int]{Value: 100_000}) != httpConfiguration.SessionMaxSessions() {
         t.Fatalf("expected 100,000 sessions, got %+v", httpConfiguration.SessionMaxSessions())
     }
-    if (bound.Resolved[time.Duration]{Value: 5 * time.Second}) != httpConfiguration.ShutdownTimeout() {
-        t.Fatalf("expected a 5s shutdown timeout, got %+v", httpConfiguration.ShutdownTimeout())
+    if false == httpConfiguration.ShutdownTimeout().IsAbsent() {
+        t.Fatalf("expected the shutdown timeout absent when no key sets it, got %v", httpConfiguration.ShutdownTimeout())
     }
 }
 
@@ -87,8 +87,8 @@ func TestConfigurationHttpLimitsAreReadFromTheEnvironment(t *testing.T) {
     if (bound.Resolved[time.Duration]{Value: 2 * time.Second}) != httpConfiguration.SessionStorageTimeout() {
         t.Fatalf("unexpected session storage timeout %+v", httpConfiguration.SessionStorageTimeout())
     }
-    if (bound.Resolved[time.Duration]{Value: 45 * time.Second}) != httpConfiguration.ShutdownTimeout() {
-        t.Fatalf("unexpected shutdown timeout %+v", httpConfiguration.ShutdownTimeout())
+    if bound.Of(45*time.Second) != httpConfiguration.ShutdownTimeout() {
+        t.Fatalf("unexpected shutdown timeout %v", httpConfiguration.ShutdownTimeout())
     }
 }
 
@@ -142,8 +142,8 @@ func TestConfigurationHttpLimitsRefuseWhatTheirRuleDoesNotAdmit(t *testing.T) {
         {HttpSessionStorageTimeoutKey, "0", "HttpConfiguration.SessionStorageTimeout"},
         {HttpSessionStorageTimeoutKey, "-1s", "HttpConfiguration.SessionStorageTimeout"},
         {HttpSessionStorageTimeoutKey, "500us", "HttpConfiguration.SessionStorageTimeout"},
-        {HttpShutdownTimeoutKey, "0", "HttpConfiguration.ShutdownTimeout"},
-        {HttpShutdownTimeoutKey, "unlimited", "HttpConfiguration.ShutdownTimeout"},
+        {HttpShutdownTimeoutKey, "0", "ApplicationConfig.HttpShutdownTimeout"},
+        {HttpShutdownTimeoutKey, "unlimited", "ApplicationConfig.HttpShutdownTimeout"},
         {HttpReadTimeoutKey, "0", "ApplicationConfig.ReadTimeout"},
         {HttpReadHeaderTimeoutKey, "unlimited", "ApplicationConfig.ReadHeaderTimeout"},
         {HttpWriteTimeoutKey, "-1s", "ApplicationConfig.WriteTimeout"},
@@ -523,7 +523,7 @@ func TestNewHttpConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
                 bound.Resolved[time.Duration]{Value: DefaultSessionTombstoneRetention},
                 bound.Resolved[time.Duration]{Value: DefaultSessionStorageTimeout},
                 bound.Resolved[int]{Value: DefaultSessionMaxSessions},
-                bound.Resolved[time.Duration]{Value: DefaultHttpShutdownTimeout},
+                bound.Duration{},
                 httpServerLimits{},
             )
 
@@ -557,7 +557,7 @@ func TestNewHttpConfiguration_CompletesABarePortAndKeepsEveryAcceptedValue(t *te
         bound.Resolved[time.Duration]{Value: 11 * time.Minute},
         bound.Resolved[time.Duration]{Value: DefaultSessionStorageTimeout},
         bound.Resolved[int]{Value: 13},
-        bound.Resolved[time.Duration]{Value: 7 * time.Second},
+        bound.Of(7 * time.Second),
         httpServerLimits{readTimeout: bound.Of(time.Second)},
     )
     if nil != httpErr {
@@ -594,7 +594,7 @@ func TestNewHttpConfiguration_CompletesABarePortAndKeepsEveryAcceptedValue(t *te
     if 13 != httpConfigurationInstance.SessionMaxSessions().Value {
         t.Fatalf("unexpected session max sessions: %+v", httpConfigurationInstance.SessionMaxSessions())
     }
-    if 7*time.Second != httpConfigurationInstance.ShutdownTimeout().Value {
+    if bound.Of(7*time.Second) != httpConfigurationInstance.ShutdownTimeout() {
         t.Fatalf("unexpected shutdown timeout: %+v", httpConfigurationInstance.ShutdownTimeout())
     }
     if bound.Of(time.Second) != httpConfigurationInstance.ReadTimeout() {

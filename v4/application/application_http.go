@@ -155,6 +155,11 @@ func (instance *Application) runHttp(
         return refusedErr
     }
 
+    httpShutdownTimeout, httpShutdownTimeoutErr := resolveHttpShutdownTimeout(configuration, instance.applicationConfig)
+    if nil != httpShutdownTimeoutErr {
+        return httpShutdownTimeoutErr
+    }
+
     unavailableRetryAfter, unavailableRetryAfterErr := resolveUnavailableRetryAfter(configuration, instance.applicationConfig)
     if nil != unavailableRetryAfterErr {
         return unavailableRetryAfterErr
@@ -206,7 +211,7 @@ func (instance *Application) runHttp(
         httpServer,
         errorChannel,
         logger,
-        configuration.Http().ShutdownTimeout().Value,
+        httpShutdownTimeout.Value,
         httpKernel,
         &shutdownHooksDone,
     )

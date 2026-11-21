@@ -18,7 +18,7 @@ func TestRegisterDefaultParameters_DeclaresTheDefaultsAnApplicationInheritsByDec
         HttpAddressKey:               ":8080",
         HttpMaxRequestBodyBytesKey:   "1048576",
         HttpSessionTtlKey:            DefaultSessionTtl.String(),
-        HttpShutdownTimeoutKey:       DefaultHttpShutdownTimeout.String(),
+        HttpShutdownTimeoutKey:       "",
         TeardownTimeoutKey:           "",
         HttpReadTimeoutKey:           "",
         HttpReadHeaderTimeoutKey:     "",

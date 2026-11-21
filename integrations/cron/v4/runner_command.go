@@ -44,10 +44,10 @@ type scheduledRunEntry struct {
     /* zero means no deadline */
     timeout time.Duration
     /* zero means the runner's window */
-    gracefulTimeout time.Duration
+    shutdownTimeout time.Duration
 }
 
-/* RunnerCommand runs the cron Configuration in-process instead of emitting a manifest: it evaluates each entry's schedule against the wall clock under the configured RunnerDialect and invokes the registered command when it is due. Due commands run concurrently, each on its own goroutine, so an entry that outlives its interval overlaps itself; wrap the command in lock.NewExclusiveCommand to serialise runs, or gate the runner behind a lock.LeaderGate for multi-instance safety. A deadline set by EntryConfig.Timeout, or the shutdown, cancels the command's context, and a command still running one EntryConfig.GracefulTimeout later is abandoned: a warning names it, the run is reported as a failure at error and counted in its minute's failures, its scope is closed under it and it stops counting towards the shutdown wait; wall-clock jumps follow the vixie-cron algorithm documented on reconcileWallClock. */
+/* RunnerCommand runs the cron Configuration in-process instead of emitting a manifest: it evaluates each entry's schedule against the wall clock under the configured RunnerDialect and invokes the registered command when it is due. Due commands run concurrently, each on its own goroutine, so an entry that outlives its interval overlaps itself; wrap the command in lock.NewExclusiveCommand to serialise runs, or gate the runner behind a lock.LeaderGate for multi-instance safety. A deadline set by EntryConfig.Timeout, or the shutdown, cancels the command's context, and a command still running one EntryConfig.ShutdownTimeout later is abandoned: a warning names it, the run is reported as a failure at error and counted in its minute's failures, its scope is closed under it and it stops counting towards the shutdown wait; wall-clock jumps follow the vixie-cron algorithm documented on reconcileWallClock. */
 type RunnerCommand struct {
     entries []*scheduledRunEntry
     now     func() time.Time
@@ -189,9 +189,9 @@ func NewRunnerCommand(configuration *Configuration, config RunnerConfig) *Runner
             exception.Panic(exception.FromError(timeoutErr))
         }
 
-        gracefulTimeout, gracefulTimeoutErr := resolveEntryGracefulTimeout(scheduled.CommandName, scheduled.Config.GracefulTimeout)
-        if nil != gracefulTimeoutErr {
-            exception.Panic(exception.FromError(gracefulTimeoutErr))
+        shutdownTimeout, shutdownTimeoutErr := resolveEntryShutdownTimeout(scheduled.CommandName, scheduled.Config.ShutdownTimeout)
+        if nil != shutdownTimeoutErr {
+            exception.Panic(exception.FromError(shutdownTimeoutErr))
         }
 
         matcher, matcherErr := newScheduleMatcher(scheduled.Config.Schedule, runner.dialect)
@@ -215,7 +215,7 @@ func NewRunnerCommand(configuration *Configuration, config RunnerConfig) *Runner
             matcher:         matcher,
             fixedTime:       matcher.fixedTime(),
             timeout:         timeout,
-            gracefulTimeout: gracefulTimeout,
+            shutdownTimeout: shutdownTimeout,
         })
     }
 
@@ -223,7 +223,7 @@ func NewRunnerCommand(configuration *Configuration, config RunnerConfig) *Runner
         entries:                 entries,
         now:                     time.Now,
         location:                mustLoadConfiguredLocation(configuration.TimezoneName()),
-        unwindGrace:             runner.gracefulTimeout,
+        unwindGrace:             runner.shutdownTimeout,
         outputCaptureLimit:      runner.outputCaptureLimit,
         clockJumpResetThreshold: runner.clockJumpResetThreshold,
         userIgnoredCommands:     userIgnoredCommands,
@@ -269,10 +269,10 @@ func (instance *RunnerCommand) nowInZone(location *time.Location) time.Time {
     return now.In(location)
 }
 
-/* gracefulTimeoutOf resolves the window a run actually gets: the entry's own, or this runner's default when it named none. */
-func (instance *RunnerCommand) gracefulTimeoutOf(entry *scheduledRunEntry) time.Duration {
-    if 0 < entry.gracefulTimeout {
-        return entry.gracefulTimeout
+/* shutdownTimeoutOf resolves the window a run actually gets: the entry's own, or this runner's default when it named none. */
+func (instance *RunnerCommand) shutdownTimeoutOf(entry *scheduledRunEntry) time.Duration {
+    if 0 < entry.shutdownTimeout {
+        return entry.shutdownTimeout
     }
 
     return instance.unwindGrace
@@ -819,7 +819,7 @@ func reconcileWallClock(previousTarget time.Time, current time.Time, resetThresh
     return evaluations, previousTarget, ""
 }
 
-/* invokeRun runs one command on a child runtime under the run id the dispatch minted, a fresh scope so scoped services do not bleed across ticks and a context derived from the runner's carrying the entry's deadline. The command line goes through cli.DispatchCommand with the command's declared flags, the surface a command sees under the cli entry point minus the banner, the scope close and the exit handling; an error carrying an exit code comes back as an error, since melody's inert exit handler replaces the engine's os.Exit. A child scope that cannot be opened fails the run before the command, naming it; a panic inside the command is recovered as an error, and a child scope close failure travels beside the command's error in its context. The command runs on its own goroutine so a cancellation can be enforced against a command that never looks at its context, in three steps whether the deadline or the shutdown cancels it: the context is cancelled; a command that watches it unwinds inside the graceful window and reports its own error with the timeout; a command that ignores it is abandoned when the window lapses, reported at warning, has its scope closed under it and stops counting towards the shutdown wait. That last step is a kill: scope.MustGet on the closed scope panics, and the recover here covers only the goroutine this runner started, so a command resolving from the scope on a goroutine of its own can take the process down. That is why the window is minutes long and a slow unwind names its own EntryConfig.GracefulTimeout. */
+/* invokeRun runs one command on a child runtime under the run id the dispatch minted, a fresh scope so scoped services do not bleed across ticks and a context derived from the runner's carrying the entry's deadline. The command line goes through cli.DispatchCommand with the command's declared flags, the surface a command sees under the cli entry point minus the banner, the scope close and the exit handling; an error carrying an exit code comes back as an error, since melody's inert exit handler replaces the engine's os.Exit. A child scope that cannot be opened fails the run before the command, naming it; a panic inside the command is recovered as an error, and a child scope close failure travels beside the command's error in its context. The command runs on its own goroutine so a cancellation can be enforced against a command that never looks at its context, in three steps whether the deadline or the shutdown cancels it: the context is cancelled; a command that watches it unwinds inside the graceful window and reports its own error with the timeout; a command that ignores it is abandoned when the window lapses, reported at warning, has its scope closed under it and stops counting towards the shutdown wait. That last step is a kill: scope.MustGet on the closed scope panics, and the recover here covers only the goroutine this runner started, so a command resolving from the scope on a goroutine of its own can take the process down. That is why the window is minutes long and a slow unwind names its own EntryConfig.ShutdownTimeout. */
 func (instance *RunnerCommand) invokeRun(runtimeInstance containercontract.Runtime, entry *scheduledRunEntry, runId string) (invokeErr error) {
     childContext, cancel := commandContextOf(runtimeInstance.Context(), entry.timeout)
     defer cancel()
@@ -898,7 +898,7 @@ func (instance *RunnerCommand) invokeRun(runtimeInstance containercontract.Runti
     /* the abandon signal sits one unwind grace past whichever cancellation reaches the command, so a command that honours its cancelled context always reports its own outcome. The deadline arms it at the start of the run and the shutdown arms it on arrival; an entry that opted out of the deadline is never abandoned while the runner is live, a nil channel blocking forever, and is abandoned at shutdown like every other. */
     var abandon <-chan time.Time
     if 0 < entry.timeout {
-        abandonTimer := time.NewTimer(abandonDelayOf(entry.timeout, instance.gracefulTimeoutOf(entry)))
+        abandonTimer := time.NewTimer(abandonDelayOf(entry.timeout, instance.shutdownTimeoutOf(entry)))
         defer abandonTimer.Stop()
 
         abandon = abandonTimer.C
@@ -916,7 +916,7 @@ func (instance *RunnerCommand) invokeRun(runtimeInstance containercontract.Runti
             return instance.resolveAbandonedRun(runtimeInstance, entry, runId, childContext, completed, abandonedAfterDeadline)
         case <-shutdown:
             /* the shutdown has reached the command through its context; from here it gets the same window the deadline gives, and the case is disarmed so the timer is armed once */
-            shutdownTimer := time.NewTimer(instance.gracefulTimeoutOf(entry))
+            shutdownTimer := time.NewTimer(instance.shutdownTimeoutOf(entry))
             defer shutdownTimer.Stop()
 
             shutdownAbandon = shutdownTimer.C
@@ -1128,7 +1128,7 @@ func (instance *RunnerCommand) resolveAbandonedRun(
     default:
     }
 
-    /* the kill is logged naming the entry and the window it overran, since it is the one path that tears a scope down under running code and the remedy, a longer GracefulTimeout or a command that watches its context, should be readable from the line */
+    /* the kill is logged naming the entry and the window it overran, since it is the one path that tears a scope down under running code and the remedy, a longer ShutdownTimeout or a command that watches its context, should be readable from the line */
     if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
         if abandonedAfterShutdown == cause {
             logger.Warning(
@@ -1136,7 +1136,7 @@ func (instance *RunnerCommand) resolveAbandonedRun(
                 exceptioncontract.Context{
                     "commandName":     entry.commandName,
                     "cronRunId":       runId,
-                    "gracefulTimeout": instance.gracefulTimeoutOf(entry).String(),
+                    "shutdownTimeout": instance.shutdownTimeoutOf(entry).String(),
                 },
             )
         } else {
@@ -1146,7 +1146,7 @@ func (instance *RunnerCommand) resolveAbandonedRun(
                     "commandName":     entry.commandName,
                     "cronRunId":       runId,
                     "timeout":         entry.timeout.String(),
-                    "gracefulTimeout": instance.gracefulTimeoutOf(entry).String(),
+                    "shutdownTimeout": instance.shutdownTimeoutOf(entry).String(),
                 },
             )
         }
@@ -1165,19 +1165,19 @@ func (instance *RunnerCommand) shutdownAbandonError(entry *scheduledRunEntry) er
         "cron: scheduled command ignored the shutdown cancellation and did not return; it was abandoned and its container scope closed while it may still be running",
         exceptioncontract.Context{
             "commandName": entry.commandName,
-            "unwindGrace": instance.gracefulTimeoutOf(entry).String(),
+            "unwindGrace": instance.shutdownTimeoutOf(entry).String(),
         },
         ErrCommandTimeout,
     )
 }
 
 /* abandonDelayOf places the abandon signal one unwind grace past the deadline, saturating at the maximum duration: both are caller-supplied, and a sum that wrapped negative would fire at once and kill every run of the entry as it started. */
-func abandonDelayOf(timeout time.Duration, gracefulTimeout time.Duration) time.Duration {
-    if gracefulTimeout > math.MaxInt64-timeout {
+func abandonDelayOf(timeout time.Duration, shutdownTimeout time.Duration) time.Duration {
+    if shutdownTimeout > math.MaxInt64-timeout {
         return math.MaxInt64
     }
 
-    return timeout + gracefulTimeout
+    return timeout + shutdownTimeout
 }
 
 /* commandContextOf derives the command's context from the runner's, adding the entry's deadline when it has one; a zero timeout, an unlimited one resolved, yields a merely cancellable context. */
@@ -1274,7 +1274,7 @@ func (instance *RunnerCommand) timeoutError(entry *scheduledRunEntry, abandoned 
             exceptioncontract.Context{
                 "commandName": entry.commandName,
                 "timeout":     entry.timeout.String(),
-                "unwindGrace": instance.gracefulTimeoutOf(entry).String(),
+                "unwindGrace": instance.shutdownTimeoutOf(entry).String(),
             },
             commandTimeoutCause(runErr),
         )

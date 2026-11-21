@@ -419,3 +419,46 @@ func TestNewApplication_TheHttpPublicUrlFieldReachesTheUrlGenerator(t *testing.T
         t.Fatalf("expected the field's base before the route, got %q, %v", urlValue, urlErr)
     }
 }
+
+func TestApplicationConfig_HttpShutdownTimeoutIsTheKeysDefault(t *testing.T) {
+    cases := map[string]struct {
+        values   map[string]string
+        field    bound.Duration
+        expected time.Duration
+    }{
+        "the field without the key":   {values: map[string]string{}, field: bound.Of(9 * time.Second), expected: 9 * time.Second},
+        "the key wins over the field": {values: map[string]string{config.HttpShutdownTimeoutKey: "2s"}, field: bound.Of(9 * time.Second), expected: 2 * time.Second},
+        "the default without either":  {values: map[string]string{}, expected: config.DefaultHttpShutdownTimeout},
+    }
+
+    for name, testCase := range cases {
+        resolved, resolveErr := resolveHttpShutdownTimeout(newLimitConfiguration(t, testCase.values), ApplicationConfig{HttpShutdownTimeout: testCase.field})
+        if nil != resolveErr || testCase.expected != resolved.Value {
+            t.Fatalf("%s: expected %v, got %v (%v)", name, testCase.expected, resolved.Value, resolveErr)
+        }
+    }
+
+    for name, field := range map[string]bound.Duration{"below 1ms": bound.Of(time.Microsecond), "unlimited": bound.UnlimitedDuration()} {
+        _, resolveErr := resolveHttpShutdownTimeout(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{HttpShutdownTimeout: field})
+        if nil == resolveErr || "ApplicationConfig.HttpShutdownTimeout" != exception.LogContext(resolveErr, exception.LogContextConfig{})["field"] {
+            t.Fatalf("%s: expected the field refused naming it, got %v", name, resolveErr)
+        }
+    }
+}
+
+func TestRefuseScopeTeardownOutlastingHttpShutdown_ReadsTheFieldsValue(t *testing.T) {
+    refusedErr := refuseScopeTeardownOutlastingHttpShutdown(
+        newLimitConfiguration(t, map[string]string{}),
+        ApplicationConfig{ScopeTeardownTimeout: bound.Of(8 * time.Second), HttpShutdownTimeout: bound.Of(6 * time.Second)},
+    )
+    if nil == refusedErr {
+        t.Fatal("expected a scope teardown over the field's shutdown timeout refused")
+    }
+
+    if admittedErr := refuseScopeTeardownOutlastingHttpShutdown(
+        newLimitConfiguration(t, map[string]string{}),
+        ApplicationConfig{ScopeTeardownTimeout: bound.Of(8 * time.Second), HttpShutdownTimeout: bound.Of(9 * time.Second)},
+    ); nil != admittedErr {
+        t.Fatalf("expected a scope teardown under the field's shutdown timeout admitted, got %v", admittedErr)
+    }
+}

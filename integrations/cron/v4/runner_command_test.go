@@ -1590,7 +1590,7 @@ func TestRunnerCommand_TimeoutCancelsACommandThatWatchesItsContext(t *testing.T)
     configuration := NewConfiguration().
         Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: bound.Of(50 * time.Millisecond)})
 
-    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, GracefulTimeout: bound.Of(2 * time.Second)})
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, ShutdownTimeout: bound.Of(2 * time.Second)})
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
 
@@ -1634,7 +1634,7 @@ func TestRunnerCommand_WedgedCommandIsAbandonedAndItsScopeReleased(t *testing.T)
     configuration := NewConfiguration().
         Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: bound.Of(50 * time.Millisecond)})
 
-    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, GracefulTimeout: bound.Of(50 * time.Millisecond)})
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, ShutdownTimeout: bound.Of(50 * time.Millisecond)})
 
     var closedScopes atomic.Int64
     job.resolveName = closeCountingServiceName
@@ -1678,7 +1678,7 @@ func TestRunnerCommand_UnlimitedTimeoutOptsOutOfTheDeadline(t *testing.T) {
     configuration := NewConfiguration().
         Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: bound.UnlimitedDuration()})
 
-    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, GracefulTimeout: bound.Of(time.Millisecond)})
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, ShutdownTimeout: bound.Of(time.Millisecond)})
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     if runErr := runner.runDue(newRunnerTestRuntime(context.Background()), at); nil != runErr {
@@ -1747,25 +1747,25 @@ func TestResolveEntryTimeout_AnAbsentTimeoutTakesTheRunnersAndAPresentOneBeatsIt
 }
 
 /* the unwind window is per entry, because how long an honest unwind takes is a property of the work rather than of the runner: a batch to flush is not a job that returns the moment its context is cancelled. An entry that names none falls to the runner's window. */
-func TestGracefulTimeoutOf_TakesTheEntrysOwnWindowAndFallsBackToTheRunnersWindow(t *testing.T) {
-    runner := NewRunnerCommand(nil, RunnerConfig{GracefulTimeout: bound.Of(7 * time.Minute)})
+func TestShutdownTimeoutOf_TakesTheEntrysOwnWindowAndFallsBackToTheRunnersWindow(t *testing.T) {
+    runner := NewRunnerCommand(nil, RunnerConfig{ShutdownTimeout: bound.Of(7 * time.Minute)})
 
     entryWithoutWindow := &scheduledRunEntry{}
-    if 7*time.Minute != runner.gracefulTimeoutOf(entryWithoutWindow) {
-        t.Fatalf("expected an entry naming no window to take the runner's, got %v", runner.gracefulTimeoutOf(entryWithoutWindow))
+    if 7*time.Minute != runner.shutdownTimeoutOf(entryWithoutWindow) {
+        t.Fatalf("expected an entry naming no window to take the runner's, got %v", runner.shutdownTimeoutOf(entryWithoutWindow))
     }
 
-    gracefulTimeout, gracefulTimeoutErr := resolveEntryGracefulTimeout("job:top", bound.Of(20*time.Minute))
-    if nil != gracefulTimeoutErr {
-        t.Fatalf("unexpected error: %v", gracefulTimeoutErr)
+    shutdownTimeout, shutdownTimeoutErr := resolveEntryShutdownTimeout("job:top", bound.Of(20*time.Minute))
+    if nil != shutdownTimeoutErr {
+        t.Fatalf("unexpected error: %v", shutdownTimeoutErr)
     }
 
-    entryWithWindow := &scheduledRunEntry{gracefulTimeout: gracefulTimeout}
-    if 20*time.Minute != runner.gracefulTimeoutOf(entryWithWindow) {
-        t.Fatalf("expected the entry's own window to be used, got %v", runner.gracefulTimeoutOf(entryWithWindow))
+    entryWithWindow := &scheduledRunEntry{shutdownTimeout: shutdownTimeout}
+    if 20*time.Minute != runner.shutdownTimeoutOf(entryWithWindow) {
+        t.Fatalf("expected the entry's own window to be used, got %v", runner.shutdownTimeoutOf(entryWithWindow))
     }
 
-    if 5*time.Minute != NewRunnerCommand(nil, RunnerConfig{}).gracefulTimeoutOf(entryWithoutWindow) {
+    if 5*time.Minute != NewRunnerCommand(nil, RunnerConfig{}).shutdownTimeoutOf(entryWithoutWindow) {
         t.Fatal("expected a runner naming no window to give five minutes")
     }
 }
@@ -1779,7 +1779,7 @@ func TestRunnerCommand_AnEntrysGracefulWindowGovernsWhenItIsAbandoned(t *testing
         Schedule("job:top", EntryConfig{
             Schedule:        &Schedule{Minute: "0"},
             Timeout:         bound.Of(50 * time.Millisecond),
-            GracefulTimeout: bound.Of(50 * time.Millisecond),
+            ShutdownTimeout: bound.Of(50 * time.Millisecond),
         })
 
     runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
@@ -1832,7 +1832,7 @@ func TestRunnerCommand_AnEntryWhoseWindowsCannotBeSummedStillRunsToCompletion(t 
         Schedule("job:top", EntryConfig{
             Schedule:        &Schedule{Minute: "0"},
             Timeout:         bound.Of(time.Hour),
-            GracefulTimeout: bound.Of(time.Duration(math.MaxInt64)),
+            ShutdownTimeout: bound.Of(time.Duration(math.MaxInt64)),
         })
 
     runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
@@ -1864,7 +1864,7 @@ func TestRunnerCommand_TheAbandonErrorNamesTheWindowTheRunWasActuallyGiven(t *te
         Schedule("job:top", EntryConfig{
             Schedule:        &Schedule{Minute: "0"},
             Timeout:         bound.Of(20 * time.Millisecond),
-            GracefulTimeout: bound.Of(30 * time.Millisecond),
+            ShutdownTimeout: bound.Of(30 * time.Millisecond),
         })
 
     runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
@@ -1894,7 +1894,7 @@ func TestRunnerCommand_TheAbandonErrorNamesTheWindowTheRunWasActuallyGiven(t *te
 
 /* the outer select cannot be made to see both cases ready from outside the runner — the window is one scheduling instant — so the branch is driven directly, with the completion already in the channel, which is the state that window produces. */
 func TestResolveAbandonedRun_ACommandThatAlreadyAnsweredReportsItsOwnOutcome(t *testing.T) {
-    runner := &RunnerCommand{unwindGrace: runnerGracefulTimeoutRule.Default}
+    runner := &RunnerCommand{unwindGrace: runnerShutdownTimeoutRule.Default}
     entry := &scheduledRunEntry{commandName: "job:top", timeout: time.Minute}
 
     commandErr := errors.New("the command's own failure")
@@ -1920,7 +1920,7 @@ func TestResolveAbandonedRun_ACommandThatAlreadyAnsweredReportsItsOwnOutcome(t *
 }
 
 func TestResolveAbandonedRun_ACommandStillRunningIsReportedAbandoned(t *testing.T) {
-    runner := &RunnerCommand{unwindGrace: runnerGracefulTimeoutRule.Default}
+    runner := &RunnerCommand{unwindGrace: runnerShutdownTimeoutRule.Default}
     entry := &scheduledRunEntry{commandName: "job:top", timeout: time.Minute}
 
     resolved := runner.resolveAbandonedRun(
@@ -1943,7 +1943,7 @@ func TestResolveAbandonedRun_ACommandStillRunningIsReportedAbandoned(t *testing.
 
 /* a command that answered with its deadline already exceeded keeps its own error beside the timeout, the way the completion branch of the outer select reports it. */
 func TestResolveAbandonedRun_ADeadlineExceededAnswerCarriesBothFailures(t *testing.T) {
-    runner := &RunnerCommand{unwindGrace: runnerGracefulTimeoutRule.Default}
+    runner := &RunnerCommand{unwindGrace: runnerShutdownTimeoutRule.Default}
     entry := &scheduledRunEntry{commandName: "job:top", timeout: time.Minute}
 
     lapsedContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
@@ -2925,7 +2925,7 @@ func (instance *panicValueCommand) Run(runtimeInstance containercontract.Runtime
 
 /* a timeout carries the command's own failure down one chain: both stay reachable by identity, and the record built from that chain reaches the command's own context instead of stopping at the join */
 func TestTimeoutError_CarriesTheCommandFailureDownOneChain(t *testing.T) {
-    runner := &RunnerCommand{unwindGrace: runnerGracefulTimeoutRule.Default}
+    runner := &RunnerCommand{unwindGrace: runnerShutdownTimeoutRule.Default}
     entry := &scheduledRunEntry{commandName: "job:top", timeout: time.Minute}
 
     commandErr := exception.NewError(
@@ -2958,7 +2958,7 @@ func TestTimeoutError_CarriesTheCommandFailureDownOneChain(t *testing.T) {
 
 /* a timeout with no command failure keeps the sentinel alone as its cause, so the shape a caller reads does not change with the presence of a second error */
 func TestTimeoutError_WithoutACommandFailureWrapsTheSentinelAlone(t *testing.T) {
-    runner := &RunnerCommand{unwindGrace: runnerGracefulTimeoutRule.Default}
+    runner := &RunnerCommand{unwindGrace: runnerShutdownTimeoutRule.Default}
     entry := &scheduledRunEntry{commandName: "job:top", timeout: time.Minute}
 
     timeoutErr := runner.timeoutError(entry, true, nil)
@@ -3688,7 +3688,7 @@ func TestRunnerCommand_ShutdownAbandonsAJobThatIgnoresItsCancellation(t *testing
     configuration := NewConfiguration().
         Schedule("job:ignoring", EntryConfig{})
 
-    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, GracefulTimeout: bound.Of(50 * time.Millisecond)})
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, ShutdownTimeout: bound.Of(50 * time.Millisecond)})
 
     baseMinute := time.Date(2026, time.July, 15, 9, 29, 0, 0, time.UTC)
 
@@ -3729,7 +3729,7 @@ func TestRunnerCommand_ShutdownAbandonsAJobThatIgnoresItsCancellation(t *testing
         t.Fatalf("expected the shutdown abandon to be announced, got %v", captured.entries)
     }
 
-    if (50 * time.Millisecond).String() != fmt.Sprintf("%v", record.context["gracefulTimeout"]) {
+    if (50 * time.Millisecond).String() != fmt.Sprintf("%v", record.context["shutdownTimeout"]) {
         t.Fatalf("expected the warning to name the window, got %v", record.context)
     }
 }
@@ -3741,7 +3741,7 @@ func TestRunnerCommand_ShutdownAbandonsAJobWhoseDeadlineIsOutOfReach(t *testing.
     configuration := NewConfiguration().
         Schedule("job:ignoring", EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: bound.Of(time.Hour)})
 
-    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, GracefulTimeout: bound.Of(50 * time.Millisecond)})
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, ShutdownTimeout: bound.Of(50 * time.Millisecond)})
 
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -3777,7 +3777,7 @@ func TestDispatchDue_AShutdownAbandonedRunIsFailedNotCancelled(t *testing.T) {
     configuration := NewConfiguration().
         Schedule("job:ignoring", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, GracefulTimeout: bound.Of(50 * time.Millisecond)})
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, ShutdownTimeout: bound.Of(50 * time.Millisecond)})
 
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -3842,7 +3842,7 @@ func TestRunnerCommand_ShutdownWaitsForAJobThatUnwindsInsideTheGracefulWindow(t 
     configuration := NewConfiguration().
         Schedule("job:ignoring", EntryConfig{Schedule: &Schedule{Minute: "0"}})
 
-    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, GracefulTimeout: bound.Of(time.Second)})
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, ShutdownTimeout: bound.Of(time.Second)})
 
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()

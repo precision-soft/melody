@@ -64,8 +64,8 @@ func TestResolveRunnerConfig_AnEmptyConfigTakesEveryDefault(t *testing.T) {
         t.Fatalf("expected a one-hour timeout, got %+v", resolved.timeout)
     }
 
-    if 5*time.Minute != resolved.gracefulTimeout {
-        t.Fatalf("expected a five-minute graceful timeout, got %v", resolved.gracefulTimeout)
+    if 5*time.Minute != resolved.shutdownTimeout {
+        t.Fatalf("expected a five-minute shutdown timeout, got %v", resolved.shutdownTimeout)
     }
 }
 
@@ -75,7 +75,7 @@ func TestResolveRunnerConfig_GivenValuesReachTheResolvedRunner(t *testing.T) {
         OutputCaptureLimit:      bound.Of(16),
         ClockJumpResetThreshold: bound.Of(2 * time.Minute),
         Timeout:                 bound.UnlimitedDuration(),
-        GracefulTimeout:         bound.Of(time.Millisecond),
+        ShutdownTimeout:         bound.Of(time.Millisecond),
     })
     if nil != resolveErr {
         t.Fatalf("unexpected error: %v", resolveErr)
@@ -89,8 +89,8 @@ func TestResolveRunnerConfig_GivenValuesReachTheResolvedRunner(t *testing.T) {
         t.Fatalf("expected an unlimited runner timeout to be admitted, got %+v", resolved.timeout)
     }
 
-    if time.Millisecond != resolved.gracefulTimeout {
-        t.Fatalf("expected the given graceful timeout, got %v", resolved.gracefulTimeout)
+    if time.Millisecond != resolved.shutdownTimeout {
+        t.Fatalf("expected the given shutdown timeout, got %v", resolved.shutdownTimeout)
     }
 }
 
@@ -106,8 +106,8 @@ func TestResolveRunnerConfig_RefusesAValueOutsideItsRuleNamingTheField(t *testin
         {"reset threshold not in whole minutes", RunnerConfig{ClockJumpResetThreshold: bound.Of(150 * time.Second)}, "RunnerConfig.ClockJumpResetThreshold"},
         {"unlimited reset threshold", RunnerConfig{ClockJumpResetThreshold: bound.UnlimitedDuration()}, "RunnerConfig.ClockJumpResetThreshold"},
         {"zero timeout", RunnerConfig{Timeout: bound.Of(time.Duration(0))}, "RunnerConfig.Timeout"},
-        {"zero graceful timeout", RunnerConfig{GracefulTimeout: bound.Of(time.Duration(0))}, "RunnerConfig.GracefulTimeout"},
-        {"unlimited graceful timeout", RunnerConfig{GracefulTimeout: bound.UnlimitedDuration()}, "RunnerConfig.GracefulTimeout"},
+        {"zero shutdown timeout", RunnerConfig{ShutdownTimeout: bound.Of(time.Duration(0))}, "RunnerConfig.ShutdownTimeout"},
+        {"unlimited shutdown timeout", RunnerConfig{ShutdownTimeout: bound.UnlimitedDuration()}, "RunnerConfig.ShutdownTimeout"},
     }
 
     for _, testCase := range testCases {
@@ -146,8 +146,8 @@ func TestNewRunnerCommand_RefusesAnEntryLimitOutsideItsRuleNamingTheFieldAndTheC
     }{
         {"zero timeout", EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: bound.Of(time.Duration(0))}, "EntryConfig.Timeout"},
         {"negative timeout", EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: bound.Of(-time.Second)}, "EntryConfig.Timeout"},
-        {"zero graceful timeout", EntryConfig{Schedule: &Schedule{Minute: "0"}, GracefulTimeout: bound.Of(time.Duration(0))}, "EntryConfig.GracefulTimeout"},
-        {"unlimited graceful timeout", EntryConfig{Schedule: &Schedule{Minute: "0"}, GracefulTimeout: bound.UnlimitedDuration()}, "EntryConfig.GracefulTimeout"},
+        {"zero shutdown timeout", EntryConfig{Schedule: &Schedule{Minute: "0"}, ShutdownTimeout: bound.Of(time.Duration(0))}, "EntryConfig.ShutdownTimeout"},
+        {"unlimited shutdown timeout", EntryConfig{Schedule: &Schedule{Minute: "0"}, ShutdownTimeout: bound.UnlimitedDuration()}, "EntryConfig.ShutdownTimeout"},
         {"zero instances", EntryConfig{Schedule: &Schedule{Minute: "0"}, Instances: bound.Of(0)}, "EntryConfig.Instances"},
         {"unlimited instances", EntryConfig{Schedule: &Schedule{Minute: "0"}, Instances: bound.UnlimitedCount()}, "EntryConfig.Instances"},
     }
@@ -168,20 +168,20 @@ func TestNewRunnerCommand_RefusesAnEntryLimitOutsideItsRuleNamingTheFieldAndTheC
 func TestNewRunnerCommand_TheRunnersTimeoutAndWindowReachAnEntryThatNamesNone(t *testing.T) {
     configuration := NewConfiguration().
         Schedule("job:inherits", EntryConfig{Schedule: &Schedule{Minute: "0"}}).
-        Schedule("job:own", EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: bound.Of(time.Minute), GracefulTimeout: bound.Of(time.Second)})
+        Schedule("job:own", EntryConfig{Schedule: &Schedule{Minute: "0"}, Timeout: bound.Of(time.Minute), ShutdownTimeout: bound.Of(time.Second)})
 
     runner := NewRunnerCommand(configuration, RunnerConfig{
         Commands:        []clicontract.Command{newRecordingCommand("job:inherits"), newRecordingCommand("job:own")},
         Timeout:         bound.Of(10 * time.Minute),
-        GracefulTimeout: bound.Of(7 * time.Minute),
+        ShutdownTimeout: bound.Of(7 * time.Minute),
     })
 
-    if 10*time.Minute != runner.entries[0].timeout || 7*time.Minute != runner.gracefulTimeoutOf(runner.entries[0]) {
-        t.Fatalf("expected the runner's timeout and window, got %v and %v", runner.entries[0].timeout, runner.gracefulTimeoutOf(runner.entries[0]))
+    if 10*time.Minute != runner.entries[0].timeout || 7*time.Minute != runner.shutdownTimeoutOf(runner.entries[0]) {
+        t.Fatalf("expected the runner's timeout and window, got %v and %v", runner.entries[0].timeout, runner.shutdownTimeoutOf(runner.entries[0]))
     }
 
-    if time.Minute != runner.entries[1].timeout || time.Second != runner.gracefulTimeoutOf(runner.entries[1]) {
-        t.Fatalf("expected the entry's own timeout and window, got %v and %v", runner.entries[1].timeout, runner.gracefulTimeoutOf(runner.entries[1]))
+    if time.Minute != runner.entries[1].timeout || time.Second != runner.shutdownTimeoutOf(runner.entries[1]) {
+        t.Fatalf("expected the entry's own timeout and window, got %v and %v", runner.entries[1].timeout, runner.shutdownTimeoutOf(runner.entries[1]))
     }
 }
 
@@ -195,7 +195,7 @@ func TestRunnerCommand_TheRunnersTimeoutCancelsAnEntryThatNamesNone(t *testing.T
     runner := NewRunnerCommand(configuration, RunnerConfig{
         Commands:        []clicontract.Command{job},
         Timeout:         bound.Of(50 * time.Millisecond),
-        GracefulTimeout: bound.Of(2 * time.Second),
+        ShutdownTimeout: bound.Of(2 * time.Second),
     })
 
     invokeErr := runner.invokeRun(newRunnerTestRuntime(context.Background()), runner.entries[0], logging.GenerateProcessId())

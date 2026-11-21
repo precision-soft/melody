@@ -32,8 +32,8 @@ func frameworkEnvironmentKeys() []configcontract.EnvironmentKey {
         frameworkEnvironmentKey(HttpSessionTombstoneRetentionKey, KernelHttpSessionTombstoneRetention, DefaultSessionTombstoneRetention.String()),
         frameworkEnvironmentKey(HttpSessionStorageTimeoutKey, KernelHttpSessionStorageTimeout, DefaultSessionStorageTimeout.String()),
         frameworkEnvironmentKey(HttpSessionMaxSessionsKey, KernelHttpSessionMaxSessions, strconv.Itoa(DefaultSessionMaxSessions)),
-        frameworkEnvironmentKey(HttpShutdownTimeoutKey, KernelHttpShutdownTimeout, DefaultHttpShutdownTimeout.String()),
         /* empty so ApplicationConfig and then the framework default fill them */
+        frameworkEnvironmentKey(HttpShutdownTimeoutKey, KernelHttpShutdownTimeout, ""),
         frameworkEnvironmentKey(TeardownTimeoutKey, KernelTeardownTimeout, ""),
         frameworkEnvironmentKey(ScopeTeardownTimeoutKey, KernelScopeTeardownTimeout, ""),
         frameworkEnvironmentKey(ContainerCreationWaitersKey, KernelContainerCreationWaiters, ""),
