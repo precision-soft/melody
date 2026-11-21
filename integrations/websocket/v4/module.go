@@ -20,8 +20,8 @@ type ModuleConfig struct {
 /* StreamConfig is one stream route. RouteName defaults to melody.websocket when the module declares a single stream and is required when it declares more, since one default cannot name two routes. */
 type StreamConfig struct {
     Hub *melodyhttp.ServerSentEventHub
-    /* Options is handed to NewStreamHandler untouched, so a limit outside its rule fails the route registration at boot. */
-    Options   Options
+    /* Handler is handed to NewStreamHandler untouched, so a limit outside its rule fails the route registration at boot. */
+    Handler   StreamHandlerConfig
     RouteName string
     Path      string
 }
@@ -42,7 +42,7 @@ func (instance *Module) Description() string {
     return "registers the websocket stream routes, each bridged onto a server-sent-event hub"
 }
 
-/* every stream is judged and its handler built before the first route registers, so a refused module leaves no route behind; a missing stream list, hub, path or route name is refused at boot rather than skipped, since an unregistered route has no later consumer to fail loudly, and an option outside its rule is refused by NewStreamHandler naming the option */
+/* every stream is judged and its handler built before the first route registers, so a refused module leaves no route behind; a missing stream list, hub, path or route name is refused at boot rather than skipped, since an unregistered route has no later consumer to fail loudly, and a handler limit outside its rule is refused by NewStreamHandler naming the field */
 func (instance *Module) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
     streams := instance.config.Streams
     if 0 == len(streams) {
@@ -79,7 +79,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel)
             ))
         }
 
-        handlers = append(handlers, NewStreamHandler(stream.Hub, stream.Options))
+        handlers = append(handlers, NewStreamHandler(stream.Hub, stream.Handler))
     }
 
     for index, stream := range streams {

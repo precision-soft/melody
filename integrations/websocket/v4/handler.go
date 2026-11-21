@@ -21,13 +21,13 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-/* Options declares one stream handler. A limit outside its rule is refused at NewStreamHandler naming the field, at boot through the module. */
-type Options struct {
+/* StreamHandlerConfig declares one stream handler. A limit outside its rule is refused at NewStreamHandler naming the field, at boot through the module. */
+type StreamHandlerConfig struct {
     /* TopicResolver names the hub topic a connection subscribes to, "default" when nil; an empty topic it answers refuses the connection. */
     TopicResolver func(request httpcontract.Request) string
 
-    /* OnMessage receives every inbound frame, nil to drop them. */
-    OnMessage func(runtimeInstance containercontract.Runtime, messageType coderwebsocket.MessageType, payload []byte)
+    /* OnMessage receives every inbound frame with the connection it arrived on, nil to drop them. A nil error keeps the connection; a non-nil error is logged once at error and closes the connection with status 1011, as a panic does. */
+    OnMessage func(runtimeInstance containercontract.Runtime, connection StreamConnection, message InboundMessage) error
 
     /* WriteTimeout bounds one write: 10s by default, at least 1ms, unlimited refused. */
     WriteTimeout bound.Duration
@@ -48,34 +48,57 @@ type Options struct {
     CloseHandshakeGrace bound.Duration
 }
 
+/* InboundMessage is one data frame a client sent: a text frame when Binary is false. */
+type InboundMessage struct {
+    Binary  bool
+    Payload []byte
+}
+
+/* OutboundMessage is one data frame Send writes: a text frame when Binary is false, whatever StreamHandlerConfig.BinaryWrites says of the broadcast frames. */
+type OutboundMessage struct {
+    Binary  bool
+    Payload []byte
+}
+
+/* ErrStreamConnectionClosed is answered by Send once the connection is closing or closed. */
+var ErrStreamConnectionClosed = errors.New("websocket stream connection is closed")
+
+/* StreamConnection is the connection a frame arrived on; it may be kept and used from any goroutine while the connection lives. */
+type StreamConnection interface {
+    /* Send writes one frame, serialised with the broadcast writes and every other Send, bounded by StreamHandlerConfig.WriteTimeout and by the runtime's context; a nil runtime is refused, a closed connection answers ErrStreamConnectionClosed. */
+    Send(runtimeInstance containercontract.Runtime, message OutboundMessage) error
+}
+
+var _ StreamConnection = (*streamConnection)(nil)
+
 var writeTimeoutRule = bound.Rule[time.Duration]{
-    Name:    "Options.WriteTimeout",
+    Name:    "StreamHandlerConfig.WriteTimeout",
     Default: 10 * time.Second,
     Minimum: bound.TimeoutMinimum,
 }
 
 /* the read limit's default is coder/websocket's own figure, made melody's so it is written on every connection */
 var readLimitRule = bound.Rule[int]{
-    Name:              "Options.ReadLimit",
+    Name:              "StreamHandlerConfig.ReadLimit",
     Default:           32768,
     Minimum:           1,
     UnlimitedAdmitted: true,
 }
 
 var idleTimeoutRule = bound.Rule[time.Duration]{
-    Name:    "Options.IdleTimeout",
+    Name:    "StreamHandlerConfig.IdleTimeout",
     Default: 30 * time.Second,
     Minimum: time.Second,
 }
 
 var closeHandshakeGraceRule = bound.Rule[time.Duration]{
-    Name:    "Options.CloseHandshakeGrace",
+    Name:    "StreamHandlerConfig.CloseHandshakeGrace",
     Default: time.Second,
     Minimum: bound.TimeoutMinimum,
 }
 
-type resolvedOptions struct {
-    options      Options
+type resolvedStreamHandlerConfig struct {
+    config       StreamHandlerConfig
     writeTimeout time.Duration
     /* coder/websocket reads a negative limit as no limit */
     readLimit           int64
@@ -83,25 +106,25 @@ type resolvedOptions struct {
     closeHandshakeGrace time.Duration
 }
 
-func resolveOptions(options Options) (resolvedOptions, error) {
-    writeTimeout, writeTimeoutErr := bound.Resolve(options.WriteTimeout, writeTimeoutRule)
+func resolveStreamHandlerConfig(config StreamHandlerConfig) (resolvedStreamHandlerConfig, error) {
+    writeTimeout, writeTimeoutErr := bound.Resolve(config.WriteTimeout, writeTimeoutRule)
     if nil != writeTimeoutErr {
-        return resolvedOptions{}, writeTimeoutErr
+        return resolvedStreamHandlerConfig{}, writeTimeoutErr
     }
 
-    readLimit, readLimitErr := bound.Resolve(options.ReadLimit, readLimitRule)
+    readLimit, readLimitErr := bound.Resolve(config.ReadLimit, readLimitRule)
     if nil != readLimitErr {
-        return resolvedOptions{}, readLimitErr
+        return resolvedStreamHandlerConfig{}, readLimitErr
     }
 
-    idleTimeout, idleTimeoutErr := bound.Resolve(options.IdleTimeout, idleTimeoutRule)
+    idleTimeout, idleTimeoutErr := bound.Resolve(config.IdleTimeout, idleTimeoutRule)
     if nil != idleTimeoutErr {
-        return resolvedOptions{}, idleTimeoutErr
+        return resolvedStreamHandlerConfig{}, idleTimeoutErr
     }
 
-    closeHandshakeGrace, closeHandshakeGraceErr := bound.Resolve(options.CloseHandshakeGrace, closeHandshakeGraceRule)
+    closeHandshakeGrace, closeHandshakeGraceErr := bound.Resolve(config.CloseHandshakeGrace, closeHandshakeGraceRule)
     if nil != closeHandshakeGraceErr {
-        return resolvedOptions{}, closeHandshakeGraceErr
+        return resolvedStreamHandlerConfig{}, closeHandshakeGraceErr
     }
 
     resolvedReadLimit := int64(readLimit.Value)
@@ -109,8 +132,8 @@ func resolveOptions(options Options) (resolvedOptions, error) {
         resolvedReadLimit = -1
     }
 
-    return resolvedOptions{
-        options:             options,
+    return resolvedStreamHandlerConfig{
+        config:              config,
         writeTimeout:        writeTimeout.Value,
         readLimit:           resolvedReadLimit,
         idleTimeout:         idleTimeout.Value,
@@ -119,13 +142,13 @@ func resolveOptions(options Options) (resolvedOptions, error) {
 }
 
 /* NewStreamHandler bridges a websocket connection onto a server-sent-event hub topic. A nil hub and a limit outside its rule panic at construction, naming what they refuse. */
-func NewStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpcontract.Handler {
+func NewStreamHandler(hub *melodyhttp.ServerSentEventHub, config StreamHandlerConfig) httpcontract.Handler {
     /* the hub is dereferenced on every accepted connection, so a nil one must fail the boot, not the first request */
     if nil == hub {
         exception.Panic(exception.NewError("websocket stream handler hub is nil", nil, nil))
     }
 
-    resolved, resolveErr := resolveOptions(options)
+    resolved, resolveErr := resolveStreamHandlerConfig(config)
     if nil != resolveErr {
         exception.Panic(exception.FromError(resolveErr))
     }
@@ -133,8 +156,8 @@ func NewStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpc
     return newStreamHandler(hub, resolved)
 }
 
-func newStreamHandler(hub *melodyhttp.ServerSentEventHub, resolved resolvedOptions) httpcontract.Handler {
-    options := resolved.options
+func newStreamHandler(hub *melodyhttp.ServerSentEventHub, resolved resolvedStreamHandlerConfig) httpcontract.Handler {
+    config := resolved.config
 
     return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         /* a hub that has shut down serves no stream: Subscribe on it hands back a closed channel, which the event loop would read as an ordinary end of stream after a 101, indistinguishable from a peer that went away. The request is refused before the upgrade with 503, as an empty resolved topic is with 400, so a client connecting during the shutdown drain is told to come back rather than handed a server error. */
@@ -147,8 +170,8 @@ func newStreamHandler(hub *melodyhttp.ServerSentEventHub, resolved resolvedOptio
 
         /* the topic is resolved before the upgrade so a resolver that comes up empty refuses the request outright: an empty topic is only ever a failed extraction, the nil-resolver default being "default", and subscribing it would pool every mis-resolved client of every tenant on one shared "" topic */
         topic := "default"
-        if nil != options.TopicResolver {
-            topic = options.TopicResolver(request)
+        if nil != config.TopicResolver {
+            topic = config.TopicResolver(request)
             if "" == topic {
                 return nil, exception.NewHttpException(
                     nethttp.StatusBadRequest,
@@ -161,7 +184,7 @@ func newStreamHandler(hub *melodyhttp.ServerSentEventHub, resolved resolvedOptio
         logger := newConnectionLogger(runtimeInstance)
 
         connection, acceptErr := coderwebsocket.Accept(writer, request.HttpRequest(), &coderwebsocket.AcceptOptions{
-            OriginPatterns: options.OriginPatterns,
+            OriginPatterns: config.OriginPatterns,
         })
         if nil != acceptErr {
             logger.error("websocket upgrade failed", acceptErr, nil)
@@ -188,12 +211,14 @@ func newStreamHandler(hub *melodyhttp.ServerSentEventHub, resolved resolvedOptio
         liveness := newConnectionLiveness()
         liveness.recordActivity()
 
+        stream := newStreamConnection(connection, connectionContext, resolved.writeTimeout, liveness)
+
         /* the handler waits on readLoopDone before returning so a still-running OnMessage callback cannot outlive the request scope the kernel closes on return */
         readLoopDone := make(chan struct{})
         go func() {
             defer close(readLoopDone)
 
-            readLoop(connectionContext, cancel, connection, runtimeInstance, options, liveness, logger)
+            readLoop(connectionContext, cancel, stream, runtimeInstance, config, liveness, logger)
         }()
 
         /* unconditional: the idle timeout is resolved at construction, so every connection is reaped by the ping loop */
@@ -202,22 +227,18 @@ func newStreamHandler(hub *melodyhttp.ServerSentEventHub, resolved resolvedOptio
         for {
             select {
             case <-connectionContext.Done():
-                closeConnection(connection, liveness, readLoopDone, resolved.closeHandshakeGrace)
+                closeConnection(stream, liveness, readLoopDone, resolved.closeHandshakeGrace)
                 return nil, nil
             case event, open := <-subscriber.Events():
                 if false == open {
-                    closeConnection(connection, liveness, readLoopDone, resolved.closeHandshakeGrace)
+                    closeConnection(stream, liveness, readLoopDone, resolved.closeHandshakeGrace)
                     return nil, nil
                 }
 
-                writeContext, writeCancel := context.WithTimeout(connectionContext, resolved.writeTimeout)
-                liveness.enterWrite()
-                writeErr := connection.Write(writeContext, writeMessageType(options), []byte(event.Data))
-                liveness.leaveWrite()
-                writeCancel()
+                writeErr := stream.write(connectionContext, writeMessageType(config.BinaryWrites), []byte(event.Data))
                 if nil != writeErr {
                     logger.debug("websocket write failed, closing connection", writeErr)
-                    closeConnection(connection, liveness, readLoopDone, resolved.closeHandshakeGrace)
+                    closeConnection(stream, liveness, readLoopDone, resolved.closeHandshakeGrace)
                     return nil, nil
                 }
             }
@@ -228,14 +249,14 @@ func newStreamHandler(hub *melodyhttp.ServerSentEventHub, resolved resolvedOptio
 func readLoop(
     ctx context.Context,
     cancel context.CancelFunc,
-    connection *coderwebsocket.Conn,
+    stream *streamConnection,
     runtimeInstance containercontract.Runtime,
-    options Options,
+    config StreamHandlerConfig,
     liveness *connectionLiveness,
     logger connectionLogger,
 ) {
     for {
-        messageType, payload, readErr := connection.Read(ctx)
+        messageType, payload, readErr := stream.connection.Read(ctx)
         if nil != readErr {
             /* debug, not error: most read failures are ordinary disconnects, but a peer killed for exceeding the read limit or for a protocol violation still leaves a record */
             logger.debug("websocket read loop ended", readErr)
@@ -245,13 +266,16 @@ func readLoop(
 
         liveness.recordActivity()
 
-        if nil != options.OnMessage {
+        if nil != config.OnMessage {
+            message := InboundMessage{Binary: coderwebsocket.MessageBinary == messageType, Payload: payload}
+
             /* the reader cannot answer a pong for as long as the callback runs, so tell the ping loop not to read its timeouts as a death */
             liveness.enterCallback()
-            panicked := dispatchOnMessage(runtimeInstance, options, messageType, payload, logger)
+            failed := dispatchOnMessage(runtimeInstance, config, stream, message, logger)
             liveness.leaveCallback()
 
-            if true == panicked {
+            if true == failed {
+                stream.closeStatus.Store(int32(coderwebsocket.StatusInternalError))
                 cancel()
                 return
             }
@@ -379,14 +403,14 @@ func pingLoop(
     }
 }
 
-/* the read goroutine runs outside the kernel's panic recovery, so a panic in the user OnMessage callback would crash the whole process; recover it, log it, and signal the connection to close. */
+/* the read goroutine runs outside the kernel's panic recovery, so a panic in the user OnMessage callback would crash the whole process; recover it, log it, and signal the connection to close. A returned error is logged and signals the same close. */
 func dispatchOnMessage(
     runtimeInstance containercontract.Runtime,
-    options Options,
-    messageType coderwebsocket.MessageType,
-    payload []byte,
+    config StreamHandlerConfig,
+    connection StreamConnection,
+    message InboundMessage,
     logger connectionLogger,
-) (panicked bool) {
+) (failed bool) {
     defer func() {
         recovered := recover()
         if nil != recovered {
@@ -396,22 +420,35 @@ func dispatchOnMessage(
                 exception.NewError(fmt.Sprintf("websocket OnMessage panicked: %v", recovered), nil, exception.PanicCause(recovered)),
                 exceptioncontract.Context{"panicStack": string(debug.Stack())},
             )
-            panicked = true
+            failed = true
         }
     }()
 
-    options.OnMessage(runtimeInstance, messageType, payload)
+    callbackErr := config.OnMessage(runtimeInstance, connection, message)
+    if nil != callbackErr {
+        logger.error("websocket OnMessage failed", callbackErr, nil)
+
+        return true
+    }
 
     return false
 }
 
-/* closeConnection tears the socket down and holds, bounded by Options.CloseHandshakeGrace, until the read loop has exited before the handler returns to the kernel, which keeps the request scope alive for a synchronous OnMessage callback resolving services against it. The bound is deliberately much shorter than the reaper's callback grace, because this wait is on the teardown path, where a long wait per wedged callback would stall hub shutdown and process exit; a callback that outruns it is abandoned, its next scope resolution panics, dispatchOnMessage recovers and logs it, and the message is lost by design. With a callback in flight the read loop is outside connection.Read, so a graceful Close cannot complete and would hold the transport for the library's five seconds while the deferred CloseNow loses the close CAS; CloseNow taken here wins it and frees the transport at once. With none in flight a graceful Close exchanges a close frame and the read loop's cancel frees the transport promptly. The grace is needed because connection.Close writes the close frame and waits for the peer's, which only the read loop reads; when that loop is wedged in a callback the handshake cannot complete, and coder/websocket would hold the handler goroutine and the hub subscription for five seconds. */
-func closeConnection(connection *coderwebsocket.Conn, liveness *connectionLiveness, readLoopDone <-chan struct{}, closeHandshakeGrace time.Duration) {
+/* closeConnection marks the stream closed for Send, tears the socket down with the stream's close status and holds, bounded by StreamHandlerConfig.CloseHandshakeGrace, until the read loop has exited before the handler returns to the kernel, which keeps the request scope alive for a synchronous OnMessage callback resolving services against it. The bound is deliberately much shorter than the reaper's callback grace, because this wait is on the teardown path, where a long wait per wedged callback would stall hub shutdown and process exit; a callback that outruns it is abandoned, its next scope resolution panics, dispatchOnMessage recovers and logs it, and the message is lost by design. With a callback in flight the read loop is outside connection.Read, so a graceful Close cannot complete and would hold the transport for the library's five seconds while the deferred CloseNow loses the close CAS; CloseNow taken here wins it and frees the transport at once. With none in flight a graceful Close exchanges a close frame and the read loop's cancel frees the transport promptly. The grace is needed because connection.Close writes the close frame and waits for the peer's, which only the read loop reads; when that loop is wedged in a callback the handshake cannot complete, and coder/websocket would hold the handler goroutine and the hub subscription for five seconds. */
+func closeConnection(stream *streamConnection, liveness *connectionLiveness, readLoopDone <-chan struct{}, closeHandshakeGrace time.Duration) {
+    stream.closed.Store(true)
+
+    closeStatus := coderwebsocket.StatusCode(stream.closeStatus.Load())
+    closeHandshakeDone := make(chan struct{})
+
     if 0 < liveness.callbacksRunning.Load() {
-        _ = connection.CloseNow()
+        _ = stream.connection.CloseNow()
+        close(closeHandshakeDone)
     } else {
         go func() {
-            _ = connection.Close(coderwebsocket.StatusNormalClosure, "")
+            defer close(closeHandshakeDone)
+
+            _ = stream.connection.Close(closeStatus, "")
         }()
     }
 
@@ -421,19 +458,100 @@ func closeConnection(connection *coderwebsocket.Conn, liveness *connectionLivene
     select {
     case <-readLoopDone:
     case <-timer.C:
+        return
+    }
+
+    /* a failure status reaches the peer only if the deferred CloseNow does not cut the handshake that carries it */
+    if coderwebsocket.StatusNormalClosure != closeStatus {
+        select {
+        case <-closeHandshakeDone:
+        case <-timer.C:
+        }
     }
 }
 
-func writeMessageType(options Options) coderwebsocket.MessageType {
-    if true == options.BinaryWrites {
+func writeMessageType(binary bool) coderwebsocket.MessageType {
+    if true == binary {
         return coderwebsocket.MessageBinary
     }
 
     return coderwebsocket.MessageText
 }
 
+/* streamConnection is the StreamConnection of one accepted connection. writeLock serialises every data frame, the broadcast ones and those of Send, so at most one write runs and the liveness write mark always belongs to it; it is a channel so a writer waiting behind a slow frame stays bounded by its own write context. */
+type streamConnection struct {
+    connection        *coderwebsocket.Conn
+    connectionContext context.Context
+    writeTimeout      time.Duration
+    liveness          *connectionLiveness
+    writeLock         chan struct{}
+    closed            atomic.Bool
+    closeStatus       atomic.Int32
+}
+
+func newStreamConnection(
+    connection *coderwebsocket.Conn,
+    connectionContext context.Context,
+    writeTimeout time.Duration,
+    liveness *connectionLiveness,
+) *streamConnection {
+    stream := &streamConnection{
+        connection:        connection,
+        connectionContext: connectionContext,
+        writeTimeout:      writeTimeout,
+        liveness:          liveness,
+        writeLock:         make(chan struct{}, 1),
+    }
+    stream.closeStatus.Store(int32(coderwebsocket.StatusNormalClosure))
+
+    return stream
+}
+
+func (instance *streamConnection) Send(runtimeInstance containercontract.Runtime, message OutboundMessage) error {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return refuseErr
+    }
+
+    return instance.write(runtimeInstance.Context(), writeMessageType(message.Binary), message.Payload)
+}
+
+func (instance *streamConnection) isClosed() bool {
+    return true == instance.closed.Load() || nil != instance.connectionContext.Err()
+}
+
+/* write waits for the write lock and writes one frame, both bounded by the write timeout over ctx */
+func (instance *streamConnection) write(ctx context.Context, messageType coderwebsocket.MessageType, payload []byte) error {
+    if true == instance.isClosed() {
+        return ErrStreamConnectionClosed
+    }
+
+    writeContext, writeCancel := context.WithTimeout(ctx, instance.writeTimeout)
+    defer writeCancel()
+
+    select {
+    case instance.writeLock <- struct{}{}:
+    case <-writeContext.Done():
+        return writeContext.Err()
+    case <-instance.connectionContext.Done():
+        return ErrStreamConnectionClosed
+    }
+    defer func() {
+        <-instance.writeLock
+    }()
+
+    if true == instance.isClosed() {
+        return ErrStreamConnectionClosed
+    }
+
+    instance.liveness.enterWrite()
+    writeErr := instance.connection.Write(writeContext, messageType, payload)
+    instance.liveness.leaveWrite()
+
+    return writeErr
+}
+
 /* pingWriteGrace bounds how long an in-flight write may go on excusing a timed-out ping: one ping interval past the write's own timeout, by which point the write has failed and the handler has closed the connection. */
-func pingWriteGrace(resolved resolvedOptions) time.Duration {
+func pingWriteGrace(resolved resolvedStreamHandlerConfig) time.Duration {
     return resolved.writeTimeout + resolved.idleTimeout
 }
 

@@ -8,6 +8,7 @@ import (
     "net"
     nethttp "net/http"
     "net/http/httptest"
+    "reflect"
     goruntime "runtime"
     "strings"
     "sync"
@@ -30,7 +31,7 @@ import (
 func TestStreamHandler_BroadcastReachesClient(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
-    handler := NewStreamHandler(hub, Options{
+    handler := NewStreamHandler(hub, StreamHandlerConfig{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
         OriginPatterns: []string{"*"},
         IdleTimeout:    bound.Of(30 * time.Second),
@@ -83,7 +84,7 @@ func TestStreamHandler_BroadcastReachesClient(t *testing.T) {
 func TestStreamHandler_IdleTimeoutKeepsHealthyClientConnected(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
-    handler := newStreamHandlerPastTheDoor(hub, Options{
+    handler := newStreamHandlerPastTheDoor(hub, StreamHandlerConfig{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
         OriginPatterns: []string{"*"},
     }, 100*time.Millisecond)
@@ -136,7 +137,7 @@ func TestStreamHandler_IdleTimeoutKeepsHealthyClientConnected(t *testing.T) {
 func TestStreamHandler_IdleTimeoutDisconnectsUnresponsiveClient(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
-    handler := newStreamHandlerPastTheDoor(hub, Options{
+    handler := newStreamHandlerPastTheDoor(hub, StreamHandlerConfig{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
         OriginPatterns: []string{"*"},
     }, 100*time.Millisecond)
@@ -226,7 +227,7 @@ func TestPingLoop_ReceivedPongRefreshesTheActivityMark(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     serverRuntime := runtime.NewRequest(loopContext, serviceContainer.NewScope())
 
-    go readLoop(loopContext, loopCancel, serverConnection, serverRuntime, Options{}, liveness, newConnectionLogger(serverRuntime))
+    go readLoop(loopContext, loopCancel, newStreamConnection(serverConnection, loopContext, time.Second, liveness), serverRuntime, StreamHandlerConfig{}, liveness, newConnectionLogger(serverRuntime))
     go pingLoop(loopContext, loopCancel, serverConnection, interval, time.Second, liveness)
 
     /* the accept-time mark is younger than one interval, so only a pong observed at or after the first tick can push it past that */
@@ -261,7 +262,7 @@ func TestStreamHandler_TheWriteTimeoutBoundsAWriteTheClientNeverDrains(t *testin
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     defer hub.Shutdown()
 
-    handler := NewStreamHandler(hub, Options{
+    handler := NewStreamHandler(hub, StreamHandlerConfig{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
         OriginPatterns: []string{"*"},
         WriteTimeout:   bound.Of(100 * time.Millisecond),
@@ -319,7 +320,7 @@ func TestStreamHandler_TheWriteTimeoutBoundsAWriteTheClientNeverDrains(t *testin
 func TestStreamHandler_SlowClientDrainingOneFrameIsNotDisconnected(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
-    handler := newStreamHandlerPastTheDoor(hub, Options{
+    handler := newStreamHandlerPastTheDoor(hub, StreamHandlerConfig{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
         OriginPatterns: []string{"*"},
         WriteTimeout:   bound.Of(10 * time.Second),
@@ -420,7 +421,7 @@ func TestStreamHandler_SlowClientDrainingOneFrameIsNotDisconnected(t *testing.T)
 func TestStreamHandler_UnansweredPingsDisconnectAPeerThatKeepsAcceptingWrites(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
-    handler := newStreamHandlerPastTheDoor(hub, Options{
+    handler := newStreamHandlerPastTheDoor(hub, StreamHandlerConfig{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
         OriginPatterns: []string{"*"},
         WriteTimeout:   bound.Of(500 * time.Millisecond),
@@ -482,13 +483,13 @@ func TestDispatchOnMessage_RecoversPanicFromCallback(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.NewRequest(context.Background(), serviceContainer.NewScope())
 
-    options := Options{
-        OnMessage: func(_ containercontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
+    config := StreamHandlerConfig{
+        OnMessage: func(_ containercontract.Runtime, _ StreamConnection, _ InboundMessage) error {
             panic("boom from user callback")
         },
     }
 
-    panicked := dispatchOnMessage(runtimeInstance, options, coderwebsocket.MessageText, []byte("payload"), newConnectionLogger(runtimeInstance))
+    panicked := dispatchOnMessage(runtimeInstance, config, nil, InboundMessage{Payload: []byte("payload")}, newConnectionLogger(runtimeInstance))
 
     if false == panicked {
         t.Fatalf("expected dispatchOnMessage to recover the callback panic and report it, so the read goroutine does not crash the process")
@@ -501,14 +502,16 @@ func TestStreamHandler_SlowOnMessageDoesNotDisconnectHealthyClient(t *testing.T)
 
     callbackEntered := make(chan struct{})
 
-    handler := newStreamHandlerPastTheDoor(hub, Options{
+    handler := newStreamHandlerPastTheDoor(hub, StreamHandlerConfig{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
         OriginPatterns: []string{"*"},
-        OnMessage: func(runtimeInstance containercontract.Runtime, messageType coderwebsocket.MessageType, payload []byte) {
+        OnMessage: func(runtimeInstance containercontract.Runtime, _ StreamConnection, _ InboundMessage) error {
             close(callbackEntered)
 
             /* outlive several ping intervals while the read loop cannot answer pongs */
             time.Sleep(400 * time.Millisecond)
+
+            return nil
         },
     }, 100*time.Millisecond)
 
@@ -568,11 +571,13 @@ func TestStreamHandler_StuckOnMessageStopsHoldingTheConnection(t *testing.T) {
     releaseCallback := make(chan struct{})
     defer close(releaseCallback)
 
-    handler := newStreamHandlerPastTheDoor(hub, Options{
+    handler := newStreamHandlerPastTheDoor(hub, StreamHandlerConfig{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
         OriginPatterns: []string{"*"},
-        OnMessage: func(runtimeInstance containercontract.Runtime, messageType coderwebsocket.MessageType, payload []byte) {
+        OnMessage: func(runtimeInstance containercontract.Runtime, _ StreamConnection, _ InboundMessage) error {
             <-releaseCallback
+
+            return nil
         },
     }, 50*time.Millisecond)
 
@@ -622,11 +627,11 @@ func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
     callbackEntered := make(chan struct{})
     resolveOutcome := make(chan string, 1)
 
-    handler := NewStreamHandler(hub, Options{
+    handler := NewStreamHandler(hub, StreamHandlerConfig{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
         OriginPatterns: []string{"*"},
         IdleTimeout:    bound.Of(30 * time.Second),
-        OnMessage: func(runtimeInstance containercontract.Runtime, messageType coderwebsocket.MessageType, payload []byte) {
+        OnMessage: func(runtimeInstance containercontract.Runtime, _ StreamConnection, _ InboundMessage) error {
             close(callbackEntered)
 
             /* keep processing briefly, then resolve a service through the scope-backed runtime; a healthy callback must never observe a closed scope */
@@ -636,10 +641,12 @@ func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
             if true == errors.Is(getErr, container.ErrScopeClosed) {
                 resolveOutcome <- "scope-closed"
 
-                return
+                return nil
             }
 
             resolveOutcome <- "alive"
+
+            return nil
         },
     })
 
@@ -715,14 +722,16 @@ func wedgedCallbackReleaseAfterTeardown(t *testing.T, closeHandshakeGrace bound.
     callbackEntered := make(chan struct{})
     handlerReturned := make(chan struct{})
 
-    handler := NewStreamHandler(hub, Options{
+    handler := NewStreamHandler(hub, StreamHandlerConfig{
         TopicResolver:       func(request httpcontract.Request) string { return "demo" },
         OriginPatterns:      []string{"*"},
         IdleTimeout:         bound.Of(30 * time.Second),
         CloseHandshakeGrace: closeHandshakeGrace,
-        OnMessage: func(runtimeInstance containercontract.Runtime, messageType coderwebsocket.MessageType, payload []byte) {
+        OnMessage: func(runtimeInstance containercontract.Runtime, _ StreamConnection, _ InboundMessage) error {
             close(callbackEntered)
             <-releaseCallback
+
+            return nil
         },
     })
 
@@ -899,8 +908,8 @@ func TestConnectionLiveness_InFlightWriteExcusesOnlyThePingItQueuedBehindItself(
     }
 }
 
-func TestResolveOptions_EmptyOptionsTakeEveryDefault(t *testing.T) {
-    resolved, resolveErr := resolveOptions(Options{})
+func TestResolveStreamHandlerConfig_AnEmptyConfigTakesEveryDefault(t *testing.T) {
+    resolved, resolveErr := resolveStreamHandlerConfig(StreamHandlerConfig{})
     if nil != resolveErr {
         t.Fatalf("unexpected error: %v", resolveErr)
     }
@@ -910,8 +919,8 @@ func TestResolveOptions_EmptyOptionsTakeEveryDefault(t *testing.T) {
     }
 }
 
-func TestResolveOptions_GivenValuesReachTheResolvedOptions(t *testing.T) {
-    resolved, resolveErr := resolveOptions(Options{
+func TestResolveStreamHandlerConfig_GivenValuesReachTheResolvedConfig(t *testing.T) {
+    resolved, resolveErr := resolveStreamHandlerConfig(StreamHandlerConfig{
         WriteTimeout:        bound.Of(time.Millisecond),
         ReadLimit:           bound.Of(1),
         IdleTimeout:         bound.Of(time.Second),
@@ -925,7 +934,7 @@ func TestResolveOptions_GivenValuesReachTheResolvedOptions(t *testing.T) {
         t.Fatalf("expected the given values, got %+v", resolved)
     }
 
-    unlimited, unlimitedErr := resolveOptions(Options{ReadLimit: bound.UnlimitedCount()})
+    unlimited, unlimitedErr := resolveStreamHandlerConfig(StreamHandlerConfig{ReadLimit: bound.UnlimitedCount()})
     if nil != unlimitedErr {
         t.Fatalf("unexpected error: %v", unlimitedErr)
     }
@@ -938,18 +947,18 @@ func TestResolveOptions_GivenValuesReachTheResolvedOptions(t *testing.T) {
 func TestNewStreamHandler_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T) {
     testCases := []struct {
         name    string
-        options Options
+        config  StreamHandlerConfig
         field   string
     }{
-        {"sub-second idle timeout", Options{IdleTimeout: bound.Of(500 * time.Millisecond)}, "Options.IdleTimeout"},
-        {"negative idle timeout", Options{IdleTimeout: bound.Of(-time.Second)}, "Options.IdleTimeout"},
-        {"unlimited idle timeout", Options{IdleTimeout: bound.UnlimitedDuration()}, "Options.IdleTimeout"},
-        {"zero write timeout", Options{WriteTimeout: bound.Of(time.Duration(0))}, "Options.WriteTimeout"},
-        {"unlimited write timeout", Options{WriteTimeout: bound.UnlimitedDuration()}, "Options.WriteTimeout"},
-        {"zero read limit", Options{ReadLimit: bound.Of(0)}, "Options.ReadLimit"},
-        {"negative read limit", Options{ReadLimit: bound.Of(-1)}, "Options.ReadLimit"},
-        {"zero close handshake grace", Options{CloseHandshakeGrace: bound.Of(time.Duration(0))}, "Options.CloseHandshakeGrace"},
-        {"unlimited close handshake grace", Options{CloseHandshakeGrace: bound.UnlimitedDuration()}, "Options.CloseHandshakeGrace"},
+        {"sub-second idle timeout", StreamHandlerConfig{IdleTimeout: bound.Of(500 * time.Millisecond)}, "StreamHandlerConfig.IdleTimeout"},
+        {"negative idle timeout", StreamHandlerConfig{IdleTimeout: bound.Of(-time.Second)}, "StreamHandlerConfig.IdleTimeout"},
+        {"unlimited idle timeout", StreamHandlerConfig{IdleTimeout: bound.UnlimitedDuration()}, "StreamHandlerConfig.IdleTimeout"},
+        {"zero write timeout", StreamHandlerConfig{WriteTimeout: bound.Of(time.Duration(0))}, "StreamHandlerConfig.WriteTimeout"},
+        {"unlimited write timeout", StreamHandlerConfig{WriteTimeout: bound.UnlimitedDuration()}, "StreamHandlerConfig.WriteTimeout"},
+        {"zero read limit", StreamHandlerConfig{ReadLimit: bound.Of(0)}, "StreamHandlerConfig.ReadLimit"},
+        {"negative read limit", StreamHandlerConfig{ReadLimit: bound.Of(-1)}, "StreamHandlerConfig.ReadLimit"},
+        {"zero close handshake grace", StreamHandlerConfig{CloseHandshakeGrace: bound.Of(time.Duration(0))}, "StreamHandlerConfig.CloseHandshakeGrace"},
+        {"unlimited close handshake grace", StreamHandlerConfig{CloseHandshakeGrace: bound.UnlimitedDuration()}, "StreamHandlerConfig.CloseHandshakeGrace"},
     }
 
     for _, testCase := range testCases {
@@ -965,7 +974,7 @@ func TestNewStreamHandler_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T
                     }
                 }()
 
-                NewStreamHandler(melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), testCase.options)
+                NewStreamHandler(melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), testCase.config)
             }()
 
             if testCase.field != refusal.Context()["field"] {
@@ -975,9 +984,9 @@ func TestNewStreamHandler_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T
     }
 }
 
-func TestNewStreamHandler_AcceptsEmptyOptions(t *testing.T) {
-    if nil == NewStreamHandler(melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), Options{}) {
-        t.Fatal("expected a handler for empty options")
+func TestNewStreamHandler_AcceptsAnEmptyConfig(t *testing.T) {
+    if nil == NewStreamHandler(melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), StreamHandlerConfig{}) {
+        t.Fatal("expected a handler for an empty config")
     }
 }
 
@@ -994,13 +1003,13 @@ func TestNewStreamHandler_RefusesANilHub(t *testing.T) {
         }
     }()
 
-    NewStreamHandler(nil, Options{IdleTimeout: bound.Of(time.Second)})
+    NewStreamHandler(nil, StreamHandlerConfig{IdleTimeout: bound.Of(time.Second)})
 }
 
 func TestStreamHandler_RefusesAnEmptyResolvedTopicBeforeTheUpgrade(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
-    handler := NewStreamHandler(hub, Options{
+    handler := NewStreamHandler(hub, StreamHandlerConfig{
         IdleTimeout:   bound.Of(time.Second),
         TopicResolver: func(request httpcontract.Request) string { return "" },
     })
@@ -1070,13 +1079,13 @@ func TestDispatchOnMessage_PreservesThePanickedErrorsCauseChain(t *testing.T) {
     runtimeInstance := runtime.NewRequest(context.Background(), serviceContainer.NewScope())
 
     rootCause := errors.New("db down")
-    options := Options{
-        OnMessage: func(_ containercontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
+    config := StreamHandlerConfig{
+        OnMessage: func(_ containercontract.Runtime, _ StreamConnection, _ InboundMessage) error {
             panic(exception.NewError("user failure", nil, rootCause))
         },
     }
 
-    panicked := dispatchOnMessage(runtimeInstance, options, coderwebsocket.MessageText, []byte("payload"), newConnectionLogger(runtimeInstance))
+    panicked := dispatchOnMessage(runtimeInstance, config, nil, InboundMessage{Payload: []byte("payload")}, newConnectionLogger(runtimeInstance))
 
     if false == panicked {
         t.Fatal("expected the panic to be recovered and reported")
@@ -1114,13 +1123,13 @@ func TestDispatchOnMessage_SurvivesAPanicWhoseUnwrapPanics(t *testing.T) {
     }
     runtimeInstance := runtime.NewRequest(context.Background(), serviceContainer.NewScope())
 
-    options := Options{
-        OnMessage: func(_ containercontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
+    config := StreamHandlerConfig{
+        OnMessage: func(_ containercontract.Runtime, _ StreamConnection, _ InboundMessage) error {
             panic(unwrapPanickingCallbackError{})
         },
     }
 
-    if false == dispatchOnMessage(runtimeInstance, options, coderwebsocket.MessageText, []byte("payload"), newConnectionLogger(runtimeInstance)) {
+    if false == dispatchOnMessage(runtimeInstance, config, nil, InboundMessage{Payload: []byte("payload")}, newConnectionLogger(runtimeInstance)) {
         t.Fatal("expected the panic to be recovered and reported")
     }
 
@@ -1140,16 +1149,18 @@ func TestStreamHandler_AnUnlimitedReadLimitDisablesTheDefaultCap(t *testing.T) {
 
     received := make(chan int, 1)
 
-    handler := NewStreamHandler(hub, Options{
+    handler := NewStreamHandler(hub, StreamHandlerConfig{
         TopicResolver:  func(request httpcontract.Request) string { return "large" },
         OriginPatterns: []string{"*"},
         IdleTimeout:    bound.Of(30 * time.Second),
         ReadLimit:      bound.UnlimitedCount(),
-        OnMessage: func(_ containercontract.Runtime, _ coderwebsocket.MessageType, payload []byte) {
+        OnMessage: func(_ containercontract.Runtime, _ StreamConnection, message InboundMessage) error {
             select {
-            case received <- len(payload):
+            case received <- len(message.Payload):
             default:
             }
+
+            return nil
         },
     })
 
@@ -1190,7 +1201,7 @@ func TestStreamHandler_RefusesAShutDownHubBeforeTheUpgrade(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     hub.Shutdown()
 
-    handler := NewStreamHandler(hub, Options{
+    handler := NewStreamHandler(hub, StreamHandlerConfig{
         IdleTimeout:   bound.Of(time.Second),
         TopicResolver: func(request httpcontract.Request) string { return "demo" },
     })
@@ -1219,7 +1230,7 @@ func TestStreamHandler_RefusesAShutDownHubBeforeTheUpgrade(t *testing.T) {
 func TestStreamHandler_BinaryWritesDeliverTheBroadcastAsABinaryFrame(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
-    handler := NewStreamHandler(hub, Options{
+    handler := NewStreamHandler(hub, StreamHandlerConfig{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
         OriginPatterns: []string{"*"},
         IdleTimeout:    bound.Of(30 * time.Second),
@@ -1334,13 +1345,13 @@ func TestDispatchOnMessage_APanicRecordCarriesTheStack(t *testing.T) {
     logger := &messageCapturingLogger{}
     runtimeInstance := runtimeWithLogger(context.Background(), logger)
 
-    options := Options{
-        OnMessage: func(_ containercontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
+    config := StreamHandlerConfig{
+        OnMessage: func(_ containercontract.Runtime, _ StreamConnection, _ InboundMessage) error {
             panic("callback boom")
         },
     }
 
-    if false == dispatchOnMessage(runtimeInstance, options, coderwebsocket.MessageText, []byte("payload"), newConnectionLogger(runtimeInstance)) {
+    if false == dispatchOnMessage(runtimeInstance, config, nil, InboundMessage{Payload: []byte("payload")}, newConnectionLogger(runtimeInstance)) {
         t.Fatal("expected the panic recovered")
     }
 
@@ -1366,13 +1377,13 @@ func TestDispatchOnMessage_APanicAfterTheScopeClosedStillLeavesARecordThroughThe
         t.Fatalf("close the scope: %v", closeErr)
     }
 
-    options := Options{
-        OnMessage: func(_ containercontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
+    config := StreamHandlerConfig{
+        OnMessage: func(_ containercontract.Runtime, _ StreamConnection, _ InboundMessage) error {
             panic("callback boom after the scope closed")
         },
     }
 
-    if false == dispatchOnMessage(runtimeInstance, options, coderwebsocket.MessageText, []byte("payload"), captured) {
+    if false == dispatchOnMessage(runtimeInstance, config, nil, InboundMessage{Payload: []byte("payload")}, captured) {
         t.Fatal("expected the panic recovered")
     }
 
@@ -1405,7 +1416,7 @@ func TestStreamHandler_ADrainingHubAnswers503AndAnEmptyTopic400(t *testing.T) {
             status:   nethttp.StatusBadRequest,
         },
     } {
-        handler := NewStreamHandler(setUp.hub(), Options{IdleTimeout: bound.Of(time.Second), TopicResolver: setUp.resolver})
+        handler := NewStreamHandler(setUp.hub(), StreamHandlerConfig{IdleTimeout: bound.Of(time.Second), TopicResolver: setUp.resolver})
 
         serviceContainer := container.NewContainer(container.ContainerConfig{})
         runtimeInstance := runtime.NewRequest(context.Background(), serviceContainer.NewScope())
@@ -1420,10 +1431,10 @@ func TestStreamHandler_ADrainingHubAnswers503AndAnEmptyTopic400(t *testing.T) {
     }
 }
 
-func serveStreamHandlerWithLogger(t *testing.T, hub *melodyhttp.ServerSentEventHub, options Options, logger loggingcontract.Logger) string {
+func serveStreamHandlerWithLogger(t *testing.T, hub *melodyhttp.ServerSentEventHub, config StreamHandlerConfig, logger loggingcontract.Logger) string {
     t.Helper()
 
-    handler := NewStreamHandler(hub, options)
+    handler := NewStreamHandler(hub, config)
 
     server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         runtimeInstance := runtimeWithLogger(request.Context(), logger)
@@ -1451,7 +1462,7 @@ func TestStreamHandler_AnOversizedFrameLeavesAReadLoopEndedRecord(t *testing.T) 
     logger := &messageCapturingLogger{}
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
-    wsUrl := serveStreamHandlerWithLogger(t, hub, Options{
+    wsUrl := serveStreamHandlerWithLogger(t, hub, StreamHandlerConfig{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
         OriginPatterns: []string{"*"},
         IdleTimeout:    bound.Of(30 * time.Second),
@@ -1476,7 +1487,7 @@ func TestStreamHandler_AHubClosedBetweenTheCheckAndTheSubscribeLeavesARecord(t *
     logger := &messageCapturingLogger{}
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
-    wsUrl := serveStreamHandlerWithLogger(t, hub, Options{
+    wsUrl := serveStreamHandlerWithLogger(t, hub, StreamHandlerConfig{
         TopicResolver: func(request httpcontract.Request) string {
             hub.Shutdown()
 
@@ -1495,4 +1506,408 @@ func TestStreamHandler_AHubClosedBetweenTheCheckAndTheSubscribeLeavesARecord(t *
     }
 
     awaitLoggedMessage(t, logger, "websocket hub shut down during connect, closing the stream")
+}
+
+func (instance *messageCapturingLogger) countMessage(message string) int {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    count := 0
+    for _, logged := range instance.messages {
+        if message == logged {
+            count++
+        }
+    }
+
+    return count
+}
+
+func dialStream(t *testing.T, wsUrl string) (*coderwebsocket.Conn, context.Context) {
+    t.Helper()
+
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    t.Cleanup(cancel)
+
+    connection, _, dialErr := coderwebsocket.Dial(ctx, wsUrl, nil)
+    if nil != dialErr {
+        t.Fatalf("dial: %v", dialErr)
+    }
+    t.Cleanup(func() {
+        _ = connection.CloseNow()
+    })
+
+    return connection, ctx
+}
+
+func awaitSubscriberCount(t *testing.T, hub *melodyhttp.ServerSentEventHub, expected int) {
+    t.Helper()
+
+    deadline := time.Now().Add(3 * time.Second)
+    for expected != hub.SubscriberCount("demo") {
+        if true == time.Now().After(deadline) {
+            t.Fatalf("expected %d subscribers on the topic, got %d", expected, hub.SubscriberCount("demo"))
+        }
+
+        time.Sleep(time.Millisecond)
+    }
+}
+
+func demoStreamHandlerConfig(onMessage func(runtimeInstance containercontract.Runtime, connection StreamConnection, message InboundMessage) error) StreamHandlerConfig {
+    return StreamHandlerConfig{
+        TopicResolver:  func(request httpcontract.Request) string { return "demo" },
+        OriginPatterns: []string{"*"},
+        IdleTimeout:    bound.Of(30 * time.Second),
+        OnMessage:      onMessage,
+    }
+}
+
+func TestStreamHandler_AFrameReachesOnMessageAsAnInboundMessageOfItsKind(t *testing.T) {
+    received := make(chan InboundMessage, 2)
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+
+    wsUrl := serveStreamHandlerWithLogger(t, hub, demoStreamHandlerConfig(func(_ containercontract.Runtime, _ StreamConnection, message InboundMessage) error {
+        received <- message
+
+        return nil
+    }), &messageCapturingLogger{})
+
+    connection, ctx := dialStream(t, wsUrl)
+
+    if writeErr := connection.Write(ctx, coderwebsocket.MessageText, []byte("text-frame")); nil != writeErr {
+        t.Fatalf("write: %v", writeErr)
+    }
+    if writeErr := connection.Write(ctx, coderwebsocket.MessageBinary, []byte("binary-frame")); nil != writeErr {
+        t.Fatalf("write: %v", writeErr)
+    }
+
+    textMessage := <-received
+    if false != textMessage.Binary || "text-frame" != string(textMessage.Payload) {
+        t.Fatalf("expected a text InboundMessage, got %+v", textMessage)
+    }
+
+    binaryMessage := <-received
+    if true != binaryMessage.Binary || "binary-frame" != string(binaryMessage.Payload) {
+        t.Fatalf("expected a binary InboundMessage, got %+v", binaryMessage)
+    }
+}
+
+func TestStreamHandler_ANilErrorKeepsTheConnection(t *testing.T) {
+    received := make(chan string, 2)
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+
+    wsUrl := serveStreamHandlerWithLogger(t, hub, demoStreamHandlerConfig(func(_ containercontract.Runtime, _ StreamConnection, message InboundMessage) error {
+        received <- string(message.Payload)
+
+        return nil
+    }), &messageCapturingLogger{})
+
+    connection, ctx := dialStream(t, wsUrl)
+    awaitSubscriberCount(t, hub, 1)
+
+    for _, payload := range []string{"first", "second"} {
+        if writeErr := connection.Write(ctx, coderwebsocket.MessageText, []byte(payload)); nil != writeErr {
+            t.Fatalf("write: %v", writeErr)
+        }
+
+        if payload != <-received {
+            t.Fatalf("expected %q delivered", payload)
+        }
+    }
+
+    if 1 != hub.Broadcast("demo", melodyhttp.ServerSentEvent{Data: "after-the-callbacks"}) {
+        t.Fatal("expected the connection still subscribed after two callbacks answered nil")
+    }
+
+    _, payload, readErr := connection.Read(ctx)
+    if nil != readErr || "after-the-callbacks" != string(payload) {
+        t.Fatalf("expected the broadcast after two nil errors, got %q %v", payload, readErr)
+    }
+}
+
+func TestStreamHandler_AFailingOrPanickingCallbackClosesTheConnectionWithStatus1011(t *testing.T) {
+    testCases := map[string]struct {
+        onMessage func(runtimeInstance containercontract.Runtime, connection StreamConnection, message InboundMessage) error
+        record    string
+    }{
+        "error": {
+            onMessage: func(_ containercontract.Runtime, _ StreamConnection, _ InboundMessage) error {
+                return errors.New("callback refused the frame")
+            },
+            record: "websocket OnMessage failed",
+        },
+        "panic": {
+            onMessage: func(_ containercontract.Runtime, _ StreamConnection, _ InboundMessage) error {
+                panic("callback boom")
+            },
+            record: "websocket OnMessage panicked",
+        },
+    }
+
+    for name, testCase := range testCases {
+        t.Run(name, func(t *testing.T) {
+            logger := &messageCapturingLogger{}
+            hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+
+            wsUrl := serveStreamHandlerWithLogger(t, hub, demoStreamHandlerConfig(testCase.onMessage), logger)
+
+            connection, ctx := dialStream(t, wsUrl)
+            awaitSubscriberCount(t, hub, 1)
+
+            if writeErr := connection.Write(ctx, coderwebsocket.MessageText, []byte("frame")); nil != writeErr {
+                t.Fatalf("write: %v", writeErr)
+            }
+
+            _, _, readErr := connection.Read(ctx)
+            if coderwebsocket.StatusInternalError != coderwebsocket.CloseStatus(readErr) {
+                t.Fatalf("expected the peer to read close status 1011, got %v", readErr)
+            }
+
+            awaitSubscriberCount(t, hub, 0)
+
+            if 1 != logger.countMessage(testCase.record) {
+                t.Fatalf("expected the record %q once, got %v", testCase.record, logger.messages)
+            }
+        })
+    }
+}
+
+func TestStreamHandler_OnMessageRepliesThroughTheConnection(t *testing.T) {
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+
+    wsUrl := serveStreamHandlerWithLogger(t, hub, demoStreamHandlerConfig(func(runtimeInstance containercontract.Runtime, connection StreamConnection, message InboundMessage) error {
+        return connection.Send(runtimeInstance, OutboundMessage{Binary: true, Payload: append([]byte("echo:"), message.Payload...)})
+    }), &messageCapturingLogger{})
+
+    connection, ctx := dialStream(t, wsUrl)
+
+    if writeErr := connection.Write(ctx, coderwebsocket.MessageText, []byte("ping")); nil != writeErr {
+        t.Fatalf("write: %v", writeErr)
+    }
+
+    messageType, payload, readErr := connection.Read(ctx)
+    if nil != readErr || coderwebsocket.MessageBinary != messageType || "echo:ping" != string(payload) {
+        t.Fatalf("expected the binary reply echo:ping, got %v %q %v", messageType, payload, readErr)
+    }
+}
+
+func TestStreamConnection_ConcurrentSendsEachArriveWhole(t *testing.T) {
+    kept := make(chan StreamConnection, 1)
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+
+    wsUrl := serveStreamHandlerWithLogger(t, hub, demoStreamHandlerConfig(func(_ containercontract.Runtime, connection StreamConnection, _ InboundMessage) error {
+        kept <- connection
+
+        return nil
+    }), &messageCapturingLogger{})
+
+    connection, ctx := dialStream(t, wsUrl)
+    awaitSubscriberCount(t, hub, 1)
+
+    if writeErr := connection.Write(ctx, coderwebsocket.MessageText, []byte("hello")); nil != writeErr {
+        t.Fatalf("write: %v", writeErr)
+    }
+
+    streamConnection := <-kept
+    senderRuntime := runtime.NewRequest(context.Background(), container.NewContainer(container.ContainerConfig{}).NewScope())
+
+    const senderCount = 16
+    sendErrors := make(chan error, senderCount+1)
+    var waitGroup sync.WaitGroup
+    for index := 0; index < senderCount; index++ {
+        waitGroup.Add(1)
+        go func(index int) {
+            defer waitGroup.Done()
+
+            sendErrors <- streamConnection.Send(senderRuntime, OutboundMessage{Payload: []byte(fmt.Sprintf("frame-%d", index))})
+        }(index)
+    }
+    hub.Broadcast("demo", melodyhttp.ServerSentEvent{Data: "broadcast"})
+
+    expected := map[string]bool{"broadcast": true}
+    for index := 0; index < senderCount; index++ {
+        expected[fmt.Sprintf("frame-%d", index)] = true
+    }
+
+    for 0 < len(expected) {
+        _, payload, readErr := connection.Read(ctx)
+        if nil != readErr {
+            t.Fatalf("read: %v, still expecting %v", readErr, expected)
+        }
+
+        if false == expected[string(payload)] {
+            t.Fatalf("unexpected or repeated frame %q", payload)
+        }
+        delete(expected, string(payload))
+    }
+
+    waitGroup.Wait()
+    close(sendErrors)
+    for sendErr := range sendErrors {
+        if nil != sendErr {
+            t.Fatalf("expected every concurrent send to succeed, got %v", sendErr)
+        }
+    }
+}
+
+func TestStreamConnection_ASendAfterTheConnectionClosedIsRefused(t *testing.T) {
+    kept := make(chan StreamConnection, 1)
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+
+    wsUrl := serveStreamHandlerWithLogger(t, hub, demoStreamHandlerConfig(func(_ containercontract.Runtime, connection StreamConnection, _ InboundMessage) error {
+        kept <- connection
+
+        return nil
+    }), &messageCapturingLogger{})
+
+    connection, ctx := dialStream(t, wsUrl)
+    awaitSubscriberCount(t, hub, 1)
+
+    if writeErr := connection.Write(ctx, coderwebsocket.MessageText, []byte("hello")); nil != writeErr {
+        t.Fatalf("write: %v", writeErr)
+    }
+
+    streamConnection := <-kept
+
+    _ = connection.Close(coderwebsocket.StatusNormalClosure, "")
+    awaitSubscriberCount(t, hub, 0)
+
+    senderRuntime := runtime.NewRequest(context.Background(), container.NewContainer(container.ContainerConfig{}).NewScope())
+    sendErr := streamConnection.Send(senderRuntime, OutboundMessage{Payload: []byte("too late")})
+    if false == errors.Is(sendErr, ErrStreamConnectionClosed) {
+        t.Fatalf("expected ErrStreamConnectionClosed after the close, got %v", sendErr)
+    }
+}
+
+func TestStreamConnection_SendRefusesANilRuntime(t *testing.T) {
+    stream := newStreamConnection(nil, context.Background(), time.Second, newConnectionLiveness())
+
+    var typedNil *runtimeWithoutContext
+    for name, runtimeInstance := range map[string]containercontract.Runtime{
+        "nil":        nil,
+        "typed nil":  typedNil,
+        "no context": &runtimeWithoutContext{},
+    } {
+        sendErr := stream.Send(runtimeInstance, OutboundMessage{Payload: []byte("frame")})
+        if nil == sendErr || false == strings.Contains(sendErr.Error(), "the runtime is nil or carries no context") {
+            t.Fatalf("%s: expected the nil-runtime refusal, got %v", name, sendErr)
+        }
+    }
+}
+
+type runtimeWithoutContext struct {
+    containercontract.Runtime
+}
+
+func (instance *runtimeWithoutContext) Context() context.Context {
+    return nil
+}
+
+func TestStreamConnection_ASendWaitingBehindAWriteIsBoundedByTheWriteTimeout(t *testing.T) {
+    stream := newStreamConnection(nil, context.Background(), 50*time.Millisecond, newConnectionLiveness())
+    stream.writeLock <- struct{}{}
+
+    senderRuntime := runtime.NewRequest(context.Background(), container.NewContainer(container.ContainerConfig{}).NewScope())
+
+    startedAt := time.Now()
+    sendErr := stream.Send(senderRuntime, OutboundMessage{Payload: []byte("frame")})
+
+    if false == errors.Is(sendErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the write timeout to end the wait for the lock, got %v", sendErr)
+    }
+
+    if 2*time.Second < time.Since(startedAt) {
+        t.Fatalf("the wait for the write lock outlived the write timeout: %s", time.Since(startedAt))
+    }
+}
+
+func TestStreamHandlerConfig_ItsCallbacksCarryNoThirdPartyType(t *testing.T) {
+    var thirdParty []string
+
+    judge := func(owner string, typeInstance reflect.Type) {
+        for typeInstance.Kind() == reflect.Pointer || typeInstance.Kind() == reflect.Slice {
+            typeInstance = typeInstance.Elem()
+        }
+
+        packagePath := typeInstance.PkgPath()
+        if "" == packagePath || false == strings.Contains(packagePath, ".") || true == strings.HasPrefix(packagePath, "github.com/precision-soft/melody/") {
+            return
+        }
+
+        thirdParty = append(thirdParty, owner+": "+packagePath)
+    }
+
+    judgeFunction := func(owner string, functionType reflect.Type) {
+        for index := 0; index < functionType.NumIn(); index++ {
+            judge(owner, functionType.In(index))
+        }
+        for index := 0; index < functionType.NumOut(); index++ {
+            judge(owner, functionType.Out(index))
+        }
+    }
+
+    configType := reflect.TypeOf(StreamHandlerConfig{})
+    for index := 0; index < configType.NumField(); index++ {
+        field := configType.Field(index)
+        if reflect.Func == field.Type.Kind() {
+            judgeFunction("StreamHandlerConfig."+field.Name, field.Type)
+        }
+    }
+
+    connectionType := reflect.TypeOf((*StreamConnection)(nil)).Elem()
+    for index := 0; index < connectionType.NumMethod(); index++ {
+        method := connectionType.Method(index)
+        judgeFunction("StreamConnection."+method.Name, method.Type)
+    }
+
+    if 0 < len(thirdParty) {
+        t.Fatalf("expected melody and standard library types only, got %v", thirdParty)
+    }
+}
+
+func TestStreamConnection_ASendOnAStreamMarkedClosedIsRefusedBeforeTheWrite(t *testing.T) {
+    stream := newStreamConnection(nil, context.Background(), time.Second, newConnectionLiveness())
+    stream.closed.Store(true)
+
+    senderRuntime := runtime.NewRequest(context.Background(), container.NewContainer(container.ContainerConfig{}).NewScope())
+    if sendErr := stream.Send(senderRuntime, OutboundMessage{Payload: []byte("frame")}); false == errors.Is(sendErr, ErrStreamConnectionClosed) {
+        t.Fatalf("expected ErrStreamConnectionClosed on a stream marked closed, got %v", sendErr)
+    }
+}
+
+func TestCloseConnection_MarksTheStreamClosedBeforeTheConnectionContextEnds(t *testing.T) {
+    serverConnections := make(chan *coderwebsocket.Conn, 1)
+    handlerRelease := make(chan struct{})
+    defer close(handlerRelease)
+
+    server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        connection, acceptErr := coderwebsocket.Accept(writer, request, &coderwebsocket.AcceptOptions{
+            OriginPatterns: []string{"*"},
+        })
+        if nil != acceptErr {
+            return
+        }
+        defer connection.CloseNow()
+
+        serverConnections <- connection
+
+        <-handlerRelease
+    }))
+    defer server.Close()
+
+    connection, ctx := dialStream(t, "ws"+strings.TrimPrefix(server.URL, "http"))
+    go func() {
+        _, _, _ = connection.Read(ctx)
+    }()
+
+    liveness := newConnectionLiveness()
+    stream := newStreamConnection(<-serverConnections, context.Background(), time.Second, liveness)
+
+    readLoopDone := make(chan struct{})
+    close(readLoopDone)
+    closeConnection(stream, liveness, readLoopDone, 10*time.Millisecond)
+
+    senderRuntime := runtime.NewRequest(context.Background(), container.NewContainer(container.ContainerConfig{}).NewScope())
+    if sendErr := stream.Send(senderRuntime, OutboundMessage{Payload: []byte("frame")}); false == errors.Is(sendErr, ErrStreamConnectionClosed) {
+        t.Fatalf("expected ErrStreamConnectionClosed once the teardown began, got %v", sendErr)
+    }
 }

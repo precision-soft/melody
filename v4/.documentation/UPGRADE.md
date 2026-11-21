@@ -22,6 +22,14 @@ Every entry below that the third major shipped is the consequence of fixing a de
 
 The fourth major takes the forms the third major kept compatible: a section that names a sibling interface, a deprecated door or a released signature on the third major describes here the form the fourth major carries instead, and this major's [`CHANGELOG.md`](../CHANGELOG.md) marks each **Breaking**.
 
+### Websocket: the stream handler's config and its message callback
+
+**What changed.** [`websocket.Options`](../../integrations/websocket/v4/handler.go) is `StreamHandlerConfig`, `StreamConfig.Options` is `StreamConfig.Handler`, and the refusals name `StreamHandlerConfig.<field>`. `OnMessage` is `func(runtimeInstance containercontract.Runtime, connection StreamConnection, message InboundMessage) error`, melody types only: `InboundMessage{Binary, Payload}` carries the frame, a nil error keeps the connection, and a non-nil error is logged once at error (`websocket OnMessage failed`) and closes the connection with status 1011, as a panicking callback does where it closed with 1000. `StreamConnection.Send(runtimeInstance, OutboundMessage{Binary, Payload})` writes a frame to that connection from the callback or from any goroutine holding it, serialised with the broadcast writes, bounded by `WriteTimeout` and the runtime's context, refused with `ErrStreamConnectionClosed` once the connection closes.
+
+**Symptom.** `undefined: websocket.Options`; `unknown field Options in struct literal of type websocket.StreamConfig`; `cannot use func(…, coderwebsocket.MessageType, []byte) (value of type func(…)) as func(…, websocket.StreamConnection, websocket.InboundMessage) error value`.
+
+**Remedy.** Rename the struct and the field, read `message.Binary` and `message.Payload` where the callback took the message type and the payload, and return nil to keep the connection; reply with `connection.Send(runtimeInstance, websocket.OutboundMessage{Payload: reply})`.
+
 ### Opentelemetry: the request metrics follow the semantic conventions
 
 **What changed.** [`NewMetricsMiddleware`](../../integrations/opentelemetry/v4/metrics_middleware.go) records `http.server.request.duration` in seconds (`http_server_request_duration_seconds` in the exposition), bucketed on the conventions' advisory boundaries, `DefaultDurationBoundaries()` answering a fresh copy of them, with `url.scheme`, the scheme the kernel resolved under its forwarded-headers policy, and an integer `http.response.status_code`; the lifecycle decorator records `melody.http.server.lifecycle.duration` the same way, its `url.scheme` read off the connection, since it runs before the kernel resolves one. An empty `DurationBoundaries` list is refused, and `HandlerDecoratorConfig.DurationBoundaries` without a `Meter` is refused naming both. The counters `http.server.request.count` and `http.server.lifecycle.request.count`, and the millisecond histograms `http.server.request.duration` and `http.server.lifecycle.request.duration`, are gone.
@@ -1425,7 +1433,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 ### Websocket: the subscribe buffer is the hub's
 
-**What changed.** The websocket integration's `Options.SubscribeBuffer` is removed: the stream handler subscribes with the hub's `SubscriberBuffer`, since `ServerSentEventHub.Subscribe` takes the topic alone.
+**What changed.** The websocket integration's `Options.SubscribeBuffer` (the struct is `StreamHandlerConfig` in this major) is removed: the stream handler subscribes with the hub's `SubscriberBuffer`, since `ServerSentEventHub.Subscribe` takes the topic alone.
 
 **Symptom.** `websocket.Options{SubscribeBuffer: 64}` no longer compiles.
 
@@ -1971,7 +1979,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 ### Websocket: the idle timeout is 30s when left out, the read limit and the write timeout are bound limits with unlimited written out, and the close handshake grace is configured
 
-**What changed.** [`websocket.Options`](../../integrations/websocket/v4/handler.go)' `WriteTimeout` and `IdleTimeout` are `bound.Duration` and `ReadLimit` a `bound.Count`, resolved once at `NewStreamHandler`, a value outside its rule panicking naming the field, at boot through the module. `IdleTimeout` is 30s when left out, at least 1s, unlimited refused; `WriteTimeout` 10s, at least 1ms, unlimited refused; `ReadLimit` 32 KiB, written on every connection, at least 1, unlimited admitted to disable the limit. The new `CloseHandshakeGrace` bounds the closing handshake on the teardown path, 1s when left out, at least 1ms, unlimited refused.
+**What changed.** [`websocket.StreamHandlerConfig`](../../integrations/websocket/v4/handler.go)' `WriteTimeout` and `IdleTimeout` are `bound.Duration` and `ReadLimit` a `bound.Count`, resolved once at `NewStreamHandler`, a value outside its rule panicking naming the field, at boot through the module. `IdleTimeout` is 30s when left out, at least 1s, unlimited refused; `WriteTimeout` 10s, at least 1ms, unlimited refused; `ReadLimit` 32 KiB, written on every connection, at least 1, unlimited admitted to disable the limit. The new `CloseHandshakeGrace` bounds the closing handshake on the teardown path, 1s when left out, at least 1ms, unlimited refused.
 
 **Symptom.** `IdleTimeout: 30 * time.Second`, `WriteTimeout: d` and `ReadLimit: n` no longer compile. `Options{}` builds a handler pinging every 30s where it panicked. A boot panics where a negative `ReadLimit` disabled the limit, a zero `WriteTimeout` took 10s, or an `IdleTimeout` below a second was taken.
 
@@ -3686,9 +3694,9 @@ positive value into the per-host pool unless that was set too, and the fourth le
 
 ### Websocket: an `IdleTimeout` the keepalive cannot work with is refused at construction
 
-**What changed.** [`websocket.NewStreamHandler`](../../integrations/websocket/v4/handler.go) refuses an `Options.IdleTimeout` below a second or unlimited, naming `Options.IdleTimeout`, and reads an absent one as 30s; the third major refused every non-positive value instead of treating it as "no keepalive". Nothing else in the stack can reap a peer that goes away without a fin: `coderwebsocket.Accept` hijacks the connection, so `http.Server`'s read and write timeouts stop applying to it; the read loop then blocks in `Read` with no deadline of its own; and a write into a half-open socket keeps succeeding for as long as the send buffer has room, so a broadcast is no liveness signal either. The keepalive ping is the only remaining evidence, which is why it has no off position.
+**What changed.** [`websocket.NewStreamHandler`](../../integrations/websocket/v4/handler.go) refuses a `StreamHandlerConfig.IdleTimeout` below a second or unlimited, naming `StreamHandlerConfig.IdleTimeout`, and reads an absent one as 30s; the third major refused every non-positive value instead of treating it as "no keepalive". Nothing else in the stack can reap a peer that goes away without a fin: `coderwebsocket.Accept` hijacks the connection, so `http.Server`'s read and write timeouts stop applying to it; the read loop then blocks in `Read` with no deadline of its own; and a write into a half-open socket keeps succeeding for as long as the send buffer has room, so a broadcast is no liveness signal either. The keepalive ping is the only remaining evidence, which is why it has no off position.
 
-**Symptom.** A handler built with `IdleTimeout: bound.Of(0)`, a sub-second interval or `bound.UnlimitedDuration()` panics at construction with `the limit is below its minimum` or `the limit does not admit unlimited`, the context naming `Options.IdleTimeout`. Through [`websocket.NewModule`](../../integrations/websocket/v4/module.go) the handler is built while routes are registered, so the failure surfaces at boot rather than on the first upgrade request. Options that name no `IdleTimeout` ping every 30s.
+**Symptom.** A handler built with `IdleTimeout: bound.Of(0)`, a sub-second interval or `bound.UnlimitedDuration()` panics at construction with `the limit is below its minimum` or `the limit does not admit unlimited`, the context naming `StreamHandlerConfig.IdleTimeout`. Through [`websocket.NewModule`](../../integrations/websocket/v4/module.go) the handler is built while routes are registered, so the failure surfaces at boot rather than on the first upgrade request. Options that name no `IdleTimeout` ping every 30s.
 
 **Remedy.** Leave `IdleTimeout` out for the 30s a browser client suits, which answers the ping inside its protocol stack where the page's JavaScript never sees it, so a receive-only client stays connected; or name another interval of at least a second:
 
@@ -3698,7 +3706,7 @@ websocket.NewModule(websocket.ModuleConfig{
         {
             Hub:  hub,
             Path: "/ws",
-            Options: websocket.Options{
+            Handler: websocket.StreamHandlerConfig{
                 TopicResolver: topicResolver,
                 IdleTimeout:   bound.Of(15 * time.Second),
             },

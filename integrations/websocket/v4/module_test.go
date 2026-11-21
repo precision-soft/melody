@@ -71,7 +71,7 @@ func TestModule_RegisterHttpRoutesRefusesAnEmptyPathAtBoot(t *testing.T) {
 
     NewModule(ModuleConfig{Streams: []StreamConfig{{
         Hub:     melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}),
-        Options: Options{IdleTimeout: bound.Of(30 * time.Second)},
+        Handler: StreamHandlerConfig{IdleTimeout: bound.Of(30 * time.Second)},
     }}}).RegisterHttpRoutes(kernel)
 }
 
@@ -81,7 +81,7 @@ func TestModule_RegisterHttpRoutesUsesDefaultName(t *testing.T) {
     NewModule(ModuleConfig{Streams: []StreamConfig{{
         Hub:     melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}),
         Path:    "/stream",
-        Options: Options{IdleTimeout: bound.Of(30 * time.Second)},
+        Handler: StreamHandlerConfig{IdleTimeout: bound.Of(30 * time.Second)},
     }}}).RegisterHttpRoutes(kernel)
 
     if 1 != len(kernel.router.handled) || defaultStreamRouteName+" GET /stream" != kernel.router.handled[0] {
@@ -96,7 +96,7 @@ func TestModule_RegisterHttpRoutesHonoursCustomName(t *testing.T) {
         Hub:       melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}),
         Path:      "/stream",
         RouteName: "custom.stream",
-        Options:   Options{IdleTimeout: bound.Of(30 * time.Second)},
+        Handler:   StreamHandlerConfig{IdleTimeout: bound.Of(30 * time.Second)},
     }}}).RegisterHttpRoutes(kernel)
 
     if 1 != len(kernel.router.handled) || "custom.stream GET /stream" != kernel.router.handled[0] {
@@ -104,7 +104,7 @@ func TestModule_RegisterHttpRoutesHonoursCustomName(t *testing.T) {
     }
 }
 
-func TestModule_RegisterHttpRoutesAcceptsEmptyOptions(t *testing.T) {
+func TestModule_RegisterHttpRoutesAcceptsAnEmptyHandlerConfig(t *testing.T) {
     kernel := &spyKernel{router: &spyRouter{}}
 
     NewModule(ModuleConfig{Streams: []StreamConfig{{
@@ -129,8 +129,8 @@ func TestModule_RegisterHttpRoutesRefusesASubSecondIdleTimeout(t *testing.T) {
             t.Fatalf("expected the panic value to be an error, got %T", recovered)
         }
 
-        if false == strings.Contains(fmt.Sprintf("%v", exception.LogContext(recoveredErr, exception.LogContextConfig{})), "Options.IdleTimeout") {
-            t.Fatalf("expected the refusal to name Options.IdleTimeout, got %v", recoveredErr)
+        if false == strings.Contains(fmt.Sprintf("%v", exception.LogContext(recoveredErr, exception.LogContextConfig{})), "StreamHandlerConfig.IdleTimeout") {
+            t.Fatalf("expected the refusal to name StreamHandlerConfig.IdleTimeout, got %v", recoveredErr)
         }
     }()
 
@@ -138,7 +138,7 @@ func TestModule_RegisterHttpRoutesRefusesASubSecondIdleTimeout(t *testing.T) {
 
     NewModule(ModuleConfig{Streams: []StreamConfig{{
         Hub:     melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}),
-        Options: Options{IdleTimeout: bound.Of(500 * time.Millisecond)},
+        Handler: StreamHandlerConfig{IdleTimeout: bound.Of(500 * time.Millisecond)},
         Path:    "/stream",
     }}}).RegisterHttpRoutes(kernel)
 }
@@ -187,7 +187,7 @@ func TestModule_RegisterHttpRoutesRefusesAnUnnamedStreamAmongSeveral(t *testing.
 }
 
 /* a later stream's nil hub and invalid option are refused before the first stream registers, the hub naming its index */
-func TestModule_RegisterHttpRoutesRefusesALaterStreamsHubAndOptionsBeforeAnyRoute(t *testing.T) {
+func TestModule_RegisterHttpRoutesRefusesALaterStreamsHubAndHandlerConfigBeforeAnyRoute(t *testing.T) {
     kernel := &spyKernel{router: &spyRouter{}}
 
     assertRefusalNamesField(t, "ModuleConfig.Streams[1].Hub", func() {
@@ -206,7 +206,7 @@ func TestModule_RegisterHttpRoutesRefusesALaterStreamsHubAndOptionsBeforeAnyRout
 
         NewModule(ModuleConfig{Streams: []StreamConfig{
             {Hub: melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), Path: "/a", RouteName: "stream.a"},
-            {Hub: melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), Path: "/b", RouteName: "stream.b", Options: Options{IdleTimeout: bound.Of(500 * time.Millisecond)}},
+            {Hub: melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), Path: "/b", RouteName: "stream.b", Handler: StreamHandlerConfig{IdleTimeout: bound.Of(500 * time.Millisecond)}},
         }}).RegisterHttpRoutes(kernel)
     }()
 
