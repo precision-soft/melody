@@ -22,6 +22,22 @@ Every entry below that the third major shipped is the consequence of fixing a de
 
 The fourth major takes the forms the third major kept compatible: a section that names a sibling interface, a deprecated door or a released signature on the third major describes here the form the fourth major carries instead, and this major's [`CHANGELOG.md`](../CHANGELOG.md) marks each **Breaking**.
 
+### Cron: a template answers its ownership line and its user column
+
+**What changed.** [`cron.Template`](../../integrations/cron/v4/template.go) is `Name()`, `Render(entries, options)`, `OwnershipMarker(applicationName string) string` and `RendersUserColumn() bool`; `OwnedTemplate`, `UserColumnTemplate` and the fallback that judged a silent template by a builtin's name are removed. The generator hands the application's cli name in `RenderOptions.ApplicationName` and asks `OwnershipMarker(applicationName)`, so a template embedding a builtin renders the application's line and its `--prune` sweeps, where its sweep was refused.
+
+**Symptom.** `*T does not implement cron.Template (missing method OwnershipMarker)`; `undefined: cron.OwnedTemplate`, `cron.UserColumnTemplate`; `wrong type for method OwnershipMarker`.
+
+**Remedy.** Give the template `OwnershipMarker(applicationName string) string`, answering `""` for a dialect never pruned, and `RendersUserColumn() bool`; render `OwnershipMarker(options.ApplicationName)` and drop a name field the template carried for its line.
+
+### Cron: the module takes a configuration factory and the templates
+
+**What changed.** [`cron.ModuleConfig`](../../integrations/cron/v4/module.go) is `{Configuration func(kernelInstance kernelcontract.Kernel) *Configuration, Templates []Template, KeyDefaults, Runner}`: the eager `Configuration *Configuration` and `ConfigurationFactory` are one factory field, a factory answering nil refused naming `ModuleConfig.Configuration`; `Templates` installs templates after the builtins, a nil entry refused naming its index and templates without a configuration refused. `NewGenerateCommand`, `GenerateCommand.RegisterTemplate` and `cron.EnvironmentKeys` are unexported: the module builds the generator and declares the keys.
+
+**Symptom.** `unknown field ConfigurationFactory in struct literal of type cron.ModuleConfig`; `cannot use configuration (variable of type *cron.Configuration) as func(kernelInstance contract.Kernel) *cron.Configuration value`; `undefined: cron.NewGenerateCommand`, `cron.EnvironmentKeys`; `generateCommand.RegisterTemplate undefined`.
+
+**Remedy.** Rename `ConfigurationFactory` to `Configuration`, or wrap an eager configuration in `func(kernelInstance kernelcontract.Kernel) *cron.Configuration { return configuration }`; register the module instead of building the generator by hand, with the custom dialects in `ModuleConfig.Templates`, and drop the hand-written key declarations.
+
 ### Outbox: the repository releases claims, requeues dead rows and prunes sent ones
 
 **What changed.** [`outbox.Repository`](../../integrations/outbox/v4/repository.go)'s six doors take the runtime they run under first, where they took a `context.Context`, and the contract gains `ReleaseClaims(runtimeInstance, claimToken) (int, error)`, `RequeueDead(runtimeInstance, RequeueDeadOptions{Ids, Limit}) (int, error)` and `PruneSent(runtimeInstance, PruneSentOptions{SentBefore, Limit}) (int, error)`, implemented by `*Store` and the lazy repository. A batch a repository failure, a failed hold write or the run's cancellation ended hands back the rows it left claimed through `ReleaseClaims`, where they waited out `VisibilityTimeout`.
@@ -1131,7 +1147,7 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 | `APP_CRON_NAMESPACE`              | `MELODY_CRON_K8S_NAMESPACE`      |
 | `APP_CRON_RESTART_POLICY`         | `MELODY_CRON_K8S_RESTART_POLICY` |
 
-An application of another spelling maps it the same way, or keeps its line and writes `MELODY_CRON_USER=${APP_CRON_USER}` in `.env`. An application that wants the refusal without `--out` or `--logs-directory` back writes the key's line empty (`MELODY_CRON_DESTINATION_FILE=`, `MELODY_CRON_LOGS_DIRECTORY=`). An application module that builds `NewGenerateCommand` without `cron.Module` declares `cron.EnvironmentKeys(cron.KeyDefaults{})` from its `RegisterEnvironmentKeys`.
+An application of another spelling maps it the same way, or keeps its line and writes `MELODY_CRON_USER=${APP_CRON_USER}` in `.env`. An application that wants the refusal without `--out` or `--logs-directory` back writes the key's line empty (`MELODY_CRON_DESTINATION_FILE=`, `MELODY_CRON_LOGS_DIRECTORY=`).
 
 **Why.** The defaults and the rules of the keys are the module's; repeating them in every application let a misspelt opt-in boot every process clean and fail at the generation.
 

@@ -26,13 +26,13 @@ func ansibleSampleEntry(mutate func(entry *melodycron.Entry)) melodycron.Entry {
 }
 
 func ansibleSampleTemplate() *AnsibleCronTemplate {
-    return &AnsibleCronTemplate{TaskNamePrefix: "billing cron: ", ApplicationName: "billing"}
+    return &AnsibleCronTemplate{TaskNamePrefix: "billing cron: "}
 }
 
 func renderAnsibleEntry(t *testing.T, mutate func(entry *melodycron.Entry)) string {
     t.Helper()
 
-    content, err := ansibleSampleTemplate().Render([]melodycron.Entry{ansibleSampleEntry(mutate)}, melodycron.RenderOptions{})
+    content, err := ansibleSampleTemplate().Render([]melodycron.Entry{ansibleSampleEntry(mutate)}, melodycron.RenderOptions{ApplicationName: "billing"})
     if nil != err {
         t.Fatalf("Render returned unexpected error: %v", err)
     }
@@ -43,7 +43,7 @@ func renderAnsibleEntry(t *testing.T, mutate func(entry *melodycron.Entry)) stri
 func renderAnsibleEntryError(t *testing.T, mutate func(entry *melodycron.Entry)) error {
     t.Helper()
 
-    _, err := ansibleSampleTemplate().Render([]melodycron.Entry{ansibleSampleEntry(mutate)}, melodycron.RenderOptions{})
+    _, err := ansibleSampleTemplate().Render([]melodycron.Entry{ansibleSampleEntry(mutate)}, melodycron.RenderOptions{ApplicationName: "billing"})
     if nil == err {
         t.Fatalf("expected Render to refuse the entry, got nil")
     }
@@ -84,7 +84,7 @@ func TestAnsibleCronRenderEmitsOneTaskPerEntryUnderTheMarker(t *testing.T) {
 }
 
 func TestAnsibleCronRenderWithoutEntriesCarriesTheMarkerAlone(t *testing.T) {
-    content, err := ansibleSampleTemplate().Render(nil, melodycron.RenderOptions{})
+    content, err := ansibleSampleTemplate().Render(nil, melodycron.RenderOptions{ApplicationName: "billing"})
     if nil != err {
         t.Fatalf("Render returned unexpected error: %v", err)
     }
@@ -201,7 +201,7 @@ func TestAnsibleCronRenderSuffixesTheCronNameWithTheInstance(t *testing.T) {
         }),
     }
 
-    content, err := ansibleSampleTemplate().Render(entries, melodycron.RenderOptions{})
+    content, err := ansibleSampleTemplate().Render(entries, melodycron.RenderOptions{ApplicationName: "billing"})
     if nil != err {
         t.Fatalf("Render returned unexpected error: %v", err)
     }
@@ -223,7 +223,7 @@ func TestAnsibleCronRenderSuffixesTheCronNameWithTheInstance(t *testing.T) {
 func TestAnsibleCronRenderRejectsTwoEntriesRenderingOneCronName(t *testing.T) {
     entries := []melodycron.Entry{ansibleSampleEntry(nil), ansibleSampleEntry(nil)}
 
-    _, err := ansibleSampleTemplate().Render(entries, melodycron.RenderOptions{})
+    _, err := ansibleSampleTemplate().Render(entries, melodycron.RenderOptions{ApplicationName: "billing"})
     if nil == err {
         t.Fatalf("expected Render to refuse two entries under one cron name, got nil")
     }
@@ -337,5 +337,18 @@ func TestAnsibleCronRenderWritesEveryTaskValueAsAnUnsafeScalar(t *testing.T) {
         if false == strings.Contains(line, ": !unsafe \"") {
             t.Fatalf("expected every task value tagged !unsafe, got the line %q", line)
         }
+    }
+}
+
+func TestNewCronModule_InstallsTheAnsibleCronDialectThroughTheModule(t *testing.T) {
+    commands := NewCronModule().RegisterCliCommands(nil)
+    if 1 != len(commands) || "melody:cron:generate" != commands[0].Name() {
+        t.Fatalf("expected the generator from the cron module, got %v", commands)
+    }
+
+    expectedLine := ansibleCronOwnershipMarker + " for billing"
+    content, err := (&AnsibleCronTemplate{}).Render(nil, melodycron.RenderOptions{ApplicationName: "billing"})
+    if nil != err || false == strings.HasPrefix(content, expectedLine+"\n") {
+        t.Fatalf("expected the line named after RenderOptions.ApplicationName, got %q (%v)", content, err)
     }
 }

@@ -1,6 +1,8 @@
 package cron
 
 import (
+    "strconv"
+
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -8,11 +10,11 @@ import (
 )
 
 type ModuleConfig struct {
-    /* Configuration drives the generator and the runner; ConfigurationFactory, when set, takes precedence. With neither set the module registers no commands, and Runner.Commands without a configuration is refused at registration as a wiring error. */
-    Configuration *Configuration
+    /* Configuration builds the configuration that drives the generator and the runner against the booted kernel; a factory that answers nil is refused at registration as a wiring error. Left out, the module registers no commands, and Runner.Commands or Templates without it are refused at registration. */
+    Configuration func(kernelInstance kernelcontract.Kernel) *Configuration
 
-    /* ConfigurationFactory builds the configuration against the booted kernel; a factory that answers nil is refused at registration as a wiring error. */
-    ConfigurationFactory func(kernelInstance kernelcontract.Kernel) *Configuration
+    /* Templates are installed in the generator after the builtin dialects, a template named as a builtin replacing it; a nil entry is refused naming its index. */
+    Templates []Template
 
     /* KeyDefaults are the values the module's MELODY_CRON_* keys take when no .env file sets them. */
     KeyDefaults KeyDefaults
@@ -38,7 +40,7 @@ func (instance *Module) Description() string {
 }
 
 func (instance *Module) RegisterEnvironmentKeys(registrar applicationcontract.EnvironmentKeyRegistrar) {
-    for _, key := range EnvironmentKeys(instance.config.KeyDefaults) {
+    for _, key := range environmentKeys(instance.config.KeyDefaults) {
         registrar.DeclareEnvironmentKey(key)
     }
 }
@@ -49,18 +51,19 @@ func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel
         refuseRetiredParameters(kernelInstance.Config())
     }
 
-    configuration := instance.config.Configuration
-    if nil != instance.config.ConfigurationFactory {
-        configuration = instance.config.ConfigurationFactory(kernelInstance)
-
-        if nil == configuration {
+    for index, template := range instance.config.Templates {
+        if nil == template {
             exception.Panic(
-                exception.NewError("cron module configuration factory returned nil", nil, nil),
+                exception.NewError(
+                    "cron module template is nil",
+                    map[string]any{"field": "ModuleConfig.Templates[" + strconv.Itoa(index) + "]"},
+                    nil,
+                ),
             )
         }
     }
 
-    if nil == configuration {
+    if nil == instance.config.Configuration {
         if 0 < len(instance.config.Runner.Commands) {
             exception.Panic(
                 exception.NewError(
@@ -73,10 +76,27 @@ func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel
             )
         }
 
+        if 0 < len(instance.config.Templates) {
+            exception.Panic(
+                exception.NewError(
+                    "cron module has templates but no configuration to generate from",
+                    map[string]any{"field": "ModuleConfig.Templates", "requires": "ModuleConfig.Configuration"},
+                    nil,
+                ),
+            )
+        }
+
         return nil
     }
 
-    commands := Commands(configuration)
+    configuration := instance.config.Configuration(kernelInstance)
+    if nil == configuration {
+        exception.Panic(
+            exception.NewError("cron module configuration factory returned nil", map[string]any{"field": "ModuleConfig.Configuration"}, nil),
+        )
+    }
+
+    commands := []clicontract.Command{newGenerateCommand(configuration, instance.config.Templates)}
 
     if 0 < len(instance.config.Runner.Commands) {
         commands = append(commands, NewRunnerCommand(configuration, instance.config.Runner))

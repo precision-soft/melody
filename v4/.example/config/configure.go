@@ -71,8 +71,8 @@ func Configure(ctx context.Context, app *melodyapplication.Application, applicat
 
     /* cron's Configuration is kernel-dependent (reads parameters), so it is supplied as a factory evaluated at command-registration time. */
     app.RegisterModule(melodycron.NewModule(melodycron.ModuleConfig{
-        ConfigurationFactory: newCronConfiguration,
-        Runner:               melodycron.RunnerConfig{Commands: cronRunnerCommands()},
+        Configuration: newCronConfiguration,
+        Runner:        melodycron.RunnerConfig{Commands: cronRunnerCommands()},
     }))
 
     moduleInstance.registerHubShutdown(app)

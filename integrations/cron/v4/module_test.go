@@ -68,7 +68,7 @@ func TestModule_RegisterCliCommandsReturnsNilWithoutConfiguration(t *testing.T) 
 }
 
 func TestModule_RegisterCliCommandsFromConfiguration(t *testing.T) {
-    commands := NewModule(ModuleConfig{Configuration: NewConfiguration()}).RegisterCliCommands(nil)
+    commands := NewModule(ModuleConfig{Configuration: staticConfiguration(NewConfiguration())}).RegisterCliCommands(nil)
     if 1 != len(commands) || "melody:cron:generate" != commands[0].Name() {
         t.Fatalf("expected the melody:cron:generate command, got %v", commands)
     }
@@ -85,10 +85,10 @@ func TestModule_RegisterCliCommandsThreadsTheRunnerDialect(t *testing.T) {
         job := newRecordingCommand("job:odd-mondays")
 
         return ModuleConfig{
-            Configuration: NewConfiguration().
+            Configuration: staticConfiguration(NewConfiguration().
                 Schedule("job:odd-mondays", EntryConfig{
                     Schedule: &Schedule{Minute: "0", Hour: "0", DayOfMonth: "*/2", DayOfWeek: "1"},
-                }),
+                })),
             Runner: RunnerConfig{Dialect: dialect, Commands: []clicontract.Command{job}},
         }
     }
@@ -140,8 +140,8 @@ func TestModule_RegisterCliCommandsUnknownRunnerDialectPanics(t *testing.T) {
     job := newRecordingCommand("job:top")
 
     module := NewModule(ModuleConfig{
-        Configuration: NewConfiguration().
-            Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}}),
+        Configuration: staticConfiguration(NewConfiguration().
+            Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}})),
         Runner: RunnerConfig{Dialect: RunnerDialect("solaris"), Commands: []clicontract.Command{job}},
     })
 
@@ -190,16 +190,16 @@ func TestModule_RegisterCliCommandsRefusesAFactoryThatReturnsNil(t *testing.T) {
     }()
 
     NewModule(ModuleConfig{
-        ConfigurationFactory: func(kernelInstance kernelcontract.Kernel) *Configuration {
+        Configuration: func(kernelInstance kernelcontract.Kernel) *Configuration {
             return nil
         },
     }).RegisterCliCommands(nil)
 }
 
-func TestModule_RegisterCliCommandsPrefersFactory(t *testing.T) {
+func TestModule_RegisterCliCommandsBuildsTheConfigurationThroughTheFactory(t *testing.T) {
     factoryCalled := false
     module := NewModule(ModuleConfig{
-        ConfigurationFactory: func(kernelInstance kernelcontract.Kernel) *Configuration {
+        Configuration: func(kernelInstance kernelcontract.Kernel) *Configuration {
             factoryCalled = true
 
             return NewConfiguration()
@@ -240,7 +240,67 @@ func TestModule_RegisterCliCommandsRefusesTheRetiredLogsDirParameter(t *testing.
 func TestModule_RegisterCliCommandsAdmitsTheSpelledOutParameter(t *testing.T) {
     kernelInstance := &configurationKernel{configuration: newStubConfiguration(map[string]string{ParameterLogsDirectory: "/var/log/app"})}
 
-    if commands := NewModule(ModuleConfig{Configuration: NewConfiguration()}).RegisterCliCommands(kernelInstance); 1 != len(commands) {
+    if commands := NewModule(ModuleConfig{Configuration: staticConfiguration(NewConfiguration())}).RegisterCliCommands(kernelInstance); 1 != len(commands) {
         t.Fatalf("expected the generator registered, got %v", commands)
     }
+}
+
+func expectCronPanicNaming(t *testing.T, field string, callback func()) {
+    t.Helper()
+
+    defer func() {
+        t.Helper()
+
+        recoveredErr, isError := recover().(error)
+        if false == isError || field != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+            t.Fatalf("expected a refusal naming %s, got %v", field, recoveredErr)
+        }
+    }()
+
+    callback()
+}
+
+func TestModule_AFactoryAnsweringNilIsRefusedNamingTheField(t *testing.T) {
+    expectCronPanicNaming(t, "ModuleConfig.Configuration", func() {
+        NewModule(ModuleConfig{Configuration: staticConfiguration(nil)}).RegisterCliCommands(nil)
+    })
+}
+
+func TestModule_TemplatesInstallACustomDialectAndReplaceABuiltinByName(t *testing.T) {
+    callCount := 0
+    replacement := &fakeTemplate{name: TemplateNameCrontab, content: "replaced\n", called: &callCount}
+
+    commands := NewModule(ModuleConfig{
+        Configuration: staticConfiguration(NewConfiguration()),
+        Templates:     []Template{&fakeTemplate{name: "json-cron", content: "{}\n"}, replacement},
+    }).RegisterCliCommands(nil)
+
+    generateCommand := commands[0].(*GenerateCommand)
+
+    if custom, lookupErr := generateCommand.resolveTemplate("json-cron"); nil != lookupErr || "json-cron" != custom.Name() {
+        t.Fatalf("expected the custom dialect selectable by name, got %v", lookupErr)
+    }
+
+    if builtin, lookupErr := generateCommand.resolveTemplate(TemplateNameCrontab); nil != lookupErr || replacement != builtin {
+        t.Fatalf("expected the template named as a builtin to replace it, got %T %v", builtin, lookupErr)
+    }
+
+    if k8s, lookupErr := generateCommand.resolveTemplate(TemplateNameK8s); nil != lookupErr || nil == k8s {
+        t.Fatalf("expected the other builtin kept, got %v", lookupErr)
+    }
+}
+
+func TestModule_ANilTemplateIsRefusedNamingItsIndex(t *testing.T) {
+    expectCronPanicNaming(t, "ModuleConfig.Templates[1]", func() {
+        NewModule(ModuleConfig{
+            Configuration: staticConfiguration(NewConfiguration()),
+            Templates:     []Template{&fakeTemplate{name: "json-cron"}, nil},
+        }).RegisterCliCommands(nil)
+    })
+}
+
+func TestModule_TemplatesWithoutAConfigurationAreRefused(t *testing.T) {
+    expectCronPanicNaming(t, "ModuleConfig.Templates", func() {
+        NewModule(ModuleConfig{Templates: []Template{&fakeTemplate{name: "json-cron"}}}).RegisterCliCommands(nil)
+    })
 }

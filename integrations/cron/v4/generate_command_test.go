@@ -26,8 +26,8 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
-func TestNewGenerateCommandIdentity(t *testing.T) {
-    command := NewGenerateCommand(nil)
+func TestNewGenerateCommand_Identity(t *testing.T) {
+    command := newGenerateCommandForTest(nil)
 
     if "melody:cron:generate" != command.Name() {
         t.Fatalf("Name() = %q, want %q", command.Name(), "melody:cron:generate")
@@ -1877,11 +1877,19 @@ func (instance *fakeTemplate) Render(entries []Entry, options RenderOptions) (st
     return instance.content, nil
 }
 
-func TestRegisterTemplateAddsToRegistry(t *testing.T) {
-    command := NewGenerateCommand(nil)
+func (instance *fakeTemplate) OwnershipMarker(applicationName string) string {
+    return ""
+}
+
+func (instance *fakeTemplate) RendersUserColumn() bool {
+    return true
+}
+
+func TestInstallTemplate_AddsToRegistry(t *testing.T) {
+    command := newGenerateCommandForTest(nil)
 
     callCount := 0
-    command.RegisterTemplate(&fakeTemplate{name: "fake", content: "fake-output\n", called: &callCount})
+    command.installTemplate(&fakeTemplate{name: "fake", content: "fake-output\n", called: &callCount})
 
     resolved, lookupErr := command.resolveTemplate("fake")
     if nil != lookupErr {
@@ -1893,7 +1901,7 @@ func TestRegisterTemplateAddsToRegistry(t *testing.T) {
 }
 
 func TestResolveTemplateErrorsOnUnknownName(t *testing.T) {
-    command := NewGenerateCommand(nil)
+    command := newGenerateCommandForTest(nil)
 
     _, lookupErr := command.resolveTemplate("nope")
     if nil == lookupErr {
@@ -1905,7 +1913,7 @@ func TestResolveTemplateErrorsOnUnknownName(t *testing.T) {
 }
 
 func TestDefaultTemplateRegisteredOnConstruction(t *testing.T) {
-    command := NewGenerateCommand(nil)
+    command := newGenerateCommandForTest(nil)
 
     resolved, lookupErr := command.resolveTemplate(TemplateNameCrontab)
     if nil != lookupErr {
@@ -1935,7 +1943,7 @@ func TestRunDispatchesToTemplateFromFlag(t *testing.T) {
             "--template", "json-cron",
         },
         func(command *GenerateCommand) {
-            command.RegisterTemplate(&fakeTemplate{name: "json-cron", content: "{\"jobs\":[]}\n"})
+            command.installTemplate(&fakeTemplate{name: "json-cron", content: "{\"jobs\":[]}\n"})
         },
     )
     if nil != runErr {
@@ -3177,7 +3185,7 @@ func TestGenerateCommand_TheTextBranchNamesWhatItProducedBeforeFailing(t *testin
     var stdout bytes.Buffer
     commandContext := parsedContextValues{WriterValue: &stdout}.parse()
 
-    runErr := NewGenerateCommand(NewConfiguration()).reportWrites(
+    runErr := newGenerateCommandForTest(NewConfiguration()).reportWrites(
         commandContext,
         output.Option{Format: output.FormatTable},
         time.Now(),
@@ -3558,7 +3566,7 @@ func TestGenerateCommand_ARegisteredNoUserDialectNeedsNoUserForTheHeartbeat(t *t
             "--heartbeat-path", filepath.Join(directory, "heartbeat.crontab"),
         },
         func(command *GenerateCommand) {
-            command.RegisterTemplate(&noUserColumnTemplate{})
+            command.installTemplate(&noUserColumnTemplate{})
         },
     )
 
@@ -3610,7 +3618,7 @@ func (instance *noUserColumnTemplate) Name() string {
 }
 
 func (instance *noUserColumnTemplate) Render(entries []Entry, options RenderOptions) (string, error) {
-    lines := []string{instance.OwnershipMarker()}
+    lines := []string{instance.OwnershipMarker(options.ApplicationName)}
     for _, entry := range entries {
         lines = append(lines, entry.Name+" "+strings.Join(entry.Command, " "))
     }
@@ -3618,7 +3626,7 @@ func (instance *noUserColumnTemplate) Render(entries []Entry, options RenderOpti
     return strings.Join(lines, "\n") + "\n", nil
 }
 
-func (instance *noUserColumnTemplate) OwnershipMarker() string {
+func (instance *noUserColumnTemplate) OwnershipMarker(applicationName string) string {
     return "# melody-cron-probe"
 }
 
@@ -4219,7 +4227,7 @@ func TestFileCarriesOwnershipMarker_KeepsOneApplicationsLineApartFromAnothersAnd
     }
 }
 
-/* decoratingCrontabTemplate embeds the builtin crontab dialect and decorates its rendering: the shape an application writes to override a builtin, registered under the builtin's own name through RegisterTemplate. The embedding promotes the builtin's unexported doors onto it — the per-application copy door included. */
+/* decoratingCrontabTemplate embeds the builtin crontab dialect and decorates its rendering: the shape an application writes to override a builtin, registered under the builtin's own name through ModuleConfig.Templates. */
 type decoratingCrontabTemplate struct {
     *CrontabTemplate
 }
@@ -4230,7 +4238,24 @@ func (instance *decoratingCrontabTemplate) Render(entries []Entry, options Rende
     return "# decorated by the application\n" + rendered, renderErr
 }
 
-/* the wrapper is used as it is, and so is the line it answers: the bare prefix promoted from the builtin it embeds, which another application's wrapper writes as well. A sweep on it would empty those destinations, so the sweep is refused and the destination is written. */
+/* bareMarkerCrontabTemplate is a custom dialect that ignores the application's name and answers the bare prefix another application writes as well */
+type bareMarkerCrontabTemplate struct {
+    *CrontabTemplate
+}
+
+func (instance *bareMarkerCrontabTemplate) OwnershipMarker(applicationName string) string {
+    return CrontabOwnershipMarker
+}
+
+func (instance *bareMarkerCrontabTemplate) Render(entries []Entry, options RenderOptions) (string, error) {
+    options.ApplicationName = ""
+
+    rendered, renderErr := instance.CrontabTemplate.Render(entries, options)
+
+    return "# decorated by the application\n" + rendered, renderErr
+}
+
+/* a dialect that ignores the name answers a line another application may write as well; a sweep on it would empty those destinations, so the sweep is refused and the destination is written */
 func TestRunPruneIsRefusedOnADialectWhoseLineDoesNotNameTheApplication(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
@@ -4250,8 +4275,8 @@ func TestRunPruneIsRefusedOnADialectWhoseLineDoesNotNameTheApplication(t *testin
         t.Fatalf("expected the builtin crontab dialect among the builtins")
     }
 
-    generateCommand := NewGenerateCommand(buildConfigurationFromFakeCommands([]clicontract.Command{newFakeCommandWithConfig("reports:daily", EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})}))
-    generateCommand.RegisterTemplate(&decoratingCrontabTemplate{CrontabTemplate: builtin})
+    generateCommand := newGenerateCommandForTest(buildConfigurationFromFakeCommands([]clicontract.Command{newFakeCommandWithConfig("reports:daily", EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})}))
+    generateCommand.installTemplate(&bareMarkerCrontabTemplate{CrontabTemplate: builtin})
 
     _, runErr := dispatchGenerateCommand(
         generateCommand,
@@ -4273,9 +4298,14 @@ func TestRunPruneIsRefusedOnADialectWhoseLineDoesNotNameTheApplication(t *testin
     }
 }
 
-func TestRunLeavesADialectEmbeddingABuiltinAsItIsInsteadOfReplacingItWithTheBareCopy(t *testing.T) {
+func TestRunADialectEmbeddingABuiltinCarriesTheApplicationsLineAndItsPruneSweeps(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
+    stalePath := filepath.Join(tempDir, "stale.crontab")
+    staleContent := "#\n" + CrontabOwnershipMarker + " for billing\n0 3 * * * deploy /usr/local/bin/old stale:job\n"
+    if writeErr := os.WriteFile(stalePath, []byte(staleContent), 0o644); nil != writeErr {
+        t.Fatalf("write stale: %v", writeErr)
+    }
 
     var builtin *CrontabTemplate
     for _, template := range BuiltinTemplates() {
@@ -4287,13 +4317,12 @@ func TestRunLeavesADialectEmbeddingABuiltinAsItIsInsteadOfReplacingItWithTheBare
         t.Fatalf("expected the builtin crontab dialect among the builtins")
     }
 
-    generateCommand := NewGenerateCommand(buildConfigurationFromFakeCommands([]clicontract.Command{newFakeCommandWithConfig("reports:daily", EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})}))
-    generateCommand.RegisterTemplate(&decoratingCrontabTemplate{CrontabTemplate: builtin})
+    generateCommand := newGenerateCommand(buildConfigurationFromFakeCommands([]clicontract.Command{newFakeCommandWithConfig("reports:daily", EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})}), []Template{&decoratingCrontabTemplate{CrontabTemplate: builtin}})
 
     _, runErr := dispatchGenerateCommand(
         generateCommand,
         newStubConfigurationNamed(nil, "billing"),
-        append(ownershipLineArguments(tempDir, "crontab", nil), "--out", outputPath),
+        append(ownershipLineArguments(tempDir, "crontab", nil), "--out", outputPath, "--prune"),
     )
     if nil != runErr {
         t.Fatalf("the generation failed: %v", runErr)
@@ -4304,16 +4333,13 @@ func TestRunLeavesADialectEmbeddingABuiltinAsItIsInsteadOfReplacingItWithTheBare
         t.Fatalf("the generation wrote no %s: %v", outputPath, readErr)
     }
 
-    if false == strings.Contains(string(content), "# decorated by the application") {
-        t.Fatalf("expected the registered dialect's own rendering, got the bare copy's: %s", content)
+    if false == strings.Contains(string(content), "# decorated by the application") || false == containsExactLeadingLine(string(content), CrontabOwnershipMarker+" for billing") {
+        t.Fatalf("expected the wrapper's own rendering carrying the application's line, got: %s", content)
     }
 
-    if false == containsExactLeadingLine(string(content), CrontabOwnershipMarker) {
-        t.Fatalf("expected the wrapper's destination to carry the bare prefix its embedded builtin answers, got: %s", content)
-    }
-
-    if true == containsExactLeadingLine(string(content), CrontabOwnershipMarker+" for billing") {
-        t.Fatalf("expected no application line on a dialect the generator does not own, got: %s", content)
+    stale, staleErr := os.ReadFile(stalePath)
+    if nil != staleErr || true == strings.Contains(string(stale), "stale:job") {
+        t.Fatalf("expected the stale destination emptied by the sweep, got %q (%v)", stale, staleErr)
     }
 }
 

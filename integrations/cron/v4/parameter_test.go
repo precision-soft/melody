@@ -36,7 +36,7 @@ func newDeclaringConfiguration(t *testing.T, values map[string]string, defaults 
         t.Fatalf("unexpected configuration error: %v", configurationErr)
     }
 
-    for _, key := range EnvironmentKeys(defaults) {
+    for _, key := range environmentKeys(defaults) {
         if declareErr := configuration.DeclareEnvironmentKey("cron", key); nil != declareErr {
             t.Fatalf("unexpected declaration error for %s: %v", key.Key, declareErr)
         }
@@ -69,7 +69,7 @@ func TestEnvironmentKeys_DeclaresTheTenKeysAndTheirParameters(t *testing.T) {
         {KeyRestartPolicy, ParameterRestartPolicy, "cron.KeyDefaults.RestartPolicy", "", true},
     }
 
-    keys := EnvironmentKeys(KeyDefaults{})
+    keys := environmentKeys(KeyDefaults{})
     if len(expected) != len(keys) {
         t.Fatalf("expected %d keys, got %d", len(expected), len(keys))
     }
@@ -93,7 +93,7 @@ func TestEnvironmentKeys_TheLogsDirectoryIsSpelledOut(t *testing.T) {
         t.Fatalf("expected the spelled-out key, parameter and flag, got %q, %q, %q", KeyLogsDirectory, ParameterLogsDirectory, flagNameLogsDirectory)
     }
 
-    for _, key := range EnvironmentKeys(KeyDefaults{}) {
+    for _, key := range environmentKeys(KeyDefaults{}) {
         if "MELODY_CRON_LOGS_DIR" == key.Key || "melody.cron.logs_dir" == key.Parameter {
             t.Fatalf("expected the abbreviated spelling declared by nothing, got %+v", key)
         }
@@ -106,7 +106,7 @@ func TestEnvironmentKeys_TheLogsDirectoryIsSpelledOut(t *testing.T) {
 }
 
 func TestEnvironmentKeys_AKeyDefaultsFieldReplacesTheModuleDefault(t *testing.T) {
-    keys := EnvironmentKeys(KeyDefaults{
+    keys := environmentKeys(KeyDefaults{
         User:             "www-data",
         LogsDirectory:    "/var/log/app",
         Binary:           "/usr/local/bin/app",
@@ -125,14 +125,14 @@ func TestEnvironmentKeys_AKeyDefaultsFieldReplacesTheModuleDefault(t *testing.T)
         }
     }
 
-    if heartbeat := EnvironmentKeys(KeyDefaults{HeartbeatEnabled: configcontract.Switch{Value: true, IsSet: true}})[5]; "true" != heartbeat.Default {
+    if heartbeat := environmentKeys(KeyDefaults{HeartbeatEnabled: configcontract.Switch{Value: true, IsSet: true}})[5]; "true" != heartbeat.Default {
         t.Fatalf("expected a set heartbeat switch rendered true, got %q", heartbeat.Default)
     }
 }
 
 func TestEnvironmentKeys_EveryDefaultPassesItsOwnRule(t *testing.T) {
     for _, defaults := range []KeyDefaults{{}, {HeartbeatEnabled: configcontract.Switch{Value: true, IsSet: true}, Namespace: "jobs", RestartPolicy: "OnFailure"}} {
-        for _, key := range EnvironmentKeys(defaults) {
+        for _, key := range environmentKeys(defaults) {
             if nil == key.Rule {
                 continue
             }
@@ -214,7 +214,7 @@ func TestEnvironmentKeys_TheGeneratorRunsOverTheDeclaredKeys(t *testing.T) {
 
 
 func TestEnvironmentKeys_LogsDirectoryRetiresTheShortSpelling(t *testing.T) {
-    for _, key := range EnvironmentKeys(KeyDefaults{}) {
+    for _, key := range environmentKeys(KeyDefaults{}) {
         retiresShortSpelling := 1 == len(key.Retired) && "MELODY_CRON_LOGS_DIR" == key.Retired[0]
         if (KeyLogsDirectory == key.Key) != retiresShortSpelling {
             t.Fatalf("expected the short spelling retired by the logs directory key alone, got %+v", key)

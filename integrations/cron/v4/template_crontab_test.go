@@ -1004,72 +1004,36 @@ func TestCrontabTemplateKeepsTheDivergentPairForTheUserColumnDialect(t *testing.
     }
 }
 
-func TestCrontabTemplatesRenderTheirOwnershipMarker(t *testing.T) {
+func TestBuiltinTemplatesAnswerAndRenderTheApplicationsOwnershipLine(t *testing.T) {
     for _, template := range BuiltinTemplates() {
-        ownedTemplate, isOwned := template.(OwnedTemplate)
-        if false == isOwned {
-            t.Fatalf("expected %q to name its ownership marker", template.Name())
+        if CrontabOwnershipMarker != template.OwnershipMarker("") {
+            t.Fatalf("expected %q to answer the bare prefix for no name, got %q", template.Name(), template.OwnershipMarker(""))
         }
 
-        /* the marker is read back from the same door the rendering is compared against, so it is pinned to the constant as well: an empty marker would satisfy every containment check while making the template unprunable, which is the fail-safe rather than the contract */
-        if CrontabOwnershipMarker != ownedTemplate.OwnershipMarker() {
-            t.Fatalf("expected %q to name the crontab marker, got %q", template.Name(), ownedTemplate.OwnershipMarker())
-        }
-
-        /* the k8s builtin joins the loop on this major, so the entry-carrying render hands it the image its manifest validation demands */
-        options := RenderOptions{}
-        if TemplateNameK8s == template.Name() {
-            options.Image = "registry.example/app:1"
-        }
-
-        for _, entries := range [][]Entry{nil, {{Name: "job:one", User: "deploy", Schedule: &Schedule{Minute: "*"}, Binary: "/bin/app", Arguments: []string{"job:one"}}}} {
-            rendered, renderErr := template.Render(entries, options)
-            if nil != renderErr {
-                t.Fatalf("unexpected render error for %q: %v", template.Name(), renderErr)
-            }
-
-            if false == strings.Contains(rendered, ownedTemplate.OwnershipMarker()) {
-                t.Fatalf("expected %q to render its own marker, got: %s", template.Name(), rendered)
-            }
-        }
-    }
-}
-
-func TestBuiltinTemplatesOwnedByAnApplicationRenderAndAnswerItsLine(t *testing.T) {
-    for _, template := range BuiltinTemplates() {
-        applicationOwned, isApplicationOwned := template.(applicationOwnedTemplate)
-        if false == isApplicationOwned {
-            t.Fatalf("expected %q to carry an application's ownership line", template.Name())
-        }
-
-        owned := applicationOwned.ownedBy("billing").(OwnedTemplate)
         expectedLine := CrontabOwnershipMarker + " for billing"
-        if expectedLine != owned.OwnershipMarker() {
-            t.Fatalf("expected the owned %q to answer the application's line, got %q", template.Name(), owned.OwnershipMarker())
+        if expectedLine != template.OwnershipMarker("billing") {
+            t.Fatalf("expected %q to answer the application's line, got %q", template.Name(), template.OwnershipMarker("billing"))
         }
 
-        /* the singleton the generator resolved stays unowned, so a second application deriving its own copy from it starts from the bare prefix */
-        if CrontabOwnershipMarker != template.(OwnedTemplate).OwnershipMarker() {
-            t.Fatalf("expected the builtin %q to stay unowned, got %q", template.Name(), template.(OwnedTemplate).OwnershipMarker())
-        }
-
-        options := RenderOptions{}
-        if TemplateNameK8s == template.Name() {
-            options.Image = "registry.example/app:1"
-        }
-
-        for _, entries := range [][]Entry{nil, {{Name: "job:one", User: "deploy", Schedule: &Schedule{Minute: "*"}, Binary: "/bin/app", Arguments: []string{"job:one"}}}} {
-            rendered, renderErr := owned.(Template).Render(entries, options)
-            if nil != renderErr {
-                t.Fatalf("unexpected render error for the owned %q: %v", template.Name(), renderErr)
+        for _, applicationName := range []string{"", "billing"} {
+            options := RenderOptions{ApplicationName: applicationName}
+            if TemplateNameK8s == template.Name() {
+                options.Image = "registry.example/app:1"
             }
 
-            if false == containsExactLeadingLine(rendered, expectedLine) {
-                t.Fatalf("expected the owned %q to render the application's line as a leading line of its own, got: %s", template.Name(), rendered)
-            }
+            for _, entries := range [][]Entry{nil, {{Name: "job:one", User: "deploy", Schedule: &Schedule{Minute: "*"}, Binary: "/bin/app", Arguments: []string{"job:one"}}}} {
+                rendered, renderErr := template.Render(entries, options)
+                if nil != renderErr {
+                    t.Fatalf("unexpected render error for %q: %v", template.Name(), renderErr)
+                }
 
-            if true == containsExactLeadingLine(rendered, CrontabOwnershipMarker) {
-                t.Fatalf("expected the owned %q not to render the bare prefix as a line of its own, got: %s", template.Name(), rendered)
+                if false == containsExactLeadingLine(rendered, template.OwnershipMarker(applicationName)) {
+                    t.Fatalf("expected %q to render %q as a leading line of its own, got: %s", template.Name(), template.OwnershipMarker(applicationName), rendered)
+                }
+
+                if "billing" == applicationName && true == containsExactLeadingLine(rendered, CrontabOwnershipMarker) {
+                    t.Fatalf("expected %q not to render the bare prefix for a named application, got: %s", template.Name(), rendered)
+                }
             }
         }
     }

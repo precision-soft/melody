@@ -21,4 +21,6 @@ type RenderOptions struct {
     Image            string
     Namespace        string
     RestartPolicy    string
+    /* ApplicationName is the cli name the run generates for, empty when the cli configuration carries none; a template renders OwnershipMarker(ApplicationName). */
+    ApplicationName string
 }

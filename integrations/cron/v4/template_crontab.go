@@ -13,7 +13,7 @@ const TemplateNameCrontab = "crontab"
 /* TemplateNameCrontabNoUser renders the user-less crontab dialect for busybox crond and per-user crontab files, which reject the /etc/cron.d user column. */
 const TemplateNameCrontabNoUser = "crontab-no-user"
 
-/* CrontabOwnershipMarker opens the ownership line every builtin template renders, in the crontab header block or as a leading YAML comment, so --prune can tell a file this generator wrote from an operator's. The line a run writes is this prefix, " for " and the application's cli name, so it proves the writing application and command but not the dialect. Only a template handed the application's name renders the whole line; the builtin singletons and the package-level Render write the bare prefix, which no named application's sweep matches. */
+/* CrontabOwnershipMarker opens the ownership line every builtin template renders, in the crontab header block or as a leading YAML comment, so --prune can tell a file this generator wrote from an operator's. The line a run writes is this prefix, " for " and the application's cli name, so it proves the writing application and command but not the dialect. A template renders the whole line for RenderOptions.ApplicationName; an empty name writes the bare prefix, which no named application's sweep matches. */
 const CrontabOwnershipMarker = "# owned by melody:cron:generate"
 
 /* ownershipMarkerLine answers the exact line a template owned by the named application renders: the shared prefix, " for " and the name. An empty name keeps the bare prefix, which belongs to no application's sweep; the separator is a word so the line never coincides with a custom marker suffixed in brackets. */
@@ -72,9 +72,6 @@ const crontabFooterBlock = `####################################################
 type CrontabTemplate struct {
     name              string
     includeUserColumn bool
-
-    /* the application whose ownership line this template renders and answers; empty on the builtin singletons, set on the copy the generator derives for a run through ownedBy */
-    applicationName string
 }
 
 var defaultCrontabTemplate = &CrontabTemplate{
@@ -91,17 +88,9 @@ func (instance *CrontabTemplate) Name() string {
     return instance.name
 }
 
-/* OwnershipMarker names the line both dialects carry in their header block, so --prune can prove a destination is one this template wrote for this application before it empties it; on a template no application owns it is the bare prefix, which no sweep matches */
-func (instance *CrontabTemplate) OwnershipMarker() string {
-    return ownershipMarkerLine(instance.applicationName)
-}
-
-/* ownedBy answers a copy of this template that renders and answers the named application's ownership line, leaving the shared singleton unowned, so two applications sharing an output directory write different lines and each sweep recognises only its own. */
-func (instance *CrontabTemplate) ownedBy(applicationName string) Template {
-    owned := *instance
-    owned.applicationName = applicationName
-
-    return &owned
+/* OwnershipMarker names the line both dialects carry in their header block for the application, so two applications sharing an output directory write different lines and each sweep recognises only its own; for an empty name it is the bare prefix, which no sweep matches */
+func (instance *CrontabTemplate) OwnershipMarker(applicationName string) string {
+    return ownershipMarkerLine(applicationName)
 }
 
 /* RendersUserColumn answers for the generator's heartbeat-user guard before anything is rendered: the /etc/cron.d dialect places a user column on every line, the user-less dialect never does. */
@@ -113,9 +102,9 @@ func (instance *CrontabTemplate) Render(entries []Entry, options RenderOptions) 
     var builder strings.Builder
 
     if true == instance.includeUserColumn {
-        builder.WriteString(crontabHeaderBlock(instance.OwnershipMarker()))
+        builder.WriteString(crontabHeaderBlock(instance.OwnershipMarker(options.ApplicationName)))
     } else {
-        builder.WriteString(crontabNoUserHeaderBlock(instance.OwnershipMarker()))
+        builder.WriteString(crontabNoUserHeaderBlock(instance.OwnershipMarker(options.ApplicationName)))
     }
 
     sectionsWritten := 0
@@ -312,8 +301,5 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
 }
 
 var (
-    _ Template                 = (*CrontabTemplate)(nil)
-    _ OwnedTemplate            = (*CrontabTemplate)(nil)
-    _ UserColumnTemplate       = (*CrontabTemplate)(nil)
-    _ applicationOwnedTemplate = (*CrontabTemplate)(nil)
+    _ Template = (*CrontabTemplate)(nil)
 )

@@ -29,10 +29,9 @@ var ansibleCronNameForbiddenCharacters = []melodycron.ForbiddenCharacter{
     {Character: '\r', Reason: "a carriage return ends the #Ansible: comment line on many cron daemons; remove it at the source"},
 }
 
-/* AnsibleCronTemplate renders every entry as one ansible.builtin.cron task, the five schedule fields mapped one to one onto the module's minute/hour/day/month/weekday arguments. The module writes the crontab line as its arguments joined on a space with no validation and no escaping, so the template holds the schedule fields, the user and the job to the builtin crontab dialect's rules through the binding's validators and shell quoting. TaskNamePrefix reaches only the play's task name and is not validated; ApplicationName completes the ownership line, since a custom dialect is handed no name by the generator. */
+/* AnsibleCronTemplate renders every entry as one ansible.builtin.cron task, the five schedule fields mapped one to one onto the module's minute/hour/day/month/weekday arguments. The module writes the crontab line as its arguments joined on a space with no validation and no escaping, so the template holds the schedule fields, the user and the job to the builtin crontab dialect's rules through the binding's validators and shell quoting. TaskNamePrefix reaches only the play's task name and is not validated. */
 type AnsibleCronTemplate struct {
-    TaskNamePrefix  string
-    ApplicationName string
+    TaskNamePrefix string
 }
 
 func (instance *AnsibleCronTemplate) Name() string {
@@ -40,12 +39,12 @@ func (instance *AnsibleCronTemplate) Name() string {
 }
 
 /* OwnershipMarker opts this dialect into --prune: a playbook file this generator wrote for this application and does not produce in this run is emptied down to the marker, while a file carrying another application's name is left alone. */
-func (instance *AnsibleCronTemplate) OwnershipMarker() string {
-    if "" == instance.ApplicationName {
+func (instance *AnsibleCronTemplate) OwnershipMarker(applicationName string) string {
+    if "" == applicationName {
         return ansibleCronOwnershipMarker
     }
 
-    return ansibleCronOwnershipMarker + " for " + instance.ApplicationName
+    return ansibleCronOwnershipMarker + " for " + applicationName
 }
 
 /* RendersUserColumn answers true because every task carries the cron module's user argument, so a heartbeat line rendered here needs the user exactly as the /etc/cron.d dialect does. */
@@ -55,7 +54,7 @@ func (instance *AnsibleCronTemplate) RendersUserColumn() bool {
 
 func (instance *AnsibleCronTemplate) Render(entries []melodycron.Entry, options melodycron.RenderOptions) (string, error) {
     var builder strings.Builder
-    builder.WriteString(instance.OwnershipMarker() + "\n---\n")
+    builder.WriteString(instance.OwnershipMarker(options.ApplicationName) + "\n---\n")
 
     /* ansible.builtin.cron keeps one crontab line per name, so two tasks sharing a name would silently leave only the last one written */
     namesSeen := make(map[string]string, len(entries))
@@ -253,8 +252,4 @@ func fieldOrEveryValue(field string) string {
     return field
 }
 
-var (
-    _ melodycron.Template           = (*AnsibleCronTemplate)(nil)
-    _ melodycron.OwnedTemplate      = (*AnsibleCronTemplate)(nil)
-    _ melodycron.UserColumnTemplate = (*AnsibleCronTemplate)(nil)
-)
+var _ melodycron.Template = (*AnsibleCronTemplate)(nil)

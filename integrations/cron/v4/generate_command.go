@@ -46,7 +46,8 @@ type GenerateCommand struct {
     templates     map[string]Template
 }
 
-func NewGenerateCommand(configuration *Configuration) *GenerateCommand {
+/* newGenerateCommand builds the generator over the builtin dialects and then the given templates, a template named as an installed one replacing it, which is how an application overrides a builtin dialect. */
+func newGenerateCommand(configuration *Configuration, templates []Template) *GenerateCommand {
     if nil == configuration {
         configuration = NewConfiguration()
     }
@@ -57,14 +58,17 @@ func NewGenerateCommand(configuration *Configuration) *GenerateCommand {
     }
 
     for _, builtinTemplate := range BuiltinTemplates() {
-        command.RegisterTemplate(builtinTemplate)
+        command.installTemplate(builtinTemplate)
+    }
+
+    for _, template := range templates {
+        command.installTemplate(template)
     }
 
     return command
 }
 
-/* RegisterTemplate installs the template under its name, silently replacing an existing one: replacement by name is how an application overrides a builtin dialect, so a caller that must not replace anything checks the name first. */
-func (instance *GenerateCommand) RegisterTemplate(template Template) {
+func (instance *GenerateCommand) installTemplate(template Template) {
     instance.templates[template.Name()] = template
 }
 
@@ -156,7 +160,7 @@ func (instance *GenerateCommand) resolveTemplate(name string) (Template, error) 
         sort.Strings(registered)
 
         return nil, exception.NewError(
-            fmt.Sprintf("cron: no template registered with name %q (registered: %s); call GenerateCommand.RegisterTemplate before running", name, strings.Join(registered, ", ")),
+            fmt.Sprintf("cron: no template registered with name %q (registered: %s); register it through ModuleConfig.Templates", name, strings.Join(registered, ", ")),
             exceptioncontract.Context{
                 "requestedTemplate":   name,
                 "registeredTemplates": registered,
@@ -270,15 +274,13 @@ func (instance *GenerateCommand) resolveRunOptions(
     }
     options.applicationName = applicationName
 
-    /* one template owned by this application renders and sweeps, so the ownership line every destination carries and the line the sweep asks for come from the same object */
-    template = templateOwnedBy(template, applicationName)
     options.template = template
 
     /* the k8s template ignores the heartbeat, so no heartbeat path is derived for it; an explicitly requested one still flows through so the run can warn that it is dropped */
     isK8s := options.rendersK8s()
 
     /* a dialect that renders no user column never needs a user to place the heartbeat line */
-    rendersUserColumn := templateRendersUserColumn(template)
+    rendersUserColumn := template.RendersUserColumn()
 
     outputPath := resolveDefaultPath(commandContext, configuration, flagNameOutput, ParameterDestinationFile)
     if "" == outputPath {
@@ -370,7 +372,7 @@ func (instance *GenerateCommand) resolveRunOptions(
 }
 
 func (instance *GenerateCommand) collectScheduledEntries(options *runOptions) ([]Entry, error) {
-    options.logDirectoryOwnership = &logDirectoryOwnership{rendersUserColumn: templateRendersUserColumn(options.template)}
+    options.logDirectoryOwnership = &logDirectoryOwnership{rendersUserColumn: options.template.RendersUserColumn()}
 
     /* only the crontab template redirects output to a log file; the k8s template logs to stdout, so it does not inherit the logs-directory requirement */
     requiresLogPath := false == options.rendersK8s()
@@ -485,9 +487,10 @@ func (instance *GenerateCommand) writeDestinations(
         destinationEntries := entriesByDestination[destination]
 
         renderOptions := RenderOptions{
-            Image:         options.image,
-            Namespace:     options.namespace,
-            RestartPolicy: options.restartPolicy,
+            Image:           options.image,
+            Namespace:       options.namespace,
+            RestartPolicy:   options.restartPolicy,
+            ApplicationName: options.applicationName,
         }
         if true == options.heartbeatEnabled && true == heartbeatDestinations[destination] {
             renderOptions.HeartbeatUser = options.defaultUserName
@@ -546,17 +549,12 @@ func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]s
         )
     }
 
-    ownedTemplate, isOwnedTemplate := options.template.(OwnedTemplate)
-    if false == isOwnedTemplate {
-        return nil, nil
-    }
-
-    marker := ownedTemplate.OwnershipMarker()
+    marker := options.template.OwnershipMarker(options.applicationName)
     if "" == strings.TrimSpace(marker) {
         return nil, nil
     }
 
-    /* the sweep runs only on a line that names this application: a template the generator could not hand the name to, such as a custom dialect embedding a builtin, answers the bare prefix another application writes as well, so for it the destination is written and the sweep is refused, naming the line */
+    /* the sweep runs only on a line that names this application: a custom dialect that ignores the name answers a line another application may write as well, so for it the destination is written and the sweep is refused, naming the line */
     if false == strings.HasSuffix(marker, " for "+options.applicationName) {
         return nil, exception.NewError(
             "cron: --prune sweeps only on an ownership line that names this application, and the template's line does not; give the dialect a line ending in \" for \" and the application's cli name, or generate without --prune",
@@ -581,7 +579,7 @@ func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]s
         )
     }
 
-    emptyContent, renderErr := options.template.Render(nil, RenderOptions{})
+    emptyContent, renderErr := options.template.Render(nil, RenderOptions{ApplicationName: options.applicationName})
     if nil != renderErr {
         return nil, exception.NewError(
             fmt.Sprintf("cron: could not render the empty %s content used to prune", options.template.Name()),
@@ -1337,22 +1335,6 @@ func applicationIdentity(configuration configcontract.Configuration) (string, er
     }
 
     return applicationName, nil
-}
-
-/* templateOwnedBy hands the application's name to a template that can carry it and answers the copy that renders that application's ownership line; a custom dialect is used as it is, with whatever line it declares, and an empty name leaves every template unowned. The copy is derived only for the package's own dialects by concrete type, so a wrapper that embeds a builtin keeps its own rendering; the line it answers is the builtin's bare prefix, on which pruneStaleDestinations refuses to sweep. */
-func templateOwnedBy(template Template, applicationName string) Template {
-    if "" == applicationName {
-        return template
-    }
-
-    switch ownedTemplate := template.(type) {
-    case *CrontabTemplate:
-        return ownedTemplate.ownedBy(applicationName)
-    case *K8sTemplate:
-        return ownedTemplate.ownedBy(applicationName)
-    }
-
-    return template
 }
 
 func resolveDefault(

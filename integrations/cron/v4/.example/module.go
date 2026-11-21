@@ -4,9 +4,20 @@ import (
     melodycron "github.com/precision-soft/melody/integrations/cron/v4"
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
-    melodyconfig "github.com/precision-soft/melody/v4/config"
     melodykernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
 )
+
+/* NewCronModule answers the cron module the application registers beside NewModule: it schedules the billing commands and installs the ansible-cron dialect, selectable by melody:cron:generate --template ansible-cron, whose ownership line names the application the generator runs for. */
+func NewCronModule() *melodycron.Module {
+    return melodycron.NewModule(melodycron.ModuleConfig{
+        Configuration: func(kernelInstance melodykernelcontract.Kernel) *melodycron.Configuration {
+            return newCronConfiguration()
+        },
+        Templates: []melodycron.Template{
+            &AnsibleCronTemplate{TaskNamePrefix: "billing cron: "},
+        },
+    })
+}
 
 type Module struct{}
 
@@ -22,27 +33,11 @@ func (instance *Module) Description() string {
     return "billing CLI commands with cron scheduling"
 }
 
-func (instance *Module) RegisterEnvironmentKeys(registrar melodyapplicationcontract.EnvironmentKeyRegistrar) {
-    for _, key := range melodycron.EnvironmentKeys(melodycron.KeyDefaults{}) {
-        registrar.DeclareEnvironmentKey(key)
-    }
-}
-
 func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.Kernel) []melodyclicontract.Command {
-    generateCommand := melodycron.NewGenerateCommand(newCronConfiguration())
-
-    /* the custom dialect carries the application's name read off the configuration the kernel holds, so its ownership line names this application as the builtin dialects' line does */
-    generateCommand.RegisterTemplate(&AnsibleCronTemplate{
-        TaskNamePrefix:  "billing cron: ",
-        ApplicationName: melodyconfig.ConfigMustFromRuntime(kernelInstance.BootRuntime()).Cli().Name(),
-    })
-
     return []melodyclicontract.Command{
         NewBillingCleanupCommand(),
-        generateCommand,
     }
 }
 
 var _ melodyapplicationcontract.Module = (*Module)(nil)
-var _ melodyapplicationcontract.EnvironmentKeyModule = (*Module)(nil)
 var _ melodyapplicationcontract.CliModule = (*Module)(nil)

@@ -35,10 +35,7 @@ func k8sHeaderBlock(marker string) string {
     return "# GENERATED FILE\n# DO NOT EDIT LOCALLY\n" + marker + "\n"
 }
 
-type K8sTemplate struct {
-    /* the application whose ownership line this template renders and answers; empty on the builtin singleton, set on the copy the generator derives for a run through ownedBy */
-    applicationName string
-}
+type K8sTemplate struct{}
 
 var defaultK8sTemplate = &K8sTemplate{}
 
@@ -47,16 +44,8 @@ func (instance *K8sTemplate) Name() string {
 }
 
 /* OwnershipMarker names the comment line every rendered manifest file opens with; the line is the generating command's and the application's, shared with the crontab dialects, because --prune proves who wrote a file, not which dialect rendered it. */
-func (instance *K8sTemplate) OwnershipMarker() string {
-    return ownershipMarkerLine(instance.applicationName)
-}
-
-/* ownedBy answers a copy of this template that renders and answers the named application's ownership line, the way the crontab dialects do, leaving the shared singleton unowned */
-func (instance *K8sTemplate) ownedBy(applicationName string) Template {
-    owned := *instance
-    owned.applicationName = applicationName
-
-    return &owned
+func (instance *K8sTemplate) OwnershipMarker(applicationName string) string {
+    return ownershipMarkerLine(applicationName)
 }
 
 /* RendersUserColumn answers false: a CronJob manifest has no user column, so the generator must not demand a heartbeat user this dialect could never place. */
@@ -68,7 +57,7 @@ func (instance *K8sTemplate) RendersUserColumn() bool {
 func (instance *K8sTemplate) Render(entries []Entry, options RenderOptions) (string, error) {
     /* an empty render needs no image: it is what --prune writes into a stale manifest, and an emptied configuration makes every earlier manifest stale */
     if 0 == len(entries) {
-        return k8sHeaderBlock(instance.OwnershipMarker()), nil
+        return k8sHeaderBlock(instance.OwnershipMarker(options.ApplicationName)), nil
     }
 
     if "" == options.Image {
@@ -133,7 +122,7 @@ func (instance *K8sTemplate) Render(entries []Entry, options RenderOptions) (str
     }
 
     var builder strings.Builder
-    builder.WriteString(k8sHeaderBlock(instance.OwnershipMarker()))
+    builder.WriteString(k8sHeaderBlock(instance.OwnershipMarker(options.ApplicationName)))
 
     documentsWritten := 0
 
@@ -399,8 +388,5 @@ func yamlQuote(value string) string {
 }
 
 var (
-    _ Template                 = (*K8sTemplate)(nil)
-    _ OwnedTemplate            = (*K8sTemplate)(nil)
-    _ UserColumnTemplate       = (*K8sTemplate)(nil)
-    _ applicationOwnedTemplate = (*K8sTemplate)(nil)
+    _ Template = (*K8sTemplate)(nil)
 )

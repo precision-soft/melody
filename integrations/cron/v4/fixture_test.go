@@ -18,6 +18,7 @@ import (
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
@@ -140,7 +141,7 @@ func runGenerateCommandWithRegistrar(
 ) (string, error) {
     t.Helper()
 
-    generateCommand := NewGenerateCommand(buildConfigurationFromFakeCommands(providedCommands))
+    generateCommand := newGenerateCommandForTest(buildConfigurationFromFakeCommands(providedCommands))
 
     if nil != registrar {
         registrar(generateCommand)
@@ -157,7 +158,7 @@ func runGenerateCommandWithConfiguration(
 ) (string, error) {
     t.Helper()
 
-    generateCommand := NewGenerateCommand(buildConfigurationFromFakeCommands(providedCommands))
+    generateCommand := newGenerateCommandForTest(buildConfigurationFromFakeCommands(providedCommands))
 
     return dispatchGenerateCommand(generateCommand, configuration, extraArgs)
 }
@@ -476,3 +477,13 @@ func TestMain(main *testing.M) {
     os.Exit(main.Run())
 }
 
+func newGenerateCommandForTest(configuration *Configuration) *GenerateCommand {
+    return newGenerateCommand(configuration, nil)
+}
+
+/* staticConfiguration answers a ModuleConfig.Configuration factory over a configuration built beforehand */
+func staticConfiguration(configuration *Configuration) func(kernelInstance kernelcontract.Kernel) *Configuration {
+    return func(kernelInstance kernelcontract.Kernel) *Configuration {
+        return configuration
+    }
+}

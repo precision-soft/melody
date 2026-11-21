@@ -57,8 +57,8 @@ type KeyDefaults struct {
     RestartPolicy    string
 }
 
-/* EnvironmentKeys answers the ten keys the module owns, for Module.RegisterEnvironmentKeys and for an application module that builds NewGenerateCommand without the cron module. */
-func EnvironmentKeys(defaults KeyDefaults) []configcontract.EnvironmentKey {
+/* environmentKeys answers the ten keys the module owns, for Module.RegisterEnvironmentKeys. */
+func environmentKeys(defaults KeyDefaults) []configcontract.EnvironmentKey {
     heartbeatEnabled := ""
     if true == defaults.HeartbeatEnabled.IsSet {
         heartbeatEnabled = "false"
