@@ -19,7 +19,7 @@ type RequestOptions struct {
     /* Timeout bounds the whole exchange: absent is the client's timeout, unlimited no deadline. On RequestStream, absent and unlimited leave the stream without a whole-stream deadline, and a value bounds the whole stream. */
     Timeout bound.Duration
 
-    /* BearerToken and BasicAuth write the Authorization header after every header door, so they win over an Authorization entry in Headers. Setting both is refused. */
+    /* BearerToken and BasicAuth write the Authorization header over the client's own headers. Setting both is refused, and so is either beside an Authorization entry in Headers. */
     BearerToken string
     BasicAuth   *BasicAuth
 

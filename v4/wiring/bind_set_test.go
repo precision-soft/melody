@@ -67,13 +67,9 @@ func TestBindSet_PackageDeclaresAScannedPackageInOrder(t *testing.T) {
     if nil == domain.BindNames() || 0 != len(domain.BindNames()) {
         t.Fatalf("expected no binds on a fresh package, got %v", domain.BindNames())
     }
-
-    if nil == domain.Excludes() || 0 != len(domain.Excludes()) {
-        t.Fatalf("expected no excludes on a fresh package, got %v", domain.Excludes())
-    }
 }
 
-func TestPackageBinding_NameAndExcludeChainAndKeepTheirOrder(t *testing.T) {
+func TestPackageBinding_NameChainsAndKeepsItsOrder(t *testing.T) {
     packageBinding := NewBindSet().Package("example.com/domain", "domain")
 
     chained := packageBinding.Name("address", "parameter.address").Name("timeout", "parameter.timeout").Name("address", "parameter.address.other")
@@ -94,31 +90,15 @@ func TestPackageBinding_NameAndExcludeChainAndKeepTheirOrder(t *testing.T) {
     if parameterName, exists := packageBinding.Bind("absent"); true == exists || "" != parameterName {
         t.Fatalf("expected an undeclared name to be absent, got %q", parameterName)
     }
-
-    excludeChained := packageBinding.Exclude("*Repository").Exclude("*Factory")
-    if packageBinding != excludeChained {
-        t.Fatal("expected Exclude to answer the package binding it was called on")
-    }
-
-    excludes := packageBinding.Excludes()
-    if 2 != len(excludes) || "*Repository" != excludes[0] || "*Factory" != excludes[1] {
-        t.Fatalf("expected the excludes in declaration order, got %v", excludes)
-    }
 }
 
 func TestPackageBinding_ReadersHandOutCopies(t *testing.T) {
     packageBinding := NewBindSet().Package("example.com/domain", "domain")
-    packageBinding.Name("address", "parameter.address").Exclude("*Repository")
+    packageBinding.Name("address", "parameter.address")
 
     names := packageBinding.BindNames()
     names[0] = "rewritten"
     if "address" != packageBinding.BindNames()[0] {
         t.Fatalf("expected the package to keep its own bind names, got %v", packageBinding.BindNames())
-    }
-
-    excludes := packageBinding.Excludes()
-    excludes[0] = "rewritten"
-    if "*Repository" != packageBinding.Excludes()[0] {
-        t.Fatalf("expected the package to keep its own excludes, got %v", packageBinding.Excludes())
     }
 }

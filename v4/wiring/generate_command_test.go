@@ -121,6 +121,33 @@ func newCommandFixtureRuntime(t *testing.T, projectDirectory string) *commandFix
 }
 
 /* runGenerateCommand drives the command through the cli library, so a flag the command stops declaring fails here instead of reading its zero value. Unless the caller gives --out, the source goes to a file and the report to the writer; what comes back is the writer followed by the generated source. */
+/* generateConfigFromArguments reads the target a test spells as flag pairs into the GenerateConfig the command is built with, leaving the other arguments */
+func generateConfigFromArguments(arguments []string) (GenerateConfig, []string) {
+    config := GenerateConfig{}
+    remaining := make([]string, 0, len(arguments))
+
+    for index := 0; index < len(arguments); index++ {
+        switch arguments[index] {
+        case "--package":
+            index++
+            config.PackageName = arguments[index]
+        case "--function":
+            index++
+            config.FunctionName = arguments[index]
+        case "--scoped-function":
+            index++
+            config.ScopedFunctionName = arguments[index]
+        case "--tags":
+            index++
+            config.BuildTags = strings.Split(arguments[index], ",")
+        default:
+            remaining = append(remaining, arguments[index])
+        }
+    }
+
+    return config, remaining
+}
+
 func runGenerateCommand(
     t *testing.T,
     projectDirectory string,
@@ -129,7 +156,8 @@ func runGenerateCommand(
 ) (string, error) {
     t.Helper()
 
-    command := NewGenerateCommand(bindSet)
+    config, arguments := generateConfigFromArguments(arguments)
+    command := NewGenerateCommand(bindSet, config)
     runtimeInstance := newCommandFixtureRuntime(t, projectDirectory)
 
     output := &bytes.Buffer{}
@@ -295,7 +323,7 @@ func runRegisteredGenerateCommand(t *testing.T, arguments []string) string {
     t.Helper()
 
     projectDirectory := newCommandFixtureProject(t)
-    command := NewGenerateCommand(appBindSet())
+    command := NewGenerateCommand(appBindSet(), GenerateConfig{})
     runtimeInstance := newCommandFixtureRuntime(t, projectDirectory)
 
     rootCommand := melodycli.NewRoot("app", "desc")
@@ -442,7 +470,7 @@ func TestGenerateCommand_StrictCarriesEveryViolationInOneRefusal(t *testing.T) {
 
     bindSet := NewBindSet()
     bindSet.Name("ghostArgument", "app.ghost")
-    bindSet.Package(commandFixtureBrokenImportPath, "broken").Exclude("*Ghost")
+    bindSet.Package(commandFixtureBrokenImportPath, "broken")
 
     _, strictErr := runGenerateCommand(t, projectDirectory, bindSet, "--strict")
     if nil == strictErr {
@@ -459,11 +487,6 @@ func TestGenerateCommand_StrictCarriesEveryViolationInOneRefusal(t *testing.T) {
     binds, _ := refusalContext["binds"].(string)
     if false == strings.Contains(binds, "ghostArgument") {
         t.Fatalf("expected the unused bind in the refusal, got %v", refusalContext)
-    }
-
-    excludes, _ := refusalContext["excludes"].(string)
-    if false == strings.Contains(excludes, "*Ghost") {
-        t.Fatalf("expected the unused exclude in the refusal, got %v", refusalContext)
     }
 
     skipped, _ := refusalContext["constructors"].(string)
@@ -572,23 +595,6 @@ func TestGenerateCommand_AtomicWriteLeavesTheModeAndNoResidue(t *testing.T) {
     }
 }
 
-/* without strict an unused exclude is not fatal, but it is named on the writer the way an unused bind is — the silent alternative registers the very constructor the pattern was declared to keep out. */
-func TestGenerateCommand_ReportsAnUnusedExcludeOnTheWriter(t *testing.T) {
-    projectDirectory := newCommandFixtureProject(t)
-
-    bindSet := NewBindSet()
-    bindSet.Package(commandFixtureImportPath, "app").Exclude("*Ghost")
-
-    output, runErr := runGenerateCommand(t, projectDirectory, bindSet)
-    if nil != runErr {
-        t.Fatalf("run: %v", runErr)
-    }
-
-    if false == strings.Contains(output, "exclude "+commandFixtureImportPath+".*Ghost matched no constructor") {
-        t.Fatalf("expected the unused exclude named on the writer, got:\n%s", output)
-    }
-}
-
 /* The containment guard read the relative path as text: a directory named ..hidden inside the scanned one started with two dots and passed as outside, and a project directory the output path could not be related to (a relative one against an absolute --out) failed the relation and passed as well. Both are refused now; the sibling directory next to the scanned one stays permitted. */
 func TestGenerateCommand_ReadsTheContainmentOnPathComponents(t *testing.T) {
     hiddenProject := newCommandFixtureProject(t)
@@ -646,7 +652,7 @@ func (instance *journalCapturingLogger) Warning(message string, context loggingc
 /* in stdout mode the writer IS the generated source, so the report cannot share it: printed ahead of the package clause, the stream redirected into a file was never a compilable Go file, banner or not. The report goes to the journal, one record per line, through the application's logger. */
 func TestGenerateCommand_TheStdoutModeJournalsTheReportAndPrintsTheSourceAlone(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
-    command := NewGenerateCommand(appBindSet())
+    command := NewGenerateCommand(appBindSet(), GenerateConfig{})
     runtimeInstance := newCommandFixtureRuntime(t, projectDirectory)
 
     journal := &journalCapturingLogger{Logger: logging.NewNopLogger()}
@@ -693,7 +699,7 @@ func TestGenerateCommand_TheStdoutModeJournalsTheReportAndPrintsTheSourceAlone(t
 /* the lines that name lost coverage are warnings, so a journal read at the usual production threshold keeps them: journaled as information, the whole report vanished from an application logger at warning — the branch every deployment with a log path takes */
 func TestGenerateCommand_TheStdoutModeJournalsTheCoverageLossesAboveAWarningThreshold(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
-    command := NewGenerateCommand(appBindSet())
+    command := NewGenerateCommand(appBindSet(), GenerateConfig{})
     runtimeInstance := newCommandFixtureRuntime(t, projectDirectory)
 
     journal := &bytes.Buffer{}
@@ -939,7 +945,7 @@ func runGenerateCommandOnTwoStreams(
 ) (string, string, error) {
     t.Helper()
 
-    command := NewGenerateCommand(bindSet)
+    command := NewGenerateCommand(bindSet, GenerateConfig{})
     runtimeInstance := newCommandFixtureRuntime(t, projectDirectory)
 
     output := &bytes.Buffer{}
@@ -962,4 +968,23 @@ func runGenerateCommandOnTwoStreams(
     _ = engineCommand.Run(context.Background(), append([]string{command.Name()}, arguments...))
 
     return output.String(), errorOutput.String(), runErr
+}
+
+func TestGenerateCommand_TheTargetFlagsAreNoLongerParsed(t *testing.T) {
+    flagNames := make(map[string]bool)
+    for _, flag := range NewGenerateCommand(NewBindSet(), GenerateConfig{}).Flags() {
+        flagNames[flag.Names()[0]] = true
+    }
+
+    for _, removed := range []string{"package", "function", "scoped-function", "tags"} {
+        if true == flagNames[removed] {
+            t.Fatalf("expected --%s gone from the command, the target declared in GenerateConfig", removed)
+        }
+    }
+
+    for _, kept := range []string{"out", "strict", "report-vendor", "report-excluded"} {
+        if false == flagNames[kept] {
+            t.Fatalf("expected --%s kept", kept)
+        }
+    }
 }

@@ -598,7 +598,7 @@ func (instance *HttpClient) buildRequest(
     return request, nil
 }
 
-/* applyAuthorization writes the credential the caller asked for, a bearer token or basic, which travels whenever asked for, empty halves included. It runs after every header door, so a typed credential wins over an Authorization header from a header map. */
+/* applyAuthorization writes the credential the caller asked for, a bearer token or basic, which travels whenever asked for, empty halves included. It runs after every header door, so a typed credential wins over the client's own Authorization header; one beside the request's own is refused when the options are resolved. */
 func applyAuthorization(request *nethttp.Request, requestOptions resolvedRequestOptions) {
     if "" != requestOptions.bearerToken {
         request.Header.Set("Authorization", "Bearer "+requestOptions.bearerToken)

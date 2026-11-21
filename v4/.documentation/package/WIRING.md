@@ -42,7 +42,9 @@ and a named one that spell the same service name still meet at boot.
 app.RegisterCliCommand(wiring.NewGenerateCommand(config.NewWiringBindSet()))
 ```
 
-Flags: `--out <path>` (write to a file relative to the project directory, with the report lines on the command's writer beside the `wiring written to` line; prints the source alone to stdout when empty, and the report lines then go to the application's journal one record per line — the lines that state a fact of a scan that worked as information (the counts of what was registered, the vendor trees stepped over), every line naming lost coverage (a skipped constructor, an unmatched bind or exclude, a file the build constraints left out, bind targets unchecked) as a warning, so a journal read at the usual production threshold keeps them; the reach of the global binds is a warning too, since a global bind reaches every constructor declaring an argument of that name and the line is where an operator learns how many that is, but it is ONE record for the whole report rather than one per bind — its message names how many binds reached and its context carries a line apiece — so a clean
+The target — the package, the registration function, the scoped function and the build tags — is the `GenerateConfig` the command is built with, declared once beside the bind set and handed to the bootstrap program too, so the two write the same file; `--package`, `--function`, `--scoped-function` and `--tags` are not flags. A constructor is kept out of the wiring by `//melody:ignore <reason>` on it; there is no exclude pattern.
+
+Flags: `--out <path>` (write to a file relative to the project directory, with the report lines on the command's writer beside the `wiring written to` line; prints the source alone to stdout when empty, and the report lines then go to the application's journal one record per line — the lines that state a fact of a scan that worked as information (the counts of what was registered, the vendor trees stepped over), every line naming lost coverage (a skipped constructor, an unmatched bind, a file the build constraints left out, bind targets unchecked) as a warning, so a journal read at the usual production threshold keeps them; the reach of the global binds is a warning too, since a global bind reaches every constructor declaring an argument of that name and the line is where an operator learns how many that is, but it is ONE record for the whole report rather than one per bind — its message names how many binds reached and its context carries a line apiece — so a clean
 generation raises exactly one warning however many binds it resolved, and none at all without them; to stderr, the console journal of a command and the emergency journal alike, since stdout is the source; a logger the application substituted for the container's cannot be read, so an application journaling to stdout through its own logger keeps the report out of the source by giving `--out`), `--quiet` (default `true`: the run banner is not written around the printed source; `--quiet=false` brings it back), `--package <name>` (default `config`), `--function <name>` (default `RegisterGeneratedServices`), `--scoped-function <name>` (default: the registration function name with `Scoped` appended; only emitted when a constructor carries `//melody:scoped`), `--strict`, `--tags <a,b>` (build tags the target binary carries), `--report-vendor` (name the vendor directories the scan stepped over), `--report-excluded` (name the build-excluded files that hold a constructor candidate).
 The committed generated file is what the application registers, so it is regenerated whenever a scanned constructor changes and kept under version control.
 
@@ -71,7 +73,7 @@ func NewWiringBindSet() *wiring.BindSet {
 Every constructor argument that is a service needs no bind — it is resolved by type. Only the scalars that cannot come from the container are named. Regenerate after adding a constructor:
 
 ```
-go run . melody:wiring:generate --package generated --function RegisterGeneratedServices --out generated/wiring_gen.go
+go run . melody:wiring:generate --out generated/wiring_gen.go
 ```
 
 and delegate to the generated function from `RegisterServices`:
@@ -89,7 +91,7 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
 - A constructor whose scalar argument narrows the accessor's widest type (a `uint8`, a `byte`) is range-guarded in the generated provider, so an out-of-range parameter is an error naming the parameter rather than a silent wrap.
 - The generated file opens with the `// Code generated ... DO NOT EDIT.` marker Go tooling recognizes; edit the constructors and regenerate, never the generated file. The command replaces only a file opening with that marker (or an absent or empty one) — a mistyped `--out` pointing at a hand-written file is refused — and the write lands through a temp file and a rename, so an interrupted run leaves the previous file intact.
 - A symlink standing where a declared directory should be is resolved before the walk; a symlinked **sub**directory stays out of the scan, exactly as the go tool leaves it out of a build.
-- The scan evaluates build constraints for the **host** platform (`go/build`'s defaults for `GOOS`, `GOARCH` and cgo, with `--tags` layered on), so a constructor in a `service_darwin.go` is scanned on a mac and skipped on linux. Generate on the platform the binary targets, or keep constructors out of platform-suffixed files.
+- The scan evaluates build constraints for the **host** platform (`go/build`'s defaults for `GOOS`, `GOARCH` and cgo, with `GenerateConfig.BuildTags` layered on), so a constructor in a `service_darwin.go` is scanned on a mac and skipped on linux. Generate on the platform the binary targets, or keep constructors out of platform-suffixed files.
 - `Generate` called as a library with an empty `GenerateRequest.DeclaredParameters` cannot check the bind targets; it says so through `GenerateReport.BindTargetsUnchecked` instead of assuming every target exists. The command always hands over the running configuration.
 
 ## Userland API
@@ -100,8 +102,7 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
 - [`BindSet.Package(importPath, directory string) *PackageBinding`](../../wiring/bind_set.go)
 - [`BindSet.Name(argumentName, parameterName string) *BindSet`](../../wiring/bind_set.go)
 - [`PackageBinding.Name(argumentName, parameterName string) *PackageBinding`](../../wiring/bind_set.go)
-- [`PackageBinding.Exclude(pattern string) *PackageBinding`](../../wiring/bind_set.go)
-- [`NewGenerateCommand(bindSet *BindSet) *GenerateCommand`](../../wiring/generate_command.go)
+- [`NewGenerateCommand(bindSet *BindSet, config GenerateConfig) *GenerateCommand`](../../wiring/generate_command.go) — the target declared once in Go: [`GenerateConfig{PackageName, FunctionName, ScopedFunctionName, BuildTags}`](../../wiring/generator.go), the package `config` when it names none; the bootstrap program hands the same config to `GenerateRequest.Config`
 - [`Generate(request *GenerateRequest) (string, *GenerateReport, error)`](../../wiring/generator.go)
 - [`Scan(request ScanRequest) (*ScanResult, error)`](../../wiring/scanner.go) — `ScanRequest` names `ProjectDirectory`, `PackageBinding` and `BuildTags`, mirroring `GenerateRequest`; the scan reads the files a build carrying the tags would compile, nil tags reading as none, and a nil binding is refused by name
 

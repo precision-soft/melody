@@ -61,7 +61,7 @@ func greetingFor(t *testing.T, routeLocale string, query string) GreetingRespons
     romanian := melodytranslation.NewMapCatalog("ro")
     romanian.Add("messages", "greeting", "Salut, {name}!")
 
-    translator := melodytranslation.NewManager([]melodytranslationcontract.Catalog{english, romanian}, melodytranslation.ManagerConfig{DefaultLocale: "en", FallbackLocales: []string{"en"}})
+    translator := melodytranslation.NewManager(melodytranslation.ManagerConfig{Catalogs: []melodytranslationcontract.Catalog{english, romanian}, FallbackLocales: []string{"en"}})
 
     response, handlerErr := serveGreeting(t, translator, routeLocale, query)
     if nil != handlerErr {

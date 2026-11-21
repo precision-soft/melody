@@ -215,7 +215,7 @@ func TestValidatePattern_RefusesTheSelectNestedPastTheLevelsTranslateRenders(t *
 }
 
 func TestTranslate_ACustomCatalogsMalformedPatternIsAnError(t *testing.T) {
-    manager := NewManager([]translationcontract.Catalog{unvalidatedCatalog{locale: "en", message: "{g, select, male {he} female other {they}}"}}, ManagerConfig{DefaultLocale: "en"})
+    manager := NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{unvalidatedCatalog{locale: "en", message: "{g, select, male {he} female other {they}}"}}, FallbackLocales: []string{"en"}})
 
     for _, gender := range []string{"male", "female"} {
         rendered, translateErr := manager.Translate("pronoun", translationcontract.TranslateConfig{Parameters: map[string]any{"g": gender}, Locale: "en"})

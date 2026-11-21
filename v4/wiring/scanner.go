@@ -82,10 +82,8 @@ type ScanResult struct {
     Skipped      []*SkippedConstructor
     /* SkippedVendorDirectories names the vendor trees the walk stepped over; they cannot contribute services, so they are reported separately from the skipped constructors strict fails on. */
     SkippedVendorDirectories []string
-    /* ExcludedFiles names the source files a build constraint kept out of the scan although they hold constructor candidates. They are reported on request rather than failing strict, which cannot know which tags the binary was built with; --tags brings a file back in. */
+    /* ExcludedFiles names the source files a build constraint kept out of the scan although they hold constructor candidates. They are reported on request rather than failing strict, which cannot know which tags the binary was built with; GenerateConfig.BuildTags brings a file back in. */
     ExcludedFiles []string
-    /* UnusedExcludes names the exclude patterns that matched no constructor, in declaration order. An exclusion that stopped matching silently registers the constructor it was declared to keep out, so it is reported as an unused bind is. */
-    UnusedExcludes []string
 }
 
 type SkippedConstructor struct {
@@ -127,27 +125,11 @@ func Scan(request ScanRequest) (*ScanResult, error) {
     }
     rootDirectory = resolvedRootDirectory
 
-    /* a malformed pattern is refused before anything is walked: path.Match answers ErrBadPattern for it on every name, so it would match nothing and register the constructor it names */
-    excludes := packageBinding.Excludes()
-    for _, pattern := range excludes {
-        if _, matchErr := path.Match(pattern, ""); nil != matchErr {
-            return nil, exception.NewError(
-                "an exclude pattern is malformed",
-                map[string]any{
-                    "pattern":    pattern,
-                    "importPath": packageBinding.ImportPath(),
-                },
-                matchErr,
-            )
-        }
-    }
-
     result := &ScanResult{
         Constructors: make([]*Constructor, 0),
         Skipped:      make([]*SkippedConstructor, 0),
     }
 
-    matchedExcludes := make(map[string]bool)
 
     fileSet := token.NewFileSet()
 
@@ -185,7 +167,7 @@ func Scan(request ScanRequest) (*ScanResult, error) {
             return nil
         }
 
-        return scanFile(fileSet, rootDirectory, currentPath, packageBinding, buildTags, matchedExcludes, result)
+        return scanFile(fileSet, rootDirectory, currentPath, packageBinding, buildTags, result)
     })
     if nil != walkErr {
         return nil, exception.NewError(
@@ -196,12 +178,6 @@ func Scan(request ScanRequest) (*ScanResult, error) {
             },
             walkErr,
         )
-    }
-
-    for _, pattern := range excludes {
-        if false == matchedExcludes[pattern] {
-            result.UnusedExcludes = append(result.UnusedExcludes, pattern)
-        }
     }
 
     sort.SliceStable(result.Constructors, func(first int, second int) bool {
@@ -221,7 +197,6 @@ func scanFile(
     currentPath string,
     packageBinding *PackageBinding,
     buildTags []string,
-    matchedExcludes map[string]bool,
     result *ScanResult,
 ) error {
     /* a file the build excludes contributes no constructors to the binary, so scanning it would register phantom or duplicate services. The scan is told the binary's tags, so the generated source is specific to that tag set. */
@@ -336,10 +311,6 @@ func scanFile(
                 Reason: skipReason,
             })
 
-            continue
-        }
-
-        if true == isExcluded(constructor.ReturnType.Expression, packageBinding.Excludes(), matchedExcludes) {
             continue
         }
 
@@ -920,26 +891,3 @@ func derivedImportPath(rootImportPath string, rootDirectory string, filePath str
     return rootImportPath + "/" + filepath.ToSlash(relativeDirectory), nil
 }
 
-/* isExcluded reports whether an exclude pattern claims the type name, recording every pattern that matched so the scan can name the ones that never did. */
-func isExcluded(typeExpression string, excludes []string, matchedExcludes map[string]bool) bool {
-    typeName := strings.TrimPrefix(typeExpression, "*")
-
-    if separatorIndex := strings.Index(typeName, "."); 0 <= separatorIndex {
-        typeName = typeName[separatorIndex+1:]
-    }
-
-    excluded := false
-    for _, pattern := range excludes {
-        matched, matchErr := path.Match(pattern, typeName)
-        if nil != matchErr {
-            continue
-        }
-
-        if true == matched {
-            matchedExcludes[pattern] = true
-            excluded = true
-        }
-    }
-
-    return excluded
-}

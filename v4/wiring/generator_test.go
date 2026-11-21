@@ -38,8 +38,7 @@ func newFixtureBindSet() *BindSet {
         Name("apiUrl", "fixture.api_url").
         Name("retryCount", "fixture.retry_count").
         Name("maxAttempts", "fixture.max_attempts").
-        Name("refreshBudget", "fixture.refresh_budget").
-        Exclude("*Fixture")
+        Name("refreshBudget", "fixture.refresh_budget")
 
     return bindSet
 }
@@ -49,9 +48,8 @@ func generateFixture(t *testing.T, bindSet *BindSet) (string, *GenerateReport) {
 
     source, report, generateErr := Generate(&GenerateRequest{
         ProjectDirectory: fixtureProjectDirectory,
-        PackageName:      "wiring",
-        FunctionName:     "RegisterFixtureServices",
         BindSet:          bindSet,
+        Config: GenerateConfig{PackageName: "wiring", FunctionName: "RegisterFixtureServices"},
     })
     if nil != generateErr {
         t.Fatalf("expected the fixture to generate, got %v", generateErr)
@@ -124,7 +122,7 @@ func TestGenerate_ReportsSkippedConstructorsWithAReason(t *testing.T) {
     }
 }
 
-func TestGenerate_HonoursDirectivesAndExcludes(t *testing.T) {
+func TestGenerate_HonoursDirectives(t *testing.T) {
     source, report := generateFixture(t, newFixtureBindSet())
 
     /* the ignore directive and the exclude pattern both remove a constructor without reporting it as an unwireable skip */
@@ -181,12 +179,12 @@ func TestGenerate_ReportsTheReachOfEveryGlobalBind(t *testing.T) {
 
 func TestGenerate_FailsWhenAScalarArgumentHasNoBind(t *testing.T) {
     bindSet := NewBindSet()
-    bindSet.Package(fixtureImportPath, fixtureDirectory).Exclude("*Fixture")
+    bindSet.Package(fixtureImportPath, fixtureDirectory)
 
     _, _, generateErr := Generate(&GenerateRequest{
         ProjectDirectory: fixtureProjectDirectory,
-        PackageName:      "wiring",
         BindSet:          bindSet,
+        Config: GenerateConfig{PackageName: "wiring"},
     })
     if nil == generateErr {
         t.Fatalf("expected generation to refuse an unbound scalar argument")
@@ -201,7 +199,6 @@ func TestGenerate_FailsWhenAScalarArgumentHasNoBind(t *testing.T) {
 func TestGenerate_FailsWhenABindTargetsAnUndeclaredParameter(t *testing.T) {
     _, _, generateErr := Generate(&GenerateRequest{
         ProjectDirectory: fixtureProjectDirectory,
-        PackageName:      "wiring",
         BindSet:          newFixtureBindSet(),
         DeclaredParameters: map[string]bool{
             "fixture.stage_env":   true,
@@ -209,6 +206,7 @@ func TestGenerate_FailsWhenABindTargetsAnUndeclaredParameter(t *testing.T) {
             "fixture.api_url":     true,
             "fixture.retry_count": true,
         },
+        Config: GenerateConfig{PackageName: "wiring"},
     })
     if nil == generateErr {
         t.Fatalf("expected generation to refuse a bind targeting an undeclared parameter")
@@ -285,9 +283,8 @@ func TestGenerate_EmptyScanEmitsACompilableFile(t *testing.T) {
 
     source, report, generateErr := Generate(&GenerateRequest{
         ProjectDirectory: fixtureProjectDirectory,
-        PackageName:      "wiring",
-        FunctionName:     "RegisterNothing",
         BindSet:          bindSet,
+        Config: GenerateConfig{PackageName: "wiring", FunctionName: "RegisterNothing"},
     })
     if nil != generateErr {
         t.Fatalf("expected the empty scan to generate, got %v", generateErr)
@@ -370,9 +367,8 @@ func TestGenerate_RejectsAFunctionNameTheGeneratedFileCannotCarry(t *testing.T) 
     for _, functionName := range []string{"melodycontainer", "error", "func", "foo bar", "3services", "a.b", "Register(", "Register//", "_", "init"} {
         _, _, generateErr := Generate(&GenerateRequest{
             ProjectDirectory: fixtureProjectDirectory,
-            PackageName:      "wiring",
-            FunctionName:     functionName,
             BindSet:          newFixtureBindSet(),
+            Config: GenerateConfig{PackageName: "wiring", FunctionName: functionName},
         })
         if nil == generateErr {
             t.Fatalf("expected the function name %q to be rejected", functionName)
@@ -383,9 +379,8 @@ func TestGenerate_RejectsAFunctionNameTheGeneratedFileCannotCarry(t *testing.T) 
 func TestGenerate_EmptyFunctionNameFallsBackToTheDefault(t *testing.T) {
     source, _, generateErr := Generate(&GenerateRequest{
         ProjectDirectory: fixtureProjectDirectory,
-        PackageName:      "wiring",
-        FunctionName:     "",
         BindSet:          newFixtureBindSet(),
+        Config: GenerateConfig{PackageName: "wiring", FunctionName: ""},
     })
     if nil != generateErr {
         t.Fatalf("expected the empty function name to fall back to the default, got %v", generateErr)
@@ -400,9 +395,8 @@ func TestGenerate_RejectsAPackageNameTheGeneratedFileCannotCarry(t *testing.T) {
     for _, packageName := range []string{"foo bar", "3pkg", "a.b", "func", "", "_"} {
         _, _, generateErr := Generate(&GenerateRequest{
             ProjectDirectory: fixtureProjectDirectory,
-            PackageName:      packageName,
-            FunctionName:     "RegisterFixtureServices",
             BindSet:          newFixtureBindSet(),
+            Config: GenerateConfig{PackageName: packageName, FunctionName: "RegisterFixtureServices"},
         })
         if nil == generateErr {
             t.Fatalf("expected the package name %q to be rejected", packageName)
@@ -424,10 +418,8 @@ func generateScopedFixture(t *testing.T, functionName string, scopedFunctionName
 
     return Generate(&GenerateRequest{
         ProjectDirectory:   fixtureProjectDirectory,
-        PackageName:        "wiringscoped",
-        FunctionName:       functionName,
-        ScopedFunctionName: scopedFunctionName,
         BindSet:            bindSet,
+        Config: GenerateConfig{PackageName: "wiringscoped", FunctionName: functionName, ScopedFunctionName: scopedFunctionName},
     })
 }
 
@@ -542,8 +534,8 @@ type UserRepository struct {
 
     _, _, generateErr := Generate(&GenerateRequest{
         ProjectDirectory: projectDirectory,
-        PackageName:      "config",
         BindSet:          bindSetWithPackage("github.com/acme/app/domain", "domain"),
+        Config: GenerateConfig{PackageName: "config"},
     })
     if nil == generateErr {
         t.Fatalf("expected the colliding registrations to be refused")
@@ -582,8 +574,8 @@ type BackupMailer struct {
 
     _, _, generateErr := Generate(&GenerateRequest{
         ProjectDirectory: projectDirectory,
-        PackageName:      "config",
         BindSet:          bindSetWithPackage("github.com/acme/app/domain", "domain"),
+        Config: GenerateConfig{PackageName: "config"},
     })
     if nil == generateErr {
         t.Fatalf("expected the colliding named registrations to be refused")
@@ -615,8 +607,8 @@ type Clock struct {
 
     _, report, generateErr := Generate(&GenerateRequest{
         ProjectDirectory: projectDirectory,
-        PackageName:      "config",
         BindSet:          bindSetWithPackage("github.com/acme/app/domain", "domain"),
+        Config: GenerateConfig{PackageName: "config"},
     })
     if nil != generateErr {
         t.Fatalf("expected the two lifetimes to coexist, got %v", generateErr)
@@ -648,8 +640,8 @@ type Clock struct {
 
     shadowSource, _, shadowErr := Generate(&GenerateRequest{
         ProjectDirectory: shadowDirectory,
-        PackageName:      "config",
         BindSet:          bindSetWithPackage("github.com/acme/app/domain", "domain"),
+        Config: GenerateConfig{PackageName: "config"},
     })
     if nil != shadowErr {
         t.Fatalf("expected the scoped shadow to generate, got %v", shadowErr)
@@ -674,8 +666,8 @@ type Clock struct {
 
     plainSource, _, plainErr := Generate(&GenerateRequest{
         ProjectDirectory: plainDirectory,
-        PackageName:      "config",
         BindSet:          bindSetWithPackage("github.com/acme/app/domain", "domain"),
+        Config: GenerateConfig{PackageName: "config"},
     })
     if nil != plainErr {
         t.Fatalf("expected the unshadowed scoped registration to generate, got %v", plainErr)
@@ -697,8 +689,8 @@ func TestGenerate_RefusesAPackageBindingWithAnEmptyHalf(t *testing.T) {
     } {
         _, _, generateErr := Generate(&GenerateRequest{
             ProjectDirectory: t.TempDir(),
-            PackageName:      "config",
             BindSet:          bindSetWithPackage(testCase.importPath, testCase.directory),
+            Config: GenerateConfig{PackageName: "config"},
         })
         if nil == generateErr {
             t.Fatalf("expected the binding %q/%q to be refused", testCase.importPath, testCase.directory)
@@ -729,8 +721,8 @@ type Repository struct {
 
     request := &GenerateRequest{
         ProjectDirectory: projectDirectory,
-        PackageName:      "config",
         BindSet:          bindSet,
+        Config: GenerateConfig{PackageName: "config"},
     }
 
     _, report, generateErr := Generate(request)
@@ -751,25 +743,6 @@ type Repository struct {
 
     if true == report.BindTargetsUnchecked {
         t.Fatalf("expected a checked bind not to raise the flag")
-    }
-}
-
-/* an unused exclude reaches the report carrying its package's import path, the way an unused bind does, so the strict refusal names where the dead pattern was declared. */
-func TestGenerate_ReportsAnUnusedExcludeWithItsImportPath(t *testing.T) {
-    bindSet := newFixtureBindSet()
-    bindSet.Packages()[0].Exclude("*Respository")
-
-    _, report, generateErr := Generate(&GenerateRequest{
-        ProjectDirectory: fixtureProjectDirectory,
-        PackageName:      "config",
-        BindSet:          bindSet,
-    })
-    if nil != generateErr {
-        t.Fatalf("generate: %v", generateErr)
-    }
-
-    if 1 != len(report.UnusedExcludes) || fixtureImportPath+".*Respository" != report.UnusedExcludes[0] {
-        t.Fatalf("unexpected unused excludes: %v", report.UnusedExcludes)
     }
 }
 
@@ -854,8 +827,8 @@ type Mailer struct {
 
     _, _, generateErr := Generate(&GenerateRequest{
         ProjectDirectory: projectDirectory,
-        PackageName:      "config",
         BindSet:          bindSetWithPackage("github.com/acme/app/domain", "domain"),
+        Config: GenerateConfig{PackageName: "config"},
     })
     if nil == generateErr {
         t.Fatalf("expected two named constructors returning one type to be refused")
@@ -955,8 +928,8 @@ type Clock struct {
 
             source, report, generateErr := Generate(&GenerateRequest{
                 ProjectDirectory: projectDirectory,
-                PackageName:      "config",
                 BindSet:          bindSetWithPackage("github.com/acme/app/domain", "domain"),
+                Config: GenerateConfig{PackageName: "config"},
             })
             if nil != generateErr {
                 t.Fatalf("expected the scoped shadow to generate, got %v", generateErr)

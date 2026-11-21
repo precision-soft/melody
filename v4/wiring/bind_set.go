@@ -22,7 +22,6 @@ func (instance *BindSet) Package(importPath string, directory string) *PackageBi
         directory:  directory,
         binds:      make(map[string]string),
         bindOrder:  make([]string, 0),
-        excludes:   make([]string, 0),
     }
 
     instance.packages = append(instance.packages, packageBinding)
@@ -68,7 +67,6 @@ type PackageBinding struct {
     directory  string
     binds      map[string]string
     bindOrder  []string
-    excludes   []string
 }
 
 /* Name binds an argument name to a configuration parameter for the constructors of this package only, taking precedence over a bind of the same name declared on the set. */
@@ -82,27 +80,12 @@ func (instance *PackageBinding) Name(argumentName string, parameterName string) 
     return instance
 }
 
-/* Exclude skips every constructor whose returned type name matches the pattern, in the syntax of path.Match. Test files are always excluded. */
-func (instance *PackageBinding) Exclude(pattern string) *PackageBinding {
-    instance.excludes = append(instance.excludes, pattern)
-
-    return instance
-}
-
 func (instance *PackageBinding) ImportPath() string {
     return instance.importPath
 }
 
 func (instance *PackageBinding) Directory() string {
     return instance.directory
-}
-
-func (instance *PackageBinding) Excludes() []string {
-    excludes := make([]string, len(instance.excludes))
-
-    copy(excludes, instance.excludes)
-
-    return excludes
 }
 
 func (instance *PackageBinding) BindNames() []string {

@@ -66,11 +66,12 @@ The package defines the service name [`ServiceTranslator`](../../translation/ser
 package main
 
 import (
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/translation"
     translationcontract "github.com/precision-soft/melody/v4/translation/contract"
 )
 
-func buildTranslator() *translation.Manager {
+func buildTranslator(configuration configcontract.Configuration) *translation.Manager {
     english := translation.NewMapCatalog("en")
     english.Add("messages", "greeting", "Hello, {name}!")
     english.Add("messages", "cart.items", "{count, plural, =0 {Your cart is empty} one {# item} other {# items}}")
@@ -78,10 +79,10 @@ func buildTranslator() *translation.Manager {
     romanian := translation.NewMapCatalog("ro")
     romanian.Add("messages", "greeting", "Salut, {name}!")
 
-    return translation.NewManager(
-        []translationcontract.Catalog{english, romanian},
-        translation.ManagerConfig{DefaultLocale: "en", FallbackLocales: []string{"en"}},
-    )
+    return translation.NewManager(translation.ManagerConfig{
+        Catalogs:        []translationcontract.Catalog{english, romanian},
+        FallbackLocales: []string{configuration.Http().DefaultLocale()},
+    })
 }
 ```
 
@@ -107,7 +108,7 @@ The example application wires a translator (`config/translation.go`) and exposes
 - Inside a `plural` branch, a `select` nested in it included, every bare `#` is the number; `'#'` writes a literal `#` and `''` a literal apostrophe, ICU's apostrophe quoting for that one character: `{n, plural, other {Order '#'{id}}}` renders `Order #A1` for `id` `A1`. Any other apostrophe is text, and outside a plural branch nothing is quoted. A `'#` no apostrophe closes is refused by `ValidatePattern`, so a pattern written for the third major that holds `'#'` in a branch renders `#` where it rendered `'5'`.
 - A `plural` or `select` style must be keyword-and-block pairs and carry an `other` block: [`ValidatePattern`](../../translation/message_format.go) refuses a selector keyword with no block (`{n, plural, one other {x}}`), a block with no keyword (`{g, select, {x} other {y}}`), a style with no `other` and a selector nested deeper than the 32 levels `Translate` renders, whose blocks it would write as raw text, naming the rune offset and the reason, nested blocks included. [`MapCatalog.Add`](../../translation/catalog.go) refuses such a pattern with a panic naming the locale, the domain, the message id, the offset and the reason, and [`JsonDirectoryLoader.Load`](../../translation/json_loader.go) returns the same refusal naming the file and the directory too, so a malformed message fails the boot. A lone `{` or `}` in plain text, an argument left open and an unknown argument type are not refused: they render visibly, and the format has no quoting to write a literal brace otherwise.
 - A [`Catalog`](../../translation/contract/catalog.go) of the application's own is judged by `Translate` at each call: a pattern `ValidatePattern` refuses answers the empty string and its error, every time it is asked. A catalog of its own runs each pattern through `ValidatePattern` when it is built, so the defect fails the boot instead.
-- A locale is matched in BCP 47 case at every door, a catalog's, the default, a fallback and the one `Translate` asks: the language lower, a four-letter script title, a two-letter region upper, every other subtag lower, so a catalog registered as `ro-RO` answers `ro-ro` and `RO-RO`, and `zh-Hant-TW` answers `ZH-HANT-tw`. The separators are kept as written: `ro_RO` and `ro-RO` are two locales. Two catalogs spelling one locale differently (`ro-RO` beside `ro-ro`) are refused by `NewManager`, naming both spellings; several catalogs spelling it alike assemble the locale, as before.
+- A locale is matched in BCP 47 case at every door, a catalog's, a fallback and the one `Translate` asks: the language lower, a four-letter script title, a two-letter region upper, every other subtag lower, so a catalog registered as `ro-RO` answers `ro-ro` and `RO-RO`, and `zh-Hant-TW` answers `ZH-HANT-tw`. The separators are kept as written: `ro_RO` and `ro-RO` are two locales. Two catalogs spelling one locale differently (`ro-RO` beside `ro-ro`) are refused by `NewManager`, naming both spellings; several catalogs spelling it alike assemble the locale, as before.
 - Plural categories follow CLDR-aligned rules for the locales with dedicated support — Romanian/Moldovan (`one`/`few`/`other`) and Russian (`one`/`few`/`many`/`other`) — and fall back to the `n == 1 → one` rule for every other locale. Use `=N` selectors for exact cases that matter.
 - A `plural` argument that is present but non-numeric — a `nil`, or a string that does not parse as a number (`"5"` takes its numeric category) — resolves the `other` branch and substitutes `#` with an empty string, rather than being treated as the number zero; an ABSENT argument renders the visible placeholder, as the next bullet says. This differs from ICU/MessageFormat implementations that default a missing argument to `0` — supply the argument explicitly if you depend on a numeric category.
 - A placeholder whose parameter is absent renders as the visible placeholder itself (`Hello, {name}!`) — the plain placeholder, and a `plural` or `select` argument alike (`{count}`, `{gender}`) — so a renamed parameter key is observable in the output instead of silently deleting the value or the count; a parameter present with an explicit `nil` renders as the empty string, or resolves the `other` branch of a `plural`, because the caller said so. A `select` argument whose keyword matches no branch resolves the `other` branch, which every pattern a catalog of the framework holds carries.
@@ -137,7 +138,7 @@ The example application wires a translator (`config/translation.go`) and exposes
 
 ### Constructors (`translation`)
 
-- [`NewManager(catalogs []translationcontract.Catalog, config ManagerConfig) *Manager`](../../translation/manager.go) — `ManagerConfig{DefaultLocale, FallbackLocales}`, a refusal naming its `field`; nil catalogs is a manager with no catalog, which answers raw ids; once a catalog is handed, a default or fallback locale that is empty or that no catalog carries is refused, since the lookup asks them by that name in BCP 47 case and a region form like `en-US` does not reach an `en` catalog
+- [`NewManager(config ManagerConfig) *Manager`](../../translation/manager.go) — `ManagerConfig{Catalogs, FallbackLocales}`, a refusal naming its `field`; nil catalogs is a manager with no catalog, which answers raw ids; a lookup asks the locale, its base, then the fallbacks in order and nothing after the last, so an application ends the list on its default locale, `kernel.default_locale`; once a catalog is handed, a fallback locale that is empty or that no catalog carries is refused, since the lookup asks them by that name in BCP 47 case and a region form like `en-US` does not reach an `en` catalog
 - [`NewMapCatalog(locale string) *MapCatalog`](../../translation/catalog.go)
 - [`NewJsonDirectoryLoader(directory string) *JsonDirectoryLoader`](../../translation/json_loader.go)
 

@@ -68,6 +68,7 @@ func NewExcludedByDirective(unbindable string) *ExcludedByDirective {
 type ExcludedByDirective struct {
 }
 
+//melody:ignore a test fixture kept out of the wiring
 func NewUserFixture() *UserFixture {
     return &UserFixture{}
 }

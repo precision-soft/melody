@@ -477,6 +477,30 @@ The six `service.<module>` names of a module's principal service, `service.cache
 
 **Remedy.** A listener whose failure must keep every listener behind it from running declares `FailureEndsDispatch: true`. Read every failure through `errors.Is` / `errors.As`, or through `Unwrap() []error` on a joined answer. A listener that answers a request returns nil.
 
+### Httpclient: a typed credential beside the request's own `Authorization` header is refused
+
+**What changed.** [`RequestOptions`](../httpclient/contract/request_option.go) carrying `BearerToken` or `BasicAuth` beside an `Authorization` entry of its own `Headers` is refused with "the request names two credentials", naming `RequestOptions.Headers`, as the pair of credentials is, where the typed credential won in silence. A typed credential still wins over the client's own `Authorization` header.
+
+**Symptom.** A request that set both now fails with that refusal before anything is sent.
+
+**Remedy.** Keep one: the typed credential or the header.
+
+### Translation: the manager takes its catalogs in its config and has no default locale of its own
+
+**What changed.** [`translation.NewManager(ManagerConfig{Catalogs, FallbackLocales})`](../translation/manager.go) takes the catalogs in the config; `ManagerConfig.DefaultLocale` is removed: a lookup asks the locale, its base, then `FallbackLocales` in order, and nothing after the last, so the application ends the list on its default locale, `kernel.default_locale`, and declares that fact once.
+
+**Symptom.** `too many arguments in call to translation.NewManager`; `unknown field DefaultLocale in struct literal of type translation.ManagerConfig`.
+
+**Remedy.** `translation.NewManager(translation.ManagerConfig{Catalogs: catalogs, FallbackLocales: []string{…, configuration.Http().DefaultLocale()}})`.
+
+### Wiring: the generation target is a `GenerateConfig`, and a constructor is kept out by its directive
+
+**What changed.** [`NewGenerateCommand(bindSet, config)`](../wiring/generate_command.go) takes a [`GenerateConfig{PackageName, FunctionName, ScopedFunctionName, BuildTags}`](../wiring/generator.go), the target declared once in Go beside the bind set, and `GenerateRequest` carries it as `Config`, so the command and a bootstrap program write the same file; the `--package`, `--function`, `--scoped-function` and `--tags` flags are removed, `--out`, `--strict`, `--report-vendor` and `--report-excluded` kept. `PackageBinding.Exclude`, `Excludes()`, `ScanResult.UnusedExcludes`, `GenerateReport.UnusedExcludes` and the unused-exclude report are removed: `//melody:ignore <reason>` on the constructor keeps it out.
+
+**Symptom.** `flag provided but not defined: -package`; `not enough arguments in call to wiring.NewGenerateCommand`; `unknown field PackageName in struct literal of type wiring.GenerateRequest`; `packageBinding.Exclude undefined`.
+
+**Remedy.** Declare `wiring.GenerateConfig{PackageName: "generated", FunctionName: "RegisterGeneratedServices"}` beside the bind set and hand it to `NewGenerateCommand` and to `GenerateRequest{Config: …}`; put `//melody:ignore <reason>` on a constructor an exclude pattern kept out.
+
 ### Http, application: a shutdown hook takes the shutdown's context, a middleware factory answers an error, the json refusal is one struct
 
 **What changed.** [`Application.OnHttpShutdown`](../application/application_http.go) takes `func(shutdownContext context.Context)`, handed the context the hooks are waited under, carrying the shutdown deadline. One middleware factory type remains, [`pipeline.MiddlewareFactory`](../http/middleware/pipeline/definition.go), `func(kernelInstance) (httpcontract.Middleware, error)`, renamed from `pipeline.HttpMiddlewareFactory`; `applicationcontract.MiddlewareFactory` and its alias `application.MiddlewareFactory` are removed, `MiddlewareRegistration.Factories` and `RegisterHttpMiddlewareFactories` taking it, a factory's error refusing the build naming the middleware. [`JsonHandlerErrorResponder`](../http/typed_handler.go) is `func(runtimeInstance, request, refusal JsonHandlerRefusal) (Response, error)`, `JsonHandlerRefusal{Status, Message, Cause}`.

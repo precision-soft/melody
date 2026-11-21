@@ -43,7 +43,7 @@ func newTestManager() *Manager {
     romanian := NewMapCatalog("ro")
     romanian.Add("messages", "greeting", "Salut, {name}!")
 
-    return NewManager([]translationcontract.Catalog{english, romanian}, ManagerConfig{DefaultLocale: "en", FallbackLocales: []string{"en"}})
+    return NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{english, romanian}, FallbackLocales: []string{"en"}})
 }
 
 /* verbatimDomainCatalog answers exactly the domain it is asked for, which the contract permits: the coercion of the empty domain is the manager door's to make, not an obligation of every catalog. */
@@ -75,7 +75,7 @@ func TestTranslate_EmptyDomainResolvesToTheDefaultAtTheManagerDoor(t *testing.T)
         },
     }
 
-    manager := NewManager([]translationcontract.Catalog{catalog}, ManagerConfig{DefaultLocale: "en", FallbackLocales: []string{"en"}})
+    manager := NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{catalog}, FallbackLocales: []string{"en"}})
 
     if "Hello!" != mustTranslate(t, manager, "greeting", translationcontract.TranslateConfig{Locale: "en"}) {
         t.Fatalf("expected the empty domain resolved to the default before the catalog was asked")
@@ -162,10 +162,7 @@ func TestTranslate_TheThreeOutcomesAreToldApart(t *testing.T) {
     english := NewMapCatalog("en")
     english.Add("messages", "greeting", "Hello, {name}!")
 
-    manager := NewManager(
-        []translationcontract.Catalog{english, unvalidatedCatalog{locale: "en", message: "{g, select, male {he}}"}},
-        ManagerConfig{DefaultLocale: "en"},
-    )
+    manager := NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{english, unvalidatedCatalog{locale: "en", message: "{g, select, male {he}}"}}, FallbackLocales: []string{"en"}})
 
     message, translateErr := manager.Translate("greeting", translationcontract.TranslateConfig{Parameters: map[string]any{"name": "Ada"}})
     if nil != translateErr || "Hello, Ada!" != message {
@@ -179,7 +176,7 @@ func TestTranslate_TheThreeOutcomesAreToldApart(t *testing.T) {
 }
 
 func TestNewManager_NilCatalogsAnswersRawIds(t *testing.T) {
-    manager := NewManager(nil, ManagerConfig{DefaultLocale: "en"})
+    manager := NewManager(ManagerConfig{FallbackLocales: []string{"en"}})
 
     expectMessageNotFound(t, manager, "greeting", translationcontract.TranslateConfig{Domain: "messages", Locale: "en"})
 }
@@ -188,7 +185,7 @@ func TestTranslate_RomanianPluralCategories(t *testing.T) {
     romanian := NewMapCatalog("ro")
     romanian.Add("messages", "files", "{count, plural, one {# fișier} few {# fișiere} other {# de fișiere}}")
 
-    manager := NewManager([]translationcontract.Catalog{romanian}, ManagerConfig{DefaultLocale: "ro"})
+    manager := NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{romanian}, FallbackLocales: []string{"ro"}})
 
     cases := map[int]string{
         1:  "1 fișier",
@@ -209,7 +206,7 @@ func TestTranslate_RussianPluralCategories(t *testing.T) {
     russian := NewMapCatalog("ru")
     russian.Add("messages", "files", "{count, plural, one {# файл} few {# файла} many {# файлов} other {# файла}}")
 
-    manager := NewManager([]translationcontract.Catalog{russian}, ManagerConfig{DefaultLocale: "ru"})
+    manager := NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{russian}, FallbackLocales: []string{"ru"}})
 
     cases := map[int]string{
         1:  "1 файл",
@@ -240,7 +237,7 @@ func TestTranslate_PathologicallyNestedPluralIsAnErrorWithoutOverflow(t *testing
         builder.WriteString("}}")
     }
 
-    manager := NewManager([]translationcontract.Catalog{unvalidatedCatalog{locale: "en", message: builder.String()}}, ManagerConfig{DefaultLocale: "en"})
+    manager := NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{unvalidatedCatalog{locale: "en", message: builder.String()}}, FallbackLocales: []string{"en"}})
 
     result, translateErr := manager.Translate("deep", translationcontract.TranslateConfig{Parameters: map[string]any{"count": 1}, Domain: "messages", Locale: "en"})
     if "" != result || nil == translateErr {
@@ -288,7 +285,7 @@ func TestHasMessage_ReadsDomainAndLocaleFromTheConfigAndIgnoresParameters(t *tes
     romanian := NewMapCatalog("ro")
     romanian.Add("messages", "only.ro", "Doar")
 
-    manager := NewManager([]translationcontract.Catalog{english, romanian}, ManagerConfig{DefaultLocale: "en"})
+    manager := NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{english, romanian}, FallbackLocales: []string{"en"}})
 
     cases := map[string]struct {
         messageId string
@@ -321,7 +318,7 @@ func TestTranslate_TheZeroConfigReadsTheDefaultDomainAndTheDefaultLocale(t *test
     romanian := NewMapCatalog("ro")
     romanian.Add("messages", "greeting", "Salut")
 
-    manager := NewManager([]translationcontract.Catalog{romanian, english}, ManagerConfig{DefaultLocale: "en"})
+    manager := NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{romanian, english}, FallbackLocales: []string{"en"}})
 
     if "Hello" != mustTranslate(t, manager, "greeting", translationcontract.TranslateConfig{}) {
         t.Fatal("expected the zero config to read the messages domain of the default locale")
@@ -339,7 +336,7 @@ func TestTranslate_TheZeroConfigReadsTheDefaultDomainAndTheDefaultLocale(t *test
 func TestNewManager_RefusesANilCatalog(t *testing.T) {
     /* a nil catalog is refused, since it would build a translator answering raw ids for a whole locale */
     testhelper.AssertPanicsWithError(t, func() {
-        NewManager([]translationcontract.Catalog{nil}, ManagerConfig{DefaultLocale: "en"})
+        NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{nil}, FallbackLocales: []string{"en"}})
     }, "translation catalog is nil")
 }
 
@@ -353,7 +350,7 @@ func TestNewManager_TwoCatalogsOfOneLocaleAreAskedInOrder(t *testing.T) {
     second.Add("messages", "farewell", "Bye")
     second.Add("messages", "shared", "from the second")
 
-    manager := NewManager([]translationcontract.Catalog{first, second}, ManagerConfig{DefaultLocale: "en"})
+    manager := NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{first, second}, FallbackLocales: []string{"en"}})
 
     if "Hello" != mustTranslate(t, manager, "greeting", translationcontract.TranslateConfig{Domain: "messages", Locale: "en"}) {
         t.Fatalf("expected the first catalog to keep answering, got %q", mustTranslate(t, manager, "greeting", translationcontract.TranslateConfig{Domain: "messages", Locale: "en"}))
@@ -371,30 +368,46 @@ func TestNewManager_TwoCatalogsOfOneLocaleAreAskedInOrder(t *testing.T) {
 /* the locale chain never asks for the empty locale, so a catalog whose Locale is empty could never be found: it is refused as the nil one is, instead of being stored under a key nothing reads */
 func TestNewManager_RefusesACatalogWithoutALocale(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
-        NewManager([]translationcontract.Catalog{NewMapCatalog("")}, ManagerConfig{DefaultLocale: "en"})
+        NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{NewMapCatalog("")}, FallbackLocales: []string{"en"}})
     }, "translation catalog carries no locale")
 }
 
-/* the default and the fallback locales are asked by their exact name, so one no catalog carries would answer raw ids for every message the request locale misses */
+/* the fallback locales are asked by their exact name, so one no catalog carries would answer raw ids for every message the request locale misses */
 func TestNewManager_RefusesALocaleNoCatalogCarries(t *testing.T) {
     cases := map[string]struct {
-        defaultLocale   string
         fallbackLocales []string
         message         string
     }{
-        "empty default":                 {"", nil, "translation default locale is empty"},
-        "default without a catalog":     {"fr", nil, "translation default locale is carried by no catalog"},
-        "default is only a region form": {"en-US", nil, "translation default locale is carried by no catalog"},
-        "fallback without a catalog":    {"en", []string{"en", "de"}, "translation fallback locale is carried by no catalog"},
-        "empty fallback":                {"en", []string{""}, "translation fallback locale is empty"},
+        "fallback without a catalog":     {[]string{"en", "de"}, "translation fallback locale is carried by no catalog"},
+        "fallback is only a region form": {[]string{"en-US"}, "translation fallback locale is carried by no catalog"},
+        "empty fallback":                 {[]string{""}, "translation fallback locale is empty"},
     }
 
     for name, testCase := range cases {
         t.Run(name, func(t *testing.T) {
             testhelper.AssertPanicsWithError(t, func() {
-                NewManager([]translationcontract.Catalog{NewMapCatalog("en"), NewMapCatalog("ro")}, ManagerConfig{DefaultLocale: testCase.defaultLocale, FallbackLocales: testCase.fallbackLocales})
+                NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{NewMapCatalog("en"), NewMapCatalog("ro")}, FallbackLocales: testCase.fallbackLocales})
             }, testCase.message)
         })
+    }
+}
+
+func TestManager_NothingIsAskedAfterTheLastFallback(t *testing.T) {
+    english := NewMapCatalog("en")
+    english.Add("messages", "only.english", "english")
+
+    romanian := NewMapCatalog("ro")
+    romanian.Add("messages", "only.romanian", "romanian")
+
+    manager := NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{english, romanian}, FallbackLocales: []string{"ro"}})
+
+    if "romanian" != mustTranslate(t, manager, "only.romanian", translationcontract.TranslateConfig{Domain: "messages", Locale: "fr-FR"}) {
+        t.Fatalf("expected the fallback to answer a locale no catalog carries")
+    }
+
+    message, translateErr := manager.Translate("only.english", translationcontract.TranslateConfig{Domain: "messages", Locale: "fr-FR"})
+    if false == errors.Is(translateErr, ErrMessageNotFound) || "only.english" != message {
+        t.Fatalf("expected no locale asked after the last fallback, got %q %v", message, translateErr)
     }
 }
 
@@ -412,12 +425,12 @@ func TestNewManager_TheRefusalNamesTheFallbackAndItsIndex(t *testing.T) {
         }
     }()
 
-    NewManager([]translationcontract.Catalog{NewMapCatalog("en")}, ManagerConfig{DefaultLocale: "en", FallbackLocales: []string{"en", "de"}})
+    NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{NewMapCatalog("en")}, FallbackLocales: []string{"en", "de"}})
 }
 
 /* with no catalog there is no locale to check against */
 func TestNewManager_WithNoCatalogAdmitsAnyLocale(t *testing.T) {
-    manager := NewManager(nil, ManagerConfig{FallbackLocales: []string{"de"}})
+    manager := NewManager(ManagerConfig{FallbackLocales: []string{"de"}})
 
     expectMessageNotFound(t, manager, "greeting", translationcontract.TranslateConfig{Domain: "messages", Locale: "fr"})
 }
@@ -430,7 +443,7 @@ func TestTranslate_ALocaleIsMatchedInBcp47Case(t *testing.T) {
     english := NewMapCatalog("en")
     english.Add("messages", "greeting", "Hello")
 
-    manager := NewManager([]translationcontract.Catalog{romanian, chinese, english}, ManagerConfig{DefaultLocale: "EN", FallbackLocales: []string{"RO-ro"}})
+    manager := NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{romanian, chinese, english}, FallbackLocales: []string{"RO-ro", "EN"}})
 
     for locale, expected := range map[string]string{"ro-ro": "Salut", "RO-RO": "Salut", "ZH-HANT-tw": "你好", "En": "Hello", "fr": "Salut"} {
         if result := mustTranslate(t, manager, "greeting", translationcontract.TranslateConfig{Domain: "messages", Locale: locale}); expected != result {
@@ -438,7 +451,7 @@ func TestTranslate_ALocaleIsMatchedInBcp47Case(t *testing.T) {
         }
     }
 
-    withoutFallback := NewManager([]translationcontract.Catalog{romanian, english}, ManagerConfig{DefaultLocale: "en"})
+    withoutFallback := NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{romanian, english}, FallbackLocales: []string{"en"}})
     if true == withoutFallback.HasMessage("greeting", translationcontract.TranslateConfig{Domain: "messages", Locale: "ro_ro"}) && "Salut" == mustTranslate(t, withoutFallback, "greeting", translationcontract.TranslateConfig{Domain: "messages", Locale: "ro_ro"}) {
         t.Fatal("expected an underscore not folded to a hyphen")
     }
@@ -458,7 +471,7 @@ func TestNewManager_RefusesTwoSpellingsOfOneLocale(t *testing.T) {
         }
     }()
 
-    NewManager([]translationcontract.Catalog{NewMapCatalog("ro-RO"), NewMapCatalog("ro-ro")}, ManagerConfig{DefaultLocale: "ro-RO"})
+    NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{NewMapCatalog("ro-RO"), NewMapCatalog("ro-ro")}, FallbackLocales: []string{"ro-RO"}})
 }
 
 func TestNewManager_AssemblesOneLocaleFromCatalogsSpellingItAlike(t *testing.T) {
@@ -467,7 +480,7 @@ func TestNewManager_AssemblesOneLocaleFromCatalogsSpellingItAlike(t *testing.T) 
     second := NewMapCatalog("ro")
     second.Add("messages", "b", "B")
 
-    manager := NewManager([]translationcontract.Catalog{first, second}, ManagerConfig{DefaultLocale: "ro"})
+    manager := NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{first, second}, FallbackLocales: []string{"ro"}})
     if "B" != mustTranslate(t, manager, "b", translationcontract.TranslateConfig{Domain: "messages", Locale: "RO"}) {
         t.Fatal("expected the second catalog of the locale asked")
     }
@@ -495,30 +508,22 @@ func expectRefusalContext(t *testing.T, key string, expected string, build func(
     build()
 }
 
-func TestNewManager_TheDefaultAndFallbackRefusalsNameTheLocaleAsWritten(t *testing.T) {
-    expectRefusalContext(t, "defaultLocale", "RO_md", func() {
-        NewManager([]translationcontract.Catalog{NewMapCatalog("en")}, ManagerConfig{DefaultLocale: "RO_md"})
+func TestNewManager_TheFallbackRefusalsNameTheLocaleAsWritten(t *testing.T) {
+    expectRefusalContext(t, "fallbackLocale", "RO_md", func() {
+        NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{NewMapCatalog("en")}, FallbackLocales: []string{"RO_md"}})
     })
 
     expectRefusalContext(t, "fallbackLocale", "DE-de", func() {
-        NewManager([]translationcontract.Catalog{NewMapCatalog("en")}, ManagerConfig{DefaultLocale: "en", FallbackLocales: []string{"DE-de"}})
+        NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{NewMapCatalog("en")}, FallbackLocales: []string{"DE-de", "en"}})
     })
 }
 
 func TestNewManager_TheRefusalsNameTheConfigField(t *testing.T) {
-    expectRefusalContext(t, "field", "ManagerConfig.DefaultLocale", func() {
-        NewManager([]translationcontract.Catalog{NewMapCatalog("en")}, ManagerConfig{})
-    })
-
-    expectRefusalContext(t, "field", "ManagerConfig.DefaultLocale", func() {
-        NewManager([]translationcontract.Catalog{NewMapCatalog("en")}, ManagerConfig{DefaultLocale: "fr"})
+    expectRefusalContext(t, "field", "ManagerConfig.FallbackLocales", func() {
+        NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{NewMapCatalog("en")}, FallbackLocales: []string{"", "en"}})
     })
 
     expectRefusalContext(t, "field", "ManagerConfig.FallbackLocales", func() {
-        NewManager([]translationcontract.Catalog{NewMapCatalog("en")}, ManagerConfig{DefaultLocale: "en", FallbackLocales: []string{""}})
-    })
-
-    expectRefusalContext(t, "field", "ManagerConfig.FallbackLocales", func() {
-        NewManager([]translationcontract.Catalog{NewMapCatalog("en")}, ManagerConfig{DefaultLocale: "en", FallbackLocales: []string{"de"}})
+        NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{NewMapCatalog("en")}, FallbackLocales: []string{"de", "en"}})
     })
 }

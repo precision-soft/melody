@@ -21,15 +21,17 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-/* NewGenerateCommand builds the command that renders the service registrations for a bind set. It runs inside the application, so it checks every bind against the parameters the running configuration actually declares instead of against a copy of them. The output package must not be one the scanned constructors take types from: the generated file would import its own package. */
-func NewGenerateCommand(bindSet *BindSet) *GenerateCommand {
+/* NewGenerateCommand builds the command that renders the service registrations for a bind set into the target the config declares, the package config when it names none. It runs inside the application, so it checks every bind against the parameters the running configuration actually declares instead of against a copy of them. The output package must not be one the scanned constructors take types from: the generated file would import its own package. */
+func NewGenerateCommand(bindSet *BindSet, config GenerateConfig) *GenerateCommand {
     return &GenerateCommand{
         bindSet: bindSet,
+        config:  config,
     }
 }
 
 type GenerateCommand struct {
     bindSet *BindSet
+    config  GenerateConfig
 }
 
 func (instance *GenerateCommand) Name() string {
@@ -57,31 +59,13 @@ func (instance *GenerateCommand) Flags() []clicontract.Flag {
             Usage: "disable ansi colors",
             Value: false,
         },
-        &clicontract.StringFlag{
-            Name:  "package",
-            Usage: "package name of the generated file",
-            Value: "config",
-        },
-        &clicontract.StringFlag{
-            Name:  "function",
-            Usage: "name of the generated registration function",
-            Value: "RegisterGeneratedServices",
-        },
-        &clicontract.StringFlag{
-            Name:  "scoped-function",
-            Usage: "name of the generated scope-owned registration function; defaults to the registration function name with Scoped appended, and is only emitted when a constructor carries //melody:scoped",
-        },
         &clicontract.BoolFlag{
             Name:  "strict",
-            Usage: "fail when a declared bind or exclude matched no constructor, or a constructor was skipped",
+            Usage: "fail when a declared bind matched no constructor, or a constructor was skipped",
         },
         &clicontract.BoolFlag{
             Name:  "report-vendor",
             Usage: "name the vendor directories the scan stepped over",
-        },
-        &clicontract.StringFlag{
-            Name:  "tags",
-            Usage: "comma-separated build tags the target binary carries, so a constructor gated on one of them is scanned; the generated file is then specific to those tags and must be built with them, since it names constructors the untagged build does not have",
         },
         &clicontract.BoolFlag{
             Name:  "report-excluded",
@@ -107,19 +91,22 @@ func (instance *GenerateCommand) Run(
         declaredParameters[name] = true
     }
 
-    buildTags, buildTagsErr := splitBuildTags(commandContext.String("tags"))
+    buildTags, buildTagsErr := splitBuildTags(strings.Join(instance.config.BuildTags, ","))
     if nil != buildTagsErr {
         return buildTagsErr
     }
 
+    target := instance.config
+    target.BuildTags = buildTags
+    if "" == target.PackageName {
+        target.PackageName = "config"
+    }
+
     source, report, generateErr := Generate(&GenerateRequest{
         ProjectDirectory:   projectDirectory,
-        PackageName:        commandContext.String("package"),
-        FunctionName:       commandContext.String("function"),
-        ScopedFunctionName: commandContext.String("scoped-function"),
+        Config:             target,
         BindSet:            instance.bindSet,
         DeclaredParameters: declaredParameters,
-        BuildTags:          buildTags,
     })
     if nil != generateErr {
         return generateErr
@@ -147,10 +134,6 @@ func (instance *GenerateCommand) Run(
             strictContext["binds"] = strings.Join(report.UnusedBinds, ", ")
         }
 
-        if 0 < len(report.UnusedExcludes) {
-            strictContext["excludes"] = strings.Join(report.UnusedExcludes, ", ")
-        }
-
         /* a skipped constructor is coverage the wiring lost; strict makes it be acknowledged, which is what //melody:ignore is for */
         if 0 < len(report.Skipped) {
             skippedNames := make([]string, 0, len(report.Skipped))
@@ -163,7 +146,7 @@ func (instance *GenerateCommand) Run(
 
         if 0 < len(strictContext) {
             return exception.NewError(
-                "declared binds or excludes matched no constructor, or constructors were skipped",
+                "declared binds matched no constructor, or constructors were skipped",
                 strictContext,
                 nil,
             )
@@ -392,7 +375,7 @@ func (instance *GenerateCommand) writeReport(
         }
     }
 
-    /* a build-excluded file holding a candidate is named on request, so a service built under a tag traces back to the tag to pass through --tags */
+    /* a build-excluded file holding a candidate is named on request, so a service built under a tag traces back to the tag to declare in GenerateConfig.BuildTags */
     if true == commandContext.Bool("report-excluded") {
         for _, excludedFile := range report.ExcludedFiles {
             fmt.Fprintf(reportWriter, "excluded by build constraints (holds a constructor candidate): %s\n", excludedFile)
@@ -401,10 +384,6 @@ func (instance *GenerateCommand) writeReport(
 
     for _, unused := range report.UnusedBinds {
         fmt.Fprintf(reportWriter, "bind %s matched no constructor argument\n", unused)
-    }
-
-    for _, unused := range report.UnusedExcludes {
-        fmt.Fprintf(reportWriter, "exclude %s matched no constructor\n", unused)
     }
 
     /* the command always hands over the running configuration, so this names the case where it declares nothing */

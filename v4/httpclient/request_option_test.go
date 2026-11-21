@@ -139,3 +139,21 @@ func TestResolveRequestOptions_TheBasicCredentialIsCopied(t *testing.T) {
         t.Fatalf("expected the resolved options to hold their own credential, got %+v", resolved.basicAuth)
     }
 }
+
+func TestResolveRequestOptions_ATypedCredentialBesideTheRequestsOwnAuthorizationHeaderIsRefused(t *testing.T) {
+    for name, options := range map[string]RequestOptions{
+        "bearer": {BearerToken: "token", Headers: map[string]string{"authorization": "Bearer other"}},
+        "basic":  {BasicAuth: &BasicAuth{Username: "user"}, Headers: map[string]string{" Authorization ": "Basic other"}},
+    } {
+        _, err := resolveRequestOptions(options, nil, false)
+        assertRefusedField(t, err, "RequestOptions.Headers", "the request names two credentials")
+
+        if "" == name {
+            t.Fatalf("unreachable")
+        }
+    }
+
+    if _, err := resolveRequestOptions(RequestOptions{BearerToken: "token", Headers: map[string]string{"X-Trace": "1"}}, nil, false); nil != err {
+        t.Fatalf("expected a credential beside other headers admitted, got %v", err)
+    }
+}

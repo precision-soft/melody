@@ -10,7 +10,6 @@ import (
 const (
     generatedWiringFile = "../generated/wiring_gen.go"
     generatedPackage    = "generated"
-    generatedFunction   = "RegisterGeneratedServices"
     /* the tests run from the config package, one level below the application root, so this is the same project directory the running application reports through KernelProjectDirectory */
     wiringProjectDirectory = ".."
 )
@@ -20,8 +19,7 @@ func generateWiring(t *testing.T) (string, *melodywiring.GenerateReport) {
 
     source, report, generateErr := melodywiring.Generate(&melodywiring.GenerateRequest{
         ProjectDirectory: wiringProjectDirectory,
-        PackageName:      generatedPackage,
-        FunctionName:     generatedFunction,
+        Config:           NewWiringGenerateConfig(),
         BindSet:          NewWiringBindSet(),
     })
     if nil != generateErr {

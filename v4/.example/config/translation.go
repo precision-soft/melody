@@ -15,5 +15,9 @@ func (instance *Module) buildTranslation() {
     /* Romanian reads 2 to 19, and a number whose last two digits are 1 to 19, in the few category, and every other count past one takes "de" before the noun */
     romanian.Add("messages", "cart.items", "{count, plural, =0 {Coșul este gol} one {# produs în coș} few {# produse în coș} other {# de produse în coș}}")
 
-    instance.translator = melodytranslation.NewManager([]melodytranslationcontract.Catalog{english, romanian}, melodytranslation.ManagerConfig{DefaultLocale: "en", FallbackLocales: []string{"en"}})
+    /* the application's default locale is the chain's last link, read from kernel.default_locale rather than spelled again */
+    instance.translator = melodytranslation.NewManager(melodytranslation.ManagerConfig{
+        Catalogs:        []melodytranslationcontract.Catalog{english, romanian},
+        FallbackLocales: []string{instance.configuration.Http().DefaultLocale()},
+    })
 }

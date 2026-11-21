@@ -8,6 +8,14 @@ const (
     importPathPrefix = "github.com/precision-soft/melody/v4/.example/"
 )
 
+/* NewGenerateConfig is the target of the generated wiring, generated/wiring_gen.go's package and function, which melody:wiring:generate and the generator under wiring/generate both take */
+func NewGenerateConfig() melodywiring.GenerateConfig {
+    return melodywiring.GenerateConfig{
+        PackageName:  "generated",
+        FunctionName: "RegisterGeneratedServices",
+    }
+}
+
 /* the parameters the bind set binds constructor scalars to; config declares them, and both read the names from here */
 const (
     ParameterRatesBaseUrl         = "app.rates.base_url"

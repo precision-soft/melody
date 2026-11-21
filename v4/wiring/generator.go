@@ -26,17 +26,23 @@ const (
     mathImportAlias              = "math"
 )
 
-type GenerateRequest struct {
-    ProjectDirectory string
-    PackageName      string
-    FunctionName     string
+/* GenerateConfig is the target of a generation, declared once in Go beside the bind set, so the command and a bootstrap program write the same file. */
+type GenerateConfig struct {
+    PackageName string
+    /* FunctionName names the registration function; RegisterGeneratedServices when empty. */
+    FunctionName string
     /* ScopedFunctionName names the function the scope-owned registrations are emitted into. It defaults to the container function's name with Scoped appended, and the function is only emitted when something carries the scoped directive. */
     ScopedFunctionName string
-    BindSet            *BindSet
+    /* BuildTags are the build tags the target binary carries, so a constructor gated on one of them is scanned rather than dropped; the generated file is then specific to those tags and must be built with them. */
+    BuildTags []string
+}
+
+type GenerateRequest struct {
+    ProjectDirectory string
+    Config           GenerateConfig
+    BindSet          *BindSet
     /* DeclaredParameters is the set of parameter names the application declares. When it is empty the generator cannot check a bind target and says so instead of assuming the target exists. */
     DeclaredParameters map[string]bool
-    /* BuildTags are the build tags the target binary carries, so a constructor gated on one of them is scanned rather than dropped. */
-    BuildTags []string
 }
 
 type GenerateReport struct {
@@ -50,8 +56,6 @@ type GenerateReport struct {
     ExcludedFiles   []string
     UnusedBinds     []string
     GlobalBindReach map[string][]string
-    /* UnusedExcludes names the exclude patterns that matched no constructor, each prefixed with its package's import path. An exclusion that stopped matching silently registers the constructor it was declared to keep out, so strict fails on it. */
-    UnusedExcludes []string
     /* BindTargetsUnchecked reports that a bind resolved while DeclaredParameters was empty, so its target could not be checked. The command always hands over the running configuration; a direct Generate caller can trip it. */
     BindTargetsUnchecked bool
 }
@@ -62,12 +66,12 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
         return "", nil, exception.NewError("a bind set is required to generate the wiring", nil, nil)
     }
 
-    functionName := request.FunctionName
+    functionName := request.Config.FunctionName
     if "" == functionName {
         functionName = "RegisterGeneratedServices"
     }
 
-    scopedFunctionName := request.ScopedFunctionName
+    scopedFunctionName := request.Config.ScopedFunctionName
     if "" == scopedFunctionName {
         scopedFunctionName = functionName + "Scoped"
     }
@@ -78,7 +82,6 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
         ExcludedFiles:            make([]string, 0),
         UnusedBinds:              make([]string, 0),
         GlobalBindReach:          make(map[string][]string),
-        UnusedExcludes:           make([]string, 0),
     }
 
     usedBinds := make(map[string]bool)
@@ -118,11 +121,11 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
         )
     }
 
-    if false == token.IsIdentifier(request.PackageName) || "_" == request.PackageName {
+    if false == token.IsIdentifier(request.Config.PackageName) || "_" == request.Config.PackageName {
         return "", nil, exception.NewError(
             "the generated package name is not a usable Go package name",
             map[string]any{
-                "package": request.PackageName,
+                "package": request.Config.PackageName,
             },
             nil,
         )
@@ -191,7 +194,7 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
             )
         }
 
-        scanResult, scanErr := Scan(ScanRequest{ProjectDirectory: request.ProjectDirectory, PackageBinding: packageBinding, BuildTags: request.BuildTags})
+        scanResult, scanErr := Scan(ScanRequest{ProjectDirectory: request.ProjectDirectory, PackageBinding: packageBinding, BuildTags: request.Config.BuildTags})
         if nil != scanErr {
             return "", nil, scanErr
         }
@@ -200,9 +203,6 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
         report.SkippedVendorDirectories = append(report.SkippedVendorDirectories, scanResult.SkippedVendorDirectories...)
         report.ExcludedFiles = append(report.ExcludedFiles, scanResult.ExcludedFiles...)
 
-        for _, pattern := range scanResult.UnusedExcludes {
-            report.UnusedExcludes = append(report.UnusedExcludes, packageBinding.ImportPath()+"."+pattern)
-        }
 
         for _, constructor := range scanResult.Constructors {
             registrationKeys := registrationKeysFor(constructor)
@@ -287,7 +287,7 @@ func Generate(request *GenerateRequest) (string, *GenerateReport, error) {
     report.UnusedBinds = collectUnusedBinds(request.BindSet, usedBinds, unusedDirectiveBinds)
 
     source := renderFile(
-        request.PackageName,
+        request.Config.PackageName,
         functionName,
         scopedFunctionName,
         importAliases,

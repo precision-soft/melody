@@ -2,6 +2,7 @@ package httpclient
 
 import (
     "maps"
+    "strings"
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
@@ -86,6 +87,23 @@ func resolveRequestOptions(options RequestOptions, positionalJson any, hasPositi
         )
     }
 
+    /* a typed credential beside the request's own Authorization entry names one header twice, as the pair does; the client's headers stay under the request's */
+    if "" != options.BearerToken || nil != options.BasicAuth {
+        for key := range options.Headers {
+            if true == strings.EqualFold("Authorization", strings.TrimSpace(key)) {
+                return resolvedRequestOptions{}, exception.NewError(
+                    "the request names two credentials",
+                    exceptioncontract.Context{
+                        "field":      "RequestOptions.Headers",
+                        "otherField": credentialFieldOf(options),
+                        "headerName": key,
+                    },
+                    nil,
+                )
+            }
+        }
+    }
+
     if _, timeoutErr := bound.Resolve(options.Timeout, requestTimeoutRule); nil != timeoutErr {
         return resolvedRequestOptions{}, timeoutErr
     }
@@ -120,4 +138,12 @@ func resolveRequestOptions(options RequestOptions, positionalJson any, hasPositi
     }
 
     return resolved, nil
+}
+
+func credentialFieldOf(options RequestOptions) string {
+    if "" != options.BearerToken {
+        return "RequestOptions.BearerToken"
+    }
+
+    return "RequestOptions.BasicAuth"
 }

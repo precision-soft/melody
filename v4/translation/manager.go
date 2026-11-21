@@ -13,18 +13,15 @@ import (
 /* ErrMessageNotFound marks a message no catalog of the locale chain carries; Translate answers it beside the message id. */
 var ErrMessageNotFound = errors.New("translation message not found")
 
-/* ManagerConfig is the default locale every lookup ends on and the fallback locales asked before it. */
+/* ManagerConfig is what a manager is built over: the catalogs, nil for none, which answers raw ids, and the fallback locales a lookup asks, in order, after the locale asked and its base; nothing is asked after the last, so an application ends the list on its default locale. */
 type ManagerConfig struct {
-    DefaultLocale   string
+    Catalogs        []translationcontract.Catalog
     FallbackLocales []string
 }
 
-/* NewManager keeps every catalog of a locale, in the order given, and a lookup asks them in that order until one answers, since a locale is assembled from several sources; nil is a manager with no catalog, which answers raw ids. Every locale, a catalog's, the default, a fallback and the one a lookup asks, is matched in BCP 47 case, so ro-ro finds the catalog of ro-RO; two catalogs spelling one locale differently are refused, naming both spellings. A nil catalog, or one whose Locale is empty and so could never be found, is refused; once a catalog is handed, so is a default or fallback locale that is empty or that no catalog carries. */
-func NewManager(
-    catalogs []translationcontract.Catalog,
-    config ManagerConfig,
-) *Manager {
-    defaultLocale := config.DefaultLocale
+/* NewManager keeps every catalog of a locale, in the order given, and a lookup asks them in that order until one answers, since a locale is assembled from several sources. Every locale, a catalog's, a fallback and the one a lookup asks, is matched in BCP 47 case, so ro-ro finds the catalog of ro-RO; two catalogs spelling one locale differently are refused, naming both spellings. A nil catalog, or one whose Locale is empty and so could never be found, is refused; once a catalog is handed, so is a fallback locale that is empty or that no catalog carries. */
+func NewManager(config ManagerConfig) *Manager {
+    catalogs := config.Catalogs
     fallbackLocales := config.FallbackLocales
 
     catalogsByLocale := make(map[string][]translationcontract.Catalog)
@@ -55,27 +52,12 @@ func NewManager(
         catalogsByLocale[canonical] = append(catalogsByLocale[canonical], catalog)
     }
 
-    canonicalDefault := canonicalLocale(defaultLocale)
     canonicalFallbacks := make([]string, 0, len(fallbackLocales))
     for _, fallbackLocale := range fallbackLocales {
         canonicalFallbacks = append(canonicalFallbacks, canonicalLocale(fallbackLocale))
     }
 
     if 0 < len(catalogsByLocale) {
-        if "" == defaultLocale {
-            exception.Panic(exception.NewError("translation default locale is empty", exceptioncontract.Context{"field": "ManagerConfig.DefaultLocale"}, nil))
-        }
-
-        if 0 == len(catalogsByLocale[canonicalDefault]) {
-            exception.Panic(
-                exception.NewError(
-                    "translation default locale is carried by no catalog",
-                    exceptioncontract.Context{"defaultLocale": defaultLocale, "field": "ManagerConfig.DefaultLocale"},
-                    nil,
-                ),
-            )
-        }
-
         for index, fallbackLocale := range fallbackLocales {
             if "" == fallbackLocale {
                 exception.Panic(exception.NewError("translation fallback locale is empty", exceptioncontract.Context{"index": index, "field": "ManagerConfig.FallbackLocales"}, nil))
@@ -94,14 +76,12 @@ func NewManager(
     }
 
     return &Manager{
-        defaultLocale:    canonicalDefault,
         fallbackLocales:  canonicalFallbacks,
         catalogsByLocale: catalogsByLocale,
     }
 }
 
 type Manager struct {
-    defaultLocale    string
     fallbackLocales  []string
     catalogsByLocale map[string][]translationcontract.Catalog
 }
@@ -152,7 +132,7 @@ func (instance *Manager) lookup(messageId string, domain string, locale string) 
 }
 
 func (instance *Manager) localeChain(locale string) []string {
-    chain := make([]string, 0, 3+len(instance.fallbackLocales))
+    chain := make([]string, 0, 2+len(instance.fallbackLocales))
     seen := make(map[string]bool)
 
     appendLocale := func(value string) {
@@ -175,8 +155,6 @@ func (instance *Manager) localeChain(locale string) []string {
     for _, fallback := range instance.fallbackLocales {
         appendLocale(fallback)
     }
-
-    appendLocale(instance.defaultLocale)
 
     return chain
 }

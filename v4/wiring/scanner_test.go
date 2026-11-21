@@ -174,31 +174,6 @@ func TestScan_ReportsUnwireableShapesWithTheirLocation(t *testing.T) {
     }
 }
 
-func TestIsExcluded_MatchesTheReturnedTypeName(t *testing.T) {
-    cases := []struct {
-        typeExpression string
-        pattern        string
-        expected       bool
-    }{
-        {"*domain.UserFixture", "*Fixture", true},
-        {"*domain.UserService", "*Fixture", false},
-        {"domain.Logger", "Logger", true},
-        {"*domain.UserService", "User*", true},
-    }
-
-    for _, testCase := range cases {
-        matchedExcludes := make(map[string]bool)
-
-        if testCase.expected != isExcluded(testCase.typeExpression, []string{testCase.pattern}, matchedExcludes) {
-            t.Fatalf("unexpected exclusion of %q by %q", testCase.typeExpression, testCase.pattern)
-        }
-
-        if testCase.expected != matchedExcludes[testCase.pattern] {
-            t.Fatalf("expected the matched-excludes record of %q to be %v", testCase.pattern, testCase.expected)
-        }
-    }
-}
-
 func TestScan_ReportsAMissingDirectory(t *testing.T) {
     bindSet := NewBindSet()
 
@@ -488,38 +463,6 @@ type NearlyScoped struct {
     directiveErr := errors.Unwrap(scanErr)
     if nil == directiveErr || false == strings.Contains(directiveErr.Error(), "an unknown melody directive is not one of bind, ignore, service or scoped") {
         t.Fatalf("unexpected error: %v (cause %v)", scanErr, directiveErr)
-    }
-}
-
-/* path.Match answers ErrBadPattern for a malformed pattern on every name, so the exclusion the operator declared would match nothing and the constructor it names would be registered anyway, with no trace; the pattern is refused before anything is walked. */
-func TestScan_RefusesAMalformedExcludePattern(t *testing.T) {
-    bindSet := NewBindSet()
-    binding := bindSet.Package(fixtureImportPath, "wiring/internal/fixture/domain").Exclude("[Fixture")
-
-    _, scanErr := Scan(ScanRequest{ProjectDirectory: fixtureProjectDirectory, PackageBinding: binding})
-    if nil == scanErr {
-        t.Fatalf("expected the malformed pattern to be refused")
-    }
-
-    if false == strings.Contains(scanErr.Error(), "an exclude pattern is malformed") {
-        t.Fatalf("unexpected error: %v", scanErr)
-    }
-}
-
-/* an exclusion that stopped matching — a renamed type, a typo — silently registers the constructor it was declared to keep out; the pattern that matched nothing is reported, and the one that matched is not. */
-func TestScan_ReportsAnExcludeThatMatchedNothing(t *testing.T) {
-    bindSet := NewBindSet()
-    binding := bindSet.Package(fixtureImportPath, "wiring/internal/fixture/domain").
-        Exclude("*Fixture").
-        Exclude("*Respository")
-
-    scanResult, scanErr := Scan(ScanRequest{ProjectDirectory: fixtureProjectDirectory, PackageBinding: binding})
-    if nil != scanErr {
-        t.Fatalf("scan: %v", scanErr)
-    }
-
-    if 1 != len(scanResult.UnusedExcludes) || "*Respository" != scanResult.UnusedExcludes[0] {
-        t.Fatalf("expected only the unmatched pattern to be reported, got %v", scanResult.UnusedExcludes)
     }
 }
 

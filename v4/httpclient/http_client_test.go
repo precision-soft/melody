@@ -2295,8 +2295,7 @@ func TestNewRequestFailedError_SanitizesAUrlErrorWithoutAnInnerCause(t *testing.
     }
 }
 
-/* a contract pin, green before this test existed: the typed credential is applied after every header door, so it wins over an Authorization header written through the client's or the request's map, and two empty halves travel because they were asked for. */
-func TestHttpClient_TheTypedCredentialIsAppliedLastAndWinsOverAnExplicitAuthorizationHeader(t *testing.T) {
+func TestHttpClient_TheTypedCredentialWinsOverTheClientsAuthorizationHeaderAndTheRequestsOwnHeaderOverTheClients(t *testing.T) {
     var received string
     server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
         received = request.Header.Get("Authorization")
@@ -2306,18 +2305,18 @@ func TestHttpClient_TheTypedCredentialIsAppliedLastAndWinsOverAnExplicitAuthoriz
     client := newTestHttpClient(t, HttpClientConfig{Headers: map[string]string{"Authorization": "Bearer configured"}})
     defer client.CloseWithContext(context.Background())
 
-    if _, err := client.Get(testRuntime(), server.URL, RequestOptions{Headers: map[string]string{"Authorization": "Bearer explicit"}, BasicAuth: &BasicAuth{Username: "", Password: ""}}); nil != err {
+    if _, err := client.Get(testRuntime(), server.URL, RequestOptions{BasicAuth: &BasicAuth{Username: "", Password: ""}}); nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
     if "Basic Og==" != received {
-        t.Fatalf("expected the empty basic credential to win over both header doors, got %q", received)
+        t.Fatalf("expected the empty basic credential to win over the client's header, got %q", received)
     }
 
-    if _, err := client.Get(testRuntime(), server.URL, RequestOptions{Headers: map[string]string{"Authorization": "Bearer explicit"}, BearerToken: "typed"}); nil != err {
+    if _, err := client.Get(testRuntime(), server.URL, RequestOptions{BearerToken: "typed"}); nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
     if "Bearer typed" != received {
-        t.Fatalf("expected the typed bearer to win over the explicit header, got %q", received)
+        t.Fatalf("expected the typed bearer to win over the client's header, got %q", received)
     }
 
     if _, err := client.Get(testRuntime(), server.URL, RequestOptions{Headers: map[string]string{"Authorization": "Bearer explicit"}}); nil != err {
