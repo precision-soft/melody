@@ -135,7 +135,7 @@ func isNilInterface(value any) bool {
     }
 }
 
-/* MigrationDatabase answers the connection the migration commands run on, the provider's OpenForMigration, opened under the caller's runtime once per name and shared: every call answering it takes a hold, CloseMigrationDatabase releases one and closes the connection with the last, and the registry's CloseWithContext is the net for whatever was not released. An answer that is the very pool the registry holds for the name is shared with that pool and takes no hold. A caller whose context is already done is refused before anything is opened or held; an empty name selects the default definition. A nil runtime, or one carrying no context or no scope, is refused before the lock is taken. */
+/* MigrationDatabase answers the connection the migration commands run on, the provider's OpenForMigration, opened under the caller's runtime once per name and shared: every call answering it takes a hold, CloseMigrationDatabase releases one and closes the connection with the last, and the registry's CloseWithContext is the net for whatever was not released. An answer that is the very pool the registry holds for the name is shared with that pool and takes no hold, whichever of the two doors opened it first: a migration connection the name's pool opens as later belongs to the pool and its release closes nothing. A caller whose context is already done is refused before anything is opened or held, a kept connection included; an empty name selects the default definition. A nil runtime, or one carrying no context or no scope, is refused before the lock is taken. */
 func (instance *ManagerRegistry) MigrationDatabase(runtimeInstance containercontract.Runtime, name string) (*bun.DB, error) {
     if runtimeErr := refuseOpenRuntime(runtimeInstance); nil != runtimeErr {
         return nil, runtimeErr
@@ -155,13 +155,6 @@ func (instance *ManagerRegistry) MigrationDatabase(runtimeInstance containercont
         return nil, ErrManagerRegistryClosed
     }
 
-    if database, exists := instance.migrationDatabases[name]; true == exists {
-        instance.migrationHolders[name]++
-        instance.lock.Unlock()
-
-        return database, nil
-    }
-
     providerDefinition, exists := instance.providerDefinitionByName[name]
     if false == exists {
         notFoundErr := instance.providerDefinitionNotFoundErrorLocked(name)
@@ -170,10 +163,18 @@ func (instance *ManagerRegistry) MigrationDatabase(runtimeInstance containercont
         return nil, notFoundErr
     }
 
+    /* ahead of the kept connection: a run already cancelled has no use for it and takes no hold */
     if nil != callerContext.Err() {
         instance.lock.Unlock()
 
         return nil, openRefusedByCallerContext(name, callerContext)
+    }
+
+    if database, exists := instance.migrationDatabases[name]; true == exists {
+        instance.migrationHolders[name]++
+        instance.lock.Unlock()
+
+        return database, nil
     }
 
     /* the dial runs outside the registry-wide lock for the same reason Manager's does: a down database must not serialize cache hits or a concurrent CloseWithContext. Migrations run from a sequential cli command, so no coalescing machinery is warranted — a concurrent duplicate open is resolved below by closing the loser. */
@@ -432,7 +433,12 @@ func (instance *ManagerRegistry) Manager(runtimeInstance containercontract.Runti
             }
         }
 
-        if true == pendingOpen.endedByOpenerContext && nil == callerContext.Err() {
+        if true == pendingOpen.endedByOpenerContext {
+            /* a waiter whose own context is done answers its own refusal, not the opener's departure */
+            if nil != callerContext.Err() {
+                return nil, openWaitCancelledByCallerContext(name, callerContext)
+            }
+
             continue
         }
 
@@ -573,8 +579,8 @@ func (instance *ManagerRegistry) openManager(runtimeInstance containercontract.R
                 return
             }
 
-            /* an open its opener's context ended, read off that context and not the failure's class, so a provider's own cancellation under a live opener travels unchanged */
-            if nil != callerContext.Err() && true == exception.ChainIs(openErr, callerContext.Err()) {
+            /* an open whose opener's context is done ended for its opener, whatever the failure carries: a driver failure or a custom cause under that departure is not a live waiter's answer; a provider's own cancellation under a live opener travels unchanged */
+            if nil != callerContext.Err() {
                 pendingOpen.endedByOpenerContext = true
             }
 
@@ -596,6 +602,12 @@ func (instance *ManagerRegistry) openManager(runtimeInstance containercontract.R
             pendingOpen.openError = ErrManagerRegistryClosed
 
             return
+        }
+
+        /* a migration connection kept before this pool that is this very pool belongs to the pool from now on: CloseMigrationDatabase must not close what the registry serves */
+        if migrationDatabase, exists := instance.migrationDatabases[name]; true == exists && migrationDatabase == database {
+            delete(instance.migrationDatabases, name)
+            delete(instance.migrationHolders, name)
         }
 
         manager := NewManager(name, database)

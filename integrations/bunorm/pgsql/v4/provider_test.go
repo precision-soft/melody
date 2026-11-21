@@ -1602,3 +1602,32 @@ func TestOpen_ADoneContextIsRefusedBeforeTheHookRuns(t *testing.T) {
         t.Fatalf("expected the hook never run, got %d calls", hookCalls)
     }
 }
+
+/* a caller cancelled with a cause finds that cause under both cancellation refusals, beside the cancellation class: refused before the attempt and cut during the backoff */
+func TestOpen_TheCancellationRefusalsCarryTheCallersCause(t *testing.T) {
+    callerCause := errors.New("the client hung up")
+
+    doneContext, cancelDone := context.WithCancelCause(context.Background())
+    cancelDone(callerCause)
+
+    _, refusedErr := NewProvider(ProviderConfig{Retry: singleAttemptRetry}).Open(testRuntimeUnder(doneContext), newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"), &capturingProviderLogger{})
+    if false == errors.Is(refusedErr, callerCause) || false == errors.Is(refusedErr, context.Canceled) {
+        t.Fatalf("expected the refusal before the attempt to carry the cause and the cancellation, got %v", refusedErr)
+    }
+
+    provider := NewProvider(ProviderConfig{
+        Timeout: TimeoutConfig{ConnectTimeout: bound.Of(50 * time.Millisecond)},
+        Retry:   RetryConfig{MaxAttempts: bound.Of(5), InitialDelay: bound.Of(2 * time.Second), MaxDelay: bound.Of(2 * time.Second), BackoffMultiplier: 1.0},
+    })
+
+    backoffContext, cancelBackoff := context.WithCancelCause(context.Background())
+    go func() {
+        time.Sleep(100 * time.Millisecond)
+        cancelBackoff(callerCause)
+    }()
+
+    _, backoffErr := provider.Open(testRuntimeUnder(backoffContext), newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody"), &capturingProviderLogger{})
+    if false == strings.Contains(fmt.Sprintf("%v", backoffErr), "retry cancelled") || false == errors.Is(backoffErr, callerCause) || false == errors.Is(backoffErr, context.Canceled) {
+        t.Fatalf("expected the backoff refusal to carry the cause and the cancellation, got %v", backoffErr)
+    }
+}

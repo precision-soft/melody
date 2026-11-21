@@ -4,6 +4,7 @@ import (
     "context"
     "crypto/tls"
     "database/sql"
+    "fmt"
     "math"
     "net"
     "reflect"
@@ -184,7 +185,7 @@ func (instance *Provider) openWithRetry(ctx context.Context, parameters bunorm.C
                     exception.FromError(openErr),
                     exception.LogContextConfig{Extra: map[string]any{"attempt": attempt}},
                 ),
-                ctx.Err(),
+                cancellationOf(ctx),
             )
 
             logger.Warning(
@@ -216,11 +217,11 @@ func (instance *Provider) connectionTlsConfig(host string) *tls.Config {
 
 func (instance *Provider) open(ctx context.Context, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     /* an already-cancelled context is refused before the attempt: so a shutdown-cancelled lazy open pays no dial against a database nothing waits for. */
-    if ctxErr := ctx.Err(); nil != ctxErr {
+    if nil != ctx.Err() {
         return nil, exception.NewError(
             "database open cancelled before the attempt",
             nil,
-            ctxErr,
+            cancellationOf(ctx),
         )
     }
 
@@ -493,4 +494,15 @@ func tlsServerNameOf(host string) string {
     }
 
     return name
+}
+
+/* cancellationOf answers the context's cause with its error under it, so errors.Is matches both the cause set through WithCancelCause and the cancellation class the classification upstream reads */
+func cancellationOf(ctx context.Context) error {
+    ctxErr := ctx.Err()
+    cause := context.Cause(ctx)
+    if nil == cause || ctxErr == cause {
+        return ctxErr
+    }
+
+    return fmt.Errorf("%w (%w)", cause, ctxErr)
 }

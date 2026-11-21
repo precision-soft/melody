@@ -3440,6 +3440,8 @@ type gatedProvider struct {
     release chan struct{}
     /* ownRefusal, when set, is what the parked open answers once released: a cancellation of the provider's own, under a live opener */
     ownRefusal error
+    /* departure, when set, is what the parked open answers once its runtime's context ends, in place of that context's error */
+    departure func(openContext context.Context) error
 }
 
 func newGatedProvider() *gatedProvider {
@@ -3458,6 +3460,10 @@ func (instance *gatedProvider) Open(runtimeInstance containercontract.Runtime, p
     select {
     case <-instance.release:
     case <-runtimeInstance.Context().Done():
+        if nil != instance.departure {
+            return nil, instance.departure(runtimeInstance.Context())
+        }
+
         return nil, runtimeInstance.Context().Err()
     }
 
@@ -3793,5 +3799,184 @@ func TestManagerRegistry_EveryRuntimeDoorRefusesAnAbsentRuntimeBeforeTheLock(t *
                 t.Fatalf("%s under %s: the door waited on the registry lock", doorName, runtimeName)
             }
         }
+    }
+}
+
+/* a live waiter takes over an open whose opener's context is done whatever the failure carries: a driver failure with no context class under it, and the opener's custom cause */
+func TestManagerRegistry_ALiveWaiterTakesOverWhateverTheDepartedOpenerFailureCarries(t *testing.T) {
+    driverFailure := errors.New("read tcp 127.0.0.1:5432: i/o timeout")
+    openerCause := errors.New("the opener's client hung up")
+
+    cases := map[string]struct {
+        departure func(openContext context.Context) error
+        expected  error
+    }{
+        "driver failure": {
+            departure: func(openContext context.Context) error { return driverFailure },
+            expected:  driverFailure,
+        },
+        "custom cause": {
+            departure: func(openContext context.Context) error { return context.Cause(openContext) },
+            expected:  openerCause,
+        },
+    }
+
+    for caseName, testCase := range cases {
+        t.Run(caseName, func(t *testing.T) {
+            provider := newGatedProvider()
+            provider.departure = testCase.departure
+            registry := newGatedRegistry(t, provider)
+
+            openerContext, cancelOpener := context.WithCancelCause(context.Background())
+            openerAnswered := managerInBackground(registry, testRuntimeUnder(openerContext))
+            <-provider.entered
+
+            waiterAnswered := managerInBackground(registry, testRuntime())
+            time.Sleep(50 * time.Millisecond)
+
+            cancelOpener(openerCause)
+
+            opener := awaitManagerAnswer(t, openerAnswered, "the opener")
+            if nil != opener.manager || false == errors.Is(opener.err, testCase.expected) {
+                t.Fatalf("expected the opener to receive its own departure, got %v, %v", opener.manager, opener.err)
+            }
+
+            waiter := awaitManagerAnswer(t, waiterAnswered, "the waiter")
+            if nil != waiter.err || nil == waiter.manager {
+                t.Fatalf("expected the live waiter to take the open over, got %v", waiter.err)
+            }
+
+            if 2 != provider.opens.Load() {
+                t.Fatalf("expected the provider opened twice, got %d", provider.opens.Load())
+            }
+        })
+    }
+}
+
+/* unobservedDoneContext reports itself done while its Done channel stays open: a waiter whose context ended before it observed the end */
+type unobservedDoneContext struct {
+    context.Context
+}
+
+func (instance unobservedDoneContext) Err() error {
+    return context.Canceled
+}
+
+/* a waiter whose own context is done when the open it waited on ended by its opener's context answers its own refusal, not the opener's cause */
+func TestManagerRegistry_ADoneWaiterOfAnOpenItsOpenerLeftAnswersItsOwnRefusal(t *testing.T) {
+    provider := newGatedProvider()
+    provider.departure = func(openContext context.Context) error { return context.Cause(openContext) }
+    registry := newGatedRegistry(t, provider)
+
+    openerCause := errors.New("the opener's client hung up")
+    openerContext, cancelOpener := context.WithCancelCause(context.Background())
+    openerAnswered := managerInBackground(registry, testRuntimeUnder(openerContext))
+    <-provider.entered
+
+    waiterAnswered := managerInBackground(registry, testRuntimeUnder(unobservedDoneContext{Context: context.Background()}))
+    time.Sleep(50 * time.Millisecond)
+
+    cancelOpener(openerCause)
+
+    if opener := awaitManagerAnswer(t, openerAnswered, "the opener"); false == errors.Is(opener.err, openerCause) {
+        t.Fatalf("expected the opener's own cause, got %v", opener.err)
+    }
+
+    waiter := awaitManagerAnswer(t, waiterAnswered, "the waiter")
+    if nil != waiter.manager || true == errors.Is(waiter.err, openerCause) || false == errors.Is(waiter.err, context.Canceled) {
+        t.Fatalf("expected the waiter's own refusal, got %v, %v", waiter.manager, waiter.err)
+    }
+
+    if "main" != exception.LogContext(waiter.err, exception.LogContextConfig{})["manager"] {
+        t.Fatalf("expected the waiter's refusal to name the manager, got %v", waiter.err)
+    }
+
+    if 1 != provider.opens.Load() {
+        t.Fatalf("expected no second open, got %d", provider.opens.Load())
+    }
+}
+
+/* the migration door taken before the pool, over a provider answering one database from both doors: the pool owns it once opened, so the release leaves it open, the manager keeps serving it, and the teardown closes it */
+func TestManagerRegistry_AMigrationDatabaseTakenBeforeThePoolIsSharedByIdentity(t *testing.T) {
+    database, closeSignal := newCloseRaceDatabase()
+    provider := &sharedPoolProvider{database: database}
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        []ProviderDefinition{
+            ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
+        },
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    if migrationDatabase, migrationDatabaseErr := registry.MigrationDatabase(testRuntime(), "main"); nil != migrationDatabaseErr || database != migrationDatabase {
+        t.Fatalf("expected the migration database, got %v", migrationDatabaseErr)
+    }
+
+    if manager, managerErr := registry.Manager(testRuntime(), "main"); nil != managerErr || database != manager.Database() {
+        t.Fatalf("expected the manager over the same database, got %v", managerErr)
+    }
+
+    if 0 != len(registry.migrationDatabases) || 0 != len(registry.migrationHolders) {
+        t.Fatal("expected the pool to own the database once opened")
+    }
+
+    if releaseErr := registry.CloseMigrationDatabase("main"); nil != releaseErr {
+        t.Fatalf("release error: %v", releaseErr)
+    }
+
+    select {
+    case <-closeSignal:
+        t.Fatal("expected the release to leave the pool open")
+    case <-time.After(50 * time.Millisecond):
+    }
+
+    if _, managerErr := registry.Manager(testRuntime(), "main"); nil != managerErr {
+        t.Fatalf("expected the manager still served, got %v", managerErr)
+    }
+
+    if closeErr := registry.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("close error: %v", closeErr)
+    }
+
+    select {
+    case <-closeSignal:
+    case <-time.After(2 * time.Second):
+        t.Fatal("expected the teardown to close the pool")
+    }
+}
+
+/* a caller whose context is done is refused ahead of a kept migration connection: no hold is taken, so the one release left closes it */
+func TestManagerRegistry_MigrationDatabaseUnderADoneContextTakesNoHoldOnAKeptConnection(t *testing.T) {
+    database, closeSignal := newCloseRaceDatabase()
+    provider := &migrationCapableProvider{migrationDatabase: database}
+    registry := newGatedRegistry(t, provider)
+
+    if _, migrationErr := registry.MigrationDatabase(testRuntime(), "main"); nil != migrationErr {
+        t.Fatalf("migration database error: %v", migrationErr)
+    }
+
+    doneCause := errors.New("the run was cancelled")
+    doneContext, cancel := context.WithCancelCause(context.Background())
+    cancel(doneCause)
+
+    if migrationDatabase, migrationErr := registry.MigrationDatabase(testRuntimeUnder(doneContext), "main"); nil != migrationDatabase || false == errors.Is(migrationErr, doneCause) {
+        t.Fatalf("expected the caller's cause and no database, got %v, %v", migrationDatabase, migrationErr)
+    }
+
+    if 1 != registry.migrationHolders["main"] {
+        t.Fatalf("expected one hold, got %d", registry.migrationHolders["main"])
+    }
+
+    if releaseErr := registry.CloseMigrationDatabase("main"); nil != releaseErr {
+        t.Fatalf("release error: %v", releaseErr)
+    }
+
+    select {
+    case <-closeSignal:
+    case <-time.After(2 * time.Second):
+        t.Fatal("expected the one release to close the kept connection")
     }
 }

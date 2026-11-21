@@ -76,7 +76,16 @@ func newRuntimeWithDatabaseAndParameters(t *testing.T, database *bun.DB, values 
         container.RegisterOptions{},
     )
 
-    return runtime.NewRun(context.Background(), serviceContainer.NewScope())
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
+
+    /* the pool is opened first, as newRuntimeWithDatabase opens it, so a run's release leaves the shared pool open for the assertions that follow */
+    if nil != database {
+        if _, managerErr := registry.Manager(runtimeInstance, "primary"); nil != managerErr {
+            t.Fatalf("failed to open the manager: %s", managerErr.Error())
+        }
+    }
+
+    return runtimeInstance
 }
 
 func TestModule_DeclaresTheTwoTableKeysWithBunNamesAsDefaults(t *testing.T) {

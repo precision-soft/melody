@@ -99,10 +99,14 @@ func (instance *ReadWriteSplitter) Writer(runtimeInstance containercontract.Runt
 func (instance *ReadWriteSplitter) Reader(runtimeInstance containercontract.Runtime) (*bun.DB, error) {
     readerName := instance.ReaderName()
 
+    var probe probeReservation
     if readerName != instance.primaryName {
-        if rememberedErr := instance.rememberedUnreachable(readerName); nil != rememberedErr {
+        reservation, rememberedErr := instance.rememberedUnreachable(readerName)
+        if nil != rememberedErr {
             return instance.primaryInPlaceOf(runtimeInstance, readerName, rememberedErr)
         }
+
+        probe = reservation
     }
 
     database, databaseErr := instance.registry.Database(runtimeInstance, readerName)
@@ -115,6 +119,9 @@ func (instance *ReadWriteSplitter) Reader(runtimeInstance containercontract.Runt
     }
 
     if true == endedByCallerContext(runtimeInstance, databaseErr) {
+        /* a probe its own caller cut proved nothing about the replica, so the next reader probes it */
+        instance.releaseProbe(readerName, probe)
+
         return nil, databaseErr
     }
 
@@ -162,26 +169,52 @@ func (instance *ReadWriteSplitter) primaryInPlaceOf(runtimeInstance containercon
     return primary, nil
 }
 
-/* rememberedUnreachable answers the failure of a replica still inside its retry interval, and nil for a replica to dial, once per lapsed interval */
-func (instance *ReadWriteSplitter) rememberedUnreachable(replicaName string) error {
+/* probeReservation is the lapsed failure instant a lone probe re-dated and the instant it dated it to; the zero value reserves nothing */
+type probeReservation struct {
+    reserved   bool
+    failedAt   time.Time
+    reservedAt time.Time
+}
+
+/* rememberedUnreachable answers the failure of a replica still inside its retry interval, and nil for a replica to dial, once per lapsed interval, with the reservation of the reader that dials it alone */
+func (instance *ReadWriteSplitter) rememberedUnreachable(replicaName string) (probeReservation, error) {
     instance.unreachableMutex.Lock()
     defer instance.unreachableMutex.Unlock()
 
     remembered, isRemembered := instance.unreachableReplicas[replicaName]
     if false == isRemembered {
-        return nil
+        return probeReservation{}, nil
     }
 
     now := instance.now()
     if instance.replicaRetryInterval <= now.Sub(remembered.failedAt) {
         /* the reader that finds the interval lapsed dials alone: the failure is dated again, so the readers beside it keep the primary instead of waiting on its open */
+        reservation := probeReservation{reserved: true, failedAt: remembered.failedAt, reservedAt: now}
         remembered.failedAt = now
         instance.unreachableReplicas[replicaName] = remembered
 
-        return nil
+        return reservation, nil
     }
 
-    return remembered.err
+    return probeReservation{}, remembered.err
+}
+
+/* releaseProbe puts back the lapsed failure instant a probe re-dated, unless another reader recorded or forgot the replica since */
+func (instance *ReadWriteSplitter) releaseProbe(replicaName string, reservation probeReservation) {
+    if false == reservation.reserved {
+        return
+    }
+
+    instance.unreachableMutex.Lock()
+    defer instance.unreachableMutex.Unlock()
+
+    remembered, isRemembered := instance.unreachableReplicas[replicaName]
+    if false == isRemembered || false == remembered.failedAt.Equal(reservation.reservedAt) {
+        return
+    }
+
+    remembered.failedAt = reservation.failedAt
+    instance.unreachableReplicas[replicaName] = remembered
 }
 
 /* rememberUnreachable records the replica's failure and journals the move of its reads to the primary when it was not already remembered */

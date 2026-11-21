@@ -120,13 +120,25 @@ func databaseTestRuntime(ctx context.Context) melodycontainercontract.Runtime {
     return melodyruntime.NewRun(ctx, melodycontainer.NewContainer(melodycontainer.ContainerConfig{}).NewScope())
 }
 
-/* registryOver builds the registry the module's provider builds, over the definitions the build declared */
+/* registryOver resolves the registry the module registers, through its own provider, beside a logger service */
 func registryOver(t *testing.T, moduleInstance *Module) *melodybunorm.ManagerRegistry {
     t.Helper()
 
-    registry, registryErr := melodybunorm.NewManagerRegistry(melodylogging.NewNopLogger(), moduleInstance.databaseDefinitions)
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
+    containerInstance.MustRegister(
+        melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return melodylogging.NewNopLogger(), nil
+        },
+        melodycontainer.RegisterOptions{},
+    )
+
+    moduleInstance.registerDatabaseServices(containerRegistrar{Container: containerInstance})
+
+    registry, registryErr := melodycontainer.FromResolver[*melodybunorm.ManagerRegistry](t.Context(), containerInstance, serviceDatabaseRegistry)
     if nil != registryErr {
-        t.Fatalf("build the registry: %v", registryErr)
+        t.Fatalf("resolve the registry: %v", registryErr)
     }
 
     return registry
@@ -479,5 +491,97 @@ func TestRegisterLockerService_ResolvesTheCatalogueHandleAtFirstUse(t *testing.T
 
     if _, isMysql := locker.(*melodymysql.Locker); false == isMysql {
         t.Fatalf("expected the catalogue's mysql locker, got %T", locker)
+    }
+}
+
+/* the registry is built at boot: a declared host whose database is left empty is a definition the registry refuses, so the boot fails naming it rather than the first request that reads the catalogue */
+func TestRegisterDatabaseServices_BuildsTheRegistryAtBootSoARefusedDefinitionFailsTheBoot(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{
+        environmentKeyMysqlHost: "127.0.0.1",
+        environmentKeyMysqlUser: "nobody",
+    })
+    moduleInstance.buildDatabase()
+
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
+    containerInstance.MustRegister(
+        melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return melodylogging.NewNopLogger(), nil
+        },
+        melodycontainer.RegisterOptions{},
+    )
+    moduleInstance.registerDatabaseServices(containerRegistrar{Container: containerInstance})
+
+    names := containerInstance.(interface{ BuiltAtBootServiceNames() []string }).BuiltAtBootServiceNames()
+    if 1 != len(names) || serviceDatabaseRegistry != names[0] {
+        t.Fatalf("expected the registry registered to be built at boot, got %v", names)
+    }
+
+    bootRuntime, finish := melodyruntime.NewBoot(t.Context(), containerInstance)
+    defer func() {
+        _ = finish()
+    }()
+
+    _, buildErr := bootRuntime.Scope().Get(bootRuntime.Context(), serviceDatabaseRegistry)
+    if false == errors.Is(buildErr, melodybunorm.ErrConnectionDatabaseIsRequired) {
+        t.Fatalf("expected the boot build refused for the empty database, got %v", buildErr)
+    }
+}
+
+/* runtimeRecordingProvider opens a handle over a connector that is never dialed and records the context of the runtime the registry handed it */
+type runtimeRecordingProvider struct {
+    openedUnder []context.Context
+}
+
+func (instance *runtimeRecordingProvider) Open(runtimeInstance melodycontainercontract.Runtime, params melodybunorm.ConnectionParameters, logger melodyloggingcontract.Logger) (*bun.DB, error) {
+    instance.openedUnder = append(instance.openedUnder, runtimeInstance.Context())
+
+    return newUndialedDatabase(), nil
+}
+
+func (instance *runtimeRecordingProvider) OpenForMigration(runtimeInstance melodycontainercontract.Runtime, params melodybunorm.ConnectionParameters, logger melodyloggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
+}
+
+/* each handle the module registers is opened under the runtime of the resolution that publishes it: the open's context carries that resolution's deadline */
+func TestRegisterDatabaseServices_EachHandleOpensUnderTheResolvingRuntime(t *testing.T) {
+    for _, serviceName := range []string{serviceDatabase, serviceArchiveDatabase} {
+        provider := &runtimeRecordingProvider{}
+
+        containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+        containerInstance.MustRegister(
+            melodylogging.ServiceLogger,
+            func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+                return melodylogging.NewNopLogger(), nil
+            },
+            melodycontainer.RegisterOptions{},
+        )
+
+        moduleInstance := moduleWithEnvironment(t, map[string]string{environmentKeyMysqlHost: "mysql"})
+        moduleInstance.databaseDefinitions = []melodybunorm.ProviderDefinition{
+            melodybunorm.ProviderDefinition{Name: databaseManagerName, Provider: provider, Parameters: melodybunorm.ConnectionParameters{Host: "mysql", Port: "3306", Database: "catalogue", User: "melody"}, IsDefault: true},
+            melodybunorm.ProviderDefinition{Name: databaseArchiveManagerName, Provider: provider, Parameters: melodybunorm.ConnectionParameters{Host: "postgres", Port: "5432", Database: "archive", User: "melody"}},
+        }
+        moduleInstance.archiveWired = true
+        moduleInstance.registerDatabaseServices(containerRegistrar{Container: containerInstance})
+
+        resolutionContext, cancel := context.WithTimeout(context.Background(), time.Minute)
+        expectedDeadline, _ := resolutionContext.Deadline()
+
+        if _, resolveErr := melodycontainer.FromResolver[*bun.DB](resolutionContext, containerInstance, serviceName); nil != resolveErr {
+            t.Fatalf("%s: resolve the handle: %v", serviceName, resolveErr)
+        }
+
+        cancel()
+        _ = containerInstance.CloseWithContext(context.Background())
+
+        if 1 != len(provider.openedUnder) {
+            t.Fatalf("%s: expected one open, got %d", serviceName, len(provider.openedUnder))
+        }
+
+        if openDeadline, hasDeadline := provider.openedUnder[0].Deadline(); false == hasDeadline || false == expectedDeadline.Equal(openDeadline) {
+            t.Fatalf("%s: expected the open under the resolution's deadline %v, got %v (%t)", serviceName, expectedDeadline, openDeadline, hasDeadline)
+        }
     }
 }

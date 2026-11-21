@@ -626,7 +626,7 @@ func TestReadWriteSplitter_AReplicaOpenTheCallerLeftIsNeitherRememberedNorServed
         t.Fatalf("expected the primary left unopened, got %d opens", primary.openCount)
     }
 
-    if nil != splitter.rememberedUnreachable("replica") {
+    if _, rememberedErr := splitter.rememberedUnreachable("replica"); nil != rememberedErr {
         t.Fatal("expected the replica not remembered unreachable")
     }
 
@@ -636,5 +636,80 @@ func TestReadWriteSplitter_AReplicaOpenTheCallerLeftIsNeitherRememberedNorServed
 
     if 2 != replica.opens.Load() || 0 != primary.openCount {
         t.Fatalf("expected the replica dialled again and the primary untouched, got %d replica opens and %d primary opens", replica.opens.Load(), primary.openCount)
+    }
+}
+
+/* a remembered replica whose lone probe its own caller's context cut gives the reservation back: the next reader under a live context probes the replica instead of taking the primary for one more interval */
+func TestReadWriteSplitter_AProbeTheCallerCutGivesTheReservationBack(t *testing.T) {
+    replica := &switchableSplitProvider{down: true}
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        []ProviderDefinition{
+            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "replica", Provider: replica, Parameters: testConnectionParameters},
+        },
+    )
+    if nil != registryErr {
+        t.Fatalf("registry: %v", registryErr)
+    }
+    t.Cleanup(func() { _ = registry.CloseWithContext(context.Background()) })
+
+    now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+    splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}, ReplicaRetryInterval: bound.Of(time.Hour)})
+    splitter.now = func() time.Time { return now }
+
+    if _, readerErr := splitter.Reader(testRuntime()); nil != readerErr {
+        t.Fatalf("expected the primary served in place of the replica, got: %v", readerErr)
+    }
+
+    replica.down = false
+    now = now.Add(time.Hour)
+
+    departedCause := errors.New("client gone")
+    departedContext, cancelDeparted := context.WithCancelCause(context.Background())
+    cancelDeparted(departedCause)
+
+    if _, readerErr := splitter.Reader(testRuntimeUnder(departedContext)); false == errors.Is(readerErr, departedCause) {
+        t.Fatalf("expected the probing caller's own cause, got %v", readerErr)
+    }
+
+    if _, readerErr := splitter.Reader(testRuntime()); nil != readerErr {
+        t.Fatalf("expected the next read to probe the replica, got %v", readerErr)
+    }
+
+    if 2 != replica.openCount {
+        t.Fatalf("expected the replica probed by the next live reader, got %d dials", replica.openCount)
+    }
+}
+
+/* a reservation given back leaves the replica alone when another reader dated it since: the later failure stands */
+func TestReadWriteSplitter_AReservationGivenBackLeavesALaterDateStanding(t *testing.T) {
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        []ProviderDefinition{
+            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
+        },
+    )
+    if nil != registryErr {
+        t.Fatalf("registry: %v", registryErr)
+    }
+
+    lapsedAt := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+    reservedAt := lapsedAt.Add(time.Hour)
+    laterAt := reservedAt.Add(time.Second)
+
+    splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}, ReplicaRetryInterval: bound.Of(time.Hour)})
+    splitter.unreachableReplicas["replica"] = unreachableReplica{failedAt: laterAt, err: errors.New("replica is down")}
+
+    splitter.releaseProbe("replica", probeReservation{reserved: true, failedAt: lapsedAt, reservedAt: reservedAt})
+
+    if false == splitter.unreachableReplicas["replica"].failedAt.Equal(laterAt) {
+        t.Fatalf("expected the later date to stand, got %v", splitter.unreachableReplicas["replica"].failedAt)
+    }
+
+    splitter.releaseProbe("replica", probeReservation{reserved: true, failedAt: lapsedAt, reservedAt: laterAt})
+
+    if false == splitter.unreachableReplicas["replica"].failedAt.Equal(lapsedAt) {
+        t.Fatalf("expected the reservation given back, got %v", splitter.unreachableReplicas["replica"].failedAt)
     }
 }

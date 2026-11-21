@@ -34,7 +34,7 @@ const (
     databaseArchiveManagerName = "archive"
 )
 
-/* buildDatabase declares this example's connections for one bunorm manager registry, so db:migrate and the repositories reach one pool. The catalogue on mysql and the archive on postgres follow their own empty-means-unwired keys, so every combination boots, and with neither no registry is registered and nothing is dialed. The registry itself is built by its provider, where the application's logger resolves, and neither connection is opened here: each is opened at the first resolution of its service, so a process that never reads a database never dials it, and the container closes every pool it opened, which a handle opened at boot and never resolved escaped. A declared database that cannot be reached is refused at its first use, by name. */
+/* buildDatabase declares this example's connections for one bunorm manager registry, so db:migrate and the repositories reach one pool. The catalogue on mysql and the archive on postgres follow their own empty-means-unwired keys, so every combination boots, and with neither no registry is registered and nothing is dialed. The registry itself is built by its provider, where the application's logger resolves, at boot, so a definition it refuses fails the boot; neither connection is opened here: each is opened at the first resolution of its service, so a process that never reads a database never dials it, and the container closes every pool it opened, which a handle opened at boot and never resolved escaped. A declared database that cannot be reached is refused at its first use, by name. */
 func (instance *Module) buildDatabase() {
     definitionList := make([]melodybunorm.ProviderDefinition, 0, 2)
 
@@ -163,7 +163,8 @@ func (instance *Module) registerDatabaseServices(registrar melodyapplicationcont
 
             return melodybunorm.NewManagerRegistry(logger, definitionList)
         },
-        melodycontainer.RegisterOptions{},
+        /* built at boot: the construction judges the definitions and opens nothing, so a definition left without its database fails the boot rather than the first request that reads it */
+        melodycontainer.RegisterOptions{BuiltAtBoot: true},
     )
 
     if true == instance.archiveWired {
