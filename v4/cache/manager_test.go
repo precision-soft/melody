@@ -10,6 +10,7 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
 )
 
@@ -177,7 +178,7 @@ func TestNewManager_DoesNotCloseTheBackend(t *testing.T) {
         t.Fatalf("close error: %v", closeErr)
     }
 
-    if setErr := backend.Set(context.Background(), "a", []byte("1"), bound.UnlimitedDuration()); nil != setErr {
+    if setErr := backend.Set(testRuntime(), "a", []byte("1"), bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("expected the backend to stay open after the non-owning manager closed, got: %v", setErr)
     }
 }
@@ -193,7 +194,7 @@ func TestNewManager_AnOwnedBackendIsClosedWithTheManager(t *testing.T) {
         t.Fatalf("close error: %v", closeErr)
     }
 
-    if setErr := backend.Set(context.Background(), "a", []byte("1"), bound.UnlimitedDuration()); nil == setErr {
+    if setErr := backend.Set(testRuntime(), "a", []byte("1"), bound.UnlimitedDuration()); nil == setErr {
         t.Fatalf("expected the backend to be closed by the owning manager")
     }
 }
@@ -206,7 +207,7 @@ func TestManager_Get_TypesTheDeserializationFailure(t *testing.T) {
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    if setErr := backend.Set(context.Background(), "corrupt", []byte("{not json"), bound.UnlimitedDuration()); nil != setErr {
+    if setErr := backend.Set(testRuntime(), "corrupt", []byte("{not json"), bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
@@ -236,7 +237,7 @@ func TestManager_Many_SkipsCorruptEntriesAndNamesThem(t *testing.T) {
     if setErr := manager.Set(testRuntime(), "good.two", "2", bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
-    if setErr := backend.Set(context.Background(), "corrupt", []byte("{not json"), bound.UnlimitedDuration()); nil != setErr {
+    if setErr := backend.Set(testRuntime(), "corrupt", []byte("{not json"), bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
@@ -296,7 +297,7 @@ func TestManager_SetMultipleNamesTheRefusedKeysDeterministically(t *testing.T) {
         }
     }
 
-    if _, exists, _ := backend.Get(context.Background(), "good"); true == exists {
+    if _, exists, _ := backend.Get(testRuntime(), "good"); true == exists {
         t.Fatalf("expected a refused SetMultiple to write nothing")
     }
 }
@@ -410,50 +411,50 @@ func (instance *cacheTestTypedNilErrorBackend) typedNilError() error {
     return typedNil
 }
 
-func (instance *cacheTestTypedNilErrorBackend) Get(ctx context.Context, key string) ([]byte, bool, error) {
-    payload, exists, _ := instance.inner.Get(ctx, key)
+func (instance *cacheTestTypedNilErrorBackend) Get(runtimeInstance containercontract.Runtime, key string) ([]byte, bool, error) {
+    payload, exists, _ := instance.inner.Get(runtimeInstance, key)
     return payload, exists, instance.typedNilError()
 }
 
-func (instance *cacheTestTypedNilErrorBackend) Set(ctx context.Context, key string, payload []byte, ttl bound.Duration) error {
-    _ = instance.inner.Set(ctx, key, payload, ttl)
+func (instance *cacheTestTypedNilErrorBackend) Set(runtimeInstance containercontract.Runtime, key string, payload []byte, ttl bound.Duration) error {
+    _ = instance.inner.Set(runtimeInstance, key, payload, ttl)
     return instance.typedNilError()
 }
 
-func (instance *cacheTestTypedNilErrorBackend) Delete(ctx context.Context, key string) error {
-    _ = instance.inner.Delete(ctx, key)
+func (instance *cacheTestTypedNilErrorBackend) Delete(runtimeInstance containercontract.Runtime, key string) error {
+    _ = instance.inner.Delete(runtimeInstance, key)
     return instance.typedNilError()
 }
 
-func (instance *cacheTestTypedNilErrorBackend) Has(ctx context.Context, key string) (bool, error) {
-    hasValue, _ := instance.inner.Has(ctx, key)
+func (instance *cacheTestTypedNilErrorBackend) Has(runtimeInstance containercontract.Runtime, key string) (bool, error) {
+    hasValue, _ := instance.inner.Has(runtimeInstance, key)
     return hasValue, instance.typedNilError()
 }
 
-func (instance *cacheTestTypedNilErrorBackend) Clear(ctx context.Context) error {
+func (instance *cacheTestTypedNilErrorBackend) Clear(runtimeInstance containercontract.Runtime) error {
     return instance.typedNilError()
 }
 
-func (instance *cacheTestTypedNilErrorBackend) Many(ctx context.Context, keys []string) (map[string][]byte, error) {
-    result, _ := instance.inner.Many(ctx, keys)
+func (instance *cacheTestTypedNilErrorBackend) Many(runtimeInstance containercontract.Runtime, keys []string) (map[string][]byte, error) {
+    result, _ := instance.inner.Many(runtimeInstance, keys)
     return result, instance.typedNilError()
 }
 
-func (instance *cacheTestTypedNilErrorBackend) SetMultiple(ctx context.Context, items map[string][]byte, ttl bound.Duration) error {
+func (instance *cacheTestTypedNilErrorBackend) SetMultiple(runtimeInstance containercontract.Runtime, items map[string][]byte, ttl bound.Duration) error {
     return instance.typedNilError()
 }
 
-func (instance *cacheTestTypedNilErrorBackend) DeleteMultiple(ctx context.Context, keys []string) error {
+func (instance *cacheTestTypedNilErrorBackend) DeleteMultiple(runtimeInstance containercontract.Runtime, keys []string) error {
     return instance.typedNilError()
 }
 
-func (instance *cacheTestTypedNilErrorBackend) Increment(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
-    newValue, _ := instance.inner.Increment(ctx, key, delta, options)
+func (instance *cacheTestTypedNilErrorBackend) Increment(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    newValue, _ := instance.inner.Increment(runtimeInstance, key, delta, options)
     return newValue, instance.typedNilError()
 }
 
-func (instance *cacheTestTypedNilErrorBackend) Decrement(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
-    newValue, _ := instance.inner.Decrement(ctx, key, delta, options)
+func (instance *cacheTestTypedNilErrorBackend) Decrement(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    newValue, _ := instance.inner.Decrement(runtimeInstance, key, delta, options)
     return newValue, instance.typedNilError()
 }
 
@@ -784,7 +785,7 @@ func TestManager_GetCounterRefusesWhatIncrementRefuses(t *testing.T) {
     defer manager.CloseWithContext(context.Background())
 
     for _, payload := range []string{" 7", "+7", "07", "7\n"} {
-        if setErr := backend.Set(context.Background(), "visits", []byte(payload), bound.UnlimitedDuration()); nil != setErr {
+        if setErr := backend.Set(testRuntime(), "visits", []byte(payload), bound.UnlimitedDuration()); nil != setErr {
             t.Fatalf("unexpected set error: %v", setErr)
         }
 

@@ -124,7 +124,7 @@ func (instance *Manager) Get(runtimeInstance containercontract.Runtime, key stri
         return false, targetErr
     }
 
-    payload, exists, getErr := instance.backend.Get(runtimeInstance.Context(), key)
+    payload, exists, getErr := instance.backend.Get(runtimeInstance, key)
     getErr = normalizeThirdPartyError(getErr)
     if nil != getErr {
         return false, getErr
@@ -162,7 +162,7 @@ func (instance *Manager) Set(runtimeInstance containercontract.Runtime, key stri
         )
     }
 
-    return normalizeThirdPartyError(instance.backend.Set(runtimeInstance.Context(), key, payload, ttl))
+    return normalizeThirdPartyError(instance.backend.Set(runtimeInstance, key, payload, ttl))
 }
 
 func (instance *Manager) Delete(runtimeInstance containercontract.Runtime, key string) error {
@@ -170,7 +170,7 @@ func (instance *Manager) Delete(runtimeInstance containercontract.Runtime, key s
         return nilErr
     }
 
-    return normalizeThirdPartyError(instance.backend.Delete(runtimeInstance.Context(), key))
+    return normalizeThirdPartyError(instance.backend.Delete(runtimeInstance, key))
 }
 
 func (instance *Manager) Has(runtimeInstance containercontract.Runtime, key string) (bool, error) {
@@ -178,7 +178,7 @@ func (instance *Manager) Has(runtimeInstance containercontract.Runtime, key stri
         return false, nilErr
     }
 
-    hasValue, hasErr := instance.backend.Has(runtimeInstance.Context(), key)
+    hasValue, hasErr := instance.backend.Has(runtimeInstance, key)
 
     return hasValue, normalizeThirdPartyError(hasErr)
 }
@@ -188,7 +188,7 @@ func (instance *Manager) Clear(runtimeInstance containercontract.Runtime) error 
         return nilErr
     }
 
-    return normalizeThirdPartyError(instance.backend.Clear(runtimeInstance.Context()))
+    return normalizeThirdPartyError(instance.backend.Clear(runtimeInstance))
 }
 
 /* Many replaces the target's map with the entries of the keys that are present and decode. An entry whose payload does not decode is left out as an absent key is, and its keys come back in a DeserializationError beside the entries that decoded; a backend failure leaves the target untouched. */
@@ -202,7 +202,7 @@ func (instance *Manager) Many(runtimeInstance containercontract.Runtime, keys []
         return targetErr
     }
 
-    payloadsByKey, manyErr := instance.backend.Many(runtimeInstance.Context(), keys)
+    payloadsByKey, manyErr := instance.backend.Many(runtimeInstance, keys)
     manyErr = normalizeThirdPartyError(manyErr)
     if nil != manyErr {
         return manyErr
@@ -300,7 +300,7 @@ func (instance *Manager) SetMultiple(runtimeInstance containercontract.Runtime, 
         )
     }
 
-    return normalizeThirdPartyError(instance.backend.SetMultiple(runtimeInstance.Context(), payloads, ttl))
+    return normalizeThirdPartyError(instance.backend.SetMultiple(runtimeInstance, payloads, ttl))
 }
 
 func (instance *Manager) DeleteMultiple(runtimeInstance containercontract.Runtime, keys []string) error {
@@ -308,7 +308,7 @@ func (instance *Manager) DeleteMultiple(runtimeInstance containercontract.Runtim
         return nilErr
     }
 
-    return normalizeThirdPartyError(instance.backend.DeleteMultiple(runtimeInstance.Context(), keys))
+    return normalizeThirdPartyError(instance.backend.DeleteMultiple(runtimeInstance, keys))
 }
 
 /* Increment adds delta to a counter through the backend's native operation, so a distributed backend keeps it atomic, the counter's ttl written in the same operation as options says. The count bypasses the serializer and is stored as decimal text, so a counter key is read with GetCounter and never mixed with Set. */
@@ -317,7 +317,7 @@ func (instance *Manager) Increment(runtimeInstance containercontract.Runtime, ke
         return 0, nilErr
     }
 
-    newValue, incrementErr := instance.backend.Increment(runtimeInstance.Context(), key, delta, options)
+    newValue, incrementErr := instance.backend.Increment(runtimeInstance, key, delta, options)
 
     return newValue, normalizeThirdPartyError(incrementErr)
 }
@@ -328,7 +328,7 @@ func (instance *Manager) GetCounter(runtimeInstance containercontract.Runtime, k
         return 0, false, nilErr
     }
 
-    payload, exists, getErr := instance.backend.Get(runtimeInstance.Context(), key)
+    payload, exists, getErr := instance.backend.Get(runtimeInstance, key)
     getErr = normalizeThirdPartyError(getErr)
     if nil != getErr {
         return 0, false, getErr
@@ -358,7 +358,7 @@ func (instance *Manager) Decrement(runtimeInstance containercontract.Runtime, ke
         return 0, nilErr
     }
 
-    newValue, decrementErr := instance.backend.Decrement(runtimeInstance.Context(), key, delta, options)
+    newValue, decrementErr := instance.backend.Decrement(runtimeInstance, key, delta, options)
 
     return newValue, normalizeThirdPartyError(decrementErr)
 }

@@ -35,7 +35,7 @@ func liveService(t *testing.T) *BackendService {
             return
         }
 
-        if clearErr := cleaner.Clear(context.Background()); nil != clearErr {
+        if clearErr := cleaner.Clear(testRuntime()); nil != clearErr {
             t.Logf("could not clear the test prefix: %v", clearErr)
         }
     })
@@ -53,29 +53,29 @@ func TestNewBackendService_RefusesANilClient(t *testing.T) {
 func TestBackendService_DelegatesEveryOperationToItsBackend(t *testing.T) {
     service := liveService(t)
 
-    if setErr := service.Set(context.Background(), "one", []byte("first"), bound.Of(time.Minute)); nil != setErr {
+    if setErr := service.Set(testRuntime(), "one", []byte("first"), bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("Set: %v", setErr)
     }
 
-    payload, found, getErr := service.Get(context.Background(), "one")
+    payload, found, getErr := service.Get(testRuntime(), "one")
     if nil != getErr || false == found || "first" != string(payload) {
         t.Fatalf("Get = %q, %v, %v", string(payload), found, getErr)
     }
 
-    present, hasErr := service.Has(context.Background(), "one")
+    present, hasErr := service.Has(testRuntime(), "one")
     if nil != hasErr || false == present {
         t.Fatalf("Has = %v, %v", present, hasErr)
     }
 
-    if deleteErr := service.Delete(context.Background(), "one"); nil != deleteErr {
+    if deleteErr := service.Delete(testRuntime(), "one"); nil != deleteErr {
         t.Fatalf("Delete: %v", deleteErr)
     }
 
-    if present, hasErr = service.Has(context.Background(), "one"); nil != hasErr || true == present {
+    if present, hasErr = service.Has(testRuntime(), "one"); nil != hasErr || true == present {
         t.Fatalf("Has after Delete = %v, %v", present, hasErr)
     }
 
-    if setMultipleErr := service.SetMultiple(context.Background(), map[string][]byte{
+    if setMultipleErr := service.SetMultiple(testRuntime(), map[string][]byte{
         "session:a": []byte("alpha"),
         "session:b": []byte("beta"),
         "profile:a": []byte("gamma"),
@@ -83,39 +83,39 @@ func TestBackendService_DelegatesEveryOperationToItsBackend(t *testing.T) {
         t.Fatalf("SetMultiple: %v", setMultipleErr)
     }
 
-    values, manyErr := service.Many(context.Background(), []string{"session:a", "session:b"})
+    values, manyErr := service.Many(testRuntime(), []string{"session:a", "session:b"})
     if nil != manyErr || 2 != len(values) {
         t.Fatalf("Many = %v, %v", values, manyErr)
     }
 
-    if deleteMultipleErr := service.DeleteMultiple(context.Background(), []string{"session:a"}); nil != deleteMultipleErr {
+    if deleteMultipleErr := service.DeleteMultiple(testRuntime(), []string{"session:a"}); nil != deleteMultipleErr {
         t.Fatalf("DeleteMultiple: %v", deleteMultipleErr)
     }
 
-    if clearByPrefixErr := service.ClearByPrefix(context.Background(), "session:"); nil != clearByPrefixErr {
+    if clearByPrefixErr := service.ClearByPrefix(testRuntime(), "session:"); nil != clearByPrefixErr {
         t.Fatalf("ClearByPrefix: %v", clearByPrefixErr)
     }
 
-    values, manyErr = service.Many(context.Background(), []string{"session:b", "profile:a"})
+    values, manyErr = service.Many(testRuntime(), []string{"session:b", "profile:a"})
     if nil != manyErr || 1 != len(values) || "gamma" != string(values["profile:a"]) {
         t.Fatalf("ClearByPrefix must remove only its subtree, got %v, %v", values, manyErr)
     }
 
-    counter, incrementErr := service.Increment(context.Background(), "counter", 4, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
+    counter, incrementErr := service.Increment(testRuntime(), "counter", 4, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil != incrementErr || 4 != counter {
         t.Fatalf("Increment = %d, %v", counter, incrementErr)
     }
 
-    counter, decrementErr := service.Decrement(context.Background(), "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
+    counter, decrementErr := service.Decrement(testRuntime(), "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil != decrementErr || 3 != counter {
         t.Fatalf("Decrement = %d, %v", counter, decrementErr)
     }
 
-    if clearErr := service.Clear(context.Background()); nil != clearErr {
+    if clearErr := service.Clear(testRuntime()); nil != clearErr {
         t.Fatalf("Clear: %v", clearErr)
     }
 
-    if values, manyErr = service.Many(context.Background(), []string{"profile:a", "counter"}); nil != manyErr || 0 != len(values) {
+    if values, manyErr = service.Many(testRuntime(), []string{"profile:a", "counter"}); nil != manyErr || 0 != len(values) {
         t.Fatalf("Clear must empty the prefix, got %v, %v", values, manyErr)
     }
 }
@@ -128,7 +128,7 @@ func TestBackendService_CloseRefusesLaterCallsAndLeavesTheClientOpen(t *testing.
         t.Fatalf("Close: %v", closeErr)
     }
 
-    setErr := service.Set(context.Background(), "after-close", []byte("payload"), bound.Of(time.Minute))
+    setErr := service.Set(testRuntime(), "after-close", []byte("payload"), bound.Of(time.Minute))
     if nil == setErr {
         t.Fatal("expected the closed service to refuse")
     }
@@ -142,10 +142,10 @@ func TestBackendService_CloseRefusesLaterCallsAndLeavesTheClientOpen(t *testing.
         t.Fatalf("sibling backend: %v", siblingErr)
     }
     t.Cleanup(func() {
-        _ = sibling.Clear(context.Background())
+        _ = sibling.Clear(testRuntime())
     })
 
-    if siblingSetErr := sibling.Set(context.Background(), "after-close", []byte("payload"), bound.Of(time.Minute)); nil != siblingSetErr {
+    if siblingSetErr := sibling.Set(testRuntime(), "after-close", []byte("payload"), bound.Of(time.Minute)); nil != siblingSetErr {
         t.Fatalf("the provider-owned client must stay open, got %v", siblingSetErr)
     }
 }
@@ -189,17 +189,17 @@ func TestBackendService_EveryDoorHandsTheCallersContextToTheBackend(t *testing.T
     cancel()
 
     doors := map[string]func() error{
-        "Get":            func() error { _, _, err := service.Get(canceledContext, "key"); return err },
-        "Set":            func() error { return service.Set(canceledContext, "key", []byte("value"), bound.Of(time.Minute)) },
-        "Delete":         func() error { return service.Delete(canceledContext, "key") },
-        "Has":            func() error { _, err := service.Has(canceledContext, "key"); return err },
-        "Clear":          func() error { return service.Clear(canceledContext) },
-        "ClearByPrefix":  func() error { return service.ClearByPrefix(canceledContext, "key") },
-        "Many":           func() error { _, err := service.Many(canceledContext, []string{"key"}); return err },
-        "SetMultiple":    func() error { return service.SetMultiple(canceledContext, map[string][]byte{"key": []byte("value")}, bound.Of(time.Minute)) },
-        "DeleteMultiple": func() error { return service.DeleteMultiple(canceledContext, []string{"key"}) },
-        "Increment":      func() error { _, err := service.Increment(canceledContext, "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); return err },
-        "Decrement":      func() error { _, err := service.Decrement(canceledContext, "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); return err },
+        "Get":            func() error { _, _, err := service.Get(testRuntimeUnder(canceledContext), "key"); return err },
+        "Set":            func() error { return service.Set(testRuntimeUnder(canceledContext), "key", []byte("value"), bound.Of(time.Minute)) },
+        "Delete":         func() error { return service.Delete(testRuntimeUnder(canceledContext), "key") },
+        "Has":            func() error { _, err := service.Has(testRuntimeUnder(canceledContext), "key"); return err },
+        "Clear":          func() error { return service.Clear(testRuntimeUnder(canceledContext)) },
+        "ClearByPrefix":  func() error { return service.ClearByPrefix(testRuntimeUnder(canceledContext), "key") },
+        "Many":           func() error { _, err := service.Many(testRuntimeUnder(canceledContext), []string{"key"}); return err },
+        "SetMultiple":    func() error { return service.SetMultiple(testRuntimeUnder(canceledContext), map[string][]byte{"key": []byte("value")}, bound.Of(time.Minute)) },
+        "DeleteMultiple": func() error { return service.DeleteMultiple(testRuntimeUnder(canceledContext), []string{"key"}) },
+        "Increment":      func() error { _, err := service.Increment(testRuntimeUnder(canceledContext), "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); return err },
+        "Decrement":      func() error { _, err := service.Decrement(testRuntimeUnder(canceledContext), "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); return err },
     }
 
     for door, call := range doors {
@@ -215,10 +215,10 @@ func TestBackendService_ACounterHandsItsOptionsToTheBackend(t *testing.T) {
     ctx := context.Background()
     prefix := "melody:test:" + t.Name() + ":"
 
-    if _, incrementErr := service.Increment(ctx, "up", 1, cachecontract.CounterOptions{Ttl: bound.Of(time.Hour)}); nil != incrementErr {
+    if _, incrementErr := service.Increment(testRuntimeUnder(ctx), "up", 1, cachecontract.CounterOptions{Ttl: bound.Of(time.Hour)}); nil != incrementErr {
         t.Fatal(incrementErr)
     }
-    if _, decrementErr := service.Decrement(ctx, "down", 1, cachecontract.CounterOptions{Ttl: bound.Of(time.Hour)}); nil != decrementErr {
+    if _, decrementErr := service.Decrement(testRuntimeUnder(ctx), "down", 1, cachecontract.CounterOptions{Ttl: bound.Of(time.Hour)}); nil != decrementErr {
         t.Fatal(decrementErr)
     }
 

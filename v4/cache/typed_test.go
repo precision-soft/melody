@@ -28,31 +28,31 @@ type cacheTestCountingBackend struct {
     manyErr   error
 }
 
-func (instance *cacheTestCountingBackend) Set(ctx context.Context, key string, payload []byte, ttl bound.Duration) error {
+func (instance *cacheTestCountingBackend) Set(runtimeInstance containercontract.Runtime, key string, payload []byte, ttl bound.Duration) error {
     instance.setCalls.Add(1)
 
-    return instance.Backend.Set(ctx, key, payload, ttl)
+    return instance.Backend.Set(runtimeInstance, key, payload, ttl)
 }
 
-func (instance *cacheTestCountingBackend) SetMultiple(ctx context.Context, items map[string][]byte, ttl bound.Duration) error {
+func (instance *cacheTestCountingBackend) SetMultiple(runtimeInstance containercontract.Runtime, items map[string][]byte, ttl bound.Duration) error {
     instance.setCalls.Add(1)
 
-    return instance.Backend.SetMultiple(ctx, items, ttl)
+    return instance.Backend.SetMultiple(runtimeInstance, items, ttl)
 }
 
-func (instance *cacheTestCountingBackend) Get(ctx context.Context, key string) ([]byte, bool, error) {
+func (instance *cacheTestCountingBackend) Get(runtimeInstance containercontract.Runtime, key string) ([]byte, bool, error) {
     instance.getCalls.Add(1)
 
-    return instance.Backend.Get(ctx, key)
+    return instance.Backend.Get(runtimeInstance, key)
 }
 
-func (instance *cacheTestCountingBackend) Many(ctx context.Context, keys []string) (map[string][]byte, error) {
+func (instance *cacheTestCountingBackend) Many(runtimeInstance containercontract.Runtime, keys []string) (map[string][]byte, error) {
     instance.manyCalls.Add(1)
     if nil != instance.manyErr {
         return nil, instance.manyErr
     }
 
-    return instance.Backend.Many(ctx, keys)
+    return instance.Backend.Many(runtimeInstance, keys)
 }
 
 func newCacheTestManager(t *testing.T) (*Manager, *cacheTestCountingBackend) {
@@ -248,7 +248,7 @@ func TestManager_Get_LeavesTheTargetOnAMissAFailureAndACorruptPayload(t *testing
         defer func() { _ = inner.CloseWithContext(context.Background()) }()
 
         manager := NewManager(inner, writingRefusingSerializer{JsonSerializer: &JsonSerializer{}}, ManagerConfig{})
-        if setErr := inner.Set(context.Background(), "corrupt", []byte("{"), bound.Of(time.Minute)); nil != setErr {
+        if setErr := inner.Set(testRuntime(), "corrupt", []byte("{"), bound.Of(time.Minute)); nil != setErr {
             t.Fatalf("set error: %v", setErr)
         }
 

@@ -734,7 +734,7 @@ func TestRemember_RecomputesOverACorruptPayload(t *testing.T) {
 
     cacheManager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    if setErr := backend.Set(context.Background(), "poisoned", []byte("{not json"), bound.UnlimitedDuration()); nil != setErr {
+    if setErr := backend.Set(testRuntime(), "poisoned", []byte("{not json"), bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
@@ -1690,7 +1690,7 @@ func TestRemember_AValueTheSerializerCannotReadBackIsNotStored(t *testing.T) {
             t.Fatalf("expected the value the serializer cannot read back to be refused (protection disabled %v)", config.StampedeProtectionDisabled)
         }
 
-        if _, exists, _ := backend.Get(context.Background(), "remember:unreadable"); true == exists {
+        if _, exists, _ := backend.Get(testRuntime(), "remember:unreadable"); true == exists {
             t.Fatalf("expected the refused value to stay out of the backend (protection disabled %v)", config.StampedeProtectionDisabled)
         }
 
@@ -1744,7 +1744,7 @@ func rememberWithABoundedWaitOnASlowCallback(t *testing.T, config RememberConfig
 
     deadline := time.Now().Add(waitFor)
     for {
-        _, exists, _ := backend.Get(context.Background(), "remember:bounded-wait")
+        _, exists, _ := backend.Get(testRuntime(), "remember:bounded-wait")
         if true == exists || false == time.Now().Before(deadline) {
             return exists, int(calls.Load())
         }
@@ -1806,23 +1806,13 @@ func TestRemember_AValueTheSerializerCannotEncodeIsRefusedNamingTheKey(t *testin
             t.Fatalf("expected the refusal to name the key, got %v (protection disabled %v)", exception.LogContext(rememberErr, exception.LogContextConfig{}), config.StampedeProtectionDisabled)
         }
 
-        if _, exists, _ := backend.Get(context.Background(), "remember:unencodable"); true == exists {
+        if _, exists, _ := backend.Get(testRuntime(), "remember:unencodable"); true == exists {
             t.Fatalf("expected the refused value to stay out of the backend (protection disabled %v)", config.StampedeProtectionDisabled)
         }
 
         _ = backend.CloseWithContext(t.Context())
     }
 }
-
-/* zzTypedNilContext dereferences its receiver in every method, which is what an application's own context wrapper does: without that a typed nil would answer happily and the guard it breaks could not be seen (§the double must be handed the failure the guard prevents). */
-type zzTypedNilContext struct {
-    parent context.Context
-}
-
-func (instance *zzTypedNilContext) Deadline() (time.Time, bool) { return instance.parent.Deadline() }
-func (instance *zzTypedNilContext) Done() <-chan struct{}       { return instance.parent.Done() }
-func (instance *zzTypedNilContext) Err() error                  { return instance.parent.Err() }
-func (instance *zzTypedNilContext) Value(key any) any           { return instance.parent.Value(key) }
 
 func TestRemember_ANilOrTypedNilOrContextlessRuntimeIsRefused(t *testing.T) {
     for _, refusedRuntime := range refusedTestRuntimes() {

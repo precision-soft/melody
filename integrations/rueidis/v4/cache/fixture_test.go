@@ -9,8 +9,28 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/redis/rueidis"
 )
+
+func testRuntime() containercontract.Runtime {
+    return testRuntimeUnder(context.Background())
+}
+
+func testRuntimeUnder(ctx context.Context) containercontract.Runtime {
+    return runtime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
+}
+
+/* contextlessTestRuntime carries no context, which no constructor of the runtime package builds */
+type contextlessTestRuntime struct {
+    containercontract.Runtime
+}
+
+func (instance *contextlessTestRuntime) Context() context.Context {
+    return nil
+}
 
 /* liveBackend answers a backend over the redis the validation lane starts, under a prefix unique to the calling test so parallel suites never read one another's keys. The suite skips where no address is exported, the way the rate limiter suite of the parent package does. */
 func liveBackend(t *testing.T) (*Backend, rueidis.Client) {
@@ -47,7 +67,7 @@ func liveBackend(t *testing.T) (*Backend, rueidis.Client) {
             return
         }
 
-        if clearErr := cleaner.Clear(context.Background()); nil != clearErr {
+        if clearErr := cleaner.Clear(testRuntime()); nil != clearErr {
             t.Logf("could not clear the test prefix: %v", clearErr)
         }
     })

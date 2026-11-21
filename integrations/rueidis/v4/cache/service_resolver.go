@@ -14,7 +14,7 @@ type ServiceRegistrar interface {
     RegisterService(serviceName string, provider any, options containercontract.RegisterOptions)
 }
 
-/* RegisterBackendService resolves the configuration at the call, so a nil client or a limit outside its rule fails the boot rather than the first resolve. Each round trip is bounded by BackendConfig.CommandTimeout, 1s when left out, on top of the caller's context. */
+/* RegisterBackendService resolves the configuration at the call, so a nil client or a limit outside its rule fails the boot rather than the first resolve. Each round trip is bounded by BackendConfig.CommandTimeout, 1s when left out, on top of the runtime's context. */
 func RegisterBackendService(registrar ServiceRegistrar, client rueidis.Client, config BackendConfig) {
     if nil == client {
         exception.Panic(exception.NewError("redis client is nil", nil, nil))

@@ -14,6 +14,7 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -182,8 +183,8 @@ func refuseInvalidKeyList(keys []string) error {
     return nil
 }
 
-func (instance *InMemoryBackend) Get(ctx context.Context, key string) ([]byte, bool, error) {
-    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+func (instance *InMemoryBackend) Get(runtimeInstance containercontract.Runtime, key string) ([]byte, bool, error) {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         return nil, false, nilErr
     }
 
@@ -200,7 +201,7 @@ func (instance *InMemoryBackend) Get(ctx context.Context, key string) ([]byte, b
         return nil, false, keyErr
     }
 
-    if doneErr := ctx.Err(); nil != doneErr {
+    if doneErr := runtimeInstance.Context().Err(); nil != doneErr {
         instance.mutex.RUnlock()
         return nil, false, doneErr
     }
@@ -243,8 +244,8 @@ func (instance *InMemoryBackend) Get(ctx context.Context, key string) ([]byte, b
     return payload, true, nil
 }
 
-func (instance *InMemoryBackend) Has(ctx context.Context, key string) (bool, error) {
-    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+func (instance *InMemoryBackend) Has(runtimeInstance containercontract.Runtime, key string) (bool, error) {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         return false, nilErr
     }
 
@@ -261,7 +262,7 @@ func (instance *InMemoryBackend) Has(ctx context.Context, key string) (bool, err
         return false, keyErr
     }
 
-    if doneErr := ctx.Err(); nil != doneErr {
+    if doneErr := runtimeInstance.Context().Err(); nil != doneErr {
         instance.mutex.RUnlock()
         return false, doneErr
     }
@@ -282,12 +283,12 @@ func (instance *InMemoryBackend) Has(ctx context.Context, key string) (bool, err
 }
 
 func (instance *InMemoryBackend) Set(
-    ctx context.Context,
+    runtimeInstance containercontract.Runtime,
     key string,
     payload []byte,
     ttl bound.Duration,
 ) error {
-    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         return nilErr
     }
 
@@ -309,7 +310,7 @@ func (instance *InMemoryBackend) Set(
         return ttlErr
     }
 
-    if doneErr := ctx.Err(); nil != doneErr {
+    if doneErr := runtimeInstance.Context().Err(); nil != doneErr {
         return doneErr
     }
 
@@ -323,8 +324,8 @@ func (instance *InMemoryBackend) Set(
     return nil
 }
 
-func (instance *InMemoryBackend) Delete(ctx context.Context, key string) error {
-    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+func (instance *InMemoryBackend) Delete(runtimeInstance containercontract.Runtime, key string) error {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         return nilErr
     }
 
@@ -339,7 +340,7 @@ func (instance *InMemoryBackend) Delete(ctx context.Context, key string) error {
         return keyErr
     }
 
-    if doneErr := ctx.Err(); nil != doneErr {
+    if doneErr := runtimeInstance.Context().Err(); nil != doneErr {
         return doneErr
     }
 
@@ -348,8 +349,8 @@ func (instance *InMemoryBackend) Delete(ctx context.Context, key string) error {
     return nil
 }
 
-func (instance *InMemoryBackend) Clear(ctx context.Context) error {
-    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+func (instance *InMemoryBackend) Clear(runtimeInstance containercontract.Runtime) error {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         return nilErr
     }
 
@@ -360,7 +361,7 @@ func (instance *InMemoryBackend) Clear(ctx context.Context) error {
         return closedBackendError()
     }
 
-    if doneErr := ctx.Err(); nil != doneErr {
+    if doneErr := runtimeInstance.Context().Err(); nil != doneErr {
         return doneErr
     }
 
@@ -370,8 +371,8 @@ func (instance *InMemoryBackend) Clear(ctx context.Context) error {
     return nil
 }
 
-func (instance *InMemoryBackend) Many(ctx context.Context, keys []string) (map[string][]byte, error) {
-    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+func (instance *InMemoryBackend) Many(runtimeInstance containercontract.Runtime, keys []string) (map[string][]byte, error) {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         return nil, nilErr
     }
 
@@ -395,7 +396,7 @@ func (instance *InMemoryBackend) Many(ctx context.Context, keys []string) (map[s
         return nil, refuseErr
     }
 
-    if doneErr := ctx.Err(); nil != doneErr {
+    if doneErr := runtimeInstance.Context().Err(); nil != doneErr {
         instance.mutex.RUnlock()
         return nil, doneErr
     }
@@ -451,8 +452,8 @@ func (instance *InMemoryBackend) Many(ctx context.Context, keys []string) (map[s
     return result, nil
 }
 
-func (instance *InMemoryBackend) SetMultiple(ctx context.Context, items map[string][]byte, ttl bound.Duration) error {
-    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+func (instance *InMemoryBackend) SetMultiple(runtimeInstance containercontract.Runtime, items map[string][]byte, ttl bound.Duration) error {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         return nilErr
     }
 
@@ -484,7 +485,7 @@ func (instance *InMemoryBackend) SetMultiple(ctx context.Context, items map[stri
         }
     }
 
-    if doneErr := ctx.Err(); nil != doneErr {
+    if doneErr := runtimeInstance.Context().Err(); nil != doneErr {
         return doneErr
     }
 
@@ -500,8 +501,8 @@ func (instance *InMemoryBackend) SetMultiple(ctx context.Context, items map[stri
     return nil
 }
 
-func (instance *InMemoryBackend) DeleteMultiple(ctx context.Context, keys []string) error {
-    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+func (instance *InMemoryBackend) DeleteMultiple(runtimeInstance containercontract.Runtime, keys []string) error {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         return nilErr
     }
 
@@ -516,7 +517,7 @@ func (instance *InMemoryBackend) DeleteMultiple(ctx context.Context, keys []stri
         return refuseErr
     }
 
-    if doneErr := ctx.Err(); nil != doneErr {
+    if doneErr := runtimeInstance.Context().Err(); nil != doneErr {
         return doneErr
     }
 
@@ -527,16 +528,16 @@ func (instance *InMemoryBackend) DeleteMultiple(ctx context.Context, keys []stri
     return nil
 }
 
-func (instance *InMemoryBackend) Increment(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
-    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+func (instance *InMemoryBackend) Increment(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         return 0, nilErr
     }
 
-    return instance.incrementValue(ctx, key, delta, options)
+    return instance.incrementValue(runtimeInstance, key, delta, options)
 }
 
-func (instance *InMemoryBackend) Decrement(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
-    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+func (instance *InMemoryBackend) Decrement(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         return 0, nilErr
     }
 
@@ -555,7 +556,7 @@ func (instance *InMemoryBackend) Decrement(ctx context.Context, key string, delt
         )
     }
 
-    return instance.incrementValue(ctx, key, -delta, options)
+    return instance.incrementValue(runtimeInstance, key, -delta, options)
 }
 
 func (instance *InMemoryBackend) refuseClosedOrInvalidKey(key string) error {
@@ -607,7 +608,7 @@ func (instance *InMemoryBackend) stopCleanupLoop() {
 }
 
 func (instance *InMemoryBackend) incrementValue(
-    ctx context.Context,
+    runtimeInstance containercontract.Runtime,
     key string,
     delta int64,
     options cachecontract.CounterOptions,
@@ -631,7 +632,7 @@ func (instance *InMemoryBackend) incrementValue(
         return 0, ttlErr
     }
 
-    if doneErr := ctx.Err(); nil != doneErr {
+    if doneErr := runtimeInstance.Context().Err(); nil != doneErr {
         return 0, doneErr
     }
 

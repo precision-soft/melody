@@ -484,19 +484,20 @@ func TestApplicationRegisterCache_TheFallbackBackendIsBoundedAtTheDefaultCeiling
     backend := container.MustFromResolver[cachecontract.Backend](t.Context(), applicationInstance.kernel.ServiceContainer(), cache.ServiceCacheBackend)
     defer func() { _ = backend.CloseWithContext(context.Background()) }()
 
+    runtimeInstance := runtime.NewRun(context.Background(), applicationInstance.kernel.ServiceContainer().NewScope())
     keys := make([]string, 0, 10_001)
     for index := 0; index <= 10_000; index++ {
         key := "key-" + strconv.Itoa(index)
         keys = append(keys, key)
 
-        if setErr := backend.Set(context.Background(), key, []byte("1"), bound.UnlimitedDuration()); nil != setErr {
+        if setErr := backend.Set(runtimeInstance, key, []byte("1"), bound.UnlimitedDuration()); nil != setErr {
             t.Fatalf("set error: %v", setErr)
         }
     }
 
     stored := 0
     for _, key := range keys {
-        if found, _ := backend.Has(context.Background(), key); true == found {
+        if found, _ := backend.Has(runtimeInstance, key); true == found {
             stored++
         }
     }

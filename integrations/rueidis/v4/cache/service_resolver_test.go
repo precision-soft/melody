@@ -103,13 +103,13 @@ func TestRegisterBackendService_HandsTheConfigToTheBackend(t *testing.T) {
         t.Fatalf("expected the config to reach the registered backend, got timeout %v, max key length %d, scan count %d and delete batch %d", service.backend.commandTimeout, service.backend.maxKeyLength, service.backend.scanCount, service.backend.deleteBatch)
     }
 
-    _ = service.Set(context.Background(), "warm", []byte("x"), melodybound.UnlimitedDuration())
-    _ = service.Delete(context.Background(), "warm")
+    _ = service.Set(testRuntime(), "warm", []byte("x"), melodybound.UnlimitedDuration())
+    _ = service.Delete(testRuntime(), "warm")
 
     backendGate.Wedge()
 
     getErr := awaitOutcome(t, registeredBackendProbeBudget, func() error {
-        _, _, err := service.Get(context.Background(), "key")
+        _, _, err := service.Get(testRuntime(), "key")
 
         return err
     })
@@ -127,14 +127,14 @@ func TestRegisterBackendService_AnAbsentCommandTimeoutRefusesAWedgedReadWithinOn
 
     service := container.MustFromResolver[*BackendService](t.Context(), serviceContainer, melodycache.ServiceCacheBackend)
 
-    _ = service.Set(context.Background(), "warm", []byte("x"), melodybound.UnlimitedDuration())
-    _ = service.Delete(context.Background(), "warm")
+    _ = service.Set(testRuntime(), "warm", []byte("x"), melodybound.UnlimitedDuration())
+    _ = service.Delete(testRuntime(), "warm")
 
     backendGate.Wedge()
 
     startedAt := time.Now()
     getErr := awaitOutcome(t, registeredBackendProbeBudget, func() error {
-        _, _, err := service.Get(context.Background(), "key")
+        _, _, err := service.Get(testRuntime(), "key")
 
         return err
     })

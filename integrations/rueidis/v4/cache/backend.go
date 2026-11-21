@@ -13,6 +13,7 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/redis/rueidis"
@@ -53,7 +54,7 @@ type BackendConfig struct {
     /* MaxKeyLength bounds the key before the prefix: 1024 by default, at least 1. */
     MaxKeyLength bound.Count
 
-    /* CommandTimeout bounds every round trip on top of the caller's context: 1s by default, at least 1ms. */
+    /* CommandTimeout bounds every round trip on top of the runtime's context: 1s by default, at least 1ms. */
     CommandTimeout bound.Duration
 }
 
@@ -217,8 +218,8 @@ func (instance *Backend) walkRoundTrip(ctx context.Context, operation string) ro
     }
 }
 
-func (instance *Backend) refuseBeforeArguments(ctx context.Context) error {
-    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+func (instance *Backend) refuseBeforeArguments(runtimeInstance containercontract.Runtime) error {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         return nilErr
     }
 
@@ -237,10 +238,12 @@ func (instance *Backend) refuseWhenClosed() error {
     return nil
 }
 
-func (instance *Backend) Get(ctx context.Context, key string) ([]byte, bool, error) {
-    if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
+func (instance *Backend) Get(runtimeInstance containercontract.Runtime, key string) ([]byte, bool, error) {
+    if refusalErr := instance.refuseBeforeArguments(runtimeInstance); nil != refusalErr {
         return nil, false, refusalErr
     }
+
+    ctx := runtimeInstance.Context()
 
     normalizedKey, normalizeErr := instance.normalizeKey(key)
     if nil != normalizeErr {
@@ -274,10 +277,12 @@ func (instance *Backend) Get(ctx context.Context, key string) ([]byte, bool, err
     return payload, true, nil
 }
 
-func (instance *Backend) Set(ctx context.Context, key string, payload []byte, ttl bound.Duration) error {
-    if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
+func (instance *Backend) Set(runtimeInstance containercontract.Runtime, key string, payload []byte, ttl bound.Duration) error {
+    if refusalErr := instance.refuseBeforeArguments(runtimeInstance); nil != refusalErr {
         return refusalErr
     }
+
+    ctx := runtimeInstance.Context()
 
     normalizedKey, normalizeErr := instance.normalizeKey(key)
     if nil != normalizeErr {
@@ -309,10 +314,12 @@ func (instance *Backend) Set(ctx context.Context, key string, payload []byte, tt
     ).Error())
 }
 
-func (instance *Backend) Delete(ctx context.Context, key string) error {
-    if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
+func (instance *Backend) Delete(runtimeInstance containercontract.Runtime, key string) error {
+    if refusalErr := instance.refuseBeforeArguments(runtimeInstance); nil != refusalErr {
         return refusalErr
     }
+
+    ctx := runtimeInstance.Context()
 
     normalizedKey, normalizeErr := instance.normalizeKey(key)
     if nil != normalizeErr {
@@ -332,10 +339,12 @@ func (instance *Backend) Delete(ctx context.Context, key string) error {
     ).Error())
 }
 
-func (instance *Backend) Has(ctx context.Context, key string) (bool, error) {
-    if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
+func (instance *Backend) Has(runtimeInstance containercontract.Runtime, key string) (bool, error) {
+    if refusalErr := instance.refuseBeforeArguments(runtimeInstance); nil != refusalErr {
         return false, refusalErr
     }
+
+    ctx := runtimeInstance.Context()
 
     normalizedKey, normalizeErr := instance.normalizeKey(key)
     if nil != normalizeErr {
@@ -365,10 +374,12 @@ func (instance *Backend) Has(ctx context.Context, key string) (bool, error) {
     return 0 != count, nil
 }
 
-func (instance *Backend) Clear(ctx context.Context) error {
-    if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
+func (instance *Backend) Clear(runtimeInstance containercontract.Runtime) error {
+    if refusalErr := instance.refuseBeforeArguments(runtimeInstance); nil != refusalErr {
         return refusalErr
     }
+
+    ctx := runtimeInstance.Context()
 
     if doneErr := ctx.Err(); nil != doneErr {
         return doneErr
@@ -391,10 +402,12 @@ func (instance *Backend) deleteMatching(roundTrip roundTripContext, pattern stri
 }
 
 /* ClearByPrefix refuses the empty prefix; Clear is the door for the whole namespace. */
-func (instance *Backend) ClearByPrefix(ctx context.Context, prefix string) error {
-    if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
+func (instance *Backend) ClearByPrefix(runtimeInstance containercontract.Runtime, prefix string) error {
+    if refusalErr := instance.refuseBeforeArguments(runtimeInstance); nil != refusalErr {
         return refusalErr
     }
+
+    ctx := runtimeInstance.Context()
 
     normalizedPrefix, normalizeErr := instance.normalizeKey(prefix)
     if nil != normalizeErr {
@@ -408,10 +421,12 @@ func (instance *Backend) ClearByPrefix(ctx context.Context, prefix string) error
     return instance.deleteMatching(instance.walkRoundTrip(ctx, "ClearByPrefix"), escapeRedisGlobMeta(normalizedPrefix)+"*")
 }
 
-func (instance *Backend) Many(ctx context.Context, keys []string) (map[string][]byte, error) {
-    if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
+func (instance *Backend) Many(runtimeInstance containercontract.Runtime, keys []string) (map[string][]byte, error) {
+    if refusalErr := instance.refuseBeforeArguments(runtimeInstance); nil != refusalErr {
         return nil, refusalErr
     }
+
+    ctx := runtimeInstance.Context()
 
     result := make(map[string][]byte, len(keys))
 
@@ -469,10 +484,12 @@ func (instance *Backend) Many(ctx context.Context, keys []string) (map[string][]
     return result, nil
 }
 
-func (instance *Backend) SetMultiple(ctx context.Context, items map[string][]byte, ttl bound.Duration) error {
-    if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
+func (instance *Backend) SetMultiple(runtimeInstance containercontract.Runtime, items map[string][]byte, ttl bound.Duration) error {
+    if refusalErr := instance.refuseBeforeArguments(runtimeInstance); nil != refusalErr {
         return refusalErr
     }
+
+    ctx := runtimeInstance.Context()
 
     /* the ttl is judged before the keys, as the in-memory backend judges it */
     expiry, ttlErr := cachecontract.ResolveTtl(ttl)
@@ -553,10 +570,12 @@ func (instance *Backend) firstSetFailure(setErrors map[string]error, requestedCo
     )
 }
 
-func (instance *Backend) DeleteMultiple(ctx context.Context, keys []string) error {
-    if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
+func (instance *Backend) DeleteMultiple(runtimeInstance containercontract.Runtime, keys []string) error {
+    if refusalErr := instance.refuseBeforeArguments(runtimeInstance); nil != refusalErr {
         return refusalErr
     }
+
+    ctx := runtimeInstance.Context()
 
     normalizedKeys := make([]string, 0, len(keys))
     for _, key := range keys {
@@ -596,10 +615,12 @@ elseif ttl == 0 and ARGV[3] == "1" then
 end
 return redis.call("get", KEYS[1])`)
 
-func (instance *Backend) Increment(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
-    if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
+func (instance *Backend) Increment(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    if refusalErr := instance.refuseBeforeArguments(runtimeInstance); nil != refusalErr {
         return 0, refusalErr
     }
+
+    ctx := runtimeInstance.Context()
 
     normalizedKey, normalizeErr := instance.normalizeKey(key)
     if nil != normalizeErr {
@@ -645,10 +666,12 @@ func (instance *Backend) addToCounter(ctx context.Context, operation string, key
     return value, nil
 }
 
-func (instance *Backend) Decrement(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
-    if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
+func (instance *Backend) Decrement(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    if refusalErr := instance.refuseBeforeArguments(runtimeInstance); nil != refusalErr {
         return 0, refusalErr
     }
+
+    ctx := runtimeInstance.Context()
 
     normalizedKey, normalizeErr := instance.normalizeKey(key)
     if nil != normalizeErr {

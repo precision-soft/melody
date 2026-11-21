@@ -30,48 +30,48 @@ func (instance *BackendService) Backend() *Backend {
     return instance.backend
 }
 
-func (instance *BackendService) Get(ctx context.Context, key string) ([]byte, bool, error) {
-    return instance.backend.Get(ctx, key)
+func (instance *BackendService) Get(runtimeInstance containercontract.Runtime, key string) ([]byte, bool, error) {
+    return instance.backend.Get(runtimeInstance, key)
 }
 
-func (instance *BackendService) Set(ctx context.Context, key string, payload []byte, ttl bound.Duration) error {
-    return instance.backend.Set(ctx, key, payload, ttl)
+func (instance *BackendService) Set(runtimeInstance containercontract.Runtime, key string, payload []byte, ttl bound.Duration) error {
+    return instance.backend.Set(runtimeInstance, key, payload, ttl)
 }
 
-func (instance *BackendService) Delete(ctx context.Context, key string) error {
-    return instance.backend.Delete(ctx, key)
+func (instance *BackendService) Delete(runtimeInstance containercontract.Runtime, key string) error {
+    return instance.backend.Delete(runtimeInstance, key)
 }
 
-func (instance *BackendService) Has(ctx context.Context, key string) (bool, error) {
-    return instance.backend.Has(ctx, key)
+func (instance *BackendService) Has(runtimeInstance containercontract.Runtime, key string) (bool, error) {
+    return instance.backend.Has(runtimeInstance, key)
 }
 
-func (instance *BackendService) Clear(ctx context.Context) error {
-    return instance.backend.Clear(ctx)
+func (instance *BackendService) Clear(runtimeInstance containercontract.Runtime) error {
+    return instance.backend.Clear(runtimeInstance)
 }
 
-func (instance *BackendService) ClearByPrefix(ctx context.Context, prefix string) error {
-    return instance.backend.ClearByPrefix(ctx, prefix)
+func (instance *BackendService) ClearByPrefix(runtimeInstance containercontract.Runtime, prefix string) error {
+    return instance.backend.ClearByPrefix(runtimeInstance, prefix)
 }
 
-func (instance *BackendService) Many(ctx context.Context, keys []string) (map[string][]byte, error) {
-    return instance.backend.Many(ctx, keys)
+func (instance *BackendService) Many(runtimeInstance containercontract.Runtime, keys []string) (map[string][]byte, error) {
+    return instance.backend.Many(runtimeInstance, keys)
 }
 
-func (instance *BackendService) SetMultiple(ctx context.Context, items map[string][]byte, ttl bound.Duration) error {
-    return instance.backend.SetMultiple(ctx, items, ttl)
+func (instance *BackendService) SetMultiple(runtimeInstance containercontract.Runtime, items map[string][]byte, ttl bound.Duration) error {
+    return instance.backend.SetMultiple(runtimeInstance, items, ttl)
 }
 
-func (instance *BackendService) DeleteMultiple(ctx context.Context, keys []string) error {
-    return instance.backend.DeleteMultiple(ctx, keys)
+func (instance *BackendService) DeleteMultiple(runtimeInstance containercontract.Runtime, keys []string) error {
+    return instance.backend.DeleteMultiple(runtimeInstance, keys)
 }
 
-func (instance *BackendService) Increment(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
-    return instance.backend.Increment(ctx, key, delta, options)
+func (instance *BackendService) Increment(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    return instance.backend.Increment(runtimeInstance, key, delta, options)
 }
 
-func (instance *BackendService) Decrement(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
-    return instance.backend.Decrement(ctx, key, delta, options)
+func (instance *BackendService) Decrement(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    return instance.backend.Decrement(runtimeInstance, key, delta, options)
 }
 
 func (instance *BackendService) CloseWithContext(closeContext context.Context) error {
