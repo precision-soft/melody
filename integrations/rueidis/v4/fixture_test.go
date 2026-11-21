@@ -20,6 +20,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     redisclient "github.com/redis/rueidis"
+    lockcontract "github.com/precision-soft/melody/v4/lock/contract"
 )
 
 /* stubClient is a client no door may reach: it satisfies the interface and panics on any command, so a pin on a refusal that fires before a round trip runs without a backend */
@@ -542,4 +543,13 @@ func newScriptCountingClient(t *testing.T) (redisclient.Client, *atomic.Int64) {
     t.Cleanup(client.Close)
 
     return client, frames
+}
+
+/* mustCreateLock answers the lock a test's CreateLock made, a refusal failing the test where it happened */
+func mustCreateLock(lock lockcontract.Lock, createErr error) lockcontract.Lock {
+    if nil != createErr {
+        panic(createErr)
+    }
+
+    return lock
 }

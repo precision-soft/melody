@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Breaking** — `lock.go`: `CreateLock` answers `(lockcontract.Lock, error)`, a nil error for any ttl.
 - **Breaking** with the framework: the fourth major's runtime is read from `v4/container/contract` and built through `v4/container/runtime`, a runtime resolving through its scope only; `runtime.New` and `Runtime.Container()` are gone. See the framework's `UPGRADE.md`.
 - **Breaking** — `provider.go`: `NewProvider` refuses `Insecure: true` beside a non-nil `TlsConfig`, naming both fields, where `TlsConfig` won in silence.
 - **Breaking** — `provider.go`: `Open(runtimeInstance, parameters, logger)` and `OpenForMigration(runtimeInstance, parameters, logger)` take the runtime first and open under its context, the bodies of the removed `OpenContext` and `OpenForMigrationContext`; a nil runtime, a typed nil and one carrying no context are refused with "the runtime is nil or carries no context" before bun's diagnostics are routed, where a nil context read as `context.Background()`. The refusal before the attempt and the one cutting a retry's backoff carry the context's cause with the cancellation under it, so `errors.Is` matches a cause set through `WithCancelCause` and `context.Canceled` alike.

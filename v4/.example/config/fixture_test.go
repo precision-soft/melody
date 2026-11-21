@@ -19,6 +19,7 @@ import (
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     bun "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
+    melodylockcontract "github.com/precision-soft/melody/v4/lock/contract"
 )
 
 /* the compose balancer as the shipped .env names it, already resolved: the tests below hand the list in resolved form because what they assert is what the resolver does with a peer and a chain, not what the name resolves to. */
@@ -138,4 +139,13 @@ func allowedBy(limiter melodyhttpcontract.RateLimiter, key string) bool {
     decision, _ := limiter.Allow(configTestRuntime(), key)
 
     return decision.Allowed
+}
+
+/* mustCreateLock answers the lock a test's CreateLock made, a refusal failing the test where it happened */
+func mustCreateLock(lock melodylockcontract.Lock, createErr error) melodylockcontract.Lock {
+    if nil != createErr {
+        panic(createErr)
+    }
+
+    return lock
 }

@@ -58,8 +58,8 @@ type Locker struct {
     releaseTimeout time.Duration
 }
 
-/* CreateLock answers a session lock, which holds until its connection drops and has no lease, so the ttl is ignored and every state of it, unlimited included, is admitted. */
-func (instance *Locker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
+/* CreateLock answers a session lock, which holds until its connection drops and has no lease, so the ttl is ignored and every state of it, unlimited included, is admitted: it answers no error. */
+func (instance *Locker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
     keyHigh, keyLow := advisoryLockKey(name)
 
     return &pgsqlLock{
@@ -68,7 +68,7 @@ func (instance *Locker) CreateLock(name string, ttl bound.Duration) lockcontract
         keyHigh:        keyHigh,
         keyLow:         keyLow,
         releaseTimeout: instance.releaseTimeout,
-    }
+    }, nil
 }
 
 /* pgsqlLock carries the name the caller gave and the two halves of the advisory key the server was asked for, and every error context names both, so a diagnostic can be matched against pg_locks. */

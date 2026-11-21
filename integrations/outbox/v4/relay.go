@@ -650,7 +650,10 @@ func (instance *Relay) acquireLease(runtimeInstance containercontract.Runtime) (
         return noopRelease, noopRefresh, true, nil
     }
 
-    lock := instance.config.Locker.CreateLock(instance.config.LockName, bound.Of(instance.config.LockTtl))
+    lock, createErr := instance.config.Locker.CreateLock(instance.config.LockName, bound.Of(instance.config.LockTtl))
+    if nil != createErr {
+        return noopRelease, noopRefresh, false, createErr
+    }
 
     acquired, acquireErr := lock.Acquire(runtimeInstance)
     if nil != acquireErr {

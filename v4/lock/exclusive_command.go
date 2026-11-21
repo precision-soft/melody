@@ -54,14 +54,25 @@ func NewExclusiveCommand(
         exception.Panic(exception.FromError(ttlErr))
     }
 
-    if _, isLeaseLocker := locker.(lockcontract.LeaseLocker); true == isLeaseLocker && true == ttl.Unlimited {
+    lockName := config.LockName
+    if "" == lockName {
+        lockName = exclusiveCommandLockNamePrefix + command.Name()
+    }
+
+    /* created once to read the locker's refusal at construction, a decorated locker's included; every run creates its own */
+    if _, createErr := locker.CreateLock(lockName, ttl.Limit()); nil != createErr {
+        message := "the exclusive command locker refused its lock"
+        if true == exception.ChainIs(createErr, lockcontract.ErrUnlimitedTtlRefused) {
+            message = "an unlimited exclusive command ttl needs a session-style locker"
+        }
+
         exception.Panic(
             exception.NewError(
-                "an unlimited exclusive command ttl needs a session-style locker",
+                message,
                 exceptioncontract.Context{
                     "field": exclusiveCommandTtlRule.Name,
                 },
-                lockcontract.ErrUnlimitedTtlRefused,
+                createErr,
             ),
         )
     }
@@ -69,11 +80,6 @@ func NewExclusiveCommand(
     refreshInterval, _ := resolveRefreshSchedule(ttl)
     if _, stopRenewalLimitErr := resolveStopRenewalLimit("ExclusiveCommandConfig.StopRenewalLimit", config.StopRenewalLimit, refreshInterval); nil != stopRenewalLimitErr {
         exception.Panic(exception.FromError(stopRenewalLimitErr))
-    }
-
-    lockName := config.LockName
-    if "" == lockName {
-        lockName = exclusiveCommandLockNamePrefix + command.Name()
     }
 
     return &ExclusiveCommand{

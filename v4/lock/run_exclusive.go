@@ -85,7 +85,10 @@ func RunExclusive(
         return false, stopRenewalLimitErr
     }
 
-    lock := locker.CreateLock(name, ttl.Limit())
+    lock, createErr := locker.CreateLock(name, ttl.Limit())
+    if nil != createErr {
+        return false, createErr
+    }
 
     /* the lease is dated from the instant the acquire is issued, since the store starts it somewhere inside the call, as enterTerm does on the leader gate */
     acquireIssuedAt := time.Now()

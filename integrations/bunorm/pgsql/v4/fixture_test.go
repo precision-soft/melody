@@ -17,6 +17,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/pgdialect"
+    lockcontract "github.com/precision-soft/melody/v4/lock/contract"
 )
 
 /* testRuntime is the runtime the provider tests open under: a run over a scope of an empty container, on a context that never ends */
@@ -225,4 +226,13 @@ func newReleaseRecordingDatabase(t *testing.T, connector *releaseRecordingConnec
 
 func (instance *spyServiceRegistrar) ReservePhaseService(serviceName string, kind containercontract.Kind) error {
     return nil
+}
+
+/* mustCreateLock answers the lock a test's CreateLock made, a refusal failing the test where it happened */
+func mustCreateLock(lock lockcontract.Lock, createErr error) lockcontract.Lock {
+    if nil != createErr {
+        panic(createErr)
+    }
+
+    return lock
 }

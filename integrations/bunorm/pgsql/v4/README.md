@@ -88,7 +88,7 @@ provider := pgsql.NewProvider(pgsql.ProviderConfig{
 ```go
 locker := pgsql.NewLocker(database, pgsql.LockerConfig{}) // database is a *bun.DB
 
-namedLock := locker.CreateLock("import:catalog", bound.UnlimitedDuration())
+namedLock, _ := locker.CreateLock("import:catalog", bound.UnlimitedDuration())
 
 acquired, err := namedLock.Acquire(runtime)
 if err != nil {

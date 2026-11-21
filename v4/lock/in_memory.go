@@ -41,11 +41,12 @@ type inMemoryHolder struct {
     expiresAt time.Time
 }
 
-/* LeaseOnly marks this locker's locks as leases. */
-func (instance *InMemoryLocker) LeaseOnly() {}
+/* CreateLock answers a lease lock, its ttl resolved through lockcontract.ResolveLeaseTtl here, so an absent one holds for 30s and an unlimited one is refused, and a holder that crashes lets the lock lapse. */
+func (instance *InMemoryLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+    if _, ttlErr := lockcontract.ResolveLeaseTtl(ttl); nil != ttlErr {
+        return nil, ttlErr
+    }
 
-/* CreateLock answers a lease lock: the ttl is resolved through lockcontract.ResolveLeaseTtl at Acquire and Refresh, so an absent one holds for 30s and an unlimited one is refused there, and a holder that crashes lets the lock lapse. */
-func (instance *InMemoryLocker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
     token := instance.counter.Add(1)
 
     return &inMemoryLock{
@@ -53,7 +54,7 @@ func (instance *InMemoryLocker) CreateLock(name string, ttl bound.Duration) lock
         name:   name,
         ttl:    ttl,
         token:  token,
-    }
+    }, nil
 }
 
 func (instance *InMemoryLocker) PurgeExpired() int {

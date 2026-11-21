@@ -63,12 +63,6 @@ type Lock interface {
 }
 
 type Locker interface {
-    CreateLock(name string, ttl bound.Duration) Lock
-}
-
-/* LeaseLocker marks a Locker whose every lock is a lease, so an unlimited ttl can be refused where the locker is handed over rather than at the first Acquire. */
-type LeaseLocker interface {
-    Locker
-
-    LeaseOnly()
+    /* CreateLock answers the lock of a name. A locker whose locks are leases refuses an unlimited ttl here, its cause ErrUnlimitedTtlRefused. It reaches no store. */
+    CreateLock(name string, ttl bound.Duration) (Lock, error)
 }

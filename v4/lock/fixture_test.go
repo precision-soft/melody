@@ -95,7 +95,7 @@ type sessionStyleLocker struct {
     inner lockcontract.Locker
 }
 
-func (instance *sessionStyleLocker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
+func (instance *sessionStyleLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
     return instance.inner.CreateLock(name, bound.Duration{})
 }
 
@@ -106,7 +106,7 @@ type ttlRecordingLocker struct {
     ttls  []bound.Duration
 }
 
-func (instance *ttlRecordingLocker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
+func (instance *ttlRecordingLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
     instance.mutex.Lock()
     instance.ttls = append(instance.ttls, ttl)
     instance.mutex.Unlock()
@@ -125,4 +125,13 @@ func (instance *ttlRecordingLocker) firstTtl(t *testing.T) bound.Duration {
     }
 
     return instance.ttls[0]
+}
+
+/* mustCreateLock answers the lock a test's CreateLock made, a refusal failing the test where it happened */
+func mustCreateLock(lock lockcontract.Lock, createErr error) lockcontract.Lock {
+    if nil != createErr {
+        panic(createErr)
+    }
+
+    return lock
 }

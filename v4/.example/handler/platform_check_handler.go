@@ -24,7 +24,10 @@ func PlatformCheckHandler() melodyhttpcontract.Handler {
         locker := melodylock.LockerMustFromRuntime(runtimeInstance)
 
         /* a probe of the lock backend calls its doors one by one, Refresh included, which RunExclusive would hide */
-        lockInstance := locker.CreateLock("example.platform.check", melodybound.Of(5*time.Second))
+        lockInstance, createErr := locker.CreateLock("example.platform.check", melodybound.Of(5*time.Second))
+        if nil != createErr {
+            return nil, createErr
+        }
 
         acquired, acquireErr := lockInstance.Acquire(runtimeInstance)
         if nil != acquireErr {

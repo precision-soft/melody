@@ -15,7 +15,7 @@ Locking is opt-in. The core defines the contract and an in-memory `Locker` (sing
 
 - Define the abstraction:
     - [`Lock`](../../lock/contract/lock.go) — `Acquire` (non-blocking try), `Release`, `Refresh(ttl)`, the ttl a `bound.Duration`
-    - [`Locker`](../../lock/contract/lock.go) — `CreateLock(name, ttl)`, the ttl a `bound.Duration`
+    - [`Locker`](../../lock/contract/lock.go) — `CreateLock(name, ttl) (Lock, error)`, the ttl a `bound.Duration`; a lease locker refuses an unlimited one there, its cause `ErrUnlimitedTtlRefused`; it reaches no store
     - [`LockTtlRule`](../../lock/contract/lock.go), [`ResolveLeaseTtl`](../../lock/contract/lock.go) and [`ResolveLeaseRefreshTtl`](../../lock/contract/lock.go) — the one reading every locker gives the ttl
 - Provide an in-memory implementation:
     - [`InMemoryLocker`](../../lock/in_memory.go)
@@ -54,7 +54,10 @@ ran, runErr := lock.RunExclusive(runtimeInstance, locker, "picking:order:42", lo
 The raw doors stay for a caller that drives the backend itself, a readiness probe that checks `Refresh` among them. Such a caller releases on a runtime detached from its cancellation, as the helpers do: a backend that runs the release under the runtime's context, the redis locker among them, refuses a request that already ended, and the lock stays held until its ttl. The mysql and pgsql lockers detach the release themselves, and the in-memory one reads no context:
 
 ```go
-pickingLock := locker.CreateLock("picking:order:42", bound.Of(30*time.Second))
+pickingLock, createErr := locker.CreateLock("picking:order:42", bound.Of(30*time.Second))
+if nil != createErr {
+    return createErr
+}
 
 acquired, acquireErr := pickingLock.Acquire(runtimeInstance)
 if nil != acquireErr || false == acquired {
@@ -180,7 +183,7 @@ The three hooks, none by default:
 
 **The lease renewal is started before `OnElected` is invoked, and keeps running for the whole time the hook runs** — so a hook that legitimately outlives the `ttl` does not lose the lease under itself. Were it the other way round, nothing would renew while the hook worked: the lease would lapse, a second instance could acquire it, and this one would still report leadership and never demote, because demotion only follows a *failed* renewal.
 
-An unlimited `Ttl` needs a session-style locker. [`NewLeaderGate`](../../lock/leader_gate.go) panics naming `LeaderGateConfig.Ttl` when the locker declares [`LeaseLocker`](../../lock/contract/lock.go), as the in-memory and the rueidis lockers do. A locker the constructor cannot read, `NewLazyLocker` or one of your own without the mark, is answered at the first campaign: `Run` reports the refusal once, through `OnCampaignError` when it is wired and as an error record otherwise, ends at once and returns it, with [`ErrUnlimitedTtlRefused`](../../lock/contract/lock.go) as its cause. [`NewExclusiveCommand`](../../lock/exclusive_command.go) panics the same way over a `LeaseLocker`, naming `ExclusiveCommandConfig.Ttl`.
+An unlimited `Ttl` needs a session-style locker. [`NewLeaderGate`](../../lock/leader_gate.go) creates the lock once at construction and panics naming `LeaderGateConfig.Ttl` when the locker's `CreateLock` refuses the ttl, as the in-memory and the rueidis lockers do, a decorator over them included. A lazy locker answers its refusal at its first use, so `NewLazyLocker` is answered at the first campaign: `Run` reports the refusal once, through `OnCampaignError` when it is wired and as an error record otherwise, ends at once and returns it, with [`ErrUnlimitedTtlRefused`](../../lock/contract/lock.go) as its cause. [`NewExclusiveCommand`](../../lock/exclusive_command.go) panics the same way, naming `ExclusiveCommandConfig.Ttl`.
 
 `Run` never aborts on any other `Acquire` error (a store outage): it backs off by doubling, capped at `MaxCampaignBackoff`, 1 minute by default, but never faster than `RetryInterval`, and resumes campaigning. Because such errors never abort it, they are also never returned: with no `OnCampaignError` wired, the gate logs each failed campaign through the runtime's logger — a store that stays down would otherwise be indistinguishable from a deployment that simply has no work to lead. A wired hook replaces the record rather than being echoed by it, and every hook runs behind a recover: a panicking hook is logged with its stack instead of unwinding the bare goroutine `Run` is documented to be started on and killing the process with the lock held. What the recover must not keep alive is the term: a panic out of `OnElected` ends the term it was leading — the lock is released, `OnLost` or the journal receives the panic as the
 lost cause with the hook's name, and the gate campaigns again after `RetryInterval`, where another replica may win — because a gate parked on a term whose work died would renew a lease under nothing, answer `IsLeader` and report no failure, the false leader a crashed process used to prevent by handing the work over. `OnLost` and `OnCampaignError` run outside any term, so their panics end nothing. Both `Run` and `RunExclusive` refuse, before any lock is taken, a runtime whose scope is a typed nil: they re-wrap the runtime through `runtime.WithContext`, once inside the deferred release, and a refusal there kept the lock held for its whole ttl.
@@ -210,7 +213,7 @@ A failed resolution never panics: `CreateLock` resolves nothing and always hands
 - `RunExclusive` and `LeaderGate` both **fail closed** on an acquire error: the work does not run. A store outage therefore stops the exclusive work rather than risking two instances doing it at once.
 - `LeaderGate.Run` swallows store outages by design and returns `nil` on a clean shutdown, so its return value carries a diagnostic only for an unlimited ttl a lease lock refuses. Each failed campaign and each lost term is logged through the runtime's logger unless the matching hook is wired, in which case the hook owns the record.
 - `ExclusiveCommand` exits **zero** when another instance holds the lock. That is what keeps a cron fleet green, but it also means "did not run" is not distinguishable from "ran successfully" by exit code alone; read the info-level skip log instead.
-- An unlimited `ttl` handed to `RunExclusive` or `LeaderGate` selects session-lock behaviour (probe instead of renew). Passing one to a *lease* backend, the Redis or the in-memory locker, is a misconfiguration, not a mode switch: `NewLeaderGate` and `NewExclusiveCommand` refuse it at construction over a `LeaseLocker`, and otherwise its `Acquire` fails closed, naming the ttl, which ends `Run` and fails `RunExclusive`.
+- An unlimited `ttl` handed to `RunExclusive` or `LeaderGate` selects session-lock behaviour (probe instead of renew). Passing one to a *lease* backend, the Redis or the in-memory locker, is a misconfiguration, not a mode switch: `CreateLock` refuses it, naming the ttl, so `NewLeaderGate` and `NewExclusiveCommand` refuse it at construction, a lazy locker at its first use, which ends `Run` and fails `RunExclusive`.
 
 ## Userland API
 

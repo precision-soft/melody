@@ -15,7 +15,7 @@ import (
 
 locker := mysql.NewLocker(database, mysql.LockerConfig{}) // database is a *bun.DB
 
-namedLock := locker.CreateLock("import:catalog", bound.UnlimitedDuration())
+namedLock, _ := locker.CreateLock("import:catalog", bound.UnlimitedDuration())
 
 acquired, err := namedLock.Acquire(runtime)
 if err != nil {
@@ -28,7 +28,7 @@ if !acquired {
 defer namedLock.Release(runtime)
 ```
 
-`NewLocker(database, config)` takes the `*bun.DB` handle and a [`LockerConfig`](./lock.go), and implements `lock/contract.Locker`; `CreateLock(name, ttl)` returns a `lock/contract.Lock`. A nil database and a `ReleaseTimeout` outside its rule panic, the latter naming the field.
+`NewLocker(database, config)` takes the `*bun.DB` handle and a [`LockerConfig`](./lock.go), and implements `lock/contract.Locker`; `CreateLock(name, ttl)` returns a `lock/contract.Lock` and a nil error for any ttl. A nil database and a `ReleaseTimeout` outside its rule panic, the latter naming the field.
 
 ### Plug-and-play registration
 

@@ -239,19 +239,24 @@ func (instance *stringCodec) Decode(_ string, payload []byte) (any, error) {
 }
 
 type fakeLocker struct {
-    acquire bool
-    lock    *fakeLock
-    ttls    []bound.Duration
+    acquire   bool
+    lock      *fakeLock
+    ttls      []bound.Duration
+    createErr error
 }
 
-func (instance *fakeLocker) CreateLock(_ string, ttl bound.Duration) lockcontract.Lock {
+func (instance *fakeLocker) CreateLock(_ string, ttl bound.Duration) (lockcontract.Lock, error) {
     instance.ttls = append(instance.ttls, ttl)
 
-    if nil != instance.lock {
-        return instance.lock
+    if nil != instance.createErr {
+        return nil, instance.createErr
     }
 
-    return &fakeLock{acquire: instance.acquire}
+    if nil != instance.lock {
+        return instance.lock, nil
+    }
+
+    return &fakeLock{acquire: instance.acquire}, nil
 }
 
 type fakeLock struct {
@@ -507,6 +512,19 @@ func TestRelay_SkipsWorkWhenLeaseNotAcquired(t *testing.T) {
     published, _ := relay.RunOnce(relayTestRuntime())
     if 0 != published || 0 != len(transport.sent) || 0 != len(repository.calls) {
         t.Fatal("expected no work when the lease is held elsewhere")
+    }
+}
+
+func TestRelay_ALockerThatRefusesTheLockIsTheRunsError(t *testing.T) {
+    refusal := errors.New("the locker refuses the lock")
+    repository := &fakeRepository{due: []Pending{{Id: 1, TypeName: "string", Payload: []byte("x")}}}
+    transport := &fakeTransport{}
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}, Locker: &fakeLocker{createErr: refusal}})
+
+    published, runErr := relay.RunOnce(relayTestRuntime())
+    if false == errors.Is(runErr, refusal) || 0 != published || 0 != len(transport.sent) {
+        t.Fatalf("expected the locker's refusal as the run's error and no work, got %d %v", published, runErr)
     }
 }
 

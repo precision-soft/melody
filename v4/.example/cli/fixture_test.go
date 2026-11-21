@@ -33,6 +33,7 @@ import (
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
+    melodylockcontract "github.com/precision-soft/melody/v4/lock/contract"
 )
 
 const testUserServiceName = "service.test.user"
@@ -481,4 +482,13 @@ func exampleTestRuntime() melodycontainercontract.Runtime {
 
 func exampleTestRuntimeUnder(ctx context.Context) melodycontainercontract.Runtime {
     return melodyruntime.NewRun(ctx, melodycontainer.NewContainer(melodycontainer.ContainerConfig{}).NewScope())
+}
+
+/* mustCreateLock answers the lock a test's CreateLock made, a refusal failing the test where it happened */
+func mustCreateLock(lock melodylockcontract.Lock, createErr error) melodylockcontract.Lock {
+    if nil != createErr {
+        panic(createErr)
+    }
+
+    return lock
 }

@@ -63,14 +63,14 @@ type Locker struct {
     releaseTimeout time.Duration
 }
 
-/* CreateLock answers a session lock, which holds until its connection drops and has no lease, so the ttl is ignored and every state of it, unlimited included, is admitted. */
-func (instance *Locker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
+/* CreateLock answers a session lock, which holds until its connection drops and has no lease, so the ttl is ignored and every state of it, unlimited included, is admitted: it answers no error. */
+func (instance *Locker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
     return &mysqlLock{
         database:       instance.database,
         name:           name,
         lockName:       boundedLockName(name),
         releaseTimeout: instance.releaseTimeout,
-    }
+    }, nil
 }
 
 /* mysqlLock carries the name the caller gave and the folded form the server was asked for, and every error context names both. */

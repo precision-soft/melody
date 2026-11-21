@@ -25,11 +25,11 @@ type switchableRefreshLocker struct {
     fail  atomic.Bool
 }
 
-func (instance *switchableRefreshLocker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
+func (instance *switchableRefreshLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
     return &switchableRefreshLock{
         locker: instance,
-        inner:  instance.inner.CreateLock(name, ttl),
-    }
+        inner:  mustCreateLock(instance.inner.CreateLock(name, ttl)),
+    }, nil
 }
 
 type switchableRefreshLock struct {
@@ -235,7 +235,7 @@ func TestLeaderGate_ReleasesOnShutdown(t *testing.T) {
     }
 
     /* the one-hour ttl must not matter: shutdown releases the lock immediately */
-    contender := locker.CreateLock("worker:release", bound.Of(time.Minute))
+    contender := mustCreateLock(locker.CreateLock("worker:release", bound.Of(time.Minute)))
     acquired, _ := contender.Acquire(testRuntime())
     if false == acquired {
         t.Fatalf("expected the lock to be free right after shutdown")
@@ -474,11 +474,11 @@ func (instance *countingRefreshLocker) refreshes() int64 {
     return instance.count.Load()
 }
 
-func (instance *countingRefreshLocker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
+func (instance *countingRefreshLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
     return &countingRefreshLock{
         locker: instance,
-        inner:  instance.inner.CreateLock(name, ttl),
-    }
+        inner:  mustCreateLock(instance.inner.CreateLock(name, ttl)),
+    }, nil
 }
 
 type countingRefreshLock struct {
@@ -505,8 +505,8 @@ type contextSensitiveAcquireLocker struct {
     entered chan struct{}
 }
 
-func (instance *contextSensitiveAcquireLocker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
-    return &contextSensitiveAcquireLock{entered: instance.entered}
+func (instance *contextSensitiveAcquireLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+    return &contextSensitiveAcquireLock{entered: instance.entered}, nil
 }
 
 type contextSensitiveAcquireLock struct {
@@ -538,8 +538,8 @@ type hangingRefreshLocker struct {
     inner lockcontract.Locker
 }
 
-func (instance *hangingRefreshLocker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
-    return &hangingRefreshLock{inner: instance.inner.CreateLock(name, ttl)}
+func (instance *hangingRefreshLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+    return &hangingRefreshLock{inner: mustCreateLock(instance.inner.CreateLock(name, ttl))}, nil
 }
 
 type hangingRefreshLock struct {
@@ -688,8 +688,8 @@ type countedFailureLocker struct {
     attempts     atomic.Int64
 }
 
-func (instance *countedFailureLocker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
-    return &countedFailureLock{locker: instance, inner: instance.inner.CreateLock(name, ttl)}
+func (instance *countedFailureLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+    return &countedFailureLock{locker: instance, inner: mustCreateLock(instance.inner.CreateLock(name, ttl))}, nil
 }
 
 type countedFailureLock struct {
@@ -857,8 +857,8 @@ type alternatingRefreshLocker struct {
     attempts atomic.Int64
 }
 
-func (instance *alternatingRefreshLocker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
-    return &alternatingRefreshLock{locker: instance, inner: instance.inner.CreateLock(name, ttl)}
+func (instance *alternatingRefreshLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+    return &alternatingRefreshLock{locker: instance, inner: mustCreateLock(instance.inner.CreateLock(name, ttl))}, nil
 }
 
 type alternatingRefreshLock struct {
@@ -1036,7 +1036,7 @@ func TestLeaderGate_PanickingOnElectedHookIsShieldedAndLogged(t *testing.T) {
     }
 
     /* the shutdown released the lock: a fresh campaign must win it immediately */
-    acquired, acquireErr := locker.CreateLock("worker:hook-panics", bound.Of(time.Minute)).Acquire(testRuntimeWithContext(context.Background()))
+    acquired, acquireErr := mustCreateLock(locker.CreateLock("worker:hook-panics", bound.Of(time.Minute))).Acquire(testRuntimeWithContext(context.Background()))
     if nil != acquireErr || false == acquired {
         t.Fatalf("expected the lock to be released on shutdown, got acquired=%v err=%v", acquired, acquireErr)
     }
@@ -1199,7 +1199,7 @@ func TestLeaderGate_APanickingOnElectedEndsTheTermAndReleasesTheLock(t *testing.
     }
 
     /* the lock is free between the ended term and the next campaign, a whole RetryInterval away: another replica can take it now */
-    acquired, acquireErr := locker.CreateLock("worker:hook-panics-term", bound.Of(time.Minute)).Acquire(testRuntimeWithContext(context.Background()))
+    acquired, acquireErr := mustCreateLock(locker.CreateLock("worker:hook-panics-term", bound.Of(time.Minute))).Acquire(testRuntimeWithContext(context.Background()))
     if nil != acquireErr || false == acquired {
         t.Fatalf("expected the lock to be released with the ended term, got acquired=%v err=%v", acquired, acquireErr)
     }
@@ -1284,7 +1284,7 @@ func TestLeaderGateRun_RefusesATypedNilScopeBeforeCampaigning(t *testing.T) {
         _ = gate.Run(&typedNilScopeRuntime{ctx: context.Background()})
     }, "leader gate runtime scope is nil")
 
-    acquired, acquireErr := locker.CreateLock("worker:typed-nil-scope", bound.Of(time.Minute)).Acquire(testRuntimeWithContext(context.Background()))
+    acquired, acquireErr := mustCreateLock(locker.CreateLock("worker:typed-nil-scope", bound.Of(time.Minute))).Acquire(testRuntimeWithContext(context.Background()))
     if nil != acquireErr || false == acquired {
         t.Fatalf("expected no lock to be held by the refused run, got acquired=%v err=%v", acquired, acquireErr)
     }
@@ -1388,8 +1388,8 @@ type parkingReleaseLocker struct {
     enteredOnce    sync.Once
 }
 
-func (instance *parkingReleaseLocker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
-    return &parkingReleaseLock{locker: instance, inner: instance.inner.CreateLock(name, ttl)}
+func (instance *parkingReleaseLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+    return &parkingReleaseLock{locker: instance, inner: mustCreateLock(instance.inner.CreateLock(name, ttl))}, nil
 }
 
 type parkingReleaseLock struct {
@@ -1754,7 +1754,7 @@ func TestLeaderGate_AnAcquireErrorWhoseChainReachesItselfDoesNotHangTheCampaign(
     }
 }
 
-var _ lockcontract.LeaseLocker = (*InMemoryLocker)(nil)
+var _ lockcontract.Locker = (*InMemoryLocker)(nil)
 
 func TestNewExclusiveCommand_RefusesAnUnlimitedTtlOverALeaseLockerNamingTheField(t *testing.T) {
     defer func() {
@@ -1797,8 +1797,8 @@ type failingAcquireLocker struct {
     err error
 }
 
-func (instance *failingAcquireLocker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
-    return &failingAcquireLock{err: instance.err}
+func (instance *failingAcquireLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+    return &failingAcquireLock{err: instance.err}, nil
 }
 
 type failingAcquireLock struct {
@@ -1976,4 +1976,31 @@ func TestLeaderGate_ReleasesItsTermOnAContextDetachedFromTheRunWithNoDeadlineOfI
     if contextErr := <-locker.releaseErr; nil != contextErr {
         t.Fatalf("expected the release context alive after the run was cancelled, got %v", contextErr)
     }
+}
+
+/* decoratedLocker forwards to the locker it embeds, as an application's decorator does */
+type decoratedLocker struct {
+    lockcontract.Locker
+}
+
+func TestNewLeaderGate_RefusesAnUnlimitedTtlOverADecoratedLeaseLockerAtConstruction(t *testing.T) {
+    defer func() {
+        recoveredErr, isError := recover().(error)
+        if false == isError || false == errors.Is(recoveredErr, lockcontract.ErrUnlimitedTtlRefused) {
+            t.Fatalf("expected the decorated lease locker's refusal at construction, got %v", recoveredErr)
+        }
+    }()
+
+    NewLeaderGate(&decoratedLocker{Locker: NewInMemoryLocker(clock.NewSystemClock())}, "worker:decorated", LeaderGateConfig{Ttl: bound.UnlimitedDuration()})
+}
+
+func TestNewExclusiveCommand_RefusesAnUnlimitedTtlOverADecoratedLeaseLockerAtConstruction(t *testing.T) {
+    defer func() {
+        recoveredErr, isError := recover().(error)
+        if false == isError || false == errors.Is(recoveredErr, lockcontract.ErrUnlimitedTtlRefused) {
+            t.Fatalf("expected the decorated lease locker's refusal at construction, got %v", recoveredErr)
+        }
+    }()
+
+    NewExclusiveCommand(&recordingCommand{}, &decoratedLocker{Locker: NewInMemoryLocker(clock.NewSystemClock())}, ExclusiveCommandConfig{Ttl: bound.UnlimitedDuration()})
 }

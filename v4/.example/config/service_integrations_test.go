@@ -122,11 +122,11 @@ func assertInProcessLockerExpiresOnTheContainersClock(t *testing.T, register fun
 
     runtimeInstance := melodyruntime.NewRun(t.Context(), serviceContainer.NewScope())
 
-    if acquired, acquireErr := locker.CreateLock("example-lock", melodybound.Of(time.Minute)).Acquire(runtimeInstance); nil != acquireErr || false == acquired {
+    if acquired, acquireErr := mustCreateLock(locker.CreateLock("example-lock", melodybound.Of(time.Minute))).Acquire(runtimeInstance); nil != acquireErr || false == acquired {
         t.Fatalf("expected the first acquire to hold the lock, got %t, %v", acquired, acquireErr)
     }
 
-    second := locker.CreateLock("example-lock", melodybound.Of(time.Minute))
+    second := mustCreateLock(locker.CreateLock("example-lock", melodybound.Of(time.Minute)))
     if acquired, acquireErr := second.Acquire(runtimeInstance); nil != acquireErr || true == acquired {
         t.Fatalf("expected the second acquire refused while the lock is held, got %t, %v", acquired, acquireErr)
     }

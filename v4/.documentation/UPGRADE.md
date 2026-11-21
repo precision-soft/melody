@@ -477,6 +477,14 @@ The six `service.<module>` names of a module's principal service, `service.cache
 
 **Remedy.** A listener whose failure must keep every listener behind it from running declares `FailureEndsDispatch: true`. Read every failure through `errors.Is` / `errors.As`, or through `Unwrap() []error` on a joined answer. A listener that answers a request returns nil.
 
+### Lock: `CreateLock` answers an error, and `LeaseLocker` is removed
+
+**What changed.** [`lockcontract.Locker`](../lock/contract/lock.go)'s `CreateLock(name, ttl)` answers `(Lock, error)`: a lease locker refuses an unlimited ttl there, its cause `ErrUnlimitedTtlRefused`, the in-memory and rueidis lockers through `ResolveLeaseTtl`, and the mysql and pgsql lockers answer a nil error for any ttl. `LeaseLocker` and `LeaseOnly()` are removed: `NewLeaderGate` and `NewExclusiveCommand` create the lock once at construction and panic with its refusal, so a decorated locker is refused there too, where it lost the mark and was refused at the first `Acquire`; the lazy locker answers its inner locker's refusal from the first `Acquire`, `Release` or `Refresh`; `RunExclusive` and the outbox relay answer it as their error.
+
+**Symptom.** `assignment mismatch: 1 variable but locker.CreateLock returns 2 values`; `*L does not implement lockcontract.Locker (wrong type for method CreateLock)`; `undefined: lockcontract.LeaseLocker`.
+
+**Remedy.** `lock, createErr := locker.CreateLock(name, ttl)` and handle the error; a locker of the application's own answers `(lock, nil)`, a lease locker refusing an unlimited ttl through `lockcontract.ResolveLeaseTtl(ttl)`, and drops `LeaseOnly()`.
+
 ### Mailer: `Send` answers a receipt
 
 **What changed.** [`mailercontract.Mailer`](../mailer/contract/mailer.go)'s and `Transport`'s `Send` answer `(Receipt, error)`: `Receipt.MessageId` is the `Message-ID` the smtp transport wrote, the caller's own header trimmed or the one it minted, one value with the header; the in-memory and log transports answer the zero receipt; `Manager.Send` answers its transport's, the zero receipt beside any error. A caller's `Message-ID` header is written trimmed.
@@ -1205,11 +1213,11 @@ The same holds for a value a module was handed and would drop, refused at the ho
 
 ### Lock: a leader gate or an exclusive command with an unlimited ttl over a lease locker is refused
 
-**What changed.** [`NewLeaderGate`](../lock/leader_gate.go) and [`NewExclusiveCommand`](../lock/exclusive_command.go) panic on an unlimited ttl when the locker declares [`lockcontract.LeaseLocker`](../lock/contract/lock.go), the in-memory and rueidis lockers among them. A locker they cannot read, `NewLazyLocker` included, makes the gate's `Run` report the refusal once, end at once and return it, with `lockcontract.ErrUnlimitedTtlRefused` as its cause, where the gate retried it as a store outage for the life of the process. In the third major the in-memory locker admitted the same configuration as a session-style lock, so the gate led there.
+**What changed.** [`NewLeaderGate`](../lock/leader_gate.go) and [`NewExclusiveCommand`](../lock/exclusive_command.go) panic on an unlimited ttl when the locker's `CreateLock` refuses it, the in-memory and rueidis lockers among them. A locker they cannot read, `NewLazyLocker` included, makes the gate's `Run` report the refusal once, end at once and return it, with `lockcontract.ErrUnlimitedTtlRefused` as its cause, where the gate retried it as a store outage for the life of the process. In the third major the in-memory locker admitted the same configuration as a session-style lock, so the gate led there.
 
 **Symptom.** `NewLeaderGate` panics with `an unlimited leader gate ttl needs a session-style locker`, `NewExclusiveCommand` with `an unlimited exclusive command ttl needs a session-style locker`, or `Run` returns `a lease lock does not admit an unlimited ttl`.
 
-**Remedy.** A lease ttl, or a session-style locker (the mysql or pgsql one). A lease locker of your own declares `LeaseOnly()` to be refused at the constructor. `go gate.Run(runtimeInstance)` discards the returned refusal, which is still reported through `OnCampaignError` or the logger; read the return value to act on it.
+**Remedy.** A lease ttl, or a session-style locker (the mysql or pgsql one). A lease locker of your own refuses an unlimited ttl from its `CreateLock` (see the section on `CreateLock` answering an error). `go gate.Run(runtimeInstance)` discards the returned refusal, which is still reported through `OnCampaignError` or the logger; read the return value to act on it.
 
 ### Session: the in-memory and file storages hold at most 100,000 sessions
 

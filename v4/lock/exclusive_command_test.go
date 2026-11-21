@@ -79,7 +79,7 @@ func TestExclusiveCommand_SkipsQuietlyWhenHeld(t *testing.T) {
     locker := NewInMemoryLocker(clock.NewSystemClock())
     runtimeInstance := testRuntime()
 
-    holder := locker.CreateLock(exclusiveCommandLockNamePrefix+"outbox:dispatch", bound.Of(time.Minute))
+    holder := mustCreateLock(locker.CreateLock(exclusiveCommandLockNamePrefix+"outbox:dispatch", bound.Of(time.Minute)))
     acquired, _ := holder.Acquire(runtimeInstance)
     if false == acquired {
         t.Fatalf("expected external holder to acquire the default lock name")
@@ -111,7 +111,7 @@ func TestExclusiveCommand_CustomLockNameSharesTheLock(t *testing.T) {
     locker := NewInMemoryLocker(clock.NewSystemClock())
     runtimeInstance := testRuntime()
 
-    holder := locker.CreateLock("custom:lease", bound.Of(time.Minute))
+    holder := mustCreateLock(locker.CreateLock("custom:lease", bound.Of(time.Minute)))
     acquired, _ := holder.Acquire(runtimeInstance)
     if false == acquired {
         t.Fatalf("expected external holder to acquire the custom lock name")
@@ -160,7 +160,7 @@ func TestExclusiveCommand_ContentionSkipNamesThePeerInstance(t *testing.T) {
     locker := NewInMemoryLocker(clock.NewSystemClock())
     runtimeInstance, logger := runtimeWithRecordingLogger(context.Background())
 
-    holder := locker.CreateLock(exclusiveCommandLockNamePrefix+"outbox:dispatch", bound.Of(time.Minute))
+    holder := mustCreateLock(locker.CreateLock(exclusiveCommandLockNamePrefix+"outbox:dispatch", bound.Of(time.Minute)))
     if acquired, _ := holder.Acquire(runtimeInstance); false == acquired {
         t.Fatalf("expected the external holder to acquire the lock")
     }

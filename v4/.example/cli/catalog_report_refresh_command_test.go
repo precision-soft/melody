@@ -88,8 +88,8 @@ type sequenceLocker struct {
     acquireErr error
 }
 
-func (instance *sequenceLocker) CreateLock(name string, ttl bound.Duration) melodylockcontract.Lock {
-    return &sequenceLock{sequence: instance.sequence, inner: instance.inner.CreateLock(name, ttl), heldAway: instance.heldAway, acquireErr: instance.acquireErr}
+func (instance *sequenceLocker) CreateLock(name string, ttl bound.Duration) (melodylockcontract.Lock, error) {
+    return &sequenceLock{sequence: instance.sequence, inner: mustCreateLock(instance.inner.CreateLock(name, ttl)), heldAway: instance.heldAway, acquireErr: instance.acquireErr}, nil
 }
 
 type sequenceLock struct {

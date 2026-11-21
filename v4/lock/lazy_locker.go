@@ -17,19 +17,20 @@ type lazyLocker struct {
     locker *container.LazyService[lockcontract.Locker]
 }
 
-/* NewLazyLocker returns a Locker that resolves the registered service.lock.locker on first use, under the runtime handed to the lock's first Acquire, Release or Refresh, whose context bounds the wait on a locker another goroutine is building and whose kind the locker's provider reads; a successful resolution is reused for every later lock. CreateLock resolves nothing and never fails: a resolution failure is reported by the lock method that met it, so LeaderGate and RunExclusive see a store outage as the acquire error they already handle, and the resolution is retried on the next method call. */
+/* NewLazyLocker returns a Locker that resolves the registered service.lock.locker on first use, under the runtime handed to the lock's first Acquire, Release or Refresh, whose context bounds the wait on a locker another goroutine is building and whose kind the locker's provider reads; a successful resolution is reused for every later lock. CreateLock resolves nothing and answers no error: a resolution failure is reported by the lock method that met it, so LeaderGate and RunExclusive see a store outage as the acquire error they already handle, and the resolution is retried on the next method call. */
 func NewLazyLocker(resolver containercontract.Resolver) lockcontract.Locker {
     return &lazyLocker{
         locker: container.Lazy[lockcontract.Locker](resolver, ServiceLocker),
     }
 }
 
-func (instance *lazyLocker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
+/* CreateLock answers a lock that creates the inner one at its first use; the inner locker's refusal is the error of that first Acquire, Release or Refresh. */
+func (instance *lazyLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
     return &deferredLock{
         owner: instance,
         name:  name,
         ttl:   ttl,
-    }
+    }, nil
 }
 
 type deferredLock struct {
@@ -75,7 +76,10 @@ func (instance *deferredLock) resolvedLock(runtimeInstance containercontract.Run
         )
     }
 
-    createdLock := locker.CreateLock(instance.name, instance.ttl)
+    createdLock, createErr := locker.CreateLock(instance.name, instance.ttl)
+    if nil != createErr {
+        return nil, createErr
+    }
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

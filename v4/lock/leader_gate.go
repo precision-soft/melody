@@ -23,7 +23,7 @@ const leaderRetryFloor = 1 * time.Second
 
 /* LeaderGateConfig is what a gate declares beyond its locker and its lock name; every zero value is the default, the intervals derived from the ttl. */
 type LeaderGateConfig struct {
-    /* Ttl is the lease a term holds and renews: 30s by default, at least 2ms, unlimited selecting a session-style lock (MySQL GET_LOCK, PostgreSQL advisory), which has no lease to extend and is probed instead, and refused over a lockcontract.LeaseLocker. */
+    /* Ttl is the lease a term holds and renews: 30s by default, at least 2ms, unlimited selecting a session-style lock (MySQL GET_LOCK, PostgreSQL advisory), which has no lease to extend and is probed instead, and refused at construction by a locker whose CreateLock refuses it. */
     Ttl bound.Duration
 
     /* RetryInterval is the pause between failed campaigns while another instance leads: half the ttl, at least 1s, by default, 1s under a session-style lock; at least 1ms when set; unlimited refused. */
@@ -86,7 +86,7 @@ type leaderGateSettings struct {
     onCampaignError               func(runtimeInstance containercontract.Runtime, cause error)
 }
 
-/* NewLeaderGate builds a gate campaigning for the named lock. The configuration is resolved here, and a refusal panics naming the field, an unlimited ttl on a LeaseLocker included. */
+/* NewLeaderGate builds a gate campaigning for the named lock. The configuration is resolved here, and a refusal panics naming the field, an unlimited ttl a lease locker's CreateLock refuses included. */
 func NewLeaderGate(locker lockcontract.Locker, name string, config LeaderGateConfig) *LeaderGate {
     if true == internal.IsNilInterface(locker) {
         exception.Panic(exception.NewError("leader gate locker is nil", nil, nil))
@@ -101,25 +101,33 @@ func NewLeaderGate(locker lockcontract.Locker, name string, config LeaderGateCon
         exception.Panic(exception.FromError(err))
     }
 
-    if _, isLeaseLocker := locker.(lockcontract.LeaseLocker); true == isLeaseLocker && true == settings.sessionMode {
-        exception.Panic(
-            exception.NewError(
-                "an unlimited leader gate ttl needs a session-style locker",
-                exceptioncontract.Context{
-                    "field": leaderGateTtlRule.Name,
-                    "name":  name,
-                },
-                lockcontract.ErrUnlimitedTtlRefused,
-            ),
-        )
-    }
-
-    return &LeaderGate{
+    gate := &LeaderGate{
         locker:     locker,
         name:       name,
         settings:   settings,
         timeAnchor: time.Now(),
     }
+
+    /* the lock is created once here to read the locker's refusal at construction, a decorated locker's included; a campaign creates its own, each minting a new fencing token */
+    if _, createErr := locker.CreateLock(name, gate.lockTtl()); nil != createErr {
+        message := "the leader gate locker refused its lock"
+        if true == exception.ChainIs(createErr, lockcontract.ErrUnlimitedTtlRefused) {
+            message = "an unlimited leader gate ttl needs a session-style locker"
+        }
+
+        exception.Panic(
+            exception.NewError(
+                message,
+                exceptioncontract.Context{
+                    "field": leaderGateTtlRule.Name,
+                    "name":  name,
+                },
+                createErr,
+            ),
+        )
+    }
+
+    return gate
 }
 
 const leaderGateStopRenewalLimitField = "LeaderGateConfig.StopRenewalLimit"
@@ -279,17 +287,20 @@ func (instance *LeaderGate) Run(runtimeInstance containercontract.Runtime) error
         }
 
         /* a fresh lock per campaign: every CreateLock mints a new fencing token, and a lock reused after losing it would alias the tokens of the holder that took it over */
-        lock := instance.locker.CreateLock(instance.name, instance.lockTtl())
+        lock, acquireErr := instance.locker.CreateLock(instance.name, instance.lockTtl())
 
         acquireIssuedAt := time.Now()
-        acquired, acquireErr := lock.Acquire(runtimeInstance)
+        acquired := false
+        if nil == acquireErr {
+            acquired, acquireErr = lock.Acquire(runtimeInstance)
+        }
         if nil != acquireErr {
             /* a shutdown cancels the context the backend is called with, so a campaign failing with the cancellation is the stop itself, not a store outage */
             if nil != runContext.Err() {
                 return nil
             }
 
-            /* only a locker the constructor could not read gets here, a lazy one or one without the mark; no retry cures a configuration */
+            /* only a lazy locker gets here, its inner locker refusing at its first use; no retry cures a configuration */
             if true == exception.ChainIs(acquireErr, lockcontract.ErrUnlimitedTtlRefused) {
                 instance.reportTtlRefusal(runtimeInstance, acquireErr)
 

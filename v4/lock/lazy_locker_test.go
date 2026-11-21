@@ -34,7 +34,7 @@ func TestLazyLocker_DefersResolutionToTheFirstLockMethodThenDelegates(t *testing
 
     lazyLockerInstance := NewLazyLocker(serviceContainer)
 
-    lock := lazyLockerInstance.CreateLock("job", bound.Of(time.Minute))
+    lock := mustCreateLock(lazyLockerInstance.CreateLock("job", bound.Of(time.Minute)))
     if true == resolved {
         t.Fatalf("expected no resolution before the lock's first method")
     }
@@ -52,7 +52,7 @@ func TestLazyLocker_DefersResolutionToTheFirstLockMethodThenDelegates(t *testing
         t.Fatalf("expected the delegated lock to acquire")
     }
 
-    contender := inMemoryLocker.CreateLock("job", bound.Of(time.Minute))
+    contender := mustCreateLock(inMemoryLocker.CreateLock("job", bound.Of(time.Minute)))
 
     contended, contendErr := contender.Acquire(testRuntimeWithContext(context.Background()))
     if nil != contendErr || true == contended {
@@ -81,7 +81,7 @@ func TestLazyLocker_ReportsResolutionFailureThroughTheLockContractAndRetries(t *
 
     lazyLockerInstance := NewLazyLocker(serviceContainer)
 
-    lock := lazyLockerInstance.CreateLock("job", bound.Of(time.Minute))
+    lock := mustCreateLock(lazyLockerInstance.CreateLock("job", bound.Of(time.Minute)))
     if nil == lock {
         t.Fatalf("expected a lock even while the locker cannot be resolved")
     }
@@ -141,7 +141,7 @@ func TestLazyLocker_TheRunContextBoundsTheWaitOnALockerAnotherGoroutineBuilds(t 
     <-providerEntered
 
     lazyLockerInstance := NewLazyLocker(serviceContainer)
-    lock := lazyLockerInstance.CreateLock("job", bound.Of(time.Minute))
+    lock := mustCreateLock(lazyLockerInstance.CreateLock("job", bound.Of(time.Minute)))
 
     runContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -172,7 +172,7 @@ type countingLocker struct {
     creates atomic.Int64
 }
 
-func (instance *countingLocker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
+func (instance *countingLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
     instance.creates.Add(1)
 
     return instance.inner.CreateLock(name, ttl)
@@ -191,7 +191,7 @@ func TestLazyLocker_ADeferredLockCreatesItsRealLockOnce(t *testing.T) {
         container.RegisterOptions{},
     )
 
-    lock := NewLazyLocker(serviceContainer).CreateLock("job", bound.Of(time.Minute))
+    lock := mustCreateLock(NewLazyLocker(serviceContainer).CreateLock("job", bound.Of(time.Minute)))
     runtimeInstance := testRuntimeWithContext(context.Background())
 
     if _, acquireErr := lock.Acquire(runtimeInstance); nil != acquireErr {
@@ -235,7 +235,7 @@ func TestLazyLocker_TheLockerIsCreatedUnderTheFirstMethodsRuntime(t *testing.T) 
                 container.RegisterOptions{},
             )
 
-            lock := NewLazyLocker(serviceContainer).CreateLock("job", bound.Of(time.Minute))
+            lock := mustCreateLock(NewLazyLocker(serviceContainer).CreateLock("job", bound.Of(time.Minute)))
             if _, acquireErr := lock.Acquire(testCase.make(t.Context(), serviceContainer.NewScope())); nil != acquireErr {
                 t.Fatalf("acquire: %v", acquireErr)
             }
@@ -244,5 +244,27 @@ func TestLazyLocker_TheLockerIsCreatedUnderTheFirstMethodsRuntime(t *testing.T) 
                 t.Fatalf("the locker's provider read %s, wanted the first method's %s", seenKind, testCase.kind)
             }
         })
+    }
+}
+
+func TestLazyLocker_TheInnerLockersRefusalIsTheErrorOfTheFirstAcquire(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    container.MustRegister[lockcontract.Locker](
+        serviceContainer,
+        ServiceLocker,
+        func(resolver containercontract.Resolver) (lockcontract.Locker, error) {
+            return NewInMemoryLocker(clock.NewSystemClock()), nil
+        },
+        container.RegisterOptions{},
+    )
+
+    lock, createErr := NewLazyLocker(serviceContainer).CreateLock("job", bound.UnlimitedDuration())
+    if nil != createErr {
+        t.Fatalf("expected the lazy locker to answer its lock, got %v", createErr)
+    }
+
+    acquired, acquireErr := lock.Acquire(testRuntimeWithContext(context.Background()))
+    if true == acquired || false == errors.Is(acquireErr, lockcontract.ErrUnlimitedTtlRefused) {
+        t.Fatalf("expected the inner refusal as the first Acquire's error, got %v %v", acquired, acquireErr)
     }
 }

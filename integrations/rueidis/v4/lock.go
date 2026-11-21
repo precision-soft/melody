@@ -63,16 +63,18 @@ type Locker struct {
     callTimeout time.Duration
 }
 
-/* LeaseOnly marks this locker's locks as leases. */
-func (instance *Locker) LeaseOnly() {}
+/* CreateLock answers a lease lock, refusing an unlimited ttl through lockcontract.ResolveLeaseTtl, since a redis lease that never lapses outlives a crashed holder. */
+func (instance *Locker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+    if _, ttlErr := lockcontract.ResolveLeaseTtl(ttl); nil != ttlErr {
+        return nil, ttlErr
+    }
 
-func (instance *Locker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
     return &redisLock{
         client:      instance.client,
         name:        name,
         ttl:         ttl,
         callTimeout: instance.callTimeout,
-    }
+    }, nil
 }
 
 type redisLock struct {
