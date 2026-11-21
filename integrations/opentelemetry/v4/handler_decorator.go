@@ -5,7 +5,6 @@ import (
     "io"
     "net"
     nethttp "net/http"
-    "strconv"
     "time"
 
     "go.opentelemetry.io/otel/attribute"
@@ -18,18 +17,20 @@ import (
     "github.com/precision-soft/melody/v4/exception"
 )
 
+/* HandlerDecoratorConfig configures NewHandlerDecorator; Propagator is W3C TraceContext when left out. */
 type HandlerDecoratorConfig struct {
-    Tracer trace.Tracer
-
     Propagator propagation.TextMapPropagator
 
-    /* Meter is optional: when set, every request, short-circuited ones included, is counted and timed under the lifecycle instrument names, distinct from the middleware's handled-request instruments so routed requests are not double-counted. */
+    /* Meter is optional: when set, every request, short-circuited ones included, is timed on the melody.http.server.lifecycle.duration histogram, in seconds, distinct from the middleware's handled-request histogram so routed requests are not double-counted. */
     Meter metric.Meter
+
+    /* DurationBoundaries are the lifecycle histogram's bucket boundaries in seconds, DefaultDurationBoundaries when left out. */
+    DurationBoundaries []float64
 }
 
-/* NewHandlerDecorator builds the outermost observability seam: it wraps the full nethttp.Handler the http kernel produces (register it through Application.RegisterHttpHandlerDecorator or the module), so requests the middlewares never see, security denials and other kernel.request short-circuits, listener-written responses and the panic-recovery path, still produce a span, and a metric when HandlerDecoratorConfig.Meter is set. The tracing middleware's span becomes a child of the lifecycle span through the context this decorator injects. */
-func NewHandlerDecorator(config HandlerDecoratorConfig) (applicationcontract.HttpHandlerDecorator, error) {
-    if nil == config.Tracer {
+/* NewHandlerDecorator builds the outermost observability seam: it wraps the full nethttp.Handler the http kernel produces (register it through Application.RegisterHttpHandlerDecorator or the module), so requests the middlewares never see, security denials and other kernel.request short-circuits, listener-written responses and the panic-recovery path, still produce a span, and a metric when HandlerDecoratorConfig.Meter is set; a nil tracer is refused. The tracing middleware's span becomes a child of the lifecycle span through the context this decorator injects. */
+func NewHandlerDecorator(tracer trace.Tracer, config HandlerDecoratorConfig) (applicationcontract.HttpHandlerDecorator, error) {
+    if nil == tracer {
         return nil, exception.NewError("handler decorator tracer is nil", nil, nil)
     }
 
@@ -38,28 +39,14 @@ func NewHandlerDecorator(config HandlerDecoratorConfig) (applicationcontract.Htt
         propagator = propagation.TraceContext{}
     }
 
-    var requestCount metric.Int64Counter
     var requestDuration metric.Float64Histogram
 
     if nil != config.Meter {
-        counter, counterErr := config.Meter.Int64Counter(
-            "http.server.lifecycle.request.count",
-            metric.WithDescription("number of http requests observed at the lifecycle seam, including short-circuited ones"),
-        )
-        if nil != counterErr {
-            return nil, exception.NewError("could not create the lifecycle request counter", nil, counterErr)
-        }
-
-        histogram, histogramErr := config.Meter.Float64Histogram(
-            "http.server.lifecycle.request.duration",
-            metric.WithDescription("duration of http requests observed at the lifecycle seam in milliseconds"),
-            metric.WithUnit("ms"),
-        )
+        histogram, histogramErr := newDurationHistogram(config.Meter, "melody.http.server.lifecycle.duration", "duration of http requests observed at the lifecycle seam, including short-circuited ones", config.DurationBoundaries)
         if nil != histogramErr {
             return nil, exception.NewError("could not create the lifecycle duration histogram", nil, histogramErr)
         }
 
-        requestCount = counter
         requestDuration = histogram
     }
 
@@ -68,7 +55,7 @@ func NewHandlerDecorator(config HandlerDecoratorConfig) (applicationcontract.Htt
             parentContext := propagator.Extract(request.Context(), propagation.HeaderCarrier(request.Header))
 
             /* the route is not resolved yet at this seam, so the span is named by the method alone, the OTel convention for an unmatched route, and the path travels as an attribute to keep cardinality bounded */
-            spanContext, span := config.Tracer.Start(
+            spanContext, span := tracer.Start(
                 parentContext,
                 normalizedMethod(request.Method),
                 trace.WithSpanKind(trace.SpanKindServer),
@@ -97,14 +84,14 @@ func NewHandlerDecorator(config HandlerDecoratorConfig) (applicationcontract.Htt
                     span.SetStatus(codes.Error, nethttp.StatusText(statusCode))
                 }
 
-                if nil != requestCount {
+                if nil != requestDuration {
                     attributes := metric.WithAttributes(
                         attribute.String("http.request.method", normalizedMethod(request.Method)),
-                        attribute.String("http.response.status_code", strconv.Itoa(statusCode)),
+                        attribute.String("url.scheme", urlScheme(request)),
+                        attribute.Int("http.response.status_code", statusCode),
                     )
 
-                    requestCount.Add(parentContext, 1, attributes)
-                    requestDuration.Record(parentContext, float64(time.Since(startedAt).Microseconds())/1000.0, attributes)
+                    requestDuration.Record(parentContext, time.Since(startedAt).Seconds(), attributes)
                 }
 
                 if nil != recoveredValue {

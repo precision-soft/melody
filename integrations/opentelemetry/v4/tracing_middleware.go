@@ -15,12 +15,18 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
 )
 
-func NewTracingMiddleware(tracer trace.Tracer, propagator propagation.TextMapPropagator) httpcontract.Middleware {
-    /* a nil tracer is refused at construction rather than panicking on the first request, as NewHandlerDecorator's nil-Tracer guard does; a no-error constructor cannot report it, so it panics with a clear cause like other constructors of required dependencies */
+/* TracingMiddlewareConfig configures NewTracingMiddleware; Propagator extracts the caller's trace context, W3C TraceContext when left out. */
+type TracingMiddlewareConfig struct {
+    Propagator propagation.TextMapPropagator
+}
+
+/* NewTracingMiddleware builds the middleware that opens a server span per handled request; a nil tracer is refused. */
+func NewTracingMiddleware(tracer trace.Tracer, config TracingMiddlewareConfig) (httpcontract.Middleware, error) {
     if nil == tracer {
-        exception.Panic(exception.NewError("tracing middleware tracer is nil", nil, nil))
+        return nil, exception.NewError("tracing middleware tracer is nil", nil, nil)
     }
 
+    propagator := config.Propagator
     if nil == propagator {
         propagator = propagation.TraceContext{}
     }
@@ -94,7 +100,7 @@ func NewTracingMiddleware(tracer trace.Tracer, propagator propagation.TextMapPro
 
             return response, handlerErr
         }
-    }
+    }, nil
 }
 
 /* recordSpanError records the handler error as the span's exception event, and records its rendered message instead when the recording itself panics — the sdk asks the error for its text, which a typed nil cannot give */

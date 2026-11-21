@@ -22,6 +22,22 @@ Every entry below that the third major shipped is the consequence of fixing a de
 
 The fourth major takes the forms the third major kept compatible: a section that names a sibling interface, a deprecated door or a released signature on the third major describes here the form the fourth major carries instead, and this major's [`CHANGELOG.md`](../CHANGELOG.md) marks each **Breaking**.
 
+### Opentelemetry: the request metrics follow the semantic conventions
+
+**What changed.** [`NewMetricsMiddleware`](../../integrations/opentelemetry/v4/metrics_middleware.go) records `http.server.request.duration` in seconds (`http_server_request_duration_seconds` in the exposition), bucketed on the conventions' advisory boundaries, with `url.scheme` and an integer `http.response.status_code`; the lifecycle decorator records `melody.http.server.lifecycle.duration` the same way. The counters `http.server.request.count` and `http.server.lifecycle.request.count`, and the millisecond histograms `http.server.request.duration` and `http.server.lifecycle.request.duration`, are gone.
+
+**Symptom.** No compile error: dashboards and alerts on `http_server_request_count_total`, `http_server_lifecycle_request_count_total`, `http_server_request_duration_milliseconds` and `http_server_lifecycle_request_duration_milliseconds` go empty, or read wrong by a factor of 1000.
+
+**Remedy.** Read `http_server_request_duration_seconds_count` for the request count and quantiles over `http_server_request_duration_seconds_bucket`; the lifecycle family is `melody_http_server_lifecycle_duration_seconds`. Set `MetricsMiddlewareConfig.DurationBoundaries` or `HandlerDecoratorConfig.DurationBoundaries` to keep buckets of your own.
+
+### Opentelemetry: the Prometheus meter has a close door; the constructors answer an error
+
+**What changed.** [`NewPrometheusMetrics(PrometheusConfig{MeterName})`](../../integrations/opentelemetry/v4/prometheus.go) answers a handle with `Meter()`, `Handler()` and `CloseWithContext(closeContext)`; `ModuleConfig.Prometheus` replaces `ModuleConfig.MetricsHandler`, serves the handle's exposition on `MetricsPath` and registers it so the teardown closes it. `NewPrometheusMeter` and `MetricsHandler` are removed. `NewTracingMiddleware(tracer, TracingMiddlewareConfig{Propagator})` answers `(Middleware, error)`, a nil tracer an error where it panicked; `NewHandlerDecorator(tracer, HandlerDecoratorConfig{Propagator, Meter, DurationBoundaries})` takes the tracer first; `NewMetricsMiddleware(meter, MetricsMiddlewareConfig{DurationBoundaries})`.
+
+**Symptom.** `undefined: opentelemetry.NewPrometheusMeter`, `opentelemetry.MetricsHandler`; `unknown field MetricsHandler in struct literal of type opentelemetry.ModuleConfig`; `unknown field Tracer in struct literal of type opentelemetry.HandlerDecoratorConfig`; `not enough arguments in call to opentelemetry.NewMetricsMiddleware`; `assignment mismatch: 1 variable but opentelemetry.NewTracingMiddleware returns 2 values`.
+
+**Remedy.** `prometheusMetrics, err := opentelemetry.NewPrometheusMetrics(opentelemetry.PrometheusConfig{})`, then `prometheusMetrics.Meter()` for the middlewares and `ModuleConfig{Prometheus: prometheusMetrics, MetricsPath: "/metrics"}`; move the tracer out of `HandlerDecoratorConfig` into the first argument; hand the middlewares their config struct and check the tracing middleware's error.
+
 ### Cron: a template answers its ownership line and its user column
 
 **What changed.** [`cron.Template`](../../integrations/cron/v4/template.go) is `Name()`, `Render(entries, options)`, `OwnershipMarker(applicationName string) string` and `RendersUserColumn() bool`; `OwnedTemplate`, `UserColumnTemplate` and the fallback that judged a silent template by a builtin's name are removed. The generator hands the application's cli name in `RenderOptions.ApplicationName` and asks `OwnershipMarker(applicationName)`, so a template embedding a builtin renders the application's line and its `--prune` sweeps, where its sweep was refused.

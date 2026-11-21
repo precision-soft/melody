@@ -69,8 +69,13 @@ func (instance *Module) RegisterHttpMiddlewares(kernelInstance kernelcontract.Ke
         tracerName = defaultTracerName
     }
 
+    tracingMiddleware, middlewareErr := opentelemetry.NewTracingMiddleware(handle.provider.Tracer(tracerName), opentelemetry.TracingMiddlewareConfig{Propagator: instance.config.Propagator})
+    if nil != middlewareErr {
+        exception.Panic(exception.FromError(middlewareErr))
+    }
+
     registrar.Use(applicationcontract.MiddlewareRegistration{
-        Middlewares: []httpcontract.Middleware{opentelemetry.NewTracingMiddleware(handle.provider.Tracer(tracerName), instance.config.Propagator)},
+        Middlewares: []httpcontract.Middleware{tracingMiddleware},
     })
 }
 

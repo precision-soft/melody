@@ -41,7 +41,7 @@ func Configure(ctx context.Context, app *melodyapplication.Application, applicat
     app.RegisterModule(melodyopentelemetry.NewModule(melodyopentelemetry.ModuleConfig{
         Middlewares:       []melodyhttpcontract.Middleware{moduleInstance.metricsMiddleware},
         HandlerDecorators: []melodyapplicationcontract.HttpHandlerDecorator{moduleInstance.lifecycleDecorator},
-        MetricsHandler:    moduleInstance.metricsHandler,
+        Prometheus:        moduleInstance.prometheusMetrics,
         MetricsPath:       metricsPath,
         MetricsRouteName:  "example.metrics",
     }))

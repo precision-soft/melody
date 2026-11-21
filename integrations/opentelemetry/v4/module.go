@@ -5,6 +5,7 @@ import (
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
@@ -12,13 +13,17 @@ import (
 
 const defaultMetricsRouteName = "melody.metrics"
 
+/* ServicePrometheusMetrics is the container name ModuleConfig.Prometheus is registered under. */
+const ServicePrometheusMetrics = "service.opentelemetry.prometheus_metrics"
+
 type ModuleConfig struct {
     Middlewares []httpcontract.Middleware
     /* HandlerDecorators are registered as outermost wrappers around the kernel's nethttp.Handler (Application.RegisterHttpHandlerDecorator), so short-circuited requests — security denials, listener-written responses — are traced too, and counted when the decorator was built with HandlerDecoratorConfig.Meter; build one with NewHandlerDecorator. */
     HandlerDecorators []applicationcontract.HttpHandlerDecorator
-    MetricsHandler    nethttp.Handler
-    MetricsRouteName  string
-    MetricsPath       string
+    /* Prometheus is served on MetricsPath and registered under ServicePrometheusMetrics, so the container's teardown closes it; build it with NewPrometheusMetrics. */
+    Prometheus       *PrometheusMetrics
+    MetricsRouteName string
+    MetricsPath      string
 }
 
 func NewModule(config ModuleConfig) *Module {
@@ -61,15 +66,31 @@ func (instance *Module) RegisterHttpHandlerDecorators(kernelInstance kernelcontr
     return decorators
 }
 
+/* RegisterServices registers ModuleConfig.Prometheus, built by the application, so the container's teardown reaches its CloseWithContext. */
+func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRegistrar) {
+    if nil == instance.config.Prometheus {
+        return
+    }
+
+    prometheusMetrics := instance.config.Prometheus
+    registrar.RegisterService(
+        ServicePrometheusMetrics,
+        func(resolver containercontract.Resolver) (*PrometheusMetrics, error) {
+            return prometheusMetrics, nil
+        },
+        containercontract.RegisterOptions{},
+    )
+}
+
 func (instance *Module) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
-    hasHandler := nil != instance.config.MetricsHandler
+    hasHandler := nil != instance.config.Prometheus
     hasPath := "" != instance.config.MetricsPath
 
     if false == hasHandler && false == hasPath {
         if "" != instance.config.MetricsRouteName {
             exception.Panic(exception.NewError(
                 "the opentelemetry module is handed a metrics route name and no metrics route",
-                map[string]any{"field": "ModuleConfig.MetricsRouteName", "requires": "ModuleConfig.MetricsHandler and ModuleConfig.MetricsPath"},
+                map[string]any{"field": "ModuleConfig.MetricsRouteName", "requires": "ModuleConfig.Prometheus and ModuleConfig.MetricsPath"},
                 nil,
             ))
         }
@@ -79,16 +100,16 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel)
 
     if false == hasHandler {
         exception.Panic(exception.NewError(
-            "the opentelemetry module is handed a metrics path and no metrics handler",
-            map[string]any{"field": "ModuleConfig.MetricsPath", "requires": "ModuleConfig.MetricsHandler"},
+            "the opentelemetry module is handed a metrics path and no prometheus metrics",
+            map[string]any{"field": "ModuleConfig.MetricsPath", "requires": "ModuleConfig.Prometheus"},
             nil,
         ))
     }
 
     if false == hasPath {
         exception.Panic(exception.NewError(
-            "the opentelemetry module is handed a metrics handler and no metrics path",
-            map[string]any{"field": "ModuleConfig.MetricsHandler", "requires": "ModuleConfig.MetricsPath"},
+            "the opentelemetry module is handed prometheus metrics and no metrics path",
+            map[string]any{"field": "ModuleConfig.Prometheus", "requires": "ModuleConfig.MetricsPath"},
             nil,
         ))
     }
@@ -98,9 +119,12 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel)
         routeName = defaultMetricsRouteName
     }
 
+    /* the resolution builds the service, so the container tracks it for its teardown */
+    prometheusMetrics := runtime.MustFromRuntime[*PrometheusMetrics](kernelInstance.BootRuntime(), ServicePrometheusMetrics)
+
     kernelInstance.HttpRouter().Handle(
         instance.config.MetricsPath,
-        MetricsRouteHandler(instance.config.MetricsHandler),
+        MetricsRouteHandler(prometheusMetrics.Handler()),
         httpcontract.RouteOptions{Name: routeName, Methods: []string{"GET"}},
     )
 }
@@ -115,6 +139,7 @@ func MetricsRouteHandler(handler nethttp.Handler) httpcontract.Handler {
 
 var (
     _ applicationcontract.Module                     = (*Module)(nil)
+    _ applicationcontract.ServiceModule              = (*Module)(nil)
     _ applicationcontract.HttpMiddlewareModule       = (*Module)(nil)
     _ applicationcontract.HttpModule                 = (*Module)(nil)
     _ applicationcontract.HttpHandlerDecoratorModule = (*Module)(nil)

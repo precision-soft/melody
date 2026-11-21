@@ -3,7 +3,6 @@ package opentelemetry
 import (
     nethttp "net/http"
     "reflect"
-    "strconv"
     "time"
 
     "go.opentelemetry.io/otel/attribute"
@@ -14,25 +13,21 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
 )
 
-func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
-    /* a nil meter is refused at construction rather than panicking on the first meter.Int64Counter call, as NewHandlerDecorator requires a non-nil Meter */
+/* DefaultDurationBoundaries are the bucket boundaries, in seconds, the HTTP semantic conventions advise for http.server.request.duration. */
+var DefaultDurationBoundaries = []float64{0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10}
+
+/* MetricsMiddlewareConfig configures NewMetricsMiddleware; DurationBoundaries are the duration histogram's bucket boundaries in seconds, DefaultDurationBoundaries when left out. */
+type MetricsMiddlewareConfig struct {
+    DurationBoundaries []float64
+}
+
+/* NewMetricsMiddleware records every handled request on the http.server.request.duration histogram of the HTTP semantic conventions, in seconds, with the method, the route, the scheme and the integer status code; a nil meter is refused. */
+func NewMetricsMiddleware(meter metric.Meter, config MetricsMiddlewareConfig) (httpcontract.Middleware, error) {
     if nil == meter {
         return nil, exception.NewError("metrics middleware meter is nil", nil, nil)
     }
 
-    requestCount, counterErr := meter.Int64Counter(
-        "http.server.request.count",
-        metric.WithDescription("number of handled http requests"),
-    )
-    if nil != counterErr {
-        return nil, exception.NewError("could not create the request counter", nil, counterErr)
-    }
-
-    requestDuration, histogramErr := meter.Float64Histogram(
-        "http.server.request.duration",
-        metric.WithDescription("duration of handled http requests in milliseconds"),
-        metric.WithUnit("ms"),
-    )
+    requestDuration, histogramErr := newDurationHistogram(meter, "http.server.request.duration", "duration of handled http requests", config.DurationBoundaries)
     if nil != histogramErr {
         return nil, exception.NewError("could not create the duration histogram", nil, histogramErr)
     }
@@ -57,11 +52,11 @@ func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
                 attributes := metric.WithAttributes(
                     attribute.String("http.request.method", normalizedMethod(request.HttpRequest().Method)),
                     attribute.String("http.route", routeLabel(request)),
-                    attribute.String("http.response.status_code", strconv.Itoa(statusCode)),
+                    attribute.String("url.scheme", urlScheme(request.HttpRequest())),
+                    attribute.Int("http.response.status_code", statusCode),
                 )
 
-                requestCount.Add(runtimeInstance.Context(), 1, attributes)
-                requestDuration.Record(runtimeInstance.Context(), float64(time.Since(startedAt).Microseconds())/1000.0, attributes)
+                requestDuration.Record(runtimeInstance.Context(), time.Since(startedAt).Seconds(), attributes)
             }()
 
             handlerResponse, nextErr := next(runtimeInstance, recorder, request)
@@ -72,6 +67,28 @@ func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
             return handlerResponse, nextErr
         }
     }, nil
+}
+
+func newDurationHistogram(meter metric.Meter, name string, description string, boundaries []float64) (metric.Float64Histogram, error) {
+    if 0 == len(boundaries) {
+        boundaries = DefaultDurationBoundaries
+    }
+
+    return meter.Float64Histogram(
+        name,
+        metric.WithDescription(description),
+        metric.WithUnit("s"),
+        metric.WithExplicitBucketBoundaries(boundaries...),
+    )
+}
+
+/* urlScheme answers https for a request that arrived over TLS on this connection and http otherwise; a scheme a trusted proxy terminated is not read. */
+func urlScheme(httpRequest *nethttp.Request) string {
+    if nil != httpRequest.TLS {
+        return "https"
+    }
+
+    return "http"
 }
 
 /* completedStatusCode answers the status of a handler that returned: a status the handler already committed to the writer is the one the connection carries, whatever it returned afterwards; otherwise the handler's error decides first and the response it returned next, in the order the kernel answers them, and a handler that returned neither is read off the writer */

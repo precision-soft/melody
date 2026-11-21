@@ -7,11 +7,15 @@ import (
     "net"
     nethttp "net/http"
     "net/http/httptest"
+    "reflect"
     "testing"
 
+    "go.opentelemetry.io/otel/attribute"
+    sdkmetric "go.opentelemetry.io/otel/sdk/metric"
     sdktrace "go.opentelemetry.io/otel/sdk/trace"
     "go.opentelemetry.io/otel/sdk/trace/tracetest"
     "go.opentelemetry.io/otel/trace"
+    tracenoop "go.opentelemetry.io/otel/trace/noop"
 )
 
 func newDecoratorTestTracer(t *testing.T) (trace.Tracer, *tracetest.SpanRecorder) {
@@ -26,7 +30,7 @@ func newDecoratorTestTracer(t *testing.T) (trace.Tracer, *tracetest.SpanRecorder
 func TestHandlerDecorator_TracesShortCircuitedRequest(t *testing.T) {
     tracer, recorder := newDecoratorTestTracer(t)
 
-    decorator, decoratorErr := NewHandlerDecorator(HandlerDecoratorConfig{Tracer: tracer})
+    decorator, decoratorErr := NewHandlerDecorator(tracer, HandlerDecoratorConfig{})
     if nil != decoratorErr {
         t.Fatalf("unexpected decorator error: %v", decoratorErr)
     }
@@ -62,7 +66,7 @@ func TestHandlerDecorator_TracesShortCircuitedRequest(t *testing.T) {
 func TestHandlerDecorator_InnerSpanParentsToLifecycleSpan(t *testing.T) {
     tracer, recorder := newDecoratorTestTracer(t)
 
-    decorator, decoratorErr := NewHandlerDecorator(HandlerDecoratorConfig{Tracer: tracer})
+    decorator, decoratorErr := NewHandlerDecorator(tracer, HandlerDecoratorConfig{})
     if nil != decoratorErr {
         t.Fatalf("unexpected decorator error: %v", decoratorErr)
     }
@@ -96,7 +100,7 @@ func TestHandlerDecorator_InnerSpanParentsToLifecycleSpan(t *testing.T) {
 func TestHandlerDecorator_MarksServerErrorStatus(t *testing.T) {
     tracer, recorder := newDecoratorTestTracer(t)
 
-    decorator, decoratorErr := NewHandlerDecorator(HandlerDecoratorConfig{Tracer: tracer})
+    decorator, decoratorErr := NewHandlerDecorator(tracer, HandlerDecoratorConfig{})
     if nil != decoratorErr {
         t.Fatalf("unexpected decorator error: %v", decoratorErr)
     }
@@ -120,7 +124,7 @@ func TestHandlerDecorator_MarksServerErrorStatus(t *testing.T) {
 }
 
 func TestHandlerDecorator_RequiresTracer(t *testing.T) {
-    if _, decoratorErr := NewHandlerDecorator(HandlerDecoratorConfig{}); nil == decoratorErr {
+    if _, decoratorErr := NewHandlerDecorator(nil, HandlerDecoratorConfig{}); nil == decoratorErr {
         t.Fatalf("expected a nil tracer to be rejected")
     }
 }
@@ -225,7 +229,7 @@ func TestStatusRecordingResponseWriter_AnUpgradeIsObservedAsSwitchingProtocolsWh
 func TestHandlerDecorator_AnUpgradedConnectionIsTracedAsSwitchingProtocols(t *testing.T) {
     tracer, recorder := newDecoratorTestTracer(t)
 
-    decorator, decoratorErr := NewHandlerDecorator(HandlerDecoratorConfig{Tracer: tracer})
+    decorator, decoratorErr := NewHandlerDecorator(tracer, HandlerDecoratorConfig{})
     if nil != decoratorErr {
         t.Fatalf("unexpected decorator error: %v", decoratorErr)
     }
@@ -335,4 +339,33 @@ func TestStatusRecordingResponseWriter_ReturnsOnACyclicChain(t *testing.T) {
             t.Error("expected the hijack's failure")
         }
     })
+}
+
+func TestHandlerDecorator_TheLifecycleSeamRecordsOneHistogramInSecondsOutsideTheReservedNamespace(t *testing.T) {
+    reader := sdkmetric.NewManualReader()
+    meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("lifecycle")
+
+    decorator, decoratorErr := NewHandlerDecorator(tracenoop.NewTracerProvider().Tracer("lifecycle"), HandlerDecoratorConfig{Meter: meter})
+    if nil != decoratorErr {
+        t.Fatalf("decorator: %v", decoratorErr)
+    }
+
+    handler := decorator(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        writer.WriteHeader(nethttp.StatusNoContent)
+    }))
+    handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/x", nil))
+
+    instrument, point := collectHistogram(t, reader, "melody.http.server.lifecycle.duration")
+    if "s" != instrument.Unit || false == reflect.DeepEqual(DefaultDurationBoundaries, point.Bounds) {
+        t.Fatalf("expected seconds and the conventions' boundaries, got %q %v", instrument.Unit, point.Bounds)
+    }
+
+    if status, hasStatus := point.Attributes.Value(attribute.Key("http.response.status_code")); false == hasStatus || attribute.INT64 != status.Type() || 204 != status.AsInt64() {
+        t.Fatalf("expected an integer status 204, got %v", status)
+    }
+
+    names := instrumentNames(t, reader)
+    if 1 != len(names) {
+        t.Fatalf("expected the one lifecycle histogram, got %v", names)
+    }
 }

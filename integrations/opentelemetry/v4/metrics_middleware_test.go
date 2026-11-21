@@ -6,11 +6,14 @@ import (
     "io"
     nethttp "net/http"
     "net/http/httptest"
+    "reflect"
     "strings"
     "testing"
     "time"
 
     "github.com/prometheus/client_golang/prometheus"
+    "go.opentelemetry.io/otel/attribute"
+    sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -34,18 +37,19 @@ func TestNormalizedMethod(t *testing.T) {
 }
 
 func TestMetricsMiddleware_RequiresMeter(t *testing.T) {
-    if _, middlewareErr := NewMetricsMiddleware(nil); nil == middlewareErr {
+    if _, middlewareErr := NewMetricsMiddleware(nil, MetricsMiddlewareConfig{}); nil == middlewareErr {
         t.Fatalf("expected a nil meter to be rejected")
     }
 }
 
 func TestMetricsMiddleware_RecordsRequestMetrics(t *testing.T) {
-    meter, registry, meterErr := NewPrometheusMeter("melody-test")
+    prometheusMetrics, meterErr := NewPrometheusMetrics(PrometheusConfig{MeterName: "melody-test"})
     if nil != meterErr {
         t.Fatalf("meter: %v", meterErr)
     }
+    meter, registry := prometheusMetrics.Meter(), prometheusMetrics.registry
 
-    middleware, middlewareErr := NewMetricsMiddleware(meter)
+    middleware, middlewareErr := NewMetricsMiddleware(meter, MetricsMiddlewareConfig{})
     if nil != middlewareErr {
         t.Fatalf("middleware: %v", middlewareErr)
     }
@@ -75,12 +79,13 @@ func TestMetricsMiddleware_RecordsRequestMetrics(t *testing.T) {
 }
 
 func TestMetricsMiddleware_RecordsServerErrorStatusWhenHandlerReturnsError(t *testing.T) {
-    meter, registry, meterErr := NewPrometheusMeter("melody-test-error")
+    prometheusMetrics, meterErr := NewPrometheusMetrics(PrometheusConfig{MeterName: "melody-test-error"})
     if nil != meterErr {
         t.Fatalf("meter: %v", meterErr)
     }
+    meter, registry := prometheusMetrics.Meter(), prometheusMetrics.registry
 
-    middleware, middlewareErr := NewMetricsMiddleware(meter)
+    middleware, middlewareErr := NewMetricsMiddleware(meter, MetricsMiddlewareConfig{})
     if nil != middlewareErr {
         t.Fatalf("middleware: %v", middlewareErr)
     }
@@ -119,12 +124,13 @@ func TestMetricsMiddleware_RecordsServerErrorStatusWhenHandlerReturnsError(t *te
 }
 
 func TestMetricsMiddleware_ReadsTheStatusADirectWriterCommitted(t *testing.T) {
-    meter, registry, meterErr := NewPrometheusMeter("melody-direct-writer-test")
+    prometheusMetrics, meterErr := NewPrometheusMetrics(PrometheusConfig{MeterName: "melody-direct-writer-test"})
     if nil != meterErr {
         t.Fatalf("meter: %v", meterErr)
     }
+    meter, registry := prometheusMetrics.Meter(), prometheusMetrics.registry
 
-    middleware, middlewareErr := NewMetricsMiddleware(meter)
+    middleware, middlewareErr := NewMetricsMiddleware(meter, MetricsMiddlewareConfig{})
     if nil != middlewareErr {
         t.Fatalf("middleware: %v", middlewareErr)
     }
@@ -147,12 +153,13 @@ func TestMetricsMiddleware_ReadsTheStatusADirectWriterCommitted(t *testing.T) {
 }
 
 func TestMetricsMiddleware_AnEarlyHintDoesNotHideTheFinalStatus(t *testing.T) {
-    meter, registry, meterErr := NewPrometheusMeter("melody-early-hint-test")
+    prometheusMetrics, meterErr := NewPrometheusMetrics(PrometheusConfig{MeterName: "melody-early-hint-test"})
     if nil != meterErr {
         t.Fatalf("meter: %v", meterErr)
     }
+    meter, registry := prometheusMetrics.Meter(), prometheusMetrics.registry
 
-    middleware, middlewareErr := NewMetricsMiddleware(meter)
+    middleware, middlewareErr := NewMetricsMiddleware(meter, MetricsMiddlewareConfig{})
     if nil != middlewareErr {
         t.Fatalf("middleware: %v", middlewareErr)
     }
@@ -191,12 +198,13 @@ func (instance *typedNilProneResponse) BodyReader() io.Reader             { retu
 func (instance *typedNilProneResponse) SetBodyReader(reader io.Reader)    { instance.body = reader }
 
 func TestMetricsMiddleware_ATypedNilResponseIsReadAsAbsentInsteadOfPanicking(t *testing.T) {
-    meter, registry, meterErr := NewPrometheusMeter("melody-typed-nil-test")
+    prometheusMetrics, meterErr := NewPrometheusMetrics(PrometheusConfig{MeterName: "melody-typed-nil-test"})
     if nil != meterErr {
         t.Fatalf("meter: %v", meterErr)
     }
+    meter, registry := prometheusMetrics.Meter(), prometheusMetrics.registry
 
-    middleware, middlewareErr := NewMetricsMiddleware(meter)
+    middleware, middlewareErr := NewMetricsMiddleware(meter, MetricsMiddlewareConfig{})
     if nil != middlewareErr {
         t.Fatalf("middleware: %v", middlewareErr)
     }
@@ -241,12 +249,13 @@ func gatheredStatusLabels(t *testing.T, registry *prometheus.Registry) map[strin
 }
 
 func TestMetricsMiddleware_RecordsTheClientStatusOfAnHttpExceptionError(t *testing.T) {
-    meter, registry, meterErr := NewPrometheusMeter("melody-http-exception-test")
+    prometheusMetrics, meterErr := NewPrometheusMetrics(PrometheusConfig{MeterName: "melody-http-exception-test"})
     if nil != meterErr {
         t.Fatalf("meter: %v", meterErr)
     }
+    meter, registry := prometheusMetrics.Meter(), prometheusMetrics.registry
 
-    middleware, middlewareErr := NewMetricsMiddleware(meter)
+    middleware, middlewareErr := NewMetricsMiddleware(meter, MetricsMiddlewareConfig{})
     if nil != middlewareErr {
         t.Fatalf("middleware: %v", middlewareErr)
     }
@@ -347,12 +356,13 @@ func TestMetricsMiddleware_ACommittedStatusWinsOverWhatTheHandlerReturnsAfterIt(
         },
     } {
         t.Run(name, func(t *testing.T) {
-            meter, registry, meterErr := NewPrometheusMeter("melody-committed-status-test")
+            prometheusMetrics, meterErr := NewPrometheusMetrics(PrometheusConfig{MeterName: "melody-committed-status-test"})
             if nil != meterErr {
                 t.Fatalf("meter: %v", meterErr)
             }
+            meter, registry := prometheusMetrics.Meter(), prometheusMetrics.registry
 
-            middleware, middlewareErr := NewMetricsMiddleware(meter)
+            middleware, middlewareErr := NewMetricsMiddleware(meter, MetricsMiddlewareConfig{})
             if nil != middlewareErr {
                 t.Fatalf("middleware: %v", middlewareErr)
             }
@@ -416,4 +426,74 @@ func TestStatusCodeForError_ReturnsOnACyclicChain(t *testing.T) {
             t.Error("expected a cyclic chain to read as a server failure")
         }
     })
+}
+
+func TestMetricsMiddleware_RecordsTheConventionsDurationInSecondsWithAnIntegerStatus(t *testing.T) {
+    reader := sdkmetric.NewManualReader()
+    meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("conventions")
+
+    middleware, middlewareErr := NewMetricsMiddleware(meter, MetricsMiddlewareConfig{})
+    if nil != middlewareErr {
+        t.Fatalf("middleware: %v", middlewareErr)
+    }
+
+    request, runtimeInstance := testRequestAndRuntime()
+    held := func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        time.Sleep(20 * time.Millisecond)
+
+        return nil, errors.New("handler failed")
+    }
+
+    _, _ = middleware(held)(runtimeInstance, httptest.NewRecorder(), request)
+
+    instrument, point := collectHistogram(t, reader, "http.server.request.duration")
+    if "s" != instrument.Unit {
+        t.Fatalf("expected the unit s, got %q", instrument.Unit)
+    }
+
+    if false == reflect.DeepEqual(DefaultDurationBoundaries, point.Bounds) || 14 != len(point.Bounds) {
+        t.Fatalf("expected the conventions' boundaries, got %v", point.Bounds)
+    }
+
+    if 0.02 > point.Sum || 1 <= point.Sum {
+        t.Fatalf("expected a sum in seconds for a 20ms handler, got %v", point.Sum)
+    }
+
+    status, hasStatus := point.Attributes.Value(attribute.Key("http.response.status_code"))
+    if false == hasStatus || attribute.INT64 != status.Type() || 500 != status.AsInt64() {
+        t.Fatalf("expected an integer status 500, got %v", status)
+    }
+
+    if scheme, hasScheme := point.Attributes.Value(attribute.Key("url.scheme")); false == hasScheme || "http" != scheme.AsString() {
+        t.Fatalf("expected url.scheme http, got %v", scheme)
+    }
+
+    for _, name := range instrumentNames(t, reader) {
+        if "http.server.request.count" == name {
+            t.Fatal("expected no request counter beside the histogram")
+        }
+    }
+}
+
+func TestMetricsMiddleware_TheExpositionFamilyIsInSecondsAndSetBoundariesReplaceTheDefault(t *testing.T) {
+    prometheusMetrics, metricsErr := NewPrometheusMetrics(PrometheusConfig{})
+    if nil != metricsErr {
+        t.Fatalf("metrics: %v", metricsErr)
+    }
+
+    middleware, middlewareErr := NewMetricsMiddleware(prometheusMetrics.Meter(), MetricsMiddlewareConfig{DurationBoundaries: []float64{0.5, 3}})
+    if nil != middlewareErr {
+        t.Fatalf("middleware: %v", middlewareErr)
+    }
+
+    request, runtimeInstance := testRequestAndRuntime()
+    _, _ = middleware(okHandler())(runtimeInstance, httptest.NewRecorder(), request)
+
+    recorder := httptest.NewRecorder()
+    prometheusMetrics.Handler().ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/metrics", nil))
+    body := recorder.Body.String()
+
+    if false == strings.Contains(body, "http_server_request_duration_seconds_bucket") || false == strings.Contains(body, `le="3"`) || true == strings.Contains(body, `le="0.005"`) {
+        t.Fatalf("expected the seconds family with the set boundaries only, got %s", body)
+    }
 }

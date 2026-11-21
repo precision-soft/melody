@@ -2,12 +2,12 @@ package config
 
 import (
     "context"
-    nethttp "net/http"
 
     minio "github.com/minio/minio-go/v7"
     melodyawss3 "github.com/precision-soft/melody/integrations/aws/s3/v4"
     melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v4"
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v4/encrypt"
+    melodyopentelemetry "github.com/precision-soft/melody/integrations/opentelemetry/v4"
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
     handlerevent "github.com/precision-soft/melody/v4/.example/handler/event"
     "github.com/precision-soft/melody/v4/.example/security"
@@ -56,7 +56,7 @@ type Module struct {
     mailer melodymailercontract.Mailer
 
     metricsMiddleware melodyhttpcontract.Middleware
-    metricsHandler    nethttp.Handler
+    prometheusMetrics *melodyopentelemetry.PrometheusMetrics
 
     /* metricsToken is the bearer credential the scraper presents on /metrics; empty leaves the exposition public */
     metricsToken string

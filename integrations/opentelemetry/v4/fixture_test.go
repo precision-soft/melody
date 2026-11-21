@@ -6,7 +6,11 @@ import (
     "net"
     nethttp "net/http"
     "net/http/httptest"
+    "testing"
     "time"
+
+    sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+    "go.opentelemetry.io/otel/sdk/metric/metricdata"
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -48,4 +52,51 @@ func (instance *streamingTestWriter) Hijack() (net.Conn, *bufio.ReadWriter, erro
     instance.hijacked = true
 
     return nil, nil, nil
+}
+
+/* collectHistogram reads the named histogram off a manual reader, failing the test when it is absent */
+func collectHistogram(t *testing.T, reader *sdkmetric.ManualReader, name string) (metricdata.Metrics, metricdata.HistogramDataPoint[float64]) {
+    t.Helper()
+
+    var collected metricdata.ResourceMetrics
+    if collectErr := reader.Collect(context.Background(), &collected); nil != collectErr {
+        t.Fatalf("collect: %v", collectErr)
+    }
+
+    for _, scope := range collected.ScopeMetrics {
+        for _, instrument := range scope.Metrics {
+            if name != instrument.Name {
+                continue
+            }
+
+            histogram, isHistogram := instrument.Data.(metricdata.Histogram[float64])
+            if false == isHistogram || 1 != len(histogram.DataPoints) {
+                t.Fatalf("expected one histogram point under %s, got %#v", name, instrument.Data)
+            }
+
+            return instrument, histogram.DataPoints[0]
+        }
+    }
+
+    t.Fatalf("expected an instrument named %s", name)
+
+    return metricdata.Metrics{}, metricdata.HistogramDataPoint[float64]{}
+}
+
+func instrumentNames(t *testing.T, reader *sdkmetric.ManualReader) []string {
+    t.Helper()
+
+    var collected metricdata.ResourceMetrics
+    if collectErr := reader.Collect(context.Background(), &collected); nil != collectErr {
+        t.Fatalf("collect: %v", collectErr)
+    }
+
+    names := make([]string, 0)
+    for _, scope := range collected.ScopeMetrics {
+        for _, instrument := range scope.Metrics {
+            names = append(names, instrument.Name)
+        }
+    }
+
+    return names
 }

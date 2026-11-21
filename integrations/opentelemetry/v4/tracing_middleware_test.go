@@ -12,6 +12,7 @@ import (
 
     sdktrace "go.opentelemetry.io/otel/sdk/trace"
     "go.opentelemetry.io/otel/sdk/trace/tracetest"
+    "go.opentelemetry.io/otel/trace"
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -22,14 +23,16 @@ import (
     "go.opentelemetry.io/otel/codes"
 )
 
-func TestTracingMiddleware_RequiresTracer(t *testing.T) {
+func TestTracingMiddleware_ANilTracerIsAnErrorAndNoPanic(t *testing.T) {
     defer func() {
-        if nil == recover() {
-            t.Fatalf("expected a nil tracer to panic at construction")
+        if recovered := recover(); nil != recovered {
+            t.Fatalf("expected no panic for a nil tracer, got %v", recovered)
         }
     }()
 
-    NewTracingMiddleware(nil, nil)
+    if middleware, middlewareErr := NewTracingMiddleware(nil, TracingMiddlewareConfig{}); nil == middlewareErr || nil != middleware {
+        t.Fatalf("expected a nil tracer refused with an error, got %v", middlewareErr)
+    }
 }
 
 func TestTracingMiddleware_RecordsServerSpan(t *testing.T) {
@@ -37,7 +40,7 @@ func TestTracingMiddleware_RecordsServerSpan(t *testing.T) {
     provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
     tracer := provider.Tracer("melody-test")
 
-    middleware := NewTracingMiddleware(tracer, nil)
+    middleware := mustTracingMiddleware(tracer)
 
     request, runtimeInstance := testRequestAndRuntime()
     handler := middleware(okHandler())
@@ -75,7 +78,7 @@ func TestTracingMiddleware_ATypedNilResponseIsReadAsAbsentInsteadOfPanicking(t *
     recorder := tracetest.NewSpanRecorder()
     provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
 
-    middleware := NewTracingMiddleware(provider.Tracer("melody-typed-nil-test"), nil)
+    middleware := mustTracingMiddleware(provider.Tracer("melody-typed-nil-test"))
 
     typedNilHandler := func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         var response *typedNilProneResponse
@@ -100,7 +103,7 @@ func TestTracingMiddleware_RecordsTheClientStatusWhenTheHandlerReturnsAnHttpExce
     provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
     tracer := provider.Tracer("melody-error-test")
 
-    middleware := NewTracingMiddleware(tracer, nil)
+    middleware := mustTracingMiddleware(tracer)
 
     request, runtimeInstance := testRequestAndRuntime()
     handler := middleware(func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
@@ -133,7 +136,7 @@ func tracedHandlerSpan(t *testing.T, handlerErr error) sdktrace.ReadOnlySpan {
 
     recorder := tracetest.NewSpanRecorder()
     provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-    middleware := NewTracingMiddleware(provider.Tracer("melody-status-test"), nil)
+    middleware := mustTracingMiddleware(provider.Tracer("melody-status-test"))
 
     request, runtimeInstance := testRequestAndRuntime()
     handler := middleware(func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
@@ -270,7 +273,7 @@ func TestTracingMiddleware_RecordsTheStatusAHandlerCommitsDirectly(t *testing.T)
             request, runtimeInstance := testRequestAndRuntime()
             underlying := &streamingTestWriter{ResponseRecorder: httptest.NewRecorder()}
 
-            handler := NewTracingMiddleware(provider.Tracer("direct-write"), nil)(func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            handler := mustTracingMiddleware(provider.Tracer("direct-write"))(func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 if deadlineErr := nethttp.NewResponseController(writer).SetWriteDeadline(time.Now().Add(time.Minute)); nil != deadlineErr {
                     t.Fatalf("set write deadline: %v", deadlineErr)
                 }
@@ -321,7 +324,7 @@ func TestTracingMiddleware_ASpanAlreadyInTheContextStaysTheParentOverATraceparen
     httpRequest.Header.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
     request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, nil)
 
-    if _, handlerErr := NewTracingMiddleware(tracer, nil)(okHandler())(runtimeInstance, httptest.NewRecorder(), request); nil != handlerErr {
+    if _, handlerErr := mustTracingMiddleware(tracer)(okHandler())(runtimeInstance, httptest.NewRecorder(), request); nil != handlerErr {
         t.Fatalf("handler: %v", handlerErr)
     }
 
@@ -344,7 +347,7 @@ func TestTracingMiddleware_ATraceparentHeaderIsTheParentWhenTheContextHoldsNoSpa
     request, runtimeInstance := testRequestAndRuntime()
     request.HttpRequest().Header.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
 
-    if _, handlerErr := NewTracingMiddleware(tracer, nil)(okHandler())(runtimeInstance, httptest.NewRecorder(), request); nil != handlerErr {
+    if _, handlerErr := mustTracingMiddleware(tracer)(okHandler())(runtimeInstance, httptest.NewRecorder(), request); nil != handlerErr {
         t.Fatalf("handler: %v", handlerErr)
     }
 
@@ -352,4 +355,13 @@ func TestTracingMiddleware_ATraceparentHeaderIsTheParentWhenTheContextHoldsNoSpa
     if 1 != len(spans) || "00f067aa0ba902b7" != spans[0].Parent().SpanID().String() {
         t.Fatalf("expected the remote span as the parent, got %v", spans)
     }
+}
+
+func mustTracingMiddleware(tracer trace.Tracer) httpcontract.Middleware {
+    middleware, middlewareErr := NewTracingMiddleware(tracer, TracingMiddlewareConfig{})
+    if nil != middlewareErr {
+        panic(middlewareErr)
+    }
+
+    return middleware
 }

@@ -23,40 +23,27 @@ import opentelemetry "github.com/precision-soft/melody/integrations/opentelemetr
 ### Metrics (Prometheus)
 
 ```go
-meter, registry, meterErr := opentelemetry.NewPrometheusMeter("my-service")
-if nil != meterErr {
-    return meterErr
+prometheusMetrics, metricsErr := opentelemetry.NewPrometheusMetrics(opentelemetry.PrometheusConfig{MeterName: "my-service"})
+if nil != metricsErr {
+    return metricsErr
 }
 
-metricsMiddleware, middlewareErr := opentelemetry.NewMetricsMiddleware(meter)
+metricsMiddleware, middlewareErr := opentelemetry.NewMetricsMiddleware(prometheusMetrics.Meter(), opentelemetry.MetricsMiddlewareConfig{})
 if nil != middlewareErr {
     return middlewareErr
 }
-// register metricsMiddleware via RegisterHttpMiddlewares
-// (the module refuses a nil middleware at boot: a discarded constructor error
-// would otherwise serve traffic silently uninstrumented)
-
-// expose the registry; e.g. route GET /metrics -> opentelemetry.MetricsHandler(registry)
+/* register metricsMiddleware via RegisterHttpMiddlewares and prometheusMetrics through ModuleConfig.Prometheus; the module refuses a nil middleware at boot */
 ```
 
-`NewMetricsMiddleware` records `http.server.request.count` and `http.server.request.duration` (ms) with `http.request.method`, `http.route`, and `http.response.status_code` attributes. The status attribute is the status the client receives: a status the handler already committed to the writer is recorded over anything it returns afterwards (`101` for a hijacked upgrade); otherwise, in the order the kernel answers it, a handler error decides first (an `HttpException` at its own status, a body past its limit as `413`, anything else as `500`), then the response the handler returns, and for a handler that returned neither, what it wrote.
+`NewMetricsMiddleware(meter, MetricsMiddlewareConfig{DurationBoundaries})` records the HTTP semantic conventions' `http.server.request.duration` histogram in seconds (unit `s`, exposed as `http_server_request_duration_seconds`), bucketed on `DefaultDurationBoundaries` (`0.005` … `10`, the conventions' advisory list) unless `DurationBoundaries` sets others, with `http.request.method`, `http.route`, `url.scheme` (`https` for a request that arrived over TLS on this connection, `http` otherwise; a scheme a trusted proxy terminated is not read) and an integer `http.response.status_code`. No request counter is recorded: the histogram's count is the request count. The status attribute is the status the client receives: a status the handler already committed to the writer is recorded over anything it returns afterwards (`101` for a hijacked upgrade); otherwise, in the order the kernel answers it, a handler error decides first (an `HttpException` at its own status, a body past its limit as `413`, anything else as `500`), then the response the handler returns, and for a handler that returned neither, what it wrote. A nil meter is refused with an error.
 
-`NewPrometheusMeter` builds a pull-based meter: the underlying meter provider has no background goroutine and no close door is offered — it lives for the process, which is the lifetime a Prometheus registry serves anyway.
-
-The meter, the middleware and the `/metrics` handler compose from those three doors:
-
-```go
-meter, registry, meterErr := opentelemetry.NewPrometheusMeter("my-service")
-metricsMiddleware, middlewareErr := opentelemetry.NewMetricsMiddleware(meter)
-metricsHandler := opentelemetry.MetricsHandler(registry)
-// register metricsMiddleware via RegisterHttpMiddlewares; route GET /metrics -> metricsHandler
-```
+`NewPrometheusMetrics(PrometheusConfig{MeterName})` builds a pull-based meter, its instrumentation scope the module's import path when `MeterName` is left out, and answers a handle: `Meter()`, `Handler()` (the exposition) and `CloseWithContext(closeContext)`, which shuts the meter provider down, a second call answering nil and a close context already done answered its error with the provider left open. `ModuleConfig.Prometheus` registers the handle as `ServicePrometheusMetrics`, so the container's teardown closes it.
 
 ### Tracing
 
 ```go
 tracer := tracerProvider.Tracer("my-service") // your configured *sdktrace.TracerProvider
-tracingMiddleware := opentelemetry.NewTracingMiddleware(tracer, nil) // nil -> W3C TraceContext propagation
+tracingMiddleware, middlewareErr := opentelemetry.NewTracingMiddleware(tracer, opentelemetry.TracingMiddlewareConfig{}) /* a left-out Propagator is W3C TraceContext; a nil tracer is an error */
 ```
 
 The tracing middleware extracts the incoming trace context from request headers, starts a server span per request (named `<METHOD> <route>`), injects the span context into the runtime passed downstream, records method/route/status attributes with the status decided as the metrics decide it — including a status the handler writes directly, as streaming, proxy and upgrade handlers do — and marks the span as errored when the status the client receives is a 5xx; a handler error is recorded on the span as an exception event either way.
@@ -66,9 +53,8 @@ The tracing middleware extracts the incoming trace context from request headers,
 The middlewares see a request only once the kernel routed it, so a security denial, a response a `kernel.request` listener wrote and the panic-recovery path leave no span and no metric there. [`NewHandlerDecorator`](./handler_decorator.go) builds the outermost seam instead: it wraps the whole `nethttp.Handler` the http kernel produces.
 
 ```go
-decorator, decoratorErr := opentelemetry.NewHandlerDecorator(opentelemetry.HandlerDecoratorConfig{
-    Tracer: tracer, // required: a nil tracer is refused with "handler decorator tracer is nil"
-    Meter:  meter,  // optional
+decorator, decoratorErr := opentelemetry.NewHandlerDecorator(tracer, opentelemetry.HandlerDecoratorConfig{
+    Meter: meter, /* optional; a nil tracer is refused with "handler decorator tracer is nil" */
 })
 if nil != decoratorErr {
     return decoratorErr
@@ -77,7 +63,7 @@ if nil != decoratorErr {
 app.RegisterHttpHandlerDecorator(decorator) // or ModuleConfig.HandlerDecorators
 ```
 
-Every request, short-circuited ones included, gets a lifecycle span; the tracing middleware's span becomes its child through the context the decorator injects. `Propagator` defaults to W3C TraceContext. With a `Meter`, the decorator counts and times under `http.server.lifecycle.request.count` and `http.server.lifecycle.request.duration`, names distinct from the middleware's `http.server.request.*`, so a routed request is not counted twice.
+Every request, short-circuited ones included, gets a lifecycle span; the tracing middleware's span becomes its child through the context the decorator injects. `Propagator` defaults to W3C TraceContext. With a `Meter`, the decorator times every request on one histogram, `melody.http.server.lifecycle.duration`, in seconds, on the same boundaries (`HandlerDecoratorConfig.DurationBoundaries` sets others), with the method, `url.scheme` and an integer status: a name outside the conventions' reserved `http.server.*`, distinct from the middleware's, so a routed request is not counted twice.
 
 ### OTLP export
 
@@ -118,14 +104,14 @@ Bundle the middlewares and the `/metrics` route as a self-registering applicatio
 
 ```go
 app.RegisterModule(opentelemetry.NewModule(opentelemetry.ModuleConfig{
-    Middlewares:    []httpcontract.Middleware{metricsMiddleware, tracingMiddleware},
-    MetricsHandler: metricsHandler,
-    MetricsPath:    "/metrics",
+    Middlewares: []httpcontract.Middleware{metricsMiddleware, tracingMiddleware},
+    Prometheus:  prometheusMetrics,
+    MetricsPath: "/metrics",
     // HandlerDecorators: []applicationcontract.HttpHandlerDecorator{decorator},
 }))
 ```
 
-The metrics route is registered when both `MetricsHandler` and `MetricsPath` are set and is absent when both are left out; a half-declared one (a path with no handler, a handler with no path, or a `MetricsRouteName` with neither) fails the boot naming the field.
+The metrics route serves `Prometheus.Handler()` when both `Prometheus` and `MetricsPath` are set and is absent when both are left out; a half-declared one (a path with no `Prometheus`, a `Prometheus` with no path, or a `MetricsRouteName` with neither) fails the boot naming the field.
 
 ## Footguns & caveats
 

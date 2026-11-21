@@ -1,7 +1,10 @@
 package opentelemetry
 
 import (
-    nethttp "net/http"
+    "github.com/precision-soft/melody/v4/container/runtime"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container"
+    "context"
     "strings"
     "testing"
 
@@ -30,7 +33,42 @@ func (instance *spyRouter) Handle(pattern string, handler httpcontract.Handler, 
 
 type spyKernel struct {
     kernelcontract.Kernel
-    router *spyRouter
+    router           *spyRouter
+    serviceContainer containercontract.Container
+}
+
+func (instance *spyKernel) BootRuntime() containercontract.Runtime {
+    return runtime.NewRun(context.Background(), instance.serviceContainer.NewScope())
+}
+
+type containerServiceRegistrar struct {
+    containercontract.Container
+}
+
+func (instance *containerServiceRegistrar) RegisterService(serviceName string, provider any, options containercontract.RegisterOptions) {
+    instance.MustRegister(serviceName, provider, options)
+}
+
+/* bootPrometheusModule registers the module's services on a container and answers the kernel whose boot runtime resolves through it */
+func bootPrometheusModule(t *testing.T, config ModuleConfig) (*Module, *spyKernel) {
+    t.Helper()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    module := NewModule(config)
+    module.RegisterServices(&containerServiceRegistrar{Container: serviceContainer})
+
+    return module, &spyKernel{router: &spyRouter{}, serviceContainer: serviceContainer}
+}
+
+func newTestPrometheusMetrics(t *testing.T) *PrometheusMetrics {
+    t.Helper()
+
+    prometheusMetrics, metricsErr := NewPrometheusMetrics(PrometheusConfig{})
+    if nil != metricsErr {
+        t.Fatalf("prometheus metrics: %v", metricsErr)
+    }
+
+    return prometheusMetrics
 }
 
 
@@ -113,7 +151,7 @@ func TestModule_RegisterHttpRoutesRefusesAHalfDeclaredMetricsRouteNamingTheField
         field  string
     }{
         {"a path with no handler", ModuleConfig{MetricsPath: "/metrics"}, "ModuleConfig.MetricsPath"},
-        {"a handler with no path", ModuleConfig{MetricsHandler: nethttp.NewServeMux()}, "ModuleConfig.MetricsHandler"},
+        {"prometheus metrics with no path", ModuleConfig{Prometheus: &PrometheusMetrics{}}, "ModuleConfig.Prometheus"},
         {"a route name with neither", ModuleConfig{MetricsRouteName: "metrics"}, "ModuleConfig.MetricsRouteName"},
     } {
         t.Run(testCase.name, func(t *testing.T) {
@@ -140,12 +178,11 @@ func TestModule_RegisterHttpRoutesRefusesAHalfDeclaredMetricsRouteNamingTheField
 }
 
 func TestModule_RegisterHttpRoutesUsesDefaultName(t *testing.T) {
-    kernel := &spyKernel{router: &spyRouter{}}
-
-    NewModule(ModuleConfig{
-        MetricsHandler: nethttp.NewServeMux(),
-        MetricsPath:    "/metrics",
-    }).RegisterHttpRoutes(kernel)
+    module, kernel := bootPrometheusModule(t, ModuleConfig{
+        Prometheus:  newTestPrometheusMetrics(t),
+        MetricsPath: "/metrics",
+    })
+    module.RegisterHttpRoutes(kernel)
 
     if 1 != len(kernel.router.handled) {
         t.Fatalf("expected one route, got %v", kernel.router.handled)
@@ -156,15 +193,28 @@ func TestModule_RegisterHttpRoutesUsesDefaultName(t *testing.T) {
 }
 
 func TestModule_RegisterHttpRoutesHonoursCustomName(t *testing.T) {
-    kernel := &spyKernel{router: &spyRouter{}}
-
-    NewModule(ModuleConfig{
-        MetricsHandler:   nethttp.NewServeMux(),
+    module, kernel := bootPrometheusModule(t, ModuleConfig{
+        Prometheus:       newTestPrometheusMetrics(t),
         MetricsPath:      "/metrics",
         MetricsRouteName: "custom.metrics",
-    }).RegisterHttpRoutes(kernel)
+    })
+    module.RegisterHttpRoutes(kernel)
 
     if 1 != len(kernel.router.handled) || "custom.metrics GET /metrics" != kernel.router.handled[0] {
         t.Fatalf("expected the custom metrics route, got %v", kernel.router.handled)
+    }
+}
+
+func TestModule_PrometheusIsRegisteredAndTheContainersCloseClosesIt(t *testing.T) {
+    prometheusMetrics := newTestPrometheusMetrics(t)
+    module, kernel := bootPrometheusModule(t, ModuleConfig{Prometheus: prometheusMetrics, MetricsPath: "/metrics"})
+    module.RegisterHttpRoutes(kernel)
+
+    if closeErr := kernel.serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("container close: %v", closeErr)
+    }
+
+    if false == prometheusMetrics.closed {
+        t.Fatal("expected the container's close to close the prometheus metrics")
     }
 }
