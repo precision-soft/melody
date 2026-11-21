@@ -44,11 +44,10 @@ Every limit is a [`bound`](../../../../v4/bound) limit: left out it takes the li
 
 `MaxIdleConnections: bound.Of(0)` keeps no idle connection, for a serverless or proxy-pooled database. The connect timeout cannot be lifted: it bounds the dial, the initial ping and the post-build hook, and a database that never answers must still fail the open. Only transient failures are retried; a non-transient error fails at once. Every terminal failure is journaled through the logger the open is handed and marked as logged, a single attempt's included.
 
-## Opening under a context, and opening for migrations
+## Opening under a runtime, and opening for migrations
 
-- [`Provider.OpenContext`](./provider.go) implements [`bunorm.ContextOpener`](../../v4/provider.go): the retry sleeps watch the caller's context alongside the clock, so a shutdown that cancels it reaches a retry loop in flight instead of sleeping through the whole remaining budget. The registry prefers it and hands the context it was constructed with.
-- [`Provider.OpenForMigration`](./provider.go) implements [`bunorm.MigrationProvider`](../../v4/provider.go) and opens the same database with the read and write deadlines lifted, the connect timeout still armed, over a pool of the two connections a sequential migration run needs and with no connection recycled mid-run.
-- [`Provider.OpenForMigrationContext`](./provider.go) implements [`bunorm.MigrationContextOpener`](../../v4/provider.go) — the migration open under the caller's context, the way `OpenContext` is `Open` under it.
+- [`Provider.Open`](./provider.go) is the pooled door of [`bunorm.Provider`](../../v4/provider.go) and opens under the runtime it is handed: a nil runtime, or one carrying no context, is refused before anything is routed, a context already done is refused before the attempt, and the retry sleeps watch the context alongside the clock, so a caller that leaves or a registry that closes reaches a retry loop in flight instead of sleeping through the whole remaining budget. The registry hands the caller's runtime over a context its own close also ends.
+- [`Provider.OpenForMigration`](./provider.go) is the migration door of the same contract, under the runtime as `Open` is, and opens the same database with the read and write deadlines lifted, the connect timeout still armed, over a pool of the two connections a sequential migration run needs and with no connection recycled mid-run.
 
 The host may be an IPv6 literal, bare (`::1`) or in brackets (`[::1]`), with the port configured separately: a bare literal is bracketed before the port is joined, a bracketed one is kept as written, and a scoped literal such as `fe80::1%eth0` is joined the same way without its zone changing. The default verifying TLS config checks the server certificate against the host without the brackets and without the zone, since no certificate carries either.
 

@@ -12,6 +12,7 @@ import (
 
     driver "github.com/go-sql-driver/mysql"
     "github.com/precision-soft/melody/integrations/bunorm/v4"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/logging"
@@ -55,15 +56,13 @@ type Provider struct {
     tlsConfig     *tls.Config
 }
 
-func (instance *Provider) Open(parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.OpenContext(context.Background(), parameters, logger)
-}
-
-/* OpenContext opens under the caller's context: an already-cancelled context is refused before the attempt, the retry sleeps watch it beside the clock, and the configuration hook and the boot ping derive their budgets from it; the dial and the handshake are bounded by the connect timeout under the caller's context, and the dialect query bun runs at construction goes over the connection the ping established. A nil context reads as context.Background(). A nil logger reads as the emergency logger for the open's own records, since the terminal branches mark the returned error as logged; the diagnostics routing takes the logger as handed, so a nil, like an already-cancelled context, routes nothing and leaves bun's channel where the last routing put it. */
-func (instance *Provider) OpenContext(ctx context.Context, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    if nil == ctx {
-        ctx = context.Background()
+/* Open opens under the runtime's context: a nil runtime, or one carrying no context, is refused before anything is routed; an already-cancelled context is refused before the attempt, the retry sleeps watch it beside the clock, and the configuration hook and the boot ping derive their budgets from it; the dial and the handshake are bounded by the connect timeout under the caller's context, and the dialect query bun runs at construction goes over the connection the ping established. A nil logger reads as the emergency logger for the open's own records, since the terminal branches mark the returned error as logged; the diagnostics routing takes the logger as handed, so a nil, like an already-cancelled context, routes nothing and leaves bun's channel where the last routing put it. */
+func (instance *Provider) Open(runtimeInstance containercontract.Runtime, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+        return nil, runtimeErr
     }
+
+    ctx := runtimeInstance.Context()
 
     /* the routing takes the logger as handed, before the open's own records fall back to the emergency logger: a nil routes nothing, so an open given no journal leaves bun's channel where the last routing put it instead of moving it onto standard error; RouteDiagnostics installs nothing when the logger is already routed; an already-cancelled context routes nothing either, since open refuses it before the attempt */
     if nil == ctx.Err() {
@@ -77,14 +76,9 @@ func (instance *Provider) OpenContext(ctx context.Context, parameters bunorm.Con
     return instance.openWithRetry(ctx, parameters, logger)
 }
 
-/* OpenForMigration opens the same database with the driver deadlines lifted: ReadTimeout and WriteTimeout are per-connection settings baked into the connector, sized for request traffic, and a DDL statement that legitimately runs past them — an ALTER TABLE adding constraints on a large table — is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back. The connect timeout stays armed (a down database must still fail fast), the pool is kept to the two connections a sequential migration run needs, and no connection is recycled mid-run — a lifetime rotation under a running statement is the same cut by another name. */
-func (instance *Provider) OpenForMigration(parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.OpenForMigrationContext(context.Background(), parameters, logger)
-}
-
-/* OpenForMigrationContext is OpenForMigration under the caller's context, the way OpenContext is Open under it: the registry hands the context it was constructed with, so an already-cancelled migration is refused before the attempt and a cancellation arriving mid-attempt is honoured at the next cancellable step instead of sleeping out the retry budget. A nil context reads as context.Background(), which is exactly OpenForMigration. */
-func (instance *Provider) OpenForMigrationContext(ctx context.Context, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.migrationProvider().OpenContext(ctx, parameters, logger)
+/* OpenForMigration opens the same database with the driver deadlines lifted: ReadTimeout and WriteTimeout are per-connection settings baked into the connector, sized for request traffic, and a DDL statement that legitimately runs past them — an ALTER TABLE adding constraints on a large table — is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back. The connect timeout stays armed (a down database must still fail fast), the pool is kept to the two connections a sequential migration run needs, and no connection is recycled mid-run — a lifetime rotation under a running statement is the same cut by another name. It runs under the runtime as Open does. */
+func (instance *Provider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.migrationProvider().Open(runtimeInstance, parameters, logger)
 }
 
 /* migrationProvider derives the provider OpenForMigration dials with: the same hook, retry policy and transport settings, over the migration pool and the lifted deadlines. */
@@ -454,12 +448,7 @@ func (instance *Provider) isTransientError(inputErr error) bool {
 }
 
 /* this major hands the provider the connection values rather than the parameter names it would read them under, so the provider knows no configuration key and names no credential of its own. Marking one is the application's call, through the framework's own application/contract.ParameterRegistrar — RegisterSecretParameter for a parameter the application declares, MarkParameterSecret for one melody registered from the .env artifacts: the party that resolved the values is the party that knows the keys, and the mark propagates to every parameter whose template reads the secret, so the assembled dsn is redacted with it. */
-var (
-    _ bunorm.Provider               = (*Provider)(nil)
-    _ bunorm.MigrationProvider      = (*Provider)(nil)
-    _ bunorm.ContextOpener          = (*Provider)(nil)
-    _ bunorm.MigrationContextOpener = (*Provider)(nil)
-)
+var _ bunorm.Provider = (*Provider)(nil)
 
 /* isNilInterface answers whether the interface value is nil outright or holds a nil pointer, map, slice, channel or function: a typed nil passes a plain nil comparison and then panics on first use, far from the wiring mistake that produced it. Duplicated from the framework's internal package, which a separate module cannot import. */
 func isNilInterface(value any) bool {

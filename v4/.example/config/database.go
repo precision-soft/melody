@@ -34,7 +34,7 @@ const (
     databaseArchiveManagerName = "archive"
 )
 
-/* buildDatabase declares this example's connections in one bunorm manager registry, so db:migrate and the repositories reach one pool. The catalogue on mysql and the archive on postgres follow their own empty-means-unwired keys, so every combination boots, and with neither the registry stays nil and nothing is dialed. Neither is opened here: each is opened at the first resolution of its service, so a process that never reads a database never dials it, and the container closes every pool it opened, which a handle opened at boot and never resolved escaped. A declared database that cannot be reached is refused at its first use, by name. */
+/* buildDatabase declares this example's connections for one bunorm manager registry, so db:migrate and the repositories reach one pool. The catalogue on mysql and the archive on postgres follow their own empty-means-unwired keys, so every combination boots, and with neither no registry is registered and nothing is dialed. The registry itself is built by its provider, where the application's logger resolves, and neither connection is opened here: each is opened at the first resolution of its service, so a process that never reads a database never dials it, and the container closes every pool it opened, which a handle opened at boot and never resolved escaped. A declared database that cannot be reached is refused at its first use, by name. */
 func (instance *Module) buildDatabase() {
     definitionList := make([]melodybunorm.ProviderDefinition, 0, 2)
 
@@ -53,17 +53,7 @@ func (instance *Module) buildDatabase() {
         return
     }
 
-    /* the emergency logger carries the registry's reporting because the framework's logger does not exist yet while the modules are wired; the passwords are declared secret in EnvironmentKeys, not here. */
-    registry, registryErr := melodybunorm.NewManagerRegistry(
-        instance.processContext,
-        melodylogging.EmergencyLogger(),
-        definitionList,
-    )
-    if nil != registryErr {
-        exception.Panic(exception.FromError(registryErr))
-    }
-
-    instance.databaseRegistry = registry
+    instance.databaseDefinitions = definitionList
     instance.catalogueWired = instance.catalogWired()
 }
 
@@ -156,26 +146,22 @@ const (
 
 /* registerDatabaseServices publishes the registry and the catalogue handle; without a configured database neither is registered, and a factory's first use reports the missing service instead of failing boot. */
 func (instance *Module) registerDatabaseServices(registrar melodyapplicationcontract.ServiceRegistrar) {
-    if nil == instance.databaseRegistry {
+    if 0 == len(instance.databaseDefinitions) {
         return
     }
 
-    registry := instance.databaseRegistry
+    definitionList := instance.databaseDefinitions
 
     registrar.RegisterService(
         serviceDatabaseRegistry,
         func(resolver melodycontainercontract.Resolver) (*melodybunorm.ManagerRegistry, error) {
-            /* the logger is resolved rather than captured, for two reasons: the registry, built on the emergency logger during wiring, gets the application's journal for its opens, its retries and bun's diagnostics; and the resolution writes the teardown edge, so the registry closes and hands bun's diagnostic channel back while the journal is still open. */
+            /* the registry is built here, where the logger resolves, for two reasons: it reports its opens, its retries and bun's diagnostics to the application's journal for its whole life; and the resolution writes the teardown edge, so the registry closes and hands bun's diagnostic channel back while the journal is still open. The passwords are declared secret in EnvironmentKeys, not here. */
             logger, loggerErr := melodylogging.LoggerFromResolver(resolver.Runtime().Context(), resolver)
             if nil != loggerErr {
                 return nil, loggerErr
             }
 
-            if setLoggerErr := registry.SetLogger(logger); nil != setLoggerErr {
-                return nil, setLoggerErr
-            }
-
-            return registry, nil
+            return melodybunorm.NewManagerRegistry(logger, definitionList)
         },
         melodycontainer.RegisterOptions{},
     )
@@ -190,7 +176,7 @@ func (instance *Module) registerDatabaseServices(registrar melodyapplicationcont
                     return nil, registryErr
                 }
 
-                return databaseOpenedBy(resolvedRegistry, databaseArchiveManagerName, instance.archiveLocation)
+                return databaseOpenedBy(resolver.Runtime(), resolvedRegistry, databaseArchiveManagerName, instance.archiveLocation)
             },
             melodycontainer.RegisterOptions{TypeRegistrationDisabled: true, Closer: registryOwnedDatabaseCloser},
         )
@@ -210,7 +196,7 @@ func (instance *Module) registerDatabaseServices(registrar melodyapplicationcont
                 return nil, registryErr
             }
 
-            return databaseOpenedBy(resolvedRegistry, databaseManagerName, instance.catalogLocation)
+            return databaseOpenedBy(resolver.Runtime(), resolvedRegistry, databaseManagerName, instance.catalogLocation)
         },
         melodycontainer.RegisterOptions{TypeRegistrationDisabled: true, Closer: registryOwnedDatabaseCloser},
     )
@@ -230,9 +216,9 @@ func databaseFunctionOf(managerName string) string {
     return managerName
 }
 
-/* databaseOpenedBy opens one manager's handle and names it when the open refuses, since the registry's refusal reads the same for either database; the registry's own exception stays the cause, so errors.Is still reaches its sentinels. */
-func databaseOpenedBy(registry *melodybunorm.ManagerRegistry, managerName string, location string) (*bun.DB, error) {
-    database, openErr := registry.Database(managerName)
+/* databaseOpenedBy opens one manager's handle under the runtime of the resolution that publishes it and names it when the open refuses, since the registry's refusal reads the same for either database; the registry's own exception stays the cause, so errors.Is still reaches its sentinels. */
+func databaseOpenedBy(runtimeInstance melodycontainercontract.Runtime, registry *melodybunorm.ManagerRegistry, managerName string, location string) (*bun.DB, error) {
+    database, openErr := registry.Database(runtimeInstance, managerName)
     if nil != openErr {
         return nil, exception.NewError(
             "the "+databaseFunctionOf(managerName)+" database at "+location+" could not be opened",

@@ -15,11 +15,13 @@ import (
     "time"
 
     "github.com/precision-soft/melody/integrations/bunorm/v4"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     "github.com/uptrace/bun/driver/pgdriver"
+    "github.com/uptrace/bun"
     "github.com/uptrace/bun/schema"
 )
 
@@ -36,7 +38,7 @@ func newTestParams(host string, port string, database string, user string, passw
 var bunDiagnosticsPinRan bool
 
 /* the routing takes bun's channel for a logger it has not seen and installs nothing for one already routed, so this pin owns the first open of the test binary: it is declared before every other test of this file on purpose, the test files that sort before this one construct configurations without opening anything, and a repeated run in the same binary (-count above one) skips rather than proves on a channel an earlier run already took. The diagnostic is provoked through bun's public surface — a query carrying an argument with no placeholder — because what is pinned is that a single-attempt open installs the journal as bun's destination, not that the adapter writes where it was pointed. */
-func TestOpenContext_ASingleAttemptOpenRoutesBunDiagnosticsIntoTheJournal(t *testing.T) {
+func TestOpen_ASingleAttemptOpenRoutesBunDiagnosticsIntoTheJournal(t *testing.T) {
     if true == bunDiagnosticsPinRan {
         t.Skip("the process-wide routing once was consumed by an earlier run in this binary; the pin proves on the first run")
     }
@@ -49,8 +51,8 @@ func TestOpenContext_ASingleAttemptOpenRoutesBunDiagnosticsIntoTheJournal(t *tes
         Retry:   singleAttemptRetry,
     })
 
-    _, openErr := provider.OpenContext(
-        context.Background(),
+    _, openErr := provider.Open(
+        testRuntimeUnder(context.Background()),
         newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"),
         logger,
     )
@@ -73,7 +75,7 @@ func TestOpenContext_ASingleAttemptOpenRoutesBunDiagnosticsIntoTheJournal(t *tes
 }
 
 /* every deadline TimeoutConfig names reaches the connector, the dial included: the post-build hook reads the built connector before any connection is attempted, so the pin needs no database and the open may fail afterwards */
-func TestOpenContext_AnEmptyPortDialsTheDefaultAndAnUnlimitedReadDeadlineReachesTheConnectorAsNone(t *testing.T) {
+func TestOpen_AnEmptyPortDialsTheDefaultAndAnUnlimitedReadDeadlineReachesTheConnectorAsNone(t *testing.T) {
     var seen *pgdriver.Config
 
     provider := NewProvider(ProviderConfig{
@@ -86,7 +88,7 @@ func TestOpenContext_AnEmptyPortDialsTheDefaultAndAnUnlimitedReadDeadlineReaches
         Retry: singleAttemptRetry,
     })
 
-    _, openErr := provider.OpenContext(context.Background(), newTestParams("203.0.113.1", "", "melody", "melody", "melody"), &capturingProviderLogger{})
+    _, openErr := provider.Open(testRuntimeUnder(context.Background()), newTestParams("203.0.113.1", "", "melody", "melody", "melody"), &capturingProviderLogger{})
     if nil == openErr || nil == seen {
         t.Fatalf("expected the hook to see the connector and end the open, got %v", openErr)
     }
@@ -96,7 +98,7 @@ func TestOpenContext_AnEmptyPortDialsTheDefaultAndAnUnlimitedReadDeadlineReaches
     }
 }
 
-func TestOpenContext_TheConnectorReceivesEveryDeadlineTheTimeoutConfigNames(t *testing.T) {
+func TestOpen_TheConnectorReceivesEveryDeadlineTheTimeoutConfigNames(t *testing.T) {
     var seen *pgdriver.Config
 
     provider := NewProvider(ProviderConfig{
@@ -109,8 +111,8 @@ func TestOpenContext_TheConnectorReceivesEveryDeadlineTheTimeoutConfigNames(t *t
         Retry: singleAttemptRetry,
     })
 
-    _, openErr := provider.OpenContext(
-        context.Background(),
+    _, openErr := provider.Open(
+        testRuntimeUnder(context.Background()),
         newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"),
         &capturingProviderLogger{},
     )
@@ -240,6 +242,7 @@ func TestProviderOpenBuildsConnectorAndAbortsOnPostBuildHookError(t *testing.T) 
     })
 
     database, openErr := provider.Open(
+        testRuntime(),
         newTestParams("db.internal", "5432", "melody", "melody_user", "melody_password"),
         nil,
     )
@@ -279,6 +282,7 @@ func TestProviderOpenWithRetryAndNilLoggerDoesNotPanic(t *testing.T) {
     })
 
     database, openErr := provider.Open(
+        testRuntime(),
         newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody"),
         nil,
     )
@@ -305,6 +309,7 @@ func TestProviderOpenWithAnAbsentConnectTimeoutConnects(t *testing.T) {
     })
 
     database, openErr := provider.Open(
+        testRuntime(),
         newTestParams(
             host,
             os.Getenv("PGSQL_PORT"),
@@ -518,7 +523,7 @@ func TestIsTransientErrorTraversesWrappedErrors(t *testing.T) {
 }
 
 /* the migration open is the door the registry's bound context did not reach: OpenForMigration carried no context at all, so a db:migrate cancelled by a supervisor slept out the whole retry budget against a down database. The derived provider is the same one either way — only the context differs — so the sleep has to be cut here too. */
-func TestProviderOpenForMigrationContextCancelsTheRetrySleep(t *testing.T) {
+func TestProviderOpenForMigrationCancelsTheRetrySleep(t *testing.T) {
     provider := NewProvider(ProviderConfig{
         Insecure: true,
         Timeout:  TimeoutConfig{ConnectTimeout: bound.Of(50 * time.Millisecond)},
@@ -532,8 +537,8 @@ func TestProviderOpenForMigrationContextCancelsTheRetrySleep(t *testing.T) {
     }()
 
     start := time.Now()
-    database, openErr := provider.OpenForMigrationContext(
-        ctx,
+    database, openErr := provider.OpenForMigration(
+        testRuntimeUnder(ctx),
         newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody"),
         nil,
     )
@@ -573,32 +578,7 @@ func TestProviderOpenForMigrationContextCancelsTheRetrySleep(t *testing.T) {
     }
 }
 
-/* the context-less door stays what it was for every caller that holds no context: it is OpenForMigrationContext under a background one, which is why it can still be reached without changing a single call site */
-func TestProviderOpenForMigrationRunsTheSameAttemptUnderABackgroundContext(t *testing.T) {
-    provider := NewProvider(ProviderConfig{
-        Insecure: true,
-        Timeout:  TimeoutConfig{ConnectTimeout: bound.Of(50 * time.Millisecond)},
-        Retry:    singleAttemptRetry,
-    })
-
-    database, openErr := provider.OpenForMigration(
-        newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody"),
-        nil,
-    )
-    if nil != database {
-        _ = database.Close()
-    }
-
-    if nil == openErr {
-        t.Fatal("expected the unreachable migration open to fail")
-    }
-
-    if true == errors.Is(openErr, context.Canceled) {
-        t.Fatalf("expected no cancellation from a background context, got %v", openErr)
-    }
-}
-
-func TestProviderOpenContextCancelsTheRetrySleep(t *testing.T) {
+func TestProviderOpenCancelsTheRetrySleep(t *testing.T) {
     provider := NewProvider(ProviderConfig{
         Insecure: true,
         Timeout:  TimeoutConfig{ConnectTimeout: bound.Of(50 * time.Millisecond)},
@@ -612,8 +592,8 @@ func TestProviderOpenContextCancelsTheRetrySleep(t *testing.T) {
     }()
 
     start := time.Now()
-    database, openErr := provider.OpenContext(
-        ctx,
+    database, openErr := provider.Open(
+        testRuntimeUnder(ctx),
         newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody"),
         nil,
     )
@@ -662,6 +642,7 @@ func TestProviderDefaultReadDeadlineAllowsAnElevenSecondQuery(t *testing.T) {
     provider := NewProvider(ProviderConfig{Insecure: true, Retry: singleAttemptRetry})
 
     database, openErr := provider.Open(
+        testRuntime(),
         newTestParams(
             host,
             os.Getenv("PGSQL_PORT"),
@@ -682,7 +663,7 @@ func TestProviderDefaultReadDeadlineAllowsAnElevenSecondQuery(t *testing.T) {
 }
 
 /* the mysql mirror of the same rule, on a cancellation arriving MID-dial: the ping derives its budget from the caller's context, so a cancellation at two hundred milliseconds ends a ten-second dial right there. The already-cancelled entry refusal is the other layer of the same rule; on this driver the derived ping shadows it for every at-entry input, which is why the in-flight cancellation is the input that proves the derivation. */
-func TestOpenContext_ACancellationMidDialReachesTheAttemptInFlight(t *testing.T) {
+func TestOpen_ACancellationMidDialReachesTheAttemptInFlight(t *testing.T) {
     provider := NewProvider(ProviderConfig{
         Timeout: TimeoutConfig{ConnectTimeout: bound.Of(10 * time.Second), ReadTimeout: bound.Of(10 * time.Second), WriteTimeout: bound.Of(10 * time.Second)},
         Retry:   singleAttemptRetry,
@@ -696,8 +677,8 @@ func TestOpenContext_ACancellationMidDialReachesTheAttemptInFlight(t *testing.T)
     defer cancel()
 
     started := time.Now()
-    _, openErr := provider.OpenContext(
-        midFlightContext,
+    _, openErr := provider.Open(
+        testRuntimeUnder(midFlightContext),
         newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"),
         nil,
     )
@@ -760,8 +741,8 @@ func TestOpenWithRetry_ACancelledOpenIsAWarningRatherThanANonTransientOutage(t *
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    _, openErr := provider.OpenContext(
-        cancelledContext,
+    _, openErr := provider.Open(
+        testRuntimeUnder(cancelledContext),
         newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"),
         logger,
     )
@@ -807,8 +788,8 @@ func TestOpenWithRetry_ACancellationDuringTheBackoffIsRecordedAndMarked(t *testi
         cancel()
     }()
 
-    _, openErr := provider.OpenContext(
-        ctx,
+    _, openErr := provider.Open(
+        testRuntimeUnder(ctx),
         newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody"),
         logger,
     )
@@ -844,8 +825,8 @@ func TestOpenWithRetry_TheRetryWarningCarriesTheDiagnosticShapeTheTerminalRecord
         Retry:   RetryConfig{MaxAttempts: bound.Of(2), InitialDelay: bound.Of(time.Millisecond), MaxDelay: bound.Of(2 * time.Millisecond)},
     })
 
-    _, openErr := provider.OpenContext(
-        context.Background(),
+    _, openErr := provider.Open(
+        testRuntimeUnder(context.Background()),
         newTestParams("127.0.0.1", "1", "melody", "melody", "melody"),
         logger,
     )
@@ -931,7 +912,7 @@ func openObservingTheTlsPosture(t *testing.T, config ProviderConfig) *tls.Config
 
     provider := NewProvider(config)
 
-    _, openErr := provider.Open(newTestParams("db.internal", "5432", "melody", "melody_user", "melody_password"), nil)
+    _, openErr := provider.Open(testRuntime(), newTestParams("db.internal", "5432", "melody", "melody_user", "melody_password"), nil)
     if false == errors.Is(openErr, stopBeforeDial) {
         t.Fatalf("expected the hook to stop the attempt before the dial, got %v", openErr)
     }
@@ -1028,6 +1009,7 @@ func TestProviderOpenWithNilLoggerWritesTheTerminalRecordToStandardError(t *test
     })
 
     database, openErr := provider.Open(
+        testRuntime(),
         newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody"),
         nil,
     )
@@ -1114,7 +1096,7 @@ func TestProviderOpen_RefusesAnEmptyDatabaseUserOrHostBeforeBuildingTheConnector
 
     for _, testCase := range testCases {
         t.Run(testCase.name, func(t *testing.T) {
-            database, openErr := provider.Open(testCase.params, nil)
+            database, openErr := provider.Open(testRuntime(), testCase.params, nil)
             if nil != database {
                 _ = database.Close()
                 t.Fatal("expected no database handle for a refused parameter set")
@@ -1150,11 +1132,11 @@ func TestDialAddressOf_BracketsABareIpv6Literal(t *testing.T) {
 }
 
 /* an outage the provider could not get past — the single-attempt open of a closed port, and the retry budget spent on it — is filed under bunorm.ErrDatabaseUnreachable, the one class a read/write splitter absorbs by reading from the primary; a refusal given by name is not, so a misconfigured replica is refused instead of served from the primary in silence. The driver failure stays reachable under the class. */
-func TestOpenContext_AnOutageIsFiledAsUnreachableAndARefusalIsNot(t *testing.T) {
+func TestOpen_AnOutageIsFiledAsUnreachableAndARefusalIsNot(t *testing.T) {
     unreachable := newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody")
 
     singleAttempt := NewProvider(ProviderConfig{Insecure: true, Timeout: TimeoutConfig{ConnectTimeout: bound.Of(100 * time.Millisecond)}, Retry: singleAttemptRetry})
-    database, openErr := singleAttempt.Open(unreachable, nil)
+    database, openErr := singleAttempt.Open(testRuntime(), unreachable, nil)
     if nil != database {
         _ = database.Close()
         t.Fatal("expected no database handle for a closed port")
@@ -1170,7 +1152,7 @@ func TestOpenContext_AnOutageIsFiledAsUnreachableAndARefusalIsNot(t *testing.T) 
     }
 
     retrying := NewProvider(ProviderConfig{Insecure: true, Timeout: TimeoutConfig{ConnectTimeout: bound.Of(100 * time.Millisecond)}, Retry: RetryConfig{MaxAttempts: bound.Of(2), InitialDelay: bound.Of(time.Millisecond), MaxDelay: bound.Of(time.Millisecond), BackoffMultiplier: 1}})
-    database, openErr = retrying.Open(unreachable, nil)
+    database, openErr = retrying.Open(testRuntime(), unreachable, nil)
     if nil != database {
         _ = database.Close()
         t.Fatal("expected no database handle for a closed port")
@@ -1184,7 +1166,7 @@ func TestOpenContext_AnOutageIsFiledAsUnreachableAndARefusalIsNot(t *testing.T) 
         t.Fatalf("expected the terminal record's mark kept on the unreachable failure, got %v", openErr)
     }
 
-    database, openErr = singleAttempt.Open(newTestParams("", "5432", "melody", "melody", "melody"), nil)
+    database, openErr = singleAttempt.Open(testRuntime(), newTestParams("", "5432", "melody", "melody", "melody"), nil)
     if nil != database {
         _ = database.Close()
         t.Fatal("expected no database handle for an empty host")
@@ -1248,11 +1230,11 @@ func TestIsTransientError_AServerOutageWithAnIdentityIsTransient(t *testing.T) {
 }
 
 /* a budget the caller had already spent refuses the open before the attempt with a deadline as its cause, which satisfies the timeout the classifier admits — so the caller's own expired budget was filed under the class the read/write splitter serves the primary for */
-func TestOpenContext_ACallersExpiredDeadlineIsNotAnUnreachableDatabase(t *testing.T) {
+func TestOpen_ACallersExpiredDeadlineIsNotAnUnreachableDatabase(t *testing.T) {
     expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
     defer cancel()
 
-    _, openErr := NewProvider(ProviderConfig{Retry: singleAttemptRetry}).OpenContext(expired, newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"), nil)
+    _, openErr := NewProvider(ProviderConfig{Retry: singleAttemptRetry}).Open(testRuntimeUnder(expired), newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"), nil)
     if nil == openErr {
         t.Fatal("expected the open under an expired deadline to be refused")
     }
@@ -1273,7 +1255,7 @@ func TestOpenWithRetry_ACallersExpiredDeadlineIsACleanStopWithoutARetry(t *testi
     expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
     defer cancel()
 
-    _, openErr := NewProvider(ProviderConfig{Retry: RetryConfig{}}).OpenContext(expired, newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"), logger)
+    _, openErr := NewProvider(ProviderConfig{Retry: RetryConfig{}}).Open(testRuntimeUnder(expired), newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"), logger)
     if nil == openErr || false == errors.Is(openErr, context.DeadlineExceeded) {
         t.Fatalf("expected the caller's deadline kept as the cause, got %v", openErr)
     }
@@ -1284,7 +1266,7 @@ func TestOpenWithRetry_ACallersExpiredDeadlineIsACleanStopWithoutARetry(t *testi
 }
 
 /* against a live server, the refusal quotes the operand: a database named after a transient marker is still a refusal by name, handed back instead of filed as the outage a replica falls back to the primary for */
-func TestOpenContext_ALiveServerRefusalSpelledAroundAMarkerIsNotFiledAsUnreachable(t *testing.T) {
+func TestOpen_ALiveServerRefusalSpelledAroundAMarkerIsNotFiledAsUnreachable(t *testing.T) {
     host := os.Getenv("PGSQL_HOST")
     if "" == host {
         t.Skip("PGSQL_HOST not set; skipping pgsql provider integration test")
@@ -1296,7 +1278,7 @@ func TestOpenContext_ALiveServerRefusalSpelledAroundAMarkerIsNotFiledAsUnreachab
         newTestParams(host, os.Getenv("PGSQL_PORT"), "timeout", os.Getenv("PGSQL_USER"), os.Getenv("PGSQL_PASSWORD")),
         newTestParams(host, os.Getenv("PGSQL_PORT"), os.Getenv("PGSQL_DATABASE"), "eof", "eof"),
     } {
-        database, openErr := provider.Open(params, nil)
+        database, openErr := provider.Open(testRuntime(), params, nil)
         if nil != database {
             _ = database.Close()
             t.Fatalf("expected the refusal for %s/%s", params.Database, params.User)
@@ -1336,7 +1318,7 @@ func TestOpenWithRetry_AnAbsentAttemptBudgetTakesTheDefaultBudget(t *testing.T) 
         Retry:   RetryConfig{InitialDelay: bound.Of(time.Millisecond), MaxDelay: bound.Of(2 * time.Millisecond)},
     })
 
-    if _, openErr := provider.OpenContext(context.Background(), newTestParams("127.0.0.1", "1", "melody", "melody", "melody"), logger); nil == openErr {
+    if _, openErr := provider.Open(testRuntimeUnder(context.Background()), newTestParams("127.0.0.1", "1", "melody", "melody", "melody"), logger); nil == openErr {
         t.Fatal("expected the open against a refused port to fail")
     }
 
@@ -1369,7 +1351,7 @@ func TestTlsServerNameOf_DropsTheBracketsAndTheZoneOfAnIpv6Literal(t *testing.T)
     }
 }
 
-func TestOpenContext_AnOpenHandedNoLoggerLeavesBunDiagnosticsWhereTheLastRoutingPutThem(t *testing.T) {
+func TestOpen_AnOpenHandedNoLoggerLeavesBunDiagnosticsWhereTheLastRoutingPutThem(t *testing.T) {
     t.Cleanup(bunorm.ResetDiagnostics)
 
     journal := &capturingProviderLogger{}
@@ -1380,8 +1362,8 @@ func TestOpenContext_AnOpenHandedNoLoggerLeavesBunDiagnosticsWhereTheLastRouting
         Retry:   singleAttemptRetry,
     })
 
-    _, openErr := provider.OpenContext(
-        context.Background(),
+    _, openErr := provider.Open(
+        testRuntimeUnder(context.Background()),
         newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"),
         nil,
     )
@@ -1403,7 +1385,7 @@ func TestOpenContext_AnOpenHandedNoLoggerLeavesBunDiagnosticsWhereTheLastRouting
     }
 }
 
-func TestOpenContext_AnAlreadyCancelledOpenLeavesBunDiagnosticsWhereTheLastRoutingPutThem(t *testing.T) {
+func TestOpen_AnAlreadyCancelledOpenLeavesBunDiagnosticsWhereTheLastRoutingPutThem(t *testing.T) {
     t.Cleanup(bunorm.ResetDiagnostics)
 
     journal := &capturingProviderLogger{}
@@ -1413,8 +1395,8 @@ func TestOpenContext_AnAlreadyCancelledOpenLeavesBunDiagnosticsWhereTheLastRouti
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    _, openErr := NewProvider(ProviderConfig{Retry: singleAttemptRetry}).OpenContext(
-        cancelledContext,
+    _, openErr := NewProvider(ProviderConfig{Retry: singleAttemptRetry}).Open(
+        testRuntimeUnder(cancelledContext),
         newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"),
         handed,
     )
@@ -1461,7 +1443,7 @@ func TestOpenWithRetry_ASingleAttemptDialsOnceAndFilesTheOutageAsUnreachable(t *
         },
     })
 
-    _, openErr := provider.OpenContext(context.Background(), newTestParams("127.0.0.1", "1", "melody", "melody", "melody"), logger)
+    _, openErr := provider.Open(testRuntimeUnder(context.Background()), newTestParams("127.0.0.1", "1", "melody", "melody", "melody"), logger)
     if false == errors.Is(openErr, bunorm.ErrDatabaseUnreachable) {
         t.Fatalf("expected the refused port filed as unreachable, got %v", openErr)
     }
@@ -1492,7 +1474,7 @@ func TestProvider_OpenReturnsOnACyclicChainFromAPostBuildHook(t *testing.T) {
     })
 
     assertReturnsOnACyclicChain(t, func() {
-        if _, openErr := provider.Open(newTestParams("unused", "5432", "db", "user", "password"), nil); nil == openErr {
+        if _, openErr := provider.Open(testRuntime(), newTestParams("unused", "5432", "db", "user", "password"), nil); nil == openErr {
             t.Error("expected the hook's refusal")
         }
     })
@@ -1512,4 +1494,111 @@ func TestNewProvider_RefusesInsecureBesideTlsConfig(t *testing.T) {
 
     _ = NewProvider(ProviderConfig{Insecure: true})
     _ = NewProvider(ProviderConfig{TlsConfig: &tls.Config{}})
+}
+
+/* nilContextRuntime is a runtime whose Context answers nil, the one shape RefuseNilRuntime refuses beside nil and a typed nil */
+type nilContextRuntime struct {
+    containercontract.Runtime
+}
+
+func (instance nilContextRuntime) Context() context.Context {
+    return nil
+}
+
+/* both doors refuse a runtime they cannot open under — nil, a typed nil, one carrying no context — before bun's channel is routed or a dial is tried */
+func TestProvider_BothDoorsRefuseARuntimeThatCarriesNoContext(t *testing.T) {
+    t.Cleanup(bunorm.ResetDiagnostics)
+
+    provider := NewProvider(ProviderConfig{Insecure: true, Retry: singleAttemptRetry})
+
+    var typedNil *nilRuntimeImplementation
+
+    doors := map[string]func(runtimeInstance containercontract.Runtime, logger *capturingProviderLogger) (*bun.DB, error){
+        "Open": func(runtimeInstance containercontract.Runtime, logger *capturingProviderLogger) (*bun.DB, error) {
+            return provider.Open(runtimeInstance, newTestParams("127.0.0.1", "1", "melody", "melody", "melody"), logger)
+        },
+        "OpenForMigration": func(runtimeInstance containercontract.Runtime, logger *capturingProviderLogger) (*bun.DB, error) {
+            return provider.OpenForMigration(runtimeInstance, newTestParams("127.0.0.1", "1", "melody", "melody", "melody"), logger)
+        },
+    }
+
+    runtimes := map[string]containercontract.Runtime{
+        "nil":        nil,
+        "typed nil":  typedNil,
+        "no context": nilContextRuntime{Runtime: testRuntime()},
+    }
+
+    for doorName, door := range doors {
+        for runtimeName, runtimeInstance := range runtimes {
+            bunorm.ResetDiagnostics()
+
+            logger := &capturingProviderLogger{}
+            database, openErr := door(runtimeInstance, logger)
+            if nil != database {
+                t.Fatalf("%s under %s: expected no database", doorName, runtimeName)
+            }
+
+            if nil == openErr || false == strings.Contains(openErr.Error(), "the runtime is nil or carries no context") {
+                t.Fatalf("%s under %s: expected the runtime refusal, got %v", doorName, runtimeName, openErr)
+            }
+
+            _ = schema.SafeQuery("SELECT 1", []any{42})
+
+            if 0 != len(logger.entries) {
+                t.Fatalf("%s under %s: expected nothing routed nor journaled, got %v", doorName, runtimeName, logger.entries)
+            }
+        }
+    }
+}
+
+/* nilRuntimeImplementation is a runtime implementation whose nil pointer is the typed nil a door is handed */
+type nilRuntimeImplementation struct {
+    containercontract.Runtime
+}
+
+func TestOpenForMigration_TheConnectorReceivesTheConnectTimeoutAndTheLiftedDeadlines(t *testing.T) {
+    var seen *pgdriver.Config
+
+    provider := NewProvider(ProviderConfig{
+        Timeout: TimeoutConfig{ConnectTimeout: bound.Of(7 * time.Second), ReadTimeout: bound.Of(11 * time.Second), WriteTimeout: bound.Of(13 * time.Second)},
+        PostBuildHook: func(ctx context.Context, connector *pgdriver.Connector) error {
+            seen = connector.Config()
+
+            return errors.New("stop before the connection")
+        },
+        Retry: singleAttemptRetry,
+    })
+
+    if _, openErr := provider.OpenForMigration(testRuntime(), newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"), &capturingProviderLogger{}); nil == openErr {
+        t.Fatal("expected the hook's refusal to end the open")
+    }
+
+    if nil == seen || 7*time.Second != seen.DialTimeout || 0 != seen.ReadTimeout || 0 != seen.WriteTimeout {
+        t.Fatalf("expected the 7s dial timeout and no read or write deadline on the migration connector, got %+v", seen)
+    }
+}
+
+func TestOpen_ADoneContextIsRefusedBeforeTheHookRuns(t *testing.T) {
+    hookCalls := 0
+
+    provider := NewProvider(ProviderConfig{
+        PostBuildHook: func(ctx context.Context, connector *pgdriver.Connector) error {
+            hookCalls++
+
+            return nil
+        },
+        Retry: singleAttemptRetry,
+    })
+
+    doneContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    _, openErr := provider.Open(testRuntimeUnder(doneContext), newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"), &capturingProviderLogger{})
+    if nil == openErr || false == strings.Contains(openErr.Error(), "database open cancelled before the attempt") || false == errors.Is(openErr, context.Canceled) {
+        t.Fatalf("expected the refusal before the attempt carrying the cancellation, got %v", openErr)
+    }
+
+    if 0 != hookCalls {
+        t.Fatalf("expected the hook never run, got %d calls", hookCalls)
+    }
 }

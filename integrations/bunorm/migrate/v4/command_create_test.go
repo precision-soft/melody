@@ -190,10 +190,14 @@ type refusingCountingProvider struct {
     opens int
 }
 
-func (instance *refusingCountingProvider) Open(params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *refusingCountingProvider) Open(runtimeInstance containercontract.Runtime, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.opens++
 
     return nil, errors.New("database connection failed")
+}
+
+func (instance *refusingCountingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
 }
 
 /* newRuntimeWithProvider wires a registry whose one manager opens through the given provider, the way newRuntimeWithDatabase does for a database already opened */
@@ -201,7 +205,6 @@ func newRuntimeWithProvider(t *testing.T, provider bunorm.Provider) containercon
     t.Helper()
 
     registry, registryErr := bunorm.NewManagerRegistry(
-        context.Background(),
         logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
             bunorm.ProviderDefinition{Name: "primary", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -343,7 +346,6 @@ func TestCreateCommand_ALostReportWriteIsAWarningInTheJournalNotAFailure(t *test
     journal := &journalRecorder{Logger: logging.NewNopLogger()}
 
     registry, registryErr := bunorm.NewManagerRegistry(
-        context.Background(),
         logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
             bunorm.ProviderDefinition{Name: "primary", Provider: &refusingCountingProvider{}, Parameters: testConnectionParameters, IsDefault: true},

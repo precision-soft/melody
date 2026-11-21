@@ -49,7 +49,6 @@ func newRuntimeWithDatabaseAndParameters(t *testing.T, database *bun.DB, values 
     t.Helper()
 
     registry, registryErr := bunorm.NewManagerRegistry(
-        context.Background(),
         logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
             bunorm.ProviderDefinition{Name: "primary", Provider: &fakeDatabaseProvider{database: database}, Parameters: testConnectionParameters, IsDefault: true},

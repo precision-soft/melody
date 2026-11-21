@@ -31,7 +31,12 @@ type fakeDatabaseProvider struct {
     database *bun.DB
 }
 
-func (instance *fakeDatabaseProvider) Open(params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *fakeDatabaseProvider) Open(runtimeInstance containercontract.Runtime, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.database, nil
+}
+
+/* the migration door answers the pool Open answered, which the registry shares by identity */
+func (instance *fakeDatabaseProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.database, nil
 }
 
@@ -39,7 +44,6 @@ func newRuntimeWithDatabase(t *testing.T, database *bun.DB) containercontract.Ru
     t.Helper()
 
     registry, registryErr := bunorm.NewManagerRegistry(
-        context.Background(),
         logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
             bunorm.ProviderDefinition{Name: "primary", Provider: &fakeDatabaseProvider{database: database}, Parameters: testConnectionParameters, IsDefault: true},
@@ -59,7 +63,16 @@ func newRuntimeWithDatabase(t *testing.T, database *bun.DB) containercontract.Ru
         container.RegisterOptions{},
     )
 
-    return runtime.NewRun(context.Background(), serviceContainer.NewScope())
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
+
+    /* the pool is opened first, so the migration door, answering the very same pool, is shared with it by identity and a run's release leaves it open */
+    if nil != database {
+        if _, managerErr := registry.Manager(runtimeInstance, "primary"); nil != managerErr {
+            t.Fatalf("failed to open the manager: %s", managerErr.Error())
+        }
+    }
+
+    return runtimeInstance
 }
 
 /* runMigrationCommand drives a migration command exactly like the CLI kernel does: the command metadata is mounted on a command context, the arguments are parsed and the command's Run receives the parsed context. */

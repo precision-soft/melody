@@ -115,7 +115,7 @@ func TestMigrateCommand_LockFailureAbortsWithoutMigratingOrUnlocking(t *testing.
 
     lockContext := contextual.Context()
     for key, expected := range map[string]string{
-        "manager":       "<default>",
+        "manager":       "<default> (dedicated migration connection)",
         "locksTable":    DefaultLocksTable,
         "unlockCommand": DefaultCommandPrefix + ":unlock",
     } {

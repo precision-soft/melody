@@ -10,6 +10,7 @@ import (
     "runtime"
     "strings"
     "sync"
+    "sync/atomic"
     "testing"
     "time"
     "unicode/utf8"
@@ -19,6 +20,7 @@ import (
     "github.com/uptrace/bun/dialect/feature"
     "github.com/uptrace/bun/schema"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
@@ -49,7 +51,7 @@ type fakeProvider struct {
     openCount int
 }
 
-func (instance *fakeProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *fakeProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.openCount = instance.openCount + 1
 
     /* a real stub database: the registry refuses a provider answering neither a database nor an error */
@@ -58,12 +60,16 @@ func (instance *fakeProvider) Open(params ConnectionParameters, logger loggingco
     return database, nil
 }
 
+func (instance *fakeProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
+}
+
 type blockingProvider struct {
     openStarted chan struct{}
     releaseOpen chan struct{}
 }
 
-func (instance *blockingProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *blockingProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     close(instance.openStarted)
     <-instance.releaseOpen
 
@@ -73,13 +79,17 @@ func (instance *blockingProvider) Open(params ConnectionParameters, logger loggi
     return database, nil
 }
 
+func (instance *blockingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
+}
+
 type panickingProvider struct {
     openStarted chan struct{}
     releaseOpen chan struct{}
     startOnce   sync.Once
 }
 
-func (instance *panickingProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *panickingProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.startOnce.Do(
         func() {
             close(instance.openStarted)
@@ -90,8 +100,12 @@ func (instance *panickingProvider) Open(params ConnectionParameters, logger logg
     panic("bunorm provider open exploded")
 }
 
+func (instance *panickingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
+}
+
 func TestNewManagerRegistry_ErrorsWhenLoggerIsNil(t *testing.T) {
-    _, registryErr := NewManagerRegistry(context.Background(), nil, nil)
+    _, registryErr := NewManagerRegistry(nil, nil)
     if nil == registryErr {
         t.Fatalf("expected error")
     }
@@ -104,7 +118,7 @@ func TestNewManagerRegistry_ErrorsWhenLoggerIsNil(t *testing.T) {
 func TestNewManagerRegistry_ErrorsWhenNoProviderDefinitions(t *testing.T) {
     logger := &fakeLogger{}
 
-    _, registryErr := NewManagerRegistry(context.Background(), logger, nil)
+    _, registryErr := NewManagerRegistry(logger, nil)
     if nil == registryErr {
         t.Fatalf("expected error")
     }
@@ -121,7 +135,6 @@ func TestNewManagerRegistry_ErrorsWhenMultipleDefaults(t *testing.T) {
     providerB := &fakeProvider{}
 
     _, registryErr := NewManagerRegistry(
-        context.Background(),
         logger,
         []ProviderDefinition{
             ProviderDefinition{Name: "a", Provider: providerA, Parameters: testConnectionParameters, IsDefault: true},
@@ -144,7 +157,6 @@ func TestNewManagerRegistry_DefaultIsFirstWhenNoneIsDefault(t *testing.T) {
     providerB := &fakeProvider{}
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         logger,
         []ProviderDefinition{
             ProviderDefinition{Name: "a", Provider: providerA, Parameters: testConnectionParameters, IsDefault: false},
@@ -155,7 +167,7 @@ func TestNewManagerRegistry_DefaultIsFirstWhenNoneIsDefault(t *testing.T) {
         t.Fatalf("unexpected error: %v", registryErr)
     }
 
-    defaultManager, managerErr := registry.DefaultManager()
+    defaultManager, managerErr := registry.DefaultManager(testRuntime())
     if nil != managerErr {
         t.Fatalf("unexpected error: %v", managerErr)
     }
@@ -172,7 +184,6 @@ func TestManagerRegistry_CachesManagersOneToOne(t *testing.T) {
     providerB := &fakeProvider{}
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         logger,
         []ProviderDefinition{
             ProviderDefinition{Name: "a", Provider: providerA, Parameters: testConnectionParameters, IsDefault: true},
@@ -183,12 +194,12 @@ func TestManagerRegistry_CachesManagersOneToOne(t *testing.T) {
         t.Fatalf("unexpected error: %v", registryErr)
     }
 
-    managerA1, errA1 := registry.Manager("a")
+    managerA1, errA1 := registry.Manager(testRuntime(), "a")
     if nil != errA1 {
         t.Fatalf("unexpected error: %v", errA1)
     }
 
-    managerA2, errA2 := registry.Manager("a")
+    managerA2, errA2 := registry.Manager(testRuntime(), "a")
     if nil != errA2 {
         t.Fatalf("unexpected error: %v", errA2)
     }
@@ -201,7 +212,7 @@ func TestManagerRegistry_CachesManagersOneToOne(t *testing.T) {
         t.Fatalf("expected provider 'a' to be opened once")
     }
 
-    _, errB1 := registry.Manager("b")
+    _, errB1 := registry.Manager(testRuntime(), "b")
     if nil != errB1 {
         t.Fatalf("unexpected error: %v", errB1)
     }
@@ -221,7 +232,6 @@ func TestManagerRegistry_OpenOfOneManagerDoesNotBlockCacheHitsForAnother(t *test
     slowProvider := &blockingProvider{openStarted: openStarted, releaseOpen: releaseOpen}
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         logger,
         []ProviderDefinition{
             ProviderDefinition{Name: "fast", Provider: fastProvider, Parameters: testConnectionParameters, IsDefault: true},
@@ -232,12 +242,12 @@ func TestManagerRegistry_OpenOfOneManagerDoesNotBlockCacheHitsForAnother(t *test
         t.Fatalf("unexpected error: %v", registryErr)
     }
 
-    if _, warmErr := registry.Manager("fast"); nil != warmErr {
+    if _, warmErr := registry.Manager(testRuntime(), "fast"); nil != warmErr {
         t.Fatalf("unexpected error warming 'fast': %v", warmErr)
     }
 
     go func() {
-        _, _ = registry.Manager("slow")
+        _, _ = registry.Manager(testRuntime(), "slow")
     }()
 
     select {
@@ -248,7 +258,7 @@ func TestManagerRegistry_OpenOfOneManagerDoesNotBlockCacheHitsForAnother(t *test
 
     cacheHitDone := make(chan struct{})
     go func() {
-        _, _ = registry.Database("fast")
+        _, _ = registry.Database(testRuntime(), "fast")
         close(cacheHitDone)
     }()
 
@@ -272,7 +282,6 @@ func TestManagerRegistry_PanicDuringOpenReleasesCoalescedWaiters(t *testing.T) {
     provider := &panickingProvider{openStarted: openStarted, releaseOpen: releaseOpen}
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         logger,
         []ProviderDefinition{
             ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -289,7 +298,7 @@ func TestManagerRegistry_PanicDuringOpenReleasesCoalescedWaiters(t *testing.T) {
             close(firstDone)
         }()
 
-        _, _ = registry.Manager("x")
+        _, _ = registry.Manager(testRuntime(), "x")
     }()
 
     select {
@@ -316,7 +325,7 @@ func TestManagerRegistry_PanicDuringOpenReleasesCoalescedWaiters(t *testing.T) {
             }
         }()
 
-        _, secondErr := registry.Manager("x")
+        _, secondErr := registry.Manager(testRuntime(), "x")
         secondResult <- secondErr
     }()
 
@@ -367,7 +376,6 @@ func TestManagerRegistry_AnInFlightOpenIsRegisteredBeforeTheDial(t *testing.T) {
     provider := &blockingProvider{openStarted: openStarted, releaseOpen: releaseOpen}
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         logger,
         []ProviderDefinition{
             ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -379,7 +387,7 @@ func TestManagerRegistry_AnInFlightOpenIsRegisteredBeforeTheDial(t *testing.T) {
 
     managerDone := make(chan struct{})
     go func() {
-        _, _ = registry.Manager("x")
+        _, _ = registry.Manager(testRuntime(), "x")
         close(managerDone)
     }()
 
@@ -408,7 +416,6 @@ func TestManagerRegistry_ACallerFindingAnInFlightOpenWaitsInsteadOfDialing(t *te
     provider := &fakeProvider{}
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         logger,
         []ProviderDefinition{
             ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -433,7 +440,7 @@ func TestManagerRegistry_ACallerFindingAnInFlightOpenWaitsInsteadOfDialing(t *te
 
     outcomeChannel := make(chan managerOutcome, 1)
     go func() {
-        manager, managerErr := registry.Manager("x")
+        manager, managerErr := registry.Manager(testRuntime(), "x")
         outcomeChannel <- managerOutcome{manager: manager, err: managerErr}
     }()
 
@@ -552,11 +559,15 @@ type closeRaceProvider struct {
     releaseOpen chan struct{}
 }
 
-func (instance *closeRaceProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *closeRaceProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     close(instance.openStarted)
     <-instance.releaseOpen
 
     return instance.database, nil
+}
+
+func (instance *closeRaceProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
 }
 
 var (
@@ -582,7 +593,6 @@ func TestManagerRegistry_CloseDuringInFlightOpenClosesDatabaseAndRefuses(t *test
     }
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         logger,
         []ProviderDefinition{
             ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -599,7 +609,7 @@ func TestManagerRegistry_CloseDuringInFlightOpenClosesDatabaseAndRefuses(t *test
 
     managerOutcomeChannel := make(chan managerOutcome, 1)
     go func() {
-        manager, managerErr := registry.Manager("x")
+        manager, managerErr := registry.Manager(testRuntime(), "x")
         managerOutcomeChannel <- managerOutcome{manager: manager, err: managerErr}
     }()
 
@@ -618,7 +628,7 @@ func TestManagerRegistry_CloseDuringInFlightOpenClosesDatabaseAndRefuses(t *test
     /* the flag is OBSERVED rather than waited out. Close publishes it under the lock before it tears any pool down, and from that instant every door answers ErrManagerRegistryClosed for any name — so a probe for a name the registry never had says exactly when the parked open may be released, where a fixed sleep only guessed that Close had got that far and decided the test by scheduling. */
     closePublishedDeadline := time.Now().Add(2 * time.Second)
     for {
-        if _, probeErr := registry.Manager("a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
+        if _, probeErr := registry.Manager(testRuntime(), "a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
             break
         }
 
@@ -669,56 +679,41 @@ type migrationCapableProvider struct {
     migrationOpenCount int
 }
 
-func (instance *migrationCapableProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *migrationCapableProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.ordinaryDatabase, nil
 }
 
-func (instance *migrationCapableProvider) OpenForMigration(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *migrationCapableProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.migrationOpenCount = instance.migrationOpenCount + 1
 
     return instance.migrationDatabase, nil
 }
 
-var _ MigrationProvider = (*migrationCapableProvider)(nil)
+var _ Provider = (*migrationCapableProvider)(nil)
 
-/* migrationContextRecordingProvider carries both migration doors, so a test can tell which one the registry reached */
+/* migrationContextRecordingProvider records the runtime its migration door receives */
 type migrationContextRecordingProvider struct {
     observed          context.Context
-    plainOpenReached  bool
     migrationDatabase *bun.DB
 }
 
-func (instance *migrationContextRecordingProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *migrationContextRecordingProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return nil, errors.New("the ordinary open must not run for a migration database")
 }
 
-func (instance *migrationContextRecordingProvider) OpenForMigration(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    instance.plainOpenReached = true
+func (instance *migrationContextRecordingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    instance.observed = runtimeInstance.Context()
 
     return instance.migrationDatabase, nil
 }
 
-func (instance *migrationContextRecordingProvider) OpenForMigrationContext(
-    ctx context.Context,
-    params ConnectionParameters,
-    logger loggingcontract.Logger,
-) (*bun.DB, error) {
-    instance.observed = ctx
-
-    return instance.migrationDatabase, nil
-}
-
-var _ MigrationContextOpener = (*migrationContextRecordingProvider)(nil)
-
-/* the registry's bound context has to reach the MIGRATION open too: it reached the ordinary one alone, so a db:migrate cancelled by a supervisor slept out the whole retry budget against a down database instead of refusing at the first cancellable step */
-func TestManagerRegistry_MigrationDatabasePrefersTheContextOpenerWithTheConstructionContext(t *testing.T) {
+/* the caller's runtime reaches the MIGRATION door too, so a db:migrate cancelled by a supervisor refuses at the first cancellable step instead of sleeping out the whole retry budget against a down database */
+func TestManagerRegistry_MigrationDatabaseHandsTheCallersRuntimeToTheMigrationDoor(t *testing.T) {
     migrationDatabase, _ := newCloseRaceDatabase()
 
-    ctx := context.WithValue(context.Background(), registryProbeContextKey{}, "bound")
     provider := &migrationContextRecordingProvider{migrationDatabase: migrationDatabase}
 
     registry, registryErr := NewManagerRegistry(
-        ctx,
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -728,64 +723,17 @@ func TestManagerRegistry_MigrationDatabasePrefersTheContextOpenerWithTheConstruc
         t.Fatalf("registry: %v", registryErr)
     }
 
-    database, dedicated, migrationErr := registry.MigrationDatabase("")
+    database, migrationErr := registry.MigrationDatabase(testRuntimeUnder(context.WithValue(context.Background(), registryProbeContextKey{}, "caller")), "")
     if nil != migrationErr {
         t.Fatalf("migration database error: %v", migrationErr)
-    }
-
-    if false == dedicated {
-        t.Fatalf("expected the dedicated migration connection to be preferred")
     }
 
     if migrationDatabase != database {
         t.Fatalf("expected the migration database")
     }
 
-    if true == provider.plainOpenReached {
-        t.Fatalf("expected the context door to be preferred over the context-less one")
-    }
-
-    if nil == provider.observed {
-        t.Fatalf("expected the construction context to reach the migration open")
-    }
-
-    if "bound" != provider.observed.Value(registryProbeContextKey{}) {
-        t.Fatalf("expected the exact construction context to reach the migration open")
-    }
-}
-
-/* a provider carrying only the context-less capability is unaffected: the door is optional, and the three implementers written before it must keep working */
-func TestManagerRegistry_MigrationDatabaseFallsBackToTheContextLessCapability(t *testing.T) {
-    ordinaryDatabase, _ := newCloseRaceDatabase()
-    migrationDatabase, _ := newCloseRaceDatabase()
-
-    provider := &migrationCapableProvider{
-        ordinaryDatabase:  ordinaryDatabase,
-        migrationDatabase: migrationDatabase,
-    }
-
-    registry, registryErr := NewManagerRegistry(
-        context.Background(),
-        &fakeLogger{},
-        []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
-        },
-    )
-    if nil != registryErr {
-        t.Fatalf("registry: %v", registryErr)
-    }
-
-    database, dedicated, migrationErr := registry.MigrationDatabase("")
-    if nil != migrationErr {
-        t.Fatalf("migration database error: %v", migrationErr)
-    }
-
-    if false == dedicated || migrationDatabase != database {
-        t.Fatalf("expected the dedicated migration connection of a context-less provider")
-    }
-
-    if 1 != provider.migrationOpenCount {
-        t.Fatalf("expected exactly one migration open, got %d", provider.migrationOpenCount)
+    if nil == provider.observed || "caller" != provider.observed.Value(registryProbeContextKey{}) {
+        t.Fatalf("expected the caller's context, carrying its value, to reach the migration open")
     }
 }
 
@@ -799,7 +747,6 @@ func TestManagerRegistry_MigrationDatabasePrefersTheCapability(t *testing.T) {
     }
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -809,18 +756,15 @@ func TestManagerRegistry_MigrationDatabasePrefersTheCapability(t *testing.T) {
         t.Fatalf("registry error: %v", registryErr)
     }
 
-    database, dedicated, migrationDatabaseErr := registry.MigrationDatabase("")
+    database, migrationDatabaseErr := registry.MigrationDatabase(testRuntime(), "")
     if nil != migrationDatabaseErr {
         t.Fatalf("migration database error: %v", migrationDatabaseErr)
-    }
-    if false == dedicated {
-        t.Fatalf("expected the dedicated migration connection to be preferred")
     }
     if migrationDatabase != database {
         t.Fatalf("expected the migration database, not the ordinary pool")
     }
 
-    databaseAgain, _, migrationDatabaseAgainErr := registry.MigrationDatabase("main")
+    databaseAgain, migrationDatabaseAgainErr := registry.MigrationDatabase(testRuntime(), "main")
     if nil != migrationDatabaseAgainErr {
         t.Fatalf("migration database error: %v", migrationDatabaseAgainErr)
     }
@@ -832,32 +776,100 @@ func TestManagerRegistry_MigrationDatabasePrefersTheCapability(t *testing.T) {
     }
 }
 
-func TestManagerRegistry_MigrationDatabaseFallsBackWithoutTheCapability(t *testing.T) {
+/* a provider with nothing to tune delegates its migration door to Open: the registry keeps that second pool as the name's migration connection, apart from the request pool, and the last release closes it */
+func TestManagerRegistry_MigrationDatabaseOfADelegatingProviderIsASecondPool(t *testing.T) {
+    provider := &fakeProvider{}
+
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
         t.Fatalf("registry error: %v", registryErr)
     }
 
-    _, dedicated, migrationDatabaseErr := registry.MigrationDatabase("main")
+    manager, managerErr := registry.Manager(testRuntime(), "main")
+    if nil != managerErr {
+        t.Fatalf("manager error: %v", managerErr)
+    }
+
+    migrationDatabase, migrationDatabaseErr := registry.MigrationDatabase(testRuntime(), "main")
     if nil != migrationDatabaseErr {
         t.Fatalf("migration database error: %v", migrationDatabaseErr)
     }
-    if true == dedicated {
-        t.Fatalf("expected the fallback to the ordinary connection")
+
+    if manager.Database() == migrationDatabase {
+        t.Fatalf("expected the delegating provider's second pool, not the request pool")
     }
 
-    if _, managerErr := registry.Manager("main"); nil != managerErr {
-        t.Fatalf("expected the ordinary manager path to have been taken: %v", managerErr)
+    if 2 != provider.openCount {
+        t.Fatalf("expected the migration door to open a second pool, got %d opens", provider.openCount)
     }
 
-    if 0 != len(registry.migrationDatabases) {
-        t.Fatalf("expected no dedicated database to be cached on the fallback path")
+    if 1 != len(registry.migrationDatabases) {
+        t.Fatalf("expected the second pool kept as the migration connection")
+    }
+}
+
+/* sharedPoolProvider answers its migration door with the very pool its Open answered, the one case the registry shares by identity */
+type sharedPoolProvider struct {
+    database *bun.DB
+}
+
+func (instance *sharedPoolProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.database, nil
+}
+
+func (instance *sharedPoolProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.database, nil
+}
+
+/* a migration answer that is the name's own pool is shared with it by identity: neither kept as a migration connection nor closed by the release, so a migration run cannot close the application's pool */
+func TestManagerRegistry_MigrationDatabaseSharesTheNamesPoolByIdentity(t *testing.T) {
+    database, closeSignal := newCloseRaceDatabase()
+    provider := &sharedPoolProvider{database: database}
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        []ProviderDefinition{
+            ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
+        },
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    if _, managerErr := registry.Manager(testRuntime(), "main"); nil != managerErr {
+        t.Fatalf("manager error: %v", managerErr)
+    }
+
+    migrationDatabase, migrationDatabaseErr := registry.MigrationDatabase(testRuntime(), "main")
+    if nil != migrationDatabaseErr {
+        t.Fatalf("migration database error: %v", migrationDatabaseErr)
+    }
+
+    if database != migrationDatabase {
+        t.Fatalf("expected the shared pool")
+    }
+
+    if 0 != len(registry.migrationDatabases) || 0 != len(registry.migrationHolders) {
+        t.Fatalf("expected the shared pool not to be kept as a migration connection")
+    }
+
+    if releaseErr := registry.CloseMigrationDatabase("main"); nil != releaseErr {
+        t.Fatalf("release error: %v", releaseErr)
+    }
+
+    select {
+    case <-closeSignal:
+        t.Fatalf("expected the release to leave the shared pool open")
+    case <-time.After(50 * time.Millisecond):
+    }
+
+    if _, managerErr := registry.Manager(testRuntime(), "main"); nil != managerErr {
+        t.Fatalf("expected the manager still served, got %v", managerErr)
     }
 }
 
@@ -870,7 +882,6 @@ func TestManagerRegistry_CloseClosesTheMigrationDatabase(t *testing.T) {
     }
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -880,7 +891,7 @@ func TestManagerRegistry_CloseClosesTheMigrationDatabase(t *testing.T) {
         t.Fatalf("registry error: %v", registryErr)
     }
 
-    if _, _, migrationDatabaseErr := registry.MigrationDatabase("main"); nil != migrationDatabaseErr {
+    if _, migrationDatabaseErr := registry.MigrationDatabase(testRuntime(), "main"); nil != migrationDatabaseErr {
         t.Fatalf("migration database error: %v", migrationDatabaseErr)
     }
 
@@ -894,7 +905,7 @@ func TestManagerRegistry_CloseClosesTheMigrationDatabase(t *testing.T) {
         t.Fatalf("expected Close to close the dedicated migration database")
     }
 
-    if _, _, afterCloseErr := registry.MigrationDatabase("main"); false == errors.Is(afterCloseErr, ErrManagerRegistryClosed) {
+    if _, afterCloseErr := registry.MigrationDatabase(testRuntime(), "main"); false == errors.Is(afterCloseErr, ErrManagerRegistryClosed) {
         t.Fatalf("expected the closed registry to refuse a migration database, got %v", afterCloseErr)
     }
 }
@@ -903,7 +914,6 @@ func TestNewManagerRegistry_ErrorsWhenLoggerIsTypedNil(t *testing.T) {
     var typedNilLogger *fakeLogger
 
     _, registryErr := NewManagerRegistry(
-        context.Background(),
         typedNilLogger,
         []ProviderDefinition{
             ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -919,7 +929,6 @@ func TestNewManagerRegistry_ErrorsWhenProviderIsTypedNil(t *testing.T) {
     var typedNilProvider *fakeProvider
 
     _, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "main", Provider: typedNilProvider, Parameters: testConnectionParameters, IsDefault: true},
@@ -935,17 +944,20 @@ type nilPairProvider struct {
     openCount int
 }
 
-func (instance *nilPairProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *nilPairProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.openCount = instance.openCount + 1
 
     return nil, nil
+}
+
+func (instance *nilPairProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
 }
 
 func TestManagerRegistry_RefusesProviderReturningNeitherDatabaseNorError(t *testing.T) {
     provider := &nilPairProvider{}
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -955,7 +967,7 @@ func TestManagerRegistry_RefusesProviderReturningNeitherDatabaseNorError(t *test
         t.Fatalf("registry error: %v", registryErr)
     }
 
-    _, managerErr := registry.Manager("main")
+    _, managerErr := registry.Manager(testRuntime(), "main")
     if false == errors.Is(managerErr, ErrProviderReturnedNilDatabase) {
         t.Fatalf("expected ErrProviderReturnedNilDatabase, got %v", managerErr)
     }
@@ -964,7 +976,7 @@ func TestManagerRegistry_RefusesProviderReturningNeitherDatabaseNorError(t *test
         t.Fatalf("expected no manager to be memoized for the refused open")
     }
 
-    _, secondErr := registry.Manager("main")
+    _, secondErr := registry.Manager(testRuntime(), "main")
     if false == errors.Is(secondErr, ErrProviderReturnedNilDatabase) {
         t.Fatalf("expected the refusal again on retry, got %v", secondErr)
     }
@@ -979,8 +991,12 @@ type databaseBesideErrorProvider struct {
     openErr  error
 }
 
-func (instance *databaseBesideErrorProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *databaseBesideErrorProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.database, instance.openErr
+}
+
+func (instance *databaseBesideErrorProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
 }
 
 func TestManagerRegistry_ClosesTheDatabaseAProviderReturnsBesideAnError(t *testing.T) {
@@ -988,7 +1004,6 @@ func TestManagerRegistry_ClosesTheDatabaseAProviderReturnsBesideAnError(t *testi
     providerErr := errors.New("open failed after the pool was assembled")
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "main", Provider: &databaseBesideErrorProvider{database: database, openErr: providerErr}, Parameters: testConnectionParameters, IsDefault: true},
@@ -998,7 +1013,7 @@ func TestManagerRegistry_ClosesTheDatabaseAProviderReturnsBesideAnError(t *testi
         t.Fatalf("registry error: %v", registryErr)
     }
 
-    _, managerErr := registry.Manager("main")
+    _, managerErr := registry.Manager(testRuntime(), "main")
     if false == errors.Is(managerErr, providerErr) {
         t.Fatalf("expected the provider's own error, got %v", managerErr)
     }
@@ -1037,8 +1052,12 @@ type pinnedDatabaseProvider struct {
     database *bun.DB
 }
 
-func (instance *pinnedDatabaseProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *pinnedDatabaseProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.database, nil
+}
+
+func (instance *pinnedDatabaseProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
 }
 
 func TestManagerRegistry_CloseNamesEveryDatabaseThatFailedToClose(t *testing.T) {
@@ -1046,7 +1065,6 @@ func TestManagerRegistry_CloseNamesEveryDatabaseThatFailedToClose(t *testing.T) 
     betaErr := errors.New("beta close refused")
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "alpha", Provider: &pinnedDatabaseProvider{database: newFailClosingDatabase(alphaErr)}, Parameters: testConnectionParameters, IsDefault: true},
@@ -1057,10 +1075,10 @@ func TestManagerRegistry_CloseNamesEveryDatabaseThatFailedToClose(t *testing.T) 
         t.Fatalf("registry error: %v", registryErr)
     }
 
-    if _, managerErr := registry.Manager("alpha"); nil != managerErr {
+    if _, managerErr := registry.Manager(testRuntime(), "alpha"); nil != managerErr {
         t.Fatalf("manager error: %v", managerErr)
     }
-    if _, managerErr := registry.Manager("beta"); nil != managerErr {
+    if _, managerErr := registry.Manager(testRuntime(), "beta"); nil != managerErr {
         t.Fatalf("manager error: %v", managerErr)
     }
 
@@ -1089,7 +1107,6 @@ func TestManagerRegistry_CloseKeepsALoneCloseFailureUntouched(t *testing.T) {
     alphaErr := errors.New("alpha close refused")
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "alpha", Provider: &pinnedDatabaseProvider{database: newFailClosingDatabase(alphaErr)}, Parameters: testConnectionParameters, IsDefault: true},
@@ -1099,7 +1116,7 @@ func TestManagerRegistry_CloseKeepsALoneCloseFailureUntouched(t *testing.T) {
         t.Fatalf("registry error: %v", registryErr)
     }
 
-    if _, managerErr := registry.Manager("alpha"); nil != managerErr {
+    if _, managerErr := registry.Manager(testRuntime(), "alpha"); nil != managerErr {
         t.Fatalf("manager error: %v", managerErr)
     }
 
@@ -1122,13 +1139,13 @@ type configurableMigrationProvider struct {
     releaseOpen       chan struct{}
 }
 
-func (instance *configurableMigrationProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *configurableMigrationProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     database, _ := newCloseRaceDatabase()
 
     return database, nil
 }
 
-func (instance *configurableMigrationProvider) OpenForMigration(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *configurableMigrationProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     if nil != instance.openStarted {
         close(instance.openStarted)
         <-instance.releaseOpen
@@ -1137,11 +1154,10 @@ func (instance *configurableMigrationProvider) OpenForMigration(params Connectio
     return instance.migrationDatabase, instance.migrationErr
 }
 
-var _ MigrationProvider = (*configurableMigrationProvider)(nil)
+var _ Provider = (*configurableMigrationProvider)(nil)
 
 func TestManagerRegistry_MigrationDatabaseRefusesProviderReturningNeitherDatabaseNorError(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "main", Provider: &configurableMigrationProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -1151,7 +1167,7 @@ func TestManagerRegistry_MigrationDatabaseRefusesProviderReturningNeitherDatabas
         t.Fatalf("registry error: %v", registryErr)
     }
 
-    _, _, migrationDatabaseErr := registry.MigrationDatabase("main")
+    _, migrationDatabaseErr := registry.MigrationDatabase(testRuntime(), "main")
     if false == errors.Is(migrationDatabaseErr, ErrProviderReturnedNilDatabase) {
         t.Fatalf("expected ErrProviderReturnedNilDatabase, got %v", migrationDatabaseErr)
     }
@@ -1166,7 +1182,6 @@ func TestManagerRegistry_MigrationDatabaseClosesTheDatabaseReturnedBesideAnError
     providerErr := errors.New("migration open failed after the pool was assembled")
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "main", Provider: &configurableMigrationProvider{migrationDatabase: database, migrationErr: providerErr}, Parameters: testConnectionParameters, IsDefault: true},
@@ -1176,7 +1191,7 @@ func TestManagerRegistry_MigrationDatabaseClosesTheDatabaseReturnedBesideAnError
         t.Fatalf("registry error: %v", registryErr)
     }
 
-    _, _, migrationDatabaseErr := registry.MigrationDatabase("main")
+    _, migrationDatabaseErr := registry.MigrationDatabase(testRuntime(), "main")
     if false == errors.Is(migrationDatabaseErr, providerErr) {
         t.Fatalf("expected the provider's own error, got %v", migrationDatabaseErr)
     }
@@ -1201,7 +1216,6 @@ func TestManagerRegistry_CloseDuringInFlightMigrationOpenClosesDatabaseAndRefuse
     }
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -1218,7 +1232,7 @@ func TestManagerRegistry_CloseDuringInFlightMigrationOpenClosesDatabaseAndRefuse
 
     outcomeChannel := make(chan migrationOutcome, 1)
     go func() {
-        migrationDatabase, _, migrationDatabaseErr := registry.MigrationDatabase("main")
+        migrationDatabase, migrationDatabaseErr := registry.MigrationDatabase(testRuntime(), "main")
         outcomeChannel <- migrationOutcome{database: migrationDatabase, err: migrationDatabaseErr}
     }()
 
@@ -1237,7 +1251,7 @@ func TestManagerRegistry_CloseDuringInFlightMigrationOpenClosesDatabaseAndRefuse
     /* the flag is OBSERVED rather than waited out. Close publishes it under the lock before it tears any pool down, and from that instant every door answers ErrManagerRegistryClosed for any name — so a probe for a name the registry never had says exactly when the parked open may be released, where a fixed sleep only guessed that Close had got that far and decided the test by scheduling. */
     closePublishedDeadline := time.Now().Add(2 * time.Second)
     for {
-        if _, probeErr := registry.Manager("a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
+        if _, probeErr := registry.Manager(testRuntime(), "a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
             break
         }
 
@@ -1280,7 +1294,6 @@ func TestManagerRegistry_CloseDuringInFlightMigrationOpenClosesDatabaseAndRefuse
 
 func TestManagerRegistry_MigrationDatabaseRefusesAnUnknownName(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -1290,7 +1303,7 @@ func TestManagerRegistry_MigrationDatabaseRefusesAnUnknownName(t *testing.T) {
         t.Fatalf("registry error: %v", registryErr)
     }
 
-    _, _, migrationDatabaseErr := registry.MigrationDatabase("missing")
+    _, migrationDatabaseErr := registry.MigrationDatabase(testRuntime(), "missing")
     if false == errors.Is(migrationDatabaseErr, ErrProviderDefinitionNotFound) {
         t.Fatalf("expected ErrProviderDefinitionNotFound, got %v", migrationDatabaseErr)
     }
@@ -1300,15 +1313,18 @@ type erroringProvider struct {
     openErr error
 }
 
-func (instance *erroringProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *erroringProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return nil, instance.openErr
 }
 
-func TestManagerRegistry_MigrationDatabaseFallbackPropagatesTheOpenFailure(t *testing.T) {
+func (instance *erroringProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
+}
+
+func TestManagerRegistry_MigrationDatabasePropagatesTheOpenFailure(t *testing.T) {
     openRefused := errors.New("open refused")
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "main", Provider: &erroringProvider{openErr: openRefused}, Parameters: testConnectionParameters, IsDefault: true},
@@ -1318,18 +1334,14 @@ func TestManagerRegistry_MigrationDatabaseFallbackPropagatesTheOpenFailure(t *te
         t.Fatalf("registry error: %v", registryErr)
     }
 
-    _, dedicated, migrationDatabaseErr := registry.MigrationDatabase("main")
+    _, migrationDatabaseErr := registry.MigrationDatabase(testRuntime(), "main")
     if false == errors.Is(migrationDatabaseErr, openRefused) {
-        t.Fatalf("expected the open failure through the fallback, got %v", migrationDatabaseErr)
-    }
-    if true == dedicated {
-        t.Fatalf("expected no dedicated connection to be reported beside a failure")
+        t.Fatalf("expected the open failure of the migration door, got %v", migrationDatabaseErr)
     }
 }
 
 func TestManagerRegistry_RefusesACachedManagerAfterClose(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -1339,7 +1351,7 @@ func TestManagerRegistry_RefusesACachedManagerAfterClose(t *testing.T) {
         t.Fatalf("registry error: %v", registryErr)
     }
 
-    if _, warmErr := registry.Manager("main"); nil != warmErr {
+    if _, warmErr := registry.Manager(testRuntime(), "main"); nil != warmErr {
         t.Fatalf("unexpected error warming the manager: %v", warmErr)
     }
 
@@ -1347,7 +1359,7 @@ func TestManagerRegistry_RefusesACachedManagerAfterClose(t *testing.T) {
         t.Fatalf("close error: %v", closeErr)
     }
 
-    manager, managerErr := registry.Manager("main")
+    manager, managerErr := registry.Manager(testRuntime(), "main")
     if false == errors.Is(managerErr, ErrManagerRegistryClosed) {
         t.Fatalf("expected ErrManagerRegistryClosed for the cached manager, got manager=%v err=%v", manager, managerErr)
     }
@@ -1361,7 +1373,6 @@ func TestManagerRegistry_RefusesAnUnopenedNameAfterCloseWithoutDialing(t *testin
     provider := &fakeProvider{}
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -1375,7 +1386,7 @@ func TestManagerRegistry_RefusesAnUnopenedNameAfterCloseWithoutDialing(t *testin
         t.Fatalf("close error: %v", closeErr)
     }
 
-    if _, managerErr := registry.Manager("main"); false == errors.Is(managerErr, ErrManagerRegistryClosed) {
+    if _, managerErr := registry.Manager(testRuntime(), "main"); false == errors.Is(managerErr, ErrManagerRegistryClosed) {
         t.Fatalf("expected ErrManagerRegistryClosed, got %v", managerErr)
     }
 
@@ -1389,52 +1400,23 @@ type contextRecordingProvider struct {
     sentinel error
 }
 
-func (instance *contextRecordingProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return nil, errors.New("the plain open must not run for a context opener")
-}
-
-func (instance *contextRecordingProvider) OpenContext(ctx context.Context, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    instance.observed = ctx
+func (instance *contextRecordingProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    instance.observed = runtimeInstance.Context()
 
     return nil, instance.sentinel
 }
 
-type registryProbeContextKey struct{}
-
-func TestManagerRegistry_PrefersTheContextOpenerWithTheConstructionContext(t *testing.T) {
-    ctx := context.WithValue(context.Background(), registryProbeContextKey{}, "bound")
-    provider := &contextRecordingProvider{sentinel: errors.New("opened")}
-
-    registry, registryErr := NewManagerRegistry(
-        ctx,
-        &fakeLogger{},
-        []ProviderDefinition{
-            ProviderDefinition{Name: "a", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
-        },
-    )
-    if nil != registryErr {
-        t.Fatalf("registry: %v", registryErr)
-    }
-
-    _, managerErr := registry.Manager("a")
-    if false == errors.Is(managerErr, provider.sentinel) {
-        t.Fatalf("expected OpenContext to have answered, got %v", managerErr)
-    }
-
-    if nil == provider.observed {
-        t.Fatal("expected the construction context to reach OpenContext")
-    }
-
-    if "bound" != provider.observed.Value(registryProbeContextKey{}) {
-        t.Fatal("expected the exact construction context to reach OpenContext")
-    }
+func (instance *contextRecordingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return nil, errors.New("the migration door must not run for a manager")
 }
 
-func TestNewManagerRegistry_ANilContextBindsABackgroundContextForContextOpeners(t *testing.T) {
+type registryProbeContextKey struct{}
+
+/* the provider's one door receives the caller's runtime: its context carries the caller's value, so a retry loop waiting on it ends when the caller leaves */
+func TestManagerRegistry_HandsTheCallersRuntimeToTheProvidersOneDoor(t *testing.T) {
     provider := &contextRecordingProvider{sentinel: errors.New("opened")}
 
     registry, registryErr := NewManagerRegistry(
-        nil,
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "a", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -1444,17 +1426,19 @@ func TestNewManagerRegistry_ANilContextBindsABackgroundContextForContextOpeners(
         t.Fatalf("registry: %v", registryErr)
     }
 
-    _, managerErr := registry.Manager("a")
+    callerRuntime := testRuntimeUnder(context.WithValue(context.Background(), registryProbeContextKey{}, "caller"))
+
+    _, managerErr := registry.Manager(callerRuntime, "a")
     if false == errors.Is(managerErr, provider.sentinel) {
-        t.Fatalf("expected OpenContext to have answered, got %v", managerErr)
+        t.Fatalf("expected Open to have answered, got %v", managerErr)
     }
 
     if nil == provider.observed {
-        t.Fatal("expected a context to reach OpenContext")
+        t.Fatal("expected the caller's context to reach Open")
     }
 
-    if nil != provider.observed.Err() {
-        t.Fatalf("expected a live background context, got %v", provider.observed.Err())
+    if "caller" != provider.observed.Value(registryProbeContextKey{}) {
+        t.Fatal("expected the caller's context, carrying its value, to reach Open")
     }
 }
 
@@ -1464,7 +1448,6 @@ func TestManagerRegistry_CloseCarriesTheSortedFirstFailureAsCause(t *testing.T) 
         zebraErr := errors.New("zebra close refused")
 
         registry, registryErr := NewManagerRegistry(
-            context.Background(),
             &fakeLogger{},
             []ProviderDefinition{
                 ProviderDefinition{Name: "zebra", Provider: &pinnedDatabaseProvider{database: newFailClosingDatabase(zebraErr)}, Parameters: testConnectionParameters, IsDefault: true},
@@ -1475,10 +1458,10 @@ func TestManagerRegistry_CloseCarriesTheSortedFirstFailureAsCause(t *testing.T) 
             t.Fatalf("registry error: %v", registryErr)
         }
 
-        if _, managerErr := registry.Manager("zebra"); nil != managerErr {
+        if _, managerErr := registry.Manager(testRuntime(), "zebra"); nil != managerErr {
             t.Fatalf("manager error: %v", managerErr)
         }
-        if _, managerErr := registry.Manager("alpha"); nil != managerErr {
+        if _, managerErr := registry.Manager(testRuntime(), "alpha"); nil != managerErr {
             t.Fatalf("manager error: %v", managerErr)
         }
 
@@ -1506,7 +1489,7 @@ type idiomaticPanickingProvider struct {
     panicValue  any
 }
 
-func (instance *idiomaticPanickingProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *idiomaticPanickingProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.startOnce.Do(
         func() {
             close(instance.openStarted)
@@ -1515,6 +1498,10 @@ func (instance *idiomaticPanickingProvider) Open(params ConnectionParameters, lo
     <-instance.releaseOpen
 
     panic(instance.panicValue)
+}
+
+func (instance *idiomaticPanickingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
 }
 
 /* the coalesced waiter receives the same diagnosis the re-raised panic carries to its own boundary: the panic value as the cause and the stack of the goroutine that raised it. Stringified into the context alone, the waiter's error named the definition and the bare message and nothing else — the same failure told two ways, decided only by which goroutine the caller happened to be on. */
@@ -1533,7 +1520,6 @@ func TestManagerRegistry_APanickingOpenHandsItsCauseAndItsStackToTheWaiter(t *te
     }
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         logger,
         []ProviderDefinition{
             ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -1550,7 +1536,7 @@ func TestManagerRegistry_APanickingOpenHandsItsCauseAndItsStackToTheWaiter(t *te
             close(firstDone)
         }()
 
-        _, _ = registry.Manager("x")
+        _, _ = registry.Manager(testRuntime(), "x")
     }()
 
     select {
@@ -1577,7 +1563,7 @@ func TestManagerRegistry_APanickingOpenHandsItsCauseAndItsStackToTheWaiter(t *te
             }
         }()
 
-        _, secondErr := registry.Manager("x")
+        _, secondErr := registry.Manager(testRuntime(), "x")
         secondResult <- secondErr
     }()
 
@@ -1637,7 +1623,6 @@ func TestManagerRegistry_ATypedNilPanicValueIsNotHandedOnAsACause(t *testing.T) 
     }
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         logger,
         []ProviderDefinition{
             ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -1654,7 +1639,7 @@ func TestManagerRegistry_ATypedNilPanicValueIsNotHandedOnAsACause(t *testing.T) 
             close(firstDone)
         }()
 
-        _, _ = registry.Manager("x")
+        _, _ = registry.Manager(testRuntime(), "x")
     }()
 
     select {
@@ -1681,7 +1666,7 @@ func TestManagerRegistry_ATypedNilPanicValueIsNotHandedOnAsACause(t *testing.T) 
             }
         }()
 
-        _, secondErr := registry.Manager("x")
+        _, secondErr := registry.Manager(testRuntime(), "x")
         secondResult <- secondErr
     }()
 
@@ -1723,7 +1708,6 @@ func TestManagerRegistry_ATypedNilPanicValueIsNotHandedOnAsACause(t *testing.T) 
 
 func TestManagerRegistry_AnUnknownDefinitionNamesTheRequestedAndTheRegistered(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -1734,7 +1718,7 @@ func TestManagerRegistry_AnUnknownDefinitionNamesTheRequestedAndTheRegistered(t 
         t.Fatalf("NewManagerRegistry returned an error: %v", registryErr)
     }
 
-    _, managerErr := registry.Manager("repots")
+    _, managerErr := registry.Manager(testRuntime(), "repots")
     if nil == managerErr {
         t.Fatal("expected the misspelled definition to be refused")
     }
@@ -1766,7 +1750,6 @@ func TestManagerRegistry_AnUnknownDefinitionNamesTheRequestedAndTheRegistered(t 
 
 func TestManagerRegistry_AnUnknownMigrationDefinitionNamesTheRequestedAndTheRegistered(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -1776,7 +1759,7 @@ func TestManagerRegistry_AnUnknownMigrationDefinitionNamesTheRequestedAndTheRegi
         t.Fatalf("NewManagerRegistry returned an error: %v", registryErr)
     }
 
-    _, _, migrationErr := registry.MigrationDatabase("repots")
+    _, migrationErr := registry.MigrationDatabase(testRuntime(), "repots")
     if false == errors.Is(migrationErr, ErrProviderDefinitionNotFound) {
         t.Fatalf("expected the sentinel to stay the cause, got %v", migrationErr)
     }
@@ -1831,15 +1814,18 @@ type fixedDatabaseProvider struct {
     database *bun.DB
 }
 
-func (instance *fixedDatabaseProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *fixedDatabaseProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.database, nil
+}
+
+func (instance *fixedDatabaseProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
 }
 
 func TestManagerRegistry_CloseRefusesAnotherCallerWhileAPoolIsStillTearingDown(t *testing.T) {
     database, closeEntered, releaseClose := newBlockingCloseDatabase()
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "main", Provider: &fixedDatabaseProvider{database: database}, Parameters: testConnectionParameters, IsDefault: true},
@@ -1849,7 +1835,7 @@ func TestManagerRegistry_CloseRefusesAnotherCallerWhileAPoolIsStillTearingDown(t
         t.Fatalf("NewManagerRegistry returned an error: %v", registryErr)
     }
 
-    if _, managerErr := registry.Manager("main"); nil != managerErr {
+    if _, managerErr := registry.Manager(testRuntime(), "main"); nil != managerErr {
         t.Fatalf("the first resolution must memoize the manager: %v", managerErr)
     }
 
@@ -1867,7 +1853,7 @@ func TestManagerRegistry_CloseRefusesAnotherCallerWhileAPoolIsStillTearingDown(t
 
     refusal := make(chan error, 1)
     go func() {
-        _, managerErr := registry.Manager("main")
+        _, managerErr := registry.Manager(testRuntime(), "main")
         refusal <- managerErr
     }()
 
@@ -1898,7 +1884,6 @@ func TestManagerRegistry_CloseRefusesAnotherCallerWhileAPoolIsStillTearingDown(t
 
 func TestNewManagerRegistry_AConstructionRefusalNamesTheDefinitionItIsAbout(t *testing.T) {
     _, missingNameErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -1908,7 +1893,6 @@ func TestNewManagerRegistry_AConstructionRefusalNamesTheDefinitionItIsAbout(t *t
     assertConstructionRefusalNames(t, missingNameErr, ErrProviderDefinitionNameIsRequired, 1, "")
 
     _, missingProviderErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -1918,7 +1902,6 @@ func TestNewManagerRegistry_AConstructionRefusalNamesTheDefinitionItIsAbout(t *t
     assertConstructionRefusalNames(t, missingProviderErr, ErrProviderIsRequired, 1, "analytics")
 
     _, duplicateErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -1938,7 +1921,6 @@ func TestNewManagerRegistry_RefusesAnEmptyHostOrDatabaseNamingTheFieldAndTheDefi
         {params: ConnectionParameters{Host: "127.0.0.1"}, sentinel: ErrConnectionDatabaseIsRequired, field: "ProviderDefinition.Parameters.Database"},
     } {
         _, refusalErr := NewManagerRegistry(
-            context.Background(),
             &fakeLogger{},
             []ProviderDefinition{
                 ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -1980,7 +1962,7 @@ type goexitProvider struct {
     startOnce   sync.Once
 }
 
-func (instance *goexitProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *goexitProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.startOnce.Do(
         func() {
             close(instance.openStarted)
@@ -1995,11 +1977,14 @@ func (instance *goexitProvider) Open(params ConnectionParameters, logger logging
     return nil, nil
 }
 
+func (instance *goexitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
+}
+
 func TestManagerRegistry_AProviderThatExitsItsGoroutineIsNotReportedAsAPanic(t *testing.T) {
     provider := &goexitProvider{openStarted: make(chan struct{}), releaseOpen: make(chan struct{})}
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -2010,7 +1995,7 @@ func TestManagerRegistry_AProviderThatExitsItsGoroutineIsNotReportedAsAPanic(t *
     }
 
     go func() {
-        _, _ = registry.Manager("x")
+        _, _ = registry.Manager(testRuntime(), "x")
     }()
 
     select {
@@ -2063,7 +2048,7 @@ type errorBesideAPanickingCloseProvider struct {
     startOnce   sync.Once
 }
 
-func (instance *errorBesideAPanickingCloseProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *errorBesideAPanickingCloseProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.startOnce.Do(
         func() {
             close(instance.openStarted)
@@ -2074,6 +2059,10 @@ func (instance *errorBesideAPanickingCloseProvider) Open(params ConnectionParame
 
     /* the Provider contract allows a database beside an error, and the publish closes it under the lock as it deletes the open's entry — which is where the panic below is raised, one stage past the provider */
     return instance.database, errors.New("the provider refused the dial")
+}
+
+func (instance *errorBesideAPanickingCloseProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
 }
 
 type panickingCloseConnector struct{}
@@ -2100,7 +2089,6 @@ func TestManagerRegistry_APanicInThePublishIsNotBlamedOnTheProvider(t *testing.T
     }
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -2117,7 +2105,7 @@ func TestManagerRegistry_APanicInThePublishIsNotBlamedOnTheProvider(t *testing.T
             close(firstDone)
         }()
 
-        _, _ = registry.Manager("x")
+        _, _ = registry.Manager(testRuntime(), "x")
     }()
 
     select {
@@ -2174,7 +2162,6 @@ func TestManagerRegistry_CloseWaitsForAnInFlightOpen(t *testing.T) {
     }
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -2185,7 +2172,7 @@ func TestManagerRegistry_CloseWaitsForAnInFlightOpen(t *testing.T) {
     }
 
     go func() {
-        _, _ = registry.Manager("x")
+        _, _ = registry.Manager(testRuntime(), "x")
     }()
 
     select {
@@ -2203,7 +2190,7 @@ func TestManagerRegistry_CloseWaitsForAnInFlightOpen(t *testing.T) {
     /* the flag is OBSERVED rather than waited out, exactly as the sibling test does it: from the instant Close publishes it, every door answers the refusal, so a probe for a name the registry never had says when Close has passed the publication and is into the teardown proper. */
     closePublishedDeadline := time.Now().Add(2 * time.Second)
     for {
-        if _, probeErr := registry.Manager("a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
+        if _, probeErr := registry.Manager(testRuntime(), "a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
             break
         }
 
@@ -2248,7 +2235,6 @@ func TestManagerRegistry_CloseWaitsForAnInFlightMigrationOpen(t *testing.T) {
     }
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -2259,7 +2245,7 @@ func TestManagerRegistry_CloseWaitsForAnInFlightMigrationOpen(t *testing.T) {
     }
 
     go func() {
-        _, _, _ = registry.MigrationDatabase("main")
+        _, _ = registry.MigrationDatabase(testRuntime(), "main")
     }()
 
     select {
@@ -2276,7 +2262,7 @@ func TestManagerRegistry_CloseWaitsForAnInFlightMigrationOpen(t *testing.T) {
 
     closePublishedDeadline := time.Now().Add(2 * time.Second)
     for {
-        if _, probeErr := registry.Manager("a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
+        if _, probeErr := registry.Manager(testRuntime(), "a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
             break
         }
 
@@ -2312,7 +2298,6 @@ func TestManagerRegistry_CloseMigrationDatabaseEndsThePoolAndForgetsIt(t *testin
     migrationDatabase, migrationDatabaseClosed := newCloseRaceDatabase()
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{
@@ -2327,7 +2312,7 @@ func TestManagerRegistry_CloseMigrationDatabaseEndsThePoolAndForgetsIt(t *testin
         t.Fatalf("registry error: %v", registryErr)
     }
 
-    if _, _, migrationErr := registry.MigrationDatabase("main"); nil != migrationErr {
+    if _, migrationErr := registry.MigrationDatabase(testRuntime(), "main"); nil != migrationErr {
         t.Fatalf("unexpected migration database error: %v", migrationErr)
     }
 
@@ -2355,7 +2340,6 @@ func TestManagerRegistry_CloseMigrationDatabaseReadsAnEmptyNameAsTheDefault(t *t
     migrationDatabase, migrationDatabaseClosed := newCloseRaceDatabase()
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{
@@ -2370,7 +2354,7 @@ func TestManagerRegistry_CloseMigrationDatabaseReadsAnEmptyNameAsTheDefault(t *t
         t.Fatalf("registry error: %v", registryErr)
     }
 
-    if _, _, migrationErr := registry.MigrationDatabase(""); nil != migrationErr {
+    if _, migrationErr := registry.MigrationDatabase(testRuntime(), ""); nil != migrationErr {
         t.Fatalf("unexpected migration database error: %v", migrationErr)
     }
 
@@ -2388,7 +2372,6 @@ func TestManagerRegistry_CloseMigrationDatabaseReadsAnEmptyNameAsTheDefault(t *t
 /* a name that never opened a migration connection — and one already ended here — closes nothing and is not an error: the commands call this on their way out, including the ones that never reached the migration door. */
 func TestManagerRegistry_CloseMigrationDatabaseIsSilentForANameThatHasNone(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -2410,7 +2393,6 @@ func TestManagerRegistry_CloseMigrationDatabaseIsSilentForANameThatHasNone(t *te
 /* a closed registry refuses the door rather than answering success: there is nothing left to end, and a nil error would say this call ended the pool when Close already had. */
 func TestManagerRegistry_CloseMigrationDatabaseRefusesAClosedRegistry(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -2435,7 +2417,7 @@ type loggerRecordingProvider struct {
     loggers []loggingcontract.Logger
 }
 
-func (instance *loggerRecordingProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *loggerRecordingProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.mutex.Lock()
     instance.loggers = append(instance.loggers, logger)
     instance.mutex.Unlock()
@@ -2443,6 +2425,10 @@ func (instance *loggerRecordingProvider) Open(params ConnectionParameters, logge
     database, _ := newCloseRaceDatabase()
 
     return database, nil
+}
+
+func (instance *loggerRecordingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
 }
 
 func (instance *loggerRecordingProvider) received() []loggingcontract.Logger {
@@ -2454,17 +2440,13 @@ func (instance *loggerRecordingProvider) received() []loggingcontract.Logger {
 
 var _ Provider = (*loggerRecordingProvider)(nil)
 
-/* TestManagerRegistry_SetLoggerReachesTheNextOpen pins the door on what the provider is handed, not on the field behind it. A registry built during module wiring has no application logger to be given — the framework's own does not exist that early — so it is constructed on the emergency logger, and without this door every later open, retry warning and terminal connection failure would keep bypassing the journal for the life of the process.
-
-   Two definitions are opened, one before the replacement and one after, so the probe separates "the registry took a new logger" from "the registry was built with this one all along". */
-func TestManagerRegistry_SetLoggerReachesTheNextOpen(t *testing.T) {
+/* the logger handed to the constructor is the one every open receives, wrapped in the registry's own identity: it is written once, so the registry is built where the application's logger resolves */
+func TestManagerRegistry_TheConstructorsLoggerReachesEveryOpen(t *testing.T) {
     provider := &loggerRecordingProvider{}
-    wiringLogger := &fakeLogger{}
     applicationLogger := &capturingDiagnosticLogger{}
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
-        wiringLogger,
+        applicationLogger,
         []ProviderDefinition{
             ProviderDefinition{Name: "first", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
             ProviderDefinition{Name: "second", Provider: provider, Parameters: testConnectionParameters},
@@ -2475,16 +2457,10 @@ func TestManagerRegistry_SetLoggerReachesTheNextOpen(t *testing.T) {
     }
     t.Cleanup(func() { _ = registry.CloseWithContext(context.Background()) })
 
-    if _, managerErr := registry.Manager("first"); nil != managerErr {
-        t.Fatalf("unexpected error: %v", managerErr)
-    }
-
-    if setErr := registry.SetLogger(applicationLogger); nil != setErr {
-        t.Fatalf("unexpected error: %v", setErr)
-    }
-
-    if _, managerErr := registry.Manager("second"); nil != managerErr {
-        t.Fatalf("unexpected error: %v", managerErr)
+    for _, name := range []string{"first", "second"} {
+        if _, managerErr := registry.Manager(testRuntime(), name); nil != managerErr {
+            t.Fatalf("unexpected error: %v", managerErr)
+        }
     }
 
     received := provider.received()
@@ -2492,75 +2468,11 @@ func TestManagerRegistry_SetLoggerReachesTheNextOpen(t *testing.T) {
         t.Fatalf("expected two opens, got %d", len(received))
     }
 
-    /* a provider receives the registry's logger, which wraps the application's */
-    first, firstIsOwned := received[0].(*registryLogger)
-    if false == firstIsOwned || loggingcontract.Logger(wiringLogger) != first.Logger {
-        t.Fatalf("the first open did not get the wiring logger")
-    }
-
-    second, secondIsOwned := received[1].(*registryLogger)
-    if false == secondIsOwned || loggingcontract.Logger(applicationLogger) != second.Logger {
-        t.Fatalf("the open after the replacement did not get the application logger")
-    }
-}
-
-/* the replacement takes bun's diagnostic channel with it, so the registry's journal and bun's own cannot drift apart: one call gives both the same destination. */
-func TestManagerRegistry_SetLoggerTakesBunsDiagnosticChannelWithIt(t *testing.T) {
-    applicationLogger := &capturingDiagnosticLogger{}
-
-    registry, registryErr := NewManagerRegistry(
-        context.Background(),
-        &fakeLogger{},
-        []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
-        },
-    )
-    if nil != registryErr {
-        t.Fatalf("registry error: %v", registryErr)
-    }
-    t.Cleanup(ResetDiagnostics)
-
-    if setErr := registry.SetLogger(applicationLogger); nil != setErr {
-        t.Fatalf("unexpected error: %v", setErr)
-    }
-
-    _ = schema.SafeQuery("SELECT 1", []any{42})
-
-    if 0 == len(applicationLogger.captured()) {
-        t.Fatal("the replacement did not take bun's diagnostic channel with it")
-    }
-}
-
-/* a logger held by value with a func inside has no identity, so the Close could not recognise the destination it had routed and left bun's channel on the closed registry's logger; the registry keeps the destination SetLogger routed and hands exactly that one back */
-func TestManagerRegistry_CloseHandsBackTheDestinationItRoutedForALoggerWithoutIdentity(t *testing.T) {
-    t.Cleanup(ResetDiagnostics)
-
-    registry, registryErr := NewManagerRegistry(
-        context.Background(),
-        &fakeLogger{},
-        []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
-        },
-    )
-    if nil != registryErr {
-        t.Fatalf("registry error: %v", registryErr)
-    }
-
-    logger := funcCarryingLogger{sink: func(string) {}}
-    if setErr := registry.SetLogger(logger); nil != setErr {
-        t.Fatalf("unexpected error: %v", setErr)
-    }
-
-    if nil == bunDiagnosticsTarget.Load() {
-        t.Fatal("expected the replacement to route bun's diagnostics")
-    }
-
-    if closeErr := registry.CloseWithContext(t.Context()); nil != closeErr {
-        t.Fatalf("unexpected close error: %v", closeErr)
-    }
-
-    if nil != bunDiagnosticsTarget.Load() {
-        t.Fatal("expected the close to hand bun's channel back through the destination it routed")
+    for index, logger := range received {
+        owned, isOwned := logger.(*registryLogger)
+        if false == isOwned || loggingcontract.Logger(applicationLogger) != owned.Logger {
+            t.Fatalf("open %d did not get the constructor's logger", index)
+        }
     }
 }
 
@@ -2589,83 +2501,14 @@ func (instance funcCarryingLogger) Emergency(message string, context loggingcont
     instance.sink(message)
 }
 
-func TestManagerRegistry_SetLoggerOnAClosedRegistryIsRefusedAndLeavesBunsChannelAlone(t *testing.T) {
-    t.Cleanup(ResetDiagnostics)
-
-    registry, registryErr := NewManagerRegistry(
-        context.Background(),
-        &fakeLogger{},
-        []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
-        },
-    )
-    if nil != registryErr {
-        t.Fatalf("registry error: %v", registryErr)
-    }
-
-    closeErr := registry.CloseWithContext(t.Context())
-    if nil != closeErr {
-        t.Fatalf("unexpected close error: %v", closeErr)
-    }
-    routedBefore := bunDiagnosticsTarget.Load()
-
-    lateLogger := &capturingDiagnosticLogger{}
-    if setErr := registry.SetLogger(lateLogger); false == errors.Is(setErr, ErrManagerRegistryClosed) {
-        t.Fatalf("expected ErrManagerRegistryClosed for a logger set after the close, got %v", setErr)
-    }
-
-    if routedBefore != bunDiagnosticsTarget.Load() {
-        t.Fatal("expected the refused SetLogger to leave bun's diagnostic channel where the close left it")
-    }
-    if lateLogger == registry.currentLogger() {
-        t.Fatal("expected the refused SetLogger to leave the registry's logger unchanged")
-    }
-}
-
-/* a nil logger, and a typed nil holding no value, are refused: they are the absence this package reads as a wiring mistake everywhere else, and installing one would silence the registry's only channel. */
-func TestManagerRegistry_SetLoggerRefusesTheAbsentLogger(t *testing.T) {
-    provider := &loggerRecordingProvider{}
-
-    registry, registryErr := NewManagerRegistry(
-        context.Background(),
-        &fakeLogger{},
-        []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
-        },
-    )
-    if nil != registryErr {
-        t.Fatalf("registry error: %v", registryErr)
-    }
-    t.Cleanup(func() { _ = registry.CloseWithContext(context.Background()) })
-
-    if setErr := registry.SetLogger(nil); false == errors.Is(setErr, ErrLoggerIsRequired) {
-        t.Fatalf("expected ErrLoggerIsRequired for a nil logger, got %v", setErr)
-    }
-
-    var typedNil *capturingDiagnosticLogger
-    if setErr := registry.SetLogger(typedNil); false == errors.Is(setErr, ErrLoggerIsRequired) {
-        t.Fatalf("expected ErrLoggerIsRequired for a typed nil logger, got %v", setErr)
-    }
-
-    if _, managerErr := registry.Manager("main"); nil != managerErr {
-        t.Fatalf("unexpected error: %v", managerErr)
-    }
-
-    received := provider.received()
-    if 1 != len(received) || nil == received[0] {
-        t.Fatalf("a refused replacement reached the provider: %v", received)
-    }
-}
-
-/* the registry hands bun's channel back from its own Close, while the logger it routed to is still alive — the container closes the registry before the logging service, because the registry resolves it. */
+/* the registry hands bun's channel back from its own Close, while the logger its provider routed to is still alive — the container closes the registry before the logging service, because the registry resolves it. */
 func TestManagerRegistry_CloseHandsBunsDiagnosticChannelBack(t *testing.T) {
     applicationLogger := &capturingDiagnosticLogger{}
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
-        &fakeLogger{},
+        applicationLogger,
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: &routingProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -2673,8 +2516,8 @@ func TestManagerRegistry_CloseHandsBunsDiagnosticChannelBack(t *testing.T) {
     }
     t.Cleanup(ResetDiagnostics)
 
-    if setErr := registry.SetLogger(applicationLogger); nil != setErr {
-        t.Fatalf("unexpected error: %v", setErr)
+    if _, managerErr := registry.Manager(testRuntime(), "main"); nil != managerErr {
+        t.Fatalf("manager error: %v", managerErr)
     }
 
     if closeErr := registry.CloseWithContext(t.Context()); nil != closeErr {
@@ -2694,23 +2537,23 @@ func TestManagerRegistry_CloseLeavesAnotherRegistrysDiagnosticChannelAlone(t *te
     secondLogger := &capturingDiagnosticLogger{}
     t.Cleanup(ResetDiagnostics)
 
-    first, firstErr := NewManagerRegistry(context.Background(), &fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
+    first, firstErr := NewManagerRegistry(firstLogger, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &routingProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
     if nil != firstErr {
         t.Fatalf("registry error: %v", firstErr)
     }
 
-    second, secondErr := NewManagerRegistry(context.Background(), &fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
+    second, secondErr := NewManagerRegistry(secondLogger, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &routingProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
     if nil != secondErr {
         t.Fatalf("registry error: %v", secondErr)
     }
     t.Cleanup(func() { _ = second.CloseWithContext(context.Background()) })
 
-    if setErr := first.SetLogger(firstLogger); nil != setErr {
-        t.Fatalf("unexpected error: %v", setErr)
+    if _, managerErr := first.Manager(testRuntime(), "main"); nil != managerErr {
+        t.Fatalf("manager error: %v", managerErr)
     }
 
-    if setErr := second.SetLogger(secondLogger); nil != setErr {
-        t.Fatalf("unexpected error: %v", setErr)
+    if _, managerErr := second.Manager(testRuntime(), "main"); nil != managerErr {
+        t.Fatalf("manager error: %v", managerErr)
     }
 
     if closeErr := first.CloseWithContext(t.Context()); nil != closeErr {
@@ -2731,7 +2574,6 @@ func TestManagerRegistry_CloseLeavesAnotherRegistrysDiagnosticChannelAlone(t *te
 /* the wait for opens still in flight ends with the caller's deadline instead of with the dial: a dial against a host that is black-holing packets ends when its own driver gives up, which outlives any teardown, and a teardown that waited it out would hold the process past whatever grace its supervisor allows. What is abandoned is only the wait — the open still ends its own database against the closed flag — so the answer names the outstanding session rather than having ended it. */
 func TestManagerRegistry_CloseWithContext_StopsWaitingForOpensStillInFlight(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "x", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -2775,7 +2617,6 @@ func TestManagerRegistry_CloseWithContext_StopsWaitingForOpensStillInFlight(t *t
 func TestManagerRegistry_CloseWithContext_AnOpenThatEndedIsNotCountedAbandonedUnderASpentDeadline(t *testing.T) {
     for round := 0; round < 1000; round = round + 1 {
         registry, registryErr := NewManagerRegistry(
-            context.Background(),
             &fakeLogger{},
             []ProviderDefinition{
                 ProviderDefinition{Name: "x", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -2808,11 +2649,9 @@ type contextWatchingProvider struct {
     endedBy error
 }
 
-func (instance *contextWatchingProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.OpenContext(context.Background(), params, logger)
-}
+func (instance *contextWatchingProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    ctx := runtimeInstance.Context()
 
-func (instance *contextWatchingProvider) OpenContext(ctx context.Context, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.once.Do(func() {
         close(instance.entered)
     })
@@ -2823,11 +2662,14 @@ func (instance *contextWatchingProvider) OpenContext(ctx context.Context, params
     return nil, ctx.Err()
 }
 
-/* the registry ends an open still in flight when it closes: left to itself the open went on retrying under the registry's own context after the teardown — each attempt routing bun's diagnostics back onto the logger the teardown had handed back and the container then closed — and the close either waited it out or reported it abandoned. The open now ends with the refusal, so the close of a registry built on the plain constructor has nothing to abandon */
+func (instance *contextWatchingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
+}
+
+/* the registry's close signal ends an open still in flight, even under a caller whose own context never ends: an open left to itself would go on retrying after the teardown, each attempt routing bun's diagnostics back onto the logger the teardown handed back, so the close has nothing to abandon */
 func TestManagerRegistry_CloseEndsAnOpenStillInFlightInsteadOfAbandoningIt(t *testing.T) {
     provider := &contextWatchingProvider{entered: make(chan struct{})}
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -2839,7 +2681,7 @@ func TestManagerRegistry_CloseEndsAnOpenStillInFlightInsteadOfAbandoningIt(t *te
 
     opened := make(chan error, 1)
     go func() {
-        _, openErr := registry.Database("x")
+        _, openErr := registry.Database(testRuntime(), "x")
         opened <- openErr
     }()
 
@@ -2884,11 +2726,7 @@ type ownRefusalAfterCloseProvider struct {
 
 var errProviderOwnRefusal = errors.New("password authentication failed for user probe")
 
-func (instance *ownRefusalAfterCloseProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.OpenContext(context.Background(), params, logger)
-}
-
-func (instance *ownRefusalAfterCloseProvider) OpenContext(ctx context.Context, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *ownRefusalAfterCloseProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.once.Do(func() {
         close(instance.entered)
     })
@@ -2898,10 +2736,13 @@ func (instance *ownRefusalAfterCloseProvider) OpenContext(ctx context.Context, p
     return nil, errProviderOwnRefusal
 }
 
+func (instance *ownRefusalAfterCloseProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
+}
+
 func TestManagerRegistry_AnOpenRefusedOnTheProvidersOwnGroundsAfterTheCloseKeepsThatRefusal(t *testing.T) {
     provider := &ownRefusalAfterCloseProvider{entered: make(chan struct{}), release: make(chan struct{})}
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -2913,7 +2754,7 @@ func TestManagerRegistry_AnOpenRefusedOnTheProvidersOwnGroundsAfterTheCloseKeeps
 
     opened := make(chan error, 1)
     go func() {
-        _, openErr := registry.Database("x")
+        _, openErr := registry.Database(testRuntime(), "x")
         opened <- openErr
     }()
 
@@ -2949,7 +2790,6 @@ func TestManagerRegistry_HasProviderDefinitionAnswersWithoutOpening(t *testing.T
     provider := &fakeProvider{}
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "primary", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -2995,7 +2835,7 @@ func TestManagerRegistry_DelayedProviderCannotRouteAfterClose(t *testing.T) {
     provider := &delayedDiagnosticProvider{entered: make(chan struct{}), resume: make(chan struct{})}
     logger := &capturingDiagnosticLogger{}
 
-    registry, registryErr := NewManagerRegistry(context.Background(), logger, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters}})
+    registry, registryErr := NewManagerRegistry(logger, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters}})
     if nil != registryErr {
         t.Fatalf("registry error: %v", registryErr)
     }
@@ -3003,7 +2843,7 @@ func TestManagerRegistry_DelayedProviderCannotRouteAfterClose(t *testing.T) {
     completed := make(chan struct{})
     go func() {
         defer close(completed)
-        _, _ = registry.Manager("main")
+        _, _ = registry.Manager(testRuntime(), "main")
     }()
     <-provider.entered
 
@@ -3028,60 +2868,13 @@ func TestManagerRegistry_DelayedProviderCannotRouteAfterClose(t *testing.T) {
     }
 }
 
-/* the same for a replacement: an open still in flight when SetLogger replaced the logger routes late with the one it received, which the replacement retired, so the channel stays on the new logger */
-func TestManagerRegistry_DelayedProviderCannotRouteAfterSetLogger(t *testing.T) {
-    t.Cleanup(ResetDiagnostics)
-
-    provider := &delayedDiagnosticProvider{entered: make(chan struct{}), resume: make(chan struct{})}
-    wiringLogger := &capturingDiagnosticLogger{}
-
-    registry, registryErr := NewManagerRegistry(context.Background(), wiringLogger, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters}})
-    if nil != registryErr {
-        t.Fatalf("registry error: %v", registryErr)
-    }
-    t.Cleanup(func() { _ = registry.CloseWithContext(context.Background()) })
-
-    completed := make(chan struct{})
-    go func() {
-        defer close(completed)
-        _, _ = registry.Manager("main")
-    }()
-    <-provider.entered
-
-    applicationLogger := &capturingDiagnosticLogger{}
-    if setErr := registry.SetLogger(applicationLogger); nil != setErr {
-        t.Fatalf("unexpected error: %v", setErr)
-    }
-
-    close(provider.resume)
-    <-completed
-
-    _ = schema.SafeQuery("SELECT 1", []any{42})
-
-    if 0 != len(wiringLogger.captured()) || 1 != len(applicationLogger.captured()) {
-        t.Fatalf("stale routing: retired=%d current=%d", len(wiringLogger.captured()), len(applicationLogger.captured()))
-    }
-}
-
-/* a logger held by value has no identity of its own, so a registry's close could not recognise the channel its provider routed through it: the registry's own logger carries the identity, and the close hands the channel back, for a logger given to the constructor as for one given to SetLogger */
+/* a logger held by value has no identity of its own, so a registry's close could not recognise the channel its provider routed through it: the registry's own logger carries the identity, and the close hands the channel back */
 func TestManagerRegistry_CloseHandsBackTheChannelItsProviderRoutedForAValueLogger(t *testing.T) {
     for name, build := range map[string]func(t *testing.T, logger loggingcontract.Logger) *ManagerRegistry{
         "constructor": func(t *testing.T, logger loggingcontract.Logger) *ManagerRegistry {
-            registry, registryErr := NewManagerRegistry(context.Background(), logger, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &routingProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
+            registry, registryErr := NewManagerRegistry(logger, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &routingProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
             if nil != registryErr {
                 t.Fatalf("registry error: %v", registryErr)
-            }
-
-            return registry
-        },
-        "SetLogger": func(t *testing.T, logger loggingcontract.Logger) *ManagerRegistry {
-            registry, registryErr := NewManagerRegistry(context.Background(), &fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &routingProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
-            if nil != registryErr {
-                t.Fatalf("registry error: %v", registryErr)
-            }
-
-            if setErr := registry.SetLogger(logger); nil != setErr {
-                t.Fatalf("unexpected error: %v", setErr)
             }
 
             return registry
@@ -3092,7 +2885,7 @@ func TestManagerRegistry_CloseHandsBackTheChannelItsProviderRoutedForAValueLogge
 
             registry := build(t, funcCarryingLogger{sink: func(string) {}})
 
-            if _, managerErr := registry.Manager("main"); nil != managerErr {
+            if _, managerErr := registry.Manager(testRuntime(), "main"); nil != managerErr {
                 t.Fatalf("unexpected error: %v", managerErr)
             }
 
@@ -3115,22 +2908,22 @@ func TestManagerRegistry_CloseHandsBackTheChannelItsProviderRoutedForAValueLogge
 func TestManagerRegistry_CloseLeavesTheChannelAnotherRegistryOfAnEqualValueLoggerRouted(t *testing.T) {
     t.Cleanup(ResetDiagnostics)
 
-    first, firstErr := NewManagerRegistry(context.Background(), sliceCarryingLogger{records: make([]string, 0)}, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &routingProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
+    first, firstErr := NewManagerRegistry(sliceCarryingLogger{records: make([]string, 0)}, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &routingProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
     if nil != firstErr {
         t.Fatalf("registry error: %v", firstErr)
     }
 
-    second, secondErr := NewManagerRegistry(context.Background(), sliceCarryingLogger{records: make([]string, 0)}, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &routingProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
+    second, secondErr := NewManagerRegistry(sliceCarryingLogger{records: make([]string, 0)}, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &routingProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
     if nil != secondErr {
         t.Fatalf("registry error: %v", secondErr)
     }
     t.Cleanup(func() { _ = second.CloseWithContext(context.Background()) })
 
-    if _, managerErr := first.Manager("main"); nil != managerErr {
+    if _, managerErr := first.Manager(testRuntime(), "main"); nil != managerErr {
         t.Fatalf("unexpected error: %v", managerErr)
     }
 
-    if _, managerErr := second.Manager("main"); nil != managerErr {
+    if _, managerErr := second.Manager(testRuntime(), "main"); nil != managerErr {
         t.Fatalf("unexpected error: %v", managerErr)
     }
 
@@ -3148,7 +2941,6 @@ func TestManagerRegistry_CloseLeavesTheChannelAnotherRegistryOfAnEqualValueLogge
 /* a requested name past the bound is carried cut on a rune boundary with its full length beside it, so a caller-supplied name cannot carry a megabyte into the error; a short name stays whole */
 func TestManagerRegistry_AnUnknownNameIsRefusedWithTheSortedListAndACutName(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -3160,7 +2952,7 @@ func TestManagerRegistry_AnUnknownNameIsRefusedWithTheSortedListAndACutName(t *t
     }
 
     requested := strings.Repeat("é", 512*1024)
-    _, managerErr := registry.Manager(requested)
+    _, managerErr := registry.Manager(testRuntime(), requested)
 
     var melodyErr *exception.Error
     if false == errors.As(managerErr, &melodyErr) {
@@ -3181,7 +2973,7 @@ func TestManagerRegistry_AnUnknownNameIsRefusedWithTheSortedListAndACutName(t *t
         t.Fatalf("expected the registered names sorted, got %v", errorContext["registered"])
     }
 
-    _, managerErr = registry.Manager("repots")
+    _, managerErr = registry.Manager(testRuntime(), "repots")
     if false == errors.As(managerErr, &melodyErr) || "repots" != melodyErr.Context()["requested"] {
         t.Fatalf("expected a short name carried whole, got %v", managerErr)
     }
@@ -3196,14 +2988,14 @@ type journalingContextWatchingProvider struct {
     contextWatchingProvider
 }
 
-func (instance *journalingContextWatchingProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.OpenContext(context.Background(), params, logger)
-}
-
-func (instance *journalingContextWatchingProvider) OpenContext(ctx context.Context, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    _, openErr := instance.contextWatchingProvider.OpenContext(ctx, params, logger)
+func (instance *journalingContextWatchingProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    _, openErr := instance.contextWatchingProvider.Open(runtimeInstance, params, logger)
 
     return nil, exception.MarkLogged(exception.NewError("database open cancelled", nil, openErr))
+}
+
+func (instance *journalingContextWatchingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
 }
 
 /* the registry's refusal over an open the provider already journaled stays marked logged, so the kernel or the console does not file it a second time; over an unmarked failure the refusal stays unmarked */
@@ -3219,14 +3011,14 @@ func TestManagerRegistry_ARefusalOverAJournaledOpenFailureStaysMarkedLogged(t *t
             provider, entered = watching, watching.entered
         }
 
-        registry, registryErr := NewManagerRegistry(context.Background(), &fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true}})
+        registry, registryErr := NewManagerRegistry(&fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true}})
         if nil != registryErr {
             t.Fatalf("unexpected error: %v", registryErr)
         }
 
         opened := make(chan error, 1)
         go func() {
-            _, openErr := registry.Database("x")
+            _, openErr := registry.Database(testRuntime(), "x")
             opened <- openErr
         }()
 
@@ -3256,7 +3048,6 @@ func TestManagerRegistry_CloseMigrationDatabaseClosesOnlyWhenTheLastHolderReleas
     migrationDatabase, migrationDatabaseClosed := newCloseRaceDatabase()
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "main", Provider: &configurableMigrationProvider{migrationDatabase: migrationDatabase}, Parameters: testConnectionParameters, IsDefault: true},
@@ -3267,7 +3058,7 @@ func TestManagerRegistry_CloseMigrationDatabaseClosesOnlyWhenTheLastHolderReleas
     }
 
     for range 2 {
-        if _, _, migrationErr := registry.MigrationDatabase("main"); nil != migrationErr {
+        if _, migrationErr := registry.MigrationDatabase(testRuntime(), "main"); nil != migrationErr {
             t.Fatalf("unexpected migration database error: %v", migrationErr)
         }
     }
@@ -3301,7 +3092,6 @@ func TestManagerRegistry_AMigrationDatabaseCloseOutlivingTheDeadlineAnswersTheDe
     database, closeEntered, releaseClose := newBlockingCloseDatabase()
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "main", Provider: &configurableMigrationProvider{migrationDatabase: database}, Parameters: testConnectionParameters, IsDefault: true},
@@ -3311,8 +3101,8 @@ func TestManagerRegistry_AMigrationDatabaseCloseOutlivingTheDeadlineAnswersTheDe
         t.Fatalf("registry error: %v", registryErr)
     }
 
-    if _, dedicated, migrationErr := registry.MigrationDatabase("main"); nil != migrationErr || false == dedicated {
-        t.Fatalf("expected a dedicated migration database, got dedicated=%v err=%v", dedicated, migrationErr)
+    if _, migrationErr := registry.MigrationDatabase(testRuntime(), "main"); nil != migrationErr {
+        t.Fatalf("expected a dedicated migration database, got %v", migrationErr)
     }
 
     closeContext, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
@@ -3333,7 +3123,7 @@ type cyclicRefusalAfterCloseProvider struct {
     once    sync.Once
 }
 
-func (instance *cyclicRefusalAfterCloseProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *cyclicRefusalAfterCloseProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.once.Do(func() {
         close(instance.entered)
     })
@@ -3343,10 +3133,13 @@ func (instance *cyclicRefusalAfterCloseProvider) Open(params ConnectionParameter
     return nil, newCyclicChainError()
 }
 
+func (instance *cyclicRefusalAfterCloseProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
+}
+
 func TestManagerRegistry_AnOpenRefusedOnACyclicChainAfterTheCloseAnswersItsWaiter(t *testing.T) {
     provider := &cyclicRefusalAfterCloseProvider{entered: make(chan struct{}), release: make(chan struct{})}
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true}},
     )
@@ -3356,7 +3149,7 @@ func TestManagerRegistry_AnOpenRefusedOnACyclicChainAfterTheCloseAnswersItsWaite
 
     opened := make(chan error, 1)
     go func() {
-        _, openErr := registry.Database("x")
+        _, openErr := registry.Database(testRuntime(), "x")
         opened <- openErr
     }()
 
@@ -3389,7 +3182,6 @@ func TestManagerRegistry_AParkedCloseOfARefusedMigrationDatabaseHoldsNoOtherCall
     releaseOpen := make(chan struct{})
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "main", Provider: &configurableMigrationProvider{migrationDatabase: database, openStarted: openStarted, releaseOpen: releaseOpen}, Parameters: testConnectionParameters, IsDefault: true},
@@ -3400,7 +3192,7 @@ func TestManagerRegistry_AParkedCloseOfARefusedMigrationDatabaseHoldsNoOtherCall
     }
 
     go func() {
-        registry.MigrationDatabase("main")
+        registry.MigrationDatabase(testRuntime(), "main")
     }()
 
     <-openStarted
@@ -3411,7 +3203,7 @@ func TestManagerRegistry_AParkedCloseOfARefusedMigrationDatabaseHoldsNoOtherCall
 
     deadline := time.Now().Add(2 * time.Second)
     for {
-        if _, probeErr := registry.Manager("a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
+        if _, probeErr := registry.Manager(testRuntime(), "a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
             break
         }
 
@@ -3433,7 +3225,7 @@ func TestManagerRegistry_AParkedCloseOfARefusedMigrationDatabaseHoldsNoOtherCall
 
     answered := make(chan struct{})
     go func() {
-        registry.Manager("another name")
+        registry.Manager(testRuntime(), "another name")
         close(answered)
     }()
 
@@ -3452,7 +3244,6 @@ func TestManagerRegistry_AParkedCloseOfARefusedManagerDatabaseHoldsNoOtherCall(t
     releaseOpen := make(chan struct{})
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "x", Provider: &closeRaceProvider{database: database, openStarted: openStarted, releaseOpen: releaseOpen}, Parameters: testConnectionParameters, IsDefault: true},
@@ -3463,7 +3254,7 @@ func TestManagerRegistry_AParkedCloseOfARefusedManagerDatabaseHoldsNoOtherCall(t
     }
 
     go func() {
-        registry.Manager("x")
+        registry.Manager(testRuntime(), "x")
     }()
 
     <-openStarted
@@ -3474,7 +3265,7 @@ func TestManagerRegistry_AParkedCloseOfARefusedManagerDatabaseHoldsNoOtherCall(t
 
     deadline := time.Now().Add(2 * time.Second)
     for {
-        if _, probeErr := registry.Manager("a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
+        if _, probeErr := registry.Manager(testRuntime(), "a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
             break
         }
 
@@ -3496,7 +3287,7 @@ func TestManagerRegistry_AParkedCloseOfARefusedManagerDatabaseHoldsNoOtherCall(t
 
     answered := make(chan struct{})
     go func() {
-        registry.Manager("another name")
+        registry.Manager(testRuntime(), "another name")
         close(answered)
     }()
 
@@ -3514,7 +3305,7 @@ type racingMigrationProvider struct {
     databases chan *bun.DB
 }
 
-func (instance *racingMigrationProvider) OpenForMigration(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *racingMigrationProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.arrived.Done()
     instance.arrived.Wait()
 
@@ -3533,7 +3324,6 @@ func TestManagerRegistry_TheLoserOfTheMigrationOpenRaceIsClosedOutsideTheLock(t 
     provider.databases <- second
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -3546,7 +3336,7 @@ func TestManagerRegistry_TheLoserOfTheMigrationOpenRaceIsClosedOutsideTheLock(t 
     results := make(chan *bun.DB, 2)
     for range 2 {
         go func() {
-            database, _, _ := registry.MigrationDatabase("main")
+            database, _ := registry.MigrationDatabase(testRuntime(), "main")
             results <- database
         }()
     }
@@ -3560,7 +3350,7 @@ func TestManagerRegistry_TheLoserOfTheMigrationOpenRaceIsClosedOutsideTheLock(t 
 
     answered := make(chan struct{})
     go func() {
-        registry.Manager("another name")
+        registry.Manager(testRuntime(), "another name")
         close(answered)
     }()
 
@@ -3583,7 +3373,6 @@ func TestManagerRegistry_ATeardownWaitsForTheParkedCloseOfARefusedManagerDatabas
     releaseOpen := make(chan struct{})
 
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "x", Provider: &closeRaceProvider{database: database, openStarted: openStarted, releaseOpen: releaseOpen}, Parameters: testConnectionParameters, IsDefault: true},
@@ -3595,7 +3384,7 @@ func TestManagerRegistry_ATeardownWaitsForTheParkedCloseOfARefusedManagerDatabas
 
     opened := make(chan struct{})
     go func() {
-        registry.Manager("x")
+        registry.Manager(testRuntime(), "x")
         close(opened)
     }()
 
@@ -3609,7 +3398,7 @@ func TestManagerRegistry_ATeardownWaitsForTheParkedCloseOfARefusedManagerDatabas
 
     deadline := time.Now().Add(2 * time.Second)
     for {
-        if _, probeErr := registry.Manager("a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
+        if _, probeErr := registry.Manager(testRuntime(), "a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
             break
         }
 
@@ -3641,5 +3430,368 @@ func TestManagerRegistry_ATeardownWaitsForTheParkedCloseOfARefusedManagerDatabas
     case <-tornDown:
     case <-time.After(2 * time.Second):
         t.Fatal("expected the teardown to return once the close is released")
+    }
+}
+
+/* gatedProvider counts its opens; the first one parks until released or until its runtime's context ends, answering that context's error, and every later one answers a fresh stub database at once */
+type gatedProvider struct {
+    opens   atomic.Int32
+    entered chan struct{}
+    release chan struct{}
+    /* ownRefusal, when set, is what the parked open answers once released: a cancellation of the provider's own, under a live opener */
+    ownRefusal error
+}
+
+func newGatedProvider() *gatedProvider {
+    return &gatedProvider{entered: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (instance *gatedProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    if 1 < instance.opens.Add(1) {
+        database, _ := newCloseRaceDatabase()
+
+        return database, nil
+    }
+
+    close(instance.entered)
+
+    select {
+    case <-instance.release:
+    case <-runtimeInstance.Context().Done():
+        return nil, runtimeInstance.Context().Err()
+    }
+
+    if nil != instance.ownRefusal {
+        return nil, instance.ownRefusal
+    }
+
+    database, _ := newCloseRaceDatabase()
+
+    return database, nil
+}
+
+func (instance *gatedProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
+}
+
+func newGatedRegistry(t *testing.T, provider Provider) *ManagerRegistry {
+    t.Helper()
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        []ProviderDefinition{
+            ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
+        },
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+    t.Cleanup(func() { _ = registry.CloseWithContext(context.Background()) })
+
+    return registry
+}
+
+type managerAnswer struct {
+    manager *Manager
+    err     error
+}
+
+func managerInBackground(registry *ManagerRegistry, runtimeInstance containercontract.Runtime) chan managerAnswer {
+    answered := make(chan managerAnswer, 1)
+    go func() {
+        manager, managerErr := registry.Manager(runtimeInstance, "main")
+        answered <- managerAnswer{manager: manager, err: managerErr}
+    }()
+
+    return answered
+}
+
+func awaitManagerAnswer(t *testing.T, answered chan managerAnswer, who string) managerAnswer {
+    t.Helper()
+
+    select {
+    case answer := <-answered:
+        return answer
+    case <-time.After(2 * time.Second):
+        t.Fatalf("%s never answered", who)
+    }
+
+    return managerAnswer{}
+}
+
+/* a waiter whose own context ends leaves the coalesced wait with its cause, naming the manager; the open goes on for its opener, a later waiter still joins it, and the manager it opened is memoized */
+func TestManagerRegistry_AWaiterLeavesWhenItsOwnContextEndsAndTheOpenGoesOn(t *testing.T) {
+    provider := newGatedProvider()
+    registry := newGatedRegistry(t, provider)
+
+    openerAnswered := managerInBackground(registry, testRuntime())
+    <-provider.entered
+
+    waiterCause := errors.New("the waiter's client hung up")
+    waiterContext, cancelWaiter := context.WithCancelCause(context.Background())
+    waiterAnswered := managerInBackground(registry, testRuntimeUnder(waiterContext))
+
+    time.Sleep(50 * time.Millisecond)
+    cancelWaiter(waiterCause)
+
+    waiter := awaitManagerAnswer(t, waiterAnswered, "the waiter")
+    if nil != waiter.manager || false == errors.Is(waiter.err, waiterCause) {
+        t.Fatalf("expected the waiter to leave with its own cause, got %v, %v", waiter.manager, waiter.err)
+    }
+
+    if "main" != exception.LogContext(waiter.err, exception.LogContextConfig{})["manager"] {
+        t.Fatalf("expected the departure to name the manager, got %v", exception.LogContext(waiter.err, exception.LogContextConfig{}))
+    }
+
+    lateWaiterAnswered := managerInBackground(registry, testRuntime())
+    time.Sleep(50 * time.Millisecond)
+
+    close(provider.release)
+
+    opener := awaitManagerAnswer(t, openerAnswered, "the opener")
+    if nil != opener.err || nil == opener.manager {
+        t.Fatalf("expected the opener to get its manager, got %v", opener.err)
+    }
+
+    lateWaiter := awaitManagerAnswer(t, lateWaiterAnswered, "the later waiter")
+    if opener.manager != lateWaiter.manager || nil != lateWaiter.err {
+        t.Fatalf("expected the later waiter to join the same open, got %v, %v", lateWaiter.manager, lateWaiter.err)
+    }
+
+    memoized, memoizedErr := registry.Manager(testRuntime(), "main")
+    if opener.manager != memoized || nil != memoizedErr {
+        t.Fatalf("expected the opened manager memoized, got %v, %v", memoized, memoizedErr)
+    }
+
+    if 1 != provider.opens.Load() {
+        t.Fatalf("expected one open, got %d", provider.opens.Load())
+    }
+}
+
+/* the opener's own cancellation ends its open and reaches it alone: a waiter whose context is live opens again and gets the manager, so no caller receives another's cancellation */
+func TestManagerRegistry_ALiveWaiterTakesOverAnOpenItsOpenersContextEnded(t *testing.T) {
+    provider := newGatedProvider()
+    registry := newGatedRegistry(t, provider)
+
+    openerContext, cancelOpener := context.WithCancel(context.Background())
+    openerAnswered := managerInBackground(registry, testRuntimeUnder(openerContext))
+    <-provider.entered
+
+    waiterAnswered := managerInBackground(registry, testRuntime())
+    time.Sleep(50 * time.Millisecond)
+
+    cancelOpener()
+
+    opener := awaitManagerAnswer(t, openerAnswered, "the opener")
+    if nil != opener.manager || false == errors.Is(opener.err, context.Canceled) {
+        t.Fatalf("expected the opener to receive its own cancellation, got %v, %v", opener.manager, opener.err)
+    }
+
+    waiter := awaitManagerAnswer(t, waiterAnswered, "the waiter")
+    if nil != waiter.err || nil == waiter.manager {
+        t.Fatalf("expected the live waiter to take the open over, got %v", waiter.err)
+    }
+
+    if 2 != provider.opens.Load() {
+        t.Fatalf("expected the provider opened twice, got %d", provider.opens.Load())
+    }
+}
+
+/* a cancellation the provider answers of its own, while its opener and the registry are both live, reaches the waiter unchanged: it is not read as the opener's departure and not retried */
+func TestManagerRegistry_AProvidersOwnCancellationUnderALiveOpenerReachesTheWaiterUnretried(t *testing.T) {
+    provider := newGatedProvider()
+    provider.ownRefusal = exception.NewError("driver gave up", nil, context.Canceled)
+    registry := newGatedRegistry(t, provider)
+
+    openerAnswered := managerInBackground(registry, testRuntime())
+    <-provider.entered
+
+    waiterAnswered := managerInBackground(registry, testRuntime())
+    time.Sleep(50 * time.Millisecond)
+
+    close(provider.release)
+
+    opener := awaitManagerAnswer(t, openerAnswered, "the opener")
+    waiter := awaitManagerAnswer(t, waiterAnswered, "the waiter")
+
+    if provider.ownRefusal != opener.err || provider.ownRefusal != waiter.err {
+        t.Fatalf("expected the provider's own refusal to both, got %v and %v", opener.err, waiter.err)
+    }
+
+    if true == errors.Is(waiter.err, ErrManagerRegistryClosed) {
+        t.Fatal("expected the refusal not read as ended by the registry")
+    }
+
+    if 1 != provider.opens.Load() {
+        t.Fatalf("expected no second open, got %d", provider.opens.Load())
+    }
+}
+
+/* a caller whose context is already done is refused before an open starts: nothing is dialled or memoized, and a live caller opens next */
+func TestManagerRegistry_ADoneCallerIsRefusedBeforeAnOpenStarts(t *testing.T) {
+    provider := &fakeProvider{}
+    registry := newGatedRegistry(t, provider)
+
+    doneCause := errors.New("the request ended")
+    doneContext, cancel := context.WithCancelCause(context.Background())
+    cancel(doneCause)
+
+    if _, managerErr := registry.Manager(testRuntimeUnder(doneContext), "main"); false == errors.Is(managerErr, doneCause) {
+        t.Fatalf("expected the caller's cause, got %v", managerErr)
+    }
+
+    if 0 != provider.openCount || 0 != len(registry.managers) || 0 != len(registry.pendingOpenByName) {
+        t.Fatalf("expected nothing opened nor memoized, got %d opens", provider.openCount)
+    }
+
+    if _, managerErr := registry.Manager(testRuntime(), "main"); nil != managerErr || 1 != provider.openCount {
+        t.Fatalf("expected a live caller to open, got %v after %d opens", managerErr, provider.openCount)
+    }
+}
+
+/* countingMigrationProvider counts the opens of its migration door */
+type countingMigrationProvider struct {
+    migrationOpens int
+}
+
+func (instance *countingMigrationProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return nil, errors.New("the ordinary open must not run for a migration database")
+}
+
+func (instance *countingMigrationProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    instance.migrationOpens = instance.migrationOpens + 1
+
+    database, _ := newCloseRaceDatabase()
+
+    return database, nil
+}
+
+/* MigrationDatabase under a done context refuses before the dial: no hold counted, no open announced to a teardown, and a later call opens */
+func TestManagerRegistry_MigrationDatabaseUnderADoneContextRefusesBeforeTheDial(t *testing.T) {
+    provider := &countingMigrationProvider{}
+    registry := newGatedRegistry(t, provider)
+
+    doneContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if _, migrationErr := registry.MigrationDatabase(testRuntimeUnder(doneContext), "main"); false == errors.Is(migrationErr, context.Canceled) {
+        t.Fatalf("expected the caller's cancellation, got %v", migrationErr)
+    }
+
+    if 0 != provider.migrationOpens || 0 != len(registry.migrationHolders) || 0 != len(registry.migrationDatabases) || 0 != len(registry.pendingMigrationOpens) {
+        t.Fatalf("expected nothing dialled, held or announced, got %d opens", provider.migrationOpens)
+    }
+
+    if _, migrationErr := registry.MigrationDatabase(testRuntime(), "main"); nil != migrationErr || 1 != provider.migrationOpens {
+        t.Fatalf("expected a live call to open, got %v after %d opens", migrationErr, provider.migrationOpens)
+    }
+
+    if 1 != registry.migrationHolders["main"] {
+        t.Fatalf("expected one hold, got %d", registry.migrationHolders["main"])
+    }
+}
+
+/* noScopeRuntime is a runtime whose Scope answers nil */
+type noScopeRuntime struct {
+    containercontract.Runtime
+}
+
+func (instance noScopeRuntime) Scope() containercontract.Scope {
+    return nil
+}
+
+/* noContextRuntime is a runtime whose Context answers nil */
+type noContextRuntime struct {
+    containercontract.Runtime
+}
+
+func (instance noContextRuntime) Context() context.Context {
+    return nil
+}
+
+/* every runtime door refuses a runtime an open cannot run under before the registry lock is taken, the Must doors by a panic carrying the same refusal */
+func TestManagerRegistry_EveryRuntimeDoorRefusesAnAbsentRuntimeBeforeTheLock(t *testing.T) {
+    registry := newGatedRegistry(t, &fakeProvider{})
+
+    var typedNil *noScopeRuntime
+
+    runtimes := map[string]struct {
+        runtimeInstance containercontract.Runtime
+        refusal         string
+    }{
+        "nil":        {nil, "the runtime is nil or carries no context"},
+        "typed nil":  {typedNil, "the runtime is nil or carries no context"},
+        "no context": {noContextRuntime{Runtime: testRuntime()}, "the runtime is nil or carries no context"},
+        "no scope":   {noScopeRuntime{Runtime: testRuntime()}, "the runtime carries no scope"},
+    }
+
+    panicOf := func(callback func()) (recovered error) {
+        defer func() {
+            recovered, _ = recover().(error)
+        }()
+
+        callback()
+
+        return nil
+    }
+
+    doors := map[string]func(runtimeInstance containercontract.Runtime) error{
+        "Manager": func(runtimeInstance containercontract.Runtime) error {
+            _, doorErr := registry.Manager(runtimeInstance, "main")
+            return doorErr
+        },
+        "Database": func(runtimeInstance containercontract.Runtime) error {
+            _, doorErr := registry.Database(runtimeInstance, "main")
+            return doorErr
+        },
+        "DefaultManager": func(runtimeInstance containercontract.Runtime) error {
+            _, doorErr := registry.DefaultManager(runtimeInstance)
+            return doorErr
+        },
+        "DefaultDatabase": func(runtimeInstance containercontract.Runtime) error {
+            _, doorErr := registry.DefaultDatabase(runtimeInstance)
+            return doorErr
+        },
+        "MigrationDatabase": func(runtimeInstance containercontract.Runtime) error {
+            _, doorErr := registry.MigrationDatabase(runtimeInstance, "main")
+            return doorErr
+        },
+        "MustManager": func(runtimeInstance containercontract.Runtime) error {
+            return panicOf(func() { registry.MustManager(runtimeInstance, "main") })
+        },
+        "MustDatabase": func(runtimeInstance containercontract.Runtime) error {
+            return panicOf(func() { registry.MustDatabase(runtimeInstance, "main") })
+        },
+        "MustDefaultManager": func(runtimeInstance containercontract.Runtime) error {
+            return panicOf(func() { registry.MustDefaultManager(runtimeInstance) })
+        },
+        "MustDefaultDatabase": func(runtimeInstance containercontract.Runtime) error {
+            return panicOf(func() { registry.MustDefaultDatabase(runtimeInstance) })
+        },
+    }
+
+    if 9 != len(doors) {
+        t.Fatalf("expected the nine runtime doors, got %d", len(doors))
+    }
+
+    registry.lock.Lock()
+    defer registry.lock.Unlock()
+
+    for doorName, door := range doors {
+        for runtimeName, runtimeCase := range runtimes {
+            answered := make(chan error, 1)
+            go func() {
+                answered <- door(runtimeCase.runtimeInstance)
+            }()
+
+            select {
+            case doorErr := <-answered:
+                if nil == doorErr || false == strings.Contains(doorErr.Error(), runtimeCase.refusal) {
+                    t.Fatalf("%s under %s: expected %q, got %v", doorName, runtimeName, runtimeCase.refusal, doorErr)
+                }
+            case <-time.After(time.Second):
+                t.Fatalf("%s under %s: the door waited on the registry lock", doorName, runtimeName)
+            }
+        }
     }
 }

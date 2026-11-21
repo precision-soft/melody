@@ -11,11 +11,22 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/pgdialect"
 )
+
+/* testRuntime is the runtime the provider tests open under: a run over a scope of an empty container, on a context that never ends */
+func testRuntime() containercontract.Runtime {
+    return testRuntimeUnder(context.Background())
+}
+
+func testRuntimeUnder(ctx context.Context) containercontract.Runtime {
+    return melodyruntime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
+}
 
 /* the shared material of this package's tests. A connector that never connects is what lets the registration tests hand the locker a real *bun.DB without a server: the doors under test decide what to register, and none of them issues a query, so a handle that would fail on the first one is the honest double. */
 

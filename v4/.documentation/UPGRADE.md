@@ -22,6 +22,22 @@ Every entry below that the third major shipped is the consequence of fixing a de
 
 The fourth major takes the forms the third major kept compatible: a section that names a sibling interface, a deprecated door or a released signature on the third major describes here the form the fourth major carries instead, and this major's [`CHANGELOG.md`](../CHANGELOG.md) marks each **Breaking**.
 
+### Bunorm: a provider has one open door per purpose, each taking the runtime
+
+**What changed.** [`bunorm.Provider`](../../integrations/bunorm/v4/provider.go) is `Open(runtimeInstance, parameters, logger)` and `OpenForMigration(runtimeInstance, parameters, logger)`, both answering `(*bun.DB, error)` under the runtime's context. `ContextOpener`, `MigrationContextOpener` and the optional `MigrationProvider` are removed, so the registry probes no capability: every provider carries the migration door, and one with nothing to tune for migrations answers its `Open` there. The `mysql` and `pgsql` providers' `Open` and `OpenForMigration` are the bodies of their removed `OpenContext` and `OpenForMigrationContext`, and they refuse a nil runtime, a typed nil and one carrying no context with "the runtime is nil or carries no context", where a nil context read as `context.Background()`.
+
+**Symptom.** `*P does not implement bunorm.Provider (wrong type for method Open)` or `(missing method OpenForMigration)`; `undefined: bunorm.ContextOpener`, `bunorm.MigrationContextOpener`, `bunorm.MigrationProvider`; `provider.OpenContext undefined`.
+
+**Remedy.** Move the body of `OpenContext` into `Open`, reading the context from `runtimeInstance.Context()`, and delete the context-less twin; a provider with nothing to tune for migrations adds `func (p *P) OpenForMigration(runtimeInstance containercontract.Runtime, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) { return p.Open(runtimeInstance, parameters, logger) }`. The registry keeps that answer as the name's migration connection, a second pool, unless it is the very `*bun.DB` the registry already holds as the name's pool, which it shares by identity and never closes on a release. A direct call writes `provider.Open(runtimeInstance, parameters, logger)`.
+
+### Bunorm: the registry captures nothing, and its doors take the caller's runtime
+
+**What changed.** [`NewManagerRegistry`](../../integrations/bunorm/v4/manager_registry.go) is `NewManagerRegistry(logger, definitions)` and captures no context. `Manager`, `MustManager`, `Database`, `MustDatabase`, `DefaultManager`, `MustDefaultManager`, `DefaultDatabase`, `MustDefaultDatabase` and `MigrationDatabase` take the runtime they run under first, and the provider is handed it over a context the caller's own context and the registry's `CloseWithContext` both end; `ReadWriteSplitter.Writer` and `Reader` take it too. `MigrationDatabase` answers `(*bun.DB, error)`, its `dedicated` bool gone. `SetLogger` is removed: the registry reports through the constructor's logger for its whole life. A nil runtime, a typed nil and one carrying no context are refused with "the runtime is nil or carries no context", one carrying no scope with "the runtime carries no scope"; a caller whose context is already done is refused before an open starts. Concurrent callers of one name coalesce onto the first caller's open: a waiter whose own context ends leaves with its cause, and a waiter whose context is live opens again when the open it waited on ended by its opener's context.
+
+**Symptom.** `too many arguments in call to bunorm.NewManagerRegistry`; `not enough arguments in call to registry.Manager` (and the eight other doors, `splitter.Reader`, `splitter.Writer`); `assignment mismatch: 3 variables but registry.MigrationDatabase returns 2 values`; `registry.SetLogger undefined`. At run time, a lazy open ends when the request or the run that asked for it ends, where it ran under the registry's construction context.
+
+**Remedy.** `NewManagerRegistry(logger, definitions)`, built inside the registry's provider, where the application's logger resolves, instead of at wiring on the emergency logger and re-pointed with `SetLogger`; hand the request's or the run's runtime to every door, `registry.Database(runtimeInstance, name)`, `registry.DefaultManager(resolver.Runtime())` inside a provider; `database, migrationErr := registry.MigrationDatabase(runtimeInstance, name)` followed by `registry.CloseMigrationDatabase(name)` on the way out.
+
 ### Storage: `Get` takes options and answers the object with its info
 
 **What changed.** [`storagecontract.Storage.Get`](../storage/contract/storage.go) is `Get(runtime, key, storagecontract.GetOptions) (storagecontract.Object, error)`: the object's `Body`, an `io.ReadCloser`, beside its `Info`, a [`storagecontract.ObjectInfo`](../storage/contract/storage.go) of `Size`, `ContentType`, `ModifiedAt`, `EntityTag` without quotes and `Key`, the key asked. Both backends fill the info from the stat they already took, so a read costs no request more. Userland calls the storage through [`storage.Bound`](../storage/bound.go), `storage.FromRuntime(runtimeInstance)` or `storage.For(runtimeInstance, storageInstance)`, whose doors take no runtime.
@@ -1538,13 +1554,13 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **Remedy.** `NewLocker(database, mysql.LockerConfig{})`, `NewLocker(database, mysql.LockerConfig{ReleaseTimeout: bound.Of(2 * time.Second)})` and `RegisterLockerService(registrar, database, mysql.LockerConfig{})`, the same on pgsql.
 
-### Bunorm: the registry is built from one door, the context first and the definitions as a slice
+### Bunorm: the registry is built from one door, the definitions as a slice
 
-**What changed.** [`NewManagerRegistry`](../../integrations/bunorm/v4/manager_registry.go) takes the context its lazy opens run under, a nil one read as `context.Background()`, the logger and the provider definitions as a `[]ProviderDefinition`; it was the context-less door with variadic definitions, beside `NewManagerRegistryWithContext`, which is removed. The refusals are the ones the two doors gave, now joined by the two of the next section.
+**What changed.** [`NewManagerRegistry`](../../integrations/bunorm/v4/manager_registry.go) takes the logger and the provider definitions as a `[]ProviderDefinition`; it was the door with variadic definitions, beside `NewManagerRegistryWithContext`, which is removed. The refusals are the ones the two doors gave, now joined by the two of the next section.
 
 **Symptom.** `NewManagerRegistry(logger, primary, replica)` and `NewManagerRegistryWithContext(ctx, logger, definitions...)` no longer compile.
 
-**Remedy.** `NewManagerRegistry(ctx, logger, []bunorm.ProviderDefinition{primary, replica})`, the context the application cancels at shutdown, or `context.Background()` where none is at hand.
+**Remedy.** `NewManagerRegistry(logger, []bunorm.ProviderDefinition{primary, replica})`; the context an open runs under is the caller's, handed to each door through its runtime.
 
 ### Bunorm: the connection parameters are one exported struct, refused by name when the host or the database is empty, and the deprecated alias is gone
 
@@ -3734,7 +3750,7 @@ sessionInstance.Set("profile", profile)
 
 **Symptom.** `Close` can now block for as long as a dial started before it takes to finish. It never leaked before either: such an open ends its own freshly opened database against the closed flag. What changes is the answer's meaning — `Close` returning now means the teardown is over, where it used to mean the teardown of everything already memoized was over while a dial was still in the air, and a process exiting on that answer left the connection outstanding for a server-side timeout to reap.
 
-**Remedy.** Build the registry with [`NewManagerRegistry`](../../integrations/bunorm/v4/manager_registry.go) on a context you cancel as part of the shutdown: the cancellation reaches the open in flight — its refusal before the attempt, its configuration hook, its boot ping, its retry sleep — so the wait is as short as the provider can make it. Registered as a service, the registry is closed through `CloseWithContext`, so the teardown budget bounds the wait; a direct `Close` is `CloseWithContext` under `context.Background()`, and it cancels the open in flight as well; what it lacks is a deadline on the wait that follows, which is the case the teardown budget exists for.
+**Remedy.** Nothing to build: the registry's close signal, fired by its `CloseWithContext`, ends the context of every open in flight, and so does the caller's own context, handed through its runtime; the cancellation reaches the open in flight — its refusal before the attempt, its configuration hook, its boot ping, its retry sleep — so the wait is as short as the provider can make it. Registered as a service, the registry is closed through `CloseWithContext`, so the teardown budget bounds the wait; a direct `Close` is `CloseWithContext` under `context.Background()`, and it cancels the open in flight as well; what it lacks is a deadline on the wait that follows, which is the case the teardown budget exists for.
 
 ### Behavioural: the retry backoff has a floor, and a constant multiplier no longer costs the square
 

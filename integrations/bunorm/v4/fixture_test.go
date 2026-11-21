@@ -1,15 +1,28 @@
 package bunorm
 
 import (
+    "context"
     "errors"
     "sync"
     "testing"
 
     "github.com/uptrace/bun"
 
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
+
+/* testRuntime is the runtime the registry tests call under: a run over a scope of an empty container, on a context that never ends */
+func testRuntime() containercontract.Runtime {
+    return testRuntimeUnder(context.Background())
+}
+
+func testRuntimeUnder(ctx context.Context) containercontract.Runtime {
+    return melodyruntime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
+}
 
 /* the connection every definition of these tests declares: the registry refuses an empty host and an empty database, and none of the fake providers dials it */
 var testConnectionParameters = ConnectionParameters{Host: "127.0.0.1", Database: "melody"}
@@ -97,7 +110,7 @@ type delayedDiagnosticProvider struct {
     resume  chan struct{}
 }
 
-func (instance *delayedDiagnosticProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *delayedDiagnosticProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     RouteDiagnostics(logger)
     close(instance.entered)
     <-instance.resume
@@ -106,15 +119,23 @@ func (instance *delayedDiagnosticProvider) Open(params ConnectionParameters, log
     return nil, errors.New("delayed open refused")
 }
 
+func (instance *delayedDiagnosticProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
+}
+
 /* routingProvider routes bun's channel with the logger its open receives, as the mysql and pgsql providers do, and answers a stub database */
 type routingProvider struct{}
 
-func (instance *routingProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *routingProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     RouteDiagnostics(logger)
 
     database, _ := newCloseRaceDatabase()
 
     return database, nil
+}
+
+func (instance *routingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
 }
 
 /* errorOnlyLogger reports only the error level as enabled, the shape of a logger with a threshold */

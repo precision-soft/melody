@@ -25,13 +25,16 @@ import (
 
 type stubProvider struct{}
 
-func (instance *stubProvider) Open(params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *stubProvider) Open(runtimeInstance containercontract.Runtime, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return nil, errors.New("stub provider open must not be called for an unknown manager")
+}
+
+func (instance *stubProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
 }
 
 func TestResolveDatabase_UnknownManagerReturnsErrorInsteadOfPanic(t *testing.T) {
     registry, registryErr := bunorm.NewManagerRegistry(
-        context.Background(),
         logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
             bunorm.ProviderDefinition{Name: "primary", Provider: &stubProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -95,7 +98,6 @@ func pinTestRegistry(t *testing.T) *bunorm.ManagerRegistry {
     paymentDatabase, _ := newFakeBunDatabase()
 
     registry, registryErr := bunorm.NewManagerRegistry(
-        context.Background(),
         logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
             bunorm.ProviderDefinition{Name: "platform", Provider: &fakeDatabaseProvider{database: platformDatabase}, Parameters: testConnectionParameters, IsDefault: true},
@@ -163,7 +165,7 @@ func TestResolveDatabase_PinnedManagerWinsOverRegistryDefault(t *testing.T) {
     options := resolvedDefaultOptions
     options.ManagerName = "payment"
 
-    if resolved := resolveWithOptions(t, options, ""); "payment" != resolved {
+    if resolved := resolveWithOptions(t, options, ""); "payment (dedicated migration connection)" != resolved {
         t.Fatalf("expected the pinned manager, got: %s", resolved)
     }
 }
@@ -172,13 +174,13 @@ func TestResolveDatabase_FlagWinsOverPinnedManager(t *testing.T) {
     options := resolvedDefaultOptions
     options.ManagerName = "payment"
 
-    if resolved := resolveWithOptions(t, options, "platform"); "platform" != resolved {
+    if resolved := resolveWithOptions(t, options, "platform"); "platform (dedicated migration connection)" != resolved {
         t.Fatalf("expected the flag to win over the pin, got: %s", resolved)
     }
 }
 
 func TestResolveDatabase_RegistryDefaultWithoutPinOrFlag(t *testing.T) {
-    if resolved := resolveWithOptions(t, resolvedDefaultOptions, ""); "<default>" != resolved {
+    if resolved := resolveWithOptions(t, resolvedDefaultOptions, ""); "<default> (dedicated migration connection)" != resolved {
         t.Fatalf("expected the registry default, got: %s", resolved)
     }
 }
@@ -269,11 +271,11 @@ type migrationCapableDatabaseProvider struct {
     migrationDatabase *bun.DB
 }
 
-func (instance *migrationCapableDatabaseProvider) Open(params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *migrationCapableDatabaseProvider) Open(runtimeInstance containercontract.Runtime, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.database, nil
 }
 
-func (instance *migrationCapableDatabaseProvider) OpenForMigration(params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *migrationCapableDatabaseProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.migrationDatabase, nil
 }
 
@@ -283,7 +285,6 @@ func TestResolveDatabase_PrefersTheDedicatedMigrationConnection(t *testing.T) {
     migrationDatabase, _ := newFakeBunDatabase()
 
     registry, registryErr := bunorm.NewManagerRegistry(
-        context.Background(),
         logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
             bunorm.ProviderDefinition{
@@ -407,17 +408,17 @@ type migrationCapableTestProvider struct {
     migrationOpens    int
 }
 
-func (instance *migrationCapableTestProvider) Open(params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *migrationCapableTestProvider) Open(runtimeInstance containercontract.Runtime, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.ordinaryDatabase, nil
 }
 
-func (instance *migrationCapableTestProvider) OpenForMigration(params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *migrationCapableTestProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.migrationOpens = instance.migrationOpens + 1
 
     return instance.migrationDatabase, nil
 }
 
-var _ bunorm.MigrationProvider = (*migrationCapableTestProvider)(nil)
+var _ bunorm.Provider = (*migrationCapableTestProvider)(nil)
 
 /* TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection pins the half of the door a command defers: the dedicated connection lifts the driver deadlines and recycles nothing, so it must not outlive the run in a process that goes on to serve requests. The proof is that the NEXT resolution dials again: counting the provider's migration opens shows the memo is gone, where the connection's own state could not, since the same pointer answers both times. */
 func TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection(t *testing.T) {
@@ -430,7 +431,6 @@ func TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection(t *testin
     }
 
     registry, registryErr := bunorm.NewManagerRegistry(
-        context.Background(),
         logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
             bunorm.ProviderDefinition{Name: "primary", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -507,7 +507,6 @@ func TestResolveDatabase_TheReleaseReportsAFailedClose(t *testing.T) {
     }
 
     registry, registryErr := bunorm.NewManagerRegistry(
-        context.Background(),
         logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
             bunorm.ProviderDefinition{Name: "primary", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -598,7 +597,6 @@ func TestResolveDatabase_TheSuccessfulReleaseIsSilent(t *testing.T) {
     }
 
     registry, registryErr := bunorm.NewManagerRegistry(
-        context.Background(),
         logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
             bunorm.ProviderDefinition{Name: "primary", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
@@ -651,8 +649,8 @@ func TestResolveDatabase_TheSuccessfulReleaseIsSilent(t *testing.T) {
     }
 }
 
-/* a provider with no migration capability ran on the ordinary POOL, which belongs to the application; the release must leave it alone, or a migration command would take the database away from everything else the process runs. */
-func TestResolveDatabase_TheReleaseLeavesTheOrdinaryPoolAlone(t *testing.T) {
+/* a provider whose migration door answers the very pool the registry holds runs the command on that POOL, which belongs to the application; the release must leave it alone, or a migration command would take the database away from everything else the process runs. */
+func TestResolveDatabase_TheReleaseLeavesTheSharedPoolAlone(t *testing.T) {
     database, _ := newFakeBunDatabase()
     runtimeInstance := newRuntimeWithDatabase(t, database)
 
@@ -673,11 +671,11 @@ func TestResolveDatabase_TheReleaseLeavesTheOrdinaryPoolAlone(t *testing.T) {
             }
 
             if database != resolved {
-                t.Errorf("expected the ordinary pool for a provider with no migration capability")
+                t.Errorf("expected the shared pool for a provider whose migration door answers it")
             }
 
-            if true == strings.Contains(label, "dedicated") {
-                t.Errorf("expected the label not to claim a dedicated connection, got %q", label)
+            if "" == label {
+                t.Errorf("expected a label")
             }
 
             releaseDatabase()
@@ -764,5 +762,62 @@ func TestNewMigrateCommand_LeftOutOptionsTakeTheDefaults(t *testing.T) {
 
     if DefaultManagerRegistryServiceId != command.base.options.ManagerRegistryServiceId || DefaultManagerFlagName != command.base.options.ManagerFlagName {
         t.Fatalf("expected the default registry service id and manager flag, got %+v", command.base.options)
+    }
+}
+
+/* the command hands its run's runtime to the migration door: a run whose context is already cancelled refuses before the dial */
+func TestResolveDatabase_ACancelledRunRefusesBeforeTheDial(t *testing.T) {
+    migrationDatabase, _ := newFakeBunDatabase()
+    provider := &migrationCapableTestProvider{migrationDatabase: migrationDatabase}
+
+    registry, registryErr := bunorm.NewManagerRegistry(
+        logging.NewNopLogger(),
+        []bunorm.ProviderDefinition{
+            bunorm.ProviderDefinition{Name: "primary", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
+        },
+    )
+    if nil != registryErr {
+        t.Fatalf("failed to build manager registry: %s", registryErr.Error())
+    }
+
+    options := resolvedDefaultOptions
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    container.MustRegister[*bunorm.ManagerRegistry](
+        serviceContainer,
+        options.ManagerRegistryServiceId,
+        func(resolver containercontract.Resolver) (*bunorm.ManagerRegistry, error) {
+            return registry, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    runContext, cancelRun := context.WithCancel(context.Background())
+    cancelRun()
+
+    runtimeInstance := runtime.NewRun(runContext, serviceContainer.NewScope())
+    base := &baseCommand{options: options}
+
+    command := &probeCommand{
+        nameValue:  "migrate",
+        flagsValue: []clicontract.Flag{&clicontract.StringFlag{Name: options.ManagerFlagName}},
+        runCallback: func(dispatchedRuntime containercontract.Runtime, commandContext *clicontract.CommandContext) error {
+            resolveOutput, _ := newBufferedOutput(true)
+
+            _, _, _, resolveErr := base.resolveDatabase(runtimeInstance, commandContext, resolveOutput)
+            if false == errors.Is(resolveErr, context.Canceled) {
+                t.Errorf("expected the run's cancellation, got %v", resolveErr)
+            }
+
+            return nil
+        },
+    }
+
+    if runErr := dispatchProbeCommand(command, runtime.NewRun(context.Background(), serviceContainer.NewScope()), []string{"migrate"}); nil != runErr {
+        t.Fatalf("unexpected command error: %s", runErr.Error())
+    }
+
+    if 0 != provider.migrationOpens {
+        t.Fatalf("expected no dial under a cancelled run, got %d opens", provider.migrationOpens)
     }
 }

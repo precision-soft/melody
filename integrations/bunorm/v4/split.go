@@ -1,6 +1,7 @@
 package bunorm
 
 import (
+    "context"
     "sync"
     "sync/atomic"
     "time"
@@ -8,6 +9,7 @@ import (
     "github.com/uptrace/bun"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
 )
 
@@ -88,27 +90,32 @@ func (instance *ReadWriteSplitter) ReaderName() string {
     return instance.replicaNames[(index-1)%uint64(len(instance.replicaNames))]
 }
 
-func (instance *ReadWriteSplitter) Writer() (*bun.DB, error) {
-    return instance.registry.Database(instance.WriterName())
+/* Writer answers the primary, opened under the caller's runtime as the registry's Database opens it. */
+func (instance *ReadWriteSplitter) Writer(runtimeInstance containercontract.Runtime) (*bun.DB, error) {
+    return instance.registry.Database(runtimeInstance, instance.WriterName())
 }
 
-/* Reader answers the round-robin replica, and falls back to the primary only when the replica is unreachable, an open failure filed under ErrDatabaseUnreachable. Every other failure, a wiring error or a teardown in progress, is refused, so a dead replica configuration is never served silently from the primary. An unreachable replica is remembered for the retry interval, so its reads go to the primary without dialling it again, and the change is journaled once each way: a warning when reads move to the primary, an info when the replica takes them back. When the primary fails too, the answer carries its failure as the cause and names the replica failure beside it. */
-func (instance *ReadWriteSplitter) Reader() (*bun.DB, error) {
+/* Reader answers the round-robin replica, and falls back to the primary only when the replica is unreachable, an open failure filed under ErrDatabaseUnreachable. Every other failure, a wiring error or a teardown in progress, is refused, so a dead replica configuration is never served silently from the primary. An unreachable replica is remembered for the retry interval, so its reads go to the primary without dialling it again, and the change is journaled once each way: a warning when reads move to the primary, an info when the replica takes them back. When the primary fails too, the answer carries its failure as the cause and names the replica failure beside it. Every open runs under the caller's runtime, and a replica open that the caller's own context ended is answered as that refusal: the caller left, so the replica is not remembered unreachable and the primary is not opened in its place. */
+func (instance *ReadWriteSplitter) Reader(runtimeInstance containercontract.Runtime) (*bun.DB, error) {
     readerName := instance.ReaderName()
 
     if readerName != instance.primaryName {
         if rememberedErr := instance.rememberedUnreachable(readerName); nil != rememberedErr {
-            return instance.primaryInPlaceOf(readerName, rememberedErr)
+            return instance.primaryInPlaceOf(runtimeInstance, readerName, rememberedErr)
         }
     }
 
-    database, databaseErr := instance.registry.Database(readerName)
+    database, databaseErr := instance.registry.Database(runtimeInstance, readerName)
     if nil == databaseErr {
         if readerName != instance.primaryName {
             instance.forgetUnreachable(readerName)
         }
 
         return database, nil
+    }
+
+    if true == endedByCallerContext(runtimeInstance, databaseErr) {
+        return nil, databaseErr
     }
 
     if false == exception.ChainIs(databaseErr, ErrDatabaseUnreachable) {
@@ -121,11 +128,25 @@ func (instance *ReadWriteSplitter) Reader() (*bun.DB, error) {
 
     instance.rememberUnreachable(readerName, databaseErr)
 
-    return instance.primaryInPlaceOf(readerName, databaseErr)
+    return instance.primaryInPlaceOf(runtimeInstance, readerName, databaseErr)
 }
 
-func (instance *ReadWriteSplitter) primaryInPlaceOf(readerName string, replicaErr error) (*bun.DB, error) {
-    primary, primaryErr := instance.registry.Database(instance.primaryName)
+/* endedByCallerContext answers whether a failure is the caller's own departure: its context is done and the failure carries that context's error or cause */
+func endedByCallerContext(runtimeInstance containercontract.Runtime, failure error) bool {
+    if true == isNilInterface(runtimeInstance) || true == isNilInterface(runtimeInstance.Context()) {
+        return false
+    }
+
+    callerContext := runtimeInstance.Context()
+    if nil == callerContext.Err() {
+        return false
+    }
+
+    return true == exception.ChainIs(failure, callerContext.Err()) || true == exception.ChainIs(failure, context.Cause(callerContext))
+}
+
+func (instance *ReadWriteSplitter) primaryInPlaceOf(runtimeInstance containercontract.Runtime, readerName string, replicaErr error) (*bun.DB, error) {
+    primary, primaryErr := instance.registry.Database(runtimeInstance, instance.primaryName)
     if nil != primaryErr {
         return nil, keepLoggedMark(exception.NewError(
             "read/write splitter could not open the replica nor the primary",
@@ -174,7 +195,7 @@ func (instance *ReadWriteSplitter) rememberUnreachable(replicaName string, repli
         return
     }
 
-    instance.registry.currentLogger().Warning(
+    instance.registry.logger.Warning(
         "read replica unreachable, reads served by the primary",
         map[string]any{
             "replica":    replicaName,
@@ -196,7 +217,7 @@ func (instance *ReadWriteSplitter) forgetUnreachable(replicaName string) {
         return
     }
 
-    instance.registry.currentLogger().Info(
+    instance.registry.logger.Info(
         "read replica reachable again, reads served by it",
         map[string]any{"replica": replicaName, "primary": instance.primaryName},
     )

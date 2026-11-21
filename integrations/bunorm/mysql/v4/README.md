@@ -110,11 +110,10 @@ It says nothing about which key refused; read the key clause of the driver's mes
 
 The failed-open errors carry the `SafeContext` of the `ConnectionParameters` the open was handed: the host, the port, the database and the user, with the password left out, so a diagnostic never prints the credential — but for a cancellation before the attempt, which carries no context.
 
-### Opening under a context, and opening for migrations
+### Opening under a runtime, and opening for migrations
 
-- [`Provider.OpenContext`](./provider.go) implements [`bunorm.ContextOpener`](../../v4/provider.go): the retry sleeps watch the caller's context alongside the clock, so a shutdown that cancels it reaches a retry loop in flight instead of sleeping through the whole remaining budget. The registry prefers it and hands the context it was constructed with.
-- [`Provider.OpenForMigration`](./provider.go) implements [`bunorm.MigrationProvider`](../../v4/provider.go) and opens the same database with the driver deadlines lifted: `ReadTimeout` and `WriteTimeout` are per-connection settings baked into the connector, sized for request traffic, and a DDL statement that legitimately runs past them is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back. The connect timeout stays armed, the pool is kept to the two connections a sequential migration run needs, and no connection is recycled mid-run.
-- [`Provider.OpenForMigrationContext`](./provider.go) implements [`bunorm.MigrationContextOpener`](../../v4/provider.go) — the migration open under the caller's context, the way `OpenContext` is `Open` under it.
+- [`Provider.Open`](./provider.go) is the pooled door of [`bunorm.Provider`](../../v4/provider.go) and opens under the runtime it is handed: a nil runtime, or one carrying no context, is refused before anything is routed, a context already done is refused before the attempt, and the retry sleeps watch the context alongside the clock, so a caller that leaves or a registry that closes reaches a retry loop in flight instead of sleeping through the whole remaining budget. The registry hands the caller's runtime over a context its own close also ends.
+- [`Provider.OpenForMigration`](./provider.go) is the migration door of the same contract, under the runtime as `Open` is, and opens the same database with the driver deadlines lifted: `ReadTimeout` and `WriteTimeout` are per-connection settings baked into the connector, sized for request traffic, and a DDL statement that legitimately runs past them is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back. The connect timeout stays armed, the pool is kept to the two connections a sequential migration run needs, and no connection is recycled mid-run.
 
 ### Transport security
 

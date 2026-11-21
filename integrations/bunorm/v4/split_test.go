@@ -12,6 +12,7 @@ import (
     "github.com/uptrace/bun"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
@@ -19,15 +20,23 @@ import (
 /* unreachableSplitProvider fails the way a provider fails on an outage it could not get past: filed under ErrDatabaseUnreachable, the one class the splitter absorbs */
 type unreachableSplitProvider struct{}
 
-func (instance *unreachableSplitProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *unreachableSplitProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return nil, exception.NewError("database connection failed", nil, DatabaseUnreachable(errors.New("replica is down")))
+}
+
+func (instance *unreachableSplitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
 }
 
 /* refusingSplitProvider fails the way a provider refuses by name — a parameter left empty, a password the server refused — or the way a provider that files nothing under the class fails: a plain error, terminal by nature */
 type refusingSplitProvider struct{}
 
-func (instance *refusingSplitProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *refusingSplitProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return nil, errors.New("pgsql database open refused: the user is empty")
+}
+
+func (instance *refusingSplitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
 }
 
 func TestReadWriteSplitter_WriterIsPrimaryReaderRoundRobins(t *testing.T) {
@@ -61,7 +70,6 @@ func TestReadWriteSplitter_ReaderFallsBackToPrimaryWithoutReplicas(t *testing.T)
 
 func TestReadWriteSplitter_ReaderRefusesAnUnknownReplicaName(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -73,7 +81,7 @@ func TestReadWriteSplitter_ReaderRefusesAnUnknownReplicaName(t *testing.T) {
 
     splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"misspelled-replica"}})
 
-    database, readerErr := splitter.Reader()
+    database, readerErr := splitter.Reader(testRuntime())
     if nil == readerErr {
         t.Fatalf("expected the unknown replica name to be refused, got a database: %v", database)
     }
@@ -85,7 +93,6 @@ func TestReadWriteSplitter_ReaderRefusesAnUnknownReplicaName(t *testing.T) {
 
 func TestReadWriteSplitter_ReaderFallsBackToPrimaryWhenTheReplicaIsUnreachable(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -98,12 +105,12 @@ func TestReadWriteSplitter_ReaderFallsBackToPrimaryWhenTheReplicaIsUnreachable(t
 
     splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}})
 
-    database, readerErr := splitter.Reader()
+    database, readerErr := splitter.Reader(testRuntime())
     if nil != readerErr {
         t.Fatalf("expected the open failure to fall back to the primary, got: %v", readerErr)
     }
 
-    primary, primaryErr := registry.Database("primary")
+    primary, primaryErr := registry.Database(testRuntime(), "primary")
     if nil != primaryErr {
         t.Fatalf("primary: %v", primaryErr)
     }
@@ -115,7 +122,6 @@ func TestReadWriteSplitter_ReaderFallsBackToPrimaryWhenTheReplicaIsUnreachable(t
 
 func TestReadWriteSplitter_ReaderNamesBothFailuresWhenThePrimaryFailsToo(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "primary", Provider: &unreachableSplitProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -128,7 +134,7 @@ func TestReadWriteSplitter_ReaderNamesBothFailuresWhenThePrimaryFailsToo(t *test
 
     splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}})
 
-    _, readerErr := splitter.Reader()
+    _, readerErr := splitter.Reader(testRuntime())
     if nil == readerErr {
         t.Fatalf("expected an error when the replica and the primary both fail to open")
     }
@@ -140,7 +146,6 @@ func TestReadWriteSplitter_ReaderNamesBothFailuresWhenThePrimaryFailsToo(t *test
 
 func TestNewReadWriteSplitter_RefusesAnEmptyReplicaName(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -166,14 +171,17 @@ func TestNewReadWriteSplitter_RefusesAnEmptyReplicaName(t *testing.T) {
 
 type noDatabaseSplitProvider struct{}
 
-func (instance *noDatabaseSplitProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *noDatabaseSplitProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return nil, nil
+}
+
+func (instance *noDatabaseSplitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
 }
 
 /* a provider answering neither a database nor an error is the wiring mistake the registry refuses by name; folded into the fallback it routed every read of that replica to the primary forever, with no signal that the replica was dead */
 func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderAnsweredNoDatabase(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -187,7 +195,7 @@ func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderAnsweredNoDatabase(
 
     splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}})
 
-    database, readerErr := splitter.Reader()
+    database, readerErr := splitter.Reader(testRuntime())
     if false == errors.Is(readerErr, ErrProviderReturnedNilDatabase) {
         t.Fatalf("expected ErrProviderReturnedNilDatabase, got database=%v err=%v", database, readerErr)
     }
@@ -200,7 +208,6 @@ func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderAnsweredNoDatabase(
 /* a replica whose provider REFUSED — a parameter left empty, a password the server refused, a database that does not exist, or a provider that files nothing under the unreachable class — is refused with the provider's own answer, not served from the primary: the denylist of registry sentinels this replaced let every refusal it did not name fall to the primary, silently and for the life of the process */
 func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderRefused(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -214,7 +221,7 @@ func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderRefused(t *testing.
 
     splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}})
 
-    database, readerErr := splitter.Reader()
+    database, readerErr := splitter.Reader(testRuntime())
     if nil != database {
         t.Fatal("expected no database beside the refusal")
     }
@@ -223,7 +230,7 @@ func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderRefused(t *testing.
         t.Fatalf("expected the provider's own refusal handed back, got %v", readerErr)
     }
 
-    if primary, primaryErr := registry.Database("primary"); nil != primaryErr || nil == primary {
+    if primary, primaryErr := registry.Database(testRuntime(), "primary"); nil != primaryErr || nil == primary {
         t.Fatalf("the primary itself stays reachable: %v", primaryErr)
     }
 }
@@ -231,8 +238,12 @@ func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderRefused(t *testing.
 /* journaledUnreachableSplitProvider fails as unreachableSplitProvider does after journaling the failure and marking it logged, as the providers' terminal branches do */
 type journaledUnreachableSplitProvider struct{}
 
-func (instance *journaledUnreachableSplitProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *journaledUnreachableSplitProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return nil, exception.MarkLogged(exception.NewError("database connection failed", nil, DatabaseUnreachable(errors.New("primary is down"))))
+}
+
+func (instance *journaledUnreachableSplitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
 }
 
 /* the double failure over a primary the provider already journaled stays marked logged, so it is not filed a second time; over an unmarked primary failure it stays unmarked */
@@ -244,7 +255,6 @@ func TestReadWriteSplitter_ADoubleFailureOverAJournaledPrimaryStaysMarkedLogged(
         }
 
         registry, registryErr := NewManagerRegistry(
-            context.Background(),
             &fakeLogger{},
             []ProviderDefinition{
                 ProviderDefinition{Name: "primary", Provider: primaryProvider, Parameters: testConnectionParameters, IsDefault: true},
@@ -255,7 +265,7 @@ func TestReadWriteSplitter_ADoubleFailureOverAJournaledPrimaryStaysMarkedLogged(
             t.Fatalf("registry: %v", registryErr)
         }
 
-        _, readerErr := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}}).Reader()
+        _, readerErr := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}}).Reader(testRuntime())
         if nil == readerErr {
             t.Fatal("expected the double failure refused")
         }
@@ -272,7 +282,7 @@ type switchableSplitProvider struct {
     openCount int
 }
 
-func (instance *switchableSplitProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *switchableSplitProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.openCount++
     if true == instance.down {
         return nil, exception.NewError("database connection failed", nil, DatabaseUnreachable(errors.New("replica is down")))
@@ -283,11 +293,14 @@ func (instance *switchableSplitProvider) Open(params ConnectionParameters, logge
     return database, nil
 }
 
+func (instance *switchableSplitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
+}
+
 /* inside the retry interval an unreachable replica's reads go to the primary without dialling it, so a dead replica does not cost every read a connect timeout; past the interval it is dialled again */
 func TestReadWriteSplitter_AnUnreachableReplicaIsRememberedForTheInterval(t *testing.T) {
     replica := &switchableSplitProvider{down: true}
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -303,7 +316,7 @@ func TestReadWriteSplitter_AnUnreachableReplicaIsRememberedForTheInterval(t *tes
     splitter.now = func() time.Time { return now }
 
     for range 2 {
-        if _, readerErr := splitter.Reader(); nil != readerErr {
+        if _, readerErr := splitter.Reader(testRuntime()); nil != readerErr {
             t.Fatalf("expected the primary served in place of the replica, got: %v", readerErr)
         }
     }
@@ -313,7 +326,7 @@ func TestReadWriteSplitter_AnUnreachableReplicaIsRememberedForTheInterval(t *tes
     }
 
     now = now.Add(time.Minute)
-    if _, readerErr := splitter.Reader(); nil != readerErr {
+    if _, readerErr := splitter.Reader(testRuntime()); nil != readerErr {
         t.Fatalf("expected the primary served in place of the replica, got: %v", readerErr)
     }
 
@@ -327,7 +340,6 @@ func TestReadWriteSplitter_WritesOneWarningPerTransition(t *testing.T) {
     logger := &capturingDiagnosticLogger{}
     replica := &switchableSplitProvider{down: true}
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         logger,
         []ProviderDefinition{
             ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -343,13 +355,13 @@ func TestReadWriteSplitter_WritesOneWarningPerTransition(t *testing.T) {
     splitter.now = func() time.Time { return now }
 
     for range 3 {
-        _, _ = splitter.Reader()
+        _, _ = splitter.Reader(testRuntime())
         now = now.Add(splitterReplicaRetryIntervalRule.Default)
     }
 
     replica.down = false
-    _, _ = splitter.Reader()
-    _, _ = splitter.Reader()
+    _, _ = splitter.Reader(testRuntime())
+    _, _ = splitter.Reader(testRuntime())
 
     warnings, infos := 0, 0
     for _, record := range logger.captured() {
@@ -368,7 +380,7 @@ func TestReadWriteSplitter_WritesOneWarningPerTransition(t *testing.T) {
 
 /* the option refuses a negative interval where it is written, and a zero one keeps the default */
 func TestNewReadWriteSplitter_AnAbsentReplicaRetryIntervalTakesFiveSeconds(t *testing.T) {
-    registry, registryErr := NewManagerRegistry(context.Background(), &fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
+    registry, registryErr := NewManagerRegistry(&fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
     }
@@ -379,7 +391,7 @@ func TestNewReadWriteSplitter_AnAbsentReplicaRetryIntervalTakesFiveSeconds(t *te
 }
 
 func TestNewReadWriteSplitter_RefusesAReplicaRetryIntervalOutsideItsRuleNamingTheField(t *testing.T) {
-    registry, registryErr := NewManagerRegistry(context.Background(), &fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
+    registry, registryErr := NewManagerRegistry(&fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
     }
@@ -439,13 +451,16 @@ func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
 
 type cyclicSplitProvider struct{}
 
-func (instance *cyclicSplitProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *cyclicSplitProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return nil, newCyclicChainError()
+}
+
+func (instance *cyclicSplitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
 }
 
 func TestReadWriteSplitter_ReaderReturnsOnACyclicChainFromAProvider(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             {Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -459,7 +474,7 @@ func TestReadWriteSplitter_ReaderReturnsOnACyclicChainFromAProvider(t *testing.T
     splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}})
 
     assertReturnsOnACyclicChain(t, func() {
-        if _, readerErr := splitter.Reader(); nil == readerErr {
+        if _, readerErr := splitter.Reader(testRuntime()); nil == readerErr {
             t.Error("expected the provider's refusal")
         }
     })
@@ -471,7 +486,7 @@ type stallingSplitProvider struct {
     opens   atomic.Int64
 }
 
-func (instance *stallingSplitProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *stallingSplitProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     if 1 < instance.opens.Add(1) {
         instance.entered <- struct{}{}
         <-instance.stall
@@ -480,10 +495,13 @@ func (instance *stallingSplitProvider) Open(params ConnectionParameters, logger 
     return nil, exception.NewError("database connection failed", nil, DatabaseUnreachable(errors.New("replica is down")))
 }
 
+func (instance *stallingSplitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
+}
+
 func TestReadWriteSplitter_OneReaderProbesALapsedReplicaWhileTheOthersKeepThePrimary(t *testing.T) {
     replica := &stallingSplitProvider{stall: make(chan struct{}), entered: make(chan struct{}, 1)}
     registry, registryErr := NewManagerRegistry(
-        context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
@@ -499,7 +517,7 @@ func TestReadWriteSplitter_OneReaderProbesALapsedReplicaWhileTheOthersKeepThePri
     splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}, ReplicaRetryInterval: bound.Of(time.Minute)})
     splitter.now = func() time.Time { return start.Add(time.Duration(clock.Load())) }
 
-    if _, readerErr := splitter.Reader(); nil != readerErr {
+    if _, readerErr := splitter.Reader(testRuntime()); nil != readerErr {
         t.Fatalf("expected the primary served in place of the replica, got: %v", readerErr)
     }
 
@@ -507,7 +525,7 @@ func TestReadWriteSplitter_OneReaderProbesALapsedReplicaWhileTheOthersKeepThePri
 
     probed := make(chan error, 1)
     go func() {
-        _, probeErr := splitter.Reader()
+        _, probeErr := splitter.Reader(testRuntime())
         probed <- probeErr
     }()
 
@@ -519,7 +537,7 @@ func TestReadWriteSplitter_OneReaderProbesALapsedReplicaWhileTheOthersKeepThePri
 
     served := make(chan error, 1)
     go func() {
-        _, readerErr := splitter.Reader()
+        _, readerErr := splitter.Reader(testRuntime())
         served <- readerErr
     }()
 
@@ -540,5 +558,83 @@ func TestReadWriteSplitter_OneReaderProbesALapsedReplicaWhileTheOthersKeepThePri
 
     if 2 != replica.opens.Load() {
         t.Fatalf("expected one dial for the lapsed interval, got %d", replica.opens.Load()-1)
+    }
+}
+
+/* departingCallerReplicaProvider parks its first open until the caller's context ends and answers that ending filed as unreachable, the class the splitter would otherwise absorb; later opens answer a database */
+type departingCallerReplicaProvider struct {
+    opens   atomic.Int32
+    entered chan struct{}
+}
+
+func (instance *departingCallerReplicaProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    if 1 < instance.opens.Add(1) {
+        database, _ := newCloseRaceDatabase()
+
+        return database, nil
+    }
+
+    close(instance.entered)
+    <-runtimeInstance.Context().Done()
+
+    return nil, exception.NewError("database connection failed", nil, DatabaseUnreachable(runtimeInstance.Context().Err()))
+}
+
+func (instance *departingCallerReplicaProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
+}
+
+/* a replica open the caller's own context ended answers that refusal: the replica is not remembered unreachable, the primary is not opened in its place, and the next read under a live context dials the replica again */
+func TestReadWriteSplitter_AReplicaOpenTheCallerLeftIsNeitherRememberedNorServedFromThePrimary(t *testing.T) {
+    primary := &fakeProvider{}
+    replica := &departingCallerReplicaProvider{entered: make(chan struct{})}
+
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        []ProviderDefinition{
+            ProviderDefinition{Name: "primary", Provider: primary, Parameters: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "replica", Provider: replica, Parameters: testConnectionParameters},
+        },
+    )
+    if nil != registryErr {
+        t.Fatalf("registry: %v", registryErr)
+    }
+    t.Cleanup(func() { _ = registry.CloseWithContext(context.Background()) })
+
+    splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}, ReplicaRetryInterval: bound.Of(time.Hour)})
+
+    callerContext, cancelCaller := context.WithCancel(context.Background())
+    answered := make(chan error, 1)
+    go func() {
+        _, readerErr := splitter.Reader(testRuntimeUnder(callerContext))
+        answered <- readerErr
+    }()
+
+    <-replica.entered
+    cancelCaller()
+
+    select {
+    case readerErr := <-answered:
+        if false == errors.Is(readerErr, context.Canceled) {
+            t.Fatalf("expected the caller's cancellation, got %v", readerErr)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("expected the replica open to end with the caller's context")
+    }
+
+    if 0 != primary.openCount {
+        t.Fatalf("expected the primary left unopened, got %d opens", primary.openCount)
+    }
+
+    if nil != splitter.rememberedUnreachable("replica") {
+        t.Fatal("expected the replica not remembered unreachable")
+    }
+
+    if _, readerErr := splitter.Reader(testRuntime()); nil != readerErr {
+        t.Fatalf("expected the next read to dial the replica, got %v", readerErr)
+    }
+
+    if 2 != replica.opens.Load() || 0 != primary.openCount {
+        t.Fatalf("expected the replica dialled again and the primary untouched, got %d replica opens and %d primary opens", replica.opens.Load(), primary.openCount)
     }
 }

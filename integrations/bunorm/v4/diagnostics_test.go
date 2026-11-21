@@ -343,7 +343,7 @@ func TestRouteDiagnostics_ARetiredRegistryLoggerRoutesNothing(t *testing.T) {
     t.Cleanup(ResetDiagnostics)
 
     owned := newRegistryLogger(&capturingDiagnosticLogger{})
-    retireRegistryLogger(owned)
+    owned.retired.Store(true)
 
     if nil != routeDiagnosticsTo(owned) || nil != bunDiagnosticsTarget.Load() {
         t.Fatal("expected a retired registry logger to route nothing")

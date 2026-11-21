@@ -80,11 +80,11 @@ type Module struct {
     storageBucket string
     storage       *melodyawss3.Storage
 
-    /* the registry is the one door onto both connections, and the catalogue handle is its default manager. Both are opened at the first resolution of the service that publishes them, so a process that never reads the catalogue never dials it, and a pool that was opened is one the container resolved and therefore closes at its teardown; catalogueWired says the environment declared the catalogue. */
-    databaseRegistry *melodybunorm.ManagerRegistry
-    catalogueWired   bool
+    /* the definitions the registry is built over, by its provider: the registry is the one door onto both connections, and the catalogue handle is its default manager. Both are opened at the first resolution of the service that publishes them, under that resolution's runtime, so a process that never reads the catalogue never dials it, and a pool that was opened is one the container resolved and therefore closes at its teardown; catalogueWired says the environment declared the catalogue. */
+    databaseDefinitions []melodybunorm.ProviderDefinition
+    catalogueWired      bool
 
-    /* processContext is what the registry's lazy opens and the outbox schema are bound to: the archive is opened at the first resolution of the service that publishes it, on a request or a command, and an open that outlives the process's signal is an open the teardown waits for */
+    /* processContext is the process's own context, which the boot-time schema work and the archive storage are bound to */
     processContext context.Context
 
     /* trustedProxyResolver is the one client resolver both budgets read the client through; the list it resolves is re-read on a schedule, so a balancer restarted onto a new address is trusted again within the interval */

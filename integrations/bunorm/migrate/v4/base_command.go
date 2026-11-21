@@ -176,7 +176,7 @@ func (instance *baseCommand) resolveRegistry(runtimeInstance containercontract.R
     return runtime.FromRuntime[*bunorm.ManagerRegistry](runtimeInstance, instance.options.ManagerRegistryServiceId)
 }
 
-/* resolveDatabase answers the connection this command runs on, the label the output names it by, and the release its caller must defer, which ends the dedicated migration connection: that connection lifts the driver deadlines and recycles nothing, so it must not outlive the run. The release reports a failed close through the command's output as a warning, not as the verdict, and it runs before the json document is rendered, since the command defers it after the frame defers finish. */
+/* resolveDatabase answers the connection this command runs on, the label the output names it by, and the release its caller must defer, which releases the run's hold on the dedicated migration connection: that connection lifts the driver deadlines and recycles nothing, so it must not outlive the run. The release reports a failed close through the command's output as a warning, not as the verdict, and it runs before the json document is rendered, since the command defers it after the frame defers finish. */
 func (instance *baseCommand) resolveDatabase(
     runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
@@ -198,8 +198,8 @@ func (instance *baseCommand) resolveDatabase(
         managerName = instance.options.ManagerName
     }
 
-    /* the migration commands prefer the dedicated migration connection — the request pool carries driver deadlines sized for requests, and a DDL statement that legitimately runs past them is cut mid-statement — and fall back to the ordinary pool when the provider offers no such capability */
-    database, dedicated, migrationDatabaseErr := registry.MigrationDatabase(managerName)
+    /* the migration commands run on the provider's migration connection, opened under the run's runtime so a cancelled run refuses before the dial: the request pool carries driver deadlines sized for requests, and a DDL statement that legitimately runs past them is cut mid-statement */
+    database, migrationDatabaseErr := registry.MigrationDatabase(runtimeInstance, managerName)
     if nil != migrationDatabaseErr {
         return nil, "", noRelease, migrationDatabaseErr
     }
@@ -209,16 +209,12 @@ func (instance *baseCommand) resolveDatabase(
         label = defaultManagerLabel
     }
 
-    release := noRelease
+    label = label + " (dedicated migration connection)"
 
-    if true == dedicated {
-        label = label + " (dedicated migration connection)"
-
-        /* only the dedicated connection is ours to end. The ordinary pool belongs to the application for as long as the registry does, and ending it here would take the database away from everything else the process runs. */
-        release = func() {
-            if closeErr := registry.CloseMigrationDatabase(managerName); nil != closeErr {
-                outputInstance.printWarning("the dedicated migration connection did not close cleanly: " + closeErr.Error())
-            }
+    /* the release ends only the run's hold: the registry closes the migration connection with its last hold, and closes nothing for one it shares with the name's pool, which belongs to the application for as long as the registry does */
+    release := func() {
+        if closeErr := registry.CloseMigrationDatabase(managerName); nil != closeErr {
+            outputInstance.printWarning("the dedicated migration connection did not close cleanly: " + closeErr.Error())
         }
     }
 

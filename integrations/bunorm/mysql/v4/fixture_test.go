@@ -11,10 +11,22 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
 )
+
+/* testRuntime is the runtime the provider tests open under: a run over a scope of an empty container, on a context that never ends */
+func testRuntime() containercontract.Runtime {
+    return testRuntimeUnder(context.Background())
+}
+
+func testRuntimeUnder(ctx context.Context) containercontract.Runtime {
+    return melodyruntime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
+}
 
 /* singleAttemptRetry keeps a refused dial from being retried under the default backoff */
 var singleAttemptRetry = RetryConfig{MaxAttempts: bound.Of(1)}

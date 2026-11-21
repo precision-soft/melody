@@ -1,29 +1,19 @@
 package bunorm
 
 import (
-    "context"
-
     "github.com/uptrace/bun"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-/* Provider opens the connection pool a definition names. Open answers a fresh pool whose ownership transfers to the caller: the registry closes every database it decides not to keep — one handed back beside an error, one that loses a duplicate migration open, one that lands after Close — so an implementation handing out a shared or memoized *bun.DB would have its live pool closed underneath it. */
+/* Provider opens the connection pools a definition names, one door per purpose, each under the runtime it is handed: the registry hands the caller's runtime over a context its own Close also ends, so a retry loop that waits on the context as well as the clock stops when the caller leaves or the registry closes, instead of sleeping through the whole retry budget. A nil runtime, or one carrying no context, is refused by the door.
+
+   Open answers a fresh pool for request traffic whose ownership transfers to the caller: the registry closes every database it decides not to keep — one handed back beside an error, one that lands after Close — so an implementation handing out a shared or memoized *bun.DB from Open would have its live pool closed underneath it.
+
+   OpenForMigration answers the connection the migration commands run on. The pool Open answers carries driver-level read and write deadlines sized for requests, and a legitimate DDL statement that runs past them — an ALTER TABLE adding constraints on a large table — is cut mid-statement, outside any transaction the database would roll back; a provider with such deadlines opens the same database with them lifted. A provider with nothing to tune answers Open's pool: func (instance *P) OpenForMigration(runtimeInstance, parameters, logger) (*bun.DB, error) { return instance.Open(runtimeInstance, parameters, logger) }. The registry keeps what it answers as the name's migration connection, shared by every caller and closed with the last CloseMigrationDatabase; an answer that is the very *bun.DB the registry already holds as the name's pool, compared by identity, is shared with that pool instead, neither kept as a migration connection nor closed by CloseMigrationDatabase. */
 type Provider interface {
-    Open(parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
-}
+    Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
 
-/* ContextOpener is the optional capability of opening under a caller's context: the retry loop between attempts sleeps on the context as well as the clock, so a shutdown that cancels it reaches a dial in flight instead of sleeping through the whole retry budget — the exact window in which supervisors send their signals. The registry prefers it whenever the provider implements it, handing a child of the context it was constructed with, which CloseWithContext also cancels, so no open goes on dialling after the registry is gone. */
-type ContextOpener interface {
-    OpenContext(ctx context.Context, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
-}
-
-/* MigrationProvider is the optional capability of opening a connection tuned for migrations: the pool a provider opens for request traffic carries driver-level read and write deadlines sized for requests, and a legitimate DDL statement that runs past them — an ALTER TABLE adding constraints on a large table — is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back. A provider that implements this opens the same database with those deadlines lifted; the migration commands prefer it and fall back to the ordinary connection when the capability is absent. */
-type MigrationProvider interface {
-    OpenForMigration(parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
-}
-
-/* MigrationContextOpener is what ContextOpener is to Open: the migration open under the caller's context, so a db:migrate that receives SIGTERM against a down database refuses at the first cancellable step. The registry asks for it only of a provider that also implements MigrationProvider, and prefers it there; implemented alone it is never called, the migration commands running on the pooled connection. */
-type MigrationContextOpener interface {
-    OpenForMigrationContext(ctx context.Context, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
+    OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
 }

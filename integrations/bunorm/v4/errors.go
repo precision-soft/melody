@@ -22,7 +22,7 @@ var ErrLoggerIsRequired = errors.New("logger is required")
 
 var ErrManagerRegistryClosed = errors.New("manager registry is closed")
 
-/* openEndedByClose files, under ErrManagerRegistryClosed, the refusal a provider answered when the registry cancelled its open in flight at close: errors.Is answers the registry's class, and the link unwraps to the provider's refusal — the cancellation of the registry's own context — so the cause chain still says how the open ended. */
+/* openEndedByClose files, under ErrManagerRegistryClosed, the refusal a provider answered when the registry cancelled its open in flight at close: errors.Is answers the registry's class, and the link unwraps to the provider's refusal — the cancellation the registry's close signal brought — so the cause chain still says how the open ended. */
 type openEndedByClose struct {
     openErr error
 }

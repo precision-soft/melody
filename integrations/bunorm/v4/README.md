@@ -24,11 +24,22 @@ Import path: `github.com/precision-soft/melody/integrations/bunorm/v4`
 
 A provider opens a database from an explicit [`bunorm.ConnectionParameters`](./connection_parameters.go) value (`Host`, `Port`, `Database`, `User`, `Password`) — the caller reads these from config/environment and passes them in. `SafeContext()` returns the parameters with the password omitted, suitable for logging.
 
-The [`bunorm.Provider`](./provider.go) contract is a single method:
+The [`bunorm.Provider`](./provider.go) contract has one open door per purpose, each taking the runtime it runs under first:
 
 ```go
-Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
+Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
+OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error)
 ```
+
+`Open` answers a fresh pool for request traffic, whose ownership passes to the registry. `OpenForMigration` answers the connection the migration commands run on, with whatever the provider tunes for a DDL statement that runs for minutes (the `mysql` and `pgsql` providers lift their read and write deadlines); a provider with nothing to tune answers its `Open`:
+
+```go
+func (instance *Provider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
+}
+```
+
+A provider refuses a nil runtime, or one carrying no context, and refuses a context already done before its attempt; its retry wait watches the runtime's context beside the clock.
 
 ## Usage
 
@@ -45,7 +56,6 @@ The pattern is:
 package main
 
 import (
-    "context"
     "os"
 
     melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v4"
@@ -69,7 +79,6 @@ func RegisterDatabaseServices(registrar applicationcontract.ServiceRegistrar) {
         ServiceManagerRegistryId,
         func(resolver containercontract.Resolver) (*melodybunorm.ManagerRegistry, error) {
             return melodybunorm.NewManagerRegistry(
-                context.Background(),
                 logging.LoggerMustFromResolver(resolver.Runtime().Context(), resolver),
                 []melodybunorm.ProviderDefinition{
                     melodybunorm.ProviderDefinition{
@@ -106,29 +115,31 @@ func RegisterDatabaseServices(registrar applicationcontract.ServiceRegistrar) {
         func(resolver containercontract.Resolver) (*melodybunorm.Manager, error) {
             registry := container.MustFromResolver[*melodybunorm.ManagerRegistry](resolver.Runtime().Context(), resolver, ServiceManagerRegistryId)
 
-            return registry.DefaultManager()
+            return registry.DefaultManager(resolver.Runtime())
         },
         containercontract.RegisterOptions{},
     )
 }
 ```
 
-[`NewManagerRegistry`](./manager_registry.go) takes the context its lazy opens run under, a nil one read as `context.Background()`, then a `logging/contract.Logger` (it is handed to every `Provider.Open`), then the provider definitions as a slice. It fails with `ErrLoggerIsRequired` on a nil logger and `ErrNoProviderDefinitions` when no definition is given, and refuses a definition by its position and name, in this order: an empty name, a nil provider, an empty `Parameters.Host` (`ErrConnectionHostIsRequired`) or `Parameters.Database` (`ErrConnectionDatabaseIsRequired`), the field named in the refusal's context, a duplicate name, and more than one default. `User` and `Password` stay free, since a socket or a trust-authenticated local database has neither, and an empty `Port` dials the driver's default. On the context, a provider that implements `ContextOpener` refuses an open the context already cancelled and has its retry sleeps watch the context alongside the clock, and the same preference reaches the migration open through `MigrationContextOpener`. Because this major hands providers the connection values rather than the configuration keys they came from, this registry declares no credential of its own and carries no marking door: arming the framework's redaction is the application's call, through the parameter registrar's own `RegisterSecretParameter` for a parameter the application declares and
+[`NewManagerRegistry`](./manager_registry.go) takes a `logging/contract.Logger` (it is handed to every `Provider.Open` and `Provider.OpenForMigration`), then the provider definitions as a slice; it captures no context. It fails with `ErrLoggerIsRequired` on a nil logger and `ErrNoProviderDefinitions` when no definition is given, and refuses a definition by its position and name, in this order: an empty name, a nil provider, an empty `Parameters.Host` (`ErrConnectionHostIsRequired`) or `Parameters.Database` (`ErrConnectionDatabaseIsRequired`), the field named in the refusal's context, a duplicate name, and more than one default. `User` and `Password` stay free, since a socket or a trust-authenticated local database has neither, and an empty `Port` dials the driver's default. Because this major hands providers the connection values rather than the configuration keys they came from, this registry declares no credential of its own and carries no marking door: arming the framework's redaction is the application's call, through the parameter registrar's own `RegisterSecretParameter` for a parameter the application declares and
 a `.env` key declared `Secret` in `ApplicationConfig.EnvironmentKeys`, which marks the parameter it feeds; `MarkParameterSecret` takes a parameter name, never a key. The mark propagates to every parameter whose template reads the secret, so the assembled dsn is redacted with it and `debug:parameters` masks the password in a process that never opens a connection. Opening a connection also routes bun's own diagnostic channel into the application's journal through `RouteDiagnostics`.
 
 Bun's logger is one variable for the whole process, so it is SET once — but what is set is a forwarder onto a destination `RouteDiagnostics` replaces whenever it is called with a different logger, and the destination is what decides where a record goes; a routing on the logger already installed changes nothing, so the providers routing on every open allocate nothing. A process that builds, closes and rebuilds its application therefore has each lifecycle take the channel back, where the first one used to keep it for the life of the process and every later lifecycle's diagnostics were dropped into a logger that was closed. `ResetDiagnostics()` hands the channel back to standard error, which is where bun writes when nobody routes it at all; it is the door for a host process that keeps its own reporting for bun. The registry's own `CloseWithContext` hands the channel back only when it is its own — routed to the registry's logger — so a second registry in the same process keeps its channel through the
 first one's teardown. Two registries built on one logger are two owners, not one: each hands its providers the logger under an identity of its own, so whichever opened last holds the channel, and a close hands it back only while that registry's own routing is the live one — the survivor's routing is left in place, and its next open takes the channel again.
 
-`SetLogger` replaces the logger a registry reports through, and takes bun's diagnostic channel with it, so the two cannot drift apart. It exists for the wiring window an application cannot avoid: a registry assembled while the modules are still being wired has no application logger to be handed — the framework's own does not exist yet — so it is built on the emergency logger, and without this door every later open, every retry warning and every terminal connection failure would keep bypassing the journal. A nil logger, and a typed nil holding no value, are refused with `ErrLoggerIsRequired`.
+Every door that opens takes the runtime it runs under first — `Manager(runtimeInstance, name)`, `MustManager`, `Database`, `MustDatabase`, `DefaultManager(runtimeInstance)`, `MustDefaultManager`, `DefaultDatabase`, `MustDefaultDatabase` and `MigrationDatabase(runtimeInstance, name)` — and the provider is handed that runtime over a context the caller's own context and the registry's `CloseWithContext` both end, so a request that goes away, a cli run that is cancelled or a teardown stops a retry loop instead of sleeping through its whole budget. A nil runtime, a typed nil and one carrying no context are refused with "the runtime is nil or carries no context", one carrying no scope with "the runtime carries no scope", before the registry is locked; a caller whose context is already done is refused before an open starts, nothing dialled, held or memoized, and a manager already opened is answered whatever the context. Concurrent callers of one name coalesce onto one open, the first caller's: a waiter whose own context ends leaves with that context's cause, the open going on for its opener, and when the open ended by its opener's context, a waiter whose context is still live opens again, so no caller ever receives another caller's cancellation. A failed open is never memoized. `HasProviderDefinition`, `CloseMigrationDatabase` and `CloseWithContext` take no runtime.
 
-A provider receives the registry's own logger, which carries the application's under an identity the registry owns: read it through `loggingcontract.Logger` and do not assert its concrete type. It forwards the logger's level threshold, and it is how the registry recognises a routing made through it whatever the logger's own comparability — a logger held by value, carrying a slice, a map or a func, is recognised at the registry's `CloseWithContext` like any other. `SetLogger` and `CloseWithContext` retire the logger handed out before, and a routing through a retired logger routes nothing, so an open still in flight when the logger was replaced or the registry closed cannot take bun's channel back onto it.
+The logger is written once, at construction, so the registry is built where the application's logger exists — inside its provider, as the sample does, resolving the logging service. A nil logger, and a typed nil holding no value, are refused with `ErrLoggerIsRequired`.
+
+A provider receives the registry's own logger, which carries the application's under an identity the registry owns: read it through `loggingcontract.Logger` and do not assert its concrete type. It forwards the logger's level threshold, and it is how the registry recognises a routing made through it whatever the logger's own comparability — a logger held by value, carrying a slice, a map or a func, is recognised at the registry's `CloseWithContext` like any other. `CloseWithContext` retires the logger handed out, and a routing through a retired logger routes nothing, so an open still in flight when the registry closed cannot take bun's channel back onto it.
 
 **Register the registry with a provider that RESOLVES the logging service rather than one that captures a pre-built registry.** The container records a teardown dependency at the moment one service resolves another and closes dependents before their dependencies, so a resolving provider gets the registry closed ahead of the journal for free — which is what lets its `CloseWithContext` tear down the pools and hand bun's channel back while the journal is still open. A capturing provider resolves nothing, declares nothing, and leaves the two closes ordered by coincidence; where a provider genuinely has nothing to resolve, the registration's `RegisterOptions.TeardownDependencyNames` writes the same edge declaratively.
 
-`Close` ends every pool the registry memoized, then WAITS for the opens that were still in flight when it published its refusal — and it ENDS them: the refusal cancels the registry's own open context, which every provider of this repository honours in its retry sleeps and its dials, so an open in flight returns instead of dialling on, an open that returns ends its own freshly opened database against the closed flag, and nothing leaks. `Close` used to leave them running under the registry's context, each further attempt routing bun's diagnostics back onto the logger the teardown had just handed back, and to return while a dial was still in the air — a process exiting on that answer left the connection outstanding, its server-side session to be reaped by a timeout rather than ended. The wait is unbounded on `Close` and ends with the caller's deadline on `CloseWithContext`, which is the door the framework container's ordered teardown prefers: a dial a driver does not cut on cancellation
+`Close` ends every pool the registry memoized, then WAITS for the opens that were still in flight when it published its refusal — and it ENDS them: the refusal fires the registry's close signal, which ends the context of every open in flight and which every provider of this repository honours in its retry sleeps and its dials, so an open in flight returns instead of dialling on, an open that returns ends its own freshly opened database against the closed flag, and nothing leaks. `Close` used to leave them running under the registry's context, each further attempt routing bun's diagnostics back onto the logger the teardown had just handed back, and to return while a dial was still in the air — a process exiting on that answer left the connection outstanding, its server-side session to be reaped by a timeout rather than ended. The wait is unbounded on `Close` and ends with the caller's deadline on `CloseWithContext`, which is the door the framework container's ordered teardown prefers: a dial a driver does not cut on cancellation
 ends when the driver gives up, which can outlive a teardown, so the answer then names the opens it stopped waiting for rather than having ended them.
 
-`CloseMigrationDatabase(name)` releases one hold on the dedicated migration connection for one definition — every `MigrationDatabase` takes a hold, so two migration commands in one process share the connection — and with the last hold ends it and forgets it, so the next `MigrationDatabase` for that name opens a fresh one. That connection is not a request pool and must not live like one: it deliberately lifts the driver's read and write deadlines and recycles nothing, which is right for a DDL statement that runs for minutes and wrong for anything that then sits idle. The migration commands call it on their way out; the registry's `CloseWithContext` stays the net underneath for whatever did not. An empty name selects the default definition, a name with no migration connection is not an error, and a closed registry refuses it.
+`MigrationDatabase(runtimeInstance, name)` answers the connection the provider's `OpenForMigration` opened for the definition, opened once per name and shared. A provider with nothing to tune answers its `Open` there, a second pool kept apart from the request pool; one that answers the very `*bun.DB` the registry already holds as that name's pool is recognised by identity and shared with it, neither kept as a migration connection nor closed by a release. `CloseMigrationDatabase(name)` releases one hold on the dedicated migration connection for one definition — every `MigrationDatabase` takes a hold, so two migration commands in one process share the connection — and with the last hold ends it and forgets it, so the next `MigrationDatabase` for that name opens a fresh one. That connection is not a request pool and must not live like one: it deliberately lifts the driver's read and write deadlines and recycles nothing, which is right for a DDL statement that runs for minutes and wrong for anything that then sits idle. The migration commands call it on their way out; the registry's `CloseWithContext` stays the net underneath for whatever did not. An empty name selects the default definition, a name with no migration connection is not an error, and a closed registry refuses it.
 
 [`HasProviderDefinition(name)`](./manager_registry.go) answers whether a definition is registered under the name, without opening anything — the question of a command that only labels a manager. The `migrate` module's `db:create` asks it, since it writes its file from the migrations collection alone and no longer opens the database that used to validate `--manager`.
 
@@ -156,7 +167,7 @@ func (instance *ApiService) Database() {
 ### Consuming a non-default database
 
 ```go
-adminManager := registry.MustManager(ManagerAdminName)
+adminManager := registry.MustManager(runtimeInstance, ManagerAdminName)
 adminDatabase := adminManager.Database()
 ```
 
@@ -167,12 +178,12 @@ splitter := melodybunorm.NewReadWriteSplitter(registry, ManagerPrimaryName, melo
     ReplicaNames: []string{"replica-1", "replica-2"},
 })
 
-writer, _ := splitter.Writer()  // always the primary
-reader, _ := splitter.Reader()  // a replica (or the primary if none configured)
+writer, _ := splitter.Writer(runtimeInstance)  // always the primary
+reader, _ := splitter.Reader(runtimeInstance)  // a replica (or the primary if none configured)
 ```
 
 `Reader` round-robins the replicas and falls back to the primary only when a replica is **unreachable** — an open failure its provider classified as transient and could not get past, answered by `ErrDatabaseUnreachable`: the outage where reading from the primary is the availability trade the splitter exists to make. Every other failure is refused instead of absorbed — a replica name the registry does not know, an empty name, a closed registry, a provider that answered neither a database nor an error, and every refusal the provider or the server gave by name (a parameter left empty, a password the server refused, a database that does not exist): each is a wiring error, permanent by nature, and folding it into the fallback routed every read to the primary forever with no signal. The `pgsql` and `mysql` providers file an outage under the class through `DatabaseUnreachable`; a provider of your own that files nothing has every failure read as a refusal, the direction that surfaces a
-misconfiguration. When the primary then fails too, the error carries the primary failure as its cause and names the replica failure beside it. An empty replica name is refused at construction, naming its index.
+misconfiguration. When the primary then fails too, the error carries the primary failure as its cause and names the replica failure beside it. Both doors open under the caller's runtime, and a replica open the caller's own context ended is answered as that refusal: the caller left, so the replica is not remembered unreachable and the primary is not opened in its place. An empty replica name is refused at construction, naming its index.
 
 An unreachable replica is remembered for `SplitterConfig.ReplicaRetryInterval`, five seconds when left out, at least 1ms, unlimited refused, since a replica never dialled again is a silent primary-only split: inside it the replica's share of the reads goes to the primary without dialling it again, so a dead replica no longer costs every read a connect timeout, and the first read after it dials the replica again. The move is journaled once each way through the registry's logger, a warning naming the replica, the primary and the interval when reads move to the primary, and an info when the replica takes them back:
 

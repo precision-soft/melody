@@ -31,7 +31,7 @@ type diagnosticsTarget struct {
     writer io.Writer
 }
 
-/* registryLogger is the logger a registry hands its providers: the application's logger under an identity the registry owns, so a routing through it is recognised whatever the logger's own comparability, and refused once the registry retired it at SetLogger or at Close. A provider reads it through loggingcontract.Logger and must not assert its concrete type. */
+/* registryLogger is the logger a registry hands its providers: the application's logger under an identity the registry owns, so a routing through it is recognised whatever the logger's own comparability, and refused once the registry retired it at Close. A provider reads it through loggingcontract.Logger and must not assert its concrete type. */
 type registryLogger struct {
     loggingcontract.Logger
     retired atomic.Bool
@@ -65,7 +65,7 @@ func routeDiagnosticsTo(logger loggingcontract.Logger) *diagnosticsTarget {
     bunDiagnosticsRouting.Lock()
     defer bunDiagnosticsRouting.Unlock()
 
-    /* a registry's logger retired at its SetLogger or its Close routes nothing: a provider open still in flight must not take the channel back onto it */
+    /* a registry's logger retired at its Close routes nothing: a provider open still in flight must not take the channel back onto it */
     if owned, isOwned := logger.(*registryLogger); true == isOwned && true == owned.retired.Load() {
         return nil
     }
@@ -118,16 +118,6 @@ func retireDiagnosticsRoutedBy(logger loggingcontract.Logger, routed *diagnostic
     }
 
     resetDiagnosticsRoutedToLocked(logger, routed)
-}
-
-/* retireRegistryLogger retires a registry's logger without touching the channel, for a SetLogger whose next routing replaces the destination at once */
-func retireRegistryLogger(logger loggingcontract.Logger) {
-    bunDiagnosticsRouting.Lock()
-    defer bunDiagnosticsRouting.Unlock()
-
-    if owned, isOwned := logger.(*registryLogger); true == isOwned {
-        owned.retired.Store(true)
-    }
 }
 
 func resetDiagnosticsRoutedToLocked(logger loggingcontract.Logger, routed *diagnosticsTarget) {

@@ -18,6 +18,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     melodylock "github.com/precision-soft/melody/v4/lock"
     melodylockcontract "github.com/precision-soft/melody/v4/lock/contract"
@@ -53,7 +54,6 @@ func TestInsecureSwitch_ArmsOnTheExactSpellingAndRefusesAnyOtherValueByName(t *t
 /* the registry's refusal reads the same for either database — "database connection failed" over a host — so the handle providers name the manager and where it is: the operator reading a console knows WHICH database refused before knowing why, and the registry's refusal stays the cause */
 func TestDatabaseOpenedBy_NamesTheManagerAndItsLocationWhenTheOpenRefuses(t *testing.T) {
     registry, registryErr := melodybunorm.NewManagerRegistry(
-        context.Background(),
         melodylogging.NewNopLogger(),
         []melodybunorm.ProviderDefinition{
             melodybunorm.ProviderDefinition{
@@ -68,7 +68,7 @@ func TestDatabaseOpenedBy_NamesTheManagerAndItsLocationWhenTheOpenRefuses(t *tes
         t.Fatalf("build the registry: %v", registryErr)
     }
 
-    database, openErr := databaseOpenedBy(registry, "archive", "postgres:5432/melody_example_v4_archive")
+    database, openErr := databaseOpenedBy(databaseTestRuntime(context.Background()), registry, "archive", "postgres:5432/melody_example_v4_archive")
     if nil == openErr || nil != database {
         t.Fatalf("expected a manager the registry does not declare to be refused, got db=%v err=%v", database, openErr)
     }
@@ -115,8 +115,25 @@ func TestArchiveReadingRepositoryResolvedByTypeNamesTheArchiveRatherThanTheWirin
     }
 }
 
-/* the registry's lazy opens are bound to the process's context: the archive is opened on a request or a scheduled command, and an open in flight when the process is asked to stop ends with the signal rather than running its whole retry budget while the teardown waits. Cancelled, the open ends at once naming the cancellation, and the registry closes with nothing pending. */
-func TestBuildDatabase_BindsTheArchiveOpenToTheProcessContext(t *testing.T) {
+/* databaseTestRuntime is a run over a scope of an empty container, under ctx */
+func databaseTestRuntime(ctx context.Context) melodycontainercontract.Runtime {
+    return melodyruntime.NewRun(ctx, melodycontainer.NewContainer(melodycontainer.ContainerConfig{}).NewScope())
+}
+
+/* registryOver builds the registry the module's provider builds, over the definitions the build declared */
+func registryOver(t *testing.T, moduleInstance *Module) *melodybunorm.ManagerRegistry {
+    t.Helper()
+
+    registry, registryErr := melodybunorm.NewManagerRegistry(melodylogging.NewNopLogger(), moduleInstance.databaseDefinitions)
+    if nil != registryErr {
+        t.Fatalf("build the registry: %v", registryErr)
+    }
+
+    return registry
+}
+
+/* the registry's lazy opens run under the runtime of the caller that asked: the archive is opened on a request or a scheduled command, and an open in flight when that caller goes away ends with its context rather than running its whole retry budget. Cancelled, the open ends at once naming the cancellation, and the registry closes with nothing pending. */
+func TestBuildDatabase_RunsTheArchiveOpenUnderTheCallersRuntime(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
@@ -127,16 +144,17 @@ func TestBuildDatabase_BindsTheArchiveOpenToTheProcessContext(t *testing.T) {
         environmentKeyPgsqlUser:     "nobody",
         environmentKeyPgsqlPassword: "nothing",
     })
-    moduleInstance.processContext = ctx
     moduleInstance.buildDatabase()
 
-    if nil == moduleInstance.databaseRegistry || false == moduleInstance.archiveWired {
-        t.Fatal("expected the archive to be declared on the registry")
+    if 0 == len(moduleInstance.databaseDefinitions) || false == moduleInstance.archiveWired {
+        t.Fatal("expected the archive to be declared for the registry")
     }
+
+    registry := registryOver(t, moduleInstance)
 
     openDone := make(chan error, 1)
     go func() {
-        _, openErr := moduleInstance.databaseRegistry.Database(databaseArchiveManagerName)
+        _, openErr := registry.Database(databaseTestRuntime(ctx), databaseArchiveManagerName)
         openDone <- openErr
     }()
 
@@ -155,7 +173,7 @@ func TestBuildDatabase_BindsTheArchiveOpenToTheProcessContext(t *testing.T) {
     closeContext, cancelClose := context.WithTimeout(context.Background(), 2*time.Second)
     defer cancelClose()
 
-    if closeErr := moduleInstance.databaseRegistry.CloseWithContext(closeContext); nil != closeErr {
+    if closeErr := registry.CloseWithContext(closeContext); nil != closeErr {
         t.Fatalf("expected the registry to close with nothing in flight, got %v", closeErr)
     }
 }
@@ -172,7 +190,7 @@ func TestBuildDatabase_GivesTheCatalogueARequestSizedOpenBudget(t *testing.T) {
     moduleInstance.buildDatabase()
 
     startedAt := time.Now()
-    _, openErr := moduleInstance.databaseRegistry.Database(databaseManagerName)
+    _, openErr := registryOver(t, moduleInstance).Database(databaseTestRuntime(context.Background()), databaseManagerName)
     elapsed := time.Since(startedAt)
 
     if nil == openErr || false == strings.Contains(openErr.Error(), "database connection failed") {
@@ -196,7 +214,7 @@ func TestBuildDatabase_GivesTheArchiveARequestSizedOpenBudget(t *testing.T) {
     moduleInstance.buildDatabase()
 
     startedAt := time.Now()
-    _, openErr := moduleInstance.databaseRegistry.Database(databaseArchiveManagerName)
+    _, openErr := registryOver(t, moduleInstance).Database(databaseTestRuntime(context.Background()), databaseArchiveManagerName)
     elapsed := time.Since(startedAt)
 
     /* the registry's own headline is "database connection failed"; the attempts spent are in its cause */
@@ -262,15 +280,19 @@ func TestRegisterArchiveStorageService_BindsTheProcessContext(t *testing.T) {
 }
 
 /* recordingProvider opens a handle over a connector that is never dialed and records the logger the registry
-   handed it: the journal an open reports through is the registry's current logger at that moment */
+   handed it: the journal an open reports through is the logger the registry was built on */
 type recordingProvider struct {
     openedWith []melodyloggingcontract.Logger
 }
 
-func (instance *recordingProvider) Open(params melodybunorm.ConnectionParameters, logger melodyloggingcontract.Logger) (*bun.DB, error) {
+func (instance *recordingProvider) Open(runtimeInstance melodycontainercontract.Runtime, params melodybunorm.ConnectionParameters, logger melodyloggingcontract.Logger) (*bun.DB, error) {
     instance.openedWith = append(instance.openedWith, logger)
 
     return newUndialedDatabase(), nil
+}
+
+func (instance *recordingProvider) OpenForMigration(runtimeInstance melodycontainercontract.Runtime, params melodybunorm.ConnectionParameters, logger melodyloggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, params, logger)
 }
 
 /* databaseServicesOver registers the database services of a module whose registry declares the catalogue and the archive over recording providers, beside a logger service that counts its resolutions; the buffer that logger writes into is returned, so a test reads where a record written through the logger an open receives lands */
@@ -280,28 +302,21 @@ func databaseServicesOver(t *testing.T, archiveWired bool) (melodycontainercontr
     catalogProvider := &recordingProvider{}
     archiveProvider := &recordingProvider{}
 
-    registry, registryErr := melodybunorm.NewManagerRegistry(
-        context.Background(),
-        melodylogging.NewNopLogger(),
-        []melodybunorm.ProviderDefinition{
-            melodybunorm.ProviderDefinition{
-                Name:       databaseManagerName,
-                Provider:   catalogProvider,
-                Parameters: melodybunorm.ConnectionParameters{Host: "mysql", Port: "3306", Database: "catalogue", User: "melody"},
-                IsDefault:  true,
-            },
-            melodybunorm.ProviderDefinition{
-                Name:       databaseArchiveManagerName,
-                Provider:   archiveProvider,
-                Parameters: melodybunorm.ConnectionParameters{Host: "postgres", Port: "5432", Database: "archive", User: "melody"},
-            },
+    definitions := []melodybunorm.ProviderDefinition{
+        melodybunorm.ProviderDefinition{
+            Name:       databaseManagerName,
+            Provider:   catalogProvider,
+            Parameters: melodybunorm.ConnectionParameters{Host: "mysql", Port: "3306", Database: "catalogue", User: "melody"},
+            IsDefault:  true,
         },
-    )
-    if nil != registryErr {
-        t.Fatalf("build the registry: %v", registryErr)
+        melodybunorm.ProviderDefinition{
+            Name:       databaseArchiveManagerName,
+            Provider:   archiveProvider,
+            Parameters: melodybunorm.ConnectionParameters{Host: "postgres", Port: "5432", Database: "archive", User: "melody"},
+        },
     }
 
-    /* a logger of its own, so a record reaching THIS one proves the open reports through it and not through the one the registry was built on */
+    /* a logger of its own, so a record reaching THIS one proves the registry's provider built the registry on the container's journal */
     journalBuffer := &lockedJournalBuffer{}
     journal := melodylogging.NewJsonLogger(journalBuffer, melodylogging.JsonLoggerConfig{MinLevel: melodyloggingcontract.LevelDebug})
     loggerResolutions := 0
@@ -319,7 +334,7 @@ func databaseServicesOver(t *testing.T, archiveWired bool) (melodycontainercontr
     )
 
     moduleInstance := moduleWithEnvironment(t, map[string]string{environmentKeyMysqlHost: "mysql"})
-    moduleInstance.databaseRegistry = registry
+    moduleInstance.databaseDefinitions = definitions
     moduleInstance.archiveWired = archiveWired
     moduleInstance.catalogLocation = "mysql:3306/catalogue"
     moduleInstance.archiveLocation = "postgres:5432/archive"
@@ -348,7 +363,7 @@ func (instance *lockedJournalBuffer) String() string {
     return instance.content.String()
 }
 
-/* the chain the catalogue storage starts (storage, handle, registry, journal) continues here: the handle resolves the registry, and the registry's provider hands it the container's journal before the handle is opened, so the open reports through the application's logger rather than the emergency one the registry is built on. A handle that captured the registry would resolve nothing, so the swap would not run and the teardown would have no edge to order the two closes by. */
+/* the chain the catalogue storage starts (storage, handle, registry, journal) continues here: the handle resolves the registry, and the registry's provider builds it on the container's journal before the handle is opened, so the open reports through the application's logger. A handle that captured the registry would resolve nothing, so the teardown would have no edge to order the two closes by. */
 func TestRegisterDatabaseServices_EachHandleResolvesTheRegistryWhichTakesTheJournalFirst(t *testing.T) {
     for _, handle := range []struct {
         serviceName string
@@ -426,12 +441,8 @@ func TestBuildDatabase_DeclaresTheCatalogueWithoutOpeningIt(t *testing.T) {
         t.Fatal("expected the build to open nothing; it is dialing the catalogue")
     }
 
-    if nil == moduleInstance.databaseRegistry || false == moduleInstance.catalogueWired {
-        t.Fatalf("expected the catalogue declared on the registry and wired, got registry %v wired %t", moduleInstance.databaseRegistry, moduleInstance.catalogueWired)
-    }
-
-    if closeErr := moduleInstance.databaseRegistry.CloseWithContext(t.Context()); nil != closeErr {
-        t.Fatalf("expected the registry to close with nothing opened, got %v", closeErr)
+    if 0 == len(moduleInstance.databaseDefinitions) || false == moduleInstance.catalogueWired {
+        t.Fatalf("expected the catalogue declared for the registry and wired, got %d definitions wired %t", len(moduleInstance.databaseDefinitions), moduleInstance.catalogueWired)
     }
 
     unwired := moduleWithEnvironment(t, map[string]string{})
