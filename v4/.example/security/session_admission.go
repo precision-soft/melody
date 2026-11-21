@@ -8,7 +8,7 @@ import (
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
-    melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodysession "github.com/precision-soft/melody/v4/session"
     melodysessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
@@ -20,17 +20,17 @@ type SessionIndex interface {
     Release(ctx context.Context, sessionId string) error
 }
 
-type SessionIndexLookup func(request melodyhttpcontract.Request) (SessionIndex, error)
+type SessionIndexLookup func(runtimeInstance melodycontainercontract.Runtime) (SessionIndex, error)
 
 /* AdmitSession records the rotated session under its account and ends the account's oldest sessions past the cap; a refused admission clears the rotated session, so the sign-in fails rather than opening a session the cap does not count. */
 func AdmitSession(
-    request melodyhttpcontract.Request,
+    runtimeInstance melodycontainercontract.Runtime,
     sessionIndex SessionIndexLookup,
     userId string,
     previousSessionId string,
     rotatedSession melodysessioncontract.Session,
 ) error {
-    admitErr := admitSession(request, sessionIndex, userId, previousSessionId, rotatedSession)
+    admitErr := admitSession(runtimeInstance, sessionIndex, userId, previousSessionId, rotatedSession)
     if nil != admitErr {
         rotatedSession.Clear()
     }
@@ -39,7 +39,7 @@ func AdmitSession(
 }
 
 func admitSession(
-    request melodyhttpcontract.Request,
+    runtimeInstance melodycontainercontract.Runtime,
     sessionIndex SessionIndexLookup,
     userId string,
     previousSessionId string,
@@ -49,14 +49,13 @@ func admitSession(
         return errors.New("the session index is not configured")
     }
 
-    index, lookupErr := sessionIndex(request)
-    if nil != lookupErr {
-        return lookupErr
+    if refuseErr := melodycontainercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return refuseErr
     }
 
-    runtimeInstance := request.RuntimeInstance()
-    if nil == runtimeInstance {
-        return errors.New("the request carries no runtime to admit the session through")
+    index, lookupErr := sessionIndex(runtimeInstance)
+    if nil != lookupErr {
+        return lookupErr
     }
 
     sessionManager, sessionManagerErr := melodyruntime.FromRuntime[melodysessioncontract.Manager](
@@ -100,19 +99,18 @@ func admitSession(
 }
 
 /* ReleaseSession removes the row of the session a sign-out ends; the sign-out ends the session whatever this answers. */
-func ReleaseSession(request melodyhttpcontract.Request, sessionIndex SessionIndexLookup, sessionId string) error {
+func ReleaseSession(runtimeInstance melodycontainercontract.Runtime, sessionIndex SessionIndexLookup, sessionId string) error {
     if nil == sessionIndex {
         return errors.New("the session index is not configured")
     }
 
-    index, lookupErr := sessionIndex(request)
-    if nil != lookupErr {
-        return lookupErr
+    if refuseErr := melodycontainercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return refuseErr
     }
 
-    runtimeInstance := request.RuntimeInstance()
-    if nil == runtimeInstance {
-        return errors.New("the request carries no runtime to release the session through")
+    index, lookupErr := sessionIndex(runtimeInstance)
+    if nil != lookupErr {
+        return lookupErr
     }
 
     return index.Release(runtimeInstance.Context(), sessionId)

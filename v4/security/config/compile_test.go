@@ -1,16 +1,13 @@
 package config
 
 import (
-    "context"
     "errors"
     "strings"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
-    "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
-    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/security"
@@ -676,9 +673,8 @@ func TestCompile_TheRoleHierarchyUpgradeKeepsTheManagersStrategyAndConfig(t *tes
         t.Fatalf("expected the role voter to be the hierarchy one")
     }
 
-    runtimeInstance := runtime.NewRequest(context.Background(), container.NewContainer(container.ContainerConfig{}).NewScope())
     token := security.NewAuthenticatedToken("u", []string{"ROLE_ADMIN"}, nil)
-    if err := compiled.DecideAll(runtimeInstance, token, []string{"ROLE_USER"}, nil); nil != err {
+    if err := compiled.DecideAll(testRuntime(), token, []string{"ROLE_USER"}, nil); nil != err {
         t.Fatalf("expected the upgraded manager to keep AllowIfTied and grant the 1-1 tie, got %v", err)
     }
 }

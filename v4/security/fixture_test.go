@@ -576,3 +576,30 @@ func sessionRuntime() containercontract.Runtime {
 func sessionRuntimeUnder(ctx context.Context) containercontract.Runtime {
     return runtime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
 }
+
+/* contextlessRuntime answers no context, the third form RefuseNilRuntime refuses beside nil and a typed nil */
+type contextlessRuntime struct {
+    containercontract.Runtime
+}
+
+func (instance *contextlessRuntime) Context() context.Context {
+    return nil
+}
+
+func refusedRuntimes() map[string]containercontract.Runtime {
+    var typedNil *contextlessRuntime
+
+    return map[string]containercontract.Runtime{
+        "nil":        nil,
+        "typed nil":  typedNil,
+        "no context": &contextlessRuntime{},
+    }
+}
+
+func assertRefusedAsNilRuntime(t *testing.T, err error) {
+    t.Helper()
+
+    if nil == err || "the runtime is nil or carries no context" != err.Error() {
+        t.Fatalf("expected the nil runtime refusal, got %v", err)
+    }
+}

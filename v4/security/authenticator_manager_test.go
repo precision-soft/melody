@@ -37,7 +37,7 @@ func TestAuthenticatorManager_ReturnsAnonymousWhenNoAuthenticatorSupports(t *tes
 
     request := newSecurityTestRequest(nethttp.MethodGet, "/x", map[string]string{}, nil)
 
-    token, _, err := manager.Authenticate(request.RuntimeInstance(), request)
+    token, _, err := manager.Authenticate(testRuntime(), request)
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -60,7 +60,7 @@ func TestAuthenticatorManager_ReturnsErrorWhenAuthenticatorErrors(t *testing.T) 
 
     request := newSecurityTestRequest(nethttp.MethodGet, "/x", map[string]string{}, nil)
 
-    _, _, err := manager.Authenticate(request.RuntimeInstance(), request)
+    _, _, err := manager.Authenticate(testRuntime(), request)
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -78,7 +78,7 @@ func TestAuthenticatorManager_ReturnsAnonymousWhenAuthenticatorReturnsNilToken(t
 
     request := newSecurityTestRequest(nethttp.MethodGet, "/x", map[string]string{}, nil)
 
-    token, _, err := manager.Authenticate(request.RuntimeInstance(), request)
+    token, _, err := manager.Authenticate(testRuntime(), request)
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -110,7 +110,7 @@ func TestAuthenticatorManager_FirstSupportingAuthenticatorWins(t *testing.T) {
 
     request := newSecurityTestRequest(nethttp.MethodGet, "/x", map[string]string{}, nil)
 
-    token, _, err := manager.Authenticate(request.RuntimeInstance(), request)
+    token, _, err := manager.Authenticate(testRuntime(), request)
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -140,8 +140,35 @@ func TestNewAuthenticatorManager_TypedNilAuthenticatorPanics(t *testing.T) {
 }
 
 func TestNewAuthenticatorManager_ANilListAnswersTheAnonymousToken(t *testing.T) {
-    token, _, err := NewAuthenticatorManager(nil).Authenticate(withItsRuntime(newSecurityTestRequest(nethttp.MethodGet, "/x", map[string]string{}, nil)))
+    token, _, err := NewAuthenticatorManager(nil).Authenticate(testRuntime(), newSecurityTestRequest(nethttp.MethodGet, "/x", map[string]string{}, nil))
     if nil != err || nil == token || true == token.IsAuthenticated() {
         t.Fatalf("expected an empty manager to answer the anonymous token, got %v, %v", token, err)
+    }
+}
+
+func TestAuthenticatorManager_ANilRuntimeIsRefusedBeforeAnyAuthenticator(t *testing.T) {
+    for name, runtimeInstance := range refusedRuntimes() {
+        t.Run(name, func(t *testing.T) {
+            calls := 0
+            manager := NewAuthenticatorManager([]securitycontract.Authenticator{
+                &testAuthenticator{
+                    supportsCallback: func(request httpcontract.Request) bool {
+                        calls = calls + 1
+                        return true
+                    },
+                    authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
+                        calls = calls + 1
+                        return NewAuthenticatedToken("u", nil, nil), nil
+                    },
+                },
+            })
+
+            token, usedAuthenticator, err := manager.Authenticate(runtimeInstance, newSecurityTestRequest(nethttp.MethodGet, "/x", map[string]string{}, nil))
+            assertRefusedAsNilRuntime(t, err)
+
+            if nil != token || true == usedAuthenticator || 0 != calls {
+                t.Fatalf("expected no token, no authenticator used and no call, got %v, %v, %d", token, usedAuthenticator, calls)
+            }
+        })
     }
 }

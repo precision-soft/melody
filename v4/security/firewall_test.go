@@ -62,7 +62,7 @@ func TestFirewall_Check_CallsOnlyApplicableRules(t *testing.T) {
         },
     })
 
-    err := firewall.Check(withItsRuntime(newFirewallTestRequest("/admin")))
+    err := firewall.Check(testRuntime(), newFirewallTestRequest("/admin"))
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -98,7 +98,7 @@ func TestFirewall_Check_ReturnsFirstError(t *testing.T) {
         },
     })
 
-    err := firewall.Check(withItsRuntime(newFirewallTestRequest("/admin")))
+    err := firewall.Check(testRuntime(), newFirewallTestRequest("/admin"))
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -113,4 +113,30 @@ func TestNewFirewall_TypedNilRulePanics(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         _ = NewFirewall([]securitycontract.Rule{typedNilRule})
     }, "security firewall rule is nil")
+}
+
+func TestFirewall_Check_ANilRuntimeIsRefusedBeforeAnyRule(t *testing.T) {
+    for name, runtimeInstance := range refusedRuntimes() {
+        t.Run(name, func(t *testing.T) {
+            calls := 0
+            firewall := NewFirewall([]securitycontract.Rule{
+                &firewallTestRule{
+                    appliesCallback: func(request httpcontract.Request) bool {
+                        calls = calls + 1
+                        return true
+                    },
+                    checkCallback: func(request httpcontract.Request) error {
+                        calls = calls + 1
+                        return nil
+                    },
+                },
+            })
+
+            assertRefusedAsNilRuntime(t, firewall.Check(runtimeInstance, newFirewallTestRequest("/admin")))
+
+            if 0 != calls {
+                t.Fatalf("expected no rule to be consulted, got %d calls", calls)
+            }
+        })
+    }
 }

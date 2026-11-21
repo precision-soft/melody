@@ -290,12 +290,6 @@ func TestSessionTokenResolverAnswersTheAccountsCurrentAuthority(t *testing.T) {
             },
             cleared: true,
         },
-        "a failing lookup leaves the session to the next request": {
-            sessionVersion: SessionCredentialVersion("original-hash"),
-            account: func(userId string) (*entity.User, bool, error) {
-                return nil, false, errors.New("the account repository is unavailable")
-            },
-        },
     } {
         t.Run(name, func(t *testing.T) {
             request, sessionInstance := requestCarryingSession(t)
@@ -305,7 +299,7 @@ func TestSessionTokenResolverAnswersTheAccountsCurrentAuthority(t *testing.T) {
                 sessionInstance.Set(SessionKeySecurityCredentialVersion, scenario.sessionVersion)
             }
 
-            lookup := func(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+            lookup := func(runtimeInstance melodycontainercontract.Runtime, userId string) (*entity.User, bool, error) {
                 return scenario.account(userId)
             }
 
@@ -362,24 +356,32 @@ func requestCarryingSessionAndJournal(t *testing.T) (melodyhttpcontract.Request,
     return request, sessionInstance, journal
 }
 
-func TestSessionTokenResolver_AFailedLookupIsUnavailableAndKeepsTheSession(t *testing.T) {
+func TestSessionTokenResolver_AFailedLookupAnswersAMarkedError(t *testing.T) {
     request, sessionInstance, journal := requestCarryingSessionAndJournal(t)
     sessionInstance.Set(SessionKeySecurityUserId, "user-2")
     sessionInstance.Set(SessionKeySecurityRoles, []string{"ROLE_EDITOR"})
     sessionInstance.Set(SessionKeySecurityCredentialVersion, SessionCredentialVersion("original-hash"))
 
     lookupErr := errors.New("the account repository is unavailable")
-    token := resolveToken(SessionTokenResolver(func(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+    var lookupRuntime melodycontainercontract.Runtime
+    resolver := SessionTokenResolver(func(runtimeInstance melodycontainercontract.Runtime, userId string) (*entity.User, bool, error) {
+        lookupRuntime = runtimeInstance
         return nil, false, lookupErr
-    }), request)
+    })
 
-    if true == token.IsAuthenticated() || false == sessionInstance.Has(SessionKeySecurityUserId) {
-        t.Fatalf("expected a not authenticated answer over a kept session, got authenticated %v, kept %v", token.IsAuthenticated(), sessionInstance.Has(SessionKeySecurityUserId))
+    handedRuntime := exampleTestRuntime()
+    token, resolveErr := resolver(handedRuntime, request)
+
+    if nil != token || false == sessionInstance.Has(SessionKeySecurityUserId) {
+        t.Fatalf("expected no token over a kept session, got %v, kept %v", token, sessionInstance.Has(SessionKeySecurityUserId))
     }
 
-    cause, unavailable := melodysecurity.AuthenticationUnavailableCause(token)
-    if false == unavailable || false == exception.IsInfrastructureFailure(cause) || false == errors.Is(cause, lookupErr) {
-        t.Fatalf("expected the unavailable token carrying the marked lookup failure, got %v %v", cause, unavailable)
+    if false == exception.IsInfrastructureFailure(resolveErr) || false == errors.Is(resolveErr, lookupErr) {
+        t.Fatalf("expected the lookup failure marked as an outage, got %v", resolveErr)
+    }
+
+    if handedRuntime != lookupRuntime {
+        t.Fatalf("expected the lookup to read through the runtime the resolver was handed")
     }
 
     if 0 != len(journal.messageList) {
@@ -391,7 +393,7 @@ func TestSessionTokenResolver_AFailedLookupIsUnavailableAndKeepsTheSession(t *te
     notFoundSession.Set(SessionKeySecurityRoles, []string{"ROLE_EDITOR"})
     notFoundSession.Set(SessionKeySecurityCredentialVersion, SessionCredentialVersion("original-hash"))
 
-    _ = resolveToken(SessionTokenResolver(func(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+    _ = resolveToken(SessionTokenResolver(func(runtimeInstance melodycontainercontract.Runtime, userId string) (*entity.User, bool, error) {
         return nil, false, nil
     }), notFoundRequest)
 

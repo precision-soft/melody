@@ -19,7 +19,7 @@ const (
     SessionKeySecurityCredentialVersion = "security.credentialVersion"
 )
 
-/* SessionTokenResolver answers the token of the account the session names, with the account's CURRENT roles. A session its storage could not load, or the empty one served for it under MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE, answers the unavailable token; any other error reading the session answers anonymous, its record filed by the read. A session that carries no credential version, or one the account does not hold, or that names an account which is gone or holds no role, is cleared and answers anonymous; a lookup that fails answers the unavailable token, 503 with Retry-After on a protected page, and leaves the session alone, since the failure says nothing about the account; the framework files the cause at error. */
+/* SessionTokenResolver answers the token of the account the session names, with the account's CURRENT roles. A session its storage could not load, or the empty one served for it under MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE, answers the unavailable token; any other error reading the session answers anonymous, its record filed by the read. A session that carries no credential version, or one the account does not hold, or that names an account which is gone or holds no role, is cleared and answers anonymous; a lookup that fails answers its error marked as an outage, read as the unavailable token: 503 with Retry-After on a protected page, the session left alone, since the failure says nothing about the account; the framework files the cause at error. */
 func SessionTokenResolver(lookupUser SessionUserLookup) melodysecuritycontract.TokenResolver {
     return func(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
         sessionInstance, sessionErr := melodyhttp.RequestSession(request)
@@ -62,15 +62,13 @@ func SessionTokenResolver(lookupUser SessionUserLookup) melodysecuritycontract.T
             return melodysecurity.NewAnonymousToken(), nil
         }
 
-        user, found, lookupErr := lookupUser(request, userId)
+        user, found, lookupErr := lookupUser(runtimeInstance, userId)
         if nil != lookupErr {
-            return melodysecurity.NewUnavailableToken(
-                melodyexception.NewError(
-                    "the account a session names could not be read",
-                    melodyexceptioncontract.Context{"userId": userId},
-                    melodyexception.MarkInfrastructureFailure(lookupErr),
-                ),
-            ), nil
+            return nil, melodyexception.NewError(
+                "the account a session names could not be read",
+                melodyexceptioncontract.Context{"userId": userId},
+                melodyexception.MarkInfrastructureFailure(lookupErr),
+            )
         }
 
         if false == sessionAccountIsCurrent(user, found, userId, credentialVersion) {

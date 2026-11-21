@@ -47,7 +47,7 @@ func TestSecurityContext_IsGranted_RefusesAnUnauthenticatedTokenTheVotersRefuse(
         AccessControlSource:         SourceFirewall,
     })
 
-    if nil == accessDecisionManager.DecideAll(nil, token, []string{"ROLE_ADMIN"}, nil) {
+    if nil == accessDecisionManager.DecideAll(testRuntime(), token, []string{"ROLE_ADMIN"}, nil) {
         t.Fatalf("the premise of this test is gone: the voters now grant ROLE_ADMIN to a token answering IsAuthenticated false")
     }
 

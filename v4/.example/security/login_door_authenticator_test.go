@@ -580,7 +580,7 @@ func serveLoginDoor(t *testing.T, runtimeInstance melodycontainercontract.Runtim
         TokenSource: &anonymousDoorTokenSource{},
         LoginPath:   request.HttpRequest().URL.Path,
         LoginHandler: security.NewSessionLoginHandler(
-            func(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+            func(runtimeInstance melodycontainercontract.Runtime, userId string) (*entity.User, bool, error) {
                 account, known := security.LoginAccount(request)
 
                 return account, known, nil
@@ -683,7 +683,7 @@ type secondFactorLogin struct {
     sessionIndex    repository.UserSessionRepository
 }
 
-func (instance *secondFactorLogin) sessionIndexLookup(request melodyhttpcontract.Request) (security.SessionIndex, error) {
+func (instance *secondFactorLogin) sessionIndexLookup(runtimeInstance melodycontainercontract.Runtime) (security.SessionIndex, error) {
     return instance.sessionIndex, nil
 }
 

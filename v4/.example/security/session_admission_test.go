@@ -2,8 +2,6 @@ package security
 
 import (
     "context"
-    nethttp "net/http"
-    "net/http/httptest"
     "testing"
     "time"
 
@@ -11,8 +9,6 @@ import (
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
-    melodyhttp "github.com/precision-soft/melody/v4/http"
-    melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodysession "github.com/precision-soft/melody/v4/session"
     melodysessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
@@ -77,13 +73,12 @@ func TestAdmitSession_ChecksAndReleasesUnderTheRequestsContext(t *testing.T) {
 
     requestContext := context.WithValue(context.Background(), admissionPlantedKey{}, "planted")
     runtimeInstance := melodyruntime.NewRequest(requestContext, containerInstance.NewScope())
-    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodPost, "/login", nil), nil, runtimeInstance, nil)
 
     index := &callbackInvokingSessionIndex{victimId: victim.Id()}
     rotated := mustSession(manager.NewSession(exampleTestRuntime()))
     storage.loadContexts = nil
 
-    if admitErr := AdmitSession(request, func(request melodyhttpcontract.Request) (SessionIndex, error) { return index, nil }, "user-1", "", rotated); nil != admitErr {
+    if admitErr := AdmitSession(runtimeInstance, func(runtimeInstance melodycontainercontract.Runtime) (SessionIndex, error) { return index, nil }, "user-1", "", rotated); nil != admitErr {
         t.Fatalf("unexpected admission error: %v", admitErr)
     }
 
@@ -93,5 +88,22 @@ func TestAdmitSession_ChecksAndReleasesUnderTheRequestsContext(t *testing.T) {
 
     if 1 != len(manager.deleteContexts) || "planted" != manager.deleteContexts[0].Value(admissionPlantedKey{}) {
         t.Fatalf("expected the release to run on the request's context, got %d deletes", len(manager.deleteContexts))
+    }
+}
+
+func TestSessionAdmission_ANilRuntimeIsRefusedBeforeTheIndex(t *testing.T) {
+    index := &runtimeRecordingSessionIndex{}
+    rotated := mustSession(melodysession.NewManager(melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{}), melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)}).NewSession(exampleTestRuntime()))
+
+    if admitErr := AdmitSession(nil, index.lookupRecording, "user-1", "", rotated); nil == admitErr || "the runtime is nil or carries no context" != admitErr.Error() {
+        t.Fatalf("expected the admission to refuse a nil runtime, got %v", admitErr)
+    }
+
+    if releaseErr := ReleaseSession(nil, index.lookupRecording, "session-1"); nil == releaseErr || "the runtime is nil or carries no context" != releaseErr.Error() {
+        t.Fatalf("expected the release to refuse a nil runtime, got %v", releaseErr)
+    }
+
+    if 0 != len(index.runtimes) {
+        t.Fatalf("expected the index not to be looked up, got %d lookups", len(index.runtimes))
     }
 }

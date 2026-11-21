@@ -142,7 +142,7 @@ func TestSessionLoginHandlerOpensASessionThePasswordChangeRevokes(t *testing.T) 
     runtimeInstance, request := loginRequest(t)
 
     account := entity.NewUser("user-2", "editor", "original-hash", []string{"ROLE_EDITOR"})
-    lookup := func(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+    lookup := func(runtimeInstance melodycontainercontract.Runtime, userId string) (*entity.User, bool, error) {
         return account, true, nil
     }
 
@@ -196,19 +196,19 @@ func TestSessionLoginHandlerRefusesATokenThatIsNotAuthenticated(t *testing.T) {
 func TestSessionLoginHandlerRefusesAnAccountThatIsNotAvailable(t *testing.T) {
     for name, lookup := range map[string]SessionUserLookup{
         "a failing lookup": refusingAccountLookup,
-        "an absent account": func(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+        "an absent account": func(runtimeInstance melodycontainercontract.Runtime, userId string) (*entity.User, bool, error) {
             return nil, false, nil
         },
-        "an account the lookup did not find": func(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+        "an account the lookup did not find": func(runtimeInstance melodycontainercontract.Runtime, userId string) (*entity.User, bool, error) {
             return entity.NewUser(userId, "editor", testPasswordHash, []string{"ROLE_EDITOR"}), false, nil
         },
-        "another account": func(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+        "another account": func(runtimeInstance melodycontainercontract.Runtime, userId string) (*entity.User, bool, error) {
             return entity.NewUser("another-user", "editor", testPasswordHash, []string{"ROLE_EDITOR"}), true, nil
         },
-        "an account without a password hash": func(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+        "an account without a password hash": func(runtimeInstance melodycontainercontract.Runtime, userId string) (*entity.User, bool, error) {
             return entity.NewUser(userId, "editor", "", []string{"ROLE_EDITOR"}), true, nil
         },
-        "an account without roles": func(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+        "an account without roles": func(runtimeInstance melodycontainercontract.Runtime, userId string) (*entity.User, bool, error) {
             return entity.NewUser(userId, "editor", testPasswordHash, nil), true, nil
         },
     } {
@@ -278,4 +278,61 @@ func registerLandingUrlGenerator(t *testing.T, containerInstance melodycontainer
     melodycontainer.MustRegister[melodyhttpcontract.UrlGenerator](containerInstance, melodyhttp.ServiceUrlGenerator, func(resolver melodycontainercontract.Resolver) (melodyhttpcontract.UrlGenerator, error) {
         return melodyhttp.NewUrlGenerator(melodyhttp.NewRouter().RouteRegistry(), melodyhttp.UrlGeneratorConfig{}), nil
     }, melodycontainer.RegisterOptions{})
+}
+
+type runtimeRecordingSessionIndex struct {
+    recordingSessionIndex
+    runtimes []melodycontainercontract.Runtime
+}
+
+func (instance *runtimeRecordingSessionIndex) lookupRecording(runtimeInstance melodycontainercontract.Runtime) (SessionIndex, error) {
+    instance.runtimes = append(instance.runtimes, runtimeInstance)
+
+    return &instance.recordingSessionIndex, nil
+}
+
+func TestSessionLoginHandlerReadsTheAccountAndAdmitsThroughTheRuntimeItWasHanded(t *testing.T) {
+    managerStorage := melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{})
+    manager := melodysession.NewManager(managerStorage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
+
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    melodycontainer.MustRegister[melodysessioncontract.Storage](containerInstance, melodysession.ServiceSessionStorage, func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Storage, error) {
+        return managerStorage, nil
+    }, melodycontainer.RegisterOptions{})
+    melodycontainer.MustRegister[melodysessioncontract.Manager](containerInstance, melodysession.ServiceSessionManager, func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Manager, error) {
+        return manager, nil
+    }, melodycontainer.RegisterOptions{})
+
+    registerAdmissionClock(t, containerInstance)
+    registerLandingUrlGenerator(t, containerInstance)
+
+    handedRuntime := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
+    otherRuntime := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
+    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodPost, "/login", nil), nil, otherRuntime, nil)
+    _ = melodyhttp.SetRequestSession(request, mustSession(manager.NewSession(exampleTestRuntime())))
+
+    var lookupRuntimes []melodycontainercontract.Runtime
+    lookup := func(runtimeInstance melodycontainercontract.Runtime, userId string) (*entity.User, bool, error) {
+        lookupRuntimes = append(lookupRuntimes, runtimeInstance)
+
+        return currentAccountLookup(runtimeInstance, userId)
+    }
+    index := &runtimeRecordingSessionIndex{}
+
+    _, loginErr := NewSessionLoginHandler(lookup, index.lookupRecording).Login(
+        handedRuntime,
+        request,
+        melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
+    )
+    if nil != loginErr {
+        t.Fatalf("the login door failed: %v", loginErr)
+    }
+
+    if 1 != len(lookupRuntimes) || handedRuntime != lookupRuntimes[0] {
+        t.Fatalf("expected the account read through the handed runtime, got %v", lookupRuntimes)
+    }
+
+    if 1 != len(index.runtimes) || handedRuntime != index.runtimes[0] {
+        t.Fatalf("expected the session admitted through the handed runtime, got %v", index.runtimes)
+    }
 }

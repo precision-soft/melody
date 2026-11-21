@@ -56,7 +56,7 @@ func TestAccessDecisionManager_Affirmative_GrantsIfAnyGranted(t *testing.T) {
 
     token := &securityTestToken{roles: []string{"ROLE_ADMIN"}}
 
-    err := manager.DecideAny(nil, token, []string{"ROLE_ADMIN"}, nil)
+    err := manager.DecideAny(testRuntime(), token, []string{"ROLE_ADMIN"}, nil)
     if nil != err {
         t.Fatalf("expected granted: %v", err)
     }
@@ -71,7 +71,7 @@ func TestAccessDecisionManager_Unanimous_DeniesIfAnyDenied(t *testing.T) {
 
     token := &securityTestToken{roles: []string{"ROLE_ADMIN"}}
 
-    err := manager.DecideAny(nil, token, []string{"ROLE_ADMIN"}, nil)
+    err := manager.DecideAny(testRuntime(), token, []string{"ROLE_ADMIN"}, nil)
     if nil == err {
         t.Fatalf("expected denied")
     }
@@ -80,7 +80,7 @@ func TestAccessDecisionManager_Unanimous_DeniesIfAnyDenied(t *testing.T) {
 func TestAccessDecisionManager_DecideAllRefusesAnEmptyAttributeList(t *testing.T) {
     manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{NewRoleVoter()}, AccessDecisionManagerConfig{})
 
-    err := manager.DecideAll(nil, NewAuthenticatedToken("u1", []string{"ROLE_ADMIN"}, nil), []string{}, nil)
+    err := manager.DecideAll(testRuntime(), NewAuthenticatedToken("u1", []string{"ROLE_ADMIN"}, nil), []string{}, nil)
     if nil == err {
         t.Fatalf("expected DecideAll over an empty attribute list to refuse, as DecideAny does")
     }
@@ -120,7 +120,7 @@ func TestAccessDecisionManager_AVotersErrorEndsTheDecisionMarked(t *testing.T) {
                 AccessDecisionManagerConfig{},
             )
 
-            err := manager.DecideAll(nil, token, []string{"ROLE_ADMIN"}, nil)
+            err := manager.DecideAll(testRuntime(), token, []string{"ROLE_ADMIN"}, nil)
             if false == errors.Is(err, decisionStoreErr) || false == exception.AnswersUnavailable(err) {
                 t.Fatalf("expected the voter's error marked, whatever the grants beside it, got %v", err)
             }
@@ -140,7 +140,7 @@ func TestAccessDecisionManager_AVoterThatAnswersNoErrorIsCountedAsAVote(t *testi
         []securitycontract.Voter{&fallibleTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted}},
         AccessDecisionManagerConfig{},
     )
-    if err := granting.DecideAll(nil, token, []string{"ROLE_ADMIN"}, nil); nil != err {
+    if err := granting.DecideAll(testRuntime(), token, []string{"ROLE_ADMIN"}, nil); nil != err {
         t.Fatalf("expected the fallible grant counted, got %v", err)
     }
 
@@ -152,7 +152,7 @@ func TestAccessDecisionManager_AVoterThatAnswersNoErrorIsCountedAsAVote(t *testi
         },
         AccessDecisionManagerConfig{},
     )
-    err := denying.DecideAll(nil, token, []string{"ROLE_ADMIN"}, nil)
+    err := denying.DecideAll(testRuntime(), token, []string{"ROLE_ADMIN"}, nil)
     if answer := exception.AsHttpException(err); nil == answer || 403 != answer.StatusCode() || true == exception.IsInfrastructureFailure(err) {
         t.Fatalf("expected the fallible denials counted into an unmarked 403, got %v", err)
     }
@@ -163,7 +163,7 @@ func TestAccessDecisionManager_AVoterThatAnswersNoErrorIsCountedAsAVote(t *testi
         []securitycontract.Voter{&fallibleTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted, err: typedNilErr}},
         AccessDecisionManagerConfig{},
     )
-    if err := typedNil.DecideAll(nil, token, []string{"ROLE_ADMIN"}, nil); nil != err {
+    if err := typedNil.DecideAll(testRuntime(), token, []string{"ROLE_ADMIN"}, nil); nil != err {
         t.Fatalf("expected a typed nil error read as none, got %v", err)
     }
 }
@@ -182,7 +182,7 @@ func TestAccessDecisionManager_AVoterErrorAnsweringAStatusOrAlreadyMarkedIsKeptA
                 AccessDecisionManagerConfig{},
             )
 
-            if err := manager.DecideAll(nil, token, []string{"ROLE_ADMIN"}, nil); voterErr != err {
+            if err := manager.DecideAll(testRuntime(), token, []string{"ROLE_ADMIN"}, nil); voterErr != err {
                 t.Fatalf("expected the voter's error as it is, got %v", err)
             }
         })
@@ -200,7 +200,7 @@ func TestAccessDecisionManager_DecideAnyGrantsOverAnotherAttributesOutage(t *tes
         AccessDecisionManagerConfig{},
     )
 
-    if err := manager.DecideAny(nil, token, []string{"ROLE_AUDIT", "ROLE_ADMIN"}, nil); nil != err {
+    if err := manager.DecideAny(testRuntime(), token, []string{"ROLE_AUDIT", "ROLE_ADMIN"}, nil); nil != err {
         t.Fatalf("expected the grant on ROLE_ADMIN to win, got %v", err)
     }
 }
@@ -216,7 +216,7 @@ func TestAccessDecisionManager_DecideAnyWithNoGrantAnswersTheOutageNotForbidden(
         AccessDecisionManagerConfig{},
     )
 
-    err := manager.DecideAny(nil, token, []string{"ROLE_ADMIN", "ROLE_AUDIT"}, nil)
+    err := manager.DecideAny(testRuntime(), token, []string{"ROLE_ADMIN", "ROLE_AUDIT"}, nil)
     if false == errors.Is(err, decisionStoreErr) || false == exception.AnswersUnavailable(err) {
         t.Fatalf("expected the outage answered instead of 403, got %v", err)
     }
@@ -229,7 +229,7 @@ func TestAccessDecisionManager_DecideAnyWithNoGrantAnswersTheOutageNotForbidden(
         },
         AccessDecisionManagerConfig{},
     )
-    err = denied.DecideAny(nil, token, []string{"ROLE_ADMIN", "ROLE_AUDIT"}, nil)
+    err = denied.DecideAny(testRuntime(), token, []string{"ROLE_ADMIN", "ROLE_AUDIT"}, nil)
     if answer := exception.AsHttpException(err); nil == answer || 403 != answer.StatusCode() {
         t.Fatalf("expected an unmarked error beside no grant to stay 403, got %v", err)
     }
@@ -249,7 +249,7 @@ func TestAccessDecisionManager_AVoterErrorAnsweringA5xxIsMarked(t *testing.T) {
                 AccessDecisionManagerConfig{},
             )
 
-            err := manager.DecideAll(nil, token, []string{"ROLE_ADMIN"}, nil)
+            err := manager.DecideAll(testRuntime(), token, []string{"ROLE_ADMIN"}, nil)
             if false == errors.Is(err, voterErr) || false == exception.AnswersUnavailable(err) {
                 t.Fatalf("expected the voter's 5xx marked as a decision that could not be made, got %v", err)
             }
@@ -268,7 +268,7 @@ func TestAccessDecisionManager_AnOutageLosesADenialAlreadyCast(t *testing.T) {
         AccessDecisionManagerConfig{},
     )
 
-    if err := manager.DecideAll(nil, token, []string{"ROLE_ADMIN"}, nil); false == exception.AnswersUnavailable(err) {
+    if err := manager.DecideAll(testRuntime(), token, []string{"ROLE_ADMIN"}, nil); false == exception.AnswersUnavailable(err) {
         t.Fatalf("expected the outage answered over the denial already cast, got %v", err)
     }
 }
@@ -285,7 +285,7 @@ func TestAccessDecisionManager_DecideAnyAnswersTheFirstOutage(t *testing.T) {
         AccessDecisionManagerConfig{},
     )
 
-    err := manager.DecideAny(nil, token, []string{"ROLE_AUDIT", "ROLE_ADMIN"}, nil)
+    err := manager.DecideAny(testRuntime(), token, []string{"ROLE_AUDIT", "ROLE_ADMIN"}, nil)
     if false == errors.Is(err, decisionStoreErr) || true == errors.Is(err, secondStoreErr) {
         t.Fatalf("expected the first outage answered, got %v", err)
     }
@@ -325,7 +325,7 @@ func TestAccessDecisionManager_ATypedNilVoterErrorIsNoError(t *testing.T) {
     var typedNil *typedNilVoterError
     manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{&fallibleTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted, err: typedNil}}, AccessDecisionManagerConfig{})
 
-    if decideErr := manager.DecideAll(nil, &securityTestToken{roles: []string{"ROLE_ADMIN"}}, []string{"ROLE_ADMIN"}, nil); nil != decideErr {
+    if decideErr := manager.DecideAll(testRuntime(), &securityTestToken{roles: []string{"ROLE_ADMIN"}}, []string{"ROLE_ADMIN"}, nil); nil != decideErr {
         t.Fatalf("expected the typed nil error read as no error, got %v", decideErr)
     }
 }
@@ -333,7 +333,7 @@ func TestAccessDecisionManager_ATypedNilVoterErrorIsNoError(t *testing.T) {
 func TestAccessDecisionManager_TheResultBesideAnErrorIsNotRead(t *testing.T) {
     manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{&fallibleTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted, err: exception.Forbidden("the voter refused")}}, AccessDecisionManagerConfig{})
 
-    if decideErr := manager.DecideAll(nil, &securityTestToken{roles: []string{"ROLE_ADMIN"}}, []string{"ROLE_ADMIN"}, nil); nil == decideErr {
+    if decideErr := manager.DecideAll(testRuntime(), &securityTestToken{roles: []string{"ROLE_ADMIN"}}, []string{"ROLE_ADMIN"}, nil); nil == decideErr {
         t.Fatalf("expected the grant beside the error not counted")
     }
 }
@@ -488,4 +488,23 @@ func TestAccessDecisionManager_WithVoters_CopiesAndRefusesANilVoter(t *testing.T
     }()
 
     _ = original.WithVoters([]securitycontract.Voter{nil})
+}
+
+func TestAccessDecisionManager_ANilRuntimeIsRefusedBeforeAnyVoter(t *testing.T) {
+    token := &securityTestToken{roles: []string{"ROLE_ADMIN"}}
+
+    for name, runtimeInstance := range refusedRuntimes() {
+        t.Run(name, func(t *testing.T) {
+            voter := &fallibleTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted}
+            manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{voter}, AccessDecisionManagerConfig{})
+
+            assertRefusedAsNilRuntime(t, manager.DecideAll(runtimeInstance, token, []string{"ROLE_ADMIN"}, nil))
+            assertRefusedAsNilRuntime(t, manager.DecideAll(runtimeInstance, token, nil, nil))
+            assertRefusedAsNilRuntime(t, manager.DecideAny(runtimeInstance, token, []string{"ROLE_ADMIN"}, nil))
+
+            if 0 != len(voter.runtimes) {
+                t.Fatalf("expected no voter to be asked, got %d calls", len(voter.runtimes))
+            }
+        })
+    }
 }

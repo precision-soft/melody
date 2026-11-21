@@ -60,12 +60,13 @@ func TestSessionLogoutHandlerAnswersTheErrorOfARequestCarryingNoSession(t *testi
 func TestSessionLogoutHandlerReleasesTheSessionsRow(t *testing.T) {
     request, sessionInstance := requestCarryingSession(t)
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    request = melodyhttp.NewRequest(request.HttpRequest(), nil, melodyruntime.NewRequest(context.Background(), containerInstance.NewScope()), nil)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
+    request = melodyhttp.NewRequest(request.HttpRequest(), nil, runtimeInstance, nil)
     _ = melodyhttp.SetRequestSession(request, sessionInstance)
 
     index := &recordingSessionIndex{}
 
-    _, err := NewSessionLogoutHandler(index.lookup).Logout(nil, request, melodysecuritycontract.LogoutInput{})
+    _, err := NewSessionLogoutHandler(index.lookup).Logout(runtimeInstance, request, melodysecuritycontract.LogoutInput{})
     if nil != err {
         t.Fatalf("the logout door failed: %v", err)
     }

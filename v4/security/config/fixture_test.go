@@ -1,11 +1,14 @@
 package config
 
 import (
+    "context"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/security"
@@ -55,6 +58,10 @@ func expectRefusalNamingField(t *testing.T, message string, field string, callba
 
 func roleDecisionManager() securitycontract.AccessDecisionManager {
     return security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{security.NewRoleVoter()}, security.AccessDecisionManagerConfig{})
+}
+
+func testRuntime() containercontract.Runtime {
+    return runtime.NewRequest(context.Background(), container.NewContainer(container.ContainerConfig{}).NewScope())
 }
 
 func openFirewallConfig() FirewallConfig {

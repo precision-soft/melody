@@ -75,7 +75,12 @@ func (instance *AccessDecisionManager) Strategy() securitycontract.DecisionStrat
     return instance.strategy
 }
 
+/* DecideAll refuses a nil runtime before the attribute list is read and before any voter; a done context is not judged, since a role decision stays decidable. */
 func (instance *AccessDecisionManager) DecideAll(runtimeInstance containercontract.Runtime, token securitycontract.Token, attributes []string, subject any) error {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return refuseErr
+    }
+
     /* an empty attribute list is a refusal, not a vacuous grant, as in DecideAny; the compiled access control never produces one, so only a direct caller reaches it */
     if 0 == len(attributes) {
         return exception.Forbidden("forbidden")
@@ -93,6 +98,10 @@ func (instance *AccessDecisionManager) DecideAll(runtimeInstance containercontra
 
 /* DecideAny grants on the first attribute granted; with none granted, the first error exception.AnswersUnavailable reads as unavailable is answered before the refusal, since its missing vote might have been the grant, and any other error is the 403 */
 func (instance *AccessDecisionManager) DecideAny(runtimeInstance containercontract.Runtime, token securitycontract.Token, attributes []string, subject any) error {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return refuseErr
+    }
+
     var unavailableErr error
 
     for _, attribute := range attributes {

@@ -1,7 +1,6 @@
 package config
 
 import (
-    "errors"
     "regexp"
     "strings"
 
@@ -12,6 +11,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/security"
     melodyapplication "github.com/precision-soft/melody/v4/application"
     "github.com/precision-soft/melody/v4/bound"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
@@ -250,13 +250,8 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
 
 var _ melodyapplication.SecurityModule = (*Module)(nil)
 
-/* sessionUserLookup reads the account through the repository, under the request's context: the user service answers usernames from its cache, and the session's authority must not outlive a change the cache has not dropped yet. */
-func sessionUserLookup(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
-    runtimeInstance := request.RuntimeInstance()
-    if nil == runtimeInstance {
-        return nil, false, errors.New("the request carries no runtime to read the account through")
-    }
-
+/* sessionUserLookup reads the account through the repository, under the runtime's context: the user service answers usernames from its cache, and the session's authority must not outlive a change the cache has not dropped yet. */
+func sessionUserLookup(runtimeInstance melodycontainercontract.Runtime, userId string) (*entity.User, bool, error) {
     userRepository, resolveErr := melodyruntime.FromRuntime[repository.UserRepository](runtimeInstance, repository.ServiceUserRepository)
     if nil != resolveErr {
         return nil, false, resolveErr
@@ -266,12 +261,7 @@ func sessionUserLookup(request melodyhttpcontract.Request, userId string) (*enti
 }
 
 /* sessionIndexLookup resolves the index of the sessions each account holds, which the sign-in doors keep under its cap and the sign-out doors release */
-func sessionIndexLookup(request melodyhttpcontract.Request) (security.SessionIndex, error) {
-    runtimeInstance := request.RuntimeInstance()
-    if nil == runtimeInstance {
-        return nil, errors.New("the request carries no runtime to resolve the session index through")
-    }
-
+func sessionIndexLookup(runtimeInstance melodycontainercontract.Runtime) (security.SessionIndex, error) {
     return melodyruntime.FromRuntime[repository.UserSessionRepository](runtimeInstance, repository.ServiceUserSessionRepository)
 }
 

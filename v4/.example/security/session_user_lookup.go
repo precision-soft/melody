@@ -5,11 +5,11 @@ import (
     "encoding/hex"
 
     "github.com/precision-soft/melody/v4/.example/entity"
-    melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 /* SessionUserLookup reads the account a session names from the source of truth, never from a cache: the session's authority is the account's current roles, and a cached copy would keep a demoted, deleted or re-passworded account's old authority alive. */
-type SessionUserLookup func(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error)
+type SessionUserLookup func(runtimeInstance melodycontainercontract.Runtime, userId string) (*entity.User, bool, error)
 
 /* SessionCredentialVersion binds a session to the password hash verified at login without storing the hash in the session: a password change gives the account another version, and every session written under the one it replaced is refused. */
 func SessionCredentialVersion(passwordHash string) string {

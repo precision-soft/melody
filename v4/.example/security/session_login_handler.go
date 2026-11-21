@@ -43,7 +43,7 @@ func (instance *sessionLoginHandler) Login(
 
     userIdentifier := input.Token.UserIdentifier()
 
-    user, found, lookupErr := instance.lookupUser(request, userIdentifier)
+    user, found, lookupErr := instance.lookupUser(runtimeInstance, userIdentifier)
     if nil != lookupErr {
         return nil, lookupErr
     }
@@ -67,7 +67,7 @@ func (instance *sessionLoginHandler) Login(
     rotatedSession.Set(SessionKeySecurityCredentialVersion, SessionCredentialVersion(user.Password))
 
     /* past the cap the account's oldest session ends here; a refused admission has cleared the rotated session, so the refusal opens nothing */
-    if admitErr := AdmitSession(request, instance.sessionIndex, userIdentifier, input.PreviousSessionId, rotatedSession); nil != admitErr {
+    if admitErr := AdmitSession(runtimeInstance, instance.sessionIndex, userIdentifier, input.PreviousSessionId, rotatedSession); nil != admitErr {
         return nil, admitErr
     }
 

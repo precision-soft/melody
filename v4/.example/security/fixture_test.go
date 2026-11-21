@@ -57,7 +57,7 @@ func sessionOnRequest(request melodyhttpcontract.Request) melodysessioncontract.
 
 const testPasswordHash = "test-password-hash"
 
-func currentAccountLookup(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+func currentAccountLookup(runtimeInstance melodycontainercontract.Runtime, userId string) (*entity.User, bool, error) {
     roles := []string{"ROLE_USER", "ROLE_EDITOR"}
     if "user-3" == userId {
         roles = []string{"ROLE_USER", "ROLE_ADMIN"}
@@ -68,7 +68,7 @@ func currentAccountLookup(request melodyhttpcontract.Request, userId string) (*e
 
 var errAccountRepositoryUnavailable = errors.New("the account repository is unavailable")
 
-func refusingAccountLookup(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+func refusingAccountLookup(runtimeInstance melodycontainercontract.Runtime, userId string) (*entity.User, bool, error) {
     return nil, false, errAccountRepositoryUnavailable
 }
 
@@ -148,7 +148,7 @@ func (instance *recordingSessionIndex) Release(ctx context.Context, sessionId st
     return nil
 }
 
-func (instance *recordingSessionIndex) lookup(request melodyhttpcontract.Request) (SessionIndex, error) {
+func (instance *recordingSessionIndex) lookup(runtimeInstance melodycontainercontract.Runtime) (SessionIndex, error) {
     return instance, nil
 }
 
