@@ -88,11 +88,13 @@ var managerTombstoneRetentionRule = bound.Rule[time.Duration]{
 const DefaultStorageTimeout = 5 * time.Second
 
 /* StorageTimeoutRule resolves ManagerConfig.StorageTimeout and judges every manager's StorageTimeout. */
-var StorageTimeoutRule = bound.Rule[time.Duration]{
-    Name:              "ManagerConfig.StorageTimeout",
-    Default:           DefaultStorageTimeout,
-    Minimum:           bound.TimeoutMinimum,
-    UnlimitedAdmitted: true,
+func StorageTimeoutRule() bound.Rule[time.Duration] {
+    return bound.Rule[time.Duration]{
+        Name:              "ManagerConfig.StorageTimeout",
+        Default:           DefaultStorageTimeout,
+        Minimum:           bound.TimeoutMinimum,
+        UnlimitedAdmitted: true,
+    }
 }
 
 /* NewManager panics on a nil storage and on a field below its minimum, by name. */
@@ -111,7 +113,7 @@ func NewManager(storage sessioncontract.Storage, config ManagerConfig) *Manager 
         exception.Panic(exception.FromError(tombstoneRetentionErr))
     }
 
-    storageTimeout, storageTimeoutErr := bound.Resolve(config.StorageTimeout, StorageTimeoutRule)
+    storageTimeout, storageTimeoutErr := bound.Resolve(config.StorageTimeout, StorageTimeoutRule())
     if nil != storageTimeoutErr {
         exception.Panic(exception.FromError(storageTimeoutErr))
     }
@@ -150,7 +152,7 @@ func ResolveStorageTimeout(manager sessioncontract.Manager) (bound.Resolved[time
         return bound.Resolved[time.Duration]{}, exception.NewError("session manager is nil", nil, nil)
     }
 
-    return bound.Resolve(manager.StorageTimeout(), StorageTimeoutRule)
+    return bound.Resolve(manager.StorageTimeout(), StorageTimeoutRule())
 }
 
 /* Session answers the stored session, nil when the id names none; a storage outage carries exception.MarkInfrastructureFailure. */

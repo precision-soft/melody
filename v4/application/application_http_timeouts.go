@@ -26,27 +26,27 @@ type httpServerLimits struct {
 func resolveHttpServerLimits(configuration configcontract.Configuration, applicationConfig ApplicationConfig) (httpServerLimits, error) {
     httpConfiguration := configuration.Http()
 
-    readTimeout, readTimeoutErr := resolveApplicationLimit(httpConfiguration.ReadTimeout(), applicationConfig.ReadTimeout, config.HttpReadTimeoutRule)
+    readTimeout, readTimeoutErr := resolveApplicationLimit(httpConfiguration.ReadTimeout(), applicationConfig.ReadTimeout, config.HttpReadTimeoutRule())
     if nil != readTimeoutErr {
         return httpServerLimits{}, readTimeoutErr
     }
 
-    readHeaderTimeout, readHeaderTimeoutErr := resolveApplicationLimit(httpConfiguration.ReadHeaderTimeout(), applicationConfig.ReadHeaderTimeout, config.HttpReadHeaderTimeoutRule)
+    readHeaderTimeout, readHeaderTimeoutErr := resolveApplicationLimit(httpConfiguration.ReadHeaderTimeout(), applicationConfig.ReadHeaderTimeout, config.HttpReadHeaderTimeoutRule())
     if nil != readHeaderTimeoutErr {
         return httpServerLimits{}, readHeaderTimeoutErr
     }
 
-    writeTimeout, writeTimeoutErr := resolveApplicationLimit(httpConfiguration.WriteTimeout(), applicationConfig.WriteTimeout, config.HttpWriteTimeoutRule)
+    writeTimeout, writeTimeoutErr := resolveApplicationLimit(httpConfiguration.WriteTimeout(), applicationConfig.WriteTimeout, config.HttpWriteTimeoutRule())
     if nil != writeTimeoutErr {
         return httpServerLimits{}, writeTimeoutErr
     }
 
-    idleTimeout, idleTimeoutErr := resolveApplicationLimit(httpConfiguration.IdleTimeout(), applicationConfig.IdleTimeout, config.HttpIdleTimeoutRule)
+    idleTimeout, idleTimeoutErr := resolveApplicationLimit(httpConfiguration.IdleTimeout(), applicationConfig.IdleTimeout, config.HttpIdleTimeoutRule())
     if nil != idleTimeoutErr {
         return httpServerLimits{}, idleTimeoutErr
     }
 
-    maxHeaderBytes, maxHeaderBytesErr := resolveApplicationLimit(httpConfiguration.MaxHeaderBytes(), applicationConfig.MaxHeaderBytes, config.HttpMaxHeaderBytesRule)
+    maxHeaderBytes, maxHeaderBytesErr := resolveApplicationLimit(httpConfiguration.MaxHeaderBytes(), applicationConfig.MaxHeaderBytes, config.HttpMaxHeaderBytesRule())
     if nil != maxHeaderBytesErr {
         return httpServerLimits{}, maxHeaderBytesErr
     }
@@ -62,11 +62,11 @@ func resolveHttpServerLimits(configuration configcontract.Configuration, applica
 
 /* resolveHttpShutdownTimeout answers the key when the deployment set it, the application's field otherwise and the rule's default without either. */
 func resolveHttpShutdownTimeout(configuration configcontract.Configuration, applicationConfig ApplicationConfig) (bound.Resolved[time.Duration], error) {
-    return resolveApplicationLimit(configuration.Http().ShutdownTimeout(), applicationConfig.HttpShutdownTimeout, config.ShutdownTimeoutRule)
+    return resolveApplicationLimit(configuration.Http().ShutdownTimeout(), applicationConfig.HttpShutdownTimeout, config.ShutdownTimeoutRule())
 }
 
 func resolveContainerCreationWaiters(configuration configcontract.Configuration, applicationConfig ApplicationConfig) (bound.Resolved[int], error) {
-    return resolveApplicationLimit(configuration.Kernel().ContainerCreationWaiters(), applicationConfig.ContainerCreationWaiters, container.CreationWaitersRule)
+    return resolveApplicationLimit(configuration.Kernel().ContainerCreationWaiters(), applicationConfig.ContainerCreationWaiters, container.CreationWaitersRule())
 }
 
 /* resolveContainerTeardownSequential answers the key when the deployment set it and the application's field otherwise. */
@@ -90,11 +90,11 @@ func resolveSessionEmptyOnOutage(configuration configcontract.Configuration, app
 }
 
 func resolveTeardownTimeout(configuration configcontract.Configuration, applicationConfig ApplicationConfig) (bound.Resolved[time.Duration], error) {
-    return resolveApplicationLimit(configuration.Kernel().TeardownTimeout(), applicationConfig.TeardownTimeout, config.TeardownTimeoutRule)
+    return resolveApplicationLimit(configuration.Kernel().TeardownTimeout(), applicationConfig.TeardownTimeout, config.TeardownTimeoutRule())
 }
 
 func resolveScopeTeardownTimeout(configuration configcontract.Configuration, applicationConfig ApplicationConfig) (bound.Resolved[time.Duration], error) {
-    return resolveApplicationLimit(configuration.Kernel().ScopeTeardownTimeout(), applicationConfig.ScopeTeardownTimeout, container.ScopeTeardownTimeoutRule)
+    return resolveApplicationLimit(configuration.Kernel().ScopeTeardownTimeout(), applicationConfig.ScopeTeardownTimeout, container.ScopeTeardownTimeoutRule())
 }
 
 /* resolveUnavailableRetryAfter answers the delay the key sets, then the application's field, then the default, a refusal naming the field as its siblings do; the configuration already refused a bad key naming the key */
@@ -104,7 +104,7 @@ func resolveUnavailableRetryAfter(configuration configcontract.Configuration, ap
         limit = keyLimit
     }
 
-    return config.ResolveUnavailableRetryAfter(limit, config.UnavailableRetryAfterRule.Name)
+    return config.ResolveUnavailableRetryAfter(limit, config.UnavailableRetryAfterRule().Name)
 }
 
 /* refuseScopeTeardownOutlastingHttpShutdown fails an http boot whose request scope may still be closing when the shutdown's wait ends, which every stop catching a slow close would report as a scope left open and exit non-zero on. */

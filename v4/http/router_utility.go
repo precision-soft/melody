@@ -592,7 +592,7 @@ func classifySessionPersistenceFailure(persistenceRuntime containercontract.Runt
     if false == internal.IsNilInterface(persistenceRuntime) && true == storageBoundExpired(persistenceRuntime.Context()) {
         return exception.NewError(
             "the session storage call was cut by its bound",
-            exceptioncontract.Context{"bound": session.StorageTimeoutRule.Name},
+            exceptioncontract.Context{"bound": session.StorageTimeoutRule().Name},
             exception.MarkInfrastructureFailure(err),
         ), true
     }

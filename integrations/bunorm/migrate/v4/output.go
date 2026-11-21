@@ -450,7 +450,7 @@ func (instance *commandOutput) printMigrationsBlock(key string, title string, na
 
 /* tableMaxWidth answers the table width the command's option asks, 0 for unlimited */
 func (instance *commandOutput) tableMaxWidth() int {
-    resolved, resolveErr := bound.Resolve(instance.option.TableMaxWidth, output.OptionTableMaxWidthRule)
+    resolved, resolveErr := bound.Resolve(instance.option.TableMaxWidth, output.OptionTableMaxWidthRule())
     if nil != resolveErr || true == resolved.Unlimited {
         return 0
     }

@@ -40,7 +40,7 @@ type ExclusiveConfig struct {
 
 var exclusiveTtlRule = bound.Rule[time.Duration]{
     Name:              "ExclusiveConfig.Ttl",
-    Default:           lockcontract.LockTtlRule.Default,
+    Default:           lockcontract.LockTtlRule().Default,
     Minimum:           minimumLeaseTtl,
     UnlimitedAdmitted: true,
 }

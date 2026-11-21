@@ -46,7 +46,7 @@ func TestMemoryNonceGuard_RefusesAnAbsentSubMillisecondOrUnlimitedTtl(t *testing
             t.Fatalf("expected a refused ttl %v to report unseen", ttl)
         }
 
-        expectErrorNamingField(t, err, securitycontract.NonceTtlRule.Name)
+        expectErrorNamingField(t, err, securitycontract.NonceTtlRule().Name)
     }
 
     if _, exists := guard.expiryByNonce["n"]; true == exists {

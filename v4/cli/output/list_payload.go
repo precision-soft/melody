@@ -32,12 +32,12 @@ func WindowItems[T any](
     limit bound.Count,
     offset bound.Count,
 ) ([]T, error) {
-    resolvedLimit, limitErr := bound.Resolve(limit, OptionLimitRule)
+    resolvedLimit, limitErr := bound.Resolve(limit, OptionLimitRule())
     if nil != limitErr {
         return nil, limitErr
     }
 
-    resolvedOffset, offsetErr := bound.Resolve(offset, OptionOffsetRule)
+    resolvedOffset, offsetErr := bound.Resolve(offset, OptionOffsetRule())
     if nil != offsetErr {
         return nil, offsetErr
     }

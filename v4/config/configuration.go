@@ -603,17 +603,17 @@ func (instance *Configuration) buildCliConfiguration() error {
 }
 
 func (instance *Configuration) buildKernelConfiguration() error {
-    teardownTimeout, teardownTimeoutErr := checkedParameterLimit(instance.MustGet(KernelTeardownTimeout), TeardownTimeoutKey, TeardownTimeoutRule)
+    teardownTimeout, teardownTimeoutErr := checkedParameterLimit(instance.MustGet(KernelTeardownTimeout), TeardownTimeoutKey, TeardownTimeoutRule())
     if nil != teardownTimeoutErr {
         return teardownTimeoutErr
     }
 
-    scopeTeardownTimeout, scopeTeardownTimeoutErr := checkedParameterLimit(instance.MustGet(KernelScopeTeardownTimeout), ScopeTeardownTimeoutKey, container.ScopeTeardownTimeoutRule)
+    scopeTeardownTimeout, scopeTeardownTimeoutErr := checkedParameterLimit(instance.MustGet(KernelScopeTeardownTimeout), ScopeTeardownTimeoutKey, container.ScopeTeardownTimeoutRule())
     if nil != scopeTeardownTimeoutErr {
         return scopeTeardownTimeoutErr
     }
 
-    containerCreationWaiters, containerCreationWaitersErr := checkedParameterLimit(instance.MustGet(KernelContainerCreationWaiters), ContainerCreationWaitersKey, container.CreationWaitersRule)
+    containerCreationWaiters, containerCreationWaitersErr := checkedParameterLimit(instance.MustGet(KernelContainerCreationWaiters), ContainerCreationWaitersKey, container.CreationWaitersRule())
     if nil != containerCreationWaitersErr {
         return containerCreationWaitersErr
     }
@@ -650,12 +650,12 @@ func (instance *Configuration) buildKernelConfiguration() error {
 }
 
 func (instance *Configuration) buildHttpConfiguration() error {
-    httpMaxRequestBodyBytes, httpMaxRequestBodyBytesErr := resolveParameter(instance.MustGet(KernelHttpMaxRequestBodyBytes), HttpMaxRequestBodyBytesKey, MaxRequestBodyBytesRule)
+    httpMaxRequestBodyBytes, httpMaxRequestBodyBytesErr := resolveParameter(instance.MustGet(KernelHttpMaxRequestBodyBytes), HttpMaxRequestBodyBytesKey, MaxRequestBodyBytesRule())
     if nil != httpMaxRequestBodyBytesErr {
         return httpMaxRequestBodyBytesErr
     }
 
-    staticCacheMaxAge, staticCacheMaxAgeErr := resolveParameter(instance.MustGet(KernelStaticCacheMaxAge), StaticCacheMaxAgeKey, StaticCacheMaxAgeRule)
+    staticCacheMaxAge, staticCacheMaxAgeErr := resolveParameter(instance.MustGet(KernelStaticCacheMaxAge), StaticCacheMaxAgeKey, StaticCacheMaxAgeRule())
     if nil != staticCacheMaxAgeErr {
         return staticCacheMaxAgeErr
     }
@@ -685,27 +685,27 @@ func (instance *Configuration) buildHttpConfiguration() error {
 
     staticExcludedPaths := splitConfigurationList(instance.MustGet(KernelStaticExcludedPaths).MustString())
 
-    sessionTtl, sessionTtlErr := resolveParameter(instance.MustGet(KernelHttpSessionTtl), HttpSessionTtlKey, SessionTtlRule)
+    sessionTtl, sessionTtlErr := resolveParameter(instance.MustGet(KernelHttpSessionTtl), HttpSessionTtlKey, SessionTtlRule())
     if nil != sessionTtlErr {
         return sessionTtlErr
     }
 
-    sessionTombstoneRetention, sessionTombstoneRetentionErr := resolveParameter(instance.MustGet(KernelHttpSessionTombstoneRetention), HttpSessionTombstoneRetentionKey, SessionTombstoneRetentionRule)
+    sessionTombstoneRetention, sessionTombstoneRetentionErr := resolveParameter(instance.MustGet(KernelHttpSessionTombstoneRetention), HttpSessionTombstoneRetentionKey, SessionTombstoneRetentionRule())
     if nil != sessionTombstoneRetentionErr {
         return sessionTombstoneRetentionErr
     }
 
-    sessionStorageTimeout, sessionStorageTimeoutErr := resolveParameter(instance.MustGet(KernelHttpSessionStorageTimeout), HttpSessionStorageTimeoutKey, SessionStorageTimeoutRule)
+    sessionStorageTimeout, sessionStorageTimeoutErr := resolveParameter(instance.MustGet(KernelHttpSessionStorageTimeout), HttpSessionStorageTimeoutKey, SessionStorageTimeoutRule())
     if nil != sessionStorageTimeoutErr {
         return sessionStorageTimeoutErr
     }
 
-    sessionMaxSessions, sessionMaxSessionsErr := resolveParameter(instance.MustGet(KernelHttpSessionMaxSessions), HttpSessionMaxSessionsKey, SessionMaxSessionsRule)
+    sessionMaxSessions, sessionMaxSessionsErr := resolveParameter(instance.MustGet(KernelHttpSessionMaxSessions), HttpSessionMaxSessionsKey, SessionMaxSessionsRule())
     if nil != sessionMaxSessionsErr {
         return sessionMaxSessionsErr
     }
 
-    shutdownTimeout, shutdownTimeoutErr := checkedParameterLimit(instance.MustGet(KernelHttpShutdownTimeout), HttpShutdownTimeoutKey, ShutdownTimeoutRule)
+    shutdownTimeout, shutdownTimeoutErr := checkedParameterLimit(instance.MustGet(KernelHttpShutdownTimeout), HttpShutdownTimeoutKey, ShutdownTimeoutRule())
     if nil != shutdownTimeoutErr {
         return shutdownTimeoutErr
     }
@@ -713,23 +713,23 @@ func (instance *Configuration) buildHttpConfiguration() error {
     serverLimits := httpServerLimits{}
 
     var serverLimitErr error
-    if serverLimits.readTimeout, serverLimitErr = checkedParameterLimit(instance.MustGet(KernelHttpReadTimeout), HttpReadTimeoutKey, HttpReadTimeoutRule); nil != serverLimitErr {
+    if serverLimits.readTimeout, serverLimitErr = checkedParameterLimit(instance.MustGet(KernelHttpReadTimeout), HttpReadTimeoutKey, HttpReadTimeoutRule()); nil != serverLimitErr {
         return serverLimitErr
     }
 
-    if serverLimits.readHeaderTimeout, serverLimitErr = checkedParameterLimit(instance.MustGet(KernelHttpReadHeaderTimeout), HttpReadHeaderTimeoutKey, HttpReadHeaderTimeoutRule); nil != serverLimitErr {
+    if serverLimits.readHeaderTimeout, serverLimitErr = checkedParameterLimit(instance.MustGet(KernelHttpReadHeaderTimeout), HttpReadHeaderTimeoutKey, HttpReadHeaderTimeoutRule()); nil != serverLimitErr {
         return serverLimitErr
     }
 
-    if serverLimits.writeTimeout, serverLimitErr = checkedParameterLimit(instance.MustGet(KernelHttpWriteTimeout), HttpWriteTimeoutKey, HttpWriteTimeoutRule); nil != serverLimitErr {
+    if serverLimits.writeTimeout, serverLimitErr = checkedParameterLimit(instance.MustGet(KernelHttpWriteTimeout), HttpWriteTimeoutKey, HttpWriteTimeoutRule()); nil != serverLimitErr {
         return serverLimitErr
     }
 
-    if serverLimits.idleTimeout, serverLimitErr = checkedParameterLimit(instance.MustGet(KernelHttpIdleTimeout), HttpIdleTimeoutKey, HttpIdleTimeoutRule); nil != serverLimitErr {
+    if serverLimits.idleTimeout, serverLimitErr = checkedParameterLimit(instance.MustGet(KernelHttpIdleTimeout), HttpIdleTimeoutKey, HttpIdleTimeoutRule()); nil != serverLimitErr {
         return serverLimitErr
     }
 
-    if serverLimits.maxHeaderBytes, serverLimitErr = checkedParameterLimit(instance.MustGet(KernelHttpMaxHeaderBytes), HttpMaxHeaderBytesKey, HttpMaxHeaderBytesRule); nil != serverLimitErr {
+    if serverLimits.maxHeaderBytes, serverLimitErr = checkedParameterLimit(instance.MustGet(KernelHttpMaxHeaderBytes), HttpMaxHeaderBytesKey, HttpMaxHeaderBytesRule()); nil != serverLimitErr {
         return serverLimitErr
     }
 

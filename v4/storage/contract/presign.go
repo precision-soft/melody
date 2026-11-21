@@ -10,16 +10,18 @@ import (
 )
 
 /* PresignExpiryRule is the reading every backend gives PresignConfig.Expiry; its ceiling is the one of an S3 signature, so a link that signs on one backend signs on every other. */
-var PresignExpiryRule = bound.Rule[time.Duration]{
-    Name:    "PresignConfig.Expiry",
-    Default: 15 * time.Minute,
-    Minimum: bound.TtlMinimum,
-    Maximum: 7 * 24 * time.Hour,
+func PresignExpiryRule() bound.Rule[time.Duration] {
+    return bound.Rule[time.Duration]{
+        Name:    "PresignConfig.Expiry",
+        Default: 15 * time.Minute,
+        Minimum: bound.TtlMinimum,
+        Maximum: 7 * 24 * time.Hour,
+    }
 }
 
 /* ResolvePresignExpiry decides the expiry against PresignExpiryRule; a refusal names the field. */
 func ResolvePresignExpiry(expiry bound.Duration) (time.Duration, error) {
-    resolved, err := bound.Resolve(expiry, PresignExpiryRule)
+    resolved, err := bound.Resolve(expiry, PresignExpiryRule())
     if nil != err {
         return 0, err
     }

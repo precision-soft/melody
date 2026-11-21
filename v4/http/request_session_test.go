@@ -632,7 +632,7 @@ func TestRequestSession_ALoadCutByTheBoundIsRecordedAtErrorNamingTheBound(t *tes
 
     _, _ = RequestSession(boundedLoadRequest(context.Background(), manager, logger, true, httpcontract.SessionPolicy{}))
 
-    if 1 != len(logger.levels) || loggingcontract.LevelError != logger.levels[0] || session.StorageTimeoutRule.Name != logger.contextList[0]["bound"] {
+    if 1 != len(logger.levels) || loggingcontract.LevelError != logger.levels[0] || session.StorageTimeoutRule().Name != logger.contextList[0]["bound"] {
         t.Fatalf("expected one error record naming the bound, got %v %v", logger.levels, logger.contextList)
     }
 }

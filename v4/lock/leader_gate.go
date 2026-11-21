@@ -54,7 +54,7 @@ type LeaderGateConfig struct {
 
 var leaderGateTtlRule = bound.Rule[time.Duration]{
     Name:              "LeaderGateConfig.Ttl",
-    Default:           lockcontract.LockTtlRule.Default,
+    Default:           lockcontract.LockTtlRule().Default,
     Minimum:           minimumLeaseTtl,
     UnlimitedAdmitted: true,
 }

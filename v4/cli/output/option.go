@@ -24,23 +24,27 @@ type Option struct {
     ApplicationVersion string
 }
 
-var (
-    OptionLimitRule = bound.Rule[int]{
+func OptionLimitRule() bound.Rule[int] {
+    return bound.Rule[int]{
         Name:             "Option.Limit",
         DefaultUnlimited: true,
         Minimum:          0,
     }
+}
 
-    OptionOffsetRule = bound.Rule[int]{
+func OptionOffsetRule() bound.Rule[int] {
+    return bound.Rule[int]{
         Name:    "Option.Offset",
         Default: 0,
         Minimum: 0,
     }
+}
 
-    OptionTableMaxWidthRule = bound.Rule[int]{
+func OptionTableMaxWidthRule() bound.Rule[int] {
+    return bound.Rule[int]{
         Name:              "Option.TableMaxWidth",
         Default:           defaultTableMaxWidth,
         Minimum:           1,
         UnlimitedAdmitted: true,
     }
-)
+}

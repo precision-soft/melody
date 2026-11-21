@@ -12,106 +12,11 @@ import (
     "github.com/precision-soft/melody/v4/internal"
 )
 
-var (
-    MaxRequestBodyBytesRule = bound.Rule[int]{
-        Name:    "HttpConfiguration.MaxRequestBodyBytes",
-        Default: DefaultHttpMaxRequestBodyBytes,
-        Minimum: 1,
-    }
-
-    StaticCacheMaxAgeRule = bound.Rule[int]{
-        Name:    "HttpConfiguration.StaticCacheMaxAge",
-        Default: DefaultStaticCacheMaxAge,
-        Minimum: 0,
-    }
-
-    SessionTtlRule = bound.Rule[time.Duration]{
-        Name:              "HttpConfiguration.SessionTtl",
-        Default:           DefaultSessionTtl,
-        Minimum:           bound.TtlMinimum,
-        UnlimitedAdmitted: true,
-    }
-
-    SessionTombstoneRetentionRule = bound.Rule[time.Duration]{
-        Name:    "HttpConfiguration.SessionTombstoneRetention",
-        Default: DefaultSessionTombstoneRetention,
-        Minimum: bound.TtlMinimum,
-    }
-
-    SessionStorageTimeoutRule = bound.Rule[time.Duration]{
-        Name:              "HttpConfiguration.SessionStorageTimeout",
-        Default:           DefaultSessionStorageTimeout,
-        Minimum:           bound.TimeoutMinimum,
-        UnlimitedAdmitted: true,
-    }
-
-    SessionMaxSessionsRule = bound.Rule[int]{
-        Name:              "HttpConfiguration.SessionMaxSessions",
-        Default:           DefaultSessionMaxSessions,
-        Minimum:           1,
-        UnlimitedAdmitted: true,
-    }
-
-    ShutdownTimeoutRule = bound.Rule[time.Duration]{
-        Name:    "ApplicationConfig.HttpShutdownTimeout",
-        Default: DefaultHttpShutdownTimeout,
-        Minimum: bound.TimeoutMinimum,
-    }
-)
-
-/* unlimited is refused: net/http reads no bound as no timeout */
-var (
-    HttpReadTimeoutRule = bound.Rule[time.Duration]{
-        Name:    "ApplicationConfig.ReadTimeout",
-        Default: DefaultHttpReadTimeout,
-        Minimum: bound.TimeoutMinimum,
-    }
-
-    HttpReadHeaderTimeoutRule = bound.Rule[time.Duration]{
-        Name:    "ApplicationConfig.ReadHeaderTimeout",
-        Default: DefaultHttpReadHeaderTimeout,
-        Minimum: bound.TimeoutMinimum,
-    }
-
-    HttpWriteTimeoutRule = bound.Rule[time.Duration]{
-        Name:    "ApplicationConfig.WriteTimeout",
-        Default: DefaultHttpWriteTimeout,
-        Minimum: bound.TimeoutMinimum,
-    }
-
-    HttpIdleTimeoutRule = bound.Rule[time.Duration]{
-        Name:    "ApplicationConfig.IdleTimeout",
-        Default: DefaultHttpIdleTimeout,
-        Minimum: bound.TimeoutMinimum,
-    }
-
-    HttpMaxHeaderBytesRule = bound.Rule[int]{
-        Name:    "ApplicationConfig.MaxHeaderBytes",
-        Default: DefaultHttpMaxHeaderBytes,
-        Minimum: 4 << 10,
-    }
-
-    TeardownTimeoutRule = bound.Rule[time.Duration]{
-        Name:              "ApplicationConfig.TeardownTimeout",
-        Default:           DefaultTeardownTimeout,
-        Minimum:           bound.TimeoutMinimum,
-        UnlimitedAdmitted: true,
-    }
-
-    /* UnavailableRetryAfterRule bounds the Retry-After of an infrastructure-failure 503: 5s when left out, 1s to 1h, unlimited refused. */
-    UnavailableRetryAfterRule = bound.Rule[time.Duration]{
-        Name:    "ApplicationConfig.UnavailableRetryAfter",
-        Default: DefaultUnavailableRetryAfter,
-        Minimum: bound.TtlMinimum,
-        Maximum: maximumUnavailableRetryAfter,
-    }
-)
-
 const maximumUnavailableRetryAfter = time.Hour
 
 /* ResolveUnavailableRetryAfter decides the delay against UnavailableRetryAfterRule and refuses a value that is not a whole number of seconds, naming field. */
 func ResolveUnavailableRetryAfter(limit bound.Duration, field string) (time.Duration, error) {
-    rule := UnavailableRetryAfterRule
+    rule := UnavailableRetryAfterRule()
     rule.Name = field
 
     resolved, resolveErr := bound.Resolve(limit, rule)
@@ -195,12 +100,12 @@ func checkedParameterLimit[T bound.Unit](parameter configcontract.Parameter, env
 }
 
 func checkedUnavailableRetryAfter(parameter configcontract.Parameter) (bound.Duration, error) {
-    limit, limitErr := checkedParameterLimit(parameter, HttpUnavailableRetryAfterKey, UnavailableRetryAfterRule)
+    limit, limitErr := checkedParameterLimit(parameter, HttpUnavailableRetryAfterKey, UnavailableRetryAfterRule())
     if nil != limitErr || true == limit.IsAbsent() {
         return limit, limitErr
     }
 
-    if _, resolveErr := ResolveUnavailableRetryAfter(limit, UnavailableRetryAfterRule.Name); nil != resolveErr {
+    if _, resolveErr := ResolveUnavailableRetryAfter(limit, UnavailableRetryAfterRule().Name); nil != resolveErr {
         return bound.Duration{}, exception.NewError(
             "invalid environment value",
             limitRefusalContext(parameter, HttpUnavailableRetryAfterKey),
@@ -250,4 +155,123 @@ func limitRefusalCause(parameter configcontract.Parameter, causeErr error) error
     }
 
     return causeErr
+}
+
+func MaxRequestBodyBytesRule() bound.Rule[int] {
+    return bound.Rule[int]{
+        Name:    "HttpConfiguration.MaxRequestBodyBytes",
+        Default: DefaultHttpMaxRequestBodyBytes,
+        Minimum: 1,
+    }
+}
+
+func StaticCacheMaxAgeRule() bound.Rule[int] {
+    return bound.Rule[int]{
+        Name:    "HttpConfiguration.StaticCacheMaxAge",
+        Default: DefaultStaticCacheMaxAge,
+        Minimum: 0,
+    }
+}
+
+func SessionTtlRule() bound.Rule[time.Duration] {
+    return bound.Rule[time.Duration]{
+        Name:              "HttpConfiguration.SessionTtl",
+        Default:           DefaultSessionTtl,
+        Minimum:           bound.TtlMinimum,
+        UnlimitedAdmitted: true,
+    }
+}
+
+func SessionTombstoneRetentionRule() bound.Rule[time.Duration] {
+    return bound.Rule[time.Duration]{
+        Name:    "HttpConfiguration.SessionTombstoneRetention",
+        Default: DefaultSessionTombstoneRetention,
+        Minimum: bound.TtlMinimum,
+    }
+}
+
+func SessionStorageTimeoutRule() bound.Rule[time.Duration] {
+    return bound.Rule[time.Duration]{
+        Name:              "HttpConfiguration.SessionStorageTimeout",
+        Default:           DefaultSessionStorageTimeout,
+        Minimum:           bound.TimeoutMinimum,
+        UnlimitedAdmitted: true,
+    }
+}
+
+func SessionMaxSessionsRule() bound.Rule[int] {
+    return bound.Rule[int]{
+        Name:              "HttpConfiguration.SessionMaxSessions",
+        Default:           DefaultSessionMaxSessions,
+        Minimum:           1,
+        UnlimitedAdmitted: true,
+    }
+}
+
+func ShutdownTimeoutRule() bound.Rule[time.Duration] {
+    return bound.Rule[time.Duration]{
+        Name:    "ApplicationConfig.HttpShutdownTimeout",
+        Default: DefaultHttpShutdownTimeout,
+        Minimum: bound.TimeoutMinimum,
+    }
+}
+
+/* HttpReadTimeoutRule and the three http timeout rules after it refuse unlimited: net/http reads no bound as no timeout. */
+func HttpReadTimeoutRule() bound.Rule[time.Duration] {
+    return bound.Rule[time.Duration]{
+        Name:    "ApplicationConfig.ReadTimeout",
+        Default: DefaultHttpReadTimeout,
+        Minimum: bound.TimeoutMinimum,
+    }
+}
+
+func HttpReadHeaderTimeoutRule() bound.Rule[time.Duration] {
+    return bound.Rule[time.Duration]{
+        Name:    "ApplicationConfig.ReadHeaderTimeout",
+        Default: DefaultHttpReadHeaderTimeout,
+        Minimum: bound.TimeoutMinimum,
+    }
+}
+
+func HttpWriteTimeoutRule() bound.Rule[time.Duration] {
+    return bound.Rule[time.Duration]{
+        Name:    "ApplicationConfig.WriteTimeout",
+        Default: DefaultHttpWriteTimeout,
+        Minimum: bound.TimeoutMinimum,
+    }
+}
+
+func HttpIdleTimeoutRule() bound.Rule[time.Duration] {
+    return bound.Rule[time.Duration]{
+        Name:    "ApplicationConfig.IdleTimeout",
+        Default: DefaultHttpIdleTimeout,
+        Minimum: bound.TimeoutMinimum,
+    }
+}
+
+func HttpMaxHeaderBytesRule() bound.Rule[int] {
+    return bound.Rule[int]{
+        Name:    "ApplicationConfig.MaxHeaderBytes",
+        Default: DefaultHttpMaxHeaderBytes,
+        Minimum: 4 << 10,
+    }
+}
+
+func TeardownTimeoutRule() bound.Rule[time.Duration] {
+    return bound.Rule[time.Duration]{
+        Name:              "ApplicationConfig.TeardownTimeout",
+        Default:           DefaultTeardownTimeout,
+        Minimum:           bound.TimeoutMinimum,
+        UnlimitedAdmitted: true,
+    }
+}
+
+/* UnavailableRetryAfterRule bounds the Retry-After of an infrastructure-failure 503: 5s when left out, 1s to 1h, unlimited refused. */
+func UnavailableRetryAfterRule() bound.Rule[time.Duration] {
+    return bound.Rule[time.Duration]{
+        Name:    "ApplicationConfig.UnavailableRetryAfter",
+        Default: DefaultUnavailableRetryAfter,
+        Minimum: bound.TtlMinimum,
+        Maximum: maximumUnavailableRetryAfter,
+    }
 }

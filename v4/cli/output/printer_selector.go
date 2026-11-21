@@ -8,7 +8,7 @@ import (
 func SelectPrinter(option Option) (Printer, error) {
     normalized := normalizeOptionChoices(option)
 
-    tableMaxWidth, resolveErr := bound.Resolve(normalized.TableMaxWidth, OptionTableMaxWidthRule)
+    tableMaxWidth, resolveErr := bound.Resolve(normalized.TableMaxWidth, OptionTableMaxWidthRule())
     if nil != resolveErr {
         return nil, resolveErr
     }

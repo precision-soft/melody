@@ -329,7 +329,7 @@ type Cache interface {
 ```
 
 - **Backend** ([`cache/contract/backend.go`](../../cache/contract/backend.go))
-- **TtlRule** and **ResolveTtl** ([`cache/contract/ttl.go`](../../cache/contract/ttl.go)) — the reading every backend gives the ttl of a write: absent refused, at least 1s, unlimited answered as 0, no expiry
+- **TtlRule()** and **ResolveTtl** ([`cache/contract/ttl.go`](../../cache/contract/ttl.go)) — the reading every backend gives the ttl of a write: absent refused, at least 1s, unlimited answered as 0, no expiry
 - **Serializer** ([`cache/contract/serializer.go`](../../cache/contract/serializer.go)) — `Serialize(value) ([]byte, error)` and `Deserialize(payload, target) error`, decoding into the target, the signature of [`serializer/contract.Serializer`](../../serializer/contract/serializer.go), so `serializer.NewJsonSerializer()` serves as a cache serializer
 
 ### Types

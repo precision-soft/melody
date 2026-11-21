@@ -22,22 +22,26 @@ import (
 const DefaultScopeTeardownTimeout = 3 * time.Second
 
 /* ScopeTeardownTimeoutRule resolves ContainerConfig.ScopeTeardownTimeout: 3s when left out, at least 1ms, unlimited admitted. */
-var ScopeTeardownTimeoutRule = bound.Rule[time.Duration]{
-    Name:              "ContainerConfig.ScopeTeardownTimeout",
-    Default:           DefaultScopeTeardownTimeout,
-    Minimum:           bound.TimeoutMinimum,
-    UnlimitedAdmitted: true,
+func ScopeTeardownTimeoutRule() bound.Rule[time.Duration] {
+    return bound.Rule[time.Duration]{
+        Name:              "ContainerConfig.ScopeTeardownTimeout",
+        Default:           DefaultScopeTeardownTimeout,
+        Minimum:           bound.TimeoutMinimum,
+        UnlimitedAdmitted: true,
+    }
 }
 
 /* DefaultCreationWaiters is how many resolutions may wait on one in-flight creation when ContainerConfig.CreationWaiters is left out: every concurrent request of one server waiting on the same singleton at a cold start. */
 const DefaultCreationWaiters = 1024
 
 /* CreationWaitersRule resolves ContainerConfig.CreationWaiters: 1,024 when left out, at least 1, unlimited admitted. */
-var CreationWaitersRule = bound.Rule[int]{
-    Name:              "ContainerConfig.CreationWaiters",
-    Default:           DefaultCreationWaiters,
-    Minimum:           1,
-    UnlimitedAdmitted: true,
+func CreationWaitersRule() bound.Rule[int] {
+    return bound.Rule[int]{
+        Name:              "ContainerConfig.CreationWaiters",
+        Default:           DefaultCreationWaiters,
+        Minimum:           1,
+        UnlimitedAdmitted: true,
+    }
 }
 
 /* ContainerConfig is what a container declares beyond its registrations; the zero value is the default. */
@@ -52,12 +56,12 @@ type ContainerConfig struct {
 
 /* NewContainer builds an empty container; a ContainerConfig field outside its rule panics naming the field. */
 func NewContainer(config ContainerConfig) containercontract.Container {
-    creationWaiters, creationWaitersErr := bound.Resolve(config.CreationWaiters, CreationWaitersRule)
+    creationWaiters, creationWaitersErr := bound.Resolve(config.CreationWaiters, CreationWaitersRule())
     if nil != creationWaitersErr {
         exception.Panic(exception.FromError(creationWaitersErr))
     }
 
-    scopeTeardownTimeout, scopeTeardownTimeoutErr := bound.Resolve(config.ScopeTeardownTimeout, ScopeTeardownTimeoutRule)
+    scopeTeardownTimeout, scopeTeardownTimeoutErr := bound.Resolve(config.ScopeTeardownTimeout, ScopeTeardownTimeoutRule())
     if nil != scopeTeardownTimeoutErr {
         exception.Panic(exception.FromError(scopeTeardownTimeoutErr))
     }

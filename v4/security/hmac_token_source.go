@@ -343,7 +343,7 @@ func (instance *HmacTokenSource) guardNonce(runtimeInstance containercontract.Ru
     }
 
     ttl := time.Unix(envelope.ExpiresAt, 0).Add(instance.leeway).Sub(instance.clock.Now())
-    if securitycontract.NonceTtlRule.Minimum > ttl {
+    if securitycontract.NonceTtlRule().Minimum > ttl {
         /* the guard refuses a ttl under its minimum, so this is the envelope's failure, not the guard's */
         return exception.NewError("internal-auth envelope is too close to expiry to guard against replay", nil, nil)
     }

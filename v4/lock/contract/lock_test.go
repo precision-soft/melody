@@ -37,7 +37,7 @@ func TestResolveLeaseTtl_RefusesAnUnlimitedTtlAndOneBelowTheMinimumNamingIt(t *t
 }
 
 func TestLockTtlRule_AdmitsUnlimitedForTheSessionLockers(t *testing.T) {
-    resolved, err := bound.Resolve(bound.UnlimitedDuration(), LockTtlRule)
+    resolved, err := bound.Resolve(bound.UnlimitedDuration(), LockTtlRule())
     if nil != err || false == resolved.Unlimited {
         t.Fatalf("expected the rule to admit unlimited, got %+v and %v", resolved, err)
     }

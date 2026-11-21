@@ -467,7 +467,7 @@ func TestRegenerateRequestSession_AHungRotationIsCutByTheBoundAsAnOutageNamingIt
         t.Fatalf("expected the hung rotation cut by the bound, it took %s", elapsed)
     }
 
-    if nil != rotated || false == exception.AnswersUnavailable(rotateErr) || session.StorageTimeoutRule.Name != exception.LogContext(rotateErr, exception.LogContextConfig{})["bound"] {
+    if nil != rotated || false == exception.AnswersUnavailable(rotateErr) || session.StorageTimeoutRule().Name != exception.LogContext(rotateErr, exception.LogContextConfig{})["bound"] {
         t.Fatalf("expected the cut rotation answered as an outage naming the bound, got %v %v", rotated, rotateErr)
     }
 }

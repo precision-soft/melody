@@ -222,7 +222,7 @@ func newRememberFlightTypeError[T any](key string) error {
 
 /* the ttl is judged before the cache is read, under the configuration's field name, so a miss never computes a value it cannot store */
 func resolveRememberTtl(ttl bound.Duration) (bound.Duration, error) {
-    rule := cachecontract.TtlRule
+    rule := cachecontract.TtlRule()
     rule.Name = "RememberConfig.Ttl"
 
     if true == ttl.IsAbsent() {
@@ -252,7 +252,7 @@ func resolveRememberStoreChoice(configTtl bound.Duration, storeChoice rememberSt
         return configTtl, true, nil
     }
 
-    rule := cachecontract.TtlRule
+    rule := cachecontract.TtlRule()
     rule.Name = "RememberItem.Ttl"
 
     if _, err := bound.Resolve(storeChoice.ttl, rule); nil != err {

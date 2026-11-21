@@ -2,6 +2,13 @@ package bound
 
 import (
     "errors"
+    "go/ast"
+    "go/parser"
+    "go/token"
+    "io/fs"
+    "os"
+    "path/filepath"
+    "strings"
     "testing"
     "time"
 
@@ -132,5 +139,94 @@ func assertRefusedField(t *testing.T, err error, field string, message string) {
 
     if field != refusal.Context()["field"] {
         t.Fatalf("expected the refusal to name %q, got %+v", field, refusal.Context())
+    }
+}
+
+/* ruleWalkRoots are the fourth major's module roots, relative to this package; a root absent from the tree is skipped */
+var ruleWalkRoots = []string{"..", "../../integrations"}
+
+func isBoundRuleLiteral(expression ast.Expr) bool {
+    literal, isLiteral := expression.(*ast.CompositeLit)
+    if false == isLiteral {
+        return false
+    }
+
+    index, isIndex := literal.Type.(*ast.IndexExpr)
+    if false == isIndex {
+        return false
+    }
+
+    switch typeExpression := index.X.(type) {
+    case *ast.SelectorExpr:
+        return "Rule" == typeExpression.Sel.Name
+    case *ast.Ident:
+        return "Rule" == typeExpression.Name
+    }
+
+    return false
+}
+
+func TestRule_NoExportedPackageLevelVariableHoldsARuleLiteral(t *testing.T) {
+    found := make([]string, 0)
+    walked := 0
+
+    for _, root := range ruleWalkRoots {
+        if _, statErr := os.Stat(root); nil != statErr {
+            continue
+        }
+
+        walkErr := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+            if nil != err {
+                return err
+            }
+
+            if true == entry.IsDir() {
+                if "testdata" == entry.Name() || "vendor" == entry.Name() || (strings.HasPrefix(entry.Name(), "v") && "v4" != entry.Name() && 2 == len(entry.Name()) && "." != path) {
+                    return filepath.SkipDir
+                }
+
+                return nil
+            }
+
+            if false == strings.HasSuffix(path, ".go") || true == strings.HasSuffix(path, "_test.go") || false == strings.Contains(filepath.ToSlash(path), "/v4/") && ".." != root {
+                return nil
+            }
+
+            parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+            if nil != parseErr {
+                return parseErr
+            }
+
+            walked++
+
+            for _, declaration := range parsed.Decls {
+                general, isGeneral := declaration.(*ast.GenDecl)
+                if false == isGeneral || token.VAR != general.Tok {
+                    continue
+                }
+
+                for _, specification := range general.Specs {
+                    valueSpecification := specification.(*ast.ValueSpec)
+                    for index, name := range valueSpecification.Names {
+                        if true == name.IsExported() && index < len(valueSpecification.Values) && true == isBoundRuleLiteral(valueSpecification.Values[index]) {
+                            found = append(found, path+":"+name.Name)
+                        }
+                    }
+                }
+            }
+
+            return nil
+        })
+        if nil != walkErr {
+            t.Fatalf("walk %s: %v", root, walkErr)
+        }
+    }
+
+    if 0 == walked {
+        t.Fatalf("expected the walk to parse the fourth major's sources")
+    }
+
+    if 0 != len(found) {
+        t.Fatalf("expected every exported rule to be a function answering it, found variables %v", found)
     }
 }

@@ -77,7 +77,7 @@ func namedStorageBound(requestContext context.Context, callContext context.Conte
 
     return exception.NewError(
         "the session storage call was cut by its bound",
-        exceptioncontract.Context{"bound": session.StorageTimeoutRule.Name},
+        exceptioncontract.Context{"bound": session.StorageTimeoutRule().Name},
         exception.MarkInfrastructureFailure(err),
     )
 }

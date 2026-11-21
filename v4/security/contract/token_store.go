@@ -14,10 +14,12 @@ type TokenStore interface {
 }
 
 /* TokenTtlRule is the reading every token store gives the ttl of a Put: a value of at least 1s, or unlimited for a token kept until it is deleted or revoked. It has no default, since a stored token declares how long it is honoured, so ResolveTokenTtl refuses an absent ttl before the rule is consulted. */
-var TokenTtlRule = bound.Rule[time.Duration]{
-    Name:              "RevocableTokenStore.Put.ttl",
-    Minimum:           bound.TtlMinimum,
-    UnlimitedAdmitted: true,
+func TokenTtlRule() bound.Rule[time.Duration] {
+    return bound.Rule[time.Duration]{
+        Name:              "RevocableTokenStore.Put.ttl",
+        Minimum:           bound.TtlMinimum,
+        UnlimitedAdmitted: true,
+    }
 }
 
 /* ResolveTokenTtl decides the ttl of a Put against TokenTtlRule and answers the expiry to apply, 0 for a token with none; an absent ttl and a value below the minimum are refused, naming the ttl. */
@@ -26,13 +28,13 @@ func ResolveTokenTtl(ttl bound.Duration) (time.Duration, error) {
         return 0, exception.NewError(
             "the token ttl is required",
             exceptioncontract.Context{
-                "field": TokenTtlRule.Name,
+                "field": TokenTtlRule().Name,
             },
             nil,
         )
     }
 
-    resolved, err := bound.Resolve(ttl, TokenTtlRule)
+    resolved, err := bound.Resolve(ttl, TokenTtlRule())
     if nil != err {
         return 0, err
     }

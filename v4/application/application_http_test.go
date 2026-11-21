@@ -1916,8 +1916,8 @@ func TestBootHttpPipeline_RefusesAManagerDeclaringAStorageTimeoutTheRuleRefusesI
     }()
 
     exceptionErr, isExceptionErr := recovered.(*exception.Error)
-    if false == isExceptionErr || "the session manager declares a storage timeout the rule refuses" != exceptionErr.Error() || session.StorageTimeoutRule.Name != exceptionErr.Context()["field"] {
-        t.Fatalf("expected the boot refused naming %s, got %v", session.StorageTimeoutRule.Name, recovered)
+    if false == isExceptionErr || "the session manager declares a storage timeout the rule refuses" != exceptionErr.Error() || session.StorageTimeoutRule().Name != exceptionErr.Context()["field"] {
+        t.Fatalf("expected the boot refused naming %s, got %v", session.StorageTimeoutRule().Name, recovered)
     }
 
     if containercontract.KindBoot != probeKind {

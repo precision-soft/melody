@@ -967,7 +967,7 @@ func TestRedisTokenStore_PutRefusesAnAbsentTtlAndOneUnderASecond(t *testing.T) {
         "sub-second": bound.Of(time.Second - time.Nanosecond),
     } {
         putErr := store.Put(newTokenStoreRuntime(), "token-bad-ttl", securitycontract.Claims{UserIdentifier: "alice"}, ttl)
-        if nil == putErr || securitycontract.TokenTtlRule.Name != exception.LogContext(putErr, exception.LogContextConfig{})["field"] || true == exception.AnswersUnavailable(putErr) {
+        if nil == putErr || securitycontract.TokenTtlRule().Name != exception.LogContext(putErr, exception.LogContextConfig{})["field"] || true == exception.AnswersUnavailable(putErr) {
             t.Fatalf("a %s ttl fell through to a store, where a lapsed remaining lifetime must be refused unmarked naming the ttl, got %v", name, putErr)
         }
     }

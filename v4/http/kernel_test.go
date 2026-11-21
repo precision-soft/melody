@@ -5765,7 +5765,7 @@ func TestKernel_ALogoutWhoseDeleteWasCutAnswers503AndKeepsTheCookie(t *testing.T
     }
 
     recordContext, recorded := recordingLogger.errorContextFor("failed to delete session")
-    if false == recorded || session.StorageTimeoutRule.Name != recordContext["bound"] {
+    if false == recorded || session.StorageTimeoutRule().Name != recordContext["bound"] {
         t.Fatalf("expected one error record of the failed delete naming the bound, got %v", recordContext)
     }
 }

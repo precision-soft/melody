@@ -373,7 +373,7 @@ A `Lazy` or `LazyByType` handle built over the container, or over the resolver a
 
 ### Constructors and helpers (`container`)
 
-- [`NewContainer(config ContainerConfig) containercontract.Container`](../../container/container.go), [`ContainerConfig`](../../container/container.go), [`CreationWaitersRule`, `DefaultCreationWaiters`](../../container/container.go)
+- [`NewContainer(config ContainerConfig) containercontract.Container`](../../container/container.go), [`ContainerConfig`](../../container/container.go), [`CreationWaitersRule()`, `DefaultCreationWaiters`](../../container/container.go)
 - Typed registration:
     - [`Register[T]`](../../container/container_register.go)
     - [`MustRegister[T]`](../../container/container_register.go)

@@ -528,7 +528,7 @@ func TestNewInMemoryTokenStore_ANilClockIsTheSystemClock(t *testing.T) {
 func TestInMemoryTokenStore_PutRefusesAnAbsentTtlAndOneUnderASecond(t *testing.T) {
     for _, ttl := range []bound.Duration{{}, bound.Of(time.Second - time.Nanosecond), bound.Of(time.Duration(0)), bound.Of(-time.Second)} {
         putErr := NewInMemoryTokenStore(InMemoryTokenStoreConfig{}).Put(newTestRuntime(), "tok", securitycontract.Claims{UserIdentifier: "u1"}, ttl)
-        expectErrorNamingField(t, putErr, securitycontract.TokenTtlRule.Name)
+        expectErrorNamingField(t, putErr, securitycontract.TokenTtlRule().Name)
 
         if true == exception.AnswersUnavailable(putErr) {
             t.Fatalf("expected a refused ttl to be an unmarked error, got %v", putErr)

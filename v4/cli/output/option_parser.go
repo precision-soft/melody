@@ -60,9 +60,9 @@ func NormalizeOption(option Option) (Option, error) {
         limit bound.Count
         rule  bound.Rule[int]
     }{
-        {limit: normalized.Limit, rule: OptionLimitRule},
-        {limit: normalized.Offset, rule: OptionOffsetRule},
-        {limit: normalized.TableMaxWidth, rule: OptionTableMaxWidthRule},
+        {limit: normalized.Limit, rule: OptionLimitRule()},
+        {limit: normalized.Offset, rule: OptionOffsetRule()},
+        {limit: normalized.TableMaxWidth, rule: OptionTableMaxWidthRule()},
     } {
         if _, resolveErr := bound.Resolve(field.limit, field.rule); nil != resolveErr {
             return Option{}, resolveErr

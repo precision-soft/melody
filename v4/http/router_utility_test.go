@@ -3014,7 +3014,7 @@ func TestWriteResponse_ASaveCutByTheStorageBoundIs503EvenUnmarked(t *testing.T) 
     }
 
     recordContext, recorded := recordingLogger.errorContextFor("failed to save session")
-    if false == recorded || session.StorageTimeoutRule.Name != recordContext["bound"] {
+    if false == recorded || session.StorageTimeoutRule().Name != recordContext["bound"] {
         t.Fatalf("expected the record to name the bound, got %v", recordContext)
     }
 }
@@ -3053,7 +3053,7 @@ func TestWriteResponse_ADeleteCutByTheStorageBoundIs503EvenUnmarkedAndNamesTheBo
     }
 
     recordContext, recorded := recordingLogger.errorContextFor("failed to delete session")
-    if false == recorded || session.StorageTimeoutRule.Name != recordContext["bound"] {
+    if false == recorded || session.StorageTimeoutRule().Name != recordContext["bound"] {
         t.Fatalf("expected the record to name the bound, got %v", recordContext)
     }
 }

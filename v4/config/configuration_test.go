@@ -938,7 +938,7 @@ func TestConfigurationTeardownTimeoutIsAbsentWhenLeftOut(t *testing.T) {
         t.Fatalf("expected the teardown timeout absent, got %v", configuration.Kernel().TeardownTimeout())
     }
 
-    resolved, resolveErr := bound.Resolve(configuration.Kernel().TeardownTimeout(), TeardownTimeoutRule)
+    resolved, resolveErr := bound.Resolve(configuration.Kernel().TeardownTimeout(), TeardownTimeoutRule())
     if nil != resolveErr || DefaultTeardownTimeout != resolved.Value {
         t.Fatalf("expected the rule to default it to %v, got %+v (%v)", DefaultTeardownTimeout, resolved, resolveErr)
     }

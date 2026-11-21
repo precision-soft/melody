@@ -242,7 +242,7 @@ func refuseSessionStorageTimeout(bootRuntime containercontract.Runtime) error {
             "the session manager declares a storage timeout the rule refuses",
             exceptioncontract.Context{
                 "service": session.ServiceSessionManager,
-                "field":   session.StorageTimeoutRule.Name,
+                "field":   session.StorageTimeoutRule().Name,
             },
             timeoutErr,
         )

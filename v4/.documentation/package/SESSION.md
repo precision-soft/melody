@@ -162,7 +162,7 @@ The returned session is a **new object marked modified**, and the one passed in 
 
 #### Functions and variables
 
-- [`var TtlRule`](../../session/contract/ttl.go) — the reading every storage gives the ttl of a `Save`: at least 1s, unlimited admitted, no default
+- [`var TtlRule()`](../../session/contract/ttl.go) — the reading every storage gives the ttl of a `Save`: at least 1s, unlimited admitted, no default
 - [`func ResolveTtl(ttl bound.Duration) (time.Duration, error)`](../../session/contract/ttl.go) — the expiry a storage applies, 0 for unlimited, an absent ttl and one below the minimum refused naming the ttl
 
 ### Types
@@ -196,8 +196,8 @@ The returned session is a **new object marked modified**, and the one passed in 
 
 ### Functions and variables
 
-- [`func ResolveStorageTimeout(manager sessioncontract.Manager) (bound.Resolved[time.Duration], error)`](../../session/manager.go) — judges the bound a manager declares by `StorageTimeoutRule`: absent is the default, a value the rule refuses is an error naming the field, a nil manager refused
-- [`var StorageTimeoutRule`](../../session/manager.go) — the rule of `ManagerConfig.StorageTimeout`: 5s by default, at least 1ms, unlimited admitted
+- [`func ResolveStorageTimeout(manager sessioncontract.Manager) (bound.Resolved[time.Duration], error)`](../../session/manager.go) — judges the bound a manager declares by `StorageTimeoutRule()`: absent is the default, a value the rule refuses is an error naming the field, a nil manager refused
+- [`var StorageTimeoutRule()`](../../session/manager.go) — the rule of `ManagerConfig.StorageTimeout`: 5s by default, at least 1ms, unlimited admitted
 
 ### Container helpers
 

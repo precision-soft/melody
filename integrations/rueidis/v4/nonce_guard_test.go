@@ -47,7 +47,7 @@ func TestRedisNonceGuard_RefusesAnAbsentSubMillisecondOrUnlimitedTtl(t *testing.
 
     for _, ttl := range []bound.Duration{{}, bound.Of(time.Duration(0)), bound.Of(time.Microsecond), bound.UnlimitedDuration()} {
         seen, rememberErr := guard.Remember(newTokenStoreRuntime(), nonce, ttl)
-        if true == seen || nil == rememberErr || securitycontract.NonceTtlRule.Name != exception.LogContext(rememberErr, exception.LogContextConfig{})["field"] {
+        if true == seen || nil == rememberErr || securitycontract.NonceTtlRule().Name != exception.LogContext(rememberErr, exception.LogContextConfig{})["field"] {
             t.Fatalf("expected the ttl %v to be refused naming the ttl, got seen=%t err=%v", ttl, seen, rememberErr)
         }
     }
