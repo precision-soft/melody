@@ -54,7 +54,7 @@ transport := mailer.NewSmtpTransport(mailer.SmtpConfig{
 
 mailerInstance := mailer.NewManager(transport)
 
-sendErr := mailerInstance.Send(runtimeInstance, mailercontract.Message{
+receipt, sendErr := mailerInstance.Send(runtimeInstance, mailercontract.Message{
     From:    mailercontract.Address{Name: "Shop", Email: "shop@example.com"},
     To:      []mailercontract.Address{{Email: "ada@example.com"}},
     Subject: "Welcome",
@@ -91,8 +91,9 @@ Because the deadline is re-armed per step and per payload chunk, `Timeout` measu
 
 ### Contracts (`mailer/contract`)
 
-- [`Mailer`](../../mailer/contract/mailer.go)
-- [`Transport`](../../mailer/contract/mailer.go)
+- [`Mailer`](../../mailer/contract/mailer.go) — `Send(runtime, message) (Receipt, error)`, the transport's receipt, the zero one beside any error
+- [`Transport`](../../mailer/contract/mailer.go) — `Send(runtime, message) (Receipt, error)`
+- [`Receipt`](../../mailer/contract/mailer.go) — `MessageId`, the identifier the transport gave the message: the smtp transport answers the `Message-ID` it wrote, the caller's own header trimmed when it set one, else the one it minted; the in-memory and log transports build no wire message and answer the zero receipt
 - [`Message`](../../mailer/contract/mailer.go)
 - [`Address`](../../mailer/contract/mailer.go)
 - [`Attachment`](../../mailer/contract/mailer.go) — `Filename`, `ContentType`, `Content`, and `ContentId` (a non-empty `ContentId` embeds the attachment inline for `<img src="cid:...">`)

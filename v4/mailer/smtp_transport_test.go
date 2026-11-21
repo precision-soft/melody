@@ -41,7 +41,7 @@ func TestSmtpTransport_RequireAuthenticationFailsWhenServerHasNoAuthExtension(t 
         RequireAuthentication: true,
     })
 
-    sendErr := transport.Send(testRuntime(), mailercontract.Message{
+    _, sendErr := transport.Send(testRuntime(), mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
         To:      []mailercontract.Address{{Email: "ada@example.com"}},
         Subject: "Hello",
@@ -70,7 +70,7 @@ func TestSmtpTransport_RequireAuthenticationFailsWhenNoUsernameConfigured(t *tes
         RequireAuthentication: true,
     })
 
-    sendErr := transport.Send(testRuntime(), mailercontract.Message{
+    _, sendErr := transport.Send(testRuntime(), mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
         To:      []mailercontract.Address{{Email: "ada@example.com"}},
         Subject: "Hello",
@@ -142,7 +142,7 @@ func TestSmtpTransport_AuthSucceedsWhenHostDiffersFromAddress(t *testing.T) {
         TlsConfig:             &tls.Config{InsecureSkipVerify: true},
     })
 
-    sendErr := transport.Send(testRuntime(), mailercontract.Message{
+    _, sendErr := transport.Send(testRuntime(), mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
         To:      []mailercontract.Address{{Email: "ada@example.com"}},
         Subject: "Hello",
@@ -291,12 +291,12 @@ func TestSmtpTransport_DialTimesOutWhenTheServerNeverGreets(t *testing.T) {
 
     finished := make(chan error, 1)
     go func() {
-        finished <- transport.Send(testRuntime(), mailercontract.Message{
+        finished <- sendErrorOf(transport.Send(testRuntime(), mailercontract.Message{
             From:    mailercontract.Address{Email: "shop@example.com"},
             To:      []mailercontract.Address{{Email: "ada@example.com"}},
             Subject: "Hello",
             Text:    "body",
-        })
+        }))
     }()
 
     <-accepted
@@ -346,12 +346,12 @@ func TestSmtpTransport_CancellationInterruptsTheGreetingRead(t *testing.T) {
 
     finished := make(chan error, 1)
     go func() {
-        finished <- transport.Send(testRuntimeWithContext(ctx), mailercontract.Message{
+        finished <- sendErrorOf(transport.Send(testRuntimeWithContext(ctx), mailercontract.Message{
             From:    mailercontract.Address{Email: "shop@example.com"},
             To:      []mailercontract.Address{{Email: "ada@example.com"}},
             Subject: "Hello",
             Text:    "body",
-        })
+        }))
     }()
 
     <-accepted
@@ -392,12 +392,12 @@ func TestSmtpTransport_TimesOutWhenServerStallsMidSession(t *testing.T) {
 
     finished := make(chan error, 1)
     go func() {
-        finished <- transport.Send(testRuntime(), mailercontract.Message{
+        finished <- sendErrorOf(transport.Send(testRuntime(), mailercontract.Message{
             From:    mailercontract.Address{Email: "shop@example.com"},
             To:      []mailercontract.Address{{Email: "ada@example.com"}},
             Subject: "Hello",
             Text:    "body",
-        })
+        }))
     }()
 
     select {
@@ -434,12 +434,12 @@ func TestSmtpTransport_ContextCancellationAbortsSession(t *testing.T) {
 
     finished := make(chan error, 1)
     go func() {
-        finished <- transport.Send(testRuntimeWithContext(ctx), mailercontract.Message{
+        finished <- sendErrorOf(transport.Send(testRuntimeWithContext(ctx), mailercontract.Message{
             From:    mailercontract.Address{Email: "shop@example.com"},
             To:      []mailercontract.Address{{Email: "ada@example.com"}},
             Subject: "Hello",
             Text:    "body",
-        })
+        }))
     }()
 
     go func() {
@@ -483,12 +483,12 @@ func TestSmtpTransport_ImplicitTlsTimesOutWhenServerStallsAfterGreeting(t *testi
 
     finished := make(chan error, 1)
     go func() {
-        finished <- transport.Send(testRuntime(), mailercontract.Message{
+        finished <- sendErrorOf(transport.Send(testRuntime(), mailercontract.Message{
             From:    mailercontract.Address{Email: "shop@example.com"},
             To:      []mailercontract.Address{{Email: "ada@example.com"}},
             Subject: "Hello",
             Text:    "body",
-        })
+        }))
     }()
 
     select {
@@ -537,7 +537,7 @@ func TestSmtpTransport_SendWithNilRuntimeReturnsError(t *testing.T) {
         Address: listener.Addr().String(),
     })
 
-    sendErr := transport.Send(nil, mailercontract.Message{
+    _, sendErr := transport.Send(nil, mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
         To:      []mailercontract.Address{{Email: "ada@example.com"}},
         Subject: "Hello",
@@ -606,12 +606,12 @@ func TestSmtpTransport_SendsLargePayloadToSlowButSteadyReader(t *testing.T) {
 
     finished := make(chan error, 1)
     go func() {
-        finished <- transport.Send(testRuntime(), mailercontract.Message{
+        finished <- sendErrorOf(transport.Send(testRuntime(), mailercontract.Message{
             From:    mailercontract.Address{Email: "shop@example.com"},
             To:      []mailercontract.Address{{Email: "ada@example.com"}},
             Subject: "Hello",
             Text:    strings.Repeat("melody carries a large body across a slow but steady link\n", 140000),
-        })
+        }))
     }()
 
     select {
@@ -646,12 +646,12 @@ func TestSmtpTransport_TimesOutWhenServerStopsReadingMidPayload(t *testing.T) {
 
     finished := make(chan error, 1)
     go func() {
-        finished <- transport.Send(testRuntime(), mailercontract.Message{
+        finished <- sendErrorOf(transport.Send(testRuntime(), mailercontract.Message{
             From:    mailercontract.Address{Email: "shop@example.com"},
             To:      []mailercontract.Address{{Email: "ada@example.com"}},
             Subject: "Hello",
             Text:    strings.Repeat("melody carries a large body across a slow but steady link\n", 140000),
-        })
+        }))
     }()
 
     select {
@@ -1019,12 +1019,12 @@ func TestSmtpTransport_SlowDotAcknowledgmentSucceedsWithinItsOwnCeiling(t *testi
 
     finished := make(chan error, 1)
     go func() {
-        finished <- transport.Send(testRuntime(), mailercontract.Message{
+        finished <- sendErrorOf(transport.Send(testRuntime(), mailercontract.Message{
             From:    mailercontract.Address{Email: "shop@example.com"},
             To:      []mailercontract.Address{{Email: "ada@example.com"}},
             Subject: "Hello",
             Text:    "body",
-        })
+        }))
     }()
 
     select {
@@ -1101,12 +1101,12 @@ func TestSmtpTransport_CancelledContextAbortsDial(t *testing.T) {
 
     finished := make(chan error, 1)
     go func() {
-        finished <- transport.Send(testRuntimeWithContext(ctx), mailercontract.Message{
+        finished <- sendErrorOf(transport.Send(testRuntimeWithContext(ctx), mailercontract.Message{
             From:    mailercontract.Address{Email: "shop@example.com"},
             To:      []mailercontract.Address{{Email: "ada@example.com"}},
             Subject: "Hello",
             Text:    "body",
-        })
+        }))
     }()
 
     select {
@@ -1135,7 +1135,7 @@ func TestSmtpTransport_ConfiguredCredentialsFailClosedWhenAuthIsNotAdvertised(t 
         Password: "pass",
     })
 
-    sendErr := transport.Send(testRuntime(), mailercontract.Message{
+    _, sendErr := transport.Send(testRuntime(), mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
         To:      []mailercontract.Address{{Email: "ada@example.com"}},
         Subject: "Hello",
@@ -1156,7 +1156,7 @@ func TestSmtpTransport_SendWithTypedNilRuntimeReturnsError(t *testing.T) {
     /* a typed-nil runtime walks straight through a plain == nil comparison and dereferences at the dial; the IsNilInterface guard must answer the same clean refusal the untyped nil gets */
     var typedNil *nilRuntime
 
-    sendErr := transport.Send(typedNil, mailercontract.Message{
+    _, sendErr := transport.Send(typedNil, mailercontract.Message{
         From: mailercontract.Address{Email: "shop@example.com"},
         To:   []mailercontract.Address{{Email: "ada@example.com"}},
     })
@@ -1213,7 +1213,7 @@ func TestSmtpTransport_MailCommandFailureNamesTheCommandNotAVerdict(t *testing.T
 
     transport := NewSmtpTransport(SmtpConfig{Address: listener.Addr().String()})
 
-    sendErr := transport.Send(testRuntime(), mailercontract.Message{
+    _, sendErr := transport.Send(testRuntime(), mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
         To:      []mailercontract.Address{{Email: "ada@example.com"}},
         Subject: "Hello",
@@ -1326,7 +1326,7 @@ func TestSmtpTransport_QuitFailureWarningCarriesTheCause(t *testing.T) {
 
     transport := NewSmtpTransport(SmtpConfig{Address: listener.Addr().String()})
 
-    sendErr := transport.Send(runtimeInstance, mailercontract.Message{
+    _, sendErr := transport.Send(runtimeInstance, mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
         To:      []mailercontract.Address{{Email: "ada@example.com"}},
         Subject: "Hello",
@@ -1407,7 +1407,7 @@ func TestSmtpTransport_EnvelopeRefusalsCarryTheAddressAndTheDotVerdictIsNamed(t 
         go serveMailRejectingSmtp(listener)
 
         transport := NewSmtpTransport(SmtpConfig{Address: listener.Addr().String()})
-        sendErr := transport.Send(testRuntime(), mailercontract.Message{
+        _, sendErr := transport.Send(testRuntime(), mailercontract.Message{
             From:    mailercontract.Address{Email: "shop@example.com"},
             To:      []mailercontract.Address{{Email: "ada@example.com"}},
             Subject: "Hello",
@@ -1434,7 +1434,7 @@ func TestSmtpTransport_EnvelopeRefusalsCarryTheAddressAndTheDotVerdictIsNamed(t 
         go serveRcptRejectingSmtp(listener)
 
         transport := NewSmtpTransport(SmtpConfig{Address: listener.Addr().String()})
-        sendErr := transport.Send(testRuntime(), mailercontract.Message{
+        _, sendErr := transport.Send(testRuntime(), mailercontract.Message{
             From:    mailercontract.Address{Email: "shop@example.com"},
             To:      []mailercontract.Address{{Email: "ada@example.com"}},
             Subject: "Hello",
@@ -1461,7 +1461,7 @@ func TestSmtpTransport_EnvelopeRefusalsCarryTheAddressAndTheDotVerdictIsNamed(t 
         go serveDotRejectingSmtp(listener)
 
         transport := NewSmtpTransport(SmtpConfig{Address: listener.Addr().String()})
-        sendErr := transport.Send(testRuntime(), mailercontract.Message{
+        _, sendErr := transport.Send(testRuntime(), mailercontract.Message{
             From:    mailercontract.Address{Email: "shop@example.com"},
             To:      []mailercontract.Address{{Email: "ada@example.com"}},
             Subject: "Hello",
@@ -1509,7 +1509,7 @@ func TestSmtpTransport_SendsTheConfiguredLocalNameInTheHello(t *testing.T) {
         hello <- strings.TrimSpace(line)
     }()
 
-    _ = NewSmtpTransport(SmtpConfig{Address: listener.Addr().String(), LocalName: "mail.example.com", Timeout: bound.Of(time.Second)}).Send(testRuntime(), mailercontract.Message{
+    _, _ = NewSmtpTransport(SmtpConfig{Address: listener.Addr().String(), LocalName: "mail.example.com", Timeout: bound.Of(time.Second)}).Send(testRuntime(), mailercontract.Message{
         From: mailercontract.Address{Email: "shop@example.com"},
         To:   []mailercontract.Address{{Email: "ada@example.com"}},
         Text: "body",
@@ -1526,7 +1526,7 @@ func TestSmtpTransport_SendsTheConfiguredLocalNameInTheHello(t *testing.T) {
 }
 
 func TestSmtpTransport_RefusesAnAddressThatIsNotABareAddrSpecBeforeTheDial(t *testing.T) {
-    sendErr := NewSmtpTransport(SmtpConfig{Address: "127.0.0.1:1"}).Send(testRuntime(), mailercontract.Message{
+    _, sendErr := NewSmtpTransport(SmtpConfig{Address: "127.0.0.1:1"}).Send(testRuntime(), mailercontract.Message{
         From: mailercontract.Address{Email: "shop@example.com"},
         To:   []mailercontract.Address{{Email: "a@x.com>, <b@y.com"}},
         Text: "body",
@@ -1534,5 +1534,92 @@ func TestSmtpTransport_RefusesAnAddressThatIsNotABareAddrSpecBeforeTheDial(t *te
 
     if nil == sendErr || false == strings.Contains(sendErr.Error(), "mailer message") {
         t.Fatalf("expected the address refused by the transport itself, got %v", sendErr)
+    }
+}
+
+/* serveCapturingSmtp accepts one message and hands its DATA body to the channel */
+func serveCapturingSmtp(listener net.Listener, captured chan<- string) {
+    connection, acceptErr := listener.Accept()
+    if nil != acceptErr {
+        return
+    }
+    defer connection.Close()
+
+    reader := bufio.NewReader(connection)
+    writeLine := func(line string) {
+        connection.Write([]byte(line + "\r\n"))
+    }
+
+    writeLine("220 fake ESMTP")
+
+    for {
+        line, readErr := reader.ReadString('\n')
+        if nil != readErr {
+            return
+        }
+
+        command := strings.ToUpper(strings.TrimSpace(line))
+        switch {
+        case strings.HasPrefix(command, "EHLO") || strings.HasPrefix(command, "HELO"):
+            writeLine("250 fake greets you")
+        case strings.HasPrefix(command, "DATA"):
+            writeLine("354 end with .")
+
+            body := strings.Builder{}
+            for {
+                dataLine, dataErr := reader.ReadString('\n')
+                if nil != dataErr {
+                    return
+                }
+                if ".\r\n" == dataLine {
+                    break
+                }
+                body.WriteString(dataLine)
+            }
+
+            captured <- body.String()
+            writeLine("250 queued")
+        case strings.HasPrefix(command, "QUIT"):
+            writeLine("221 bye")
+            return
+        default:
+            writeLine("250 ok")
+        }
+    }
+}
+
+func TestSmtpTransport_TheReceiptCarriesTheMessageIdTheServerReceived(t *testing.T) {
+    for name, headers := range map[string]map[string]string{
+        "minted":       nil,
+        "caller's own": {"Message-ID": " <own@example.com> "},
+    } {
+        listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+        if nil != listenErr {
+            t.Fatalf("listen: %v", listenErr)
+        }
+
+        captured := make(chan string, 1)
+        go serveCapturingSmtp(listener, captured)
+
+        receipt, sendErr := NewSmtpTransport(SmtpConfig{Address: listener.Addr().String(), Host: "127.0.0.1", Timeout: bound.Of(2 * time.Second)}).Send(testRuntime(), mailercontract.Message{
+            From:    mailercontract.Address{Email: "shop@example.com"},
+            To:      []mailercontract.Address{{Email: "ada@example.com"}},
+            Subject: "Hello",
+            Text:    "body",
+            Headers: headers,
+        })
+        listener.Close()
+        if nil != sendErr {
+            t.Fatalf("%s: unexpected send error: %v", name, sendErr)
+        }
+
+        body := <-captured
+        if "" == receipt.MessageId || false == strings.Contains(body, "Message-ID: "+receipt.MessageId+"\r\n") {
+            t.Fatalf("%s: expected the receipt's id %q as the Message-ID the server received, got:\n%s", name, receipt.MessageId, body)
+        }
+
+        if "caller's own" == name && "<own@example.com>" != receipt.MessageId {
+            t.Fatalf("expected the caller's own Message-ID, got %q", receipt.MessageId)
+        }
     }
 }

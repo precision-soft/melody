@@ -63,7 +63,7 @@ func (instance *MailSendCommand) Run(
         return decodeErr
     }
 
-    sendErr := instance.mailer.Send(runtimeInstance, melodymailercontract.Message{
+    receipt, sendErr := instance.mailer.Send(runtimeInstance, melodymailercontract.Message{
         From:    melodymailercontract.Address{Name: "Melody Shop", Email: "shop@example.com"},
         To:      []melodymailercontract.Address{{Email: to}},
         Subject: subject,
@@ -84,6 +84,10 @@ func (instance *MailSendCommand) Run(
     }
 
     _, _ = fmt.Fprintln(commandContext.Writer, "sent email to", to)
+
+    if "" != receipt.MessageId {
+        _, _ = fmt.Fprintln(commandContext.Writer, "message id:", receipt.MessageId)
+    }
 
     return nil
 }

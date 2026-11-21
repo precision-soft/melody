@@ -477,6 +477,14 @@ The six `service.<module>` names of a module's principal service, `service.cache
 
 **Remedy.** A listener whose failure must keep every listener behind it from running declares `FailureEndsDispatch: true`. Read every failure through `errors.Is` / `errors.As`, or through `Unwrap() []error` on a joined answer. A listener that answers a request returns nil.
 
+### Mailer: `Send` answers a receipt
+
+**What changed.** [`mailercontract.Mailer`](../mailer/contract/mailer.go)'s and `Transport`'s `Send` answer `(Receipt, error)`: `Receipt.MessageId` is the `Message-ID` the smtp transport wrote, the caller's own header trimmed or the one it minted, one value with the header; the in-memory and log transports answer the zero receipt; `Manager.Send` answers its transport's, the zero receipt beside any error. A caller's `Message-ID` header is written trimmed.
+
+**Symptom.** `assignment mismatch: 1 variable but mailer.Send returns 2 values`; `*T does not implement mailercontract.Transport (wrong type for method Send)`.
+
+**Remedy.** `receipt, sendErr := mailer.Send(runtimeInstance, message)`, or `_, sendErr :=`; a transport of the application's own answers `mailercontract.Receipt{MessageId: id}` or the zero receipt.
+
 ### Clock: a clock arms timers
 
 **What changed.** [`clockcontract.Clock`](../clock/contract/clock.go) carries `NewTimer(duration) Timer`, a `Timer` of `Channel()`, `Stop() bool` and `Reset(duration) bool` answering as `time.Timer`'s do. The frozen clock's timer runs on wall time and sends its frozen `Now`, as its ticker does.

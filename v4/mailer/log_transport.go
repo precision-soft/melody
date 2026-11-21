@@ -18,8 +18,8 @@ type LogTransport struct {
     logger loggingcontract.Logger
 }
 
-/* Send prefers the logger supplied at construction; when it is nil the runtime's logger is resolved quietly, and with neither the send is a no-op. */
-func (instance *LogTransport) Send(runtimeInstance containercontract.Runtime, message mailercontract.Message) error {
+/* Send prefers the logger supplied at construction; when it is nil the runtime's logger is resolved quietly, and with neither the send is a no-op. It builds no wire message, so it answers the zero receipt. */
+func (instance *LogTransport) Send(runtimeInstance containercontract.Runtime, message mailercontract.Message) (mailercontract.Receipt, error) {
     logger := instance.logger
     if true == internal.IsNilInterface(logger) {
         resolved, _ := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, logging.ServiceLogger)
@@ -27,7 +27,7 @@ func (instance *LogTransport) Send(runtimeInstance containercontract.Runtime, me
     }
 
     if true == internal.IsNilInterface(logger) {
-        return nil
+        return mailercontract.Receipt{}, nil
     }
 
     logger.Info(
@@ -43,7 +43,7 @@ func (instance *LogTransport) Send(runtimeInstance containercontract.Runtime, me
         },
     )
 
-    return nil
+    return mailercontract.Receipt{}, nil
 }
 
 /* describeAttachments summarizes each attachment as metadata only, never its content, and answers nil for a message with no attachments. */

@@ -10,6 +10,7 @@ import (
     "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    mailercontract "github.com/precision-soft/melody/v4/mailer/contract"
 )
 
 func testRuntime() containercontract.Runtime {
@@ -105,4 +106,9 @@ func testRuntimeWithRecordingLogger() (containercontract.Runtime, *mailerRecordi
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
 
     return runtime.NewRun(context.Background(), scope), logger
+}
+
+/* sendErrorOf keeps the error of a send whose receipt the test does not read */
+func sendErrorOf(receipt mailercontract.Receipt, sendErr error) error {
+    return sendErr
 }

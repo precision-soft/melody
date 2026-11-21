@@ -45,6 +45,25 @@ var structuredIdentifierHeaders = map[string]struct{}{
 }
 
 func RenderMessage(message mailercontract.Message) ([]byte, error) {
+    return renderMessage(message, messageIdOf(message))
+}
+
+/* messageIdOf answers the Message-ID the wire message carries: the caller's own header, trimmed, when it set one, else one minted for the sender, so the header and a receipt are one value. */
+func messageIdOf(message mailercontract.Message) string {
+    for key, value := range message.Headers {
+        if "message-id" == strings.ToLower(strings.TrimSpace(key)) {
+            return strings.TrimSpace(value)
+        }
+    }
+
+    if "" == message.From.Email {
+        return ""
+    }
+
+    return newMessageId(message.From.Email)
+}
+
+func renderMessage(message mailercontract.Message, messageId string) ([]byte, error) {
     if "" == message.From.Email {
         return nil, exception.NewError("mailer message has no sender", nil, nil)
     }
@@ -70,7 +89,7 @@ func RenderMessage(message mailercontract.Message) ([]byte, error) {
     writeHeader(&builder, "MIME-Version", "1.0")
 
     if false == hasHeader(message.Headers, "message-id") {
-        writeHeader(&builder, "Message-ID", newMessageId(message.From.Email))
+        writeHeader(&builder, "Message-ID", messageId)
     }
 
     for rawKey, value := range message.Headers {
@@ -87,6 +106,11 @@ func RenderMessage(message mailercontract.Message) ([]byte, error) {
         if _, structured := structuredIdentifierHeaders[normalizedKey]; true == structured {
             if identifierErr := validateStructuredIdentifierHeader(key, value); nil != identifierErr {
                 return nil, identifierErr
+            }
+            /* the Message-ID is written as the receipt answers it, so the header and the receipt are one value */
+            if "message-id" == normalizedKey {
+                writeHeader(&builder, key, messageId)
+                continue
             }
             writeHeader(&builder, key, value)
             continue

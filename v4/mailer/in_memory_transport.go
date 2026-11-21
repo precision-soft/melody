@@ -16,13 +16,14 @@ type InMemoryTransport struct {
     sent  []mailercontract.Message
 }
 
-func (instance *InMemoryTransport) Send(runtimeInstance containercontract.Runtime, message mailercontract.Message) error {
+/* Send records the message and answers the zero receipt: it builds no wire message, so it gives the message no identifier. */
+func (instance *InMemoryTransport) Send(runtimeInstance containercontract.Runtime, message mailercontract.Message) (mailercontract.Receipt, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
     instance.sent = append(instance.sent, message)
 
-    return nil
+    return mailercontract.Receipt{}, nil
 }
 
 func (instance *InMemoryTransport) Sent() []mailercontract.Message {

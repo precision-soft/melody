@@ -23,20 +23,25 @@ type Manager struct {
     transport mailercontract.Transport
 }
 
-func (instance *Manager) Send(runtimeInstance containercontract.Runtime, message mailercontract.Message) error {
+func (instance *Manager) Send(runtimeInstance containercontract.Runtime, message mailercontract.Message) (mailercontract.Receipt, error) {
     if "" == message.From.Email {
-        return exception.NewError("mailer message has no sender", nil, nil)
+        return mailercontract.Receipt{}, exception.NewError("mailer message has no sender", nil, nil)
     }
 
     if false == hasDeliverableRecipient(message) {
-        return exception.NewError("mailer message has no recipients", nil, nil)
+        return mailercontract.Receipt{}, exception.NewError("mailer message has no recipients", nil, nil)
     }
 
     if validationErr := validateAddresses(message); nil != validationErr {
-        return validationErr
+        return mailercontract.Receipt{}, validationErr
     }
 
-    return instance.transport.Send(runtimeInstance, message)
+    receipt, sendErr := instance.transport.Send(runtimeInstance, message)
+    if nil != sendErr {
+        return mailercontract.Receipt{}, sendErr
+    }
+
+    return receipt, nil
 }
 
 func hasDeliverableRecipient(message mailercontract.Message) bool {

@@ -19,14 +19,14 @@ type recordingTransport struct {
     sendErr error
 }
 
-func (instance *recordingTransport) Send(_ melodycontainercontract.Runtime, messageInstance melodymailercontract.Message) error {
+func (instance *recordingTransport) Send(_ melodycontainercontract.Runtime, messageInstance melodymailercontract.Message) (melodymailercontract.Receipt, error) {
     if nil != instance.sendErr {
-        return instance.sendErr
+        return melodymailercontract.Receipt{}, instance.sendErr
     }
 
     instance.sent = append(instance.sent, messageInstance)
 
-    return nil
+    return melodymailercontract.Receipt{}, nil
 }
 
 func runtimeWithMailer(t *testing.T, transport melodymailercontract.Transport) melodycontainercontract.Runtime {

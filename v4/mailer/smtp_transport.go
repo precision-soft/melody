@@ -192,28 +192,34 @@ type SmtpTransport struct {
     localName              string
 }
 
-func (instance *SmtpTransport) Send(runtimeInstance containercontract.Runtime, message mailercontract.Message) error {
+func (instance *SmtpTransport) Send(runtimeInstance containercontract.Runtime, message mailercontract.Message) (mailercontract.Receipt, error) {
     /* the runtime's context drives cancellation, so a nil or typed-nil runtime is refused before the dial */
     if true == internal.IsNilInterface(runtimeInstance) {
-        return exception.NewError("runtime may not be nil", nil, nil)
+        return mailercontract.Receipt{}, exception.NewError("runtime may not be nil", nil, nil)
     }
 
     /* judged here as well as in the manager, since the envelope writes each address between angle brackets as it is */
     if validationErr := validateAddresses(message); nil != validationErr {
-        return validationErr
+        return mailercontract.Receipt{}, validationErr
     }
 
-    payload, renderErr := RenderMessage(message)
+    messageId := messageIdOf(message)
+
+    payload, renderErr := renderMessage(message, messageId)
     if nil != renderErr {
-        return renderErr
+        return mailercontract.Receipt{}, renderErr
     }
 
     recipientList := recipients(message)
     if 0 == len(recipientList) {
-        return exception.NewError("mailer message has no recipients", nil, nil)
+        return mailercontract.Receipt{}, exception.NewError("mailer message has no recipients", nil, nil)
     }
 
-    return instance.deliver(runtimeInstance, message.From.Email, recipientList, payload)
+    if deliverErr := instance.deliver(runtimeInstance, message.From.Email, recipientList, payload); nil != deliverErr {
+        return mailercontract.Receipt{}, deliverErr
+    }
+
+    return mailercontract.Receipt{MessageId: messageId}, nil
 }
 
 func (instance *SmtpTransport) deliver(runtimeInstance containercontract.Runtime, from string, recipientList []string, payload []byte) error {

@@ -30,10 +30,17 @@ type Message struct {
     Attachments []Attachment
 }
 
+/* Receipt is what a delivery answers; fields may be added. */
+type Receipt struct {
+    /* MessageId is the identifier the transport gave the message, empty when it gave none. */
+    MessageId string
+}
+
+/* Mailer sends a message and answers its transport's receipt, the zero receipt beside any error. */
 type Mailer interface {
-    Send(runtimeInstance containercontract.Runtime, message Message) error
+    Send(runtimeInstance containercontract.Runtime, message Message) (Receipt, error)
 }
 
 type Transport interface {
-    Send(runtimeInstance containercontract.Runtime, message Message) error
+    Send(runtimeInstance containercontract.Runtime, message Message) (Receipt, error)
 }

@@ -134,7 +134,7 @@ func TestBuildMailer_WiresTheLogTransportWithoutAnAddress(t *testing.T) {
         return logger, nil
     }, melodycontainer.RegisterOptions{})
 
-    sendErr := module.mailer.Send(melodyruntime.NewRun(context.Background(), containerInstance.NewScope()), melodymailercontract.Message{
+    _, sendErr := module.mailer.Send(melodyruntime.NewRun(context.Background(), containerInstance.NewScope()), melodymailercontract.Message{
         From:    melodymailercontract.Address{Email: "catalog@example.test"},
         To:      []melodymailercontract.Address{{Email: "reader@example.test"}},
         Subject: "welcome",
@@ -216,12 +216,14 @@ func sendThroughBuiltMailer(t *testing.T, environment map[string]string) error {
         return melodylogging.NewNopLogger(), nil
     }, melodycontainer.RegisterOptions{})
 
-    return module.mailer.Send(melodyruntime.NewRun(context.Background(), containerInstance.NewScope()), melodymailercontract.Message{
+    _, sendErr := module.mailer.Send(melodyruntime.NewRun(context.Background(), containerInstance.NewScope()), melodymailercontract.Message{
         From:    melodymailercontract.Address{Email: "catalog@example.test"},
         To:      []melodymailercontract.Address{{Email: "reader@example.test"}},
         Subject: "welcome",
         Text:    "welcome",
     })
+
+    return sendErr
 }
 
 func TestBuildMailer_HandsTheRelayTheConfiguredCredentials(t *testing.T) {

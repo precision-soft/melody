@@ -14,11 +14,11 @@ func TestInMemoryTransport_KeepsWhatItWasSentInOrder(t *testing.T) {
         t.Fatalf("expected a fresh transport to have sent nothing, got %v", transport.Sent())
     }
 
-    if sendErr := transport.Send(nil, mailercontract.Message{Subject: "first"}); nil != sendErr {
+    if _, sendErr := transport.Send(nil, mailercontract.Message{Subject: "first"}); nil != sendErr {
         t.Fatalf("unexpected send error: %v", sendErr)
     }
 
-    if sendErr := transport.Send(nil, mailercontract.Message{Subject: "second"}); nil != sendErr {
+    if _, sendErr := transport.Send(nil, mailercontract.Message{Subject: "second"}); nil != sendErr {
         t.Fatalf("unexpected send error: %v", sendErr)
     }
 
@@ -31,7 +31,7 @@ func TestInMemoryTransport_KeepsWhatItWasSentInOrder(t *testing.T) {
 /* the recorded list is handed out as a copy: a test holding the slice while the application keeps sending would otherwise be reading a backing array the transport appends into under it */
 func TestInMemoryTransport_SentHandsOutACopy(t *testing.T) {
     transport := NewInMemoryTransport()
-    _ = transport.Send(nil, mailercontract.Message{Subject: "first"})
+    _, _ = transport.Send(nil, mailercontract.Message{Subject: "first"})
 
     read := transport.Sent()
     read[0].Subject = "rewritten"
@@ -40,7 +40,7 @@ func TestInMemoryTransport_SentHandsOutACopy(t *testing.T) {
         t.Fatalf("expected the transport to keep its own copy, got %q", transport.Sent()[0].Subject)
     }
 
-    _ = transport.Send(nil, mailercontract.Message{Subject: "second"})
+    _, _ = transport.Send(nil, mailercontract.Message{Subject: "second"})
 
     if 1 != len(read) {
         t.Fatalf("expected the earlier read to stay the length it was, got %v", read)
@@ -58,7 +58,7 @@ func TestInMemoryTransport_IsSafeUnderConcurrentSendAndRead(t *testing.T) {
         go func() {
             defer waitGroup.Done()
 
-            _ = transport.Send(nil, mailercontract.Message{Subject: "concurrent"})
+            _, _ = transport.Send(nil, mailercontract.Message{Subject: "concurrent"})
         }()
 
         go func() {

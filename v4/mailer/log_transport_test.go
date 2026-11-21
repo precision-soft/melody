@@ -58,7 +58,7 @@ func TestLogTransportLogsRecipientsSubjectAndText(t *testing.T) {
     logger := &capturingLogger{}
     transport := NewLogTransport(logger)
 
-    sendErr := transport.Send(testRuntime(), mailercontract.Message{
+    _, sendErr := transport.Send(testRuntime(), mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
         To:      []mailercontract.Address{{Email: "ada@example.com"}},
         Cc:      []mailercontract.Address{{Email: "ops@example.com"}},
@@ -106,7 +106,7 @@ func TestLogTransportSummarizesAttachments(t *testing.T) {
     logger := &capturingLogger{}
     transport := NewLogTransport(logger)
 
-    sendErr := transport.Send(testRuntime(), mailercontract.Message{
+    _, sendErr := transport.Send(testRuntime(), mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
         To:      []mailercontract.Address{{Email: "ada@example.com"}},
         Subject: "Welcome",
@@ -159,7 +159,7 @@ func TestLogTransportOmitsAttachmentsWhenNone(t *testing.T) {
     logger := &capturingLogger{}
     transport := NewLogTransport(logger)
 
-    sendErr := transport.Send(testRuntime(), mailercontract.Message{
+    _, sendErr := transport.Send(testRuntime(), mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
         To:      []mailercontract.Address{{Email: "ada@example.com"}},
         Subject: "Welcome",
@@ -178,7 +178,7 @@ func TestLogTransportOmitsAttachmentsWhenNone(t *testing.T) {
 func TestLogTransportIsNoOpWithoutLogger(t *testing.T) {
     transport := NewLogTransport(nil)
 
-    sendErr := transport.Send(testRuntime(), mailercontract.Message{
+    _, sendErr := transport.Send(testRuntime(), mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
         To:      []mailercontract.Address{{Email: "ada@example.com"}},
         Subject: "Welcome",
@@ -200,7 +200,7 @@ func TestLogTransport_ATypedNilConstructorLoggerFallsThroughToTheRuntimes(t *tes
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, runtimeLogger, container.OverrideOptions{})
     runtimeInstance := runtime.NewRun(context.Background(), scope)
 
-    sendErr := NewLogTransport(absentLogger).Send(runtimeInstance, mailercontract.Message{
+    _, sendErr := NewLogTransport(absentLogger).Send(runtimeInstance, mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
         To:      []mailercontract.Address{{Email: "ada@example.com"}},
         Subject: "Welcome",
@@ -220,7 +220,7 @@ func TestLogTransport_ATypedNilConstructorLoggerFallsThroughToTheRuntimes(t *tes
 func TestLogTransport_ATypedNilLoggerKeepsTheSendASafeNoOp(t *testing.T) {
     var absentLogger *capturingLogger
 
-    sendErr := NewLogTransport(absentLogger).Send(testRuntime(), mailercontract.Message{
+    _, sendErr := NewLogTransport(absentLogger).Send(testRuntime(), mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
         To:      []mailercontract.Address{{Email: "ada@example.com"}},
         Subject: "Welcome",

@@ -19,7 +19,7 @@ func HandleWelcomeEmail(runtimeInstance melodycontainercontract.Runtime, message
         return melodyexception.MarkInfrastructureFailure(resolveErr)
     }
 
-    sendErr := mailer.Send(runtimeInstance, melodymailercontract.Message{
+    _, sendErr := mailer.Send(runtimeInstance, melodymailercontract.Message{
         From:    melodymailercontract.Address{Name: "Melody Shop", Email: "shop@example.com"},
         To:      []melodymailercontract.Address{{Email: messageInstance.Address}},
         Subject: "Welcome to the Melody shop",
