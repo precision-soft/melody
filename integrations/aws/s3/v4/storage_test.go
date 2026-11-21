@@ -1641,3 +1641,38 @@ func TestStorage_PresignedUrlRefusesBeforeSigning(t *testing.T) {
         t.Fatalf("expected no request, got %v", methodList)
     }
 }
+
+func TestStorage_GetSendsTheRangeAsked(t *testing.T) {
+    recorder := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "0123456789")
+    store := recorder.newStorage(t)
+
+    object, getErr := store.Get(newRuntime(), "digits.txt", storagecontract.GetOptions{Range: storagecontract.ByteRange{Offset: 5, Length: 3}})
+    if nil != getErr {
+        t.Fatalf("get: %v", getErr)
+    }
+
+    content, _ := io.ReadAll(object.Body)
+    _ = object.Body.Close()
+
+    if "567" != string(content) || 10 != object.Info.Size {
+        t.Fatalf("expected the three bytes from the offset of an object of 10, got %q of %d", string(content), object.Info.Size)
+    }
+
+    recorder.mutex.Lock()
+    requestList := append([]scriptedObjectRequest(nil), recorder.requestList...)
+    recorder.mutex.Unlock()
+
+    if 2 != len(requestList) || http.MethodHead != requestList[0].method || http.MethodGet != requestList[1].method || "bytes=5-" != requestList[1].rangeHeader {
+        t.Fatalf("expected one HEAD then one GET from the offset, got %+v", requestList)
+    }
+
+    rangeRecorder := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "0123456789")
+    refused, refusedErr := rangeRecorder.newStorage(t).Get(newRuntime(), "digits.txt", storagecontract.GetOptions{Range: storagecontract.ByteRange{Offset: 10}})
+    if false == exception.ChainIs(refusedErr, storagecontract.ErrRangeNotSatisfiable) || nil != refused.Body {
+        t.Fatalf("expected a range at the end refused with no body, got %v", refusedErr)
+    }
+
+    if methodList := rangeRecorder.methods(); false == reflect.DeepEqual([]string{http.MethodHead}, methodList) {
+        t.Fatalf("expected no GET for a refused range, got %v", methodList)
+    }
+}

@@ -145,14 +145,15 @@ func TestBound_EveryMethodReachesItsDoorWithTheBoundRuntimeAndAnswersWhatItAnswe
     presignConfig := storagecontract.PresignConfig{Expiry: bound.Of(90 * time.Second), Method: http.MethodPut}
 
     putErr := boundStorage.Put("put-key", reader, 7, putOptions)
-    object, getErr := boundStorage.Get("got-key", storagecontract.GetOptions{})
+    getOptions := storagecontract.GetOptions{Range: storagecontract.ByteRange{Offset: 3, Length: 4}}
+    object, getErr := boundStorage.Get("got-key", getOptions)
     objectInfo, statErr := boundStorage.Stat("stated-key")
     deleteErr := boundStorage.Delete("deleted-key")
     url, presignErr := boundStorage.PresignedUrl("signed-key", presignConfig)
 
     expected := []boundStorageRecordedCall{
         {door: "Put", arguments: []any{"put-key", reader, int64(7), putOptions}},
-        {door: "Get", arguments: []any{"got-key", storagecontract.GetOptions{}}},
+        {door: "Get", arguments: []any{"got-key", getOptions}},
         {door: "Stat", arguments: []any{"stated-key"}},
         {door: "Delete", arguments: []any{"deleted-key"}},
         {door: "PresignedUrl", arguments: []any{"signed-key", presignConfig}},

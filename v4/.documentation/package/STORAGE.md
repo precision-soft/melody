@@ -15,10 +15,11 @@ Storage is opt-in. Userland builds a `Storage` and registers it under [`ServiceS
 
 - Define the abstraction:
     - [`Storage`](../../storage/contract/storage.go) — `Put`, `Get`, `Stat`, `Delete`, `PresignedUrl`
-    - [`PutOptions`](../../storage/contract/storage.go), [`GetOptions`](../../storage/contract/storage.go), [`Object`](../../storage/contract/storage.go), [`ObjectInfo`](../../storage/contract/storage.go), [`PresignConfig`](../../storage/contract/storage.go)
-    - [`PresignExpiryRule`](../../storage/contract/presign.go), [`ResolvePresignExpiry`](../../storage/contract/presign.go), [`ResolvePresignMethod`](../../storage/contract/presign.go)
+    - [`PutOptions`](../../storage/contract/storage.go), [`GetOptions`](../../storage/contract/storage.go) with its [`ByteRange`](../../storage/contract/storage.go), [`Object`](../../storage/contract/storage.go), [`ObjectInfo`](../../storage/contract/storage.go), [`PresignConfig`](../../storage/contract/storage.go)
+    - [`ResolveByteRange`](../../storage/contract/range.go), [`PresignExpiryRule`](../../storage/contract/presign.go), [`ResolvePresignExpiry`](../../storage/contract/presign.go), [`ResolvePresignMethod`](../../storage/contract/presign.go)
     - [`ErrKeyIsDirectory`](../../storage/contract/error.go) — the cause of a refusal of a key that names a directory, a prefix of other keys and not an object
     - [`ErrObjectNotFound`](../../storage/contract/error.go) — the cause of a `Get` or a `Stat` of a key that names no object
+    - [`ErrRangeNotSatisfiable`](../../storage/contract/error.go) — the cause of a `Get` whose range starts at or past the end of the object
     - [`ErrPresignUnsupported`](../../storage/contract/error.go) — the cause of a presigned url the backend cannot sign, or cannot sign for the method asked
 - Provide a filesystem implementation:
     - [`LocalStorage`](../../storage/local.go), [`NewLocalStorage`](../../storage/local.go)
@@ -84,6 +85,7 @@ Every door of `storagecontract.Storage` takes the runtime it runs under first; t
 - [`storage.Exists(boundStorage, key)`](../../storage/exists.go) is no door of the contract: it answers `true` when `Stat` answers, `false` when `Stat` answers `ErrObjectNotFound` or `ErrKeyIsDirectory`, and `Stat`'s error beside `false` for anything else, a refused key included, so it cannot drift from what `Stat` and `Get` judge.
 - A key that names no object, a base directory that is gone included, answers an error whose chain carries [`storagecontract.ErrObjectNotFound`](../../storage/contract/error.go) at `Get` and `Stat` on both backends; a refusal of the key and a failure to ask the backend never carry it. `Delete` of such a key answers `nil`: the object is gone, which is what was asked.
 - `Get` answers a [`storagecontract.Object`](../../storage/contract/storage.go): the caller closes `Object.Body`, exactly once, also after a read failed; beside an error the object is the zero value and nothing is open. `Object.Info` and `Stat` answer the same [`ObjectInfo`](../../storage/contract/storage.go): `Size`, `ContentType` (what the `Put` declared, empty when the backend holds none: `LocalStorage` holds none), `ModifiedAt`, `EntityTag` without quotes and `Key`, the key asked as given. The local entity tag is derived from the size and the modification time as the static file server derives its own, so it is weak-equivalent: two stores of equal size in the same instant share it.
+- `GetOptions.Range` reads a part of the object, `ByteRange{Offset, Length}`, judged by [`storagecontract.ResolveByteRange`](../../storage/contract/range.go) on both backends: the zero value is the whole object, a zero `Length` reads to the end and one past the end is clipped to it, a negative field is refused naming `GetOptions.Range`, and an `Offset` at or past the end answers `ErrRangeNotSatisfiable`, the offset 0 of an empty object excepted. `Object.Info.Size` stays the whole object's size. A suffix range, the last N bytes, and several ranges are not expressible. An implementation of the application's own honours the range: one that ignores it answers the whole object to a caller that asked a part.
 - `PresignedUrl` takes a [`storagecontract.PresignConfig`](../../storage/contract/storage.go). `Expiry` is read against `PresignExpiryRule`: 15 minutes when left out, at least 1s, at most 7 days, unlimited refused, each refusal naming `PresignConfig.Expiry`. `Method` is `http.MethodGet`, a download, when left out, or `http.MethodPut`, an upload of the key; any other method is refused with `ErrPresignUnsupported`. A presigned upload binds neither a content type nor a size.
 
 ## Userland API
@@ -91,9 +93,10 @@ Every door of `storagecontract.Storage` takes the runtime it runs under first; t
 ### Contracts (`storage/contract`)
 
 - [`Storage`](../../storage/contract/storage.go)
-- [`PutOptions`](../../storage/contract/storage.go), [`GetOptions`](../../storage/contract/storage.go), [`Object`](../../storage/contract/storage.go), [`ObjectInfo`](../../storage/contract/storage.go), [`PresignConfig`](../../storage/contract/storage.go)
+- [`PutOptions`](../../storage/contract/storage.go), [`GetOptions`](../../storage/contract/storage.go), [`ByteRange`](../../storage/contract/storage.go), [`Object`](../../storage/contract/storage.go), [`ObjectInfo`](../../storage/contract/storage.go), [`PresignConfig`](../../storage/contract/storage.go)
+- [`ResolveByteRange(ByteRange, int64) (int64, int64, error)`](../../storage/contract/range.go)
 - [`PresignExpiryRule`](../../storage/contract/presign.go), [`ResolvePresignExpiry(bound.Duration) (time.Duration, error)`](../../storage/contract/presign.go), [`ResolvePresignMethod(string) (string, error)`](../../storage/contract/presign.go)
-- [`ErrKeyIsDirectory`](../../storage/contract/error.go), [`ErrObjectNotFound`](../../storage/contract/error.go), [`ErrPresignUnsupported`](../../storage/contract/error.go)
+- [`ErrKeyIsDirectory`](../../storage/contract/error.go), [`ErrObjectNotFound`](../../storage/contract/error.go), [`ErrRangeNotSatisfiable`](../../storage/contract/error.go), [`ErrPresignUnsupported`](../../storage/contract/error.go)
 
 ### Types and constructors (`storage`)
 

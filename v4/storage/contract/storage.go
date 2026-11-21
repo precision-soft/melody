@@ -12,11 +12,18 @@ type PutOptions struct {
     ContentType string
 }
 
-/* GetOptions is what a Get may ask beyond the key; the zero value reads the whole object. */
+/* GetOptions is what a Get may ask beyond the key; the zero value reads the whole object. An implementation answers an option it does not know by refusing nothing, so a caller that depends on an option added after this major's tag checks the backend's version. */
 type GetOptions struct {
+    Range ByteRange
 }
 
-/* ObjectInfo is what a storage knows about an object without reading it. Size is the whole object's size in bytes. ContentType is what the Put that stored it declared, empty when it declared none or the backend holds none. ModifiedAt is when the object was last stored. EntityTag is the backend's tag of the stored bytes without quotes: the bucket's ETag on S3, and on the local backend a tag derived from the size and the modification time as the static file server derives its own, so weak-equivalent: it moves with every store, but two stores of equal size in the same instant share it. Key is the key the caller asked, as given. */
+/* ByteRange names a part of an object, Length bytes from Offset, judged by ResolveByteRange. The zero value is the whole object, and a zero Length reads from Offset to the end. A negative Offset or Length is refused before the backend is asked. An Offset at or past the end of an object answers an error whose chain carries ErrRangeNotSatisfiable, the offset 0 of an empty object excepted; a Length that runs past the end is clipped to it. Info.Size stays the whole object's size. */
+type ByteRange struct {
+    Offset int64
+    Length int64
+}
+
+/* ObjectInfo is what a storage knows about an object without reading it. Size is the whole object's size in bytes, whatever range was read. ContentType is what the Put that stored it declared, empty when it declared none or the backend holds none. ModifiedAt is when the object was last stored. EntityTag is the backend's tag of the stored bytes without quotes: the bucket's ETag on S3, and on the local backend a tag derived from the size and the modification time as the static file server derives its own, so weak-equivalent: it moves with every store, but two stores of equal size in the same instant share it. Key is the key the caller asked, as given. */
 type ObjectInfo struct {
     Size        int64
     ContentType string

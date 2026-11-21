@@ -1214,3 +1214,50 @@ func TestLocalStorage_DeleteOfAnAbsentKeyAnswersNil(t *testing.T) {
         t.Fatalf("expected nil once the base directory is gone, got %v", deleteErr)
     }
 }
+
+func TestLocalStorage_GetReadsTheRangeAsked(t *testing.T) {
+    local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    if putErr := local.Put(runtimeInstance, "digits.txt", strings.NewReader("0123456789"), 10, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    for name, testCase := range map[string]struct {
+        byteRange storagecontract.ByteRange
+        expected  string
+    }{
+        "the zero value":           {storagecontract.ByteRange{}, "0123456789"},
+        "a range inside":           {storagecontract.ByteRange{Offset: 3, Length: 4}, "3456"},
+        "a zero length to the end": {storagecontract.ByteRange{Offset: 3}, "3456789"},
+        "a length past the end":    {storagecontract.ByteRange{Offset: 3, Length: 100}, "3456789"},
+        "the first bytes":          {storagecontract.ByteRange{Length: 2}, "01"},
+    } {
+        object, getErr := local.Get(runtimeInstance, "digits.txt", storagecontract.GetOptions{Range: testCase.byteRange})
+        if nil != getErr {
+            t.Fatalf("%s: get: %v", name, getErr)
+        }
+
+        content, _ := io.ReadAll(object.Body)
+        if closeErr := object.Body.Close(); nil != closeErr {
+            t.Fatalf("%s: expected the body closed, got %v", name, closeErr)
+        }
+
+        if testCase.expected != string(content) || 10 != object.Info.Size {
+            t.Fatalf("%s: expected %q of an object of 10 bytes, got %q of %d", name, testCase.expected, string(content), object.Info.Size)
+        }
+    }
+
+    object, getErr := local.Get(runtimeInstance, "digits.txt", storagecontract.GetOptions{Range: storagecontract.ByteRange{Offset: 10}})
+    if false == exception.ChainIs(getErr, storagecontract.ErrRangeNotSatisfiable) || nil != object.Body {
+        t.Fatalf("expected a range at the end refused with no body, got %v", getErr)
+    }
+
+    if deleteErr := local.Delete(runtimeInstance, "digits.txt"); nil != deleteErr {
+        t.Fatalf("expected the object deleted after its ranged reads, got %v", deleteErr)
+    }
+
+    if putErr := local.Put(runtimeInstance, "digits.txt", strings.NewReader("again"), 5, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("expected the object stored again after its ranged reads, got %v", putErr)
+    }
+}

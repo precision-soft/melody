@@ -28,7 +28,7 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Symptom.** `assignment mismatch: 2 variables but store.Get returns 1 value` or `not enough arguments in call to store.Get`; an implementation of the contract: `does not implement storagecontract.Storage (wrong type for method Get)`.
 
-**Remedy.** `object, getErr := storage.FromRuntime(runtimeInstance).Get(key, storagecontract.GetOptions{})`, read and close `object.Body`, exactly once, also after a failed read; beside an error the object is the zero value. An implementation answers `storagecontract.Object{Body: reader, Info: info}` and the zero `Object` beside every error.
+**Remedy.** `object, getErr := storage.FromRuntime(runtimeInstance).Get(key, storagecontract.GetOptions{})`, read and close `object.Body`, exactly once, also after a failed read; beside an error the object is the zero value. An implementation answers `storagecontract.Object{Body: reader, Info: info}` and the zero `Object` beside every error, and honours `options.Range`: it reads the range through `storagecontract.ResolveByteRange(options.Range, info.Size)`, which answers the offset and the clipped length or the refusal, `ErrRangeNotSatisfiable` for an offset at or past the end; a backend that ignores the range answers the whole object to a caller that asked a part.
 
 ### Storage: `Stat` is part of the contract, and `Exists` is a function of the package
 

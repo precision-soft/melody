@@ -409,7 +409,33 @@ func (instance *Storage) Get(
         return storagecontract.Object{}, instance.statFailure("object storage get failed", key, statErr)
     }
 
-    return storagecontract.Object{Body: object, Info: objectInfoOf(key, minioInfo)}, nil
+    objectInfo := objectInfoOf(key, minioInfo)
+
+    offset, length, rangeErr := storagecontract.ResolveByteRange(options.Range, objectInfo.Size)
+    if nil != rangeErr {
+        object.Close()
+
+        return storagecontract.Object{}, rangeErr
+    }
+
+    if 0 == offset && objectInfo.Size == length {
+        return storagecontract.Object{Body: object, Info: objectInfo}, nil
+    }
+
+    /* a read after the seek leaves as one GET asking from the offset to the end, cut at the length by the reader and ended by its close */
+    if _, seekErr := object.Seek(offset, io.SeekStart); nil != seekErr {
+        object.Close()
+
+        return storagecontract.Object{}, exception.NewError("object storage get failed", map[string]any{"key": key, "bucket": instance.bucket}, seekErr)
+    }
+
+    return storagecontract.Object{Body: rangeBody{Reader: io.LimitReader(object, length), Closer: object}, Info: objectInfo}, nil
+}
+
+/* rangeBody reads the range asked and closes the whole object */
+type rangeBody struct {
+    io.Reader
+    io.Closer
 }
 
 func (instance *Storage) Stat(

@@ -332,7 +332,28 @@ func (instance *LocalStorage) Get(
         return storagecontract.Object{}, objectErr
     }
 
-    return storagecontract.Object{Body: file, Info: objectInfo}, nil
+    offset, length, rangeErr := storagecontract.ResolveByteRange(options.Range, objectInfo.Size)
+    if nil != rangeErr {
+        _ = file.Close()
+        return storagecontract.Object{}, rangeErr
+    }
+
+    if 0 == offset && objectInfo.Size == length {
+        return storagecontract.Object{Body: file, Info: objectInfo}, nil
+    }
+
+    if _, seekErr := file.Seek(offset, io.SeekStart); nil != seekErr {
+        _ = file.Close()
+        return storagecontract.Object{}, exception.NewError("could not open the storage object", map[string]any{"key": key}, seekErr)
+    }
+
+    return storagecontract.Object{Body: localRangeBody{Reader: io.LimitReader(file, length), Closer: file}, Info: objectInfo}, nil
+}
+
+/* localRangeBody reads the range asked and closes the whole file */
+type localRangeBody struct {
+    io.Reader
+    io.Closer
 }
 
 func (instance *LocalStorage) Stat(
