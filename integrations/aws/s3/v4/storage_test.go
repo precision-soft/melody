@@ -6,7 +6,9 @@ import (
     "io"
     "net/http"
     "net/http/httptest"
+    "net/url"
     "os"
+    "reflect"
     "strconv"
     "strings"
     "sync"
@@ -69,19 +71,53 @@ func TestObjectStorage_PutGetExistsPresignDelete(t *testing.T) {
         t.Fatalf("expected object to exist: %v %v", exists, existsErr)
     }
 
-    reader, getErr := store.Get(runtimeInstance, key)
+    object, getErr := store.Get(runtimeInstance, key, storagecontract.GetOptions{})
     if nil != getErr {
         t.Fatalf("get: %v", getErr)
     }
-    loaded, _ := io.ReadAll(reader)
-    reader.Close()
+    loaded, _ := io.ReadAll(object.Body)
+    object.Body.Close()
     if content != string(loaded) {
         t.Fatalf("content mismatch: %q", string(loaded))
     }
 
-    presigned, presignErr := store.PresignedUrl(runtimeInstance, key, 5*time.Minute)
+    if "text/plain" != object.Info.ContentType || int64(len(content)) != object.Info.Size || key != object.Info.Key || "" == object.Info.EntityTag || true == object.Info.ModifiedAt.IsZero() {
+        t.Fatalf("expected the info the put declared, got %+v", object.Info)
+    }
+
+    if objectInfo, statErr := store.Stat(runtimeInstance, key); nil != statErr || object.Info != objectInfo {
+        t.Fatalf("expected Stat to answer the info Get answered, %+v, got %+v (%v)", object.Info, objectInfo, statErr)
+    }
+
+    presigned, presignErr := store.PresignedUrl(runtimeInstance, key, storagecontract.PresignConfig{Expiry: bound.Of(5 * time.Minute)})
     if nil != presignErr || false == strings.Contains(presigned, key) {
         t.Fatalf("unexpected presigned url: %q %v", presigned, presignErr)
+    }
+
+    uploadUrl, uploadPresignErr := store.PresignedUrl(runtimeInstance, key, storagecontract.PresignConfig{Method: http.MethodPut})
+    if nil != uploadPresignErr {
+        t.Fatalf("presign upload: %v", uploadPresignErr)
+    }
+
+    uploadRequest, requestErr := http.NewRequest(http.MethodPut, uploadUrl, strings.NewReader("uploaded through the link"))
+    if nil != requestErr {
+        t.Fatalf("upload request: %v", requestErr)
+    }
+
+    uploadResponse, uploadErr := http.DefaultClient.Do(uploadRequest)
+    if nil != uploadErr || http.StatusOK != uploadResponse.StatusCode {
+        t.Fatalf("expected the presigned upload accepted, got %v %v", uploadResponse, uploadErr)
+    }
+    _ = uploadResponse.Body.Close()
+
+    uploaded, uploadedGetErr := store.Get(runtimeInstance, key, storagecontract.GetOptions{})
+    if nil != uploadedGetErr {
+        t.Fatalf("get after upload: %v", uploadedGetErr)
+    }
+    uploadedContent, _ := io.ReadAll(uploaded.Body)
+    uploaded.Body.Close()
+    if "uploaded through the link" != string(uploadedContent) {
+        t.Fatalf("expected the uploaded body read back, got %q", string(uploadedContent))
     }
 
     if deleteErr := store.Delete(runtimeInstance, key); nil != deleteErr {
@@ -696,12 +732,12 @@ func TestObjectStorage_RejectedPutPreservesTheStoredObject(t *testing.T) {
             t.Fatalf("%s: the stored object must survive a rejected put: %v %v", testCase.name, exists, existsErr)
         }
 
-        reader, getErr := store.Get(runtimeInstance, key)
+        object, getErr := store.Get(runtimeInstance, key, storagecontract.GetOptions{})
         if nil != getErr {
             t.Fatalf("%s: the stored object must survive a rejected put: %v", testCase.name, getErr)
         }
-        loaded, _ := io.ReadAll(reader)
-        reader.Close()
+        loaded, _ := io.ReadAll(object.Body)
+        object.Body.Close()
 
         if stored != string(loaded) {
             t.Fatalf("%s: the rejected put replaced the stored object: %d bytes instead of %d", testCase.name, len(loaded), len(stored))
@@ -780,18 +816,18 @@ func TestObjectStorage_StreamedPutAboveTheSpoolLimitIsAllOrNothing(t *testing.T)
 }
 
 func storedObjectShape(t *testing.T, store *Storage, runtimeInstance containercontract.Runtime, key string) (int64, byte) {
-    reader, getErr := store.Get(runtimeInstance, key)
+    object, getErr := store.Get(runtimeInstance, key, storagecontract.GetOptions{})
     if nil != getErr {
         t.Fatalf("get: %v", getErr)
     }
-    defer reader.Close()
+    defer object.Body.Close()
 
     head := make([]byte, 1)
-    if _, headErr := io.ReadFull(reader, head); nil != headErr {
+    if _, headErr := io.ReadFull(object.Body, head); nil != headErr {
         t.Fatalf("read stored object: %v", headErr)
     }
 
-    tail, copyErr := io.Copy(io.Discard, reader)
+    tail, copyErr := io.Copy(io.Discard, object.Body)
     if nil != copyErr {
         t.Fatalf("read stored object: %v", copyErr)
     }
@@ -1066,13 +1102,15 @@ func TestStorage_RefusesAParentSegmentAtEveryDoorBeforeTouchingTheBucket(t *test
 
     key := "tenant-b/../tenant-a/secret.txt"
 
-    _, getErr := store.Get(runtimeInstance, key)
+    _, getErr := store.Get(runtimeInstance, key, storagecontract.GetOptions{})
+    _, statErr := store.Stat(runtimeInstance, key)
     putErr := store.Put(runtimeInstance, key, strings.NewReader("B"), 1, storagecontract.PutOptions{})
     deleteErr := store.Delete(runtimeInstance, key)
     _, existsErr := store.Exists(runtimeInstance, key)
-    _, presignErr := store.PresignedUrl(runtimeInstance, key, time.Minute)
+    _, presignErr := store.PresignedUrl(runtimeInstance, key, storagecontract.PresignConfig{Expiry: bound.Of(time.Minute)})
+    _, unsupportedPresignErr := store.PresignedUrl(runtimeInstance, key, storagecontract.PresignConfig{Method: http.MethodDelete, Expiry: bound.UnlimitedDuration()})
 
-    for door, doorErr := range map[string]error{"Get": getErr, "Put": putErr, "Delete": deleteErr, "Exists": existsErr, "PresignedUrl": presignErr} {
+    for door, doorErr := range map[string]error{"Get": getErr, "Stat": statErr, "Put": putErr, "Delete": deleteErr, "Exists": existsErr, "PresignedUrl": presignErr, "PresignedUrl of a refused config": unsupportedPresignErr} {
         if nil == doorErr || false == strings.Contains(doorErr.Error(), `".." segment`) {
             t.Fatalf("expected %s of %q to be refused by name, got %v", door, key, doorErr)
         }
@@ -1210,12 +1248,12 @@ func TestObjectStorage_AStreamedSingleShotPutThatOverReadsLeavesTheObjectUntouch
         t.Fatal("expected a body longer than declared to fail the put")
     }
 
-    reader, getErr := store.Get(runtimeInstance, key)
+    object, getErr := store.Get(runtimeInstance, key, storagecontract.GetOptions{})
     if nil != getErr {
         t.Fatalf("get: %v", getErr)
     }
-    content, _ := io.ReadAll(reader)
-    _ = reader.Close()
+    content, _ := io.ReadAll(object.Body)
+    _ = object.Body.Close()
 
     if original != string(content) {
         t.Fatalf("expected the object at the key untouched, got %d bytes", len(content))
@@ -1317,5 +1355,288 @@ func TestPutObjectOptions_NamesThePartSizeOfABodyOfUnknownSize(t *testing.T) {
         if known := putObjectOptions(size, ""); 0 != known.PartSize {
             t.Fatalf("expected the part size of a body of %d bytes left to minio, got %d", size, known.PartSize)
         }
+    }
+}
+
+type scriptedObjectRequest struct {
+    method      string
+    path        string
+    rangeHeader string
+}
+
+/* scriptedObjectServer answers a HEAD with headStatus and the object's headers, and a GET with getStatus and the body from the Range it asked, recording every request */
+type scriptedObjectServer struct {
+    server      *httptest.Server
+    mutex       sync.Mutex
+    requestList []scriptedObjectRequest
+}
+
+const scriptedLastModified = "Mon, 05 Oct 2026 10:00:00 GMT"
+
+func newScriptedObjectServer(t *testing.T, headStatus int, getStatus int, body string) *scriptedObjectServer {
+    recorder := &scriptedObjectServer{}
+
+    recorder.server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        recorder.mutex.Lock()
+        recorder.requestList = append(recorder.requestList, scriptedObjectRequest{method: request.Method, path: request.URL.Path, rangeHeader: request.Header.Get("Range")})
+        recorder.mutex.Unlock()
+
+        status := getStatus
+        if http.MethodHead == request.Method {
+            status = headStatus
+        }
+
+        served := body
+        if http.MethodGet == request.Method && "" != request.Header.Get("Range") {
+            offset, _ := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(request.Header.Get("Range"), "bytes="), "-"))
+            served = body[min(offset, len(body)):]
+            if http.StatusOK == status {
+                status = http.StatusPartialContent
+            }
+        }
+
+        writer.Header().Set("ETag", "\"9a0364b9e99bb480dd25e1f0284c8555\"")
+        writer.Header().Set("Last-Modified", scriptedLastModified)
+        writer.Header().Set("Content-Type", "application/pdf")
+        if http.StatusOK == status || http.StatusPartialContent == status {
+            writer.Header().Set("Content-Length", strconv.Itoa(len(served)))
+        }
+        writer.WriteHeader(status)
+
+        if http.MethodGet == request.Method && (http.StatusOK == status || http.StatusPartialContent == status) {
+            _, _ = writer.Write([]byte(served))
+        }
+    }))
+
+    t.Cleanup(recorder.server.Close)
+
+    return recorder
+}
+
+func (instance *scriptedObjectServer) newStorage(t *testing.T) *Storage {
+    client, clientErr := NewClient(Config{
+        Endpoint:  strings.TrimPrefix(instance.server.URL, "http://"),
+        AccessKey: "test",
+        SecretKey: "test",
+        Insecure:  true,
+        Region:    "us-east-1",
+    })
+    if nil != clientErr {
+        t.Fatalf("client: %s", clientErr.Error())
+    }
+
+    return NewStorage(client, "melody-test", StorageConfig{})
+}
+
+func (instance *scriptedObjectServer) methods() []string {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    methodList := []string{}
+    for _, recorded := range instance.requestList {
+        methodList = append(methodList, recorded.method)
+    }
+
+    return methodList
+}
+
+func scriptedObjectInfo(t *testing.T, key string, size int64) storagecontract.ObjectInfo {
+    modifiedAt, parseErr := time.Parse(http.TimeFormat, scriptedLastModified)
+    if nil != parseErr {
+        t.Fatalf("parse: %v", parseErr)
+    }
+
+    return storagecontract.ObjectInfo{
+        Size:        size,
+        ContentType: "application/pdf",
+        ModifiedAt:  modifiedAt,
+        EntityTag:   "9a0364b9e99bb480dd25e1f0284c8555",
+        Key:         key,
+    }
+}
+
+func TestStorage_GetAnswersTheInfoTheBucketDeclares(t *testing.T) {
+    recorder := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "%PDF-1.7 body")
+    store := recorder.newStorage(t)
+
+    object, getErr := store.Get(newRuntime(), "\\reports/report.pdf", storagecontract.GetOptions{})
+    if nil != getErr {
+        t.Fatalf("get: %v", getErr)
+    }
+
+    content, _ := io.ReadAll(object.Body)
+    _ = object.Body.Close()
+
+    if "%PDF-1.7 body" != string(content) {
+        t.Fatalf("expected the body read whole, got %q", string(content))
+    }
+
+    expected := scriptedObjectInfo(t, "\\reports/report.pdf", 13)
+    if false == expected.ModifiedAt.Equal(object.Info.ModifiedAt) {
+        t.Fatalf("expected the modification time the bucket declared, got %v", object.Info.ModifiedAt)
+    }
+    object.Info.ModifiedAt = expected.ModifiedAt
+
+    if expected != object.Info {
+        t.Fatalf("expected the info the bucket declared, %+v, got %+v", expected, object.Info)
+    }
+
+    if methodList := recorder.methods(); false == reflect.DeepEqual([]string{http.MethodHead, http.MethodGet}, methodList) {
+        t.Fatalf("expected one HEAD then one GET, got %v", methodList)
+    }
+}
+
+func TestStorage_StatSendsOneHeadAndAnswersItsHeaders(t *testing.T) {
+    recorder := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "%PDF-1.7 body")
+    store := recorder.newStorage(t)
+
+    objectInfo, statErr := store.Stat(newRuntime(), "reports/report.pdf")
+    if nil != statErr {
+        t.Fatalf("stat: %v", statErr)
+    }
+
+    expected := scriptedObjectInfo(t, "reports/report.pdf", 0)
+    expected.Size = objectInfo.Size
+    if false == expected.ModifiedAt.Equal(objectInfo.ModifiedAt) {
+        t.Fatalf("expected the modification time the bucket declared, got %v", objectInfo.ModifiedAt)
+    }
+    objectInfo.ModifiedAt = expected.ModifiedAt
+
+    if expected != objectInfo {
+        t.Fatalf("expected the info the bucket declared, %+v, got %+v", expected, objectInfo)
+    }
+
+    if methodList := recorder.methods(); false == reflect.DeepEqual([]string{http.MethodHead}, methodList) {
+        t.Fatalf("expected one HEAD and no GET, got %v", methodList)
+    }
+}
+
+func TestStorage_AnAbsentKeyAnswersObjectNotFoundAtGetAndStat(t *testing.T) {
+    recorder := newScriptedObjectServer(t, http.StatusNotFound, http.StatusOK, "")
+    store := recorder.newStorage(t)
+
+    object, getErr := store.Get(newRuntime(), "absent.pdf", storagecontract.GetOptions{})
+    if false == exception.ChainIs(getErr, storagecontract.ErrObjectNotFound) || nil != object.Body {
+        t.Fatalf("expected Get to answer ErrObjectNotFound and no body, got %v", getErr)
+    }
+
+    if _, statErr := store.Stat(newRuntime(), "absent.pdf"); false == exception.ChainIs(statErr, storagecontract.ErrObjectNotFound) {
+        t.Fatalf("expected Stat to answer ErrObjectNotFound, got %v", statErr)
+    }
+
+    for _, method := range recorder.methods() {
+        if http.MethodHead != method {
+            t.Fatalf("expected no request but HEADs for an absent key, got %v", recorder.methods())
+        }
+    }
+}
+
+/* a 5xx is retried by minio for seconds, so the refusals that are no absence are read on two statuses it answers at once */
+func TestStorage_AnOutageIsNotObjectNotFound(t *testing.T) {
+    for _, headStatus := range []int{http.StatusForbidden, http.StatusBadRequest} {
+        store := newScriptedObjectServer(t, headStatus, http.StatusOK, "").newStorage(t)
+
+        object, getErr := store.Get(newRuntime(), "object.pdf", storagecontract.GetOptions{})
+        if nil == getErr || true == exception.ChainIs(getErr, storagecontract.ErrObjectNotFound) || nil != object.Body {
+            t.Fatalf("%d: expected Get refused without ErrObjectNotFound, got %v", headStatus, getErr)
+        }
+
+        if _, statErr := store.Stat(newRuntime(), "object.pdf"); nil == statErr || true == exception.ChainIs(statErr, storagecontract.ErrObjectNotFound) {
+            t.Fatalf("%d: expected Stat refused without ErrObjectNotFound, got %v", headStatus, statErr)
+        }
+    }
+}
+
+func TestStorage_DeleteOfAnAbsentKeyAnswersNil(t *testing.T) {
+    store := newScriptedObjectServer(t, http.StatusNotFound, http.StatusNoContent, "").newStorage(t)
+
+    if deleteErr := store.Delete(newRuntime(), "absent.pdf"); nil != deleteErr {
+        t.Fatalf("expected nil, got %v", deleteErr)
+    }
+}
+
+func presignedQuery(t *testing.T, presigned string) url.Values {
+    parsed, parseErr := url.Parse(presigned)
+    if nil != parseErr {
+        t.Fatalf("parse %q: %v", presigned, parseErr)
+    }
+
+    return parsed.Query()
+}
+
+func TestStorage_PresignedUrlSignsTheExpiryAsked(t *testing.T) {
+    recorder := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "")
+    store := recorder.newStorage(t)
+
+    for expected, config := range map[string]storagecontract.PresignConfig{
+        "900": {},
+        "60":  {Expiry: bound.Of(time.Minute)},
+    } {
+        presigned, presignErr := store.PresignedUrl(newRuntime(), "reports/report.pdf", config)
+        if nil != presignErr || expected != presignedQuery(t, presigned).Get("X-Amz-Expires") {
+            t.Fatalf("expected X-Amz-Expires=%s, got %q (%v)", expected, presigned, presignErr)
+        }
+    }
+
+    if methodList := recorder.methods(); 0 != len(methodList) {
+        t.Fatalf("expected signing to send no request, got %v", methodList)
+    }
+}
+
+/* minio takes no clock, so the method is read through the signature: two urls of one key and one expiry signed in one second differ only by it */
+func TestStorage_PresignedUrlSignsTheMethodAsked(t *testing.T) {
+    store := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "").newStorage(t)
+
+    for attempt := 0; attempt < 3; attempt = attempt + 1 {
+        download, downloadErr := store.PresignedUrl(newRuntime(), "reports/report.pdf", storagecontract.PresignConfig{Method: http.MethodGet})
+        upload, uploadErr := store.PresignedUrl(newRuntime(), "reports/report.pdf", storagecontract.PresignConfig{Method: http.MethodPut})
+        if nil != downloadErr || nil != uploadErr {
+            t.Fatalf("presign: %v %v", downloadErr, uploadErr)
+        }
+
+        downloadQuery := presignedQuery(t, download)
+        uploadQuery := presignedQuery(t, upload)
+        if downloadQuery.Get("X-Amz-Date") != uploadQuery.Get("X-Amz-Date") {
+            continue
+        }
+
+        if downloadQuery.Get("X-Amz-Signature") == uploadQuery.Get("X-Amz-Signature") {
+            t.Fatalf("expected the upload signed for another method than the download")
+        }
+
+        downloadQuery.Del("X-Amz-Signature")
+        uploadQuery.Del("X-Amz-Signature")
+        if false == reflect.DeepEqual(downloadQuery, uploadQuery) {
+            t.Fatalf("expected the two urls to differ by the signature only, got %v and %v", downloadQuery, uploadQuery)
+        }
+
+        return
+    }
+
+    t.Fatalf("could not sign the pair within one second")
+}
+
+func TestStorage_PresignedUrlRefusesBeforeSigning(t *testing.T) {
+    recorder := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "")
+    store := recorder.newStorage(t)
+
+    presigned, methodErr := store.PresignedUrl(newRuntime(), "reports/report.pdf", storagecontract.PresignConfig{Method: http.MethodDelete})
+    if "" != presigned || false == exception.ChainIs(methodErr, storagecontract.ErrPresignUnsupported) {
+        t.Fatalf("expected the method refused as unsupported, got %q %v", presigned, methodErr)
+    }
+
+    for name, expiry := range map[string]bound.Duration{"unlimited": bound.UnlimitedDuration(), "eight days": bound.Of(8 * 24 * time.Hour)} {
+        presigned, expiryErr := store.PresignedUrl(newRuntime(), "reports/report.pdf", storagecontract.PresignConfig{Expiry: expiry})
+        if "" != presigned || nil == expiryErr || true == exception.ChainIs(expiryErr, storagecontract.ErrPresignUnsupported) {
+            t.Fatalf("%s: expected the expiry refused, got %q %v", name, presigned, expiryErr)
+        }
+
+        if "PresignConfig.Expiry" != exception.FromError(expiryErr).Context()["field"] {
+            t.Fatalf("%s: expected the refusal to name PresignConfig.Expiry, got %v", name, exception.FromError(expiryErr).Context())
+        }
+    }
+
+    if methodList := recorder.methods(); 0 != len(methodList) {
+        t.Fatalf("expected no request, got %v", methodList)
     }
 }

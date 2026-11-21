@@ -14,8 +14,11 @@ import (
     melodyawss3 "github.com/precision-soft/melody/integrations/aws/s3/v4"
     "github.com/precision-soft/melody/v4/.example/presenter"
     melodybag "github.com/precision-soft/melody/v4/bag"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodystorage "github.com/precision-soft/melody/v4/storage"
     storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
@@ -47,7 +50,7 @@ func PutHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
             body = readBytes
         }
 
-        putErr := storage.Put(runtimeInstance, key, bytes.NewReader(body), int64(len(body)), storagecontract.PutOptions{ContentType: "application/octet-stream"})
+        putErr := melodystorage.For(runtimeInstance, storage).Put(key, bytes.NewReader(body), int64(len(body)), storagecontract.PutOptions{ContentType: "application/octet-stream"})
         if nil != putErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not store the object", putErr), nil
         }
@@ -68,39 +71,41 @@ func GetHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, objectKeyParentSegmentRefusal), nil
         }
 
-        exists, existsErr := storage.Exists(runtimeInstance, key)
-        if nil != existsErr {
-            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the object", existsErr), nil
-        }
-
-        if false == exists {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusNotFound, "object not found"), nil
-        }
-
-        /* the object was there a statement ago, so a get that fails now is a failure of the store, not an absence */
-        reader, getErr := storage.Get(runtimeInstance, key)
+        object, getErr := melodystorage.For(runtimeInstance, storage).Get(key, storagecontract.GetOptions{})
         if nil != getErr {
+            if true == melodyexception.ChainIs(getErr, storagecontract.ErrObjectNotFound) {
+                return presenter.ApiError(runtimeInstance, request, nethttp.StatusNotFound, "object not found"), nil
+            }
+
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the object", getErr), nil
         }
-        defer reader.Close()
+        defer object.Body.Close()
 
-        /* the door answers the object inline, so it reads one byte past its bound to tell an object it cannot hold */
-        content, readErr := io.ReadAll(io.LimitReader(reader, objectInlineMaximumBytes+1))
+        if objectInlineMaximumBytes < object.Info.Size {
+            return objectTooLargeInline(runtimeInstance, request), nil
+        }
+
+        /* the read stops one byte past the bound, for a backend that declared less than it serves */
+        content, readErr := io.ReadAll(io.LimitReader(object.Body, objectInlineMaximumBytes+1))
         if nil != readErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the object", readErr), nil
         }
 
         if objectInlineMaximumBytes < len(content) {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnprocessableEntity, "the object is larger than this door answers inline ("+strconv.Itoa(objectInlineMaximumBytes)+" bytes)"), nil
+            return objectTooLargeInline(runtimeInstance, request), nil
         }
 
         /* a json string carries text: bytes that are not utf-8 would be replaced in the encoding, so such an object is answered in base64 and the encoding names which */
         if true == utf8.Valid(content) {
-            return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, map[string]any{"key": key, "encoding": "utf-8", "content": string(content)}), nil
+            return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, map[string]any{"key": key, "contentType": object.Info.ContentType, "size": object.Info.Size, "encoding": "utf-8", "content": string(content)}), nil
         }
 
-        return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, map[string]any{"key": key, "encoding": "base64", "content": base64.StdEncoding.EncodeToString(content)}), nil
+        return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, map[string]any{"key": key, "contentType": object.Info.ContentType, "size": object.Info.Size, "encoding": "base64", "content": base64.StdEncoding.EncodeToString(content)}), nil
     }
+}
+
+func objectTooLargeInline(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request) melodyhttpcontract.Response {
+    return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnprocessableEntity, "the object is larger than this door answers inline ("+strconv.Itoa(objectInlineMaximumBytes)+" bytes)")
 }
 
 /* objectInlineMaximumBytes bounds the object the get door reads into memory to answer inline */
@@ -147,16 +152,17 @@ func LinkHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, ttlErr.Error()), nil
         }
 
-        exists, existsErr := storage.Exists(runtimeInstance, key)
-        if nil != existsErr {
-            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the object", existsErr), nil
+        boundStorage := melodystorage.For(runtimeInstance, storage)
+
+        if _, statErr := boundStorage.Stat(key); nil != statErr {
+            if true == melodyexception.ChainIs(statErr, storagecontract.ErrObjectNotFound) {
+                return presenter.ApiError(runtimeInstance, request, nethttp.StatusNotFound, "object not found"), nil
+            }
+
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the object", statErr), nil
         }
 
-        if false == exists {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusNotFound, "object not found"), nil
-        }
-
-        link, presignErr := storage.PresignedUrl(runtimeInstance, key, ttl)
+        link, presignErr := boundStorage.PresignedUrl(key, storagecontract.PresignConfig{Expiry: melodybound.Of(ttl)})
         if nil != presignErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not sign the link", presignErr), nil
         }

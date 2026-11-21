@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - This major includes every change of the third major, `integrations/awss3/v3`, up to v3.1.0; that history is in the third major's changelog.
 - `storage.go`, `provider.go`, `module.go`: `StorageConfig` of `PutSpoolLimit`, what a `Put` may hold in memory, 16 MiB when left out as the constant was, at least 1, unlimited refused, and `MultipartAbortTimeout`, the bound of the detached abort, 10s when left out as the constant was, at least 1ms, unlimited refused; `EnsureBucketConfig` of `Region`; `ModuleConfig.Storage`.
+- `storage.go`: `Storage.Stat(runtime, key)` answers the object's `storagecontract.ObjectInfo` from one `HEAD`; `PresignedUrl` signs an upload link under `PresignConfig{Method: http.MethodPut}`; an absent key answers `storagecontract.ErrObjectNotFound` in the chain at `Get` and `Stat`. See the framework's `UPGRADE.md`.
 - `module.go`, `plaintext_endpoint.go`: the module is a `BootWarningModule`: it declares `aws.s3.plaintextEndpoint`, exported as `PlaintextEndpointBootWarningName`, as a boot warning a command writes, and over a plaintext client off this machine adds the warning at boot, so `MELODY_CLI_BOOT_WARNINGS_IGNORED` accepts the code and both cli keys silence it; a storage built with `NewStorage` honours the two keys at its first use.
 
 ### Changed
@@ -20,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Breaking** — `provider.go`: `Config.Secure` is replaced by `Config.Insecure`, so a configuration that names neither dials https where it dialed plaintext http; the refusals of an empty endpoint or credential name the field.
 - **Breaking** — `provider.go`: `EnsureBucket(runtimeInstance, client, bucket, config)` takes the runtime in place of a context, its three calls bounded by the runtime's context, a nil runtime refused.
 - **Breaking** — `provider.go`, `storage.go`, `service_resolver.go`: `EnsureBucket` takes an `EnsureBucketConfig` after the bucket where it took the region, `NewStorage` a `StorageConfig` after the bucket, refused naming the field, and `RegisterStorageService` a `StorageConfig` resolved at the call, so a refused value fails the registration.
+- **Breaking** — `storage.go`: `Storage.Get(runtime, key, storagecontract.GetOptions)` answers a `storagecontract.Object`, its `Info` read from the `HEAD` the get already sends, and `Storage.PresignedUrl(runtime, key, storagecontract.PresignConfig)` takes the expiry as a `bound.Duration`, 15 minutes when left out where `0` was refused by minio, and a value outside 1s to 7 days is refused naming `PresignConfig.Expiry`. See the framework's `UPGRADE.md`.
 - **Breaking** — `module.go`, `plaintext_endpoint.go`, `provider.go`: the module is named `aws.s3`, its boot warning `aws.s3.plaintextEndpoint`, and a `Config` prints as `aws.s3.Config{…}`, after the module's path, where they said `awss3`, so a journal filter on `awss3.plaintextEndpoint` matches nothing and `MELODY_CLI_BOOT_WARNINGS_IGNORED` naming it is refused at boot as an unknown code. The Go package stays `awss3`.
 
 ### Fixed

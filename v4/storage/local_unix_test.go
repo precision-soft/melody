@@ -3,15 +3,18 @@
 package storage
 
 import (
+    "errors"
     "path/filepath"
     "strings"
     "syscall"
     "testing"
     "time"
+
+    storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
 /* a named pipe under a key is not an object: Get refuses it at once, where a blocking open waited for a writer forever, and Exists answers false */
-func TestLocalStorage_ANamedPipeUnderAKeyIsNotAnObject(t *testing.T) {
+func TestLocalStorage_GetRefusesANamedPipe(t *testing.T) {
     base := t.TempDir()
     local := NewLocalStorage(base, LocalStorageConfig{})
     runtimeInstance := testRuntime()
@@ -22,9 +25,10 @@ func TestLocalStorage_ANamedPipeUnderAKeyIsNotAnObject(t *testing.T) {
 
     answered := make(chan error, 1)
     go func() {
-        reader, getErr := local.Get(runtimeInstance, "pipe")
-        if nil != reader {
-            _ = reader.Close()
+        object, getErr := local.Get(runtimeInstance, "pipe", storagecontract.GetOptions{})
+        if nil != object.Body {
+            _ = object.Body.Close()
+            getErr = errors.New("a body beside the refusal")
         }
         answered <- getErr
     }()
@@ -40,5 +44,31 @@ func TestLocalStorage_ANamedPipeUnderAKeyIsNotAnObject(t *testing.T) {
 
     if exists, existsErr := local.Exists(runtimeInstance, "pipe"); nil != existsErr || true == exists {
         t.Fatalf("expected the pipe not to exist as an object, got %v %v", exists, existsErr)
+    }
+}
+
+/* Stat judges the pipe without opening it, so no writer is waited for */
+func TestLocalStorage_StatRefusesANamedPipeWithoutOpeningIt(t *testing.T) {
+    base := t.TempDir()
+    local := NewLocalStorage(base, LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    if mkfifoErr := syscall.Mkfifo(filepath.Join(base, "pipe"), 0o600); nil != mkfifoErr {
+        t.Skipf("mkfifo is not available here: %v", mkfifoErr)
+    }
+
+    answered := make(chan error, 1)
+    go func() {
+        _, statErr := local.Stat(runtimeInstance, "pipe")
+        answered <- statErr
+    }()
+
+    select {
+    case statErr := <-answered:
+        if nil == statErr || false == strings.Contains(statErr.Error(), "not a regular object") {
+            t.Fatalf("expected the pipe refused, got %v", statErr)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("expected Stat to answer at once on a named pipe")
     }
 }

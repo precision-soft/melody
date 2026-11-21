@@ -140,30 +140,56 @@ func TestHandlers_AnswerAKeyWithAParentSegmentWith400BeforeTheStore(t *testing.T
     }
 }
 
-/* objectServer answers the n-th HEAD with the n-th of headStatuses, the last one repeated, and a GET with getStatus, serving "stored" on a 200 GET: the door's existence check and the object's own stat are two HEADs */
+/* objectServer answers the n-th HEAD with the n-th of headStatuses, the last one repeated, and a GET with getStatus, serving "stored" on a 200 GET: a download is the object's one stat, a HEAD, then its GET */
 func objectServer(t *testing.T, headStatuses []int, getStatus int) *melodyawss3.Storage {
     t.Helper()
 
-    return objectServerServing(t, headStatuses, getStatus, []byte("stored"))
+    storage, _ := objectServerCounting(t, headStatuses, getStatus, []byte("stored"))
+
+    return storage
 }
 
 func objectServerServing(t *testing.T, headStatuses []int, getStatus int, body []byte) *melodyawss3.Storage {
     t.Helper()
 
-    var mutex sync.Mutex
-    heads := 0
+    storage, _ := objectServerCounting(t, headStatuses, getStatus, body)
+
+    return storage
+}
+
+/* objectRequestCount is what an object server was asked, by method */
+type objectRequestCount struct {
+    mutex sync.Mutex
+    heads int
+    gets  int
+}
+
+func (instance *objectRequestCount) counted() (int, int) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return instance.heads, instance.gets
+}
+
+func objectServerCounting(t *testing.T, headStatuses []int, getStatus int, body []byte) (*melodyawss3.Storage, *objectRequestCount) {
+    t.Helper()
+
+    count := &objectRequestCount{}
 
     server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, httpRequest *nethttp.Request) {
         status := getStatus
+        count.mutex.Lock()
         if nethttp.MethodHead == httpRequest.Method {
-            mutex.Lock()
-            status = headStatuses[min(heads, len(headStatuses)-1)]
-            heads++
-            mutex.Unlock()
+            status = headStatuses[min(count.heads, len(headStatuses)-1)]
+            count.heads++
+        } else if nethttp.MethodGet == httpRequest.Method {
+            count.gets++
         }
+        count.mutex.Unlock()
 
         writer.Header().Set("ETag", "\"9a0364b9e99bb480dd25e1f0284c8555\"")
         writer.Header().Set("Last-Modified", "Mon, 05 Oct 2026 10:00:00 GMT")
+        writer.Header().Set("Content-Type", "text/plain")
         writer.Header().Set("Content-Length", strconv.Itoa(len(body)))
         writer.WriteHeader(status)
         if nethttp.MethodGet == httpRequest.Method && nethttp.StatusOK == status {
@@ -177,7 +203,7 @@ func objectServerServing(t *testing.T, headStatuses []int, getStatus int, body [
         t.Fatalf("client: %v", clientErr)
     }
 
-    return melodyawss3.NewStorage(client, "melody-test", melodyawss3.StorageConfig{})
+    return melodyawss3.NewStorage(client, "melody-test", melodyawss3.StorageConfig{}), count
 }
 
 /* errorRecordingLogger keeps the server-error records the presenter filed through the runtime's logger; the presenter's fallback records of a container without a serializer are not the door's */
@@ -208,6 +234,12 @@ func (instance *errorRecordingLogger) recorded() []string {
 func getObject(t *testing.T, storage *melodyawss3.Storage) (int, []string) {
     t.Helper()
 
+    return answerOf(t, GetHandler(storage), "/storage/object?key=probe.txt")
+}
+
+func answerOf(t *testing.T, handler melodyhttpcontract.Handler, target string) (int, []string) {
+    t.Helper()
+
     logger := &errorRecordingLogger{Logger: melodylogging.NewNopLogger()}
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
@@ -216,9 +248,9 @@ func getObject(t *testing.T, storage *melodyawss3.Storage) (int, []string) {
     }, melodycontainer.RegisterOptions{})
     runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
-    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/storage/object?key=probe.txt", nil), nil, runtimeInstance, melodyhttp.NewRequestContext("storage-get-test", time.Now()))
+    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, target, nil), nil, runtimeInstance, melodyhttp.NewRequestContext("storage-get-test", time.Now()))
 
-    response, handlerErr := GetHandler(storage)(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr {
         t.Fatalf("expected a response, got %v", handlerErr)
     }
@@ -235,19 +267,14 @@ func getObject(t *testing.T, storage *melodyawss3.Storage) (int, []string) {
 var lastGetBody []byte
 
 func TestGetHandler_AnswersAStoreRefusalWith500AndJournalsIt(t *testing.T) {
-    status, records := getObject(t, objectServer(t, []int{nethttp.StatusForbidden}, nethttp.StatusOK))
+    storage, count := objectServerCounting(t, []int{nethttp.StatusForbidden}, nethttp.StatusOK, []byte("stored"))
+    status, records := getObject(t, storage)
     if nethttp.StatusInternalServerError != status || 1 != len(records) {
-        t.Fatalf("expected 500 and one record for an existence check the store refused, got %d and %v", status, records)
+        t.Fatalf("expected 500 and one record for a stat the store refused, got %d and %v", status, records)
     }
 
-    status, records = getObject(t, objectServer(t, []int{nethttp.StatusOK, nethttp.StatusForbidden}, nethttp.StatusOK))
-    if nethttp.StatusInternalServerError != status || 1 != len(records) {
-        t.Fatalf("expected 500 and one record for a get the store refused after the existence check, got %d and %v", status, records)
-    }
-
-    status, records = getObject(t, objectServer(t, []int{nethttp.StatusOK, nethttp.StatusNotFound}, nethttp.StatusOK))
-    if nethttp.StatusInternalServerError != status || 1 != len(records) {
-        t.Fatalf("expected an object gone after the existence check answered 500, got %d and %v", status, records)
+    if heads, gets := count.counted(); 1 != heads || 0 != gets {
+        t.Fatalf("expected one HEAD and no GET for a refused stat, got %d and %d", heads, gets)
     }
 
     status, records = getObject(t, objectServer(t, []int{nethttp.StatusOK}, nethttp.StatusForbidden))
@@ -257,14 +284,35 @@ func TestGetHandler_AnswersAStoreRefusalWith500AndJournalsIt(t *testing.T) {
 }
 
 func TestGetHandler_AnswersAMissingObject404(t *testing.T) {
-    status, records := getObject(t, objectServer(t, []int{nethttp.StatusNotFound}, nethttp.StatusNotFound))
+    storage, count := objectServerCounting(t, []int{nethttp.StatusNotFound}, nethttp.StatusNotFound, []byte("stored"))
+    status, records := getObject(t, storage)
     if nethttp.StatusNotFound != status || 0 != len(records) {
         t.Fatalf("expected 404 and no record for an absent object, got %d and %v", status, records)
     }
 
-    status, records = getObject(t, objectServer(t, []int{nethttp.StatusOK}, nethttp.StatusOK))
+    if heads, gets := count.counted(); 1 != heads || 0 != gets {
+        t.Fatalf("expected one HEAD and no GET for an absent object, got %d and %d", heads, gets)
+    }
+
+    storage, count = objectServerCounting(t, []int{nethttp.StatusOK}, nethttp.StatusOK, []byte("stored"))
+    status, records = getObject(t, storage)
     if nethttp.StatusOK != status || 0 != len(records) {
         t.Fatalf("expected the stored object served, got %d and %v", status, records)
+    }
+
+    if heads, gets := count.counted(); 1 != heads || 1 != gets {
+        t.Fatalf("expected one HEAD and one GET per download, got %d and %d", heads, gets)
+    }
+}
+
+func TestGetHandler_AnswersTheStoredContentTypeAndSize(t *testing.T) {
+    status, _ := getObject(t, objectServerServing(t, []int{nethttp.StatusOK}, nethttp.StatusOK, []byte("stored bytes")))
+    if nethttp.StatusOK != status {
+        t.Fatalf("expected 200, got %d", status)
+    }
+
+    if false == bytes.Contains(lastGetBody, []byte(`"contentType":"text/plain"`)) || false == bytes.Contains(lastGetBody, []byte(`"size":12`)) {
+        t.Fatalf("expected the stored content type and size answered, got %s", lastGetBody)
     }
 }
 
@@ -290,10 +338,15 @@ func TestGetHandler_AnswersAnObjectByteForByte(t *testing.T) {
     }
 }
 
-func TestGetHandler_RefusesAnObjectPastTheInlineBound(t *testing.T) {
-    status, _ := getObject(t, objectServerServing(t, []int{nethttp.StatusOK}, nethttp.StatusOK, bytes.Repeat([]byte("a"), objectInlineMaximumBytes+1)))
+func TestGetHandler_RefusesAnObjectPastTheInlineBoundBeforeReadingIt(t *testing.T) {
+    storage, count := objectServerCounting(t, []int{nethttp.StatusOK}, nethttp.StatusOK, bytes.Repeat([]byte("a"), objectInlineMaximumBytes+1))
+    status, _ := getObject(t, storage)
     if nethttp.StatusUnprocessableEntity != status {
         t.Fatalf("expected an object past the bound refused, got %d", status)
+    }
+
+    if _, gets := count.counted(); 0 != gets {
+        t.Fatalf("expected the size the stat declared to refuse the object before its GET, got %d GETs", gets)
     }
 }
 
@@ -304,3 +357,24 @@ func TestGetHandler_AnswersAnObjectOfExactlyTheInlineBound(t *testing.T) {
     }
 }
 
+
+func TestLinkHandler_SignsTheTtlAskedAndAnswers404ForAnAbsentObject(t *testing.T) {
+    for target, expected := range map[string]string{
+        "/storage/object/link?key=probe.txt&ttl=60": "60",
+        "/storage/object/link?key=probe.txt":        "300",
+    } {
+        status, _ := answerOf(t, LinkHandler(objectServer(t, []int{nethttp.StatusOK}, nethttp.StatusOK)), target)
+        if nethttp.StatusOK != status {
+            t.Fatalf("%s: expected 200, got %d (%s)", target, status, lastGetBody)
+        }
+
+        if false == bytes.Contains(lastGetBody, []byte("X-Amz-Expires="+expected)) || false == bytes.Contains(lastGetBody, []byte(`"expiresIn":`+expected)) {
+            t.Fatalf("%s: expected the link signed for %s seconds, got %s", target, expected, lastGetBody)
+        }
+    }
+
+    status, records := answerOf(t, LinkHandler(objectServer(t, []int{nethttp.StatusNotFound}, nethttp.StatusOK)), "/storage/object/link?key=probe.txt")
+    if nethttp.StatusNotFound != status || 0 != len(records) {
+        t.Fatalf("expected 404 and no record for an absent object, got %d and %v", status, records)
+    }
+}

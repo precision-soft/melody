@@ -20,7 +20,7 @@ import (
 /* PlatformCheckHandler is a readiness probe: it takes the distributed lock, refreshes it, then writes, reads back and removes one object in storage, answering whether the two backends a request needs are reachable and behaving. */
 func PlatformCheckHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        storageInstance := melodystorage.StorageMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+        boundStorage := melodystorage.FromRuntime(runtimeInstance)
         locker := melodylock.LockerMustFromRuntime(runtimeInstance)
 
         /* a probe of the lock backend calls its doors one by one, Refresh included, which RunExclusive would hide */
@@ -45,22 +45,22 @@ func PlatformCheckHandler() melodyhttpcontract.Handler {
         key := "example/platform-check.txt"
         payload := []byte("the storage backend accepted a write and returned it")
 
-        if putErr := storageInstance.Put(runtimeInstance, key, bytes.NewReader(payload), int64(len(payload)), melodystoragecontract.PutOptions{ContentType: "text/plain"}); nil != putErr {
+        if putErr := boundStorage.Put(key, bytes.NewReader(payload), int64(len(payload)), melodystoragecontract.PutOptions{ContentType: "text/plain"}); nil != putErr {
             return nil, putErr
         }
 
-        reader, getErr := storageInstance.Get(runtimeInstance, key)
+        object, getErr := boundStorage.Get(key, melodystoragecontract.GetOptions{})
         if nil != getErr {
             return nil, getErr
         }
 
-        stored, readErr := io.ReadAll(reader)
-        reader.Close()
+        stored, readErr := io.ReadAll(object.Body)
+        object.Body.Close()
         if nil != readErr {
             return nil, readErr
         }
 
-        if deleteErr := storageInstance.Delete(runtimeInstance, key); nil != deleteErr {
+        if deleteErr := boundStorage.Delete(key); nil != deleteErr {
             return nil, deleteErr
         }
 

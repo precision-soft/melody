@@ -7,6 +7,7 @@ import (
     "errors"
     "fmt"
     "io"
+    "net/http"
     "os"
     "path/filepath"
     "strings"
@@ -20,6 +21,7 @@ import (
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
+    "github.com/precision-soft/melody/v4/http/static"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
@@ -46,12 +48,12 @@ func TestLocalStorage_PutGetExistsDelete(t *testing.T) {
         t.Fatalf("expected object to exist: %v %v", exists, existsErr)
     }
 
-    reader, getErr := local.Get(runtimeInstance, key)
+    object, getErr := local.Get(runtimeInstance, key, storagecontract.GetOptions{})
     if nil != getErr {
         t.Fatalf("get: %v", getErr)
     }
-    loaded, _ := io.ReadAll(reader)
-    reader.Close()
+    loaded, _ := io.ReadAll(object.Body)
+    object.Body.Close()
 
     if content != string(loaded) {
         t.Fatalf("content mismatch: %q", string(loaded))
@@ -150,10 +152,10 @@ func TestLocalStorage_RejectsPathTraversal(t *testing.T) {
         t.Fatalf("unexpected put error: %v", putErr)
     }
 
-    reader, getErr := local.Get(runtimeInstance, "../../etc/passwd")
+    object, getErr := local.Get(runtimeInstance, "../../etc/passwd", storagecontract.GetOptions{})
     if nil == getErr {
-        loaded, _ := io.ReadAll(reader)
-        _ = reader.Close()
+        loaded, _ := io.ReadAll(object.Body)
+        _ = object.Body.Close()
 
         t.Fatalf("expected path traversal to be refused, read %q", string(loaded))
     }
@@ -173,7 +175,7 @@ func TestLocalStorage_RefusesAParentSegmentAtEveryDoor(t *testing.T) {
     }
 
     for _, key := range []string{"tenant-b/../tenant-a/secret.txt", "tenant-b\\..\\tenant-a\\secret.txt", "../tenant-a/secret.txt", "tenant-a/x/.."} {
-        if _, getErr := local.Get(runtimeInstance, key); nil == getErr || false == strings.Contains(getErr.Error(), `".." segment`) {
+        if _, getErr := local.Get(runtimeInstance, key, storagecontract.GetOptions{}); nil == getErr || false == strings.Contains(getErr.Error(), `".." segment`) {
             t.Fatalf("expected Get of %q to be refused by name, got %v", key, getErr)
         }
 
@@ -189,14 +191,18 @@ func TestLocalStorage_RefusesAParentSegmentAtEveryDoor(t *testing.T) {
         if nil == existsErr || false == strings.Contains(existsErr.Error(), `".." segment`) || true == exists {
             t.Fatalf("expected Exists of %q to be refused by name, got %v, %v", key, exists, existsErr)
         }
+
+        if objectInfo, statErr := local.Stat(runtimeInstance, key); nil == statErr || false == strings.Contains(statErr.Error(), `".." segment`) || (storagecontract.ObjectInfo{}) != objectInfo {
+            t.Fatalf("expected Stat of %q to be refused by name, got %v, %v", key, objectInfo, statErr)
+        }
     }
 
-    reader, getErr := local.Get(runtimeInstance, "tenant-a/secret.txt")
+    object, getErr := local.Get(runtimeInstance, "tenant-a/secret.txt", storagecontract.GetOptions{})
     if nil != getErr {
         t.Fatalf("expected the other prefix's object to survive, got %v", getErr)
     }
-    loaded, _ := io.ReadAll(reader)
-    _ = reader.Close()
+    loaded, _ := io.ReadAll(object.Body)
+    _ = object.Body.Close()
 
     if "A" != string(loaded) {
         t.Fatalf("expected the other prefix's object unchanged, got %q", string(loaded))
@@ -227,12 +233,12 @@ func TestLocalStorage_AllowsBaseUnderSymlinkedAncestor(t *testing.T) {
         t.Fatalf("put under a symlinked base should succeed: %v", putErr)
     }
 
-    reader, getErr := local.Get(runtimeInstance, key)
+    object, getErr := local.Get(runtimeInstance, key, storagecontract.GetOptions{})
     if nil != getErr {
         t.Fatalf("get under a symlinked base should not be rejected as a symlink escape: %v", getErr)
     }
-    loaded, _ := io.ReadAll(reader)
-    reader.Close()
+    loaded, _ := io.ReadAll(object.Body)
+    object.Body.Close()
 
     if content != string(loaded) {
         t.Fatalf("content mismatch: %q", string(loaded))
@@ -255,7 +261,7 @@ func TestLocalStorage_RejectsSymlinkEscape(t *testing.T) {
     local := NewLocalStorage(base, LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
-    if _, getErr := local.Get(runtimeInstance, "escape"); nil == getErr {
+    if _, getErr := local.Get(runtimeInstance, "escape", storagecontract.GetOptions{}); nil == getErr {
         t.Fatalf("expected symlink escape to be rejected")
     }
 }
@@ -377,12 +383,12 @@ func TestLocalStorage_FailedOverwritePreservesPriorObject(t *testing.T) {
         t.Fatalf("expected the overwrite to fail when the source reader errors mid-stream")
     }
 
-    reader, getErr := local.Get(runtimeInstance, key)
+    object, getErr := local.Get(runtimeInstance, key, storagecontract.GetOptions{})
     if nil != getErr {
         t.Fatalf("the prior object must survive a failed overwrite, but Get failed: %v", getErr)
     }
-    loaded, _ := io.ReadAll(reader)
-    reader.Close()
+    loaded, _ := io.ReadAll(object.Body)
+    object.Body.Close()
 
     if original != string(loaded) {
         t.Fatalf("a failed overwrite destroyed or truncated the prior object: got %q, want %q", string(loaded), original)
@@ -405,10 +411,10 @@ func TestLocalStorage_Get_ErrorOnDirectoryKey(t *testing.T) {
         t.Fatalf("put: %v", putErr)
     }
 
-    rc, getErr := local.Get(runtimeInstance, "subdir")
+    object, getErr := local.Get(runtimeInstance, "subdir", storagecontract.GetOptions{})
     if nil == getErr {
-        if nil != rc {
-            rc.Close()
+        if nil != object.Body {
+            object.Body.Close()
         }
         t.Fatalf("Get on a directory key must return an error, but returned nil error")
     }
@@ -482,7 +488,7 @@ func TestLocalStorage_RejectsIntermediateDirectorySymlinkEscapeOnPut(t *testing.
 func TestLocalStorage_RejectsAbsoluteKeyEscape(t *testing.T) {
     local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
 
-    if _, getErr := local.Get(testRuntime(), "/etc/passwd"); nil == getErr {
+    if _, getErr := local.Get(testRuntime(), "/etc/passwd", storagecontract.GetOptions{}); nil == getErr {
         t.Fatalf("expected an absolute-path key to be confined and rejected")
     }
 }
@@ -691,6 +697,12 @@ func TestLocalStorage_RefusesAKeySpelledLikeAReservedTemporaryObject(t *testing.
     if _, existsErr := storage.Exists(runtimeInstance, reservedKey); nil == existsErr {
         t.Fatalf("expected Exists to refuse the reserved spelling too")
     }
+    if _, statErr := storage.Stat(runtimeInstance, reservedKey); nil == statErr || false == strings.Contains(statErr.Error(), "reserved .melody-storage- namespace") {
+        t.Fatalf("expected Stat to refuse the reserved spelling too, got %v", statErr)
+    }
+    if _, getErr := storage.Get(runtimeInstance, reservedKey, storagecontract.GetOptions{}); nil == getErr || false == strings.Contains(getErr.Error(), "reserved .melody-storage- namespace") {
+        t.Fatalf("expected Get to refuse the reserved spelling too, got %v", getErr)
+    }
 
     for _, ordinaryKey := range []string{".melody-storage-notes.txt", reservedTemporaryName("report.txt", "notahexsuffix!!!"), "report.txt.tmp-00112233445566aa"} {
         if putErr := storage.Put(runtimeInstance, ordinaryKey, strings.NewReader("user data"), -1, storagecontract.PutOptions{}); nil != putErr {
@@ -714,12 +726,12 @@ func TestLocalStorage_PutStoresAKeyWhoseLeafFillsTheFilesystemComponent(t *testi
         t.Fatalf("expected a leaf of 255 bytes to be replaced, got %v", putErr)
     }
 
-    reader, getErr := storage.Get(runtimeInstance, key)
+    object, getErr := storage.Get(runtimeInstance, key, storagecontract.GetOptions{})
     if nil != getErr {
         t.Fatalf("get error: %v", getErr)
     }
-    loaded, _ := io.ReadAll(reader)
-    reader.Close()
+    loaded, _ := io.ReadAll(object.Body)
+    object.Body.Close()
     if "second" != string(loaded) {
         t.Fatalf("expected the replaced content, got %q", string(loaded))
     }
@@ -730,17 +742,19 @@ func TestLocalStorage_PutStoresAKeyWhoseLeafFillsTheFilesystemComponent(t *testi
     }
 }
 
-/* a local directory has no signing authority to delegate a read to, so the door refuses rather than handing out a path a client could not use */
-func TestLocalStorage_PresignedUrlIsRefused(t *testing.T) {
+/* a local directory has no signing authority to delegate a read or a write to, so the door refuses with the sentinel a caller falls back on, rather than handing out a path a client could not use */
+func TestLocalStorage_PresignedUrlIsRefusedAsUnsupported(t *testing.T) {
     local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
 
-    url, presignErr := local.PresignedUrl(nil, "reports/report.csv", time.Minute)
-    if nil == presignErr || false == strings.Contains(presignErr.Error(), "presigned urls are not supported by local storage") {
-        t.Fatalf("expected the local storage to refuse a presigned url, got %v", presignErr)
-    }
+    for _, config := range []storagecontract.PresignConfig{{}, {Method: http.MethodPut}} {
+        url, presignErr := local.PresignedUrl(nil, "reports/report.csv", config)
+        if false == exception.ChainIs(presignErr, storagecontract.ErrPresignUnsupported) || false == strings.Contains(presignErr.Error(), "presigned urls are not supported by local storage") {
+            t.Fatalf("%v: expected the local storage to refuse a presigned url as unsupported, got %v", config, presignErr)
+        }
 
-    if "" != url {
-        t.Fatalf("expected no url beside the refusal, got %q", url)
+        if "" != url {
+            t.Fatalf("%v: expected no url beside the refusal, got %q", config, url)
+        }
     }
 }
 
@@ -952,9 +966,251 @@ func TestLocalStorage_Put_RefusesADirectoryKeyWithItsCause(t *testing.T) {
         t.Fatalf("expected the refusal to carry ErrKeyIsDirectory, got %v", putErr)
     }
 
-    reader, getErr := local.Get(runtimeInstance, "subdir/file.txt")
+    object, getErr := local.Get(runtimeInstance, "subdir/file.txt", storagecontract.GetOptions{})
     if nil != getErr {
         t.Fatalf("expected the object under the prefix kept, got %v", getErr)
     }
-    _ = reader.Close()
+    _ = object.Body.Close()
+}
+
+func TestLocalStorage_GetAnswersTheObjectWithItsInfo(t *testing.T) {
+    base := t.TempDir()
+    local := NewLocalStorage(base, LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    content := "shipping label body"
+    before := time.Now().Add(-time.Second)
+    if putErr := local.Put(runtimeInstance, "labels\\awb-1.txt", strings.NewReader(content), int64(len(content)), storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+    after := time.Now().Add(time.Second)
+
+    object, getErr := local.Get(runtimeInstance, "labels\\awb-1.txt", storagecontract.GetOptions{})
+    if nil != getErr {
+        t.Fatalf("get: %v", getErr)
+    }
+    loaded, _ := io.ReadAll(object.Body)
+    _ = object.Body.Close()
+
+    if content != string(loaded) || int64(len(content)) != object.Info.Size {
+        t.Fatalf("expected the %d bytes and their size, got %q and %d", len(content), string(loaded), object.Info.Size)
+    }
+
+    if object.Info.ModifiedAt.Before(before) || object.Info.ModifiedAt.After(after) {
+        t.Fatalf("expected the modification time of the put, got %v outside %v..%v", object.Info.ModifiedAt, before, after)
+    }
+
+    /* the key asked, as given, not the path it folds to */
+    if "labels\\awb-1.txt" != object.Info.Key {
+        t.Fatalf("expected the key asked, got %q", object.Info.Key)
+    }
+
+    fileInfo, statErr := os.Stat(filepath.Join(base, "labels", "awb-1.txt"))
+    if nil != statErr {
+        t.Fatalf("stat: %v", statErr)
+    }
+
+    if strings.Trim(static.GenerateEtag(fileInfo, false), `"`) != object.Info.EntityTag || "" == object.Info.EntityTag {
+        t.Fatalf("expected the static file server's tag of the object without quotes, got %q", object.Info.EntityTag)
+    }
+
+    if "" != object.Info.ContentType {
+        t.Fatalf("expected no content type for a put that declared none, got %q", object.Info.ContentType)
+    }
+}
+
+func TestLocalStorage_TheEntityTagMovesWithEveryStore(t *testing.T) {
+    base := t.TempDir()
+    local := NewLocalStorage(base, LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    if putErr := local.Put(runtimeInstance, "report.txt", strings.NewReader("first"), -1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    firstInfo, firstErr := local.Stat(runtimeInstance, "report.txt")
+    if nil != firstErr {
+        t.Fatalf("stat: %v", firstErr)
+    }
+
+    earlier := time.Now().Add(-time.Hour)
+    if touchErr := os.Chtimes(filepath.Join(base, "report.txt"), earlier, earlier); nil != touchErr {
+        t.Fatalf("chtimes: %v", touchErr)
+    }
+
+    secondInfo, secondErr := local.Stat(runtimeInstance, "report.txt")
+    if nil != secondErr || firstInfo.EntityTag == secondInfo.EntityTag {
+        t.Fatalf("expected another modification time to move the tag, got %q and %q (%v)", firstInfo.EntityTag, secondInfo.EntityTag, secondErr)
+    }
+
+    if putErr := local.Put(runtimeInstance, "report.txt", strings.NewReader("second, longer"), -1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    thirdInfo, thirdErr := local.Stat(runtimeInstance, "report.txt")
+    if nil != thirdErr || secondInfo.EntityTag == thirdInfo.EntityTag || 14 != thirdInfo.Size {
+        t.Fatalf("expected a second store to move the tag and the size, got %v (%v)", thirdInfo, thirdErr)
+    }
+}
+
+/* every refusal answers the zero object, so a caller that forgets the error closes nothing and reads nothing */
+func TestLocalStorage_GetAnswersNoBodyBesideAnError(t *testing.T) {
+    base := t.TempDir()
+    local := NewLocalStorage(base, LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    if putErr := local.Put(runtimeInstance, "prefix/object.txt", strings.NewReader("x"), 1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    for _, key := range []string{"prefix", "../prefix/object.txt", "prefix/" + reservedTemporaryName("object.txt", "00112233445566aa"), "absent.txt"} {
+        object, getErr := local.Get(runtimeInstance, key, storagecontract.GetOptions{})
+        if nil == getErr || nil != object.Body || (storagecontract.ObjectInfo{}) != object.Info {
+            if nil != object.Body {
+                _ = object.Body.Close()
+            }
+
+            t.Fatalf("%q: expected an error beside the zero object, got %v (%v)", key, object, getErr)
+        }
+    }
+}
+
+func TestLocalStorage_StatAnswersTheInfoGetAnswers(t *testing.T) {
+    local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    if putErr := local.Put(runtimeInstance, "reports/2026/report.csv", strings.NewReader("a,b,c"), 5, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    object, getErr := local.Get(runtimeInstance, "reports/2026/report.csv", storagecontract.GetOptions{})
+    if nil != getErr {
+        t.Fatalf("get: %v", getErr)
+    }
+    _ = object.Body.Close()
+
+    objectInfo, statErr := local.Stat(runtimeInstance, "reports/2026/report.csv")
+    if nil != statErr || object.Info != objectInfo {
+        t.Fatalf("expected Stat to answer the info Get answered, %v, got %v (%v)", object.Info, objectInfo, statErr)
+    }
+}
+
+/* each row runs against both doors and is compared by cause, so the two cannot drift on what an object is */
+func TestLocalStorage_StatRefusesWhatGetRefuses(t *testing.T) {
+    base := t.TempDir()
+    outside := t.TempDir()
+    local := NewLocalStorage(base, LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    if putErr := local.Put(runtimeInstance, "prefix/object.txt", strings.NewReader("inside"), -1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    if writeErr := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("top secret"), 0o600); nil != writeErr {
+        t.Fatalf("seed: %v", writeErr)
+    }
+
+    if linkErr := os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(base, "escape")); nil != linkErr {
+        t.Skipf("symlinks not supported: %v", linkErr)
+    }
+
+    if linkErr := os.Symlink(filepath.Join("prefix", "object.txt"), filepath.Join(base, "inside-link")); nil != linkErr {
+        t.Fatalf("symlink: %v", linkErr)
+    }
+
+    for name, testCase := range map[string]struct {
+        key          string
+        directory    bool
+        message      string
+        refused      bool
+        notFoundless bool
+    }{
+        "a directory":             {key: "prefix", directory: true, refused: true, notFoundless: true},
+        "a parent segment":        {key: "../prefix/object.txt", message: `".." segment`, refused: true, notFoundless: true},
+        "a reserved temporary":    {key: reservedTemporaryName("x.txt", "00112233445566aa"), message: "reserved .melody-storage- namespace", refused: true, notFoundless: true},
+        "a link leaving the base": {key: "escape", refused: true, notFoundless: true},
+        "a link inside the base":  {key: "inside-link"},
+    } {
+        object, getErr := local.Get(runtimeInstance, testCase.key, storagecontract.GetOptions{})
+        if nil != object.Body {
+            _ = object.Body.Close()
+        }
+        objectInfo, statErr := local.Stat(runtimeInstance, testCase.key)
+
+        if testCase.refused != (nil != getErr) || testCase.refused != (nil != statErr) {
+            t.Fatalf("%s: expected both doors refused %v, got %v and %v", name, testCase.refused, getErr, statErr)
+        }
+
+        if false == testCase.refused {
+            if 6 != objectInfo.Size || object.Info != objectInfo {
+                t.Fatalf("%s: expected both doors to answer the linked object, got %v and %v", name, object.Info, objectInfo)
+            }
+
+            continue
+        }
+
+        if testCase.directory != exception.ChainIs(getErr, storagecontract.ErrKeyIsDirectory) || testCase.directory != exception.ChainIs(statErr, storagecontract.ErrKeyIsDirectory) {
+            t.Fatalf("%s: expected ErrKeyIsDirectory %v at both doors, got %v and %v", name, testCase.directory, getErr, statErr)
+        }
+
+        if "" != testCase.message && (false == strings.Contains(getErr.Error(), testCase.message) || false == strings.Contains(statErr.Error(), testCase.message)) {
+            t.Fatalf("%s: expected both refusals to say %q, got %v and %v", name, testCase.message, getErr, statErr)
+        }
+
+        if true == testCase.notFoundless && (true == exception.ChainIs(getErr, storagecontract.ErrObjectNotFound) || true == exception.ChainIs(statErr, storagecontract.ErrObjectNotFound)) {
+            t.Fatalf("%s: expected a refusal that is no absence, got %v and %v", name, getErr, statErr)
+        }
+
+        if (storagecontract.ObjectInfo{}) != objectInfo {
+            t.Fatalf("%s: expected the zero info beside the refusal, got %v", name, objectInfo)
+        }
+    }
+}
+
+func TestLocalStorage_AnAbsentKeyAnswersObjectNotFoundAtGetAndStat(t *testing.T) {
+    base := filepath.Join(t.TempDir(), "base")
+    local := NewLocalStorage(base, LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    if putErr := local.Put(runtimeInstance, "object.bin", strings.NewReader("x"), 1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    assertAbsent := func(name string, key string) {
+        object, getErr := local.Get(runtimeInstance, key, storagecontract.GetOptions{})
+        if false == exception.ChainIs(getErr, storagecontract.ErrObjectNotFound) || nil != object.Body {
+            t.Fatalf("%s: expected Get to answer ErrObjectNotFound and no body, got %v", name, getErr)
+        }
+
+        if _, statErr := local.Stat(runtimeInstance, key); false == exception.ChainIs(statErr, storagecontract.ErrObjectNotFound) {
+            t.Fatalf("%s: expected Stat to answer ErrObjectNotFound, got %v", name, statErr)
+        }
+    }
+
+    assertAbsent("a key never stored", "never/stored.bin")
+    assertAbsent("a key under a regular file", "object.bin/child")
+
+    if removeErr := os.RemoveAll(base); nil != removeErr {
+        t.Fatalf("remove: %v", removeErr)
+    }
+
+    assertAbsent("a key after the base directory was removed", "object.bin")
+}
+
+func TestLocalStorage_DeleteOfAnAbsentKeyAnswersNil(t *testing.T) {
+    base := filepath.Join(t.TempDir(), "base")
+    local := NewLocalStorage(base, LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    if deleteErr := local.Delete(runtimeInstance, "never/stored.bin"); nil != deleteErr {
+        t.Fatalf("expected nil for a key never stored, got %v", deleteErr)
+    }
+
+    if removeErr := os.RemoveAll(base); nil != removeErr {
+        t.Fatalf("remove: %v", removeErr)
+    }
+
+    if deleteErr := local.Delete(runtimeInstance, "object.bin"); nil != deleteErr {
+        t.Fatalf("expected nil once the base directory is gone, got %v", deleteErr)
+    }
 }

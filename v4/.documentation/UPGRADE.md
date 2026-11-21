@@ -22,6 +22,38 @@ Every entry below that the third major shipped is the consequence of fixing a de
 
 The fourth major takes the forms the third major kept compatible: a section that names a sibling interface, a deprecated door or a released signature on the third major describes here the form the fourth major carries instead, and this major's [`CHANGELOG.md`](../CHANGELOG.md) marks each **Breaking**.
 
+### Storage: `Get` takes options and answers the object with its info
+
+**What changed.** [`storagecontract.Storage.Get`](../storage/contract/storage.go) is `Get(runtime, key, storagecontract.GetOptions) (storagecontract.Object, error)`: the object's `Body`, an `io.ReadCloser`, beside its `Info`, a [`storagecontract.ObjectInfo`](../storage/contract/storage.go) of `Size`, `ContentType`, `ModifiedAt`, `EntityTag` without quotes and `Key`, the key asked. Both backends fill the info from the stat they already took, so a read costs no request more. Userland calls the storage through [`storage.Bound`](../storage/bound.go), `storage.FromRuntime(runtimeInstance)` or `storage.For(runtimeInstance, storageInstance)`, whose doors take no runtime.
+
+**Symptom.** `assignment mismatch: 2 variables but store.Get returns 1 value` or `not enough arguments in call to store.Get`; an implementation of the contract: `does not implement storagecontract.Storage (wrong type for method Get)`.
+
+**Remedy.** `object, getErr := storage.FromRuntime(runtimeInstance).Get(key, storagecontract.GetOptions{})`, read and close `object.Body`, exactly once, also after a failed read; beside an error the object is the zero value. An implementation answers `storagecontract.Object{Body: reader, Info: info}` and the zero `Object` beside every error.
+
+### Storage: `Stat` is part of the contract
+
+**What changed.** [`Storage.Stat(runtime, key) (storagecontract.ObjectInfo, error)`](../storage/contract/storage.go) answers what the storage knows about the object without opening it: it refuses what `Get` refuses, by the same causes, and answers the info a `Get` would answer at that instant. The S3 storage sends one `HEAD`; `LocalStorage` judges the file without opening it, so a named pipe answers at once.
+
+**Symptom.** An implementation of the contract: `missing method Stat`.
+
+**Remedy.** Implement `Stat` by the rule "refuses what `Get` refuses": share one function between the two doors that judges what was found. A caller that asked `Exists` before reading the size or the content type asks `Stat`.
+
+### Storage: an absent object is `ErrObjectNotFound`
+
+**What changed.** `Get` and `Stat` of a key that names no object answer an error whose chain carries [`storagecontract.ErrObjectNotFound`](../storage/contract/error.go), on both backends: locally a key never stored, a key under a regular file and a base directory that is gone; on S3 `NoSuchKey`. A refusal of the key, a directory, a 403 or a transport failure never carries it. `Delete` of an absent key answers `nil`, as it did, now the stated rule.
+
+**Symptom.** None at compile time. A caller that matched the sentence `object storage object not found`, or `fs.ErrNotExist` in the local chain, keeps working; one that called `Exists` and then `Get` pays two round trips where one answers.
+
+**Remedy.** `exception.ChainIs(getErr, storagecontract.ErrObjectNotFound)`; the `Exists`-then-`Get` pair becomes one `Get`.
+
+### Storage: `PresignedUrl` takes a config
+
+**What changed.** [`Storage.PresignedUrl(runtime, key, storagecontract.PresignConfig)`](../storage/contract/storage.go) takes `PresignConfig{Expiry bound.Duration, Method string}`. `Expiry` is read against [`storagecontract.PresignExpiryRule`](../storage/contract/presign.go): 15 minutes when left out, at least 1s, at most 7 days, unlimited refused, each refusal naming `PresignConfig.Expiry` before the backend signs. `Method` is `http.MethodGet` when left out; `http.MethodPut` signs an upload of the key, which binds neither a content type nor a size; any other method is refused with [`storagecontract.ErrPresignUnsupported`](../storage/contract/error.go). `LocalStorage` refuses every presign with the same cause, its message kept.
+
+**Symptom.** `cannot use 15 * time.Minute (constant 900000000000 of type time.Duration) as storagecontract.PresignConfig value in argument`; at run time an expiry of `0`, refused by minio before, signs for 15 minutes, and one past 7 days is refused by the framework naming the field, where minio refused it with its own sentence.
+
+**Remedy.** `storagecontract.PresignConfig{Expiry: bound.Of(15 * time.Minute)}`, with `Method: http.MethodPut` for an upload link. A caller that falls back to streaming on the local backend branches on `exception.ChainIs(presignErr, storagecontract.ErrPresignUnsupported)`; a backend of the application's own reads the expiry through `storagecontract.ResolvePresignExpiry` and the method through `storagecontract.ResolvePresignMethod`.
+
 ### Cache: the callback of `Remember` receives the flight's runtime and an item, and chooses its ttl or skips the store
 
 **What changed.** The callback of [`Remember`](../cache/remember.go) is `func(runtimeInstance containercontract.Runtime, item *cache.RememberItem) (T, error)`. The runtime is the flight's, never a caller's: a run of its own, `KindRun`, over the flight's context, in a scope the flight opens behind the leader's and closes once it completed, so the callback resolves its services whichever request ends first; a leader whose runtime opens no child run, the boot runtime, a provider's runtime or a scope of another implementation, lends its own scope over the flight's context, and a view kept past its closed scope is answered that scope's error; with no flight it is the caller's own runtime. Through the item it chooses the ttl of the entry it computes, `item.SetTtl(bound.Of(time.Minute))`, or asks that the value is answered and not stored, `item.SkipStore()`. `RememberConfig.Ttl` stays required and is what an untouched item stores under.
@@ -1760,7 +1792,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **What changed.** `LocalStorage` and the awss3 `Storage` refuse, at every door, a key that holds a `..` segment once its backslashes are read as separators, with an error that names the segment. They used to fold it: `tenant-b/../tenant-a/secret.txt` addressed `tenant-a/secret.txt` on both backends.
 
-**Symptom.** `Put`, `Get`, `Delete`, `Exists` (and `PresignedUrl` on awss3) answer `storage key carries a ".." segment` or `object storage key carries a ".." segment` for a key they used to fold.
+**Symptom.** `Put`, `Get`, `Stat`, `Delete`, `Exists` (and `PresignedUrl` on awss3) answer `storage key carries a ".." segment` or `object storage key carries a ".." segment` for a key they used to fold.
 
 **Remedy.** Address the object by the key it folds to: `b` for `a/../b`. A key built from a client-chosen name should refuse a separator in that name before it reaches the storage.
 

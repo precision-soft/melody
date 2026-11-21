@@ -36,11 +36,13 @@ if ensureErr := awss3.EnsureBucket(runtimeInstance, client, "documents", awss3.E
 
 store := awss3.NewStorage(client, "documents", awss3.StorageConfig{})
 
-putErr := store.Put(runtimeInstance, "labels/awb-123.pdf", reader, size, storagecontract.PutOptions{
+documents := storage.For(runtimeInstance, store)
+
+putErr := documents.Put("labels/awb-123.pdf", reader, size, storagecontract.PutOptions{
     ContentType: "application/pdf",
 })
 
-url, _ := store.PresignedUrl(runtimeInstance, "labels/awb-123.pdf", 15*time.Minute)
+url, presignErr := documents.PresignedUrl("labels/awb-123.pdf", storagecontract.PresignConfig{Expiry: bound.Of(15 * time.Minute)})
 ```
 
 ### Transport security
@@ -51,7 +53,7 @@ The zero `Config` dials **https**. `Config.Insecure` selects plain http: credent
 
 ### Plug-and-play registration
 
-Register the S3 backend under the core `storage.ServiceStorage` service name in one call, so handlers resolve it from the container with `storage.StorageMustFromResolver`:
+Register the S3 backend under the core `storage.ServiceStorage` service name in one call, so a handler binds it with `storage.FromRuntime(runtimeInstance)` and a provider resolves it with `storage.StorageMustFromResolver`:
 
 ```go
 awss3.RegisterStorageService(registrar, client, "documents", awss3.StorageConfig{})
@@ -78,8 +80,9 @@ app.RegisterModule(awss3.NewModule(awss3.ModuleConfig{Client: client, Bucket: "d
 - Neither `*minio.Client` nor `Storage` expose a `Close`: minio-go offers none, so the client's pooled connections live until idle timeout or process exit. This is a property of the underlying SDK, not a forgotten teardown door.
 - `Put` with a negative size streams a body of unknown length in parts of 16 MiB, one part in memory at a time, up to ten thousand parts, 156.25 GiB.
 - `Put` enforces the size you declare. A seekable body (`*bytes.Reader`, `*strings.Reader`, `multipart.File`, `*os.File`) is measured before the upload; a non-seekable one (an `http.Request.Body`) is checked as it streams and the upload is cut off before its last byte if the body turns out to be longer, so a wrong size never leaves a truncated object at the key. Memory does not scale with the body: a declared size at or below `StorageConfig.PutSpoolLimit`, 16 MiB by default, is buffered so it can be rejected before any request, anything larger streams and is cut off mid-upload. Whether the upload goes up as one request or multipart is MinIO's decision by its own 16 MiB part size, whatever the limit. Pass `-1` when the size is unknown and the client streams the object with no size check.
-- `Get` returns the object's reader after a `Stat`, so a missing object fails fast instead of erroring only on first read. Close the reader.
-- `PresignedUrl` issues a presigned GET URL valid for the given expiry.
-- A bucket has no directories: a key that is only a prefix of other objects names no object, so `Delete` sends the bucket's delete for it, which removes nothing and succeeds as for any absent key, and `Exists` answers `false`. This storage never answers `storagecontract.ErrKeyIsDirectory`, the refusal `LocalStorage` returns for a key naming a directory.
+- `Get` answers the object after its `HEAD`, the one minio sends as the object's first call, so a missing object fails fast instead of erroring only on first read, and `Object.Info` comes from that `HEAD`'s headers: a download is one `HEAD` and one `GET`. `Stat` sends the `HEAD` alone. The info carries the bucket's `ETag` without its quotes as `EntityTag`, the content type the `Put` declared, the size, the modification time and the key asked. Close `Object.Body`.
+- A key that names no object, `NoSuchKey` or a bodiless 404, answers `storagecontract.ErrObjectNotFound` in the chain at `Get` and `Stat`; a 403, a missing bucket or a transport failure never carries it. `Delete` of an absent key answers `nil`.
+- `PresignedUrl` takes a `storagecontract.PresignConfig`: `Expiry` is 15 minutes when left out, at least 1s and at most 7 days, the ceiling of an S3 signature, refused naming `PresignConfig.Expiry` before minio is asked; `Method` is `http.MethodGet`, a download link, when left out, or `http.MethodPut`, an upload link of the key, any other refused with `storagecontract.ErrPresignUnsupported`. An upload link binds neither a content type nor a size. Signing is local arithmetic when the client names its region.
+- A bucket has no directories: a key that is only a prefix of other objects names no object, so `Get` and `Stat` answer `ErrObjectNotFound`, `Delete` sends the bucket's delete for it, which removes nothing and succeeds as for any absent key, and `Exists` answers `false`. This storage never answers `storagecontract.ErrKeyIsDirectory`, the refusal `LocalStorage` returns for a key naming a directory.
 - A key is folded the way `LocalStorage` folds it (backslash to slash, `.` and empty segments and a leading slash folded away), and a key that carries a `..` segment is refused by name at every door before the bucket is asked, so a key that climbs out of one prefix never addresses an object under another.
 - The integration test (`storage_test.go`) is skipped unless `MINIO_ENDPOINT` (and `MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`) are set; it was verified against MinIO and LocalStack (the dev `docker-compose.yml` ships a LocalStack `s3` service).

@@ -366,6 +366,7 @@ var viewTypes = map[string]bool{
     "github.com/precision-soft/melody/v4/cache.Bound":              true,
     "github.com/precision-soft/melody/v4/httpclient.Bound":         true,
     "github.com/precision-soft/melody/v4/security.BoundTokenStore": true,
+    "github.com/precision-soft/melody/v4/storage.Bound":            true,
 }
 
 func isViewType(typeReference *TypeReference) bool {

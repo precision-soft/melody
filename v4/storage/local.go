@@ -9,6 +9,7 @@ import (
     "math"
     "os"
     "path/filepath"
+    "strconv"
     "strings"
     "syscall"
     "time"
@@ -300,41 +301,96 @@ func createStorageTemporaryFile(root *os.Root, relativeKey string) (string, *os.
 func (instance *LocalStorage) Get(
     runtimeInstance containercontract.Runtime,
     key string,
-) (io.ReadCloser, error) {
+    options storagecontract.GetOptions,
+) (storagecontract.Object, error) {
     relativeKey, keyErr := storageRelativeKey(key)
     if nil != keyErr {
-        return nil, keyErr
+        return storagecontract.Object{}, keyErr
     }
 
     root, rootErr := os.OpenRoot(instance.baseDirectory)
     if nil != rootErr {
-        return nil, exception.NewError("could not open the storage object", map[string]any{"key": key}, rootErr)
+        return storagecontract.Object{}, exception.NewError("could not open the storage object", map[string]any{"key": key}, storageAbsenceCause(rootErr))
     }
     defer root.Close()
 
     /* opened non-blocking, so a named pipe or a device under the key answers at once and is refused below; a blocking open of a pipe waits for a writer forever */
     file, openErr := root.OpenFile(relativeKey, os.O_RDONLY|syscall.O_NONBLOCK, 0)
     if nil != openErr {
-        return nil, exception.NewError("could not open the storage object", map[string]any{"key": key}, openErr)
+        return storagecontract.Object{}, exception.NewError("could not open the storage object", map[string]any{"key": key}, storageAbsenceCause(openErr))
     }
 
-    info, statErr := file.Stat()
+    fileInfo, statErr := file.Stat()
     if nil != statErr {
         _ = file.Close()
-        return nil, exception.NewError("could not open the storage object", map[string]any{"key": key}, statErr)
+        return storagecontract.Object{}, exception.NewError("could not open the storage object", map[string]any{"key": key}, statErr)
     }
 
-    if true == info.IsDir() {
+    objectInfo, objectErr := localObjectInfo(key, fileInfo)
+    if nil != objectErr {
         _ = file.Close()
-        return nil, exception.NewError("storage key resolves to a directory", map[string]any{"key": key}, storagecontract.ErrKeyIsDirectory)
+        return storagecontract.Object{}, objectErr
     }
 
-    if false == info.Mode().IsRegular() {
-        _ = file.Close()
-        return nil, exception.NewError("storage key resolves to a file that is not a regular object", map[string]any{"key": key}, nil)
+    return storagecontract.Object{Body: file, Info: objectInfo}, nil
+}
+
+func (instance *LocalStorage) Stat(
+    runtimeInstance containercontract.Runtime,
+    key string,
+) (storagecontract.ObjectInfo, error) {
+    relativeKey, keyErr := storageRelativeKey(key)
+    if nil != keyErr {
+        return storagecontract.ObjectInfo{}, keyErr
     }
 
-    return file, nil
+    root, rootErr := os.OpenRoot(instance.baseDirectory)
+    if nil != rootErr {
+        return storagecontract.ObjectInfo{}, exception.NewError("could not stat the storage object", map[string]any{"key": key}, storageAbsenceCause(rootErr))
+    }
+    defer root.Close()
+
+    /* followed only inside the root, as Get opens it; the file is not opened, so a pipe is judged without waiting for a writer */
+    fileInfo, statErr := root.Stat(relativeKey)
+    if nil != statErr {
+        return storagecontract.ObjectInfo{}, exception.NewError("could not stat the storage object", map[string]any{"key": key}, storageAbsenceCause(statErr))
+    }
+
+    return localObjectInfo(key, fileInfo)
+}
+
+/* localObjectInfo judges what Get and Stat found under the key, so the two doors cannot disagree on what an object is */
+func localObjectInfo(key string, fileInfo os.FileInfo) (storagecontract.ObjectInfo, error) {
+    if true == fileInfo.IsDir() {
+        return storagecontract.ObjectInfo{}, exception.NewError("storage key resolves to a directory", map[string]any{"key": key}, storagecontract.ErrKeyIsDirectory)
+    }
+
+    if false == fileInfo.Mode().IsRegular() {
+        return storagecontract.ObjectInfo{}, exception.NewError("storage key resolves to a file that is not a regular object", map[string]any{"key": key}, nil)
+    }
+
+    return storagecontract.ObjectInfo{
+        Size:       fileInfo.Size(),
+        ModifiedAt: fileInfo.ModTime(),
+        EntityTag:  localEntityTag(fileInfo),
+        Key:        key,
+    }, nil
+}
+
+/* localEntityTag is the tag the static file server gives a file of this size and modification time, without its quotes */
+func localEntityTag(fileInfo os.FileInfo) string {
+    digest := sha256.Sum256([]byte(strconv.FormatInt(fileInfo.Size(), 10) + "-" + strconv.FormatInt(fileInfo.ModTime().UnixNano(), 10)))
+
+    return hex.EncodeToString(digest[:8])
+}
+
+/* storageAbsenceCause carries ErrObjectNotFound beside an error that means the key names no object, and leaves every other error as it is */
+func storageAbsenceCause(err error) error {
+    if true == storageObjectAbsent(err) {
+        return errors.Join(storagecontract.ErrObjectNotFound, err)
+    }
+
+    return err
 }
 
 func (instance *LocalStorage) Delete(
@@ -410,9 +466,9 @@ func storageObjectAbsent(err error) bool {
 func (instance *LocalStorage) PresignedUrl(
     runtimeInstance containercontract.Runtime,
     key string,
-    expiry time.Duration,
+    config storagecontract.PresignConfig,
 ) (string, error) {
-    return "", exception.NewError("presigned urls are not supported by local storage", nil, nil)
+    return "", exception.NewError("presigned urls are not supported by local storage", map[string]any{"key": key}, storagecontract.ErrPresignUnsupported)
 }
 
 /* storageRelativeKey folds a key to the path it names under the base: a backslash reads as a separator, and "." and empty segments and a leading slash fold away. A ".." segment is refused by name rather than folded, since a fold would hand "tenant-b/../tenant-a/secret.txt" the object of "tenant-a/secret.txt" and an application that isolates its callers by key prefix would be crossed by it; the S3 backend refuses it the same way. */

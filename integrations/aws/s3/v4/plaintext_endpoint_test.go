@@ -16,6 +16,7 @@ import (
     "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
 /* warningCapturingLogger keeps the message and the context of every warning */
@@ -155,7 +156,7 @@ func TestNewStorage_APlaintextEndpointOffThisMachineIsNamedOnceAtTheFirstUse(t *
     storage := NewStorage(newClientFor(t, "s3.example.com", false), "bucket", StorageConfig{})
 
     for range 2 {
-        _, _ = storage.PresignedUrl(runtimeInstance, "object.txt", 0)
+        _, _ = storage.PresignedUrl(runtimeInstance, "object.txt", storagecontract.PresignConfig{})
     }
 
     warnings := logger.captured()
@@ -176,7 +177,7 @@ func TestNewStorage_ALoopbackPlaintextEndpointAndAnHttpsEndpointWriteNoWarning(t
     for _, client := range []*minio.Client{newClientFor(t, "localhost:4566", false), newClientFor(t, "s3.example.com", true)} {
         logger := &warningCapturingLogger{}
 
-        _, _ = NewStorage(client, "bucket", StorageConfig{}).PresignedUrl(newRuntimeWithLogger(logger), "object.txt", 0)
+        _, _ = NewStorage(client, "bucket", StorageConfig{}).PresignedUrl(newRuntimeWithLogger(logger), "object.txt", storagecontract.PresignConfig{})
 
         if 0 != len(logger.captured()) {
             t.Fatalf("expected no warning over %s, got %v", client.EndpointURL(), logger.captured())
@@ -189,7 +190,7 @@ func TestNewStorage_ASingleLabelPlaintextEndpointWarns(t *testing.T) {
 
     logger := &warningCapturingLogger{}
 
-    _, _ = NewStorage(newClientFor(t, "localstack:4566", false), "bucket", StorageConfig{}).PresignedUrl(newRuntimeWithLogger(logger), "object.txt", 0)
+    _, _ = NewStorage(newClientFor(t, "localstack:4566", false), "bucket", StorageConfig{}).PresignedUrl(newRuntimeWithLogger(logger), "object.txt", storagecontract.PresignConfig{})
 
     if 1 != len(logger.captured()) {
         t.Fatalf("expected the single-label endpoint warned of, got %v", logger.captured())
@@ -214,7 +215,7 @@ func TestNewStorage_TheWarningNamesTheInsecureField(t *testing.T) {
 
     logger := &warningCapturingLogger{}
 
-    _, _ = NewStorage(newClientFor(t, "s3.example.com", false), "bucket", StorageConfig{}).PresignedUrl(newRuntimeWithLogger(logger), "object.txt", 0)
+    _, _ = NewStorage(newClientFor(t, "s3.example.com", false), "bucket", StorageConfig{}).PresignedUrl(newRuntimeWithLogger(logger), "object.txt", storagecontract.PresignConfig{})
 
     if 1 != len(logger.messages) || false == strings.Contains(logger.messages[0], "Config.Insecure") || true == strings.Contains(logger.messages[0], "Secure on") {
         t.Fatalf("expected the message to name Config.Insecure, got %v", logger.messages)
@@ -228,13 +229,13 @@ func TestNewStorage_TwoStoragesOverOneEndpointNameItOnceAndAUseWithNoJournalLeav
     first := NewStorage(client, "bucket", StorageConfig{})
     second := NewStorage(client, "other", StorageConfig{})
 
-    _, _ = first.PresignedUrl(newRuntimeOver(nil, nil), "object.txt", 0)
+    _, _ = first.PresignedUrl(newRuntimeOver(nil, nil), "object.txt", storagecontract.PresignConfig{})
 
     logger := &warningCapturingLogger{}
     runtimeInstance := newRuntimeWithLogger(logger)
 
-    _, _ = first.PresignedUrl(runtimeInstance, "object.txt", 0)
-    _, _ = second.PresignedUrl(runtimeInstance, "object.txt", 0)
+    _, _ = first.PresignedUrl(runtimeInstance, "object.txt", storagecontract.PresignConfig{})
+    _, _ = second.PresignedUrl(runtimeInstance, "object.txt", storagecontract.PresignConfig{})
 
     if warnings := logger.captured(); 1 != len(warnings) {
         t.Fatalf("expected the endpoint named once across both storages, got %v", warnings)
@@ -266,12 +267,35 @@ func TestNewStorage_TheFirstUseHonoursTheCliBootWarningKeysAndTheModulesRecord(t
             runtimeInstance := newRuntimeOver(logger, newTestConfiguration(t, testCase.values))
 
             for range 2 {
-                _, _ = NewStorage(client, "bucket", StorageConfig{}).PresignedUrl(runtimeInstance, "object.txt", 0)
+                _, _ = NewStorage(client, "bucket", StorageConfig{}).PresignedUrl(runtimeInstance, "object.txt", storagecontract.PresignConfig{})
             }
 
             if warnings := logger.captured(); testCase.expected != len(warnings) {
                 t.Fatalf("expected %d warnings, got %v", testCase.expected, warnings)
             }
         })
+    }
+}
+
+/* the runtime's context is done before the door is called, so the HEAD never leaves for the endpoint; the warning is written first all the same */
+func TestStorage_StatWritesThePlaintextEndpointWarning(t *testing.T) {
+    forgetJudgedPlaintextEndpoints(t)
+
+    logger := &warningCapturingLogger{}
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+    runtimeInstance := runtime.WithContext(newRuntimeWithLogger(logger), cancelledContext)
+
+    storage := NewStorage(newClientFor(t, "s3.example.com", false), "bucket", StorageConfig{})
+
+    for range 2 {
+        if _, statErr := storage.Stat(runtimeInstance, "object.txt"); nil == statErr {
+            t.Fatalf("expected the stat refused under a done context")
+        }
+    }
+
+    warnings := logger.captured()
+    if 1 != len(warnings) || PlaintextEndpointBootWarningName != warnings[0][bootWarningContextKey] {
+        t.Fatalf("expected one warning at the first Stat, got %v", warnings)
     }
 }

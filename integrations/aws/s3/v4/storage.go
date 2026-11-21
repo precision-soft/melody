@@ -4,7 +4,10 @@ import (
     "bufio"
     "bytes"
     "context"
+    "errors"
     "io"
+    "net/http"
+    "net/url"
     "path"
     "strings"
     "sync/atomic"
@@ -384,30 +387,68 @@ func boundedPutReader(reader io.Reader, size int64) io.Reader {
 func (instance *Storage) Get(
     runtimeInstance containercontract.Runtime,
     key string,
-) (io.ReadCloser, error) {
+    options storagecontract.GetOptions,
+) (storagecontract.Object, error) {
     instance.plaintextEndpointWarning.write(runtimeInstance)
 
     normalizedKey, keyErr := normalizeObjectKey(key)
     if nil != keyErr {
-        return nil, keyErr
+        return storagecontract.Object{}, keyErr
     }
 
     object, getErr := instance.client.GetObject(runtimeInstance.Context(), instance.bucket, normalizedKey, minio.GetObjectOptions{})
     if nil != getErr {
-        return nil, exception.NewError("object storage get failed", map[string]any{"key": key, "bucket": instance.bucket}, getErr)
+        return storagecontract.Object{}, exception.NewError("object storage get failed", map[string]any{"key": key, "bucket": instance.bucket}, getErr)
     }
 
-    if _, statErr := object.Stat(); nil != statErr {
+    /* the first call on a minio object is a HEAD, and the GET leaves at the first read, so the info costs no request of its own */
+    minioInfo, statErr := object.Stat()
+    if nil != statErr {
         object.Close()
 
-        if "NoSuchKey" == minio.ToErrorResponse(statErr).Code {
-            return nil, exception.NewError("object storage object not found", map[string]any{"key": key, "bucket": instance.bucket}, statErr)
-        }
-
-        return nil, exception.NewError("object storage get failed", map[string]any{"key": key, "bucket": instance.bucket}, statErr)
+        return storagecontract.Object{}, instance.statFailure("object storage get failed", key, statErr)
     }
 
-    return object, nil
+    return storagecontract.Object{Body: object, Info: objectInfoOf(key, minioInfo)}, nil
+}
+
+func (instance *Storage) Stat(
+    runtimeInstance containercontract.Runtime,
+    key string,
+) (storagecontract.ObjectInfo, error) {
+    instance.plaintextEndpointWarning.write(runtimeInstance)
+
+    normalizedKey, keyErr := normalizeObjectKey(key)
+    if nil != keyErr {
+        return storagecontract.ObjectInfo{}, keyErr
+    }
+
+    minioInfo, statErr := instance.client.StatObject(runtimeInstance.Context(), instance.bucket, normalizedKey, minio.StatObjectOptions{})
+    if nil != statErr {
+        return storagecontract.ObjectInfo{}, instance.statFailure("object storage stat failed", key, statErr)
+    }
+
+    return objectInfoOf(key, minioInfo), nil
+}
+
+/* statFailure answers a failed HEAD: a key that names no object, a prefix included, carries ErrObjectNotFound beside minio's error, and any other failure carries minio's error alone */
+func (instance *Storage) statFailure(message string, key string, statErr error) error {
+    if "NoSuchKey" == minio.ToErrorResponse(statErr).Code {
+        return exception.NewError("object storage object not found", map[string]any{"key": key, "bucket": instance.bucket}, errors.Join(storagecontract.ErrObjectNotFound, statErr))
+    }
+
+    return exception.NewError(message, map[string]any{"key": key, "bucket": instance.bucket}, statErr)
+}
+
+/* objectInfoOf maps the bucket's answer for the key asked; the entity tag loses the quotes of its header form */
+func objectInfoOf(key string, minioInfo minio.ObjectInfo) storagecontract.ObjectInfo {
+    return storagecontract.ObjectInfo{
+        Size:        minioInfo.Size,
+        ContentType: minioInfo.ContentType,
+        ModifiedAt:  minioInfo.LastModified,
+        EntityTag:   strings.Trim(minioInfo.ETag, `"`),
+        Key:         key,
+    }
 }
 
 func (instance *Storage) Delete(
@@ -455,7 +496,7 @@ func (instance *Storage) Exists(
 func (instance *Storage) PresignedUrl(
     runtimeInstance containercontract.Runtime,
     key string,
-    expiry time.Duration,
+    config storagecontract.PresignConfig,
 ) (string, error) {
     instance.plaintextEndpointWarning.write(runtimeInstance)
 
@@ -464,9 +505,25 @@ func (instance *Storage) PresignedUrl(
         return "", keyErr
     }
 
-    presigned, presignErr := instance.client.PresignedGetObject(runtimeInstance.Context(), instance.bucket, normalizedKey, expiry, nil)
+    method, methodErr := storagecontract.ResolvePresignMethod(config.Method)
+    if nil != methodErr {
+        return "", methodErr
+    }
+
+    expiry, expiryErr := storagecontract.ResolvePresignExpiry(config.Expiry)
+    if nil != expiryErr {
+        return "", expiryErr
+    }
+
+    var presigned *url.URL
+    var presignErr error
+    if http.MethodPut == method {
+        presigned, presignErr = instance.client.PresignedPutObject(runtimeInstance.Context(), instance.bucket, normalizedKey, expiry)
+    } else {
+        presigned, presignErr = instance.client.PresignedGetObject(runtimeInstance.Context(), instance.bucket, normalizedKey, expiry, nil)
+    }
     if nil != presignErr {
-        return "", exception.NewError("object storage presign failed", map[string]any{"key": key, "bucket": instance.bucket}, presignErr)
+        return "", exception.NewError("object storage presign failed", map[string]any{"key": key, "bucket": instance.bucket, "method": method}, presignErr)
     }
 
     return presigned.String(), nil
