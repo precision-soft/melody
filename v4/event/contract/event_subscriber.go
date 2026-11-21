@@ -3,7 +3,7 @@ package contract
 type SubscribedEvent interface {
     Listener() EventListener
 
-    Priority() int
+    Config() ListenerConfig
 }
 
 type EventSubscriber interface {

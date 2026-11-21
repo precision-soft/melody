@@ -188,7 +188,7 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Symptom.** A call of a removed door no longer compiles. A `kernel.exception` listener below one that answers no longer runs, where it used to run and could overwrite the response. A listener at `math.MinInt` registered after the handler was built panics. An out-of-tree implementation of `httpcontract.Kernel` no longer needs `SetErrorHandler`.
 
-**Remedy.** Register a listener with `AddListener(kernelcontract.EventKernelException, listener, 0)` that calls `SetResponse`, or declines by not calling it; call [`RenderExceptionResponse`](../http/exception_listener.go) to delegate to the framework's body. An observer sits at a higher priority than any responder. The handler's `writer` argument has no replacement: a listener answers with a `Response` the kernel writes, whose body may be a stream through `SetBodyReader`, and an error path that needs the raw connection has to act in the handler that failed.
+**Remedy.** Register a listener with `AddListener(kernelcontract.EventKernelException, listener, eventcontract.ListenerConfig{})` that calls `SetResponse`, or declines by not calling it; call [`RenderExceptionResponse`](../http/exception_listener.go) to delegate to the framework's body. An observer sits at a higher priority than any responder. The handler's `writer` argument has no replacement: a listener answers with a `Response` the kernel writes, whose body may be a stream through `SetBodyReader`, and an error path that needs the raw connection has to act in the handler that failed.
 
 ### Http: a `kernel.request` listener refuses through `KernelRequestEvent.Refuse`
 
@@ -238,13 +238,13 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** Report refused credentials as an unauthenticated token, or as an error answering `401` or `403`; return a fault as a plain error and a malformed request as a `400`.
 
-### Application: a kernel whose dispatcher cannot hold the framework's guarantees, and a bus whose transports cannot be ordered or closed, are refused
+### Application: a bus whose transports cannot be ordered or closed is refused
 
-**What changed.** Four wiring failures that wrote a warning and left a guarantee unarmed are refused. The application's boot refuses a bus registered under `messagebus.ServiceBus` or `messagebus.ServiceConsumeBus` that the container cannot order before `messagebus.ServiceTransportsCloser`, a ring among them for instance, naming the bus, and a transports closer whose provider fails, naming the closer, the container's error in the chain of each. [`RegisterKernelAccessControlListener`](../security/access_control_listener.go), which an http boot with a security configuration calls, refuses a kernel whose event dispatcher does not implement [`eventcontract.RequiredListenerRegistrar`](../event/contract/event_dispatcher.go) before it adds the access control listener, and the http kernel's `ServeHttp` refuses the dispatcher of the container it is handed when it does not implement [`eventcontract.PriorityFloorRegistrar`](../event/contract/event_dispatcher.go), before it adds the built-in `kernel.exception` listener, each naming the dispatcher type in the context key `dispatcherType`; the access control listener ran unmarked, and the built-in `kernel.exception` listener was added through `AddListener`, each with a warning on the emergency channel.
+**What changed.** Two wiring failures that wrote a warning and left a guarantee unarmed are refused. The application's boot refuses a bus registered under `messagebus.ServiceBus` or `messagebus.ServiceConsumeBus` that the container cannot order before `messagebus.ServiceTransportsCloser`, a ring among them for instance, naming the bus, and a transports closer whose provider fails, naming the closer, the container's error in the chain of each. An event dispatcher carries the required mark and the reserved floor through `eventcontract.EventDispatcher` itself, so one that cannot hold them no longer compiles; see the event section on one dispatcher contract.
 
-**Symptom.** A process whose kernel was built over an event dispatcher of its own, or whose container wiring of the message bus is broken, exits with the refusal, at boot or when its http handler is built, where it served with the warning.
+**Symptom.** A process whose container wiring of the message bus is broken exits with the refusal at boot, where it served with the warning.
 
-**Remedy.** Build the kernel over `event.NewEventDispatcher`, or implement both capabilities on the dispatcher, forwarding to the one it wraps; register the transports through `messagebus.RegisterTransports`, which registers the closer beside them, and declare no teardown dependency from the closer to a bus.
+**Remedy.** Register the transports through `messagebus.RegisterTransports`, which registers the closer beside them, and declare no teardown dependency from the closer to a bus.
 
 ### Lock: a stopped process keeps its lock until its work returns
 
@@ -460,6 +460,22 @@ The six `service.<module>` names of a module's principal service, `service.cache
 **Symptom.** `*L does not implement loggingcontract.Logger (missing method CauseChainDepth)` or `(missing method Enabled)`; `undefined: loggingcontract.LevelReporter`, `loggingcontract.CauseChainDepthReporter`, `logging.LevelEnabled`, `logging.CauseChainDepth`.
 
 **Remedy.** Give a logger of the application's both methods: `Enabled` answering its threshold, `true` for one with none, and `CauseChainDepth` the links its error records carry, 8 for the framework's default; a decorator forwards both to the logger it wraps, or embeds `loggingcontract.Logger`. Write `logger.Enabled(level)` for `logging.LevelEnabled(logger, level)` and `logger.CauseChainDepth()` for `logging.CauseChainDepth(logger)`.
+
+### Event: one dispatcher contract, and a registration declares its listener
+
+**What changed.** [`eventcontract.EventDispatcher`](../event/contract/event_dispatcher.go) carries `InstallFloorListener` and `RegisteredEvents`; `RequiredListenerRegistrar`, `PriorityFloorRegistrar` and `EventDispatcherInspector` are removed, with `MarkListenerRequired` and `MarkListenerMaySkipRequiredListeners`. `AddListener(eventName, listener, config)` and `InstallFloorListener(eventName, listener, config)` take an [`eventcontract.ListenerConfig`](../event/contract/event_dispatcher.go) of `Priority`, `Name`, `Required`, `MaySkipRequiredListeners` and `FailureEndsDispatch`, so a required listener is registered in one call; `SubscribedEvent` answers `Config() ListenerConfig` in place of `Priority() int`, and `NewSubscribedEvent(listener, config)` takes one. `NewEventDispatcher(EventDispatcherConfig{Clock})` takes a config, the system clock when `Clock` is nil, a typed nil refused. `NewRequiredListenerSkippedErrorWithCause` is removed. The access control listener refusing a dispatcher without the required mark, the http kernel refusing one without the floor, the adapter's two refusals and `debug:events` warning about a dispatcher it cannot inspect are gone: the compiler says it.
+
+**Symptom.** `cannot use 10 (untyped int constant) as eventcontract.ListenerConfig value in argument to dispatcher.AddListener`; `dispatcher.MarkListenerRequired undefined`; `undefined: eventcontract.RequiredListenerRegistrar`, `eventcontract.PriorityFloorRegistrar`, `eventcontract.EventDispatcherInspector`, `event.NewRequiredListenerSkippedErrorWithCause`; `*S does not implement eventcontract.SubscribedEvent (missing method Config)`; a dispatcher of the application's own `does not implement eventcontract.EventDispatcher (missing method InstallFloorListener)`.
+
+**Remedy.** Write `AddListener(name, listener, eventcontract.ListenerConfig{Priority: 10})`, `ListenerConfig{}` for priority 0; fold `MarkListenerRequired(registration)` into `ListenerConfig{Required: true}` and `MarkListenerMaySkipRequiredListeners(registration)` into `ListenerConfig{MaySkipRequiredListeners: true}`; `NewSubscribedEvent(listener, eventcontract.ListenerConfig{Priority: 10})`; `event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})`, or `EventDispatcherConfig{}` for the system clock. A dispatcher of the application's own implements the two methods, forwarding to the one it wraps.
+
+### Event: every listener runs, and the failures are joined
+
+**Behavioural change.** A failing listener — a returned error or a recovered panic — no longer ends the dispatch: the listeners behind it run, and [`Dispatch`](../event/event_dispatcher.go) answers the failure, or every failure joined through `errors.Join` in priority order when several failed, each reachable through `errors.Is` and `errors.As`; a single failure is answered as itself. A stop still ends the dispatch, and so does the failure of a listener registered with `ListenerConfig{FailureEndsDispatch: true}`, the required check then applying as on a stop, the opt-out not read for a listener that failed. The framework declares its rate limit, security resolution and access control listeners so. On `kernel.request` and `kernel.controller` the http kernel answers its fail-closed 500 for any failed dispatch, dropping a response a listener set beside the failure, where such a response was served when no required listener was skipped; a refusal through `KernelRequestEvent.Refuse` still stands. On `kernel.exception` the built-in listener answers after a failed application listener, and its answer is served.
+
+**Symptom.** A listener behind a failing one runs where it was skipped; a dispatch that skipped a required listener behind a failure answers the failure itself, no `RequiredListenerSkippedError`; a `kernel.request` listener that set a response and failed gets the 500 page.
+
+**Remedy.** A listener whose failure must keep every listener behind it from running declares `FailureEndsDispatch: true`. Read every failure through `errors.Is` / `errors.As`, or through `Unwrap() []error` on a joined answer. A listener that answers a request returns nil.
 
 ### Messagebus: a handler receives the envelope; one stamping and one send door
 
@@ -2313,19 +2329,11 @@ A code path that asserted `SubscriberRegistrar` calls the two methods on the dis
 
 ### Event: a dispatch that skipped a required listener fails closed, with a type you can assert
 
-**What changed.** When a listener ends a dispatch early — by stopping propagation or by failing — and a listener marked required through `RequiredListenerRegistrar` sits behind it, the dispatch returns an `*event.RequiredListenerSkippedError` instead of completing, or instead of returning only the ending listener's own failure. The http kernel refuses such a dispatch on `kernel.request` and `kernel.controller` even when a listener produced a response, dropping that response for the error page.
+**What changed.** When a listener ends a dispatch early — by stopping propagation or by failing — and a listener registered required sits behind it, the dispatch returns an `*event.RequiredListenerSkippedError` instead of completing, or instead of returning only the ending listener's own failure. The http kernel refuses such a dispatch on `kernel.request` and `kernel.controller` even when a listener produced a response, dropping that response for the error page.
 
 **Symptom.** A listener that stops propagation and answers the request at a priority ahead of a required listener — an http cache above the access-control listener is the shape this was found in — now yields a 500 error page where it used to deliver its own response. A dispatch that used to complete quietly now returns an error.
 
-**Remedy.** This is the guarantee working; the previous behaviour served pages with access control never consulted. If the listener is legitimately entitled to short-circuit past required listeners, mark it: `MarkListenerMaySkipRequiredListeners(registration)`. Both marks default off, so a dispatcher with no marked listeners behaves exactly as before. Assert the type on the error a dispatch returns DIRECTLY rather than through `errors.As`: a listener may dispatch further events, and a nested dispatch skipping a required listener of its own travels up as the cause of an ordinary listener error, which is a different and wider policy.
-
-### Event: marking an unknown registration panics, and the adapter refuses a dispatcher that cannot mark
-
-**What changed.** `MarkListenerRequired` and `MarkListenerMaySkipRequiredListeners` panic when the registration is not one the dispatcher holds, where an unknown registration used to be a documented silent no-op. `EventDispatcherAdapter` panics when the dispatcher it wraps does not implement `RequiredListenerRegistrar`, where it used to absorb the mark.
-
-**Symptom.** A boot that marked a stale or hand-built registration now panics with `event listener registration is not registered`. An adapter over a custom dispatcher panics with `the wrapped event dispatcher cannot mark required listeners`.
-
-**Remedy.** Mark the registration `AddListener` returned, not one assembled by hand. If you wrap a dispatcher of your own and want the required-listener guarantee, implement `RequiredListenerRegistrar` on it — the silent absorption was the defect: callers probe for that interface precisely to learn whether the guarantee is available, and the adapter satisfies the probe on its own behalf, so swallowing the mark answered the probe yes and left the guarantee unarmed.
+**Remedy.** This is the guarantee working; the previous behaviour served pages with access control never consulted. If the listener is legitimately entitled to short-circuit past required listeners, register it with `eventcontract.ListenerConfig{MaySkipRequiredListeners: true}`. Both default off, so a dispatcher whose listeners declare nothing behaves exactly as before. Assert the type on the error a dispatch returns DIRECTLY rather than through `errors.As`: a listener may dispatch further events, and a nested dispatch skipping a required listener of its own travels up as the cause of an ordinary listener error, which is a different and wider policy.
 
 ### Event: a panic the dispatcher recovers carries its value as the cause
 

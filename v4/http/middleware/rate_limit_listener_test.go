@@ -39,7 +39,7 @@ func newRateLimitListenerTestRequestEvent(runtimeInstance containercontract.Runt
 }
 
 func TestRegisterRateLimitRequestListener_AnswersTooManyRequestsOnceTheBudgetIsGone(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     RegisterRateLimitRequestListener(
         dispatcher,
@@ -71,7 +71,7 @@ func TestRegisterRateLimitRequestListener_AnswersTooManyRequestsOnceTheBudgetIsG
 
 /* OnLimitExceeded is the application's, so a typed nil of a concrete response type is the shape a hand-written "no response" takes; through a bare nil check it reads as a live response, SetResponse normalizes it to nil, and the refused request is served unmetered — the guard must read it through IsNilInterface and serve the 429 fallback */
 func TestRegisterRateLimitRequestListener_ATypedNilLimitResponseStillAnswers429(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     RegisterRateLimitRequestListener(
         dispatcher,
@@ -102,7 +102,7 @@ func TestRegisterRateLimitRequestListener_ATypedNilLimitResponseStillAnswers429(
 }
 
 func TestRegisterRateLimitRequestListener_LeavesAnAnsweredRequestAloneAndUncharged(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     extractorCalls := 0
     limiter := NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{})
@@ -137,7 +137,7 @@ func TestRegisterRateLimitRequestListener_LeavesAnAnsweredRequestAloneAndUncharg
 }
 
 func TestRegisterRateLimitRequestListener_ChargesTheBudgetBeforeTheSecurityChainRuns(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     RegisterRateLimitRequestListener(
         dispatcher,
@@ -162,7 +162,7 @@ func TestRegisterRateLimitRequestListener_ChargesTheBudgetBeforeTheSecurityChain
 
             return nil
         },
-        50,
+        eventcontract.ListenerConfig{Priority: 50},
     )
 
     runtimeInstance := newRateLimitListenerTestRuntime()
@@ -192,7 +192,7 @@ func TestRegisterRateLimitRequestListener_RefusesAMissingLimiter(t *testing.T) {
     for _, limiter := range []httpcontract.RateLimiter{nil, (*FixedWindowLimiter)(nil)} {
         assertPanicsNamingArgument(
             t,
-            func() { RegisterRateLimitRequestListener(event.NewEventDispatcher(clock.NewSystemClock()), limiter, RateLimitConfig{}) },
+            func() { RegisterRateLimitRequestListener(event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()}), limiter, RateLimitConfig{}) },
             "limiter is required for rate limit request listener",
             "limiter",
             "RegisterRateLimitRequestListener",
@@ -209,7 +209,7 @@ func TestRegisterRateLimitRequestListener_ACancelledLimiterCallIsRecordedAtWarni
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
     runtimeInstance := runtime.NewRequest(context.Background(), scope)
 
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     RegisterRateLimitRequestListener(
         dispatcher,
@@ -233,7 +233,7 @@ func TestRegisterRateLimitRequestListener_ACancelledLimiterCallIsRecordedAtWarni
 door as a non-nil interface and the read below dereferences it. The untyped literal a sibling probe passes
 is the only shape a bare comparison already catches. */
 func TestRegisterRateLimitRequestListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     RegisterRateLimitRequestListener(
         dispatcher,
@@ -258,7 +258,7 @@ func TestRegisterRateLimitRequestListener_ATypedNilRequestIsLeftAlone(t *testing
 }
 
 func TestRegisterRateLimitRequestListener_TheRefusalCarriesTheLimitHandlersError(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     limitCause := errors.New("budget spent")
     limitErr := exception.NewHttpError(nethttp.StatusTooManyRequests, exception.HttpErrorConfig{Message: "slow down", Cause: limitCause})
@@ -292,7 +292,7 @@ func TestRegisterRateLimitRequestListener_TheRefusalCarriesTheLimitHandlersError
 }
 
 func TestRegisterRateLimitRequestListener_ATypedNilLimitErrorFallsBackTo429(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     RegisterRateLimitRequestListener(
         dispatcher,
@@ -322,7 +322,7 @@ func TestRegisterRateLimitRequestListener_ATypedNilLimitErrorFallsBackTo429(t *t
 }
 
 func TestRegisterRateLimitRequestListener_StandsAsideOnARefusal(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     limiter := NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{})
     RegisterRateLimitRequestListener(dispatcher, limiter, RateLimitConfig{})
@@ -349,7 +349,7 @@ func TestRegisterRateLimitRequestListener_StandsAsideOnARefusal(t *testing.T) {
 }
 
 func TestRegisterRateLimitRequestListener_AnIpv6ClientSharesOneBudgetAcrossItsSlash64(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     RegisterRateLimitRequestListener(
         dispatcher,
@@ -398,7 +398,7 @@ func (instance *closeCountingBody) Close() error {
 }
 
 func TestRegisterRateLimitRequestListener_AResponseBesideALimitErrorIsClosed(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     body := &closeCountingBody{}
 
     RegisterRateLimitRequestListener(
@@ -468,5 +468,16 @@ func TestRateLimitGate_AnUnmarkedDenialBesideAnErrorStays429(t *testing.T) {
 
     if httpException := exception.AsHttpException(requestEvent.Refusal()); nil == httpException || nethttp.StatusTooManyRequests != httpException.StatusCode() {
         t.Fatalf("expected an unmarked error beside a denial to stay 429, got %v", requestEvent.Refusal())
+    }
+}
+
+func TestRegisterRateLimitRequestListener_ItsFailureEndsTheDispatch(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{})
+
+    RegisterRateLimitRequestListener(dispatcher, NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{}), RateLimitConfig{})
+
+    registeredEvents := dispatcher.RegisteredEvents()
+    if 1 != len(registeredEvents) || 1 != len(registeredEvents[0].Listeners) || false == registeredEvents[0].Listeners[0].FailureEndsDispatch {
+        t.Fatalf("expected the rate limit listener registered with FailureEndsDispatch, got %+v", registeredEvents)
     }
 }

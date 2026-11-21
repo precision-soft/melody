@@ -14,20 +14,29 @@ type SubscriberRegistration struct {
     SubscriberId uint64
 }
 
-/* RequiredListenerRegistrar is an interface an EventDispatcher implements to mark registered listeners as required; the security firewall refuses a kernel dispatcher without it. When a listener stops propagation or fails before a required listener behind it has run, the dispatch returns an error, so a caller such as the http kernel fails closed; a listener that legitimately short-circuits opts out through MarkListenerMaySkipRequiredListeners. Both marks default off, and a failure travels as the cause of the refusal. */
-type RequiredListenerRegistrar interface {
-    MarkListenerRequired(registration ListenerRegistration)
+/* ListenerConfig is what a registration declares about its listener; the zero value is priority 0, unnamed, neither required, allowed to skip nor ending the dispatch on its failure. */
+type ListenerConfig struct {
+    /* Priority orders the listeners of one event, the highest first; on InstallFloorListener it is the reserved floor. */
+    Priority int
 
-    MarkListenerMaySkipRequiredListeners(registration ListenerRegistration)
-}
+    /* Name is what inspection and the journal call the listener; empty takes the function's qualified name. */
+    Name string
 
-/* PriorityFloorRegistrar is an interface an EventDispatcher implements to give the bottom of one event's order to the listener that answers last, registered and reserved as one step: a later registration on that event at or below the priority could never run, so it is refused by name. A registration made before stands, and the order is not changed. A second installation on an event already holding a floor adds nothing and answers false, so kernels sharing a dispatcher install one listener. The http kernel refuses, when it builds its handler, a dispatcher without it. */
-type PriorityFloorRegistrar interface {
-    InstallFloorListener(eventName string, listener EventListener, priority int) (ListenerRegistration, bool)
+    /* Required makes a dispatch that ends before this listener ran, by a stop or by a failure that ends it, answer a RequiredListenerSkippedError, so a caller such as the http kernel fails closed. */
+    Required bool
+
+    /* MaySkipRequiredListeners lets this listener stop propagation ahead of required listeners without the refusal; it is not read when the listener failed. */
+    MaySkipRequiredListeners bool
+
+    /* FailureEndsDispatch makes a failure of this listener end the dispatch: no listener behind it runs, and a required one behind it is refused as on a stop. The framework sets it on its own gates. */
+    FailureEndsDispatch bool
 }
 
 type EventDispatcher interface {
-    AddListener(eventName string, listener EventListener, priority int) ListenerRegistration
+    AddListener(eventName string, listener EventListener, config ListenerConfig) ListenerRegistration
+
+    /* InstallFloorListener gives the bottom of one event's order to the listener that answers last, registered and reserved as one step at config.Priority: a later registration on that event at or below the priority could never run, so it is refused by name. A registration made before stands, and the order is not changed. A second installation on an event already holding a floor adds nothing and answers false, so kernels sharing a dispatcher install one listener. */
+    InstallFloorListener(eventName string, listener EventListener, config ListenerConfig) (ListenerRegistration, bool)
 
     RemoveListener(registration ListenerRegistration) bool
 
@@ -37,9 +46,12 @@ type EventDispatcher interface {
     /* RemoveSubscriber removes the listeners installed by one AddSubscriber call and answers how many were removed. An unknown registration removes nothing and answers zero. */
     RemoveSubscriber(registration SubscriberRegistration) int
 
-    /* Dispatch runs the listeners registered for the event's name in descending priority order. The first listener error aborts the remaining listeners and is returned alongside the (partially dispatched) event, as the cause of a RequiredListenerSkippedError when a listener marked required stood behind it; callers decide the policy for partial dispatch. */
+    /* Dispatch runs the listeners registered for the event's name in descending priority order. Every listener runs unless propagation is stopped or a listener declared FailureEndsDispatch fails; the answer joins every failure in priority order, each reachable through errors.Is and errors.As, and is the cause of a RequiredListenerSkippedError when the dispatch ended before a required listener ran. */
     Dispatch(runtimeInstance containercontract.Runtime, event Event) (Event, error)
 
-    /* DispatchName behaves like Dispatch for the given event name and payload: listeners run in descending priority order and the first listener error aborts the remaining listeners. */
+    /* DispatchName behaves like Dispatch for an event of the name and payload, stamped with the dispatcher's clock. */
     DispatchName(runtimeInstance containercontract.Runtime, eventName string, payload any) (Event, error)
+
+    /* RegisteredEvents reports a point-in-time view of the registered listeners and what each declared; dispatch never depends on it. */
+    RegisteredEvents() []RegisteredEvent
 }

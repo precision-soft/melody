@@ -88,6 +88,6 @@ func RegisterKernelHttpProfilerListener(eventDispatcher eventcontract.EventDispa
 
             return err
         },
-        KernelHttpProfilerListenerPriority,
+        eventcontract.ListenerConfig{Priority: KernelHttpProfilerListenerPriority},
     )
 }

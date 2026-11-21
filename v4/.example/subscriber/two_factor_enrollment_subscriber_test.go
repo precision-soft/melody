@@ -84,14 +84,14 @@ func TestTwoFactorEnrollmentSubscriber_ReleasesTheEnrollmentBeforeTheCacheListen
     enrollmentSubscriber := NewTwoFactorEnrollmentSubscriber(fixedTwoFactorStore(twofactor.NewStore(database)))
     cacheSubscriber := NewUserEventSubscriber()
 
-    releasePriority := enrollmentSubscriber.SubscribedEvents()[event.UserDeletedEventName][0].Priority()
-    cachePriority := cacheSubscriber.SubscribedEvents()[event.UserDeletedEventName][0].Priority()
+    releasePriority := enrollmentSubscriber.SubscribedEvents()[event.UserDeletedEventName][0].Config().Priority
+    cachePriority := cacheSubscriber.SubscribedEvents()[event.UserDeletedEventName][0].Config().Priority
     if releasePriority <= cachePriority {
         t.Fatalf("expected the release to outrank the cache listener on %s, got %d against %d", event.UserDeletedEventName, releasePriority, cachePriority)
     }
 
     clockInstance := melodyclock.NewSystemClock()
-    dispatcher := melodyevent.NewEventDispatcher(clockInstance)
+    dispatcher := melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: clockInstance})
     dispatcher.AddSubscriber(cacheSubscriber)
     dispatcher.AddSubscriber(enrollmentSubscriber)
 

@@ -27,7 +27,7 @@ type eventCommandTestEnvelope struct {
 }
 
 func newEventTestRuntime(eventCount int) *testRuntime {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     for index := 0; index < eventCount; index++ {
         dispatcher.AddListener(
@@ -38,7 +38,7 @@ func newEventTestRuntime(eventCount int) *testRuntime {
             ) error {
                 return nil
             },
-            0,
+            eventcontract.ListenerConfig{},
         )
     }
 
@@ -382,14 +382,14 @@ func (instance *debugTestSubscriber) SubscribedEvents() map[string][]eventcontra
     }
 
     return map[string][]eventcontract.SubscribedEvent{
-        "event.alpha": {event.NewSubscribedEvent(listener, 0)},
-        "event.beta":  {event.NewSubscribedEvent(listener, 0)},
+        "event.alpha": {event.NewSubscribedEvent(listener, eventcontract.ListenerConfig{})},
+        "event.beta":  {event.NewSubscribedEvent(listener, eventcontract.ListenerConfig{})},
     }
 }
 
 /* the summary total counts distinct subscribers across the dispatcher: summing the per-event counts reported one subscriber on two events as two subscribers */
 func TestEventCommand_CountsASubscriberOnceAcrossEvents(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     dispatcher.AddSubscriber(&debugTestSubscriber{})
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
@@ -417,9 +417,9 @@ func TestEventCommand_CountsASubscriberOnceAcrossEvents(t *testing.T) {
 
 /* the listener detail — including the required and may-skip marks — must be reachable in the machine format: it existed only in the table, so a json consumer could never learn whether the fail-closed guarantee is armed */
 func TestEventCommand_CarriesTheListenerDetailInTheVerboseJsonFormat(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
-    registration := dispatcher.AddListener(
+    dispatcher.AddListener(
         "event.guarded",
         func(
             runtimeInstance containercontract.Runtime,
@@ -427,9 +427,8 @@ func TestEventCommand_CarriesTheListenerDetailInTheVerboseJsonFormat(t *testing.
         ) error {
             return nil
         },
-        7,
+        eventcontract.ListenerConfig{Priority: 7, Required: true},
     )
-    dispatcher.MarkListenerRequired(registration)
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
@@ -497,120 +496,16 @@ func TestEventCommand_KeepsThePlainJsonShapeWithoutVerbose(t *testing.T) {
     }
 }
 
-/* dispatcherWithoutInspection is an event dispatcher that implements the dispatch contract and nothing else: the inspection contract is optional, and a userland dispatcher that does not carry it is exactly what this command has to survive. */
-type dispatcherWithoutInspection struct{}
-
-func (instance *dispatcherWithoutInspection) AddListener(
-    eventName string,
-    listener eventcontract.EventListener,
-    priority int,
-) eventcontract.ListenerRegistration {
-    return eventcontract.ListenerRegistration{EventName: eventName}
-}
-
-func (instance *dispatcherWithoutInspection) RemoveListener(registration eventcontract.ListenerRegistration) bool {
-    return false
-}
-
-func (instance *dispatcherWithoutInspection) AddSubscriber(subscriber eventcontract.EventSubscriber) eventcontract.SubscriberRegistration {
-    return eventcontract.SubscriberRegistration{}
-}
-
-func (instance *dispatcherWithoutInspection) RemoveSubscriber(registration eventcontract.SubscriberRegistration) int {
-    return 0
-}
-
-func (instance *dispatcherWithoutInspection) Dispatch(
-    runtimeInstance containercontract.Runtime,
-    eventInstance eventcontract.Event,
-) (eventcontract.Event, error) {
-    return eventInstance, nil
-}
-
-func (instance *dispatcherWithoutInspection) DispatchName(
-    runtimeInstance containercontract.Runtime,
-    eventName string,
-    payload any,
-) (eventcontract.Event, error) {
-    return nil, nil
-}
-
-var _ eventcontract.EventDispatcher = (*dispatcherWithoutInspection)(nil)
-
-func newRuntimeWithDispatcherWithoutInspection() *testRuntime {
-    serviceContainer := container.NewContainer(container.ContainerConfig{})
-
-    serviceContainer.MustRegister(
-        event.ServiceEventDispatcher,
-        func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
-            return &dispatcherWithoutInspection{}, nil
-        },
-        container.RegisterOptions{},
-    )
-
-    return newTestRuntime(serviceContainer)
-}
-
-/* a dispatcher that does not implement the inspection contract cannot be listed, and the command says so through a warning instead of failing or printing an empty list that reads as "no listeners are registered" — the difference matters because the answer decides whether an operator goes looking for a wiring mistake */
-func TestEventCommand_DispatcherWithoutInspection_WarnsInsteadOfReportingNoEvents(t *testing.T) {
-    rendered, runErr := runDebugCommand(
-        &EventCommand{},
-        newRuntimeWithDispatcherWithoutInspection(),
-        []string{"--format=json"},
-    )
-    if nil != runErr {
-        t.Fatalf("expected no error, got %v", runErr)
-    }
-
-    if false == strings.Contains(rendered, "debug.notSupported") {
-        t.Fatalf("expected the warning code, got %q", rendered)
-    }
-
-    if false == strings.Contains(rendered, "does not support inspection") {
-        t.Fatalf("expected the warning message, got %q", rendered)
-    }
-
-    if false == strings.Contains(rendered, "dispatcherWithoutInspection") {
-        t.Fatalf("expected the dispatcher type to be named, got %q", rendered)
-    }
-
-    envelope := decodeEventCommandEnvelope(t, rendered)
-
-    if 0 != envelope.Data.Total {
-        t.Fatalf("expected a total of zero beside the warning, got %d", envelope.Data.Total)
-    }
-}
-
-/* the same refusal in the table format prints the empty summary rather than a table of nothing */
-func TestEventCommand_DispatcherWithoutInspection_PrintsTheEmptySummaryInTheTableFormat(t *testing.T) {
-    rendered, runErr := runDebugCommand(
-        &EventCommand{},
-        newRuntimeWithDispatcherWithoutInspection(),
-        []string{},
-    )
-    if nil != runErr {
-        t.Fatalf("expected no error, got %v", runErr)
-    }
-
-    if false == strings.Contains(rendered, "EVENTS: 0 total") {
-        t.Fatalf("expected the empty summary, got %q", rendered)
-    }
-
-    if false == strings.Contains(rendered, "does not support inspection") {
-        t.Fatalf("expected the warning beside it, got %q", rendered)
-    }
-}
-
 /* the verbose block guarantees the DISPATCH order — the dispatcher's own slice, held sorted at insertion — carried by the order column; the re-sort it replaced compared the listener id as text, so among eleven listeners of one priority the tenth printed second, and the two halves of one output contradicted each other */
 func TestEventCommand_VerboseListsListenersInDispatchOrder(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     registrationPattern := []string{"A", "A", "B", "B", "A", "A", "B", "B", "A", "B", "A"}
     for _, mark := range registrationPattern {
         if "A" == mark {
-            dispatcher.AddListener("event.order", eventOrderProbeListenerAlpha, 0)
+            dispatcher.AddListener("event.order", eventOrderProbeListenerAlpha, eventcontract.ListenerConfig{})
         } else {
-            dispatcher.AddListener("event.order", eventOrderProbeListenerBeta, 0)
+            dispatcher.AddListener("event.order", eventOrderProbeListenerBeta, eventcontract.ListenerConfig{})
         }
     }
 
@@ -847,60 +742,3 @@ func TestEventCommand_DescendingOrderReachesTheListenerDetail(t *testing.T) {
     }
 }
 
-/* the declaration of what a serving process wires is the command's own, not the dispatcher's, so a dispatcher that cannot be inspected costs the listing and nothing else. Dropping it there answered "is access control wired?" with an absence, which is the one answer the declaration exists to prevent — and the branch is the likelier one to be read, since a dispatcher that cannot be listed is already a reason to go looking. */
-func TestEventCommand_DispatcherWithoutInspection_StillDeclaresTheServingProcessListeners(t *testing.T) {
-    command := NewEventCommand(func() []DeferredListener {
-        return []DeferredListener{
-            {EventName: "kernel.request", Priority: 50, ListenerName: "security resolution listener", Note: "registered only in the http serving process"},
-        }
-    })
-
-    rendered, runErr := runDebugCommand(
-        command,
-        newRuntimeWithDispatcherWithoutInspection(),
-        []string{"--format=json"},
-    )
-    if nil != runErr {
-        t.Fatalf("expected no error, got %v", runErr)
-    }
-
-    decoded := struct {
-        Data struct {
-            Items                   []struct{}         `json:"items"`
-            Total                   int                `json:"total"`
-            ServingProcessListeners []DeferredListener `json:"servingProcessListeners"`
-        } `json:"data"`
-    }{}
-    if decodeErr := json.Unmarshal([]byte(rendered), &decoded); nil != decodeErr {
-        t.Fatalf("failed to decode the rendered envelope: %v, rendered %q", decodeErr, rendered)
-    }
-
-    if 0 != decoded.Data.Total {
-        t.Fatalf("expected the listing to stay empty beside the warning, got %q", rendered)
-    }
-
-    if 1 != len(decoded.Data.ServingProcessListeners) {
-        t.Fatalf("expected the declaration to survive the branch that cannot list, got %q", rendered)
-    }
-
-    if "security resolution listener" != decoded.Data.ServingProcessListeners[0].ListenerName {
-        t.Fatalf("expected the declared listener, got %#v", decoded.Data.ServingProcessListeners[0])
-    }
-
-    if false == strings.Contains(rendered, "debug.notSupported") {
-        t.Fatalf("expected the warning to stay beside it, got %q", rendered)
-    }
-
-    tableRendered, tableErr := runDebugCommand(
-        command,
-        newRuntimeWithDispatcherWithoutInspection(),
-        []string{},
-    )
-    if nil != tableErr {
-        t.Fatalf("expected no error, got %v", tableErr)
-    }
-
-    if false == strings.Contains(tableRendered, "SERVING-PROCESS LISTENERS") {
-        t.Fatalf("expected the declaration block in the table format too, got %q", tableRendered)
-    }
-}

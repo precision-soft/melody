@@ -5,7 +5,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
-/* NewRequiredListenerSkippedError reports that a listener stopped propagation while a listener marked required through RequiredListenerRegistrar was still behind it. Its type lets a caller refuse the dispatch outright, as the http kernel does for kernel.request. Type-assert the error a dispatch returns directly rather than through errors.As: a nested dispatch's refusal travels up as the cause of an ordinary listener error. The cause is the stopping listener's own failure, nil when it stopped cleanly. */
+/* NewRequiredListenerSkippedError reports that a dispatch ended, by a stop or by the failure of a listener declared FailureEndsDispatch, while a listener declared Required was still behind it. Its type lets a caller refuse the dispatch outright, as the http kernel does for kernel.request. Type-assert the error a dispatch returns directly rather than through errors.As: a nested dispatch's refusal travels up as the cause of an ordinary listener error. The cause joins the failures of the dispatch, nil when none failed. */
 func NewRequiredListenerSkippedError(eventName string, stoppedByListenerName string, cause error) *RequiredListenerSkippedError {
     return &RequiredListenerSkippedError{
         exceptionErr: exception.NewError(
@@ -13,20 +13,6 @@ func NewRequiredListenerSkippedError(eventName string, stoppedByListenerName str
             exceptioncontract.Context{
                 "eventName":         eventName,
                 "stoppedByListener": stoppedByListenerName,
-            },
-            cause,
-        ),
-    }
-}
-
-/* NewRequiredListenerSkippedErrorWithCause reports the same refusal for a dispatch that aborted on a failing listener with a required listener still behind it; the failure travels as the cause. */
-func NewRequiredListenerSkippedErrorWithCause(eventName string, failedListenerName string, cause error) *RequiredListenerSkippedError {
-    return &RequiredListenerSkippedError{
-        exceptionErr: exception.NewError(
-            "event dispatch failed before a required listener ran",
-            exceptioncontract.Context{
-                "eventName":      eventName,
-                "failedListener": failedListenerName,
             },
             cause,
         ),

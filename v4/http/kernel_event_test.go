@@ -148,7 +148,7 @@ func TestKernelEvents_SetResponseStoresTheNilATypedNilMeans(t *testing.T) {
 
 func TestKernelExceptionEvent_SetResponseStopsPropagation(t *testing.T) {
     runtimeInstance := newTestRuntime()
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     secondRan := 0
 
@@ -159,7 +159,7 @@ func TestKernelExceptionEvent_SetResponseStopsPropagation(t *testing.T) {
 
             return nil
         },
-        10,
+        eventcontract.ListenerConfig{Priority: 10},
     )
     dispatcher.AddListener(
         kernelcontract.EventKernelException,
@@ -168,7 +168,7 @@ func TestKernelExceptionEvent_SetResponseStopsPropagation(t *testing.T) {
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     request := testhelper.NewHttpTestRequestFromHttpRequest(httptest.NewRequest(nethttp.MethodGet, "/articles", nil))

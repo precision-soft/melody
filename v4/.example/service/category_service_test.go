@@ -117,7 +117,7 @@ func TestCategoryService_ARefusedUpdateLeavesTheStoredEntityUntouched(t *testing
         t.Fatalf("build the product repository: %v", productRepositoryErr)
     }
 
-    categoryService := NewCategoryService(&refusingUpdateCategoryRepository{CategoryRepository: categoryRepository}, productRepository, catalogue.cache, melodyevent.NewEventDispatcher(melodyclock.NewSystemClock()))
+    categoryService := NewCategoryService(&refusingUpdateCategoryRepository{CategoryRepository: categoryRepository}, productRepository, catalogue.cache, melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()}))
 
     before, _, _ := categoryRepository.FindById(context.Background(), "cat-1")
     name := before.Name

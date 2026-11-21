@@ -17,7 +17,7 @@ import (
 
 func testNewEventDispatcher() (*EventDispatcher, clockcontract.Clock) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := NewEventDispatcher(clockInstance)
+    dispatcher := NewEventDispatcher(EventDispatcherConfig{Clock: clockInstance})
 
     return dispatcher, clockInstance
 }

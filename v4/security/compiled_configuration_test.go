@@ -225,7 +225,7 @@ func TestCompiledFirewall_Login_ADispatchFailureNamesTheBrokenListener(t *testin
         func(listenerRuntime containercontract.Runtime, eventValue eventcontract.Event) error {
             return listenerFailure
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     _, loginErr := firewall.Login(runtimeInstance, nil, securitycontract.LoginInput{})
@@ -274,7 +274,7 @@ func TestCompiledFirewall_Logout_ADispatchFailureNamesTheBrokenListener(t *testi
         func(listenerRuntime containercontract.Runtime, eventValue eventcontract.Event) error {
             return listenerFailure
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     _, logoutErr := firewall.Logout(runtimeInstance, nil, securitycontract.LogoutInput{})
@@ -434,7 +434,7 @@ func TestCompiledFirewall_Logout_DispatchesTheSuccessItself(t *testing.T) {
 
             return listenerFailure
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     result, logoutErr := firewall.Logout(runtimeInstance, nil, securitycontract.LogoutInput{})

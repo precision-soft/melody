@@ -162,7 +162,7 @@ func TestProductService_ARefusedUpdateLeavesTheStoredEntityUntouched(t *testing.
         t.Fatalf("build the product repository: %v", productRepositoryErr)
     }
 
-    productService := NewProductService(&refusingUpdateProductRepository{ProductRepository: productRepository}, catalogue.category, catalogue.currency, catalogue.cache, melodyevent.NewEventDispatcher(melodyclock.NewSystemClock()), melodyclock.NewSystemClock())
+    productService := NewProductService(&refusingUpdateProductRepository{ProductRepository: productRepository}, catalogue.category, catalogue.currency, catalogue.cache, melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()}), melodyclock.NewSystemClock())
 
     before, _, _ := productRepository.FindById(context.Background(), "prod-1")
     name := before.Name

@@ -6,25 +6,25 @@ import (
 
 func NewSubscribedEvent(
     listener eventcontract.EventListener,
-    priority int,
+    config eventcontract.ListenerConfig,
 ) *SubscribedEvent {
     return &SubscribedEvent{
         listener: listener,
-        priority: priority,
+        config:   config,
     }
 }
 
 type SubscribedEvent struct {
     listener eventcontract.EventListener
-    priority int
+    config   eventcontract.ListenerConfig
 }
 
 func (instance *SubscribedEvent) Listener() eventcontract.EventListener {
     return instance.listener
 }
 
-func (instance *SubscribedEvent) Priority() int {
-    return instance.priority
+func (instance *SubscribedEvent) Config() eventcontract.ListenerConfig {
+    return instance.config
 }
 
 var _ eventcontract.SubscribedEvent = (*SubscribedEvent)(nil)

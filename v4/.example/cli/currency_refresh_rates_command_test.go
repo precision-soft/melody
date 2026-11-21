@@ -46,7 +46,7 @@ func rateRefreshCommandRuntime(t *testing.T, document string, dispatcherOf func(
     }
 
     clockInstance := melodyclock.NewSystemClock()
-    var dispatcher melodyeventcontract.EventDispatcher = melodyevent.NewEventDispatcher(clockInstance)
+    var dispatcher melodyeventcontract.EventDispatcher = melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: clockInstance})
     if nil != dispatcherOf {
         dispatcher = dispatcherOf(dispatcher)
     }

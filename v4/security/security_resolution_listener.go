@@ -120,7 +120,7 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
 
             return nil
         },
-        KernelFirewallListenerPriority,
+        eventcontract.ListenerConfig{Priority: KernelFirewallListenerPriority, FailureEndsDispatch: true},
     )
 }
 

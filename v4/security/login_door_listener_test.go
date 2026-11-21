@@ -184,12 +184,12 @@ func newDoorFixture(t *testing.T, mutate func(*CompiledFirewallConfig)) *doorFix
         failures++
 
         return nil
-    }, 0)
+    }, eventcontract.ListenerConfig{})
     kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLoginSuccess, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         successes++
 
         return nil
-    }, 0)
+    }, eventcontract.ListenerConfig{})
 
     return &doorFixture{kernel: kernel, login: login, logout: logout, logger: &recordingLogger{}, failures: &failures, successes: &successes}
 }
@@ -339,7 +339,7 @@ func TestLoginDoor_ASuccessfulLoginPublishesTheTokenToTheRestOfTheChain(t *testi
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil)
@@ -406,7 +406,7 @@ func TestLoginDoor_ASecondFactorNotPresentedIsAChallengeAnnouncedToNobody(t *tes
 
             return nil
         },
-        100,
+        eventcontract.ListenerConfig{Priority: 100},
     )
 
     recorder := fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil)
@@ -443,7 +443,7 @@ func TestLoginDoor_AFailedFailureDispatchKeepsTheRefusalAndIsFiled(t *testing.T)
 
     fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLoginFailure, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         return errors.New("audit refused")
-    }, 100)
+    }, eventcontract.ListenerConfig{Priority: 100})
 
     recorder := fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil)
 
@@ -611,7 +611,7 @@ func TestLogoutDoor_AFailedSuccessListenerStillEndsTheSession(t *testing.T) {
     fixture := newDoorFixture(t, nil)
     fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLogoutSuccess, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         return errors.New("audit unavailable")
-    }, 0)
+    }, eventcontract.ListenerConfig{})
 
     serviceContainer := servedSecurityContainer(t, fixture.kernel, fixture.logger)
     sessionManager := session.SessionMustFromResolver(t.Context(), serviceContainer)
@@ -650,7 +650,7 @@ func TestLoginDoor_ARefusedSignInEndsTheSessionTheDoorRotated(t *testing.T) {
     })
     fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLoginSuccess, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         return errors.New("audit unavailable")
-    }, 100)
+    }, eventcontract.ListenerConfig{Priority: 100})
 
     recorder := fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil)
 
@@ -668,7 +668,7 @@ func TestLoginDoor_ARefusedSignInEndsTheSessionTheHandlerRotated(t *testing.T) {
     fixture.login.rotate = true
     fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLoginSuccess, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         return errors.New("audit unavailable")
-    }, 100)
+    }, eventcontract.ListenerConfig{Priority: 100})
 
     recorder := fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil)
 
@@ -746,7 +746,7 @@ func TestDoor_AServedDoorIsNotJournaledAsNoRoute(t *testing.T) {
 
             return nil
         },
-        100,
+        eventcontract.ListenerConfig{Priority: 100},
     )
 
     fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil)
@@ -920,7 +920,7 @@ func TestLoginDoor_TheUnavailableRefusalNamesTheDoorAndCarriesTheCause(t *testin
         observedErr = eventValue.Payload().(*http.KernelExceptionEvent).Err()
 
         return nil
-    }, 10)
+    }, eventcontract.ListenerConfig{Priority: 10})
 
     recorder := fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil)
 
@@ -1048,7 +1048,7 @@ func (instance *doorFixture) refusals() *[]error {
         }
 
         return nil
-    }, 100)
+    }, eventcontract.ListenerConfig{Priority: 100})
 
     return &recorded
 }
@@ -1520,7 +1520,7 @@ func recordLogoutEvents(fixture *doorFixture, sessionManager sessioncontract.Man
         record.storedAtSignal = append(record.storedAtSignal, false == internal.IsNilInterface(stored))
 
         return nil
-    }, 0)
+    }, eventcontract.ListenerConfig{})
 
     fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLogoutFailure, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         if failureEvent, isFailureEvent := eventValue.Payload().(*LogoutFailureEvent); true == isFailureEvent {
@@ -1528,7 +1528,7 @@ func recordLogoutEvents(fixture *doorFixture, sessionManager sessioncontract.Man
         }
 
         return nil
-    }, 0)
+    }, eventcontract.ListenerConfig{})
 
     return record
 }
@@ -1667,7 +1667,7 @@ func TestLogoutDoor_AFailedFailureListenerKeepsTheStoragesAnswer(t *testing.T) {
     stored := newStoredLogoutSession(t, fixture, 1)
     fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLogoutFailure, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         return errors.New("audit unavailable")
-    }, 0)
+    }, eventcontract.ListenerConfig{})
 
     recorder := stored.serve(fixture)
 

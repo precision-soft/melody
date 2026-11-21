@@ -107,7 +107,7 @@ func newProductDoorFixtureOver(t *testing.T, wrap func(stores productDoorStores)
         examplecache.NewGobSerializer(),
         melodycache.ManagerConfig{OwnsBackend: true},
     )
-    dispatcher := melodyevent.NewEventDispatcher(clockInstance)
+    dispatcher := melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: clockInstance})
     categoryService := service.NewCategoryService(stores.categories, stores.products, cacheInstance, dispatcher)
     currencyService := service.NewCurrencyService(stores.currencies, stores.products, cacheInstance, dispatcher, clockInstance)
     productService := service.NewProductService(stores.products, categoryService, currencyService, cacheInstance, dispatcher, clockInstance)

@@ -18,7 +18,6 @@ import (
     "github.com/precision-soft/melody/v4/config"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
-    eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
@@ -1194,10 +1193,7 @@ func TestBoot_RegistersTheKernelListenersInEveryProcessShape(t *testing.T) {
 
     applicationInstance.Boot()
 
-    inspector, ok := applicationInstance.kernel.EventDispatcher().(eventcontract.EventDispatcherInspector)
-    if false == ok {
-        t.Fatalf("expected the dispatcher to support inspection")
-    }
+    inspector := applicationInstance.kernel.EventDispatcher()
 
     listenerCountByEvent := map[string]int{}
     for _, registeredEvent := range inspector.RegisteredEvents() {

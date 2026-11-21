@@ -21,7 +21,7 @@ func (instance *detachedListenerSubscriber) SubscribedEvents() map[string][]even
                 func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                     return nil
                 },
-                0,
+                eventcontract.ListenerConfig{},
             ),
         },
     }

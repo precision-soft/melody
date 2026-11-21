@@ -2,17 +2,14 @@ package security
 
 import (
     "errors"
-    "fmt"
     "io"
     nethttp "net/http"
     "net/http/httptest"
-    "strings"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
-    "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpPkg "github.com/precision-soft/melody/v4/http"
@@ -254,7 +251,7 @@ func TestAccessControlListener_WhenNoSecurityContext_EmitsAuthorizationDeniedAnd
             deniedCount++
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     RegisterKernelAccessControlListener(kernel, registry)
@@ -312,7 +309,7 @@ func TestAccessControlListener_ReadsThePathTheRouterRoutes(t *testing.T) {
                 deniedCount++
                 return nil
             },
-            0,
+            eventcontract.ListenerConfig{},
         )
 
         RegisterKernelAccessControlListener(kernel, registry)
@@ -358,7 +355,7 @@ func TestAccessControlListener_ReadsAnEncodedSeparatorTheEscapedPathWouldRespell
                 deniedCount++
                 return nil
             },
-            0,
+            eventcontract.ListenerConfig{},
         )
 
         RegisterKernelAccessControlListener(kernel, registry)
@@ -423,7 +420,7 @@ func TestAccessControlListener_WhenSecurityContextHasNilToken_EmitsAuthorization
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     RegisterKernelAccessControlListener(kernel, registry)
@@ -541,7 +538,7 @@ func TestAccessControlListener_WhenDecisionGranted_EmitsAuthorizationGranted(t *
             grantedCount++
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     RegisterKernelAccessControlListener(kernel, registry)
@@ -644,7 +641,7 @@ func TestAccessControlListener_WhenDecisionDenied_EmitsAuthorizationDeniedAndRef
             deniedCount++
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     RegisterKernelAccessControlListener(kernel, registry)
@@ -898,7 +895,7 @@ func TestAccessControlListener_TheDecisionIsDecideAllOverTheWholeAttributeSet(t 
             grantedCount++
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     RegisterKernelAccessControlListener(kernel, registry)
@@ -923,37 +920,41 @@ func TestAccessControlListener_TheDecisionIsDecideAllOverTheWholeAttributeSet(t 
     }
 }
 
-func TestRegisterKernelAccessControlListener_RefusesADispatcherThatCannotMarkItRequired(t *testing.T) {
+func TestRegisterKernelAccessControlListener_RegistersTheListenerRequiredInOneCall(t *testing.T) {
     kernel := newTestKernel()
-    innerDispatcher := kernel.eventDispatcher.(*event.EventDispatcher)
-    kernel.eventDispatcher = &capabilitylessDispatcher{EventDispatcher: innerDispatcher}
-
-    defer func() {
-        panicErr, isPanicErr := recover().(*exception.Error)
-        if false == isPanicErr || "the event dispatcher cannot mark the access control listener required" != panicErr.Message() {
-            t.Fatalf("expected the dispatcher to be refused, got %v", panicErr)
-        }
-
-        if false == strings.Contains(fmt.Sprint(panicErr.Context()["dispatcherType"]), "capabilitylessDispatcher") {
-            t.Fatalf("expected the refusal to name the dispatcher, got %v", panicErr.Context())
-        }
-
-        for _, registeredEvent := range innerDispatcher.RegisteredEvents() {
-            if kernelcontract.EventKernelRequest == registeredEvent.EventName && 0 != len(registeredEvent.Listeners) {
-                t.Fatalf("expected no listener added before the refusal, got %d", len(registeredEvent.Listeners))
-            }
-        }
-    }()
 
     RegisterKernelAccessControlListener(
         kernel,
         NewFirewallRegistry(NewCompiledConfiguration(nil, NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}))),
     )
+
+    for _, registeredEvent := range kernel.EventDispatcher().RegisteredEvents() {
+        if kernelcontract.EventKernelRequest != registeredEvent.EventName {
+            continue
+        }
+
+        if 1 != len(registeredEvent.Listeners) || false == registeredEvent.Listeners[0].Required || false == registeredEvent.Listeners[0].FailureEndsDispatch || KernelAccessControlListenerPriority != registeredEvent.Listeners[0].Priority {
+            t.Fatalf("expected one required listener whose failure ends the dispatch at the access control priority, got %+v", registeredEvent.Listeners)
+        }
+
+        return
+    }
+
+    t.Fatalf("expected the access control listener on kernel.request")
 }
 
-/* capabilitylessDispatcher is a dispatcher of the application's own: it forwards every dispatch through the published contract and carries no MarkListenerRequired, which is exactly what an implementation written against the contract looks like */
-type capabilitylessDispatcher struct {
-    eventcontract.EventDispatcher
+func TestRegisterKernelSecurityResolutionListener_ItsFailureEndsTheDispatch(t *testing.T) {
+    kernel := newTestKernel()
+
+    RegisterKernelSecurityResolutionListener(kernel, NewFirewallRegistry(NewCompiledConfiguration(nil, nil)))
+
+    for _, registeredEvent := range kernel.EventDispatcher().RegisteredEvents() {
+        if kernelcontract.EventKernelRequest == registeredEvent.EventName && 1 == len(registeredEvent.Listeners) && true == registeredEvent.Listeners[0].FailureEndsDispatch {
+            return
+        }
+    }
+
+    t.Fatalf("expected the security resolution listener registered with FailureEndsDispatch")
 }
 
 func TestAccessControlListener_AFailedDeniedHandlerKeepsItsErrorBesideTheDecision(t *testing.T) {
@@ -1076,7 +1077,7 @@ func TestSecurityRefusals_ReachAnApplicationListenerAndKeepTheirStatus(t *testin
 
                     return nil
                 },
-                0,
+                eventcontract.ListenerConfig{},
             )
 
             answered := serveSecurityRequest(t, kernel, "/admin")
@@ -1107,7 +1108,7 @@ func TestAccessControlListener_AnAnonymousRefusalReachesAnApplicationListener(t 
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     recorder := serveSecurityRequest(t, kernel, "/admin")
@@ -1165,7 +1166,7 @@ func TestSecurityListeners_StandAsideOnAnEarlierRefusal(t *testing.T) {
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     earlier := exception.Forbidden("refused earlier")
@@ -1303,7 +1304,7 @@ func newUnavailableRouteFixtureOver(tokenSource securitycontract.TokenSource, re
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
     dispatcher.AddListener(
         securitycontract.EventSecurityAuthorizationGranted,
@@ -1312,7 +1313,7 @@ func newUnavailableRouteFixtureOver(tokenSource securitycontract.TokenSource, re
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
     dispatcher.AddListener(
         kernelcontract.EventKernelException,
@@ -1321,7 +1322,7 @@ func newUnavailableRouteFixtureOver(tokenSource securitycontract.TokenSource, re
 
             return nil
         },
-        10,
+        eventcontract.ListenerConfig{Priority: 10},
     )
 
     return fixture
@@ -1527,7 +1528,7 @@ func newDecisionOutageFixture(decisionManager securitycontract.AccessDecisionMan
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
     dispatcher.AddListener(
         kernelcontract.EventKernelException,
@@ -1536,7 +1537,7 @@ func newDecisionOutageFixture(decisionManager securitycontract.AccessDecisionMan
 
             return nil
         },
-        10,
+        eventcontract.ListenerConfig{Priority: 10},
     )
 
     return fixture
@@ -1651,7 +1652,7 @@ func TestAccessControlListener_AFailedDeniedDispatchForAnOutageIsTheListenersErr
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return listenerErr
         },
-        1,
+        eventcontract.ListenerConfig{Priority: 1},
     )
 
     recorder, handled, _ := fixture.serve(t, "/admin")

@@ -19,7 +19,7 @@ import (
 /* profiling listener must emit a profile even when Attributes() is nil, as long as RequestContext() is present */
 func TestKernelHttpProfilerListener_EmitsProfileWhenAttributesAreNil(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     runtimeInstance := newTestRuntime()
 
     RegisterKernelHttpProfilerListener(dispatcher)
@@ -32,7 +32,7 @@ func TestKernelHttpProfilerListener_EmitsProfileWhenAttributesAreNil(t *testing.
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     request := &nilAttributesRequest{
@@ -100,7 +100,7 @@ application's own bag type arrives as a non-nil interface. Read with a bare comp
 live bag and Get would dereference the nil receiver inside a response listener, where no recover covers it. */
 func TestKernelHttpProfilerListener_EmitsProfileWhenAttributesAreATypedNil(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     runtimeInstance := newTestRuntime()
 
     RegisterKernelHttpProfilerListener(dispatcher)
@@ -113,7 +113,7 @@ func TestKernelHttpProfilerListener_EmitsProfileWhenAttributesAreATypedNil(t *te
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     var unassignedAttributes *bag.ParameterBag
@@ -159,7 +159,7 @@ func (instance *typedNilAttributesRequest) Attributes() bagcontract.ParameterBag
 application's contract, and the request-context read below dereferences a nil pointer of a request type
 that a bare comparison carries through — in a response listener, where no recover covers it. */
 func TestKernelHttpProfilerListener_EmitsNoProfileForATypedNilRequest(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     runtimeInstance := newTestRuntime()
 
     RegisterKernelHttpProfilerListener(dispatcher)
@@ -172,7 +172,7 @@ func TestKernelHttpProfilerListener_EmitsNoProfileForATypedNilRequest(t *testing
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     var unassignedRequest *Request

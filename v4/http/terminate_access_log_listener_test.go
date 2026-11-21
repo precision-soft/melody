@@ -81,7 +81,7 @@ func TestRegisterKernelTerminateAccessLogListener_RecordsTheRequestItCompleted(t
     recordingLogger := &accessLogRecordingLogger{}
     runtimeInstance := newAccessLogRuntime(recordingLogger)
 
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     RegisterKernelTerminateAccessLogListener(dispatcher)
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/articles?draft=1&token=super-secret", nil)
@@ -150,7 +150,7 @@ func TestRegisterKernelTerminateAccessLogListener_PrefersTheSchemeTheKernelResol
     recordingLogger := &accessLogRecordingLogger{}
     runtimeInstance := newAccessLogRuntime(recordingLogger)
 
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     RegisterKernelTerminateAccessLogListener(dispatcher)
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/articles", nil)
@@ -183,7 +183,7 @@ func TestRegisterKernelTerminateAccessLogListener_FallsBackToTheUntrustedSchemeD
     recordingLogger := &accessLogRecordingLogger{}
     runtimeInstance := newAccessLogRuntime(recordingLogger)
 
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     RegisterKernelTerminateAccessLogListener(dispatcher)
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/articles", nil)
@@ -213,7 +213,7 @@ func TestRegisterKernelTerminateAccessLogListener_DetectsTlsFromTheConnection(t 
     recordingLogger := &accessLogRecordingLogger{}
     runtimeInstance := newAccessLogRuntime(recordingLogger)
 
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     RegisterKernelTerminateAccessLogListener(dispatcher)
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/articles", nil)
@@ -243,7 +243,7 @@ func TestRegisterKernelTerminateAccessLogListener_IgnoresAForeignPayload(t *test
     recordingLogger := &accessLogRecordingLogger{}
     runtimeInstance := newAccessLogRuntime(recordingLogger)
 
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     RegisterKernelTerminateAccessLogListener(dispatcher)
 
     if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelTerminate, "not a terminate event"); nil != dispatchErr {
@@ -259,7 +259,7 @@ func TestRegisterKernelTerminateAccessLogListener_RecordsAZeroStatusWithoutAResp
     recordingLogger := &accessLogRecordingLogger{}
     runtimeInstance := newAccessLogRuntime(recordingLogger)
 
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     RegisterKernelTerminateAccessLogListener(dispatcher)
 
     terminateEvent := NewKernelTerminateEvent(
@@ -286,7 +286,7 @@ func TestRegisterKernelTerminateAccessLogListener_RedactsEveryQueryValue(t *test
     recordingLogger := &accessLogRecordingLogger{}
     runtimeInstance := newAccessLogRuntime(recordingLogger)
 
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     RegisterKernelTerminateAccessLogListener(dispatcher)
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/reset?apiKey=live-credential&next=/home", nil)
@@ -328,7 +328,7 @@ func TestRegisterKernelTerminateAccessLogListener_RedactsTheQueryOfTheReferer(t 
     recordingLogger := &accessLogRecordingLogger{}
     runtimeInstance := newAccessLogRuntime(recordingLogger)
 
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     RegisterKernelTerminateAccessLogListener(dispatcher)
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/articles", nil)
@@ -359,7 +359,7 @@ func TestRegisterKernelTerminateAccessLogListener_BoundsEveryRequestSuppliedFiel
     recordingLogger := &accessLogRecordingLogger{}
     runtimeInstance := newAccessLogRuntime(recordingLogger)
 
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     RegisterKernelTerminateAccessLogListener(dispatcher)
 
     longText := strings.Repeat("a", 4096)

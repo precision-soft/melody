@@ -339,7 +339,7 @@ func newTestKernel() *testKernel {
     return &testKernel{
         configuration:    nil,
         serviceContainer: container.NewContainer(container.ContainerConfig{}),
-        eventDispatcher:  event.NewEventDispatcher(clock.NewSystemClock()),
+        eventDispatcher:  event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()}),
         httpKernel:       http.NewKernel(httpRouter, http.KernelConfig{}),
         httpRouter:       httpRouter,
         clock:            clock.NewSystemClock(),

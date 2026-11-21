@@ -125,6 +125,6 @@ func RegisterKernelTerminateAccessLogListener(eventDispatcher eventcontract.Even
 
             return nil
         },
-        KernelTerminateAccessLogListenerPriority,
+        eventcontract.ListenerConfig{Priority: KernelTerminateAccessLogListenerPriority},
     )
 }

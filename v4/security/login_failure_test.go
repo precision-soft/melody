@@ -118,7 +118,7 @@ func TestLoginDoor_AFailedDispatchForAnAuthenticatorsRefusalKeepsTheStatusAndIsF
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return errors.New("the audit sink refused the record")
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     recorder := fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil)
@@ -143,7 +143,7 @@ func TestLoginDoor_AFailedDispatchForAHandlersRefusalKeepsTheStatusAndIsFiled(t 
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return errors.New("the audit sink refused the record")
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     recorder := fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil)

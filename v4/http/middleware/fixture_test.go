@@ -33,7 +33,7 @@ func (instance *rateLimitKernelEnvironmentSource) Load(ctx context.Context) (map
 func servedRateLimitKernel(t *testing.T, configure func(router *http.Router, dispatcher eventcontract.EventDispatcher)) nethttp.Handler {
     t.Helper()
 
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     router := http.NewRouter()
     configure(router, dispatcher)
 

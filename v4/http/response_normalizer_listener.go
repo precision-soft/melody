@@ -40,6 +40,6 @@ func RegisterKernelResponseNormalizerListener(eventDispatcher eventcontract.Even
 
             return nil
         },
-        KernelResponseNormalizerListenerPriority,
+        eventcontract.ListenerConfig{Priority: KernelResponseNormalizerListenerPriority},
     )
 }

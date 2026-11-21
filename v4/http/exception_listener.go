@@ -1,7 +1,6 @@
 package http
 
 import (
-    "fmt"
     "math"
     nethttp "net/http"
 
@@ -22,20 +21,9 @@ import (
 /* BuiltInExceptionListenerPriority is the floor of kernel.exception: the kernel's built-in listener answers there, and a listener registered at it once the kernel serves is refused, since it could never run. */
 const BuiltInExceptionListenerPriority = math.MinInt
 
-/* installBuiltInExceptionListener registers the default answer of kernel.exception on the floor of the event. A dispatcher without the floor door cannot keep the listener once per kernel nor refuse a listener at the floor that would never run, so it is refused before any listener is added. */
+/* installBuiltInExceptionListener registers the default answer of kernel.exception on the floor of the event, once per dispatcher, refusing a later listener at the floor that would never run. */
 func installBuiltInExceptionListener(eventDispatcher eventcontract.EventDispatcher) {
-    registrar, ok := eventDispatcher.(eventcontract.PriorityFloorRegistrar)
-    if false == ok {
-        exception.Panic(
-            exception.NewError(
-                "the event dispatcher cannot reserve the priority of the built-in exception listener",
-                exceptioncontract.Context{"dispatcherType": fmt.Sprintf("%T", eventDispatcher)},
-                nil,
-            ),
-        )
-    }
-
-    registrar.InstallFloorListener(kernelcontract.EventKernelException, builtInExceptionListener, BuiltInExceptionListenerPriority)
+    eventDispatcher.InstallFloorListener(kernelcontract.EventKernelException, builtInExceptionListener, eventcontract.ListenerConfig{Priority: BuiltInExceptionListenerPriority})
 }
 
 /* builtInExceptionListener journals an error no producer filed and answers with RenderExceptionResponse. Debug mode is read per dispatch from the runtime's configuration; a runtime without one renders the production body. */
@@ -74,6 +62,7 @@ func builtInExceptionListener(runtimeInstance containercontract.Runtime, eventVa
             },
         ),
     )
+    exceptionEvent.builtInAnswered = true
 
     return nil
 }

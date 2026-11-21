@@ -389,8 +389,16 @@ func assignCachedTestValues(keys []string, target any, values map[string]any) er
 /* silentEventDispatcher stands in for the wired dispatcher: the doors under test dispatch a domain event on the way out, and what the listeners then do belongs to their own tests. */
 type silentEventDispatcher struct{}
 
-func (instance *silentEventDispatcher) AddListener(eventName string, listener melodyeventcontract.EventListener, priority int) melodyeventcontract.ListenerRegistration {
+func (instance *silentEventDispatcher) AddListener(eventName string, listener melodyeventcontract.EventListener, config melodyeventcontract.ListenerConfig) melodyeventcontract.ListenerRegistration {
     return melodyeventcontract.ListenerRegistration{}
+}
+
+func (instance *silentEventDispatcher) InstallFloorListener(eventName string, listener melodyeventcontract.EventListener, config melodyeventcontract.ListenerConfig) (melodyeventcontract.ListenerRegistration, bool) {
+    return melodyeventcontract.ListenerRegistration{}, false
+}
+
+func (instance *silentEventDispatcher) RegisteredEvents() []melodyeventcontract.RegisteredEvent {
+    return nil
 }
 
 func (instance *silentEventDispatcher) RemoveListener(registration melodyeventcontract.ListenerRegistration) bool {

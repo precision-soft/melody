@@ -32,7 +32,7 @@ func NewAccessTokenReleaseSubscriber(storeSource AccessTokenStoreSource) *Access
 func (instance *AccessTokenReleaseSubscriber) SubscribedEvents() map[string][]melodyeventcontract.SubscribedEvent {
     return map[string][]melodyeventcontract.SubscribedEvent{
         event.UserDeletedEventName: {
-            melodyevent.NewSubscribedEvent(instance.onUserDeleted(), AccessTokenReleasePriority),
+            melodyevent.NewSubscribedEvent(instance.onUserDeleted(), melodyeventcontract.ListenerConfig{Priority: AccessTokenReleasePriority}),
         },
     }
 }

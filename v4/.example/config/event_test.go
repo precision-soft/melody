@@ -65,7 +65,7 @@ func TestRequestBudgetConfig_AnEmptyListChargesThePeer(t *testing.T) {
 /* the release of a second factor with its account is a subscriber the composition root installs; its own tests pin what it does once installed, and this one pins that it is installed. Read off a real dispatcher: with a database, one more owner on the deletion event, and it is this one. */
 func TestRegisterSubscribers_InstallsTheTwoFactorEnrollmentReleaseWhenThereIsADatabase(t *testing.T) {
     ownersOnDeletion := func(moduleInstance *Module) []string {
-        eventDispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
+        eventDispatcher := melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()})
         moduleInstance.registerSubscribers(eventDispatcher)
 
         var owners []string
@@ -109,7 +109,7 @@ func TestRegisterSubscribers_TheEnrollmentReleaseOutranksTheCacheClearOnUserDele
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.catalogueWired = true
 
-    eventDispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
+    eventDispatcher := melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()})
     moduleInstance.registerSubscribers(eventDispatcher)
 
     releasePriority, cachePriority := 0, 0
@@ -157,7 +157,7 @@ func TestRequestBudgetLimiter_AdmitsTheBudgetPerHourAndRefusesTheNext(t *testing
 }
 
 func TestRegisterRateLimitRequestListener_TheArmedDoorRefusesTheRequestPastTheSwitchBudget(t *testing.T) {
-    eventDispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
+    eventDispatcher := melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()})
     moduleInstance := moduleWithEnvironment(t, map[string]string{environmentKeyRequestBudgetPerHour: "2"})
     moduleInstance.trustedProxyResolver = newTrustedProxyResolver("", time.Now)
     moduleInstance.registerRateLimitRequestListener(eventDispatcher)
@@ -187,7 +187,7 @@ func TestRegisterRateLimitRequestListener_TheArmedDoorRefusesTheRequestPastTheSw
 /* the switch arms the door on a positive integer, spaces around it tolerated, and refuses any other value by name rather than reading it as unset, since a swallowed typo would disarm the global budget with no signal anywhere */
 func TestRegisterRateLimitRequestListener_ArmsOnAPositiveBudgetAndRefusesAnyOtherValueByName(t *testing.T) {
     kernelRequestListeners := func(moduleInstance *Module) int {
-        eventDispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
+        eventDispatcher := melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()})
         moduleInstance.registerRateLimitRequestListener(eventDispatcher)
 
         count := 0
@@ -246,7 +246,7 @@ func TestRequestBudgetLimiter_BoundsTheAddressesItTracksByEvictingTheOldest(t *t
 }
 
 func TestRegisterApiExceptionListener_AnswersTheApiPathsAndLeavesTheOthersToTheBuiltIn(t *testing.T) {
-    eventDispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
+    eventDispatcher := melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()})
     moduleWithEnvironment(t, map[string]string{}).registerApiExceptionListener(eventDispatcher)
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -304,7 +304,7 @@ func TestRegisterApiExceptionListener_AnswersTheApiPathsAndLeavesTheOthersToTheB
 }
 
 func TestRegisterSubscribers_InstallsTheApiExceptionListener(t *testing.T) {
-    eventDispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
+    eventDispatcher := melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()})
     moduleWithEnvironment(t, map[string]string{}).registerSubscribers(eventDispatcher)
 
     for _, registered := range eventDispatcher.RegisteredEvents() {

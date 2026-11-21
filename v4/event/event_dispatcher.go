@@ -1,6 +1,7 @@
 package event
 
 import (
+    "errors"
     "fmt"
     "reflect"
     "runtime"
@@ -9,6 +10,7 @@ import (
     "sync"
     "time"
 
+    "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
@@ -19,17 +21,26 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-func NewEventDispatcher(clock clockcontract.Clock) *EventDispatcher {
-    if true == internal.IsNilInterface(clock) {
+/* EventDispatcherConfig is what NewEventDispatcher builds over; the zero value stamps DispatchName with the system clock. */
+type EventDispatcherConfig struct {
+    /* Clock stamps the events DispatchName builds; nil takes the system clock, a typed nil is refused. */
+    Clock clockcontract.Clock
+}
+
+func NewEventDispatcher(config EventDispatcherConfig) *EventDispatcher {
+    clockInstance := config.Clock
+    if nil == clockInstance {
+        clockInstance = clock.NewSystemClock()
+    } else if true == internal.IsNilInterface(clockInstance) {
         exception.Panic(
-            exception.NewError("clock may not be nil", nil, nil),
+            exception.NewError("EventDispatcherConfig.Clock may not be a typed nil", nil, nil),
         )
     }
 
     return &EventDispatcher{
         listeners:      make(map[string][]listenerWithPriority),
         subscribers:    newSubscriberBookkeeping[subscriberRegistration](),
-        clock:          clock,
+        clock:          clockInstance,
         priorityFloors: make(map[string]int),
     }
 }
@@ -48,8 +59,10 @@ type EventDispatcher struct {
 func (instance *EventDispatcher) AddListener(
     eventName string,
     listener eventcontract.EventListener,
-    priority int,
+    config eventcontract.ListenerConfig,
 ) eventcontract.ListenerRegistration {
+    priority := config.Priority
+
     if "" == eventName {
         exception.Panic(
             exception.NewError("event name is required to add a listener", nil, nil),
@@ -86,7 +99,7 @@ func (instance *EventDispatcher) AddListener(
         )
     }
 
-    registration := instance.appendListenerLocked(eventName, listener, priority)
+    registration := instance.appendListenerLocked(eventName, listener, config)
 
     instance.mutex.Unlock()
 
@@ -96,7 +109,7 @@ func (instance *EventDispatcher) AddListener(
 func (instance *EventDispatcher) appendListenerLocked(
     eventName string,
     listener eventcontract.EventListener,
-    priority int,
+    config eventcontract.ListenerConfig,
 ) eventcontract.ListenerRegistration {
     instance.nextListenerId++
     listenerId := instance.nextListenerId
@@ -104,9 +117,13 @@ func (instance *EventDispatcher) appendListenerLocked(
     instance.listeners[eventName] = append(
         instance.listeners[eventName],
         listenerWithPriority{
-            listener:   listener,
-            listenerId: listenerId,
-            priority:   priority,
+            listener:                 listener,
+            listenerId:               listenerId,
+            priority:                 config.Priority,
+            name:                     config.Name,
+            required:                 config.Required,
+            maySkipRequiredListeners: config.MaySkipRequiredListeners,
+            failureEndsDispatch:      config.FailureEndsDispatch,
         },
     )
 
@@ -127,11 +144,11 @@ func (instance *EventDispatcher) appendListenerLocked(
     }
 }
 
-/* InstallFloorListener registers the listener and refuses every later registration on the event at or below its priority, under one lock, so nothing registers between the two. An event already holding a floor keeps it, and the listener is not added. */
+/* InstallFloorListener registers the listener and refuses every later registration on the event at or below config.Priority, under one lock, so nothing registers between the two. An event already holding a floor keeps it, and the listener is not added. */
 func (instance *EventDispatcher) InstallFloorListener(
     eventName string,
     listener eventcontract.EventListener,
-    priority int,
+    config eventcontract.ListenerConfig,
 ) (eventcontract.ListenerRegistration, bool) {
     if "" == eventName {
         exception.Panic(
@@ -158,73 +175,11 @@ func (instance *EventDispatcher) InstallFloorListener(
         return eventcontract.ListenerRegistration{}, false
     }
 
-    registration := instance.appendListenerLocked(eventName, listener, priority)
+    registration := instance.appendListenerLocked(eventName, listener, config)
 
-    instance.priorityFloors[eventName] = priority
+    instance.priorityFloors[eventName] = config.Priority
 
     return registration, true
-}
-
-/* MarkListenerRequired flags the registered listener so that, if another listener stops propagation before it runs, dispatch returns a RequiredListenerSkippedError and the caller can fail closed. An unknown registration is refused. The mark follows the registration, so a dispatch between the two sees the listener unmarked; register at boot, or do not dispatch the event until the mark is applied. */
-func (instance *EventDispatcher) MarkListenerRequired(registration eventcontract.ListenerRegistration) {
-    instance.markListenerFlag(registration, func(entry *listenerWithPriority) {
-        entry.required = true
-    })
-}
-
-/* MarkListenerMaySkipRequiredListeners flags the registered listener so that when it stops propagation it is allowed to skip required listeners behind it without failing dispatch — the explicit opt-out that restores the plain stop-and-proceed behavior for a listener that knowingly short-circuits. */
-func (instance *EventDispatcher) MarkListenerMaySkipRequiredListeners(registration eventcontract.ListenerRegistration) {
-    instance.markListenerFlag(registration, func(entry *listenerWithPriority) {
-        entry.maySkipRequiredListeners = true
-    })
-}
-
-func (instance *EventDispatcher) markListenerFlag(
-    registration eventcontract.ListenerRegistration,
-    apply func(entry *listenerWithPriority),
-) {
-    eventName := registration.EventName
-    if "" == eventName {
-        exception.Panic(
-            exception.NewError("event name is required to mark a listener", nil, nil),
-        )
-    }
-
-    listenerId := registration.ListenerId
-    if 0 == listenerId {
-        exception.Panic(
-            exception.NewError(
-                "event listener id is required to mark a listener",
-                exceptioncontract.Context{
-                    "eventName": eventName,
-                },
-                nil,
-            ),
-        )
-    }
-
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    entries := instance.listeners[eventName]
-    for index := range entries {
-        if entries[index].listenerId == listenerId {
-            apply(&entries[index])
-
-            return
-        }
-    }
-
-    exception.Panic(
-        exception.NewError(
-            "event listener registration is not registered",
-            exceptioncontract.Context{
-                "eventName":  eventName,
-                "listenerId": listenerId,
-            },
-            nil,
-        ),
-    )
 }
 
 func (instance *EventDispatcher) RemoveListener(registration eventcontract.ListenerRegistration) bool {
@@ -278,7 +233,7 @@ func (instance *EventDispatcher) installSubscriberListener(planned plannedSubscr
     registration := instance.AddListener(
         planned.eventName,
         planned.listener,
-        planned.priority,
+        planned.config,
     )
 
     return subscriberRegistration{
@@ -293,7 +248,7 @@ func (instance *EventDispatcher) removeSubscriberListener(entry subscriberRegist
     return instance.removeListenerById(entry.eventName, entry.listenerId)
 }
 
-/* Dispatch runs the listeners of the event's name in priority order and stops at the first that fails: the failure, or the refusal of a required listener it skipped, is returned beside the partially dispatched event. The order of subscribers on one event therefore decides what runs: a release that must happen belongs in the store, a cascade or a transaction, or ahead of every subscriber that may fail. */
+/* Dispatch runs the listeners of the event's name in priority order, every one of them unless propagation is stopped or a listener declared FailureEndsDispatch fails: a failure of one listener is collected and the next runs. The answer is the one failure, the failures joined through errors.Join in priority order when several failed, or the refusal of a required listener the dispatch ended before, with the failures as its cause. */
 func (instance *EventDispatcher) Dispatch(runtimeInstance containercontract.Runtime, event eventcontract.Event) (eventcontract.Event, error) {
     return instance.dispatchSafely(
         runtimeInstance,
@@ -360,7 +315,7 @@ func (instance *EventDispatcher) RegisteredEvents() []eventcontract.RegisteredEv
 
             listenerId := fmt.Sprintf("%d", entry.listenerId)
 
-            listenerName := listenerNameOf(entry.listener)
+            listenerName := entryNameOf(entry)
 
             registeredListenerList = append(
                 registeredListenerList,
@@ -372,6 +327,7 @@ func (instance *EventDispatcher) RegisteredEvents() []eventcontract.RegisteredEv
                     ListenerName:             listenerName,
                     Required:                 entry.required,
                     MaySkipRequiredListeners: entry.maySkipRequiredListeners,
+                    FailureEndsDispatch:      entry.failureEndsDispatch,
                 },
             )
         }
@@ -478,8 +434,10 @@ func (instance *EventDispatcher) dispatch(runtimeInstance containercontract.Runt
     }
 
     listenerIndex := 0
-    stoppedByListener := eventcontract.EventListener(nil)
+    /* the entry travels rather than its name, which only a refusal reads */
+    lastRanEntry := listenerWithPriority{}
     stoppedByListenerMaySkip := false
+    listenerErrs := make([]error, 0)
 
     for listenerIndex = 0; listenerIndex < len(listenerList); listenerIndex++ {
         /* propagation is tested before each listener runs, so an event that arrives already stopped runs none of them */
@@ -496,7 +454,7 @@ func (instance *EventDispatcher) dispatch(runtimeInstance containercontract.Runt
                 "event listener started",
                 loggingcontract.Context{
                     "eventName":        eventName,
-                    "listenerName":     listenerNameOf(entry.listener),
+                    "listenerName":     entryNameOf(entry),
                     "listenerPriority": entry.priority,
                 },
             )
@@ -506,43 +464,44 @@ func (instance *EventDispatcher) dispatch(runtimeInstance containercontract.Runt
             runtimeInstance,
             eventName,
             eventValue,
-            entry.listener,
-            entry.priority,
+            entry,
             listenerStartedAt,
             logger,
         )
-        if nil != err {
-            listenerName := listenerNameOf(entry.listener)
 
-            /* a failing listener ends the dispatch as decisively as a stop, so a required listener behind it is reported skipped ahead of the failure, which travels as the cause on both branches, or a response set by the failing listener would be served with access control never consulted. The opt-out is not read here: MarkListenerMaySkipRequiredListeners licenses a chosen short-circuit, a failure is not one, and the kernel tells the two apart by the type of the error. */
+        lastRanEntry = entry
+        /* the opt-out licenses a chosen short-circuit; a listener that failed and stopped made no such choice */
+        stoppedByListenerMaySkip = nil == err && true == entry.maySkipRequiredListeners
+
+        if nil == err {
+            continue
+        }
+
+        listenerErrs = append(listenerErrs, err)
+
+        if true == entry.failureEndsDispatch {
             requiredErr := refuseSkippedRequiredListeners(
                 eventName,
                 listenerList[listenerIndex+1:],
-                listenerName,
+                entryNameOf(lastRanEntry),
                 false,
+                joinListenerErrors(listenerErrs),
             )
             if nil != requiredErr {
-                if true == isEventPropagationStopped(eventValue) {
-                    return eventValue, NewRequiredListenerSkippedError(eventName, listenerName, err)
-                }
-
-                return eventValue, NewRequiredListenerSkippedErrorWithCause(eventName, listenerName, err)
+                return eventValue, requiredErr
             }
 
-            return eventValue, err
+            return eventValue, joinListenerErrors(listenerErrs)
         }
-
-        /* the listener travels rather than its name, which only the refusal below reads */
-        stoppedByListener = entry.listener
-        stoppedByListenerMaySkip = entry.maySkipRequiredListeners
     }
 
     if true == isEventPropagationStopped(eventValue) {
         requiredErr := refuseSkippedRequiredListeners(
             eventName,
             listenerList[listenerIndex:],
-            listenerNameOf(stoppedByListener),
+            entryNameOf(lastRanEntry),
             stoppedByListenerMaySkip,
+            joinListenerErrors(listenerErrs),
         )
         if nil != requiredErr {
             return eventValue, requiredErr
@@ -568,7 +527,20 @@ func (instance *EventDispatcher) dispatch(runtimeInstance containercontract.Runt
         )
     }
 
-    return eventValue, nil
+    return eventValue, joinListenerErrors(listenerErrs)
+}
+
+/* joinListenerErrors answers nil for no failure, the failure itself for one, so its type reaches the caller unchanged, and errors.Join of every failure in priority order for several. */
+func joinListenerErrors(listenerErrs []error) error {
+    if 0 == len(listenerErrs) {
+        return nil
+    }
+
+    if 1 == len(listenerErrs) {
+        return listenerErrs[0]
+    }
+
+    return errors.Join(listenerErrs...)
 }
 
 func isEventPropagationStopped(eventValue eventcontract.Event) bool {
@@ -595,12 +567,22 @@ func listenerNameOf(listener eventcontract.EventListener) string {
     return function.Name()
 }
 
-/* refuseSkippedRequiredListeners answers the error an early end of the dispatch owes, by a stop or a failure alike, when a required listener sits among those it skipped, so the dispatch fails closed; the listener that ended it may be explicitly allowed to skip them. */
+/* entryNameOf answers the name a registration declared, and the listener's qualified function name when it declared none. */
+func entryNameOf(entry listenerWithPriority) string {
+    if "" != entry.name {
+        return entry.name
+    }
+
+    return listenerNameOf(entry.listener)
+}
+
+/* refuseSkippedRequiredListeners answers the error an early end of the dispatch owes, by a stop or a failure that ends it alike, when a required listener sits among those it skipped, so the dispatch fails closed; the listener that ended it may be explicitly allowed to skip them. The cause is the dispatch's failures, nil when none failed. */
 func refuseSkippedRequiredListeners(
     eventName string,
     skippedListenerList []listenerWithPriority,
     stoppedByListenerName string,
     stoppedByListenerMaySkip bool,
+    cause error,
 ) error {
     if true == stoppedByListenerMaySkip {
         return nil
@@ -611,7 +593,7 @@ func refuseSkippedRequiredListeners(
             return NewRequiredListenerSkippedError(
                 eventName,
                 stoppedByListenerName,
-                nil,
+                cause,
             )
         }
     }
@@ -623,11 +605,12 @@ func (instance *EventDispatcher) callListenerSafely(
     runtimeInstance containercontract.Runtime,
     eventName string,
     eventValue eventcontract.Event,
-    listener eventcontract.EventListener,
-    priority int,
+    entry listenerWithPriority,
     listenerStartedAt time.Time,
     logger loggingcontract.Logger,
 ) (returnedErr error) {
+    listener := entry.listener
+    priority := entry.priority
     eventType := reflect.TypeOf(eventValue).String()
     listenerType := internal.StringifyType(listener)
 
@@ -647,7 +630,7 @@ func (instance *EventDispatcher) callListenerSafely(
         baseContext := internal.NewEventListenerContext(
             eventName,
             eventType,
-            listenerNameOf(listener),
+            entryNameOf(entry),
             listenerType,
             priority,
             durationMs,
@@ -694,7 +677,7 @@ func (instance *EventDispatcher) callListenerSafely(
     exceptionContext := internal.NewEventListenerContext(
         eventName,
         eventType,
-        listenerNameOf(listener),
+        entryNameOf(entry),
         listenerType,
         priority,
         durationMs,
@@ -764,8 +747,10 @@ type listenerWithPriority struct {
     listener                 eventcontract.EventListener
     listenerId               uint64
     priority                 int
+    name                     string
     required                 bool
     maySkipRequiredListeners bool
+    failureEndsDispatch      bool
 }
 
 type subscriberRegistration struct {
@@ -775,9 +760,6 @@ type subscriberRegistration struct {
 }
 
 var _ eventcontract.EventDispatcher = (*EventDispatcher)(nil)
-var _ eventcontract.EventDispatcherInspector = (*EventDispatcher)(nil)
-var _ eventcontract.RequiredListenerRegistrar = (*EventDispatcher)(nil)
-var _ eventcontract.PriorityFloorRegistrar = (*EventDispatcher)(nil)
 
 /* requireEventSubscriber refuses a subscriber that cannot be installed and answers the type name its installation is filed under, for inspection. The nil test reads through the interface, since SubscribedEvents would dereference a typed nil. A value subscriber is installable, since the installation is filed under an id the dispatcher issues. */
 func requireEventSubscriber(
@@ -896,7 +878,7 @@ func planSubscriberRegistrations(subscriber eventcontract.EventSubscriber) []pla
                 plannedSubscriberRegistration{
                     eventName: eventName,
                     listener:  listener,
-                    priority:  subscribedEvent.Priority(),
+                    config:    subscribedEvent.Config(),
                 },
             )
         }
@@ -908,5 +890,5 @@ func planSubscriberRegistrations(subscriber eventcontract.EventSubscriber) []pla
 type plannedSubscriberRegistration struct {
     eventName string
     listener  eventcontract.EventListener
-    priority  int
+    config    eventcontract.ListenerConfig
 }

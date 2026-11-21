@@ -149,7 +149,7 @@ func NewApplication(
             TeardownSequential:   resolveContainerTeardownSequential(configuration, applicationConfig),
         }),
         httpRouter,
-        event.NewEventDispatcher(clockInstance),
+        event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance}),
         clockInstance,
     )
 

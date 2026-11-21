@@ -63,7 +63,7 @@ func newTestKernel() *testKernel {
     return &testKernel{
         configuration:    nil,
         serviceContainer: container.NewContainer(container.ContainerConfig{}),
-        eventDispatcher:  event.NewEventDispatcher(clock.NewSystemClock()),
+        eventDispatcher:  event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()}),
         httpKernel:       http.NewKernel(httpRouter, http.KernelConfig{}),
         httpRouter:       httpRouter,
         clock:            clock.NewSystemClock(),
@@ -203,10 +203,7 @@ func newSecurityWiringApplication(t *testing.T, mode string) *Application {
 func registeredListenerCount(t *testing.T, applicationInstance *Application) int {
     t.Helper()
 
-    inspector, isInspector := applicationInstance.kernel.EventDispatcher().(eventcontract.EventDispatcherInspector)
-    if false == isInspector {
-        t.Fatalf("expected the kernel dispatcher to be inspectable")
-    }
+    inspector := applicationInstance.kernel.EventDispatcher()
 
     total := 0
     for _, registeredEvent := range inspector.RegisteredEvents() {

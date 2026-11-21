@@ -12,7 +12,7 @@ import (
 func TestEventServiceResolver_MustFromResolver(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    dispatcher := NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := NewEventDispatcher(EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     err := serviceContainer.Register(
         ServiceEventDispatcher,

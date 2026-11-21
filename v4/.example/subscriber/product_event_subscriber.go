@@ -25,13 +25,13 @@ func NewProductEventSubscriber() *ProductEventSubscriber {
 func (instance *ProductEventSubscriber) SubscribedEvents() map[string][]melodyeventcontract.SubscribedEvent {
     return map[string][]melodyeventcontract.SubscribedEvent{
         event.ProductCreatedEventName: {
-            melodyevent.NewSubscribedEvent(instance.onProductCreated(), 0),
+            melodyevent.NewSubscribedEvent(instance.onProductCreated(), melodyeventcontract.ListenerConfig{}),
         },
         event.ProductUpdatedEventName: {
-            melodyevent.NewSubscribedEvent(instance.onProductUpdated(), 0),
+            melodyevent.NewSubscribedEvent(instance.onProductUpdated(), melodyeventcontract.ListenerConfig{}),
         },
         event.ProductDeletedEventName: {
-            melodyevent.NewSubscribedEvent(instance.onProductDeleted(), 0),
+            melodyevent.NewSubscribedEvent(instance.onProductDeleted(), melodyeventcontract.ListenerConfig{}),
         },
     }
 }

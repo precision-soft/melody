@@ -38,7 +38,7 @@ func newTestRuntime() containercontract.Runtime {
 }
 
 func TestRegisterResponseListener_AppliesHeadersToErrorResponse(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     RegisterResponseListener(dispatcher, NewService(Config{}))
 
@@ -64,7 +64,7 @@ func TestRegisterResponseListener_AppliesHeadersToErrorResponse(t *testing.T) {
 }
 
 func TestRegisterResponseListener_SkipsWhenOriginMissing(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     RegisterResponseListener(dispatcher, NewService(Config{}))
 
@@ -91,7 +91,7 @@ func TestRegisterResponseListener_SkipsWhenOriginMissing(t *testing.T) {
 func TestRegisterResponseListener_SkipsDisallowedOrigin(t *testing.T) {
     service := NewService(Config{AllowOrigins: []string{"https://allowed.example.com"}})
 
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     RegisterResponseListener(dispatcher, service)
 
     request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
@@ -124,7 +124,7 @@ func newPreflightTestRequest(path string) *nethttp.Request {
 }
 
 func TestRegisterRequestListener_AnswersAWellFormedPreflightFromAnAllowedOrigin(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     RegisterRequestListener(dispatcher, RestrictiveService([]string{"https://app.example.com"}))
 
@@ -147,7 +147,7 @@ func TestRegisterRequestListener_AnswersAWellFormedPreflightFromAnAllowedOrigin(
 }
 
 func TestRegisterRequestListener_FallsThroughForADisallowedOrigin(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     RegisterRequestListener(dispatcher, RestrictiveService([]string{"https://app.example.com"}))
 
@@ -167,7 +167,7 @@ func TestRegisterRequestListener_FallsThroughForADisallowedOrigin(t *testing.T) 
 }
 
 func TestRegisterRequestListener_FallsThroughForAnOptionsRequestWithoutARequestedMethod(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     RegisterRequestListener(dispatcher, RestrictiveService([]string{"https://app.example.com"}))
 
@@ -188,7 +188,7 @@ func TestRegisterRequestListener_FallsThroughForAnOptionsRequestWithoutARequeste
 
 /* a preflight from an allowed origin that a listener ahead of this one already answered — the rate limiter's 429 among them — is decorated with the cross-origin headers rather than left opaque: the earlier listener's status stands, but a browser can now read the refusal as a rate limit instead of a bare cors failure. */
 func TestRegisterRequestListener_DecoratesAnAlreadyAnsweredPreflight(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     RegisterRequestListener(dispatcher, RestrictiveService([]string{"https://app.example.com"}))
 
@@ -267,7 +267,7 @@ func newCorsListenerTestContainer() containercontract.Container {
     serviceContainer.MustRegister(
         event.ServiceEventDispatcher,
         func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
-            return event.NewEventDispatcher(clock.NewSystemClock()), nil
+            return event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()}), nil
         },
         container.RegisterOptions{},
     )
@@ -360,7 +360,7 @@ func TestRegisterListeners_AnswersThePreflightTheAccessControlWouldOtherwiseRefu
 }
 
 func TestRegisterListeners_WiresTheResponseDoorToo(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     RegisterListeners(dispatcher, RestrictiveService([]string{"https://app.example.com"}))
 
@@ -385,7 +385,7 @@ func TestRegisterListeners_WiresTheResponseDoorToo(t *testing.T) {
 door as a non-nil interface and the read below dereferences it. The untyped literal a sibling probe passes
 is the only shape a bare comparison already catches. */
 func TestRegisterRequestListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     RegisterRequestListener(dispatcher, NewService(Config{}))
 
@@ -404,7 +404,7 @@ func TestRegisterRequestListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
 }
 
 func TestRegisterListeners_RefuseANilService(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     assertPanicsWithContext(t, func() { RegisterListeners(dispatcher, nil) }, "the cors service is nil", "door", "cors.RegisterListeners")
     assertPanicsWithContext(t, func() { RegisterRequestListener(dispatcher, nil) }, "the cors service is nil", "door", "cors.RegisterRequestListener")
@@ -412,7 +412,7 @@ func TestRegisterListeners_RefuseANilService(t *testing.T) {
 }
 
 func TestRegisterRequestListener_LeavesARefusedPreflightToTheKernel(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     RegisterRequestListener(dispatcher, RestrictiveService([]string{"https://app.example.com"}))
 
@@ -455,7 +455,7 @@ func TestMiddleware_And_Listener_PassTheRequestOfTheCall(t *testing.T) {
         t.Fatalf("middleware simple: %v", err)
     }
 
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     RegisterRequestListener(dispatcher, service)
     RegisterResponseListener(dispatcher, service)
 

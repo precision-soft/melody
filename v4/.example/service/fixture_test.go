@@ -253,7 +253,7 @@ type recordingDispatcher struct {
 }
 
 func newRecordingDispatcher(clockInstance melodyclockcontract.Clock, eventNames ...string) *recordingDispatcher {
-    recorder := &recordingDispatcher{dispatcher: melodyevent.NewEventDispatcher(clockInstance)}
+    recorder := &recordingDispatcher{dispatcher: melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: clockInstance})}
 
     for _, eventName := range eventNames {
         observed := eventName
@@ -266,7 +266,7 @@ func newRecordingDispatcher(clockInstance melodyclockcontract.Clock, eventNames 
 
                 return nil
             },
-            0,
+            melodyeventcontract.ListenerConfig{},
         )
     }
 
@@ -466,7 +466,7 @@ func newCatalogueUnderTest(t *testing.T, refusing bool) *catalogueUnderTest {
     cacheInstance := melodycache.NewManager(melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(128), CleanupInterval: melodybound.Of(time.Minute), Clock: clockInstance}), examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
     t.Cleanup(func() { _ = cacheInstance.CloseWithContext(context.Background()) })
 
-    var dispatcher melodyeventcontract.EventDispatcher = melodyevent.NewEventDispatcher(clockInstance)
+    var dispatcher melodyeventcontract.EventDispatcher = melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: clockInstance})
     if true == refusing {
         dispatcher = &refusingDispatcher{EventDispatcher: dispatcher}
     }
@@ -553,7 +553,7 @@ func newUserServiceUnderTest(t *testing.T, dispatcherOf func(melodyeventcontract
         cacheInstance = cacheOf(cacheInstance)
     }
 
-    var dispatcher melodyeventcontract.EventDispatcher = melodyevent.NewEventDispatcher(clockInstance)
+    var dispatcher melodyeventcontract.EventDispatcher = melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: clockInstance})
     if nil != dispatcherOf {
         dispatcher = dispatcherOf(dispatcher)
     }

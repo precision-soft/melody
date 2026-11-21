@@ -390,7 +390,7 @@ func newHttpTestContainerWithSessionManagerAndEnvironmentValues(
     serviceContainer.MustRegister(
         event.ServiceEventDispatcher,
         func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
-            return event.NewEventDispatcher(clock.NewSystemClock()), nil
+            return event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()}), nil
         },
         container.RegisterOptions{},
     )

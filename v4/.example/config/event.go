@@ -139,7 +139,7 @@ func requestBudgetConfig(trustedProxyResolver *trustedProxyResolver) melodyhttpm
 
 /* registerRequiredRequestContextListener registers a required kernel.request listener that prepares a per-request attribute later stages depend on; the kernel fails closed if another kernel.request listener stops propagation before it. */
 func (instance *Module) registerRequiredRequestContextListener(eventDispatcher melodyeventcontract.EventDispatcher) {
-    registration := eventDispatcher.AddListener(
+    eventDispatcher.AddListener(
         melodykernelcontract.EventKernelRequest,
         func(runtimeInstance melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
             requestEvent, ok := eventValue.Payload().(*melodyhttp.KernelRequestEvent)
@@ -151,12 +151,8 @@ func (instance *Module) registerRequiredRequestContextListener(eventDispatcher m
 
             return nil
         },
-        10,
+        melodyeventcontract.ListenerConfig{Priority: 10, Required: true},
     )
-
-    if registrar, ok := eventDispatcher.(melodyeventcontract.RequiredListenerRegistrar); true == ok {
-        registrar.MarkListenerRequired(registration)
-    }
 }
 
 /* registerApiExceptionListener answers an error under the api paths and on the sign-in door, which the page reads as json, with the example's json envelope, the refusals of the security chain included; declining leaves every other path to the framework's built-in listener. */
@@ -178,7 +174,7 @@ func (instance *Module) registerApiExceptionListener(eventDispatcher melodyevent
 
             return nil
         },
-        0,
+        melodyeventcontract.ListenerConfig{},
     )
 }
 

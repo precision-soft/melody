@@ -61,7 +61,7 @@ func TestKernel_ResponseListenerReplacesResponseOnSuccessPath(t *testing.T) {
             responseEvent.SetResponse(TextResponse(nethttp.StatusAccepted, "replaced"))
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -104,7 +104,7 @@ func TestKernel_ResponseListenerReplacesResponseOnPanicRecoveryPath(t *testing.T
             responseEvent.SetResponse(TextResponse(nethttp.StatusAccepted, "recovered-replaced"))
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -183,7 +183,7 @@ func TestKernel_ClosesDiscardedResponseBodyWhenResponseListenerSwapsResponse(t *
             responseEvent.SetResponse(TextResponse(nethttp.StatusAccepted, "replaced"))
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -411,7 +411,7 @@ func TestKernel_ServeHttpClosesScopeWhenRequestLoggerSetupFails(t *testing.T) {
     }
 }
 
-func TestKernel_FailsClosedWhenKernelRequestDispatchErrors(t *testing.T) {
+func TestKernel_FailsClosedWhenKernelRequestDispatchErrorsAfterEveryListenerRan(t *testing.T) {
     handlerRan := false
 
     router := NewRouter()
@@ -434,7 +434,7 @@ func TestKernel_FailsClosedWhenKernelRequestDispatchErrors(t *testing.T) {
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return exception.NewError("resolution listener failed", nil, nil)
         },
-        50,
+        eventcontract.ListenerConfig{Priority: 50},
     )
 
     accessControlRan := false
@@ -445,7 +445,7 @@ func TestKernel_FailsClosedWhenKernelRequestDispatchErrors(t *testing.T) {
 
             return nil
         },
-        20,
+        eventcontract.ListenerConfig{Priority: 20},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -455,8 +455,8 @@ func TestKernel_FailsClosedWhenKernelRequestDispatchErrors(t *testing.T) {
 
     handler.ServeHTTP(recorder, request)
 
-    if true == accessControlRan {
-        t.Fatalf("expected the lower-priority listener to be skipped by the dispatcher abort")
+    if false == accessControlRan {
+        t.Fatalf("expected the lower-priority listener to run behind the failing one")
     }
 
     if true == handlerRan {
@@ -468,7 +468,7 @@ func TestKernel_FailsClosedWhenKernelRequestDispatchErrors(t *testing.T) {
     }
 }
 
-func TestKernel_FailsClosedWhenKernelControllerDispatchErrors(t *testing.T) {
+func TestKernel_FailsClosedWhenKernelControllerDispatchErrorsAfterEveryListenerRan(t *testing.T) {
     handlerRan := false
 
     router := NewRouter()
@@ -491,7 +491,7 @@ func TestKernel_FailsClosedWhenKernelControllerDispatchErrors(t *testing.T) {
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return exception.NewError("controller guard listener failed", nil, nil)
         },
-        50,
+        eventcontract.ListenerConfig{Priority: 50},
     )
 
     lowerPriorityRan := false
@@ -502,7 +502,7 @@ func TestKernel_FailsClosedWhenKernelControllerDispatchErrors(t *testing.T) {
 
             return nil
         },
-        20,
+        eventcontract.ListenerConfig{Priority: 20},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -512,8 +512,8 @@ func TestKernel_FailsClosedWhenKernelControllerDispatchErrors(t *testing.T) {
 
     handler.ServeHTTP(recorder, request)
 
-    if true == lowerPriorityRan {
-        t.Fatalf("expected the lower-priority kernel.controller listener to be skipped by the dispatcher abort")
+    if false == lowerPriorityRan {
+        t.Fatalf("expected the lower-priority kernel.controller listener to run behind the failing one")
     }
 
     if true == handlerRan {
@@ -524,7 +524,8 @@ func TestKernel_FailsClosedWhenKernelControllerDispatchErrors(t *testing.T) {
         t.Fatalf("expected a fail-closed 500 when the kernel.controller dispatch errored, got %d", recorder.Code)
     }
 }
-func TestKernel_KernelRequestListenerResponseStillWinsOverDispatchError(t *testing.T) {
+
+func TestKernel_AKernelRequestResponseSetBesideAFailureIsDroppedForTheErrorPage(t *testing.T) {
     router := NewRouter()
     router.Handle(
         "/denied",
@@ -550,7 +551,7 @@ func TestKernel_KernelRequestListenerResponseStillWinsOverDispatchError(t *testi
 
             return exception.NewError("denied-event dispatch failed", nil, nil)
         },
-        50,
+        eventcontract.ListenerConfig{Priority: 50},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -560,8 +561,8 @@ func TestKernel_KernelRequestListenerResponseStillWinsOverDispatchError(t *testi
 
     handler.ServeHTTP(recorder, request)
 
-    if nethttp.StatusUnauthorized != recorder.Code {
-        t.Fatalf("expected the listener-set 401 to win over the synthesized 500, got %d", recorder.Code)
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the response set beside the failure to be dropped for the fail-closed 500, got %d", recorder.Code)
     }
 }
 
@@ -579,20 +580,13 @@ func TestKernel_KernelRequestStoppingListenerThatAnswersStillFailsClosedBeforeAR
 
     dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
 
-    requiredRegistration := dispatcher.AddListener(
+    dispatcher.AddListener(
         kernelcontract.EventKernelRequest,
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
-        10,
+        eventcontract.ListenerConfig{Priority: 10, Required: true},
     )
-
-    registrar, isRegistrar := any(dispatcher).(eventcontract.RequiredListenerRegistrar)
-    if false == isRegistrar {
-        t.Fatalf("expected the dispatcher to mark required listeners")
-    }
-
-    registrar.MarkListenerRequired(requiredRegistration)
 
     dispatcher.AddListener(
         kernelcontract.EventKernelRequest,
@@ -607,7 +601,7 @@ func TestKernel_KernelRequestStoppingListenerThatAnswersStillFailsClosedBeforeAR
 
             return nil
         },
-        50,
+        eventcontract.ListenerConfig{Priority: 50},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -640,22 +634,15 @@ func TestKernel_KernelRequestFailingMaySkipListenerThatAnswersStillFailsClosedBe
 
     dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
 
-    requiredRegistration := dispatcher.AddListener(
+    dispatcher.AddListener(
         kernelcontract.EventKernelRequest,
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
-        10,
+        eventcontract.ListenerConfig{Priority: 10, Required: true},
     )
 
-    registrar, isRegistrar := any(dispatcher).(eventcontract.RequiredListenerRegistrar)
-    if false == isRegistrar {
-        t.Fatalf("expected the dispatcher to mark required listeners")
-    }
-
-    registrar.MarkListenerRequired(requiredRegistration)
-
-    cacheRegistration := dispatcher.AddListener(
+    dispatcher.AddListener(
         kernelcontract.EventKernelRequest,
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             requestEvent, ok := eventValue.Payload().(*KernelRequestEvent)
@@ -667,10 +654,8 @@ func TestKernel_KernelRequestFailingMaySkipListenerThatAnswersStillFailsClosedBe
 
             return errors.New("the cache listener's own failure")
         },
-        50,
+        eventcontract.ListenerConfig{Priority: 50, MaySkipRequiredListeners: true},
     )
-
-    registrar.MarkListenerMaySkipRequiredListeners(cacheRegistration)
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
@@ -702,20 +687,13 @@ func TestKernel_KernelControllerStoppingListenerThatAnswersStillFailsClosedBefor
 
     dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
 
-    requiredRegistration := dispatcher.AddListener(
+    dispatcher.AddListener(
         kernelcontract.EventKernelController,
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
-        10,
+        eventcontract.ListenerConfig{Priority: 10, Required: true},
     )
-
-    registrar, isRegistrar := any(dispatcher).(eventcontract.RequiredListenerRegistrar)
-    if false == isRegistrar {
-        t.Fatalf("expected the dispatcher to mark required listeners")
-    }
-
-    registrar.MarkListenerRequired(requiredRegistration)
 
     dispatcher.AddListener(
         kernelcontract.EventKernelController,
@@ -730,7 +708,7 @@ func TestKernel_KernelControllerStoppingListenerThatAnswersStillFailsClosedBefor
 
             return nil
         },
-        50,
+        eventcontract.ListenerConfig{Priority: 50},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -767,7 +745,7 @@ func TestKernel_ResponseListenerErrorDoesNotDropResponse(t *testing.T) {
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return exception.NewError("response listener failed", nil, nil)
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -948,7 +926,7 @@ func TestKernel_HandlerPathResponseDispatchErrorRespectsAlreadyLogged(t *testing
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return exception.NewError("response listener failure", nil, nil)
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -1083,7 +1061,7 @@ func TestKernel_PanicRecoveryClosesTheDiscardedResponseWhenAListenerLeavesByExit
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -1154,7 +1132,7 @@ func TestKernel_PanicRecoveryClosesTheResponseAListenerSwappedInNotTheDiscardedO
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -1222,7 +1200,7 @@ func TestKernel_PanicRecoveryDoesNotCloseAResponseTheRepublishHandsBack(t *testi
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -1438,7 +1416,7 @@ func serveOverSessionManager(t *testing.T, sessionManager sessioncontract.Manage
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     handler := NewKernel(router, KernelConfig{UnavailableRetryAfter: bound.Of(7 * time.Second)}).ServeHttp(serviceContainer)
@@ -1568,7 +1546,7 @@ func TestKernel_ASessionStorageOutageReachesTheExceptionListenersRecordedOnce(t 
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -1659,7 +1637,7 @@ func TestKernel_ASessionAnsweredBesideALoadErrorIsNotSavedWhenTheResponsePathPan
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -1975,7 +1953,7 @@ func TestKernel_DispatchesResponseEventForHandlerReturningNoResponse(t *testing.
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -2027,7 +2005,7 @@ func TestKernel_ResponseListenerMayReplaceTheSynthesizedEmptyResponse(t *testing
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -2087,7 +2065,6 @@ func TestKernel_PanicRecoveryLogsPanicSiteStack(t *testing.T) {
     }
 }
 
-
 func newContainerWithPanickingExceptionListener(t *testing.T, serviceContainer containercontract.Container) containercontract.Container {
     t.Helper()
 
@@ -2096,7 +2073,7 @@ func newContainerWithPanickingExceptionListener(t *testing.T, serviceContainer c
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             panic("listener exploded")
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     return serviceContainer
@@ -2548,7 +2525,7 @@ func TestKernel_ServesTheResponseOfAStoppingListenerWhenNothingRequiredWasSkippe
 
             return nil
         },
-        100,
+        eventcontract.ListenerConfig{Priority: 100},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -2607,7 +2584,7 @@ func TestKernel_ServeHttpAnswersARequestWhoseTerminateListenerPanics(t *testing.
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             panic("terminate listener")
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -2650,7 +2627,7 @@ func TestKernel_ServeHttpAnswersATypedNilResponseFromAHandlerWithTheEmptyDefault
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -2770,7 +2747,7 @@ func TestKernel_ASessionSaveOutageReachesTerminateAsTheStatusTheClientReceived(t
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -3748,7 +3725,7 @@ func TestKernel_ARefusedStaleRawPathCarriesNoRouteAndLogsTheRawPath(t *testing.T
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     kernelHandler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -4060,7 +4037,7 @@ func TestKernel_AnApplicationListenerReadsTheMarkOfTheOccurrenceTheKernelFiled(t
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     router := NewRouter()
@@ -4529,7 +4506,7 @@ func TestKernel_ABuiltInListenerAnswersWhenNoApplicationListenerDid(t *testing.T
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     recorder := httptest.NewRecorder()
@@ -4562,7 +4539,7 @@ func TestKernel_AnObserverAtAHigherPrioritySeesTheErrorBeforeTheBuiltInAnswers(t
 
             return nil
         },
-        BuiltInExceptionListenerPriority+1,
+        eventcontract.ListenerConfig{Priority: BuiltInExceptionListenerPriority+1},
     )
 
     recorder := httptest.NewRecorder()
@@ -4589,7 +4566,7 @@ func TestKernel_AnApplicationListenerAnswersAheadOfTheBuiltIn(t *testing.T) {
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     recorder := httptest.NewRecorder()
@@ -4623,7 +4600,7 @@ func TestKernel_AListenerThatPanicsAfterSettingAResponseDoesNotGetItServed(t *te
 
             panic("listener exploded")
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     recorder := httptest.NewRecorder()
@@ -4695,7 +4672,7 @@ func TestKernel_APropagationStopWithoutAResponseIsRenderedByTheKernel(t *testing
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     recorder := httptest.NewRecorder()
@@ -4719,16 +4696,14 @@ func TestKernel_ARequiredListenerSkippedByTheResponderDropsTheAnswer(t *testing.
 
             return nil
         },
-        10,
+        eventcontract.ListenerConfig{Priority: 10},
     )
-    eventDispatcher.(eventcontract.RequiredListenerRegistrar).MarkListenerRequired(
-        eventDispatcher.AddListener(
-            kernelcontract.EventKernelException,
-            func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
-                return nil
-            },
-            0,
-        ),
+    eventDispatcher.AddListener(
+        kernelcontract.EventKernelException,
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+            return nil
+        },
+        eventcontract.ListenerConfig{Required: true},
     )
 
     recorder := httptest.NewRecorder()
@@ -4783,7 +4758,7 @@ func TestKernel_ServeHttpInstallsTheBuiltInListenerOnce(t *testing.T) {
 
     NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer)
 
-    inspector := eventDispatcher.(eventcontract.EventDispatcherInspector)
+    inspector := eventDispatcher
     for _, registeredEvent := range inspector.RegisteredEvents() {
         if kernelcontract.EventKernelException != registeredEvent.EventName {
             continue
@@ -4812,7 +4787,7 @@ func TestKernel_ServeHttpReservesTheExceptionFloor(t *testing.T) {
                 func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                     return nil
                 },
-                BuiltInExceptionListenerPriority,
+                eventcontract.ListenerConfig{Priority: BuiltInExceptionListenerPriority},
             )
         },
         "an event listener at or below the event's reserved priority can never run, so it is refused; register it above that priority",
@@ -4833,7 +4808,7 @@ func TestKernel_ARefusedRequestNeverReachesItsHandler(t *testing.T) {
     event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
         kernelcontract.EventKernelRequest,
         newRefusingKernelRequestListener(exception.Forbidden("not you")),
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     handlerRan := 0
@@ -4866,7 +4841,7 @@ func TestKernel_ARefusalIsRenderedThroughTheExceptionListeners(t *testing.T) {
     refusal := exception.Forbidden("not you")
 
     eventDispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
-    eventDispatcher.AddListener(kernelcontract.EventKernelRequest, newRefusingKernelRequestListener(refusal), 0)
+    eventDispatcher.AddListener(kernelcontract.EventKernelRequest, newRefusingKernelRequestListener(refusal), eventcontract.ListenerConfig{})
 
     var observedErr error
 
@@ -4879,7 +4854,7 @@ func TestKernel_ARefusalIsRenderedThroughTheExceptionListeners(t *testing.T) {
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     recorder := httptest.NewRecorder()
@@ -4903,7 +4878,7 @@ func TestKernel_ARefusalIsRecordedEvenWhenAnApplicationListenerAnswersFirst(t *t
     refusal := exception.Forbidden("not you")
 
     eventDispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
-    eventDispatcher.AddListener(kernelcontract.EventKernelRequest, newRefusingKernelRequestListener(refusal), 0)
+    eventDispatcher.AddListener(kernelcontract.EventKernelRequest, newRefusingKernelRequestListener(refusal), eventcontract.ListenerConfig{})
     eventDispatcher.AddListener(
         kernelcontract.EventKernelException,
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
@@ -4911,7 +4886,7 @@ func TestKernel_ARefusalIsRecordedEvenWhenAnApplicationListenerAnswersFirst(t *t
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     handler := NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer)
@@ -4941,7 +4916,7 @@ func TestKernel_ARefusalAlreadyLoggedIsNotFiledAgain(t *testing.T) {
     refusal := exception.NewError("already filed", nil, nil)
     _ = exception.MarkLogged(refusal)
 
-    event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(kernelcontract.EventKernelRequest, newRefusingKernelRequestListener(refusal), 0)
+    event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(kernelcontract.EventKernelRequest, newRefusingKernelRequestListener(refusal), eventcontract.ListenerConfig{})
 
     NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/guarded", nil))
 
@@ -4956,13 +4931,13 @@ func TestKernel_ARefusalStandsOverALaterListenersFailure(t *testing.T) {
     serviceContainer := newHttpTestContainer()
 
     eventDispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
-    eventDispatcher.AddListener(kernelcontract.EventKernelRequest, newRefusingKernelRequestListener(exception.Forbidden("not you")), 10)
+    eventDispatcher.AddListener(kernelcontract.EventKernelRequest, newRefusingKernelRequestListener(exception.Forbidden("not you")), eventcontract.ListenerConfig{Priority: 10})
     eventDispatcher.AddListener(
         kernelcontract.EventKernelRequest,
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return errors.New("a later listener failed")
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     recorder := httptest.NewRecorder()
@@ -4985,16 +4960,14 @@ func TestKernel_ARefusalBesideASkippedRequiredListenerFailsClosed(t *testing.T) 
 
             return nil
         },
-        10,
+        eventcontract.ListenerConfig{Priority: 10},
     )
-    eventDispatcher.(eventcontract.RequiredListenerRegistrar).MarkListenerRequired(
-        eventDispatcher.AddListener(
-            kernelcontract.EventKernelRequest,
-            func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
-                return nil
-            },
-            0,
-        ),
+    eventDispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+            return nil
+        },
+        eventcontract.ListenerConfig{Required: true},
     )
 
     recorder := httptest.NewRecorder()
@@ -5024,7 +4997,7 @@ func TestKernel_AListenerThatAnswersAndRefusesFailsClosed(t *testing.T) {
     } {
         serviceContainer := newHttpTestContainer()
 
-        event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(kernelcontract.EventKernelRequest, listener, 0)
+        event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(kernelcontract.EventKernelRequest, listener, eventcontract.ListenerConfig{})
 
         recorder := httptest.NewRecorder()
         NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/guarded", nil))
@@ -5051,7 +5024,7 @@ func TestKernel_AListenerThatRecoversTheRefusalOfASecondDecisionFailsClosed(t *t
 
                 return nil
             },
-            0,
+            eventcontract.ListenerConfig{},
         )
 
         handlerRan := 0
@@ -5097,7 +5070,7 @@ func TestKernel_AListenerThatAnswersAndRefusesHasTheResponseClosed(t *testing.T)
 
                 return nil
             },
-            0,
+            eventcontract.ListenerConfig{},
         )
 
         NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/guarded", nil))
@@ -5151,7 +5124,7 @@ func TestKernel_ARendererBrokenByItsSerializerStillAnswersThroughTheResponsePath
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     bodyReader := &closeTrackingReader{}
@@ -5264,7 +5237,7 @@ func TestKernel_ARefusalCarryingRetryAfterIsServedWithTheHeader(t *testing.T) {
     event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
         kernelcontract.EventKernelRequest,
         newRefusingKernelRequestListener(exception.NewHttpError(nethttp.StatusServiceUnavailable, exception.HttpErrorConfig{Message: "down", RetryAfter: 3 * time.Second})),
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     recorder := httptest.NewRecorder()
@@ -5284,14 +5257,14 @@ func TestKernel_TheFinalStepKeepsTheRetryAfterHeader(t *testing.T) {
     eventDispatcher.AddListener(
         kernelcontract.EventKernelRequest,
         newRefusingKernelRequestListener(exception.NewHttpError(nethttp.StatusServiceUnavailable, exception.HttpErrorConfig{Message: "down", RetryAfter: 3 * time.Second})),
-        0,
+        eventcontract.ListenerConfig{},
     )
     eventDispatcher.AddListener(
         kernelcontract.EventKernelException,
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             panic("listener exploded")
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     recorder := httptest.NewRecorder()
@@ -5322,7 +5295,7 @@ func TestKernel_AHandlerReturningAMarkedErrorAnswers503WithTheKernelDelay(t *tes
                 func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                     panic("listener exploded")
                 },
-                0,
+                eventcontract.ListenerConfig{},
             )
         }
 
@@ -5489,7 +5462,7 @@ func TestKernel_ASessionStorageOutageFilesOneRecordForTwoReaders(t *testing.T) {
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     recorder := httptest.NewRecorder()

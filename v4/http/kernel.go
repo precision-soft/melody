@@ -610,11 +610,11 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         _, eventKernelRequestErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, kernelRequestEvent)
         instance.logEventDispatchError(requestLogger, "kernel request error", eventKernelRequestErr)
 
-        /* fails closed: an error with no decision means the listeners behind it, access control among them, never ran */
+        /* fails closed: a response set beside a failure is half made, and the listeners behind it, access control among them, skip a request that already carries one */
         _, requiredListenerSkipped := eventKernelRequestErr.(*event.RequiredListenerSkippedError)
 
         /* read on its own, since a listener that recovers its own panic leaves the dispatch clean */
-        if true == kernelRequestEvent.decisionRefused || (nil != eventKernelRequestErr && (true == requiredListenerSkipped || (nil == kernelRequestEvent.Response() && nil == kernelRequestEvent.Refusal()))) {
+        if true == kernelRequestEvent.decisionRefused || (nil != eventKernelRequestErr && (true == requiredListenerSkipped || nil == kernelRequestEvent.Refusal())) {
             statusCode := nethttp.StatusInternalServerError
             message := "internal server error"
             if true == debugMode && nil != eventKernelRequestErr {
@@ -742,10 +742,8 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         _, eventKernelControllerErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelController, kernelControllerEvent)
         instance.logEventDispatchError(requestLogger, "kernel controller error", eventKernelControllerErr)
 
-        /* fails closed on the same terms as kernel.request */
-        _, controllerRequiredListenerSkipped := eventKernelControllerErr.(*event.RequiredListenerSkippedError)
-
-        if nil != eventKernelControllerErr && (true == controllerRequiredListenerSkipped || nil == kernelControllerEvent.Response()) {
+        /* fails closed on any failure: a response set beside one is half made */
+        if nil != eventKernelControllerErr {
             statusCode := nethttp.StatusInternalServerError
             message := "internal server error"
             if true == debugMode {
@@ -875,7 +873,7 @@ func (instance *Kernel) raiseException(
 
     answered := exceptionEvent.Response()
 
-    if nil == dispatchErr && nil != answered {
+    if nil != answered && (nil == dispatchErr || true == exceptionEvent.builtInAnswered) {
         return answered
     }
 

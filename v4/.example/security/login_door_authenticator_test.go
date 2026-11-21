@@ -319,7 +319,7 @@ func registerLoginFailureRecorder(t *testing.T, containerInstance melodycontaine
         logger = melodylogging.NewNopLogger()
     }
 
-    dispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
+    dispatcher := melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()})
     dispatcher.AddListener(
         melodysecuritycontract.EventSecurityLoginFailure,
         func(runtimeInstance melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
@@ -329,7 +329,7 @@ func registerLoginFailureRecorder(t *testing.T, containerInstance melodycontaine
 
             return listenerErr
         },
-        0,
+        melodyeventcontract.ListenerConfig{},
     )
 
     registerErr := melodycontainer.Register[melodyeventcontract.EventDispatcher](
@@ -541,7 +541,7 @@ type doorDispatcher struct {
     listener melodyeventcontract.EventListener
 }
 
-func (instance *doorDispatcher) AddListener(eventName string, listener melodyeventcontract.EventListener, priority int) melodyeventcontract.ListenerRegistration {
+func (instance *doorDispatcher) AddListener(eventName string, listener melodyeventcontract.EventListener, config melodyeventcontract.ListenerConfig) melodyeventcontract.ListenerRegistration {
     instance.listener = listener
 
     return melodyeventcontract.ListenerRegistration{}

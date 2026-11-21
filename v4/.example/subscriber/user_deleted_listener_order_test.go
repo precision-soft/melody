@@ -41,7 +41,7 @@ func deletionRuntime(t *testing.T, cacheInstance melodycachecontract.Cache) melo
 
 /* the three listeners of the deletion, registered in the composition root's order: the cache's first, the token release, then the two-factor release over the given store source */
 func deletionDispatcher(tokenStore melodysecuritycontract.EpochRevocableTokenStore, twoFactorStore twofactor.StoreSource) *melodyevent.EventDispatcher {
-    dispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
+    dispatcher := melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()})
     dispatcher.AddSubscriber(NewUserEventSubscriber())
     dispatcher.AddSubscriber(NewAccessTokenReleaseSubscriber(func(runtimeInstance melodycontainercontract.Runtime) melodysecuritycontract.EpochRevocableTokenStore {
         return tokenStore
@@ -53,9 +53,9 @@ func deletionDispatcher(tokenStore melodysecuritycontract.EpochRevocableTokenSto
 
 /* the token release outranks every other listener of the deletion, read off the real subscribers: the dispatcher ends a dispatch at the first listener that fails, and the release is the one that ends a deleted account's access */
 func TestUserDeleted_TheTokenReleaseOutranksTheOtherListeners(t *testing.T) {
-    releasePriority := NewAccessTokenReleaseSubscriber(nil).SubscribedEvents()[event.UserDeletedEventName][0].Priority()
-    twoFactorPriority := NewTwoFactorEnrollmentSubscriber(nil).SubscribedEvents()[event.UserDeletedEventName][0].Priority()
-    cachePriority := NewUserEventSubscriber().SubscribedEvents()[event.UserDeletedEventName][0].Priority()
+    releasePriority := NewAccessTokenReleaseSubscriber(nil).SubscribedEvents()[event.UserDeletedEventName][0].Config().Priority
+    twoFactorPriority := NewTwoFactorEnrollmentSubscriber(nil).SubscribedEvents()[event.UserDeletedEventName][0].Config().Priority
+    cachePriority := NewUserEventSubscriber().SubscribedEvents()[event.UserDeletedEventName][0].Config().Priority
 
     if releasePriority <= twoFactorPriority || twoFactorPriority <= cachePriority {
         t.Fatalf("expected the token release above the two-factor release above the cache listener, got %d, %d, %d", releasePriority, twoFactorPriority, cachePriority)
@@ -93,7 +93,7 @@ func TestUserDeleted_AFailingListenerDoesNotLeaveTheDeletedAccountsTokens(t *tes
     controlStore.Put(releaseTestRuntime(), "token-user-4", melodysecuritycontract.Claims{UserIdentifier: "user-4", DeviceIdentifier: "phone"}, melodybound.UnlimitedDuration())
     database, recorder := newRecordingDatabase()
 
-    controlDispatcher := melodyevent.NewEventDispatcher(clockInstance)
+    controlDispatcher := melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: clockInstance})
     controlDispatcher.AddSubscriber(NewAccessTokenReleaseSubscriber(func(runtimeInstance melodycontainercontract.Runtime) melodysecuritycontract.EpochRevocableTokenStore {
         return controlStore
     }))

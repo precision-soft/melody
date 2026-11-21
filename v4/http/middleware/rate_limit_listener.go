@@ -40,7 +40,7 @@ func RegisterRateLimitRequestListener(
 
             return nil
         },
-        RateLimitRequestListenerPriority,
+        eventcontract.ListenerConfig{Priority: RateLimitRequestListenerPriority, FailureEndsDispatch: true},
     )
 }
 

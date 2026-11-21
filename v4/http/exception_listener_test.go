@@ -19,7 +19,6 @@ import (
     "github.com/precision-soft/melody/v4/container"
     "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/event"
-    eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
@@ -32,7 +31,7 @@ import (
 
 func TestExceptionListener_HtmlResponse_EscapesXss(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     runtimeInstance := newTestRuntime()
 
     installBuiltInExceptionListener(dispatcher)
@@ -69,7 +68,7 @@ func TestExceptionListener_HtmlResponse_EscapesXss(t *testing.T) {
 
 func TestExceptionListener_JsonResponse_ContainsMessage(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     runtimeInstance := newTestRuntime()
 
     installBuiltInExceptionListener(dispatcher)
@@ -105,7 +104,7 @@ func TestExceptionListener_JsonResponse_ContainsMessage(t *testing.T) {
 
 func TestExceptionListener_DebugModeOff_GenericMessage(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     runtimeInstance := newTestRuntime()
 
     installBuiltInExceptionListener(dispatcher)
@@ -144,7 +143,7 @@ func TestExceptionListener_DebugModeOff_GenericMessage(t *testing.T) {
 
 func TestExceptionListener_DebugModeOn_ShowsErrorMessage(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     runtimeInstance := newDebugTestRuntime()
 
     installBuiltInExceptionListener(dispatcher)
@@ -176,7 +175,7 @@ func TestExceptionListener_DebugModeOn_ShowsErrorMessage(t *testing.T) {
 
 func TestExceptionListener_DebugModeOn_HtmlEscapesMessage(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     runtimeInstance := newDebugTestRuntime()
 
     installBuiltInExceptionListener(dispatcher)
@@ -211,7 +210,7 @@ func TestExceptionListener_DebugModeOn_HtmlEscapesMessage(t *testing.T) {
 
 func TestExceptionListener_NilErr_NoResponse(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     runtimeInstance := newTestRuntime()
 
     installBuiltInExceptionListener(dispatcher)
@@ -234,7 +233,7 @@ func TestExceptionListener_NilErr_NoResponse(t *testing.T) {
 
 func TestExceptionListener_ResponseAlreadySet_Skips(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     runtimeInstance := newTestRuntime()
 
     installBuiltInExceptionListener(dispatcher)
@@ -259,7 +258,7 @@ func TestExceptionListener_ResponseAlreadySet_Skips(t *testing.T) {
 
 func TestExceptionListener_SetsRequestIdHeader(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     runtimeInstance := newTestRuntime()
 
     installBuiltInExceptionListener(dispatcher)
@@ -291,7 +290,7 @@ func TestExceptionListener_SetsRequestIdHeader(t *testing.T) {
 
 func TestExceptionListener_HttpExceptionStatusCode(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     runtimeInstance := newTestRuntime()
 
     installBuiltInExceptionListener(dispatcher)
@@ -339,7 +338,7 @@ func readResponseBody(t *testing.T, response httpcontract.Response) string {
 /* the validationErrors context key is the public half of an http exception's context: BindJsonAndValidate attaches the per-field validation errors under it, and without this the client of a failed validation received only the flat message */
 func TestExceptionListener_ValidationErrorsContextReachesTheJsonBody(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     runtimeInstance := newTestRuntime()
 
     installBuiltInExceptionListener(dispatcher)
@@ -380,7 +379,7 @@ func TestExceptionListener_ValidationErrorsContextReachesTheJsonBody(t *testing.
 /* an http exception without the validationErrors key keeps today's body: the exposure is opt-in per context key, not a blanket context dump */
 func TestExceptionListener_ContextWithoutValidationErrorsKeyStaysPrivate(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     runtimeInstance := newTestRuntime()
 
     installBuiltInExceptionListener(dispatcher)
@@ -420,7 +419,7 @@ func TestExceptionListener_ContextWithoutValidationErrorsKeyStaysPrivate(t *test
 /* the json body of a framework error is the envelope: the status, the moment and the request id beside an error object carrying the message; an exception that declares no client-facing identity adds nothing to the error object */
 func TestExceptionListener_WritesTheEnvelopeWithTheRequestId(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     runtimeInstance := newTestRuntime()
 
     installBuiltInExceptionListener(dispatcher)
@@ -465,7 +464,7 @@ func TestExceptionListener_WritesTheEnvelopeWithTheRequestId(t *testing.T) {
 
 func TestExceptionListener_CarriesTheClientFacingIdentityInsideTheErrorObject(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     runtimeInstance := newTestRuntime()
 
     installBuiltInExceptionListener(dispatcher)
@@ -513,7 +512,7 @@ func TestExceptionListener_CarriesTheClientFacingIdentityInsideTheErrorObject(t 
 /* in debug mode the context and the cause of the nearest melody error sit inside the error object, beside the message */
 func TestExceptionListener_DebugContextAndCauseAreInsideTheErrorObject(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     runtimeInstance := newDebugTestRuntime()
 
     installBuiltInExceptionListener(dispatcher)
@@ -558,7 +557,7 @@ func TestExceptionListener_DebugContextAndCauseAreInsideTheErrorObject(t *testin
 /* errors.As matches the dynamic type of a typed nil and reports it as found, so reading the status straight off the result would dereference it; the package's own door refuses the typed nil, as NewKernelExceptionEvent below does with the unassigned exception. */
 func TestExceptionListener_AnswersATypedNilHttpExceptionWithoutDereferencingIt(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     runtimeInstance := newTestRuntime()
 
     installBuiltInExceptionListener(dispatcher)
@@ -587,7 +586,7 @@ func TestExceptionListener_AnswersATypedNilHttpExceptionWithoutDereferencingIt(t
 
 func TestExceptionListener_UnmarkedError_LogsOneRecordAndMarksIt(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     capture := &exceptionListenerCaptureLogger{}
     runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
 
@@ -629,7 +628,7 @@ func TestExceptionListener_UnmarkedError_LogsOneRecordAndMarksIt(t *testing.T) {
 
 func TestExceptionListener_AlreadyLoggedError_WritesNoSecondRecord(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     capture := &exceptionListenerCaptureLogger{}
     runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
 
@@ -659,7 +658,7 @@ func TestExceptionListener_AlreadyLoggedError_WritesNoSecondRecord(t *testing.T)
 
 func TestExceptionListener_AlreadyLoggedError_AttachesRequestCoordinatesWithoutOverwriting(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     capture := &exceptionListenerCaptureLogger{}
     runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
 
@@ -701,7 +700,7 @@ func TestExceptionListener_AlreadyLoggedError_AttachesRequestCoordinatesWithoutO
 
 func TestExceptionListener_AlreadyLoggedErrorWithoutARequest_AttachesNoEmptyCoordinates(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     capture := &exceptionListenerCaptureLogger{}
     runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
 
@@ -728,7 +727,7 @@ func TestExceptionListener_AlreadyLoggedErrorWithoutARequest_AttachesNoEmptyCoor
 
 func TestExceptionListener_ADeliberate4xxIsRecordedAtWarning(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     capture := &exceptionListenerCaptureLogger{}
     runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
 
@@ -751,7 +750,7 @@ func TestExceptionListener_ADeliberate4xxIsRecordedAtWarning(t *testing.T) {
 
 func TestExceptionListener_A5xxKeepsTheErrorLevel(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     capture := &exceptionListenerCaptureLogger{}
     runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
 
@@ -774,7 +773,7 @@ func TestExceptionListener_A5xxKeepsTheErrorLevel(t *testing.T) {
 
 /* a struct tag naming a rule that does not exist is a program failure wearing a 400: it refuses every request that route will ever serve, and no input a client can send produces it. At warning it sat in the dashboard among the users who mistyped their address, with the route permanently broken and nothing saying so. */
 func TestExceptionListener_AValidationWiringFaultIsRecordedAtErrorRatherThanAsARoutineFourHundred(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     capture := &exceptionListenerCaptureLogger{}
     runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
 
@@ -802,7 +801,7 @@ func TestExceptionListener_AValidationWiringFaultIsRecordedAtErrorRatherThanAsAR
 
 /* a genuine field refusal keeps the warning level a deliberate 4xx earns: raising every 400 would put the users who mistyped their address back among the incidents, which is the mirror of the defect. */
 func TestExceptionListener_AGenuineFieldRefusalStaysAWarning(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     capture := &exceptionListenerCaptureLogger{}
     runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
 
@@ -830,7 +829,7 @@ func TestExceptionListener_AGenuineFieldRefusalStaysAWarning(t *testing.T) {
 
 /* the context of a wiring fault names the developer's typo, the parameters the constraint refused and its reason: the operator's material, not the client's. It stays in the record and leaves the response body. */
 func TestExceptionListener_AWiringFaultKeepsItsContextInTheRecordAndOutOfTheResponse(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     capture := &exceptionListenerCaptureLogger{}
     runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
 
@@ -894,7 +893,7 @@ func TestExceptionListener_AForeignValidationErrorsPayloadIsHandedBackUntouched(
 /* the debug-mode rendering of the error text runs under the containment its siblings received: a panic value whose own Error() dereferences exactly the nil that produced the panic raised a second panic while the listener was rendering the first, and the dispatcher absorbed it one level up — at the price of the whole debug payload, so the client received the kernel's fallback body instead of the degraded page the listener exists to serve. */
 func TestExceptionListener_DebugModeOn_APanickingErrorTextIsContained(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     runtimeInstance := newDebugTestRuntime()
 
     installBuiltInExceptionListener(dispatcher)
@@ -925,7 +924,7 @@ func TestExceptionListener_DebugModeOn_APanickingErrorTextIsContained(t *testing
 /* the same containment covers the cause the debug payload carries: the cause is a second error, rendered by a second call, and only one of the two being contained leaves the same hole. */
 func TestExceptionListener_DebugModeOn_APanickingCauseTextIsContained(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
     runtimeInstance := newDebugTestRuntime()
 
     installBuiltInExceptionListener(dispatcher)
@@ -970,9 +969,8 @@ func (instance *nilMapPanickingError) Error() string {
     return "unreachable"
 }
 
-
 func TestBuiltInExceptionListener_ABareRuntimeRendersTheProductionBody(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     runtimeInstance := newTestRuntime()
 
     installBuiltInExceptionListener(dispatcher)
@@ -992,7 +990,7 @@ func TestBuiltInExceptionListener_ABareRuntimeRendersTheProductionBody(t *testin
 }
 
 func TestBuiltInExceptionListener_AProductionConfigurationRendersTheProductionBody(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     serviceContainer := newHttpTestContainerWithSessionStorageAndEnvironmentValues(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), map[string]string{config.EnvironmentNameKey: config.EnvironmentProduction})
     scope := serviceContainer.NewScope()
@@ -1013,33 +1011,6 @@ func TestBuiltInExceptionListener_AProductionConfigurationRendersTheProductionBo
     if body := readResponseBody(t, exceptionEvent.Response()); true == strings.Contains(body, "detailed debug info here") {
         t.Fatalf("expected the production body under a production configuration: %s", body)
     }
-}
-
-type foreignFloorlessEventDispatcher struct {
-    eventcontract.EventDispatcher
-}
-
-func TestInstallBuiltInExceptionListener_RefusesADispatcherWithoutTheFloor(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
-
-    defer func() {
-        panicErr, isPanicErr := recover().(*exception.Error)
-        if false == isPanicErr || "the event dispatcher cannot reserve the priority of the built-in exception listener" != panicErr.Message() {
-            t.Fatalf("expected the dispatcher to be refused, got %v", panicErr)
-        }
-
-        if false == strings.Contains(fmt.Sprint(panicErr.Context()["dispatcherType"]), "foreignFloorlessEventDispatcher") {
-            t.Fatalf("expected the refusal to name the dispatcher, got %v", panicErr.Context())
-        }
-
-        for _, registeredEvent := range dispatcher.RegisteredEvents() {
-            if kernelcontract.EventKernelException == registeredEvent.EventName && 0 != len(registeredEvent.Listeners) {
-                t.Fatalf("expected no listener added before the refusal, got %d", len(registeredEvent.Listeners))
-            }
-        }
-    }()
-
-    installBuiltInExceptionListener(&foreignFloorlessEventDispatcher{EventDispatcher: dispatcher})
 }
 
 func TestExceptionListener_TheOccurrenceDoorsReturnOnACyclicChain(t *testing.T) {
@@ -1153,7 +1124,7 @@ func TestRenderExceptionResponse_ServesTheConfiguredUnavailableDelay(t *testing.
 }
 
 func TestBuiltInExceptionListener_ServesTheDelayTheEventCarries(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     runtimeInstance := newTestRuntime()
 
     installBuiltInExceptionListener(dispatcher)
@@ -1184,7 +1155,7 @@ func TestBuiltInExceptionListener_ServesTheDelayTheEventCarries(t *testing.T) {
 }
 
 func TestExceptionListener_AStoreStatusBeneathTheMarkIsRecordedAtError(t *testing.T) {
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
     capture := &exceptionListenerCaptureLogger{}
     runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
 

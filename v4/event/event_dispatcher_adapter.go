@@ -39,7 +39,7 @@ type EventDispatcherAdapter struct {
     subscribers           *subscriberBookkeeping[eventcontract.ListenerRegistration]
 }
 
-func (instance *EventDispatcherAdapter) AddListener(eventName string, listener eventcontract.EventListener, priority int) eventcontract.ListenerRegistration {
+func (instance *EventDispatcherAdapter) AddListener(eventName string, listener eventcontract.EventListener, config eventcontract.ListenerConfig) eventcontract.ListenerRegistration {
     if "" == eventName {
         exception.Panic(
             exception.NewError("event name is required to add a listener", nil, nil),
@@ -61,7 +61,7 @@ func (instance *EventDispatcherAdapter) AddListener(eventName string, listener e
     return instance.addListenerRegistration(
         eventName,
         listener,
-        priority,
+        config,
         eventcontract.RegisteredListenerSourceListener,
         "-",
     )
@@ -114,7 +114,7 @@ func (instance *EventDispatcherAdapter) installSubscriberListener(planned planne
     return instance.addListenerRegistration(
         planned.eventName,
         planned.listener,
-        planned.priority,
+        planned.config,
         eventcontract.RegisteredListenerSourceSubscriber,
         subscriberType,
     )
@@ -137,91 +137,20 @@ func (instance *EventDispatcherAdapter) DispatchName(runtimeInstance containerco
     return instance.eventDispatcher.DispatchName(runtimeInstance, eventName, payload)
 }
 
-/* MarkListenerRequired forwards to the wrapped dispatcher and records the mark for inspection. A wrapped dispatcher that cannot mark required listeners is refused, since the adapter answers the RequiredListenerRegistrar probe itself and an absorbed mark would leave the guarantee unarmed. */
-func (instance *EventDispatcherAdapter) MarkListenerRequired(registration eventcontract.ListenerRegistration) {
-    instance.requireRegistrar().MarkListenerRequired(registration)
-
-    instance.markListenerRegistration(
-        registration,
-        func(entry *adapterListenerRegistration) {
-            entry.required = true
-        },
-    )
-}
-
-/* MarkListenerMaySkipRequiredListeners forwards to the wrapped dispatcher and records the mark for inspection, refusing a wrapped dispatcher that cannot mark required listeners for the reason MarkListenerRequired gives. */
-func (instance *EventDispatcherAdapter) MarkListenerMaySkipRequiredListeners(registration eventcontract.ListenerRegistration) {
-    instance.requireRegistrar().MarkListenerMaySkipRequiredListeners(registration)
-
-    instance.markListenerRegistration(
-        registration,
-        func(entry *adapterListenerRegistration) {
-            entry.maySkipRequiredListeners = true
-        },
-    )
-}
-
-/* InstallFloorListener forwards to the wrapped dispatcher, which holds the order, and records what it installed for inspection, refusing a wrapped dispatcher without the door for the reason MarkListenerRequired gives. */
+/* InstallFloorListener forwards to the wrapped dispatcher, which holds the order, and records what it installed for inspection. */
 func (instance *EventDispatcherAdapter) InstallFloorListener(
     eventName string,
     listener eventcontract.EventListener,
-    priority int,
+    config eventcontract.ListenerConfig,
 ) (eventcontract.ListenerRegistration, bool) {
-    registrar, ok := instance.eventDispatcher.(eventcontract.PriorityFloorRegistrar)
-    if false == ok {
-        exception.Panic(
-            exception.NewError(
-                "the wrapped event dispatcher cannot install a floor listener",
-                exceptioncontract.Context{
-                    "eventDispatcherType": internal.StringifyType(instance.eventDispatcher),
-                },
-                nil,
-            ),
-        )
-    }
-
-    registration, installed := registrar.InstallFloorListener(eventName, listener, priority)
+    registration, installed := instance.eventDispatcher.InstallFloorListener(eventName, listener, config)
     if false == installed {
         return registration, false
     }
 
-    instance.recordListenerRegistration(eventName, registration, listener, priority, eventcontract.RegisteredListenerSourceListener, "-")
+    instance.recordListenerRegistration(eventName, registration, listener, config, eventcontract.RegisteredListenerSourceListener, "-")
 
     return registration, true
-}
-
-func (instance *EventDispatcherAdapter) requireRegistrar() eventcontract.RequiredListenerRegistrar {
-    registrar, ok := instance.eventDispatcher.(eventcontract.RequiredListenerRegistrar)
-    if false == ok {
-        exception.Panic(
-            exception.NewError(
-                "the wrapped event dispatcher cannot mark required listeners",
-                exceptioncontract.Context{
-                    "eventDispatcherType": internal.StringifyType(instance.eventDispatcher),
-                },
-                nil,
-            ),
-        )
-    }
-
-    return registrar
-}
-
-func (instance *EventDispatcherAdapter) markListenerRegistration(
-    registration eventcontract.ListenerRegistration,
-    apply func(entry *adapterListenerRegistration),
-) {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    entries := instance.listenerRegistrations[registration.EventName]
-    for index := range entries {
-        if entries[index].registration.ListenerId == registration.ListenerId {
-            apply(&entries[index])
-
-            return
-        }
-    }
 }
 
 /* RegisteredEvents reports a point-in-time view, which a concurrent registration or removal is observed mid-step in; dispatch never depends on it. It covers what was registered through the adapter: a listener added directly on the wrapped dispatcher is live but absent here. */
@@ -248,11 +177,11 @@ func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.Regis
         sort.SliceStable(
             listenerList,
             func(leftIndex int, rightIndex int) bool {
-                if listenerList[leftIndex].priority == listenerList[rightIndex].priority {
+                if listenerList[leftIndex].config.Priority == listenerList[rightIndex].config.Priority {
                     return listenerList[leftIndex].registration.ListenerId < listenerList[rightIndex].registration.ListenerId
                 }
 
-                return listenerList[leftIndex].priority > listenerList[rightIndex].priority
+                return listenerList[leftIndex].config.Priority > listenerList[rightIndex].config.Priority
             },
         )
 
@@ -261,22 +190,26 @@ func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.Regis
         for _, entry := range listenerList {
             listenerId := fmt.Sprintf("%d", entry.registration.ListenerId)
 
-            listenerName := "-"
-            function := runtime.FuncForPC(entry.listenerProgramCounter)
-            if nil != function {
-                listenerName = function.Name()
+            listenerName := entry.config.Name
+            if "" == listenerName {
+                listenerName = "-"
+                function := runtime.FuncForPC(entry.listenerProgramCounter)
+                if nil != function {
+                    listenerName = function.Name()
+                }
             }
 
             registeredListenerList = append(
                 registeredListenerList,
                 eventcontract.RegisteredListener{
-                    Priority:                 entry.priority,
+                    Priority:                 entry.config.Priority,
                     Source:                   entry.source,
                     Owner:                    entry.owner,
                     ListenerId:               listenerId,
                     ListenerName:             listenerName,
-                    Required:                 entry.required,
-                    MaySkipRequiredListeners: entry.maySkipRequiredListeners,
+                    Required:                 entry.config.Required,
+                    MaySkipRequiredListeners: entry.config.MaySkipRequiredListeners,
+                    FailureEndsDispatch:      entry.config.FailureEndsDispatch,
                 },
             )
         }
@@ -296,7 +229,7 @@ func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.Regis
 func (instance *EventDispatcherAdapter) addListenerRegistration(
     eventName string,
     listener eventcontract.EventListener,
-    priority int,
+    config eventcontract.ListenerConfig,
     source string,
     owner string,
 ) eventcontract.ListenerRegistration {
@@ -304,10 +237,10 @@ func (instance *EventDispatcherAdapter) addListenerRegistration(
     registration := instance.eventDispatcher.AddListener(
         eventName,
         listener,
-        priority,
+        config,
     )
 
-    instance.recordListenerRegistration(eventName, registration, listener, priority, source, owner)
+    instance.recordListenerRegistration(eventName, registration, listener, config, source, owner)
 
     return registration
 }
@@ -316,7 +249,7 @@ func (instance *EventDispatcherAdapter) recordListenerRegistration(
     eventName string,
     registration eventcontract.ListenerRegistration,
     listener eventcontract.EventListener,
-    priority int,
+    config eventcontract.ListenerConfig,
     source string,
     owner string,
 ) {
@@ -327,7 +260,7 @@ func (instance *EventDispatcherAdapter) recordListenerRegistration(
         instance.listenerRegistrations[eventName],
         adapterListenerRegistration{
             registration:           registration,
-            priority:               priority,
+            config:                 config,
             source:                 source,
             owner:                  owner,
             listenerProgramCounter: reflect.ValueOf(listener).Pointer(),
@@ -336,16 +269,11 @@ func (instance *EventDispatcherAdapter) recordListenerRegistration(
 }
 
 type adapterListenerRegistration struct {
-    registration             eventcontract.ListenerRegistration
-    priority                 int
-    source                   string
-    owner                    string
-    listenerProgramCounter   uintptr
-    required                 bool
-    maySkipRequiredListeners bool
+    registration           eventcontract.ListenerRegistration
+    config                 eventcontract.ListenerConfig
+    source                 string
+    owner                  string
+    listenerProgramCounter uintptr
 }
 
 var _ eventcontract.EventDispatcher = (*EventDispatcherAdapter)(nil)
-var _ eventcontract.EventDispatcherInspector = (*EventDispatcherAdapter)(nil)
-var _ eventcontract.RequiredListenerRegistrar = (*EventDispatcherAdapter)(nil)
-var _ eventcontract.PriorityFloorRegistrar = (*EventDispatcherAdapter)(nil)

@@ -83,7 +83,7 @@ func newCommandFixtureOverUsers(t *testing.T, dispatcherOf func(melodyeventcontr
         melodycache.ManagerConfig{OwnsBackend: true},
     )
 
-    dispatcher := melodyevent.NewEventDispatcher(clockInstance)
+    dispatcher := melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: clockInstance})
     dispatcher.AddListener(
         event.UserUpdatedEventName,
         func(runtimeInstance melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
@@ -104,7 +104,7 @@ func newCommandFixtureOverUsers(t *testing.T, dispatcherOf func(melodyeventcontr
 
             return nil
         },
-        0,
+        melodyeventcontract.ListenerConfig{},
     )
 
     var dispatching melodyeventcontract.EventDispatcher = dispatcher

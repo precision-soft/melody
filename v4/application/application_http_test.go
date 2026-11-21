@@ -1194,7 +1194,7 @@ func addTeapotExceptionListener(applicationInstance *Application) {
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 }
 

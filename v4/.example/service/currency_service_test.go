@@ -430,7 +430,7 @@ func TestCurrencyServiceUpdate_AnswersAndPublishesTheRowAsWrittenAfterAConcurren
 
             return nil
         },
-        0,
+        melodyeventcontract.ListenerConfig{},
     )
 
     renamed, found, err := currencyService.Update(runtimeInstance, "cur-usd", "USD", "Dollar")

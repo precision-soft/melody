@@ -20,13 +20,25 @@ type capturingEventDispatcher struct {
 func (instance *capturingEventDispatcher) AddListener(
     eventName string,
     listener eventcontract.EventListener,
-    priority int,
+    config eventcontract.ListenerConfig,
 ) eventcontract.ListenerRegistration {
     instance.eventName = eventName
     instance.listener = listener
-    instance.priority = priority
+    instance.priority = config.Priority
 
     return eventcontract.ListenerRegistration{EventName: eventName, ListenerId: 1}
+}
+
+func (instance *capturingEventDispatcher) InstallFloorListener(
+    eventName string,
+    listener eventcontract.EventListener,
+    config eventcontract.ListenerConfig,
+) (eventcontract.ListenerRegistration, bool) {
+    return eventcontract.ListenerRegistration{}, false
+}
+
+func (instance *capturingEventDispatcher) RegisteredEvents() []eventcontract.RegisteredEvent {
+    return nil
 }
 
 func (instance *capturingEventDispatcher) RemoveListener(registration eventcontract.ListenerRegistration) bool {

@@ -35,7 +35,7 @@ func newTokenSourceTestRuntimeLogging(t *testing.T, logger loggingcontract.Logge
     t.Helper()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
     registerErr := serviceContainer.Register(
         event.ServiceEventDispatcher,
@@ -314,7 +314,7 @@ func TestAuthenticatorTokenSource_ResolveKeepsTheAuthenticationErrorWhenTheFailu
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return errors.New("event bus down")
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     authenticationErr := exception.Unauthorized("invalid credentials")
@@ -353,7 +353,7 @@ func TestAuthenticatorTokenSource_ResolveFailsWhenTheSuccessDispatchFails(t *tes
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return dispatchErr
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     tokenSource := NewAuthenticatorTokenSource(
@@ -428,7 +428,7 @@ func TestAuthenticatorTokenSource_ARejectedSecondFactorIsAnnouncedAsAFailure(t *
 
             return nil
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     tokenSource := NewAuthenticatorTokenSource(
@@ -475,7 +475,7 @@ func recordSecurityLoginEvents(dispatcher eventcontract.EventDispatcher) *[]stri
 
                 return nil
             },
-            0,
+            eventcontract.ListenerConfig{},
         )
     }
 
@@ -586,7 +586,7 @@ func TestAuthenticatorTokenSource_ResolveFailsWhenTheRejectedCredentialsDispatch
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return listenerErr
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     tokenSource := NewAuthenticatorTokenSource(
@@ -620,7 +620,7 @@ func TestAuthenticatorTokenSource_AFailedLoginFailureDispatchKeepsTheStatusAndFi
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return listenerErr
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     authenticationErr := exception.NewHttpException(401, "invalid credentials")
@@ -661,7 +661,7 @@ func TestAuthenticatorTokenSource_AFailedRejectedCredentialsDispatchKeepsTheReje
 
             return listenerErr
         },
-        0,
+        eventcontract.ListenerConfig{},
     )
 
     tokenSource := NewAuthenticatorTokenSource(

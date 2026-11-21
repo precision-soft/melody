@@ -55,7 +55,7 @@ func TestNewKernel_InitialState(t *testing.T) {
     configuration := newTestConfiguration(t, config.EnvironmentDevelopment)
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
 
     routeRegistry := http.NewRouteRegistry()
     httpRouter := http.NewRouterWithRouteRegistry(routeRegistry)
@@ -97,7 +97,7 @@ func TestKernel_DebugModeFalseOutsideDevelopment(t *testing.T) {
         newTestConfiguration(t, config.EnvironmentProduction),
         container.NewContainer(container.ContainerConfig{}),
         httpRouter,
-        event.NewEventDispatcher(clockInstance),
+        event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance}),
         clockInstance,
     )
 
@@ -129,7 +129,7 @@ func TestNewKernel_ATypedNilCollaboratorIsRefusedByName(t *testing.T) {
         absentConfiguration,
         container.NewContainer(container.ContainerConfig{}),
         http.NewRouterWithRouteRegistry(routeRegistry),
-        event.NewEventDispatcher(clockInstance),
+        event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance}),
         clockInstance,
     )
 }
@@ -143,7 +143,7 @@ func TestKernel_BootRuntimeAnswersTheRuntimeTheApplicationInstalled(t *testing.T
         newTestConfiguration(t, config.EnvironmentProduction),
         serviceContainer,
         http.NewRouterWithRouteRegistry(http.NewRouteRegistry()),
-        event.NewEventDispatcher(clockInstance),
+        event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance}),
         clockInstance,
     )
 

@@ -235,7 +235,7 @@ func TestRegisterSecurity_TheMetricsTokenPutsTheExpositionBehindTheScraperRole(t
             containerInstance,
             melodyevent.ServiceEventDispatcher,
             func(resolver melodycontainercontract.Resolver) (melodyeventcontract.EventDispatcher, error) {
-                return melodyevent.NewEventDispatcher(melodyclock.NewSystemClock()), nil
+                return melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()}), nil
             },
             melodycontainer.RegisterOptions{},
         )
@@ -299,7 +299,7 @@ func TestRegisterSecurity_TheDeviceFirewallHonoursATokenOnlyWhileItsAccountExist
             return userRepository, nil
         }, melodycontainer.RegisterOptions{})
         melodycontainer.MustRegister[melodyeventcontract.EventDispatcher](containerInstance, melodyevent.ServiceEventDispatcher, func(resolver melodycontainercontract.Resolver) (melodyeventcontract.EventDispatcher, error) {
-            return melodyevent.NewEventDispatcher(melodyclock.NewSystemClock()), nil
+            return melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()}), nil
         }, melodycontainer.RegisterOptions{})
         melodycontainer.MustRegister[melodyloggingcontract.Logger](containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
             return melodylogging.NewNopLogger(), nil
@@ -399,7 +399,7 @@ func TestRegisterSecurity_TheInternalFirewallAnswersAGuardOutageWith503AndRetryA
             }, melodycontainer.RegisterOptions{})
             runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 
-            dispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
+            dispatcher := melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()})
             kernel := &securityListenerKernel{dispatcher: dispatcher}
             registry := melodysecurity.NewFirewallRegistry(melodysecurity.NewCompiledConfiguration([]*melodysecurity.CompiledFirewall{outageFirewall}, nil))
             melodysecurity.RegisterKernelSecurityResolutionListener(kernel, registry)
@@ -515,7 +515,7 @@ func TestRegisterSecurity_TheMainFirewallAnswersAnAccountLookupOutageWith503AndR
             }, melodycontainer.RegisterOptions{})
             runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 
-            dispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
+            dispatcher := melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()})
             kernel := &securityListenerKernel{dispatcher: dispatcher}
             registry := melodysecurity.NewFirewallRegistry(melodysecurity.NewCompiledConfiguration([]*melodysecurity.CompiledFirewall{outageFirewall}, nil))
             melodysecurity.RegisterKernelSecurityResolutionListener(kernel, registry)

@@ -69,7 +69,7 @@ func RegisterRequestListener(eventDispatcher eventcontract.EventDispatcher, serv
 
             return nil
         },
-        RequestListenerPriority,
+        eventcontract.ListenerConfig{Priority: RequestListenerPriority},
     )
 }
 
@@ -110,6 +110,6 @@ func RegisterResponseListener(eventDispatcher eventcontract.EventDispatcher, ser
 
             return nil
         },
-        ResponseListenerPriority,
+        eventcontract.ListenerConfig{Priority: ResponseListenerPriority},
     )
 }

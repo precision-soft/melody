@@ -239,6 +239,8 @@ type KernelExceptionEvent struct {
     err                   error
     response              httpcontract.Response
     unavailableRetryAfter time.Duration
+    /* builtInAnswered is set by the built-in floor listener, which runs after every other listener and fails nothing, so its answer stands when an earlier listener failed */
+    builtInAnswered bool
 }
 
 /* UnavailableRetryAfter is the Retry-After a marked infrastructure failure is answered with, the delay the kernel was configured with; a listener that builds its own response sets it with SetRetryAfter, one that answers through RenderExceptionResponse passes it in ExceptionRenderConfig. */

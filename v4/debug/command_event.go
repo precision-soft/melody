@@ -70,40 +70,7 @@ func (instance *EventCommand) Run(
 
     dispatcher := event.EventDispatcherMustFromRuntime(runtimeInstance)
 
-    inspector, ok := dispatcher.(eventcontract.EventDispatcherInspector)
-    if false == ok {
-        envelope.AddWarning(
-            "debug.notSupported",
-            "event dispatcher does not support inspection",
-            map[string]any{
-                "dispatcherType": fmt.Sprintf("%T", dispatcher),
-            },
-        )
-
-        if output.FormatTable == option.Format {
-            builder := output.NewTableBuilder()
-            builder.AddSummaryLine("EVENTS: 0 total")
-            renderDeferredListenerBlock(builder, instance.deferredListeners())
-            envelope.Table = builder.Build()
-        } else {
-            /* the declaration is the command's own, so it is rendered even when the dispatcher cannot be inspected */
-            envelope.Data = eventListPayload{
-                ListPayload: output.NewListPayload(
-                    []eventListItem{},
-                    0,
-                    option.Limit,
-                    option.Offset,
-                ),
-                ServingProcessListeners: instance.deferredListeners(),
-            }
-        }
-
-        envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
-
-        return output.Render(commandContext.Writer, envelope, option)
-    }
-
-    registeredEvents := inspector.RegisteredEvents()
+    registeredEvents := dispatcher.RegisteredEvents()
 
     items := make([]eventListItem, 0, len(registeredEvents))
 

@@ -2,7 +2,6 @@ package security
 
 import (
     "errors"
-    "fmt"
     nethttp "net/http"
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -81,19 +80,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
 
     eventDispatcher := kernelInstance.EventDispatcher()
 
-    /* without the required mark a listener that stops propagation lets a request past access control, so such a dispatcher is refused before the listener is added */
-    registrar, ok := eventDispatcher.(eventcontract.RequiredListenerRegistrar)
-    if false == ok {
-        exception.Panic(
-            exception.NewError(
-                "the event dispatcher cannot mark the access control listener required",
-                exceptioncontract.Context{"dispatcherType": fmt.Sprintf("%T", eventDispatcher)},
-                nil,
-            ),
-        )
-    }
-
-    accessControlRegistration := eventDispatcher.AddListener(
+    eventDispatcher.AddListener(
         kernelcontract.EventKernelRequest,
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             requestEvent, ok := eventValue.Payload().(*http.KernelRequestEvent)
@@ -404,10 +391,8 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
 
             return nil
         },
-        KernelAccessControlListenerPriority,
+        eventcontract.ListenerConfig{Priority: KernelAccessControlListenerPriority, Required: true, FailureEndsDispatch: true},
     )
-
-    registrar.MarkListenerRequired(accessControlRegistration)
 }
 
 func matchAccessControlRule(accessControl *AccessControl, path string, source Source, firewallName string) (*MatchedAccessControlRule, []string, bool) {

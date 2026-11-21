@@ -21,10 +21,10 @@ type SecurityAuthenticationEventSubscriber struct{}
 func (instance *SecurityAuthenticationEventSubscriber) SubscribedEvents() map[string][]melodyeventcontract.SubscribedEvent {
     return map[string][]melodyeventcontract.SubscribedEvent{
         melodysecuritycontract.EventSecurityLoginSuccess: {
-            melodyevent.NewSubscribedEvent(instance.onLoginSuccess(), 0),
+            melodyevent.NewSubscribedEvent(instance.onLoginSuccess(), melodyeventcontract.ListenerConfig{}),
         },
         melodysecuritycontract.EventSecurityLoginFailure: {
-            melodyevent.NewSubscribedEvent(instance.onLoginFailure(), 0),
+            melodyevent.NewSubscribedEvent(instance.onLoginFailure(), melodyeventcontract.ListenerConfig{}),
         },
     }
 }

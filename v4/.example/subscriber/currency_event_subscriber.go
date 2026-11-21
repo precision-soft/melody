@@ -21,13 +21,13 @@ func NewCurrencyEventSubscriber() *CurrencyEventSubscriber {
 func (instance *CurrencyEventSubscriber) SubscribedEvents() map[string][]melodyeventcontract.SubscribedEvent {
     return map[string][]melodyeventcontract.SubscribedEvent{
         event.CurrencyCreatedEventName: {
-            melodyevent.NewSubscribedEvent(instance.onCurrencyCreated(), 0),
+            melodyevent.NewSubscribedEvent(instance.onCurrencyCreated(), melodyeventcontract.ListenerConfig{}),
         },
         event.CurrencyUpdatedEventName: {
-            melodyevent.NewSubscribedEvent(instance.onCurrencyUpdated(), 0),
+            melodyevent.NewSubscribedEvent(instance.onCurrencyUpdated(), melodyeventcontract.ListenerConfig{}),
         },
         event.CurrencyDeletedEventName: {
-            melodyevent.NewSubscribedEvent(instance.onCurrencyDeleted(), 0),
+            melodyevent.NewSubscribedEvent(instance.onCurrencyDeleted(), melodyeventcontract.ListenerConfig{}),
         },
     }
 }

@@ -78,7 +78,7 @@ func newCurrencyDoorFixture(t *testing.T) *currencyDoorFixture {
         examplecache.NewGobSerializer(),
         melodycache.ManagerConfig{OwnsBackend: true},
     )
-    currencyService := service.NewCurrencyService(currencyRepository, productRepository, cacheInstance, melodyevent.NewEventDispatcher(clockInstance), clockInstance)
+    currencyService := service.NewCurrencyService(currencyRepository, productRepository, cacheInstance, melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: clockInstance}), clockInstance)
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 

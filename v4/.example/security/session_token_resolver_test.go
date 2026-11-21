@@ -433,7 +433,7 @@ func TestSessionTokenResolver_ASessionOutageAnswersTheUnavailableToken(t *testin
         return melodysession.NewManager(&outageSessionStorage{Storage: melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{})}, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)}), nil
     }, melodycontainer.RegisterOptions{})
     containerInstance.MustRegister(melodyevent.ServiceEventDispatcher, func(resolver melodycontainercontract.Resolver) (melodyeventcontract.EventDispatcher, error) {
-        return melodyevent.NewEventDispatcher(melodyclock.NewSystemClock()), nil
+        return melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()}), nil
     }, melodycontainer.RegisterOptions{})
 
     var token melodysecuritycontract.Token
