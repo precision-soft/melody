@@ -167,12 +167,28 @@ func TestNewDefaultLogger_TheZeroConfigWritesTheDefaultLabelsAndChainDepth(t *te
         t.Fatalf("expected the default info label %s, got %q", expected, written)
     }
 
-    if causeChainDefaultDepth != CauseChainDepth(logger) {
-        t.Fatalf("expected the default cause chain depth, got %d", CauseChainDepth(logger))
+    if causeChainDefaultDepth != logger.CauseChainDepth() {
+        t.Fatalf("expected the default cause chain depth, got %d", logger.CauseChainDepth())
     }
 
-    if 2 != CauseChainDepth(NewDefaultLogger(DefaultLoggerConfig{CauseChainDepth: bound.Of(2)})) {
+    if 2 != NewDefaultLogger(DefaultLoggerConfig{CauseChainDepth: bound.Of(2)}).CauseChainDepth() {
         t.Fatalf("expected the configured cause chain depth reported")
+    }
+}
+
+func TestDefaultLogger_EnabledAnswersTrueForEveryLevel(t *testing.T) {
+    logger := NewDefaultLogger(DefaultLoggerConfig{})
+
+    for _, level := range []loggingcontract.Level{
+        loggingcontract.LevelDebug,
+        loggingcontract.LevelInfo,
+        loggingcontract.LevelWarning,
+        loggingcontract.LevelError,
+        loggingcontract.LevelEmergency,
+    } {
+        if false == logger.Enabled(level) {
+            t.Fatalf("expected %q enabled on a logger with no threshold", level)
+        }
     }
 }
 

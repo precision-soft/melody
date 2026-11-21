@@ -62,6 +62,14 @@ func (instance *messageRecordingLogger) Emergency(message string, context loggin
     instance.record(message)
 }
 
+func (instance *messageRecordingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *messageRecordingLogger) CauseChainDepth() int {
+    return 8
+}
+
 func (instance *messageRecordingLogger) hasMessageContaining(fragment string) bool {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

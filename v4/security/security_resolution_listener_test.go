@@ -373,6 +373,14 @@ func (instance *resolutionListenerCaptureLogger) Emergency(message string, conte
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
+func (instance *resolutionListenerCaptureLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *resolutionListenerCaptureLogger) CauseChainDepth() int {
+    return 8
+}
+
 var _ loggingcontract.Logger = (*resolutionListenerCaptureLogger)(nil)
 
 func newResolutionListenerTestRuntimeWithLogger(logger loggingcontract.Logger) containercontract.Runtime {

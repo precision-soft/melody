@@ -97,6 +97,14 @@ func (instance *capturingDiagnosticLogger) Emergency(message string, context log
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
+func (instance *capturingDiagnosticLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *capturingDiagnosticLogger) CauseChainDepth() int {
+    return 8
+}
+
 func (instance *capturingDiagnosticLogger) captured() []capturedDiagnosticRecord {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

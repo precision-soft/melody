@@ -355,6 +355,14 @@ func (instance *recordingBackplaneLogger) Emergency(message string, context logg
     instance.Log("", message, context)
 }
 
+func (instance *recordingBackplaneLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *recordingBackplaneLogger) CauseChainDepth() int {
+    return 8
+}
+
 func (instance *recordingBackplaneLogger) sawTerminalStop() bool {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

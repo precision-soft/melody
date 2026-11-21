@@ -45,6 +45,14 @@ func (instance *fakeLogger) Error(message string, context loggingcontract.Contex
 func (instance *fakeLogger) Emergency(message string, context loggingcontract.Context) {
 }
 
+func (instance *fakeLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *fakeLogger) CauseChainDepth() int {
+    return 8
+}
+
 var _ loggingcontract.Logger = (*fakeLogger)(nil)
 
 type fakeProvider struct {
@@ -2499,6 +2507,14 @@ func (instance funcCarryingLogger) Error(message string, context loggingcontract
 }
 func (instance funcCarryingLogger) Emergency(message string, context loggingcontract.Context) {
     instance.sink(message)
+}
+
+func (instance funcCarryingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance funcCarryingLogger) CauseChainDepth() int {
+    return 8
 }
 
 /* the registry hands bun's channel back from its own Close, while the logger its provider routed to is still alive — the container closes the registry before the logging service, because the registry resolves it. */

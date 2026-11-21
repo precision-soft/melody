@@ -197,6 +197,14 @@ func (instance sliceCarryingLogger) Warning(message string, context loggingcontr
 func (instance sliceCarryingLogger) Error(message string, context loggingcontract.Context)     {}
 func (instance sliceCarryingLogger) Emergency(message string, context loggingcontract.Context) {}
 
+func (instance sliceCarryingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance sliceCarryingLogger) CauseChainDepth() int {
+    return 8
+}
+
 /* routing bun's diagnostics to a logger whose dynamic type is not comparable panicked on the SECOND routing — the first found no live target to compare against — and at a registry's Close through the hand-back, for a logger that had routed fine once: a bare comparison of two interfaces is a runtime panic on an incomparable dynamic type. Such a logger has no identity, so the hand-back goes through the destination the routing answered */
 func TestRouteDiagnostics_ALoggerWhoseTypeIsNotComparableRoutesTwiceAndHandsBackThroughTheDestinationItRouted(t *testing.T) {
     t.Cleanup(ResetDiagnostics)
@@ -267,6 +275,14 @@ func (instance mapCarryingLogger) Emergency(message string, context loggingcontr
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
+func (instance mapCarryingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance mapCarryingLogger) CauseChainDepth() int {
+    return 8
+}
+
 /* a routing and a hand-back on a logger without identity read none of its content: read by content, the comparison walked the logger's map while its own Log was writing it, a data race the detector reported on every run. Proven under -race, the shape a mutation cannot separate. */
 func TestRouteDiagnostics_ALoggerWithoutIdentityIsNeverReadWhileItWrites(t *testing.T) {
     t.Cleanup(ResetDiagnostics)
@@ -300,26 +316,25 @@ func TestRouteDiagnostics_ALoggerWithoutIdentityIsNeverReadWhileItWrites(t *test
     writers.Wait()
 }
 
-/* the registry's logger forwards the contract's optional threshold door, so a threshold the application's logger keeps still holds through it, and a logger without one is read as enabled, as logging.LevelEnabled reads any logger */
 func TestRegistryLogger_ForwardsTheWrappedLoggersThreshold(t *testing.T) {
     filtered := newRegistryLogger(&errorOnlyLogger{})
 
-    if true == logging.LevelEnabled(filtered, loggingcontract.LevelWarning) || false == logging.LevelEnabled(filtered, loggingcontract.LevelError) {
+    if true == filtered.Enabled(loggingcontract.LevelWarning) || false == filtered.Enabled(loggingcontract.LevelError) {
         t.Fatal("expected the wrapped logger's threshold to hold through the registry's logger")
     }
 
-    if false == logging.LevelEnabled(newRegistryLogger(&capturingDiagnosticLogger{}), loggingcontract.LevelDebug) {
-        t.Fatal("expected a logger without a threshold to be read as enabled")
+    if false == newRegistryLogger(&capturingDiagnosticLogger{}).Enabled(loggingcontract.LevelDebug) {
+        t.Fatal("expected a logger enabled at debug to stay enabled through the registry's logger")
     }
 }
 
 func TestRegistryLogger_ForwardsTheWrappedLoggersCauseChainDepth(t *testing.T) {
     configured := newRegistryLogger(logging.NewJsonLogger(&bytes.Buffer{}, logging.JsonLoggerConfig{CauseChainDepth: bound.Of(2)}))
-    if 2 != logging.CauseChainDepth(configured) {
-        t.Fatalf("expected the wrapped logger's depth of 2 through the registry's logger, got %d", logging.CauseChainDepth(configured))
+    if 2 != configured.CauseChainDepth() {
+        t.Fatalf("expected the wrapped logger's depth of 2 through the registry's logger, got %d", configured.CauseChainDepth())
     }
 
-    if 8 != logging.CauseChainDepth(newRegistryLogger(&capturingDiagnosticLogger{})) {
+    if 8 != newRegistryLogger(&capturingDiagnosticLogger{}).CauseChainDepth() {
         t.Fatal("expected a logger without a depth to be read as the default")
     }
 }

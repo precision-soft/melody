@@ -329,8 +329,6 @@ func (instance *jsonLogger) CauseChainDepth() int {
 }
 
 var _ loggingcontract.Logger = (*jsonLogger)(nil)
-var _ loggingcontract.LevelReporter = (*jsonLogger)(nil)
-var _ loggingcontract.CauseChainDepthReporter = (*jsonLogger)(nil)
 
 /* normalizeJsonContextMaxDepth is the default and the ceiling of JsonLoggerConfig.ContextNormalizationDepth, which bounds the recursive normalization, since a deep enough acyclic context would overflow the goroutine stack, a fatal error no recover reaches. It is a backstop: the shapes this package nests sit two or three levels down. */
 const normalizeJsonContextMaxDepth = 10000

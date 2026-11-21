@@ -91,19 +91,12 @@ func (instance *requestLogger) Closed() bool {
     return closedChecker.Closed()
 }
 
-/* Enabled forwards the level question to the base logger, since this decorator is what handlers and listeners hold; a base that does not implement the capability is reported enabled. */
 func (instance *requestLogger) Enabled(level loggingcontract.Level) bool {
-    levelReporter, isReporter := instance.base.(loggingcontract.LevelReporter)
-    if false == isReporter {
-        return true
-    }
-
-    return levelReporter.Enabled(level)
+    return instance.base.Enabled(level)
 }
 
-/* CauseChainDepth forwards the depth question to the base logger, so LogError writes through this decorator the chain its base was configured for. */
 func (instance *requestLogger) CauseChainDepth() int {
-    return CauseChainDepth(instance.base)
+    return instance.base.CauseChainDepth()
 }
 
 /* mergeContextWithRequestId writes the real correlation id under the context key unconditionally, so a client cannot forge the correlation of a record. A value already under the key survives per the constructor's policy, as a "Claimed" string on the request path or a "Provided" value on the console path. */
@@ -137,5 +130,3 @@ func (instance *requestLogger) mergeContextWithRequestId(context loggingcontract
 }
 
 var _ loggingcontract.Logger = (*requestLogger)(nil)
-var _ loggingcontract.LevelReporter = (*requestLogger)(nil)
-var _ loggingcontract.CauseChainDepthReporter = (*requestLogger)(nil)

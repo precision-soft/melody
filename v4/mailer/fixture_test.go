@@ -75,6 +75,14 @@ func (instance *mailerRecordingLogger) Emergency(message string, context logging
     instance.record(message, context)
 }
 
+func (instance *mailerRecordingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *mailerRecordingLogger) CauseChainDepth() int {
+    return 8
+}
+
 func (instance *mailerRecordingLogger) contextOfMessage(fragment string) (loggingcontract.Context, bool) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

@@ -22,24 +22,13 @@ func causeChainDepthRule(name string) bound.Rule[int] {
     }
 }
 
-/* CauseChainDepth asks a logger how many links of an error's cause chain LogError writes, and answers 8 for a nil logger or one that cannot be asked; it is the one door onto loggingcontract.CauseChainDepthReporter, which a logger decorator forwards through it. */
-func CauseChainDepth(logger loggingcontract.Logger) int {
-    depthReporter, isReporter := logger.(loggingcontract.CauseChainDepthReporter)
-    if false == isReporter || true == internal.IsNilInterface(depthReporter) {
+/* loggerCauseChainDepth answers the logger's CauseChainDepth, and 8 for a nil or typed-nil logger, which LogError accepts. */
+func loggerCauseChainDepth(logger loggingcontract.Logger) int {
+    if true == internal.IsNilInterface(logger) {
         return causeChainDefaultDepth
     }
 
-    return depthReporter.CauseChainDepth()
-}
-
-/* LevelEnabled asks a logger whether a record at this level would survive its threshold, and answers true for one that cannot be asked; it is the one door onto loggingcontract.LevelReporter. Ask it only where the answer saves work otherwise thrown away. */
-func LevelEnabled(logger loggingcontract.Logger, level loggingcontract.Level) bool {
-    levelReporter, isReporter := logger.(loggingcontract.LevelReporter)
-    if false == isReporter {
-        return true
-    }
-
-    return levelReporter.Enabled(level)
+    return logger.CauseChainDepth()
 }
 
 /* LogError writes one record for the error, or none when it is nil, a typed nil or already logged; the mark is read at the depth exception.MarkLogged writes it. A top-level *exception.Error contributes its own level, message and context, while any other error is logged at error level under its full message, with the nearest provider's context and its cause chain; either chain is written to the logger's CauseChainDepth. A nil logger falls back to the standard library's log package, its default logger writing the level, the message and the context as one text line. */
@@ -56,7 +45,7 @@ func LogError(logger loggingcontract.Logger, err error) {
     exceptionValue, isTopException := err.(*exception.Error)
     if true == isTopException {
         levelUpper := strings.ToUpper(string(exceptionValue.Level()))
-        enrichedContext := enrichContextWithCause(exceptionValue, CauseChainDepth(logger))
+        enrichedContext := enrichContextWithCause(exceptionValue, loggerCauseChainDepth(logger))
 
         if true == internal.IsNilInterface(logger) {
             /* this fallback writes through the raw standard logger, so keeping one record on one line is its own duty */
@@ -74,7 +63,7 @@ func LogError(logger loggingcontract.Logger, err error) {
     }
 
     /* a foreign depth below one reads as one link, as BuildCauseChain reads it, so a recovery handler never reaches LogContext's refusal */
-    causeChainDepth := CauseChainDepth(logger)
+    causeChainDepth := loggerCauseChainDepth(logger)
     if 1 > causeChainDepth {
         causeChainDepth = 1
     }

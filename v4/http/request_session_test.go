@@ -437,6 +437,14 @@ func (instance *levelRecordingLogger) Emergency(message string, context loggingc
     instance.record(loggingcontract.LevelEmergency)
 }
 
+func (instance *levelRecordingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *levelRecordingLogger) CauseChainDepth() int {
+    return 8
+}
+
 func TestRequestSession_ALoadTheClientsHangupCancelledIsRecordedAtWarning(t *testing.T) {
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()

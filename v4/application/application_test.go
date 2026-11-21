@@ -811,6 +811,14 @@ func (instance *typedNilProbeExitLogger) Error(message string, context loggingco
 func (instance *typedNilProbeExitLogger) Emergency(message string, context loggingcontract.Context) {
 }
 
+func (instance *typedNilProbeExitLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *typedNilProbeExitLogger) CauseChainDepth() int {
+    return 8
+}
+
 func (instance *typedNilProbeExitLogger) Closed() bool {
     return instance.closedFlag
 }

@@ -294,6 +294,14 @@ func (instance *warningRecordingLogger) Error(message string, context loggingcon
 func (instance *warningRecordingLogger) Emergency(message string, context loggingcontract.Context) {
 }
 
+func (instance *warningRecordingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *warningRecordingLogger) CauseChainDepth() int {
+    return 8
+}
+
 var _ loggingcontract.Logger = (*warningRecordingLogger)(nil)
 
 const cacheWarningFragment = "cache"

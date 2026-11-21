@@ -727,6 +727,14 @@ func (instance *capturingProviderLogger) Emergency(message string, context loggi
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
+func (instance *capturingProviderLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *capturingProviderLogger) CauseChainDepth() int {
+    return 8
+}
+
 var _ loggingcontract.Logger = (*capturingProviderLogger)(nil)
 
 /* the caller's own cancellation is a clean stop, not a database outage: the transient classifier carries no cancellation marker, so a shutdown that cancelled the open fell through to the terminal branch and paged the operator with "non-transient error" against a healthy database. */

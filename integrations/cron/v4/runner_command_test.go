@@ -2036,6 +2036,14 @@ func (instance *capturingRunnerLogger) Emergency(message string, context logging
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
+func (instance *capturingRunnerLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *capturingRunnerLogger) CauseChainDepth() int {
+    return 8
+}
+
 func (instance *capturingRunnerLogger) recordByMessageProbe(message string) (capturedRunnerRecord, bool) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -3950,6 +3958,14 @@ func (instance *panicOnceLogger) Emergency(message string, context loggingcontra
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
+func (instance *panicOnceLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *panicOnceLogger) CauseChainDepth() int {
+    return 8
+}
+
 /* panickingLogger panics on every record: the shape of an application logger whose sink is gone. */
 type panickingLogger struct{}
 
@@ -3975,6 +3991,14 @@ func (instance *panickingLogger) Error(message string, context loggingcontract.C
 
 func (instance *panickingLogger) Emergency(message string, context loggingcontract.Context) {
     instance.Log(loggingcontract.LevelEmergency, message, context)
+}
+
+func (instance *panickingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *panickingLogger) CauseChainDepth() int {
+    return 8
 }
 
 /* errorWithPanickingText is a failure whose Error() panics, the shape the container's own teardown guards against. */

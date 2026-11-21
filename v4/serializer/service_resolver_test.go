@@ -251,4 +251,12 @@ func (instance *recordingSerializerLogger) Error(message string, context logging
 func (instance *recordingSerializerLogger) Emergency(message string, context loggingcontract.Context) {
 }
 
+func (instance *recordingSerializerLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *recordingSerializerLogger) CauseChainDepth() int {
+    return 8
+}
+
 var _ loggingcontract.Logger = (*recordingSerializerLogger)(nil)

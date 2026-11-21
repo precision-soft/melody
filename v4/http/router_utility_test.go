@@ -1785,6 +1785,14 @@ func (instance *sessionPersistenceCaptureLogger) Emergency(message string, conte
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
+func (instance *sessionPersistenceCaptureLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *sessionPersistenceCaptureLogger) CauseChainDepth() int {
+    return 8
+}
+
 var _ loggingcontract.Logger = (*sessionPersistenceCaptureLogger)(nil)
 
 func writeResponseWithSessionOutcome(

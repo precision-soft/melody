@@ -1195,11 +1195,6 @@ func stampOfRecord(t *testing.T, payload []byte) time.Time {
 func TestJsonLogger_EnabledAnswersTheThresholdLogItselfApplies(t *testing.T) {
     logger := NewJsonLogger(io.Discard, JsonLoggerConfig{MinLevel: loggingcontract.LevelWarning})
 
-    levelReporter, isReporter := logger.(loggingcontract.LevelReporter)
-    if false == isReporter {
-        t.Fatalf("expected the json logger to answer the level question")
-    }
-
     cases := []struct {
         level    loggingcontract.Level
         expected bool
@@ -1214,7 +1209,7 @@ func TestJsonLogger_EnabledAnswersTheThresholdLogItselfApplies(t *testing.T) {
     }
 
     for _, testCase := range cases {
-        if testCase.expected != levelReporter.Enabled(testCase.level) {
+        if testCase.expected != logger.Enabled(testCase.level) {
             t.Fatalf("expected %q enabled=%v under a warning threshold", testCase.level, testCase.expected)
         }
     }
@@ -1229,9 +1224,7 @@ func TestJsonLogger_EnabledReportsNothingOnceClosed(t *testing.T) {
 
     logger := NewJsonLogger(file, JsonLoggerConfig{MinLevel: loggingcontract.LevelDebug})
 
-    levelReporter := logger.(loggingcontract.LevelReporter)
-
-    if false == levelReporter.Enabled(loggingcontract.LevelDebug) {
+    if false == logger.Enabled(loggingcontract.LevelDebug) {
         t.Fatalf("expected debug to be enabled before the logger is closed")
     }
 
@@ -1241,7 +1234,7 @@ func TestJsonLogger_EnabledReportsNothingOnceClosed(t *testing.T) {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    if true == levelReporter.Enabled(loggingcontract.LevelEmergency) {
+    if true == logger.Enabled(loggingcontract.LevelEmergency) {
         t.Fatalf("expected a closed logger to report nothing enabled")
     }
 }
@@ -1497,8 +1490,8 @@ func TestLogError_WritesTheCauseChainAtTheLoggersConfiguredDepth(t *testing.T) {
         }
     }
 
-    if causeChainDefaultDepth != CauseChainDepth(nil) || causeChainDefaultDepth != CauseChainDepth(&captureLogger{}) {
-        t.Fatalf("expected a nil logger and one that reports no depth to take the default")
+    if causeChainDefaultDepth != loggerCauseChainDepth(nil) || causeChainDefaultDepth != loggerCauseChainDepth(NewNopLogger()) {
+        t.Fatalf("expected a nil logger and the no-op logger to take the default")
     }
 }
 

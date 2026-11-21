@@ -26,6 +26,14 @@ func (instance valueLoggerWithoutIdentity) Error(message string, context logging
 func (instance valueLoggerWithoutIdentity) Emergency(message string, context loggingcontract.Context) {
 }
 
+func (instance valueLoggerWithoutIdentity) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance valueLoggerWithoutIdentity) CauseChainDepth() int {
+    return 8
+}
+
 /* the refusal is a cause under the storage's exception and renders the sentinel alone: a dead-letter record, or a caller's log of Save, reads the sentinel once where an extra link read the message twice and put the message where the sentinel stood. */
 func TestJournaledRefusal_RendersTheSentinelOnceInTheCauseChain(t *testing.T) {
     delegate := newRecordingStorage()

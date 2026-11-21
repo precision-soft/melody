@@ -345,6 +345,14 @@ func (instance *contextCapturingCliLogger) Emergency(message string, context log
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
+func (instance *contextCapturingCliLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *contextCapturingCliLogger) CauseChainDepth() int {
+    return 8
+}
+
 func (instance *contextCapturingCliLogger) contextOfMessage(message string) (map[string]any, bool) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

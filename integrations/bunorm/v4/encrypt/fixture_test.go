@@ -680,6 +680,14 @@ func (instance *recordingLogger) Emergency(message string, context loggingcontra
     instance.Log("", message, context)
 }
 
+func (instance *recordingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *recordingLogger) CauseChainDepth() int {
+    return 8
+}
+
 /* runCommandLine runs one command line through the command's own flags under a runtime whose logger is the one given, and answers the command's error */
 func runCommandLine(t *testing.T, command *EncryptDatabaseCommand, logger loggingcontract.Logger, arguments ...string) error {
     t.Helper()

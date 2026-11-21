@@ -6,6 +6,7 @@ import (
     "os"
     "testing"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
@@ -361,32 +362,24 @@ func TestProcessLogger_AnEmptyProcessIdReturnsTheBaseUndecorated(t *testing.T) {
     }
 }
 
-/* the decorator is what every handler and listener holds, as a scope override, so it forwards the level question to its base; answering itself would report every level enabled for a journal configured at error */
 func TestRequestLogger_EnabledForwardsToTheBase(t *testing.T) {
     baseLogger := NewJsonLogger(io.Discard, JsonLoggerConfig{MinLevel: loggingcontract.LevelError})
     wrappedLogger := NewRequestLogger(baseLogger, "request-id", "requestId")
 
-    levelReporter, isReporter := wrappedLogger.(loggingcontract.LevelReporter)
-    if false == isReporter {
-        t.Fatalf("expected the request logger to answer the level question")
-    }
-
-    if true == levelReporter.Enabled(loggingcontract.LevelDebug) {
+    if true == wrappedLogger.Enabled(loggingcontract.LevelDebug) {
         t.Fatalf("expected debug to be reported disabled through a base configured at error")
     }
 
-    if false == levelReporter.Enabled(loggingcontract.LevelError) {
+    if false == wrappedLogger.Enabled(loggingcontract.LevelError) {
         t.Fatalf("expected error to be reported enabled through a base configured at error")
     }
 }
 
-/* a base that cannot be asked is reported enabled, which is the contract's floor: reporting the other way would silently stop the caller from recording against every logger that does not carry the capability — most of them, an integrator's adapter included */
-func TestRequestLogger_EnabledReportsEnabledOverABaseWithoutTheCapability(t *testing.T) {
-    wrappedLogger := NewRequestLogger(&captureLogger{}, "request-id", "requestId")
+func TestRequestLogger_CauseChainDepthForwardsToTheBase(t *testing.T) {
+    baseLogger := NewJsonLogger(io.Discard, JsonLoggerConfig{CauseChainDepth: bound.Of(3)})
+    wrappedLogger := NewRequestLogger(baseLogger, "request-id", "requestId")
 
-    levelReporter := wrappedLogger.(loggingcontract.LevelReporter)
-
-    if false == levelReporter.Enabled(loggingcontract.LevelDebug) {
-        t.Fatalf("expected a base without the capability to be reported enabled")
+    if 3 != wrappedLogger.CauseChainDepth() {
+        t.Fatalf("expected the base's depth of 3 through the request logger, got %d", wrappedLogger.CauseChainDepth())
     }
 }

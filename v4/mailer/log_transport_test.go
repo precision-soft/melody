@@ -46,6 +46,14 @@ func (instance *capturingLogger) Emergency(message string, context loggingcontra
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
+func (instance *capturingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *capturingLogger) CauseChainDepth() int {
+    return 8
+}
+
 func TestLogTransportLogsRecipientsSubjectAndText(t *testing.T) {
     logger := &capturingLogger{}
     transport := NewLogTransport(logger)

@@ -919,6 +919,14 @@ func (instance *errorCountingLogger) Error(message string, context loggingcontra
 
 func (instance *errorCountingLogger) Emergency(message string, context loggingcontract.Context) {}
 
+func (instance *errorCountingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *errorCountingLogger) CauseChainDepth() int {
+    return 8
+}
+
 func TestKernel_HandlerPathResponseDispatchErrorRespectsAlreadyLogged(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -2380,6 +2388,14 @@ func (instance *warningRecordingLogger) Error(message string, context loggingcon
 func (instance *warningRecordingLogger) Emergency(message string, context loggingcontract.Context) {
 }
 
+func (instance *warningRecordingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *warningRecordingLogger) CauseChainDepth() int {
+    return 8
+}
+
 func (instance *warningRecordingLogger) hasWarning(message string) bool {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -2995,6 +3011,14 @@ func (instance *recordCountingLogger) Error(message string, context loggingcontr
 }
 
 func (instance *recordCountingLogger) Emergency(message string, context loggingcontract.Context) {}
+
+func (instance *recordCountingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *recordCountingLogger) CauseChainDepth() int {
+    return 8
+}
 
 func serveAndCountErrorRecords(t *testing.T, handler httpcontract.Handler) *recordCountingLogger {
     t.Helper()

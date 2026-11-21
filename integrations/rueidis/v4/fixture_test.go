@@ -434,6 +434,14 @@ func (instance *capturingLogger) Emergency(message string, context loggingcontra
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
+func (instance *capturingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *capturingLogger) CauseChainDepth() int {
+    return 8
+}
+
 /* scriptCountingConn counts the script commands one client writes, which a server-wide tally cannot tell from another package's or application's */
 type scriptCountingConn struct {
     net.Conn

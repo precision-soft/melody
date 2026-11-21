@@ -1452,6 +1452,14 @@ type testRecordingLogger struct {
 func (instance *testRecordingLogger) Emergency(message string, context loggingcontract.Context) {
 }
 
+func (instance *testRecordingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *testRecordingLogger) CauseChainDepth() int {
+    return 8
+}
+
 func (instance *testRecordingLogger) Alert(message string, context loggingcontract.Context) {
 }
 
@@ -1977,11 +1985,15 @@ func (instance *debugGateLogger) Error(message string, context loggingcontract.C
 
 func (instance *debugGateLogger) Emergency(message string, context loggingcontract.Context) {}
 
+func (instance *debugGateLogger) CauseChainDepth() int {
+    return 8
+}
+
 func (instance *debugGateLogger) Enabled(level loggingcontract.Level) bool {
     return debugGateLevelPriority(level) >= debugGateLevelPriority(instance.minLevel)
 }
 
-var _ loggingcontract.LevelReporter = (*debugGateLogger)(nil)
+var _ loggingcontract.Logger = (*debugGateLogger)(nil)
 
 /* the dispatch asks the journal once and builds nothing it would throw away: at least three events travel per request, and every debug record below assembles a context map at the call site — plus, for one of them, a listener name resolved through reflect and runtime.FuncForPC per listener per dispatch. A logger that says the level is off must receive nothing at all; the same dispatch under a logger that says it is on must receive every record it always did, which is what tells the gate apart from a deletion. */
 func TestEventDispatcher_DoesNotBuildDebugRecordsTheJournalWouldDiscard(t *testing.T) {

@@ -453,6 +453,14 @@ The six `service.<module>` names of a module's principal service, `service.cache
 
 **Remedy.** Pass `clock.Now()` where a clock was passed, and rename `NewEventWithTimestamp` to `NewEvent`.
 
+### Logging: a logger answers `Enabled` and `CauseChainDepth`
+
+**What changed.** [`loggingcontract.Logger`](../logging/contract/logger.go) carries `Enabled(level Level) bool` and `CauseChainDepth() int`. The optional `loggingcontract.LevelReporter` and `loggingcontract.CauseChainDepthReporter` are removed, with `logging.LevelEnabled` and `logging.CauseChainDepth`: a caller asks the logger itself, and a decorator that forgets to forward can no longer turn every level on or reset the depth to 8 unseen.
+
+**Symptom.** `*L does not implement loggingcontract.Logger (missing method CauseChainDepth)` or `(missing method Enabled)`; `undefined: loggingcontract.LevelReporter`, `loggingcontract.CauseChainDepthReporter`, `logging.LevelEnabled`, `logging.CauseChainDepth`.
+
+**Remedy.** Give a logger of the application's both methods: `Enabled` answering its threshold, `true` for one with none, and `CauseChainDepth` the links its error records carry, 8 for the framework's default; a decorator forwards both to the logger it wraps, or embeds `loggingcontract.Logger`. Write `logger.Enabled(level)` for `logging.LevelEnabled(logger, level)` and `logger.CauseChainDepth()` for `logging.CauseChainDepth(logger)`.
+
 ### Messagebus: a handler receives the envelope; one stamping and one send door
 
 **What changed.** [`MessageHandler.Handle`](../messagebus/contract/handler.go) is `Handle(runtimeInstance, envelope)` and the function [`RegisterHandler[T]`](../messagebus/locator.go) registers is `func(runtimeInstance, message T, envelope Envelope) error`, so a handler reads `messagebus.MessageId(envelope)` and the redelivery count of the delivery it handles. `Envelope.WithStamp` is removed beside `WithStamps`. [`NewSendMessageMiddleware`](../messagebus/middleware_send.go) takes the `*Routing` that `NewRouting` and `RouteType[T]` build; its map form, `NewSendMessageMiddlewareFromRouting` and `TransportRouting` are removed.
@@ -1593,7 +1601,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 ### Logging: the json and default loggers are built from one struct each, an empty min level is info, and the depths are configurable
 
-**What changed.** [`NewJsonLogger`](../logging/json_logger.go) takes the output and a `JsonLoggerConfig{MinLevel, Labels, Clock, CauseChainDepth, ContextNormalizationDepth}`: `MinLevel` info when left out, an unknown level still refused; `Labels` the default labels when nil; `Clock` the process clock when nil, a typed nil refused, where `NewJsonLoggerWithClock` refused a nil one; `CauseChainDepth` the links of an error's cause chain `LogError` writes, 8 when left out, at least 1, unlimited refused; `ContextNormalizationDepth` how deep a record's context is walked before the depth marker, 10000 when left out, from 1 to 10000. [`NewDefaultLogger`](../logging/default_logger.go) takes a `DefaultLoggerConfig{Labels, CauseChainDepth}`. A field outside its rule panics naming it. `LogError` reads the depth through the new optional `loggingcontract.CauseChainDepthReporter`, whose one door is `logging.CauseChainDepth`, and which the request and process loggers forward to their base; any other logger gets 8. A logger decorator of the application's forwards it through `logging.CauseChainDepth`, as it forwards `Enabled` through `logging.LevelEnabled`. `NewJsonLoggerWithLabels`, `NewJsonLoggerWithClock` and `NewDefaultLoggerWithLabels` are removed.
+**What changed.** [`NewJsonLogger`](../logging/json_logger.go) takes the output and a `JsonLoggerConfig{MinLevel, Labels, Clock, CauseChainDepth, ContextNormalizationDepth}`: `MinLevel` info when left out, an unknown level still refused; `Labels` the default labels when nil; `Clock` the process clock when nil, a typed nil refused, where `NewJsonLoggerWithClock` refused a nil one; `CauseChainDepth` the links of an error's cause chain `LogError` writes, 8 when left out, at least 1, unlimited refused; `ContextNormalizationDepth` how deep a record's context is walked before the depth marker, 10000 when left out, from 1 to 10000. [`NewDefaultLogger`](../logging/default_logger.go) takes a `DefaultLoggerConfig{Labels, CauseChainDepth}`. A field outside its rule panics naming it. `LogError` reads the depth through the logger's `CauseChainDepth()`, which the request and process loggers forward to their base. `NewJsonLoggerWithLabels`, `NewJsonLoggerWithClock` and `NewDefaultLoggerWithLabels` are removed.
 
 **Symptom.** `NewJsonLogger(output, level)`, `NewDefaultLogger()` and the three removed doors no longer compile.
 

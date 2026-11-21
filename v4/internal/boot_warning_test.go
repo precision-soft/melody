@@ -29,6 +29,14 @@ func (instance *bootWarningRecordingLogger) Error(message string, context loggin
 func (instance *bootWarningRecordingLogger) Emergency(message string, context loggingcontract.Context) {
 }
 
+func (instance *bootWarningRecordingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *bootWarningRecordingLogger) CauseChainDepth() int {
+    return 8
+}
+
 func TestWriteBootWarning_WritesAtWarningWithItsNameAndLeavesTheContextItWasGiven(t *testing.T) {
     logger := &bootWarningRecordingLogger{}
     warningContext := loggingcontract.Context{"firewall": "api"}

@@ -52,11 +52,6 @@ func TestNopLogger_DoesNotAnswerTheClosedQuestion(t *testing.T) {
 func TestNopLogger_ReportsNoLevelEnabled(t *testing.T) {
     logger := NewNopLogger()
 
-    levelReporter, isReporter := logger.(loggingcontract.LevelReporter)
-    if false == isReporter {
-        t.Fatalf("expected the no-op logger to answer the level question")
-    }
-
     for _, level := range []loggingcontract.Level{
         loggingcontract.LevelDebug,
         loggingcontract.LevelInfo,
@@ -64,8 +59,14 @@ func TestNopLogger_ReportsNoLevelEnabled(t *testing.T) {
         loggingcontract.LevelError,
         loggingcontract.LevelEmergency,
     } {
-        if true == levelReporter.Enabled(level) {
+        if true == logger.Enabled(level) {
             t.Fatalf("expected %q to be reported disabled by the no-op logger", level)
         }
+    }
+}
+
+func TestNopLogger_CauseChainDepthAnswersTheDefault(t *testing.T) {
+    if causeChainDefaultDepth != NewNopLogger().CauseChainDepth() {
+        t.Fatalf("expected the no-op logger to answer the default depth, got %d", NewNopLogger().CauseChainDepth())
     }
 }

@@ -506,6 +506,14 @@ func (instance *panickingProbeLogger) Emergency(message string, context loggingc
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
+func (instance *panickingProbeLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *panickingProbeLogger) CauseChainDepth() int {
+    return 8
+}
+
 func TestLogOnRecoverAndExit_ShieldsTheHookAndTheRecord(t *testing.T) {
     if "hook" == os.Getenv(exitHandlerShieldProbeMarker) {
         LogOnRecoverAndExit(

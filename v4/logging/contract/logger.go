@@ -14,14 +14,10 @@ type Logger interface {
     Error(message string, context Context)
 
     Emergency(message string, context Context)
-}
 
-/* LevelReporter is the optional capability a Logger implements to say whether a record at a level would survive its threshold, for callers that build what they log. It stays outside Logger so every existing implementation still compiles; an absent LevelReporter means "enabled". Enabled answers for the level alone and is no permission to skip work something else reads. */
-type LevelReporter interface {
+    /* Enabled answers whether a record at the level would survive the logger's threshold, for callers that build what they log. It answers for the level alone and is no permission to skip work something else reads. */
     Enabled(level Level) bool
-}
 
-/* CauseChainDepthReporter is the optional capability a Logger implements to say how many links of an error's cause chain LogError writes; an absent CauseChainDepthReporter means the framework's 8. */
-type CauseChainDepthReporter interface {
+    /* CauseChainDepth is how many links of an error's cause chain LogError writes through this logger. */
     CauseChainDepth() int
 }

@@ -485,7 +485,7 @@ func shieldedCauseChainDepth(logger loggingcontract.Logger) (depth int) {
         }
     }()
 
-    depth = CauseChainDepth(logger)
+    depth = loggerCauseChainDepth(logger)
     if 1 > depth {
         depth = 1
     }

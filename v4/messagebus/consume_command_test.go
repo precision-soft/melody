@@ -939,6 +939,14 @@ func (instance *contextCapturingLogger) Error(message string, context loggingcon
 func (instance *contextCapturingLogger) Emergency(message string, context loggingcontract.Context) {
 }
 
+func (instance *contextCapturingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *contextCapturingLogger) CauseChainDepth() int {
+    return 8
+}
+
 func TestConsume_MessageScopeCarriesMessageIdLogger(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 

@@ -74,6 +74,14 @@ func (instance *capturingLogger) Error(message string, context loggingcontract.C
 
 func (instance *capturingLogger) Emergency(message string, context loggingcontract.Context) {}
 
+func (instance *capturingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *capturingLogger) CauseChainDepth() int {
+    return 8
+}
+
 func (instance *capturingLogger) count() int {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

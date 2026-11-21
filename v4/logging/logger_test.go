@@ -4,7 +4,6 @@ import (
     "bytes"
     "errors"
     "fmt"
-    "io"
     "log"
     "strings"
     "testing"
@@ -491,22 +490,11 @@ func TestLogError_KeepsCallerSetCauseKeysOnAForeignError(t *testing.T) {
     }
 }
 
-/* LevelEnabled is the single door onto the capability, and its answer for a logger that does not carry it is TRUE: the fallback is the reporting floor, so a site that spelled it the other way would stop recording against most loggers there are. Every caller asks through here rather than writing its own assertion, which is what keeps the rule in one place. */
-func TestLevelEnabled_AnswersTrueForALoggerThatCannotBeAsked(t *testing.T) {
-    if false == LevelEnabled(&captureLogger{}, loggingcontract.LevelDebug) {
-        t.Fatalf("expected a logger without the capability to be reported enabled")
-    }
+func TestLoggerCauseChainDepth_ANilOrTypedNilLoggerAnswersTheDefault(t *testing.T) {
+    var typedNil *jsonLogger
 
-    if false == LevelEnabled(NewJsonLogger(io.Discard, JsonLoggerConfig{MinLevel: loggingcontract.LevelDebug}), loggingcontract.LevelDebug) {
-        t.Fatalf("expected a debug-level json logger to report debug enabled")
-    }
-
-    if true == LevelEnabled(NewJsonLogger(io.Discard, JsonLoggerConfig{MinLevel: loggingcontract.LevelError}), loggingcontract.LevelDebug) {
-        t.Fatalf("expected an error-level json logger to report debug disabled")
-    }
-
-    if true == LevelEnabled(NewNopLogger(), loggingcontract.LevelEmergency) {
-        t.Fatalf("expected the no-op logger to report nothing enabled")
+    if causeChainDefaultDepth != loggerCauseChainDepth(nil) || causeChainDefaultDepth != loggerCauseChainDepth(typedNil) {
+        t.Fatalf("expected a nil and a typed-nil logger to answer the default depth")
     }
 }
 

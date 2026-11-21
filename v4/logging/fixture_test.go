@@ -41,6 +41,14 @@ func (instance *captureLogger) Emergency(message string, context loggingcontract
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
+func (instance *captureLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *captureLogger) CauseChainDepth() int {
+    return 8
+}
+
 var _ loggingcontract.Logger = (*captureLogger)(nil)
 
 /* typedNilProbeError is the concrete error type whose typed nil the package has to read as the nil its producer meant, rather than dereference. */

@@ -462,8 +462,8 @@ func (instance *EventDispatcher) dispatch(runtimeInstance containercontract.Runt
 
     logger := logging.LoggerMustFromRuntime(runtimeInstance)
 
-    /* asked once per dispatch: the debug records below assemble a context map a journal above debug discards, and the listener name is resolved through listenerNameOf only where used. A logger that cannot answer reports enabled. */
-    debugEnabled := logging.LevelEnabled(logger, loggingcontract.LevelDebug)
+    /* asked once per dispatch: the debug records below assemble a context map a journal above debug discards, and the listener name is resolved through listenerNameOf only where used */
+    debugEnabled := logger.Enabled(loggingcontract.LevelDebug)
 
     dispatchStartedAt := time.Now()
 

@@ -255,6 +255,14 @@ func (instance *hubRecordingLogger) Error(message string, context loggingcontrac
 
 func (instance *hubRecordingLogger) Emergency(message string, context loggingcontract.Context) {}
 
+func (instance *hubRecordingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *hubRecordingLogger) CauseChainDepth() int {
+    return 8
+}
+
 func (instance *hubRecordingLogger) errorCount() int {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

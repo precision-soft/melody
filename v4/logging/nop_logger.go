@@ -29,6 +29,10 @@ func (instance *nopLogger) Enabled(level loggingcontract.Level) bool {
     return false
 }
 
+func (instance *nopLogger) CauseChainDepth() int {
+    return causeChainDefaultDepth
+}
+
 func EnsureLogger(logger loggingcontract.Logger) loggingcontract.Logger {
     if false == internal.IsNilInterface(logger) {
         return logger
@@ -38,4 +42,3 @@ func EnsureLogger(logger loggingcontract.Logger) loggingcontract.Logger {
 }
 
 var _ loggingcontract.Logger = (*nopLogger)(nil)
-var _ loggingcontract.LevelReporter = (*nopLogger)(nil)

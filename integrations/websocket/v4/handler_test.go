@@ -1050,6 +1050,14 @@ func (instance *capturingLogger) Emergency(message string, context loggingcontra
     instance.Log("", message, context)
 }
 
+func (instance *capturingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *capturingLogger) CauseChainDepth() int {
+    return 8
+}
+
 func TestDispatchOnMessage_PreservesThePanickedErrorsCauseChain(t *testing.T) {
     logger := &capturingLogger{}
 
@@ -1290,6 +1298,14 @@ func (instance *messageCapturingLogger) Error(message string, context loggingcon
 }
 func (instance *messageCapturingLogger) Emergency(message string, context loggingcontract.Context) {
     instance.Log("", message, context)
+}
+
+func (instance *messageCapturingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *messageCapturingLogger) CauseChainDepth() int {
+    return 8
 }
 
 func (instance *messageCapturingLogger) hasMessage(message string) bool {

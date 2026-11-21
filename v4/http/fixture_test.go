@@ -241,6 +241,14 @@ func (instance *exceptionListenerCaptureLogger) Emergency(message string, contex
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
+func (instance *exceptionListenerCaptureLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *exceptionListenerCaptureLogger) CauseChainDepth() int {
+    return 8
+}
+
 var _ loggingcontract.Logger = (*exceptionListenerCaptureLogger)(nil)
 
 func newExceptionListenerTestRuntimeWithLogger(logger loggingcontract.Logger) containercontract.Runtime {
@@ -277,6 +285,14 @@ func (instance *errorContextRecordingLogger) Error(message string, context loggi
 }
 
 func (instance *errorContextRecordingLogger) Emergency(message string, context loggingcontract.Context) {
+}
+
+func (instance *errorContextRecordingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *errorContextRecordingLogger) CauseChainDepth() int {
+    return 8
 }
 
 func (instance *errorContextRecordingLogger) errorContextFor(message string) (loggingcontract.Context, bool) {
@@ -424,6 +440,14 @@ func (instance *recordsCaptureLogger) Error(message string, context loggingcontr
 
 func (instance *recordsCaptureLogger) Emergency(message string, context loggingcontract.Context) {
     instance.Log(loggingcontract.LevelEmergency, message, context)
+}
+
+func (instance *recordsCaptureLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *recordsCaptureLogger) CauseChainDepth() int {
+    return 8
 }
 
 func (instance *recordsCaptureLogger) failureRecords() []capturedRecord {

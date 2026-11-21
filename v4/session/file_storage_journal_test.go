@@ -60,6 +60,14 @@ func (instance *recordingJournalLogger) Emergency(message string, context loggin
     instance.record("emergency", message, context)
 }
 
+func (instance *recordingJournalLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *recordingJournalLogger) CauseChainDepth() int {
+    return 8
+}
+
 type simulatedJournalCrash struct {
     point journalPoint
 }

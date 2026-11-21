@@ -105,9 +105,13 @@ func (instance *defaultLogger) joinPairs(values []string) string {
     return result
 }
 
+/* Enabled answers true for every level: the default logger has no threshold. */
+func (instance *defaultLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
 func (instance *defaultLogger) CauseChainDepth() int {
     return instance.causeChainDepth
 }
 
 var _ loggingcontract.Logger = (*defaultLogger)(nil)
-var _ loggingcontract.CauseChainDepthReporter = (*defaultLogger)(nil)

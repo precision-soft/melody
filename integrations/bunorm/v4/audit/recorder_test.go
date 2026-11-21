@@ -60,6 +60,14 @@ func (instance *fakeLogger) Error(message string, context loggingcontract.Contex
 }
 func (instance *fakeLogger) Emergency(message string, context loggingcontract.Context) {}
 
+func (instance *fakeLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *fakeLogger) CauseChainDepth() int {
+    return 8
+}
+
 type parityAccount struct {
     Id     int64  `bun:"id,pk"`
     Email  string `bun:"email"`

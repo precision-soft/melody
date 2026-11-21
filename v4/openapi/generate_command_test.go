@@ -485,6 +485,14 @@ func (instance *recordingOpenApiLogger) Error(message string, context loggingcon
 
 func (instance *recordingOpenApiLogger) Emergency(message string, context loggingcontract.Context) {}
 
+func (instance *recordingOpenApiLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *recordingOpenApiLogger) CauseChainDepth() int {
+    return 8
+}
+
 var _ loggingcontract.Logger = (*recordingOpenApiLogger)(nil)
 
 type commandStdoutJournalEnvironmentSource struct {
