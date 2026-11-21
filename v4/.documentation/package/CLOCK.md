@@ -134,7 +134,7 @@ func example(ctx context.Context) (time.Time, error) {
     - `TravelTo(time.Time)`
     - `Advance(time.Duration)`
     - `NewTicker(interval time.Duration) clockcontract.Ticker`
-    - `NewTimer(duration time.Duration) clockcontract.Timer` — on real wall time, sending the frozen `Now` of the moment it fires; `Advance` and `TravelTo` neither fire nor suppress it
+    - `NewTimer(duration time.Duration) clockcontract.Timer` — on real wall time, sending the frozen `Now` of the moment it fires; `Advance` and `TravelTo` neither fire nor suppress it; `Stop` and `Reset` drop a value not yet received, as `time.Timer`'s do since Go 1.23
 
 ### Container helpers (`clock`)
 

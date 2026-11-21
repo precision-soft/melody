@@ -248,7 +248,7 @@ func (instance *EventDispatcher) removeSubscriberListener(entry subscriberRegist
     return instance.removeListenerById(entry.eventName, entry.listenerId)
 }
 
-/* Dispatch runs the listeners of the event's name in priority order, every one of them unless propagation is stopped or a listener declared FailureEndsDispatch fails: a failure of one listener is collected and the next runs. The answer is the one failure, the failures joined through errors.Join in priority order when several failed, or the refusal of a required listener the dispatch ended before, with the failures as its cause. */
+/* Dispatch runs the listeners of the event's name in priority order, every one of them unless propagation is stopped or a listener declared FailureEndsDispatch fails: a failure of one listener is collected and the next runs. The answer is the one failure, the failures joined in priority order when several failed, the join reading already logged only when every failure does, or the refusal of a required listener the dispatch ended before, with the failures as its cause. */
 func (instance *EventDispatcher) Dispatch(runtimeInstance containercontract.Runtime, event eventcontract.Event) (eventcontract.Event, error) {
     return instance.dispatchSafely(
         runtimeInstance,
@@ -530,7 +530,7 @@ func (instance *EventDispatcher) dispatch(runtimeInstance containercontract.Runt
     return eventValue, joinListenerErrors(listenerErrs)
 }
 
-/* joinListenerErrors answers nil for no failure, the failure itself for one, so its type reaches the caller unchanged, and errors.Join of every failure in priority order for several. */
+/* joinListenerErrors answers nil for no failure, the failure itself for one, so its type reaches the caller unchanged, and a listenerFailures joining every failure in priority order for several. */
 func joinListenerErrors(listenerErrs []error) error {
     if 0 == len(listenerErrs) {
         return nil
@@ -540,7 +540,36 @@ func joinListenerErrors(listenerErrs []error) error {
         return listenerErrs[0]
     }
 
-    return errors.Join(listenerErrs...)
+    return &listenerFailures{failures: append([]error(nil), listenerErrs...)}
+}
+
+/* listenerFailures joins several listener failures as errors.Join does and reads already logged only when every failure does, so a logged panic beside an unlogged error does not silence the caller's record of the second one. */
+type listenerFailures struct {
+    failures []error
+}
+
+func (instance *listenerFailures) Error() string {
+    return errors.Join(instance.failures...).Error()
+}
+
+func (instance *listenerFailures) Unwrap() []error {
+    return instance.failures
+}
+
+func (instance *listenerFailures) AlreadyLogged() bool {
+    for _, failure := range instance.failures {
+        if false == exception.IsAlreadyLogged(failure) {
+            return false
+        }
+    }
+
+    return true
+}
+
+func (instance *listenerFailures) MarkAsLogged() {
+    for _, failure := range instance.failures {
+        _ = exception.MarkLogged(failure)
+    }
 }
 
 func isEventPropagationStopped(eventValue eventcontract.Event) bool {

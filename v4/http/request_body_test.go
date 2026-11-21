@@ -2,6 +2,7 @@ package http
 
 import (
     "context"
+    "errors"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
@@ -493,5 +494,28 @@ func TestValidateBoundBody_HandsTheRequestsRuntimeToTheConstraints(t *testing.T)
 
     if runtimeInstance != recording.seen {
         t.Fatalf("expected the request's runtime handed to the constraint, got %v", recording.seen)
+    }
+}
+
+func TestBoundBodyValidationAnswer_AValidatorErrorThatIsNoValidationIsAServerFailure(t *testing.T) {
+    validatorErr := errors.New("the runtime is nil or carries no context")
+
+    answer := boundBodyValidationAnswer(validatorErr)
+    if nil == answer || false == errors.Is(answer, validatorErr) {
+        t.Fatalf("expected the validator's error carried as the cause, got %v", answer)
+    }
+
+    var httpException *exception.HttpException
+    if true == errors.As(answer, &httpException) {
+        t.Fatalf("expected a server failure, not the client's %d", httpException.StatusCode())
+    }
+
+    if nil != boundBodyValidationAnswer(nil) {
+        t.Fatalf("expected no error for a valid body")
+    }
+
+    var validationException *exception.HttpException
+    if false == errors.As(boundBodyValidationAnswer(validation.ValidationErrors{validation.NewValidationError("name", "is required", "required", nil)}), &validationException) || nethttp.StatusBadRequest != validationException.StatusCode() {
+        t.Fatalf("expected validation errors answered as the client's 400")
     }
 }

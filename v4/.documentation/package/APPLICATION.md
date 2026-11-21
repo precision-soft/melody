@@ -12,7 +12,7 @@ It coordinates configuration resolution, container bootstrapping, module wiring 
 ## Subpackages
 
 - [`application/contract`](../../application/contract)
-  Public module contracts (`Module`, `ModuleProvider`, `ParameterModule`, `ServiceModule`, `HttpModule`, `HttpMiddlewareModule`, `HttpMiddlewareRegistrar`, `MiddlewareRegistration`, `MiddlewareFactory`, `HttpHandlerDecoratorModule`, `CliModule`, `EventModule`, `ConfigModule`, `BootWarningModule`, `BootWarningRegistrar`, `BootWarning`, `EnvironmentKeyModule`, `EnvironmentKeyRegistrar`).
+  Public module contracts (`Module`, `ModuleProvider`, `ParameterModule`, `ServiceModule`, `HttpModule`, `HttpMiddlewareModule`, `HttpMiddlewareRegistrar`, `MiddlewareRegistration`, `HttpHandlerDecoratorModule`, `CliModule`, `EventModule`, `ConfigModule`, `BootWarningModule`, `BootWarningRegistrar`, `BootWarning`, `EnvironmentKeyModule`, `EnvironmentKeyRegistrar`).
 
 ## Responsibilities
 

@@ -268,3 +268,29 @@ func TestLazyLocker_TheInnerLockersRefusalIsTheErrorOfTheFirstAcquire(t *testing
         t.Fatalf("expected the inner refusal as the first Acquire's error, got %v %v", acquired, acquireErr)
     }
 }
+
+func TestLazyLocker_AnInnerLockerAnsweringNoLockIsTheErrorOfEveryDoor(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    container.MustRegister[lockcontract.Locker](
+        serviceContainer,
+        ServiceLocker,
+        func(resolver containercontract.Resolver) (lockcontract.Locker, error) {
+            return &noLockLocker{}, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    lock, createErr := NewLazyLocker(serviceContainer).CreateLock("job", bound.Of(time.Second))
+    if nil != createErr {
+        t.Fatalf("expected the lazy locker to answer its lock, got %v", createErr)
+    }
+
+    runtimeInstance := testRuntimeWithContext(context.Background())
+
+    for attempt := 0; attempt < 2; attempt++ {
+        acquired, acquireErr := lock.Acquire(runtimeInstance)
+        if true == acquired || false == namesNoLock(acquireErr) {
+            t.Fatalf("attempt %d: expected the no-lock refusal, got %v %v", attempt, acquired, acquireErr)
+        }
+    }
+}

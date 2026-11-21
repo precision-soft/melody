@@ -16,6 +16,7 @@ import (
     "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    melodylock "github.com/precision-soft/melody/v4/lock"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -650,7 +651,7 @@ func (instance *Relay) acquireLease(runtimeInstance containercontract.Runtime) (
         return noopRelease, noopRefresh, true, nil
     }
 
-    lock, createErr := instance.config.Locker.CreateLock(instance.config.LockName, bound.Of(instance.config.LockTtl))
+    lock, createErr := melodylock.CreateLock(instance.config.Locker, instance.config.LockName, bound.Of(instance.config.LockTtl))
     if nil != createErr {
         return noopRelease, noopRefresh, false, createErr
     }

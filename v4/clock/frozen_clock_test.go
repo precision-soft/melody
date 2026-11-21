@@ -4,6 +4,7 @@ import (
     "testing"
     "time"
 
+    clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
 )
 
@@ -248,5 +249,68 @@ func TestFrozenClock_AStoppedTimerNeverFiresAndAFiredOneAnswersFalse(t *testing.
 
     if true == fired.Stop() {
         t.Fatalf("expected Stop of a fired timer to answer false")
+    }
+}
+
+func TestFrozenClock_AnUnreadFiringIsDroppedByResetAndStopAsOnTheSystemClock(t *testing.T) {
+    clocks := map[string]clockcontract.Clock{
+        "frozen": NewFrozenClock(time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)),
+        "system": NewSystemClock(),
+    }
+
+    for clockName, clockInstance := range clocks {
+        resetTimer := clockInstance.NewTimer(time.Millisecond)
+        time.Sleep(30 * time.Millisecond)
+
+        if false == resetTimer.Reset(60*time.Millisecond) {
+            t.Fatalf("%s: expected Reset of a fired timer whose value was not received to answer true", clockName)
+        }
+
+        select {
+        case <-resetTimer.Channel():
+            t.Fatalf("%s: expected the unread firing dropped by Reset, nothing readable before the new duration", clockName)
+        case <-time.After(30 * time.Millisecond):
+        }
+
+        select {
+        case <-resetTimer.Channel():
+        case <-time.After(2 * time.Second):
+            t.Fatalf("%s: expected the reset timer to fire once after the new duration", clockName)
+        }
+
+        select {
+        case <-resetTimer.Channel():
+            t.Fatalf("%s: expected one value after the reset, got a second", clockName)
+        case <-time.After(30 * time.Millisecond):
+        }
+
+        stopTimer := clockInstance.NewTimer(time.Millisecond)
+        time.Sleep(30 * time.Millisecond)
+
+        if false == stopTimer.Stop() {
+            t.Fatalf("%s: expected Stop of a fired timer whose value was not received to answer true", clockName)
+        }
+
+        select {
+        case <-stopTimer.Channel():
+            t.Fatalf("%s: expected the unread firing dropped by Stop", clockName)
+        case <-time.After(30 * time.Millisecond):
+        }
+    }
+}
+
+func TestFrozenClock_AFiringParkedBehindAStopSendsNothing(t *testing.T) {
+    timerInstance := NewFrozenClock(time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)).NewTimer(time.Millisecond).(*frozenTimer)
+
+    /* the firing runs while the mutex is held, so it parks on it, as one does that races a Stop */
+    timerInstance.mutex.Lock()
+    time.Sleep(30 * time.Millisecond)
+    timerInstance.disarm()
+    timerInstance.mutex.Unlock()
+
+    select {
+    case <-timerInstance.Channel():
+        t.Fatalf("expected a firing retired by the Stop it raced to send nothing")
+    case <-time.After(30 * time.Millisecond):
     }
 }

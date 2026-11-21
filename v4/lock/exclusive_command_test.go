@@ -253,3 +253,17 @@ func TestNewExclusiveCommand_HandsItsStopRenewalLimitToTheRun(t *testing.T) {
         t.Fatalf("expected the limit handed to the run, got %v", command.exclusiveConfig.StopRenewalLimit)
     }
 }
+
+func TestNewExclusiveCommand_ALockerAnsweringNoLockIsRefusedAtConstruction(t *testing.T) {
+    var recovered any
+    func() {
+        defer func() { recovered = recover() }()
+
+        NewExclusiveCommand(&recordingCommand{name: "report:build"}, &noLockLocker{}, ExclusiveCommandConfig{})
+    }()
+
+    refusal, isMelodyErr := recovered.(*exception.Error)
+    if false == isMelodyErr || false == namesNoLock(refusal) {
+        t.Fatalf("expected a panic carrying the no-lock refusal, got %#v", recovered)
+    }
+}

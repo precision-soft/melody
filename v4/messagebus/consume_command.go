@@ -317,16 +317,9 @@ func (instance *consumeSession) consumeFrom(
                     return
                 case envelopeInstance, open := <-queue:
                     if false == open {
-                        if nil == signalContext.Err() {
+                        if closedErr := closedStreamError(signalContext, subscription); nil != closedErr {
                             loopErrOnce.Do(func() {
-                                streamErr := subscription.Err()
-                                if nil == streamErr {
-                                    loopErr = exception.NewError("transport delivery channel closed unexpectedly", nil, nil)
-
-                                    return
-                                }
-
-                                loopErr = exception.NewError("transport delivery channel closed", nil, streamErr)
+                                loopErr = closedErr
                             })
                         }
                         cancelWorkers()
@@ -363,6 +356,20 @@ func (instance *consumeSession) consumeFrom(
         /* returning runs the deferred cancelHandlers, so the grace is also the deadline for whatever is still in flight */
         return exception.NewError("consumer shutdown timed out waiting for in-flight handlers", nil, nil)
     }
+}
+
+/* closedStreamError judges a stream that closed: nil once the stop was asked, whatever reason the subscription gives, since the stop closes it; otherwise the subscription's reason as the cause of the closure, or the closure named unexpected when it gives none. */
+func closedStreamError(signalContext context.Context, subscription messagebuscontract.Subscription) error {
+    if nil != signalContext.Err() {
+        return nil
+    }
+
+    streamErr := subscription.Err()
+    if nil == streamErr {
+        return exception.NewError("transport delivery channel closed unexpectedly", nil, nil)
+    }
+
+    return exception.NewError("transport delivery channel closed", nil, streamErr)
 }
 
 /* consumeRecovered runs consume behind a panic barrier, so a panic outside the handler dispatch (scope setup, Ack/Nack, scope teardown) is logged and the worker survives to take the next delivery. A handler panic already enters the retry pipeline inside dispatchSafely; the in-flight delivery here stays unacked, so the broker redelivers it. */

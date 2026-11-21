@@ -48,12 +48,10 @@ func RenderMessage(message mailercontract.Message) ([]byte, error) {
     return renderMessage(message, messageIdOf(message))
 }
 
-/* messageIdOf answers the Message-ID the wire message carries: the caller's own header, trimmed, when it set one, else one minted for the sender, so the header and a receipt are one value. */
+/* messageIdOf answers the Message-ID the wire message carries: the caller's own header, trimmed, when it set one with a value, else one minted for the sender, so the header and a receipt are one value. A message carrying the header under two spellings is refused by renderMessage. */
 func messageIdOf(message mailercontract.Message) string {
-    for key, value := range message.Headers {
-        if "message-id" == strings.ToLower(strings.TrimSpace(key)) {
-            return strings.TrimSpace(value)
-        }
+    if callerMessageId, _ := callerMessageIdOf(message.Headers); "" != callerMessageId {
+        return callerMessageId
     }
 
     if "" == message.From.Email {
@@ -88,7 +86,12 @@ func renderMessage(message mailercontract.Message, messageId string) ([]byte, er
     writeHeader(&builder, "Date", time.Now().Format(time.RFC1123Z))
     writeHeader(&builder, "MIME-Version", "1.0")
 
-    if false == hasHeader(message.Headers, "message-id") {
+    callerMessageId, messageIdErr := callerMessageIdOf(message.Headers)
+    if nil != messageIdErr {
+        return nil, messageIdErr
+    }
+
+    if "" == callerMessageId {
         writeHeader(&builder, "Message-ID", messageId)
     }
 
@@ -101,6 +104,10 @@ func renderMessage(message mailercontract.Message, messageId string) ([]byte, er
 
         normalizedKey := strings.ToLower(key)
         if _, reserved := reservedHeaders[normalizedKey]; true == reserved {
+            continue
+        }
+        /* a blank Message-ID is the caller's absent one, the minted id written above in its place */
+        if "message-id" == normalizedKey && "" == strings.TrimSpace(value) {
             continue
         }
         if _, structured := structuredIdentifierHeaders[normalizedKey]; true == structured {
@@ -306,14 +313,29 @@ func writeHeader(builder *strings.Builder, name string, value string) {
     builder.WriteString(lineBreak)
 }
 
-func hasHeader(headers map[string]string, name string) bool {
-    for key := range headers {
-        if name == strings.ToLower(strings.TrimSpace(key)) {
-            return true
+/* callerMessageIdOf answers the caller's Message-ID trimmed, empty when it set none or a blank one, and refuses the header set under two spellings, which would leave the written value to the map's order */
+func callerMessageIdOf(headers map[string]string) (string, error) {
+    callerMessageId := ""
+    spellings := 0
+
+    for key, value := range headers {
+        if "message-id" != strings.ToLower(strings.TrimSpace(key)) {
+            continue
         }
+
+        spellings++
+        if 1 < spellings {
+            return "", exception.NewError(
+                "Message-ID header is set under more than one spelling",
+                map[string]any{"header": "Message-ID"},
+                nil,
+            )
+        }
+
+        callerMessageId = strings.TrimSpace(value)
     }
 
-    return false
+    return callerMessageId, nil
 }
 
 func newMessageId(senderEmail string) string {

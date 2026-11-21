@@ -2,6 +2,7 @@ package messagebus
 
 import (
     "bytes"
+    "context"
     "os"
     "strings"
     "sync"
@@ -9,6 +10,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
@@ -116,6 +118,87 @@ func TestInMemoryTransport_CloseClosesTheReceiveChannelSoAConsumerSeesEndOfStrea
         }
     case <-time.After(2 * time.Second):
         t.Fatalf("expected Close to close the Receive channel so a consumer ranging it ends; it stayed open")
+    }
+}
+
+func TestInMemoryTransport_ASubscriptionEndsWithItsRuntimeAndTheQueueServesTheNextOne(t *testing.T) {
+    for _, bufferSize := range []int{0, 4} {
+        transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(bufferSize)})
+        runtimeInstance := newTestRuntime()
+
+        stoppedContext, stop := context.WithCancel(context.Background())
+        stoppedSubscription, receiveErr := transport.Receive(runtime.WithContext(runtimeInstance, stoppedContext))
+        if nil != receiveErr {
+            t.Fatalf("size %d: receive: %v", bufferSize, receiveErr)
+        }
+
+        go func() {
+            _ = transport.Send(runtimeInstance, NewEnvelope(taskCreated{TaskId: 7}, nil))
+        }()
+
+        /* the stopped subscription may already hold the delivery; it hands it back to the queue */
+        time.Sleep(20 * time.Millisecond)
+        stop()
+
+        select {
+        case _, open := <-stoppedSubscription.Envelopes():
+            for true == open {
+                _, open = <-stoppedSubscription.Envelopes()
+            }
+        case <-time.After(2 * time.Second):
+            t.Fatalf("size %d: expected the stream to close once its runtime ended, with the transport still open", bufferSize)
+        }
+
+        if nil != stoppedSubscription.Err() {
+            t.Fatalf("size %d: expected no reason for a stop asked through the runtime, got %v", bufferSize, stoppedSubscription.Err())
+        }
+
+        nextSubscription, _ := transport.Receive(runtimeInstance)
+
+        select {
+        case envelopeInstance, open := <-nextSubscription.Envelopes():
+            if false == open {
+                t.Fatalf("size %d: expected the shared queue to stay open for the next subscription", bufferSize)
+            }
+
+            if 7 != envelopeInstance.Message().(taskCreated).TaskId {
+                t.Fatalf("size %d: expected the delivery the stopped subscription did not hand on, got %v", bufferSize, envelopeInstance.Message())
+            }
+        case <-time.After(2 * time.Second):
+            t.Fatalf("size %d: expected the next subscription to receive the delivery", bufferSize)
+        }
+
+        _ = transport.CloseWithContext(t.Context())
+    }
+}
+
+func TestInMemoryTransport_AnIdleSubscriptionClosesItsStreamWhenItsRuntimeEnds(t *testing.T) {
+    transport := NewInMemoryTransport(InMemoryTransportConfig{})
+    defer func() {
+        _ = transport.CloseWithContext(t.Context())
+    }()
+
+    stoppedContext, stop := context.WithCancel(context.Background())
+    subscription, _ := transport.Receive(runtime.WithContext(newTestRuntime(), stoppedContext))
+
+    stop()
+
+    select {
+    case _, open := <-subscription.Envelopes():
+        if true == open {
+            t.Fatalf("expected no delivery on an idle subscription")
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected the idle subscription's stream to close once its runtime ended, with the transport still open")
+    }
+}
+
+func TestInMemoryTransport_ReceiveRefusesANilRuntime(t *testing.T) {
+    transport := NewInMemoryTransport(InMemoryTransportConfig{})
+
+    subscription, receiveErr := transport.Receive(nil)
+    if nil == receiveErr || nil != subscription {
+        t.Fatalf("expected a nil runtime refused with no subscription, got %v and %v", subscription, receiveErr)
     }
 }
 

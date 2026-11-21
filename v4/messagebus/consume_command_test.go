@@ -152,7 +152,7 @@ func TestConsume_ExhaustsRetriesAndRoutesToFailureTransport(t *testing.T) {
         if 2 != RedeliveryCount(deadLettered) {
             t.Fatalf("expected the dead-lettered envelope to carry a redelivery count of 2, got %d", RedeliveryCount(deadLettered))
         }
-    default:
+    case <-time.After(2 * time.Second):
         t.Fatalf("expected the exhausted message to be routed to the failure transport")
     }
 }
@@ -192,7 +192,7 @@ func TestConsume_AMessageExhaustedOnTheFailureTransportItselfIsNotSentBackToIt(t
     select {
     case leftover := <-failureQueue:
         t.Fatalf("expected the message not sent back to the failure transport, found %v", leftover.Message())
-    default:
+    case <-time.After(100 * time.Millisecond):
     }
 }
 
@@ -230,7 +230,7 @@ func TestConsume_ExhaustedWithoutFailureTransportDropsMessage(t *testing.T) {
     select {
     case leftover := <-sourceQueue:
         t.Fatalf("expected the exhausted message to be dropped, found %v still queued", leftover.Message())
-    default:
+    case <-time.After(100 * time.Millisecond):
     }
 }
 
@@ -481,6 +481,25 @@ func TestConsumeFrom_AStreamThatEndsAfterTheStopAnswersNilWhateverItsReason(t *t
     consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, &closedQueueTransport{queue: queue, streamErr: errors.New("ignored after the stop")}, 0, 1)
     if nil != consumeErr {
         t.Fatalf("expected no error for a stream that ended after the stop, got %v", consumeErr)
+    }
+}
+
+func TestClosedStreamError_AStreamClosedAfterTheStopIsNoErrorWhateverItsReason(t *testing.T) {
+    reason := errors.New("the connection is gone")
+
+    stoppedContext, stop := context.WithCancel(context.Background())
+    stop()
+
+    if closedErr := closedStreamError(stoppedContext, &queueSubscription{err: reason}); nil != closedErr {
+        t.Fatalf("expected no error for a stream closed after the stop, got %v", closedErr)
+    }
+
+    if closedErr := closedStreamError(context.Background(), &queueSubscription{err: reason}); false == errors.Is(closedErr, reason) {
+        t.Fatalf("expected the reason as the cause of a closure without the stop, got %v", closedErr)
+    }
+
+    if closedErr := closedStreamError(context.Background(), &queueSubscription{}); nil == closedErr || false == strings.Contains(closedErr.Error(), "closed unexpectedly") {
+        t.Fatalf("expected a closure with no reason and no stop named unexpected, got %v", closedErr)
     }
 }
 
@@ -791,7 +810,7 @@ func TestConsume_PanickingHandlerFlowsIntoRetryPipeline(t *testing.T) {
         if 2 != RedeliveryCount(deadLettered) {
             t.Fatalf("expected the dead-lettered envelope to carry a redelivery count of 2, got %d", RedeliveryCount(deadLettered))
         }
-    default:
+    case <-time.After(2 * time.Second):
         t.Fatalf("expected the poison message to reach the failure transport instead of crashing the consumer")
     }
 }

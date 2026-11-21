@@ -2,6 +2,7 @@ package lock
 
 import (
     "context"
+    "fmt"
     "strings"
     "sync"
     "testing"
@@ -10,6 +11,7 @@ import (
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
+    "github.com/precision-soft/melody/v4/exception"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -134,4 +136,16 @@ func mustCreateLock(lock lockcontract.Lock, createErr error) lockcontract.Lock {
     }
 
     return lock
+}
+
+/* noLockLocker answers neither a lock nor an error, the slip a locker of the application's own can make */
+type noLockLocker struct{}
+
+func (instance *noLockLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+    return nil, nil
+}
+
+/* namesNoLock reports whether a refusal's cause chain carries the no-lock refusal */
+func namesNoLock(err error) bool {
+    return nil != err && true == strings.Contains(fmt.Sprint(exception.LogContext(err, exception.LogContextConfig{})), "the locker answered no lock")
 }

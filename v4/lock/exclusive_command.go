@@ -60,7 +60,7 @@ func NewExclusiveCommand(
     }
 
     /* created once to read the locker's refusal at construction, a decorated locker's included; every run creates its own */
-    if _, createErr := locker.CreateLock(lockName, ttl.Limit()); nil != createErr {
+    if _, createErr := CreateLock(locker, lockName, ttl.Limit()); nil != createErr {
         message := "the exclusive command locker refused its lock"
         if true == exception.ChainIs(createErr, lockcontract.ErrUnlimitedTtlRefused) {
             message = "an unlimited exclusive command ttl needs a session-style locker"

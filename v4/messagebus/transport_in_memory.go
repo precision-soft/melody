@@ -62,7 +62,7 @@ type InMemoryTransport struct {
     done      chan struct{}
     closeOnce sync.Once
 
-    /* sendMutex lets CloseWithContext close the queue without racing a send: every send holds it as a reader across its closed-check and the send, and CloseWithContext holds it as the writer around close(queue), after closing done. The queue is closed so a consumer ranging over Receive() sees the end of stream. */
+    /* sendMutex lets CloseWithContext close the queue without racing a send: every send holds it as a reader across its closed-check and the send, and CloseWithContext holds it as the writer around close(queue), after closing done. The queue is closed so every subscription's stream sees the end of stream. */
     sendMutex sync.RWMutex
 
     logger loggingcontract.Logger
@@ -96,19 +96,71 @@ func (instance *InMemoryTransport) Send(
     }
 }
 
-/* Receive answers the queue as the subscription; it ends only when the transport is closed, so its Err is always nil. */
+/* Receive answers a subscription of its own over the shared queue: its stream closes when the runtime handed to Receive ends or the transport closes, so each subscription ends alone and the queue stays open for the others; its Err is always nil. A delivery taken from the queue when the runtime ends is handed back to it. */
 func (instance *InMemoryTransport) Receive(
     runtimeInstance containercontract.Runtime,
 ) (messagebuscontract.Subscription, error) {
-    return &inMemorySubscription{queue: instance.queue}, nil
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return nil, refuseErr
+    }
+
+    subscription := &inMemorySubscription{envelopes: make(chan messagebuscontract.Envelope)}
+
+    go instance.forward(runtimeInstance.Context(), subscription.envelopes, instance.resolveLogger(runtimeInstance))
+
+    return subscription, nil
+}
+
+/* forward hands the queue's deliveries to one subscription's stream until its runtime's context ends or the queue closes, then closes the stream */
+func (instance *InMemoryTransport) forward(
+    runtimeContext context.Context,
+    envelopes chan messagebuscontract.Envelope,
+    logger loggingcontract.Logger,
+) {
+    defer close(envelopes)
+
+    for {
+        select {
+        case <-runtimeContext.Done():
+            return
+        case envelopeInstance, open := <-instance.queue:
+            if false == open {
+                return
+            }
+
+            select {
+            case envelopes <- envelopeInstance:
+            case <-runtimeContext.Done():
+                /* the delivery was taken for a consumer that stopped, so it goes back to the queue for the other subscribers instead of being lost: at once where a buffered queue has room, otherwise once a receiver or room arrives */
+                if 0 < cap(instance.queue) && nil == instance.requeue(envelopeInstance) {
+                    return
+                }
+
+                go instance.handBack(envelopeInstance, logger)
+
+                return
+            }
+        }
+    }
+}
+
+/* handBack returns a delivery no consumer received to the queue, waiting for room or for the transport's close, which journals the drop */
+func (instance *InMemoryTransport) handBack(envelopeInstance messagebuscontract.Envelope, logger loggingcontract.Logger) {
+    if requeueErr := instance.requeueWhenReceived(envelopeInstance); nil != requeueErr {
+        if true == internal.IsNilInterface(logger) {
+            logger = logging.EmergencyLogger()
+        }
+
+        logger.Error("in-memory transport dropped a delivery its stopped subscription took", exception.LogContext(requeueErr, exception.LogContextConfig{}))
+    }
 }
 
 type inMemorySubscription struct {
-    queue chan messagebuscontract.Envelope
+    envelopes chan messagebuscontract.Envelope
 }
 
 func (instance *inMemorySubscription) Envelopes() <-chan messagebuscontract.Envelope {
-    return instance.queue
+    return instance.envelopes
 }
 
 func (instance *inMemorySubscription) Err() error {
@@ -189,7 +241,7 @@ func (instance *InMemoryTransport) requeue(envelopeInstance messagebuscontract.E
     }
 }
 
-/* requeueWhenReceived is the requeue of an unbuffered queue: it waits for a receiver, or for the transport's close */
+/* requeueWhenReceived is the requeue of an unbuffered queue and of a delivery handed back: it waits for a receiver or for room, or for the transport's close */
 func (instance *InMemoryTransport) requeueWhenReceived(envelopeInstance messagebuscontract.Envelope) error {
     /* held across both selects for the reason Send holds it */
     instance.sendMutex.RLock()

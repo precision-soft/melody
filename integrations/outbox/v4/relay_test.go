@@ -1915,3 +1915,22 @@ func TestRelay_AnOutageAfterARecoveryWritesARecordOfItsOwn(t *testing.T) {
         t.Fatalf("expected one outage record per outage, got %d", len(records))
     }
 }
+
+/* a locker answering neither a lock nor an error is the run's error, never a nil lock acquired */
+type noLockLocker struct{}
+
+func (instance *noLockLocker) CreateLock(_ string, ttl bound.Duration) (lockcontract.Lock, error) {
+    return nil, nil
+}
+
+func TestRelay_ALockerAnsweringNoLockIsTheRunsError(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{{Id: 1, TypeName: "string", Payload: []byte("x")}}}
+    transport := &fakeTransport{}
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}, Locker: &noLockLocker{}})
+
+    published, runErr := relay.RunOnce(relayTestRuntime())
+    if nil == runErr || false == strings.Contains(runErr.Error(), "the locker answered no lock") || 0 != published || 0 != len(transport.sent) {
+        t.Fatalf("expected the no-lock refusal as the run's error and no work, got %d %v", published, runErr)
+    }
+}

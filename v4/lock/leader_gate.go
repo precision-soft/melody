@@ -109,7 +109,7 @@ func NewLeaderGate(locker lockcontract.Locker, name string, config LeaderGateCon
     }
 
     /* the lock is created once here to read the locker's refusal at construction, a decorated locker's included; a campaign creates its own, each minting a new fencing token */
-    if _, createErr := locker.CreateLock(name, gate.lockTtl()); nil != createErr {
+    if _, createErr := CreateLock(locker, name, gate.lockTtl()); nil != createErr {
         message := "the leader gate locker refused its lock"
         if true == exception.ChainIs(createErr, lockcontract.ErrUnlimitedTtlRefused) {
             message = "an unlimited leader gate ttl needs a session-style locker"
@@ -287,7 +287,7 @@ func (instance *LeaderGate) Run(runtimeInstance containercontract.Runtime) error
         }
 
         /* a fresh lock per campaign: every CreateLock mints a new fencing token, and a lock reused after losing it would alias the tokens of the holder that took it over */
-        lock, acquireErr := instance.locker.CreateLock(instance.name, instance.lockTtl())
+        lock, acquireErr := CreateLock(instance.locker, instance.name, instance.lockTtl())
 
         acquireIssuedAt := time.Now()
         acquired := false

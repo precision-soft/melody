@@ -1566,3 +1566,17 @@ func TestRunExclusive_ALockersRefusalIsTheRunsErrorAndTheCallbackDoesNotRun(t *t
         t.Fatalf("expected the refusal and no run, got %v %v %v", ran, called, runErr)
     }
 }
+
+func TestRunExclusive_ALockerAnsweringNoLockIsTheRunsErrorAndTheCallbackDoesNotRun(t *testing.T) {
+    called := false
+
+    ran, runErr := RunExclusive(testRuntime(), &noLockLocker{}, "job:none", ExclusiveConfig{Ttl: bound.Of(time.Second)}, func(runtimeInstance containercontract.Runtime) error {
+        called = true
+
+        return nil
+    })
+
+    if true == ran || true == called || false == namesNoLock(runErr) {
+        t.Fatalf("expected the no-lock refusal and no run, got %v %v %v", ran, called, runErr)
+    }
+}

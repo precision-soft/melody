@@ -85,7 +85,7 @@ func RunExclusive(
         return false, stopRenewalLimitErr
     }
 
-    lock, createErr := locker.CreateLock(name, ttl.Limit())
+    lock, createErr := CreateLock(locker, name, ttl.Limit())
     if nil != createErr {
         return false, createErr
     }

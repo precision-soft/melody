@@ -21,6 +21,7 @@ Locking is opt-in. The core defines the contract and an in-memory `Locker` (sing
     - [`InMemoryLocker`](../../lock/in_memory.go)
     - [`NewInMemoryLocker`](../../lock/in_memory.go)
 - Provide the patterns built on the contract, so consumers do not hand-roll them:
+    - [`CreateLock`](../../lock/create_lock.go) — asks a locker for a lock and refuses one answering neither a lock nor an error with `the locker answered no lock`, naming the lock; `RunExclusive`, `LeaderGate`, `NewExclusiveCommand`, the lazy locker and the outbox relay create their locks through it
     - [`RunExclusive`](../../lock/run_exclusive.go) — run-once-per-tick around a callback
     - [`ExclusiveCommand`](../../lock/exclusive_command.go) — the same, as a CLI command decorator
     - [`LeaderGate`](../../lock/leader_gate.go) — become leader, renew, release on shutdown

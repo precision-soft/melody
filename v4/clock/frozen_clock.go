@@ -57,26 +57,31 @@ func (instance *FrozenClock) NewTicker(interval time.Duration) clockcontract.Tic
     return newFrozenTicker(instance, time.NewTicker(interval))
 }
 
-/* NewTimer answers a timer on real wall time whose value is the frozen Now of the moment it fires; Advance and TravelTo neither fire nor suppress it. */
+/* NewTimer answers a timer on real wall time whose value is the frozen Now of the moment it fires; Advance and TravelTo neither fire nor suppress it. Stop and Reset follow time.Timer since Go 1.23: a value not yet received when they are called is dropped, so no stale value is read after either, and a fired timer whose value was not received answers true. */
 func (instance *FrozenClock) NewTimer(duration time.Duration) clockcontract.Timer {
-    channelInstance := make(chan time.Time, 1)
-
-    return &frozenTimer{
-        channel: channelInstance,
-        timer: time.AfterFunc(duration, func() {
-            select {
-            case channelInstance <- instance.Now():
-            default:
-            }
-        }),
+    timerInstance := &frozenTimer{
+        clockInstance: instance,
+        channel:       make(chan time.Time, 1),
     }
+
+    timerInstance.mutex.Lock()
+    defer timerInstance.mutex.Unlock()
+
+    timerInstance.arm(duration)
+
+    return timerInstance
 }
 
 var _ clockcontract.Clock = (*FrozenClock)(nil)
 
 type frozenTimer struct {
-    channel chan time.Time
-    timer   *time.Timer
+    clockInstance *FrozenClock
+    channel       chan time.Time
+
+    /* mutex orders a firing against Stop and Reset: a firing of an older generation sends nothing */
+    mutex      sync.Mutex
+    timer      *time.Timer
+    generation uint64
 }
 
 func (instance *frozenTimer) Channel() <-chan time.Time {
@@ -84,11 +89,61 @@ func (instance *frozenTimer) Channel() <-chan time.Time {
 }
 
 func (instance *frozenTimer) Stop() bool {
-    return instance.timer.Stop()
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return instance.disarm()
 }
 
 func (instance *frozenTimer) Reset(duration time.Duration) bool {
-    return instance.timer.Reset(duration)
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    active := instance.disarm()
+
+    instance.arm(duration)
+
+    return active
+}
+
+/* arm starts a firing of a new generation; the caller holds the mutex */
+func (instance *frozenTimer) arm(duration time.Duration) {
+    instance.generation++
+    generation := instance.generation
+
+    instance.timer = time.AfterFunc(duration, func() {
+        instance.fire(generation)
+    })
+}
+
+/* disarm stops the pending firing, retires its generation so one already in flight sends nothing, and drops a value not yet received; it answers whether the timer was pending or held an unreceived value. The caller holds the mutex. */
+func (instance *frozenTimer) disarm() bool {
+    active := instance.timer.Stop()
+    instance.generation++
+
+    select {
+    case <-instance.channel:
+        active = true
+    default:
+    }
+
+    return active
+}
+
+func (instance *frozenTimer) fire(generation uint64) {
+    now := instance.clockInstance.Now()
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if generation != instance.generation {
+        return
+    }
+
+    select {
+    case instance.channel <- now:
+    default:
+    }
 }
 
 var _ clockcontract.Timer = (*frozenTimer)(nil)

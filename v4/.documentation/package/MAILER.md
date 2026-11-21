@@ -29,7 +29,7 @@ Mailing is opt-in. Userland builds a `Mailer` over a `Transport` and registers i
 
 ## Message rendering
 
-[`RenderMessage`](../../mailer/message.go) writes standard headers (`From`, `To`, `Cc`, `Reply-To`, `Subject`, `Date`, `MIME-Version`, and a `Message-ID` generated from the sender's domain unless the caller's `Headers` carry one) plus any custom `Headers`, then a body chosen from the populated fields:
+[`RenderMessage`](../../mailer/message.go) writes standard headers (`From`, `To`, `Cc`, `Reply-To`, `Subject`, `Date`, `MIME-Version`, and a `Message-ID` generated from the sender's domain unless the caller's `Headers` carry one with a value; a blank one is replaced by the generated id, and the header set under two spellings, `Message-ID` and `message-id`, is refused naming it) plus any custom `Headers`, then a body chosen from the populated fields:
 
 - both `Text` and `Html` → `multipart/alternative` with a `text/plain` and a `text/html` part;
 - only `Html` → `text/html`;

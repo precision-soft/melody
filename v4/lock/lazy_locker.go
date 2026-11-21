@@ -76,7 +76,7 @@ func (instance *deferredLock) resolvedLock(runtimeInstance containercontract.Run
         )
     }
 
-    createdLock, createErr := locker.CreateLock(instance.name, instance.ttl)
+    createdLock, createErr := CreateLock(locker, instance.name, instance.ttl)
     if nil != createErr {
         return nil, createErr
     }

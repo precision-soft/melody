@@ -2004,3 +2004,17 @@ func TestNewExclusiveCommand_RefusesAnUnlimitedTtlOverADecoratedLeaseLockerAtCon
 
     NewExclusiveCommand(&recordingCommand{}, &decoratedLocker{Locker: NewInMemoryLocker(clock.NewSystemClock())}, ExclusiveCommandConfig{Ttl: bound.UnlimitedDuration()})
 }
+
+func TestNewLeaderGate_ALockerAnsweringNoLockIsRefusedAtConstruction(t *testing.T) {
+    var recovered any
+    func() {
+        defer func() { recovered = recover() }()
+
+        NewLeaderGate(&noLockLocker{}, "worker:none", LeaderGateConfig{})
+    }()
+
+    refusal, isMelodyErr := recovered.(*exception.Error)
+    if false == isMelodyErr || false == namesNoLock(refusal) {
+        t.Fatalf("expected a panic carrying the no-lock refusal, got %#v", recovered)
+    }
+}

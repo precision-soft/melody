@@ -1053,3 +1053,40 @@ func TestRenderMessage_AnAttachmentWithoutANameOmitsTheFilenameParameter(t *test
         }
     }
 }
+
+func TestRenderMessage_AMessageIdUnderTwoSpellingsIsRefusedNamingTheHeader(t *testing.T) {
+    _, renderErr := RenderMessage(mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Welcome",
+        Text:    "Hello",
+        Headers: map[string]string{"Message-ID": "<one@example.com>", "message-id": "<two@example.com>"},
+    })
+    if nil == renderErr || false == strings.Contains(renderErr.Error(), "Message-ID header is set under more than one spelling") {
+        t.Fatalf("expected the second spelling refused naming the header, got %v", renderErr)
+    }
+}
+
+func TestRenderMessage_ABlankCallerMessageIdIsReplacedByAMintedOne(t *testing.T) {
+    message := mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Welcome",
+        Text:    "Hello",
+        Headers: map[string]string{"Message-Id": "  "},
+    }
+
+    messageId := messageIdOf(message)
+    if false == strings.HasPrefix(messageId, "<") || false == strings.HasSuffix(messageId, "@example.com>") {
+        t.Fatalf("expected a minted Message-ID for a blank caller value, got %q", messageId)
+    }
+
+    payload, renderErr := renderMessage(message, messageId)
+    if nil != renderErr {
+        t.Fatalf("render: %v", renderErr)
+    }
+
+    if 1 != strings.Count(strings.ToLower(string(payload)), "message-id:") || false == strings.Contains(string(payload), "Message-ID: "+messageId) {
+        t.Fatalf("expected one Message-ID header carrying the minted id, got\n%s", payload)
+    }
+}
