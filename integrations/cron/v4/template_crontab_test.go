@@ -1038,3 +1038,19 @@ func TestBuiltinTemplatesAnswerAndRenderTheApplicationsOwnershipLine(t *testing.
         }
     }
 }
+
+/* the public render path writes the name into the ownership line too, so a line break in it would start an active crontab line even under an empty entry list; it is refused before anything is rendered */
+func TestRenderRefusesAnApplicationNameCarryingALineBreak(t *testing.T) {
+    options := RenderOptions{ApplicationName: "app\n* * * * * root /usr/bin/touch /tmp/unexpected"}
+
+    for _, template := range []Template{defaultCrontabTemplate, defaultCrontabNoUserTemplate} {
+        content, renderErr := template.Render(nil, options)
+        if false == errors.Is(renderErr, ErrInvalidApplicationName) || "" != content {
+            t.Fatalf("expected %s to refuse the name with ErrInvalidApplicationName and render nothing, got %q, %v", template.Name(), content, renderErr)
+        }
+    }
+
+    if _, renderErr := Render(nil, options); false == errors.Is(renderErr, ErrInvalidApplicationName) {
+        t.Fatalf("expected cron.Render to refuse the name, got %v", renderErr)
+    }
+}

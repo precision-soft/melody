@@ -10,13 +10,16 @@ import (
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
 )
 
-/* DefaultDurationBoundaries are the bucket boundaries, in seconds, the HTTP semantic conventions advise for http.server.request.duration. */
-var DefaultDurationBoundaries = []float64{0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10}
+/* DefaultDurationBoundaries answers a fresh copy of the bucket boundaries, in seconds, the HTTP semantic conventions advise for http.server.request.duration, so no caller can change the default another one reads. */
+func DefaultDurationBoundaries() []float64 {
+    return []float64{0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10}
+}
 
-/* MetricsMiddlewareConfig configures NewMetricsMiddleware; DurationBoundaries are the duration histogram's bucket boundaries in seconds, DefaultDurationBoundaries when left out. */
+/* MetricsMiddlewareConfig configures NewMetricsMiddleware; DurationBoundaries are the duration histogram's bucket boundaries in seconds, DefaultDurationBoundaries() when nil; an empty list is refused, since it would leave the histogram without buckets. */
 type MetricsMiddlewareConfig struct {
     DurationBoundaries []float64
 }
@@ -25,6 +28,10 @@ type MetricsMiddlewareConfig struct {
 func NewMetricsMiddleware(meter metric.Meter, config MetricsMiddlewareConfig) (httpcontract.Middleware, error) {
     if nil == meter {
         return nil, exception.NewError("metrics middleware meter is nil", nil, nil)
+    }
+
+    if nil != config.DurationBoundaries && 0 == len(config.DurationBoundaries) {
+        return nil, exception.NewError("MetricsMiddlewareConfig.DurationBoundaries is empty: leave it nil for DefaultDurationBoundaries()", nil, nil)
     }
 
     requestDuration, histogramErr := newDurationHistogram(meter, "http.server.request.duration", "duration of handled http requests", config.DurationBoundaries)
@@ -52,7 +59,7 @@ func NewMetricsMiddleware(meter metric.Meter, config MetricsMiddlewareConfig) (h
                 attributes := metric.WithAttributes(
                     attribute.String("http.request.method", normalizedMethod(request.HttpRequest().Method)),
                     attribute.String("http.route", routeLabel(request)),
-                    attribute.String("url.scheme", urlScheme(request.HttpRequest())),
+                    attribute.String("url.scheme", requestScheme(request)),
                     attribute.Int("http.response.status_code", statusCode),
                 )
 
@@ -70,8 +77,8 @@ func NewMetricsMiddleware(meter metric.Meter, config MetricsMiddlewareConfig) (h
 }
 
 func newDurationHistogram(meter metric.Meter, name string, description string, boundaries []float64) (metric.Float64Histogram, error) {
-    if 0 == len(boundaries) {
-        boundaries = DefaultDurationBoundaries
+    if nil == boundaries {
+        boundaries = DefaultDurationBoundaries()
     }
 
     return meter.Float64Histogram(
@@ -82,7 +89,18 @@ func newDurationHistogram(meter metric.Meter, name string, description string, b
     )
 }
 
-/* urlScheme answers https for a request that arrived over TLS on this connection and http otherwise; a scheme a trusted proxy terminated is not read. */
+/* requestScheme answers the scheme the kernel resolved for the request under its forwarded-headers policy, so a trusted proxy that terminated TLS reads as https here as in the access log; a request carrying no resolved scheme falls back to the connection's own. */
+func requestScheme(request httpcontract.Request) string {
+    if schemeValue, exists := request.Attributes().Get(melodyhttp.RequestAttributeScheme); true == exists {
+        if scheme, isString := schemeValue.(string); true == isString && "" != scheme {
+            return scheme
+        }
+    }
+
+    return urlScheme(request.HttpRequest())
+}
+
+/* urlScheme answers https for a request that arrived over TLS on this connection and http otherwise: the lifecycle seam runs before the kernel resolves a scheme, so it reads the connection alone. */
 func urlScheme(httpRequest *nethttp.Request) string {
     if nil != httpRequest.TLS {
         return "https"

@@ -24,7 +24,7 @@ type HandlerDecoratorConfig struct {
     /* Meter is optional: when set, every request, short-circuited ones included, is timed on the melody.http.server.lifecycle.duration histogram, in seconds, distinct from the middleware's handled-request histogram so routed requests are not double-counted. */
     Meter metric.Meter
 
-    /* DurationBoundaries are the lifecycle histogram's bucket boundaries in seconds, DefaultDurationBoundaries when left out. */
+    /* DurationBoundaries are the lifecycle histogram's bucket boundaries in seconds, DefaultDurationBoundaries() when nil; an empty list, or a list set without Meter, is refused. */
     DurationBoundaries []float64
 }
 
@@ -32,6 +32,14 @@ type HandlerDecoratorConfig struct {
 func NewHandlerDecorator(tracer trace.Tracer, config HandlerDecoratorConfig) (applicationcontract.HttpHandlerDecorator, error) {
     if nil == tracer {
         return nil, exception.NewError("handler decorator tracer is nil", nil, nil)
+    }
+
+    if nil == config.Meter && nil != config.DurationBoundaries {
+        return nil, exception.NewError("HandlerDecoratorConfig.DurationBoundaries is set without HandlerDecoratorConfig.Meter: the lifecycle histogram is built only with a meter", nil, nil)
+    }
+
+    if nil != config.DurationBoundaries && 0 == len(config.DurationBoundaries) {
+        return nil, exception.NewError("HandlerDecoratorConfig.DurationBoundaries is empty: leave it nil for DefaultDurationBoundaries()", nil, nil)
     }
 
     propagator := config.Propagator

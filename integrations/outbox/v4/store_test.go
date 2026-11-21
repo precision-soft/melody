@@ -447,7 +447,7 @@ func reloadOutboxRow(t *testing.T, store *Store, id int64) Message {
     return row
 }
 
-func TestStore_ReleaseClaimsHandsBackOnlyTheTokensStillClaimedRows(t *testing.T) {
+func TestStore_ReleaseClaimsHandsBackOnlyTheNamedRowsStillClaimedUnderTheToken(t *testing.T) {
     store := outboxTestStore(t)
     runtimeInstance := outboxTestRuntime(context.Background())
 
@@ -473,16 +473,18 @@ func TestStore_ReleaseClaimsHandsBackOnlyTheTokensStillClaimedRows(t *testing.T)
         t.Fatalf("second claim: %v (got %d)", otherErr, len(other))
     }
 
-    released, releaseErr := store.ReleaseClaims(runtimeInstance, token)
-    if nil != releaseErr || 2 != released {
-        t.Fatalf("expected the two rows still claimed under the token released, got %d: %v", released, releaseErr)
+    released, releaseErr := store.ReleaseClaims(runtimeInstance, []int64{claimed[0].Id, claimed[1].Id, other[0].Id}, token)
+    if nil != releaseErr || 1 != released {
+        t.Fatalf("expected the one named row still claimed under the token released, got %d: %v", released, releaseErr)
     }
 
-    for _, id := range []int64{claimed[0].Id, claimed[2].Id} {
-        row := reloadOutboxRow(t, store, id)
-        if StatusPending != row.Status || row.AvailableAt.After(time.Now()) || 0 != row.Attempts {
-            t.Fatalf("expected row %d pending, available now, attempts unchanged, got %+v", id, row)
-        }
+    row := reloadOutboxRow(t, store, claimed[0].Id)
+    if StatusPending != row.Status || row.AvailableAt.After(time.Now()) || 0 != row.Attempts {
+        t.Fatalf("expected row %d pending, available now, attempts unchanged, got %+v", claimed[0].Id, row)
+    }
+
+    if StatusInFlight != reloadOutboxRow(t, store, claimed[2].Id).Status {
+        t.Fatal("expected the row the release does not name kept claimed")
     }
 
     if 1 != reloadOutboxRow(t, store, claimed[0].Id).DeliveryAttempts {
@@ -632,7 +634,7 @@ func TestStore_EveryRepositoryDoorRefusesANilRuntime(t *testing.T) {
 
     _, claimErr := store.ClaimDueMessages(nil, 1, time.Minute)
     _, _, recordErr := store.RecordDeliveryAttempt(nil, 1, "token")
-    _, releaseErr := store.ReleaseClaims(nil, "token")
+    _, releaseErr := store.ReleaseClaims(nil, []int64{1}, "token")
     _, requeueErr := store.RequeueDead(nil, RequeueDeadOptions{})
     _, pruneErr := store.PruneSent(nil, PruneSentOptions{SentBefore: time.Now()})
 
@@ -650,5 +652,38 @@ func TestStore_EveryRepositoryDoorRefusesANilRuntime(t *testing.T) {
         if nil == doorErr || false == strings.Contains(doorErr.Error(), "the runtime is nil or carries no context") {
             t.Fatalf("%s: expected a nil runtime refused, got %v", name, doorErr)
         }
+    }
+}
+
+/* the refusals run before the store is touched: the store here has no database, so a refusal moved below the statement panics the test */
+func TestStore_ReleaseClaimsRefusesAnEmptyTokenAndTooManyRowsAndReleasesNothingForNoRow(t *testing.T) {
+    store := &Store{}
+    runtimeInstance := outboxTestRuntime(context.Background())
+
+    if _, releaseErr := store.ReleaseClaims(runtimeInstance, []int64{1}, ""); nil == releaseErr || false == strings.Contains(releaseErr.Error(), "outbox claim release token is empty") {
+        t.Fatalf("expected an empty claim token refused, got %v", releaseErr)
+    }
+
+    if _, releaseErr := store.ReleaseClaims(runtimeInstance, make([]int64, maximumBatchSize+1), "token"); nil == releaseErr || false == strings.Contains(releaseErr.Error(), "more rows than the maximum batch size") {
+        t.Fatalf("expected more ids than the maximum batch size refused, got %v", releaseErr)
+    }
+
+    if released, releaseErr := store.ReleaseClaims(runtimeInstance, nil, "token"); nil != releaseErr || 0 != released {
+        t.Fatalf("expected no row named to release nothing, got %d: %v", released, releaseErr)
+    }
+}
+
+/* more ids than the limit are refused rather than cut to it, before the store is touched */
+func TestStore_RequeueDeadRefusesMoreIdsThanItsLimit(t *testing.T) {
+    store := &Store{}
+
+    _, requeueErr := store.RequeueDead(outboxTestRuntime(context.Background()), RequeueDeadOptions{Ids: []int64{1, 2, 3}, Limit: 2})
+    if nil == requeueErr || false == strings.Contains(requeueErr.Error(), "outbox requeue names more rows than its limit") {
+        t.Fatalf("expected more ids than the limit refused, got %v", requeueErr)
+    }
+
+    logContext := exception.LogContext(requeueErr, exception.LogContextConfig{})
+    if "RequeueDeadOptions.Ids" != logContext["field"] {
+        t.Fatalf("expected the refusal to name RequeueDeadOptions.Ids, got %v", logContext)
     }
 }

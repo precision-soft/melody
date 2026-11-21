@@ -102,7 +102,7 @@ type exampleContainerDescription struct {
     TypeName string `json:"typeName"`
 }
 
-/* exampleProcessServiceInventoryOf answers the inventory one major's example is held to: the rows name their module path, and the fourth major adds the cipher of its integration module, the internal-auth signer, whose judged key id is kept under its lock, the bucket check and the audit schema it builds at boot */
+/* exampleProcessServiceInventoryOf answers the inventory one major's example is held to: the rows name their module path, and the fourth major adds the cipher of its integration module, the internal-auth signer, whose judged key id is kept under its lock, the bucket check and the audit schema it builds at boot, and the prometheus registry the metrics module tears down */
 func exampleProcessServiceInventoryOf(major exampleMajor) map[string]processServiceClassification {
     inventory := make(map[string]processServiceClassification, len(exampleProcessServiceInventory)+1)
     for serviceName, classification := range exampleProcessServiceInventory {
@@ -114,6 +114,7 @@ func exampleProcessServiceInventoryOf(major exampleMajor) map[string]processServ
         inventory["service.example.internal_auth_signer"] = processServiceClassification{typeName: "*security.HmacEnvelopeSigner", category: processServiceStore}
         inventory["service.example.storage_bucket"] = processServiceClassification{typeName: "*config.storageBucketReady", category: processServiceStateless}
         inventory["service.example.audit_schema"] = processServiceClassification{typeName: "*persistence.AuditSchema", category: processServiceStateless}
+        inventory["service.opentelemetry.prometheus_metrics"] = processServiceClassification{typeName: "*opentelemetry.PrometheusMetrics", category: processServiceStore}
     }
 
     return inventory

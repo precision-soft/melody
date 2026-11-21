@@ -53,6 +53,10 @@ func (instance *AnsibleCronTemplate) RendersUserColumn() bool {
 }
 
 func (instance *AnsibleCronTemplate) Render(entries []melodycron.Entry, options melodycron.RenderOptions) (string, error) {
+    if applicationNameErr := melodycron.ValidateApplicationName(options.ApplicationName); nil != applicationNameErr {
+        return "", applicationNameErr
+    }
+
     var builder strings.Builder
     builder.WriteString(instance.OwnershipMarker(options.ApplicationName) + "\n---\n")
 

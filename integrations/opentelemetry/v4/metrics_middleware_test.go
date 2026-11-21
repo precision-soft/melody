@@ -1,6 +1,7 @@
 package opentelemetry
 
 import (
+    "crypto/tls"
     "errors"
     "fmt"
     "io"
@@ -451,7 +452,7 @@ func TestMetricsMiddleware_RecordsTheConventionsDurationInSecondsWithAnIntegerSt
         t.Fatalf("expected the unit s, got %q", instrument.Unit)
     }
 
-    if false == reflect.DeepEqual(DefaultDurationBoundaries, point.Bounds) || 14 != len(point.Bounds) {
+    if false == reflect.DeepEqual(conventionDurationBoundaries, point.Bounds) {
         t.Fatalf("expected the conventions' boundaries, got %v", point.Bounds)
     }
 
@@ -475,6 +476,46 @@ func TestMetricsMiddleware_RecordsTheConventionsDurationInSecondsWithAnIntegerSt
     }
 }
 
+/* behind a TLS-terminating trusted proxy the connection is plain while the kernel resolved https: the series follows the kernel, as the access log does, and a request with no resolved scheme reads its connection */
+func TestMetricsMiddleware_UrlSchemeFollowsTheKernelsResolvedScheme(t *testing.T) {
+    for _, scenario := range []struct {
+        name           string
+        resolvedScheme string
+        overTls        bool
+        expected       string
+    }{
+        {name: "resolved https over a plain connection", resolvedScheme: "https", overTls: false, expected: "https"},
+        {name: "resolved http over a tls connection", resolvedScheme: "http", overTls: true, expected: "http"},
+        {name: "no resolved scheme over a tls connection", resolvedScheme: "", overTls: true, expected: "https"},
+        {name: "no resolved scheme over a plain connection", resolvedScheme: "", overTls: false, expected: "http"},
+    } {
+        t.Run(scenario.name, func(t *testing.T) {
+            reader := sdkmetric.NewManualReader()
+            meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("scheme")
+
+            middleware, middlewareErr := NewMetricsMiddleware(meter, MetricsMiddlewareConfig{})
+            if nil != middlewareErr {
+                t.Fatalf("middleware: %v", middlewareErr)
+            }
+
+            request, runtimeInstance := testRequestAndRuntime()
+            if true == scenario.overTls {
+                request.HttpRequest().TLS = &tls.ConnectionState{}
+            }
+            if "" != scenario.resolvedScheme {
+                request.Attributes().Set(melodyhttp.RequestAttributeScheme, scenario.resolvedScheme)
+            }
+
+            _, _ = middleware(okHandler())(runtimeInstance, httptest.NewRecorder(), request)
+
+            _, point := collectHistogram(t, reader, "http.server.request.duration")
+            if scheme, hasScheme := point.Attributes.Value(attribute.Key("url.scheme")); false == hasScheme || scenario.expected != scheme.AsString() {
+                t.Fatalf("expected url.scheme %s, got %v", scenario.expected, scheme)
+            }
+        })
+    }
+}
+
 func TestMetricsMiddleware_TheExpositionFamilyIsInSecondsAndSetBoundariesReplaceTheDefault(t *testing.T) {
     prometheusMetrics, metricsErr := NewPrometheusMetrics(PrometheusConfig{})
     if nil != metricsErr {
@@ -495,5 +536,28 @@ func TestMetricsMiddleware_TheExpositionFamilyIsInSecondsAndSetBoundariesReplace
 
     if false == strings.Contains(body, "http_server_request_duration_seconds_bucket") || false == strings.Contains(body, `le="3"`) || true == strings.Contains(body, `le="0.005"`) {
         t.Fatalf("expected the seconds family with the set boundaries only, got %s", body)
+    }
+}
+
+func TestDefaultDurationBoundaries_AnswersAFreshCopyOfTheConventionsList(t *testing.T) {
+    first := DefaultDurationBoundaries()
+    if false == reflect.DeepEqual(conventionDurationBoundaries, first) {
+        t.Fatalf("expected the conventions' boundaries, got %v", first)
+    }
+
+    first[0] = 42
+
+    if second := DefaultDurationBoundaries(); false == reflect.DeepEqual(conventionDurationBoundaries, second) {
+        t.Fatalf("expected a caller's edit to leave the default unchanged, got %v", second)
+    }
+}
+
+/* an empty list would build a histogram with no buckets, a sum and a count only, so it is refused rather than read as left out */
+func TestNewMetricsMiddleware_AnEmptyDurationBoundariesListIsRefused(t *testing.T) {
+    meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewManualReader())).Meter("empty")
+
+    _, middlewareErr := NewMetricsMiddleware(meter, MetricsMiddlewareConfig{DurationBoundaries: []float64{}})
+    if nil == middlewareErr || false == strings.Contains(middlewareErr.Error(), "MetricsMiddlewareConfig.DurationBoundaries is empty") {
+        t.Fatalf("expected an empty DurationBoundaries refused naming the field, got %v", middlewareErr)
     }
 }

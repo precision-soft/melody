@@ -111,7 +111,7 @@ func TestLazyRepository_ForwardsTheMaintenanceDoorsAndAnswersTheResolutionError(
     repository := NewLazyRepository(serviceContainer)
     runtimeInstance := outboxTestRuntime(t.Context())
 
-    if _, releaseErr := repository.ReleaseClaims(runtimeInstance, "claim-token"); false == exception.ChainIs(releaseErr, storeDown) {
+    if _, releaseErr := repository.ReleaseClaims(runtimeInstance, []int64{1}, "claim-token"); false == exception.ChainIs(releaseErr, storeDown) {
         t.Fatalf("expected ReleaseClaims to answer the resolution error, got %v", releaseErr)
     }
 
@@ -159,7 +159,7 @@ func TestLazyRepository_ReleaseClaimsReachesTheStore(t *testing.T) {
         t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
     }
 
-    released, releaseErr := NewLazyRepository(serviceContainer).ReleaseClaims(runtimeInstance, claimed[0].ClaimToken)
+    released, releaseErr := NewLazyRepository(serviceContainer).ReleaseClaims(runtimeInstance, []int64{claimed[0].Id}, claimed[0].ClaimToken)
     if nil != releaseErr || 1 != released {
         t.Fatalf("expected the lazy door to release the claimed row, got %d: %v", released, releaseErr)
     }

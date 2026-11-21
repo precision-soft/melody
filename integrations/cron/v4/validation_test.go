@@ -240,3 +240,17 @@ func TestValidateScheduleFields_TheRefusalCauseNamesTheFieldAndTheDialect(t *tes
         t.Fatalf("expected the dialect that chose the bound named in the cause, got %v", inner.Context())
     }
 }
+
+func TestValidateApplicationNameRefusesAControlCharacter(t *testing.T) {
+    for _, applicationName := range []string{"app\n* * * * * root /usr/bin/touch /tmp/unexpected", "app\r", "app\tname", "app\x1b[31m", "app\u0085"} {
+        if validationErr := ValidateApplicationName(applicationName); false == errors.Is(validationErr, ErrInvalidApplicationName) {
+            t.Fatalf("expected %q refused with ErrInvalidApplicationName, got %v", applicationName, validationErr)
+        }
+    }
+
+    for _, applicationName := range []string{"", "billing", "billing api", "facturare-ă"} {
+        if validationErr := ValidateApplicationName(applicationName); nil != validationErr {
+            t.Fatalf("expected %q admitted, got %v", applicationName, validationErr)
+        }
+    }
+}

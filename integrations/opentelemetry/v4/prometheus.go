@@ -62,7 +62,7 @@ func (instance *PrometheusMetrics) Handler() nethttp.Handler {
     return instance.handler
 }
 
-/* CloseWithContext shuts the meter provider down under the close context; a second call answers nil, and a context already done is answered its error with the provider left open, since the sdk latches a shutdown driven under a spent context. */
+/* CloseWithContext shuts the meter provider down under the close context; a context already done is answered its error with the provider left open, and once the sdk's shutdown was entered the handle is closed whatever it answered, since the sdk runs its shutdown once and answers every later call an error, so a second call answers nil. */
 func (instance *PrometheusMetrics) CloseWithContext(closeContext context.Context) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -75,11 +75,11 @@ func (instance *PrometheusMetrics) CloseWithContext(closeContext context.Context
         return exception.NewError("the prometheus meter provider was not shut down: its close context is already done", nil, contextErr)
     }
 
+    instance.closed = true
+
     if shutdownErr := instance.provider.Shutdown(closeContext); nil != shutdownErr {
         return exception.NewError("could not shut the prometheus meter provider down", nil, shutdownErr)
     }
-
-    instance.closed = true
 
     return nil
 }

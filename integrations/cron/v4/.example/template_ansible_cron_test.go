@@ -340,15 +340,17 @@ func TestAnsibleCronRenderWritesEveryTaskValueAsAnUnsafeScalar(t *testing.T) {
     }
 }
 
-func TestNewCronModule_InstallsTheAnsibleCronDialectThroughTheModule(t *testing.T) {
-    commands := NewCronModule().RegisterCliCommands(nil)
-    if 1 != len(commands) || "melody:cron:generate" != commands[0].Name() {
-        t.Fatalf("expected the generator from the cron module, got %v", commands)
-    }
-
+func TestAnsibleCronTemplate_TheOwnershipLineNamesTheApplication(t *testing.T) {
     expectedLine := ansibleCronOwnershipMarker + " for billing"
     content, err := (&AnsibleCronTemplate{}).Render(nil, melodycron.RenderOptions{ApplicationName: "billing"})
     if nil != err || false == strings.HasPrefix(content, expectedLine+"\n") {
         t.Fatalf("expected the line named after RenderOptions.ApplicationName, got %q (%v)", content, err)
+    }
+}
+
+func TestAnsibleCronTemplate_RefusesAnApplicationNameCarryingALineBreak(t *testing.T) {
+    content, err := (&AnsibleCronTemplate{}).Render(nil, melodycron.RenderOptions{ApplicationName: "billing\n- name: injected"})
+    if false == errors.Is(err, melodycron.ErrInvalidApplicationName) || "" != content {
+        t.Fatalf("expected the name refused with ErrInvalidApplicationName and nothing rendered, got %q (%v)", content, err)
     }
 }

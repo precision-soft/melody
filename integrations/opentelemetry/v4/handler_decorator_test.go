@@ -8,6 +8,7 @@ import (
     nethttp "net/http"
     "net/http/httptest"
     "reflect"
+    "strings"
     "testing"
 
     "go.opentelemetry.io/otel/attribute"
@@ -356,7 +357,7 @@ func TestHandlerDecorator_TheLifecycleSeamRecordsOneHistogramInSecondsOutsideThe
     handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/x", nil))
 
     instrument, point := collectHistogram(t, reader, "melody.http.server.lifecycle.duration")
-    if "s" != instrument.Unit || false == reflect.DeepEqual(DefaultDurationBoundaries, point.Bounds) {
+    if "s" != instrument.Unit || false == reflect.DeepEqual(conventionDurationBoundaries, point.Bounds) {
         t.Fatalf("expected seconds and the conventions' boundaries, got %q %v", instrument.Unit, point.Bounds)
     }
 
@@ -367,5 +368,22 @@ func TestHandlerDecorator_TheLifecycleSeamRecordsOneHistogramInSecondsOutsideThe
     names := instrumentNames(t, reader)
     if 1 != len(names) {
         t.Fatalf("expected the one lifecycle histogram, got %v", names)
+    }
+}
+
+/* without a meter no lifecycle histogram is built, so boundaries set for it would be dropped; they are refused naming both fields */
+func TestNewHandlerDecorator_DurationBoundariesWithoutAMeterAreRefused(t *testing.T) {
+    _, decoratorErr := NewHandlerDecorator(tracenoop.NewTracerProvider().Tracer("boundaries"), HandlerDecoratorConfig{DurationBoundaries: []float64{1, 2}})
+    if nil == decoratorErr || false == strings.Contains(decoratorErr.Error(), "HandlerDecoratorConfig.DurationBoundaries is set without HandlerDecoratorConfig.Meter") {
+        t.Fatalf("expected DurationBoundaries without a Meter refused naming both, got %v", decoratorErr)
+    }
+}
+
+func TestNewHandlerDecorator_AnEmptyDurationBoundariesListIsRefused(t *testing.T) {
+    meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewManualReader())).Meter("empty")
+
+    _, decoratorErr := NewHandlerDecorator(tracenoop.NewTracerProvider().Tracer("boundaries"), HandlerDecoratorConfig{Meter: meter, DurationBoundaries: []float64{}})
+    if nil == decoratorErr || false == strings.Contains(decoratorErr.Error(), "HandlerDecoratorConfig.DurationBoundaries is empty") {
+        t.Fatalf("expected an empty DurationBoundaries refused naming the field, got %v", decoratorErr)
     }
 }

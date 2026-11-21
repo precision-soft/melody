@@ -335,15 +335,28 @@ func (instance *Store) MarkDead(runtimeInstance containercontract.Runtime, id in
     return nil
 }
 
-func (instance *Store) ReleaseClaims(runtimeInstance containercontract.Runtime, claimToken string) (int, error) {
+func (instance *Store) ReleaseClaims(runtimeInstance containercontract.Runtime, ids []int64, claimToken string) (int, error) {
     if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
         return 0, refuseErr
+    }
+
+    if "" == claimToken {
+        return 0, exception.NewError("outbox claim release token is empty", map[string]any{"field": "claimToken"}, nil)
+    }
+
+    if maximumBatchSize < len(ids) {
+        return 0, exception.NewError("outbox claim release names more rows than the maximum batch size", map[string]any{"field": "ids", "ids": len(ids), "maximum": maximumBatchSize}, nil)
+    }
+
+    if 0 == len(ids) {
+        return 0, nil
     }
 
     result, updateErr := instance.database.NewUpdate().
         Model((*Message)(nil)).
         Set("status = ?", StatusPending).
         Set("available_at = ?", time.Now()).
+        Where("id IN (?)", bun.In(ids)).
         Where("status = ?", StatusInFlight).
         Where("claim_token = ?", claimToken).
         Exec(runtimeInstance.Context())
@@ -362,6 +375,10 @@ func (instance *Store) RequeueDead(runtimeInstance containercontract.Runtime, op
     limit, limitErr := maintenanceLimit(options.Limit)
     if nil != limitErr {
         return 0, limitErr
+    }
+
+    if limit < len(options.Ids) {
+        return 0, exception.NewError("outbox requeue names more rows than its limit", map[string]any{"field": "RequeueDeadOptions.Ids", "ids": len(options.Ids), "limit": limit}, nil)
     }
 
     ctx := runtimeInstance.Context()

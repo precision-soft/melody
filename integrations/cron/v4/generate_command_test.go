@@ -4196,8 +4196,28 @@ func TestRunRefusesAnApplicationNameThatSpansLines(t *testing.T) {
         append(ownershipLineArguments(tempDir, TemplateNameCrontab, nil), "--out", outputPath),
         newStubConfigurationNamed(nil, "billing\n0 * * * * root /bin/sh"),
     )
-    if nil == runErr || false == strings.Contains(runErr.Error(), "spans lines") {
+    if false == errors.Is(runErr, ErrInvalidApplicationName) {
         t.Fatalf("expected a name spanning lines to be refused before anything is written, got: %v", runErr)
+    }
+
+    if _, statErr := os.Stat(outputPath); nil == statErr {
+        t.Fatalf("expected nothing to be written under a refused name")
+    }
+}
+
+/* a control character that breaks no line, a terminal escape, is refused by the generator as well, since the ownership line is read back as written */
+func TestRunRefusesAnApplicationNameCarryingAControlCharacter(t *testing.T) {
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+
+    _, runErr := runGenerateCommandWithConfiguration(
+        t,
+        []clicontract.Command{newFakeCommandWithConfig("reports:daily", EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})},
+        append(ownershipLineArguments(tempDir, TemplateNameCrontab, nil), "--out", outputPath),
+        newStubConfigurationNamed(nil, "billing\x1b[2K"),
+    )
+    if false == errors.Is(runErr, ErrInvalidApplicationName) {
+        t.Fatalf("expected a name carrying a control character to be refused, got: %v", runErr)
     }
 
     if _, statErr := os.Stat(outputPath); nil == statErr {

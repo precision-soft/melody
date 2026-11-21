@@ -118,6 +118,19 @@ func ValidateUserField(label string, value string) error {
     )
 }
 
+/* ValidateApplicationName refuses an application name carrying a control character, a line break above all: the name is written verbatim into the ownership line, which has to stay one comment line, so a newline in it would start an active line of the rendered file. It is exported for a custom dialect that renders the name, as the builtins do before rendering. */
+func ValidateApplicationName(applicationName string) error {
+    if -1 != strings.IndexFunc(applicationName, unicode.IsControl) {
+        return exception.NewError(
+            fmt.Sprintf("cron: the application name %q contains a control character, so it cannot be written into a one-line ownership marker; configure a single-line cli name", applicationName),
+            exceptioncontract.Context{"applicationName": applicationName},
+            ErrInvalidApplicationName,
+        )
+    }
+
+    return nil
+}
+
 /* steppedSingleValueItem reports the first list item that steps a single value ("5/15"), which the target schedulers disagree on: vixie crond refuses the whole crontab, busybox accepts it and the robfig scheduler reads a range to the field maximum. The matcher and the generator refuse it; the explicit range the error names ("5-59/15") reads identically everywhere. */
 func steppedSingleValueItem(expression string) (string, bool) {
     for _, item := range strings.Split(expression, ",") {

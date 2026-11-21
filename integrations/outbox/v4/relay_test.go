@@ -5,6 +5,7 @@ import (
     "errors"
     "fmt"
     "math"
+    "reflect"
     "strings"
     "sync"
     "testing"
@@ -122,9 +123,19 @@ type fakeRepository struct {
     claimDelay    time.Duration
     markDeadErr   error
     rescheduleErr error
-    /* releasedTokens records ReleaseClaims apart from calls, so the exact resolution-call assertions stay meaningful */
+    /* releasedTokens and releases record ReleaseClaims apart from calls, so the exact resolution-call assertions stay meaningful */
     releasedTokens []string
+    releases       []releaseCall
     releaseErr     error
+}
+
+/* releaseCall is one ReleaseClaims: the ids it named and the runtime it ran under, read at the call */
+type releaseCall struct {
+    ids             []int64
+    runtimeInstance containercontract.Runtime
+    contextErr      error
+    deadline        time.Time
+    hasDeadline     bool
 }
 
 func (instance *fakeRepository) ClaimDueMessages(_ containercontract.Runtime, limit int, _ time.Duration) ([]Pending, error) {
@@ -180,8 +191,17 @@ func (instance *fakeRepository) MarkDead(_ containercontract.Runtime, id int64, 
     return instance.markDeadErr
 }
 
-func (instance *fakeRepository) ReleaseClaims(_ containercontract.Runtime, claimToken string) (int, error) {
+func (instance *fakeRepository) ReleaseClaims(runtimeInstance containercontract.Runtime, ids []int64, claimToken string) (int, error) {
     instance.releasedTokens = append(instance.releasedTokens, claimToken)
+
+    deadline, hasDeadline := runtimeInstance.Context().Deadline()
+    instance.releases = append(instance.releases, releaseCall{
+        ids:             append([]int64(nil), ids...),
+        runtimeInstance: runtimeInstance,
+        contextErr:      runtimeInstance.Context().Err(),
+        deadline:        deadline,
+        hasDeadline:     hasDeadline,
+    })
 
     return 0, instance.releaseErr
 }
@@ -1322,6 +1342,35 @@ func TestRelay_AFailedSendIsReportedOncePerPass(t *testing.T) {
     }
 }
 
+/* a repository that refuses to record the delivery attempt of one row */
+type recordRefusingRepository struct {
+    fakeRepository
+    refusedId int64
+}
+
+func (instance *recordRefusingRepository) RecordDeliveryAttempt(runtimeInstance containercontract.Runtime, id int64, claimToken string) (int, bool, error) {
+    if id == instance.refusedId {
+        return 0, false, errors.New("database unreachable")
+    }
+
+    return instance.fakeRepository.RecordDeliveryAttempt(runtimeInstance, id, claimToken)
+}
+
+/* a repository whose hold write of one row cancels the run, the shape of a SIGTERM landing mid-hold */
+type cancellingRescheduleRepository struct {
+    fakeRepository
+    cancelAtId int64
+    cancel     context.CancelFunc
+}
+
+func (instance *cancellingRescheduleRepository) Reschedule(runtimeInstance containercontract.Runtime, id int64, attempts int, availableAt time.Time, lastError string, claimToken string) error {
+    if id == instance.cancelAtId {
+        instance.cancel()
+    }
+
+    return instance.fakeRepository.Reschedule(runtimeInstance, id, attempts, availableAt, lastError, claimToken)
+}
+
 /* a repository that refuses the reschedule of one row */
 type rescheduleRefusingRepository struct {
     fakeRepository
@@ -1970,6 +2019,116 @@ func TestRelay_ABatchEndedByAFailureReleasesItsClaimOnceWithTheBatchsToken(t *te
 
     if 1 != len(repository.releasedTokens) || "batch-token" != repository.releasedTokens[0] {
         t.Fatalf("expected one release under the batch's token, got %v", repository.releasedTokens)
+    }
+
+    if false == reflect.DeepEqual([]int64{3}, repository.releases[0].ids) {
+        t.Fatalf("expected only the row after the refused hold released, the refused row keeping its claim, got %v", repository.releases[0].ids)
+    }
+}
+
+/* a send that succeeded and whose MarkSent failed leaves its row claimed until the visibility timeout, so the published row is not published again on the next pass; the rows after it are released */
+func TestRelay_AFailedMarkSentMidBatchReleasesOnlyTheRowsAfterIt(t *testing.T) {
+    repository := &markSentFailingRepository{fakeRepository{due: []Pending{
+        {Id: 1, TypeName: "string", Payload: []byte("a"), ClaimToken: "batch-token"},
+        {Id: 2, TypeName: "string", Payload: []byte("b"), ClaimToken: "batch-token"},
+        {Id: 3, TypeName: "string", Payload: []byte("c"), ClaimToken: "batch-token"},
+    }}}
+
+    if _, runErr := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{}, Codec: &stringCodec{}}).RunOnce(relayTestRuntime()); nil == runErr {
+        t.Fatal("expected the failing MarkSent to surface")
+    }
+
+    if 1 != len(repository.releases) || false == reflect.DeepEqual([]int64{2, 3}, repository.releases[0].ids) || "batch-token" != repository.releasedTokens[0] {
+        t.Fatalf("expected one release of rows 2 and 3 under the batch's token, got %+v", repository.releases)
+    }
+}
+
+/* a repository failure recording the delivery attempt ends the batch at that row, and the rows after it are released */
+func TestRelay_AFailedDeliveryAttemptRecordMidBatchReleasesOnlyTheRowsAfterIt(t *testing.T) {
+    repository := &recordRefusingRepository{
+        fakeRepository: fakeRepository{due: []Pending{
+            {Id: 1, TypeName: "string", Payload: []byte("a"), ClaimToken: "batch-token"},
+            {Id: 2, TypeName: "string", Payload: []byte("b"), ClaimToken: "batch-token"},
+            {Id: 3, TypeName: "string", Payload: []byte("c"), ClaimToken: "batch-token"},
+        }},
+        refusedId: 2,
+    }
+
+    if _, runErr := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{}, Codec: &stringCodec{}}).RunOnce(relayTestRuntime()); nil == runErr {
+        t.Fatal("expected the failing delivery attempt record to surface")
+    }
+
+    if 1 != len(repository.releases) || false == reflect.DeepEqual([]int64{3}, repository.releases[0].ids) {
+        t.Fatalf("expected one release of row 3, got %+v", repository.releases)
+    }
+}
+
+/* an outage probe whose resolution write fails ends the batch past the probed row, so only the rows after the probe are released */
+func TestRelay_AFailedOutageResolutionReleasesOnlyTheRowsAfterTheProbe(t *testing.T) {
+    repository := &fakeRepository{
+        due: []Pending{
+            {Id: 1, TypeName: "string", Payload: []byte("a"), ClaimToken: "batch-token"},
+            {Id: 2, TypeName: "string", Payload: []byte("b"), ClaimToken: "batch-token"},
+            {Id: 3, TypeName: "string", Payload: []byte("c"), ClaimToken: "batch-token"},
+        },
+        rescheduleErr: errors.New("database unreachable"),
+    }
+
+    if _, runErr := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{unavailable: true}, Codec: &stringCodec{}}).RunOnce(relayTestRuntime()); nil == runErr {
+        t.Fatal("expected the failed outage resolution reported")
+    }
+
+    if 1 != len(repository.releases) || false == reflect.DeepEqual([]int64{3}, repository.releases[0].ids) {
+        t.Fatalf("expected one release of row 3, got %+v", repository.releases)
+    }
+}
+
+/* a run cancelled during the hold releases the rows not yet held under a runtime the cancellation does not reach: the same scope, the run's values, and a deadline within ResolutionTimeout */
+func TestRelay_ARunCancelledDuringTheHoldReleasesUnderADetachedBoundedRuntime(t *testing.T) {
+    type contextKey string
+
+    runContext, cancel := context.WithCancel(context.WithValue(context.Background(), contextKey("trace"), "kept"))
+    defer cancel()
+    runtimeInstance := runtime.NewRun(runContext, container.NewContainer(container.ContainerConfig{}).NewScope())
+
+    repository := &cancellingRescheduleRepository{
+        fakeRepository: fakeRepository{due: []Pending{
+            {Id: 1, TypeName: "string", Payload: []byte("a"), ClaimToken: "batch-token"},
+            {Id: 2, TypeName: "string", Payload: []byte("b"), ClaimToken: "batch-token"},
+            {Id: 3, TypeName: "string", Payload: []byte("c"), ClaimToken: "batch-token"},
+            {Id: 4, TypeName: "string", Payload: []byte("d"), ClaimToken: "batch-token"},
+        }},
+        cancelAtId: 2,
+        cancel:     cancel,
+    }
+
+    resolutionTimeout := 3 * time.Second
+    startedAt := time.Now()
+
+    _, runErr := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{fail: true}, Codec: &stringCodec{}, ResolutionTimeout: bound.Of(resolutionTimeout)}).RunOnce(runtimeInstance)
+    if nil == runErr || false == strings.Contains(runErr.Error(), "hold interrupted by the run's cancellation") {
+        t.Fatalf("expected the hold interrupted by the cancellation, got %v", runErr)
+    }
+
+    if 1 != len(repository.releases) {
+        t.Fatalf("expected one release, got %+v", repository.releases)
+    }
+
+    release := repository.releases[0]
+    if false == reflect.DeepEqual([]int64{3, 4}, release.ids) {
+        t.Fatalf("expected the rows not yet held released, got %v", release.ids)
+    }
+
+    if nil != release.contextErr {
+        t.Fatalf("expected the release context live under a cancelled run, got %v", release.contextErr)
+    }
+
+    if false == release.hasDeadline || release.deadline.After(time.Now().Add(resolutionTimeout)) || release.deadline.Before(startedAt) {
+        t.Fatalf("expected a release deadline within ResolutionTimeout, got %v (set %v)", release.deadline, release.hasDeadline)
+    }
+
+    if "kept" != release.runtimeInstance.Context().Value(contextKey("trace")) || runtimeInstance.Scope() != release.runtimeInstance.Scope() {
+        t.Fatal("expected the release runtime to keep the run's values and scope")
     }
 }
 

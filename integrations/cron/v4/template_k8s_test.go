@@ -443,3 +443,15 @@ func TestK8sRenderFilesAnInvalidUtf8TokenUnderTheForbiddenCharacterClass(t *test
         t.Fatalf("expected the refusal filed under ErrForbiddenCharacter alone, got %v", renderErr)
     }
 }
+
+func TestK8sRenderRefusesAnApplicationNameCarryingALineBreak(t *testing.T) {
+    options := RenderOptions{ApplicationName: "app\nkind: Secret"}
+
+    if content, renderErr := defaultK8sTemplate.Render(nil, options); false == errors.Is(renderErr, ErrInvalidApplicationName) || "" != content {
+        t.Fatalf("expected the empty render to refuse the name, got %q, %v", content, renderErr)
+    }
+
+    if _, renderErr := defaultK8sTemplate.Render([]Entry{k8sSampleEntry("reports:daily")}, options); false == errors.Is(renderErr, ErrInvalidApplicationName) {
+        t.Fatalf("expected the render to refuse the name, got %v", renderErr)
+    }
+}

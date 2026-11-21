@@ -99,6 +99,10 @@ func (instance *CrontabTemplate) RendersUserColumn() bool {
 }
 
 func (instance *CrontabTemplate) Render(entries []Entry, options RenderOptions) (string, error) {
+    if applicationNameErr := ValidateApplicationName(options.ApplicationName); nil != applicationNameErr {
+        return "", applicationNameErr
+    }
+
     var builder strings.Builder
 
     if true == instance.includeUserColumn {

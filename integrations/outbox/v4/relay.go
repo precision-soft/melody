@@ -101,7 +101,7 @@ type Relay struct {
     outageReported atomic.Bool
 }
 
-/* RunOnce drains one batch of due messages and returns how many were published; when a Locker is configured and another instance holds the lease, it returns 0. The lease is an optimisation: every claimed row carries this run's claim token, so a lease lost mid-batch hands no claimed row to the new holder, and the batch is drained to its end, or to a failed send, with the refresh failure reported after it. A repository failure mid-batch ends the run where it happened, and the rows it left claimed after that point are handed back through Repository.ReleaseClaims, the visibility timeout re-surfacing them when the release fails. A failed send ends the batch too, the unreached rows handed back uncharged and held until the failed row is tried again; the failed row is charged an attempt, unless the transport marked the failure with exception.MarkInfrastructureFailure and the next row failed too, an outage, which charges it nothing, or the run's cancellation cut the send, which hands the row back due at once, uncharged, and is reported as the run's error. */
+/* RunOnce drains one batch of due messages and returns how many were published; when a Locker is configured and another instance holds the lease, it returns 0. The lease is an optimisation: every claimed row carries this run's claim token, so a lease lost mid-batch hands no claimed row to the new holder, and the batch is drained to its end, or to a failed send, with the refresh failure reported after it. A repository failure mid-batch ends the run where it happened, and the claimed rows after the one it stopped at are handed back through Repository.ReleaseClaims, the visibility timeout re-surfacing them when the release fails; the row it stopped at keeps its claim until the visibility timeout, since its write failed and a row whose send succeeded would otherwise publish again on the next pass. A failed send ends the batch too, the unreached rows handed back uncharged and held until the failed row is tried again; the failed row is charged an attempt, unless the transport marked the failure with exception.MarkInfrastructureFailure and the next row failed too, an outage, which charges it nothing, or the run's cancellation cut the send, which hands the row back due at once, uncharged, and is reported as the run's error. */
 func (instance *Relay) RunOnce(runtimeInstance containercontract.Runtime) (int, error) {
     release, refresh, acquired, lockErr := instance.acquireLease(runtimeInstance)
     if nil != lockErr {
@@ -138,10 +138,10 @@ func (instance *Relay) RunOnce(runtimeInstance containercontract.Runtime) (int, 
         }
     }
 
-    /* endBatch ends the batch on a failure, handing back the claimed rows after the one it stopped at */
-    endBatch := func(index int, batchErr error) error {
-        if index+1 < len(due) {
-            instance.releaseClaims(runtimeInstance, due[index].ClaimToken)
+    /* endBatch ends the batch on a failure at stoppedIndex, the last row the batch wrote for, handing back only the claimed rows after it */
+    endBatch := func(stoppedIndex int, batchErr error) error {
+        if stoppedIndex+1 < len(due) {
+            instance.releaseClaims(runtimeInstance, due[stoppedIndex+1:])
         }
 
         return instance.batchFailureOutcome(batchErr, refreshErr)
@@ -172,7 +172,8 @@ func (instance *Relay) RunOnce(runtimeInstance containercontract.Runtime) (int, 
             }
 
             if nil != resolveErr {
-                return published, endBatch(index, resolveErr)
+                /* the probed row was written for too, so the batch stopped past it */
+                return published, endBatch(index+probed, resolveErr)
             }
 
             if nil == resolved {
@@ -186,8 +187,8 @@ func (instance *Relay) RunOnce(runtimeInstance containercontract.Runtime) (int, 
             index = index + probed
         }
 
-        if holdErr := instance.holdUnreached(runtimeInstance, pending.Id, *failure, due[index+1:], keepLease); nil != holdErr {
-            return published, endBatch(index, holdErr)
+        if handled, holdErr := instance.holdUnreached(runtimeInstance, pending.Id, *failure, due[index+1:], keepLease); nil != holdErr {
+            return published, endBatch(index+handled, holdErr)
         }
 
         break
@@ -204,10 +205,15 @@ func (instance *Relay) RunOnce(runtimeInstance containercontract.Runtime) (int, 
     return published, nil
 }
 
-/* releaseClaims hands back the rows a failed batch left claimed, detached from the run's cancellation and bounded as a resolution is; a failed release is logged and never replaces the batch's own error, the visibility timeout re-surfacing the rows. */
-func (instance *Relay) releaseClaims(runtimeInstance containercontract.Runtime, claimToken string) {
+/* releaseClaims hands back the unreached rows of a failed batch, detached from the run's cancellation and bounded as a resolution is; a failed release is logged and never replaces the batch's own error, the visibility timeout re-surfacing the rows. */
+func (instance *Relay) releaseClaims(runtimeInstance containercontract.Runtime, unreached []Pending) {
+    ids := make([]int64, 0, len(unreached))
+    for _, pending := range unreached {
+        ids = append(ids, pending.Id)
+    }
+
     releaseErr := instance.resolve(runtimeInstance, func(resolutionRuntime containercontract.Runtime) error {
-        _, releaseErr := instance.config.Repository.ReleaseClaims(resolutionRuntime, claimToken)
+        _, releaseErr := instance.config.Repository.ReleaseClaims(resolutionRuntime, ids, unreached[0].ClaimToken)
 
         return releaseErr
     })
@@ -311,19 +317,19 @@ type unavailableSend struct {
     storedError string
 }
 
-/* holdUnreached hands the rows a failed send left unreached back to the pending state with their attempts unchanged, available again when the failed row is tried, each write on a context of its own like a resolution: they were claimed but never tried, so they are charged nothing, and their last_error names the row whose failed send held them. The lease is kept before every write, as before every row the batch reaches. A write that fails, or a cancellation of the run, ends the hold, and the rows not handed back re-surface after the visibility timeout. */
-func (instance *Relay) holdUnreached(runtimeInstance containercontract.Runtime, failedId int64, failure failedSend, unreached []Pending, keepLease func()) error {
+/* holdUnreached hands the rows a failed send left unreached back to the pending state with their attempts unchanged, available again when the failed row is tried, each write on a context of its own like a resolution: they were claimed but never tried, so they are charged nothing, and their last_error names the row whose failed send held them. The lease is kept before every write, as before every row the batch reaches. A write that fails, or a cancellation of the run, ends the hold and answers how many unreached rows it wrote for, the failed write's row included, so the batch's end hands back only the rows after them. */
+func (instance *Relay) holdUnreached(runtimeInstance containercontract.Runtime, failedId int64, failure failedSend, unreached []Pending, keepLease func()) (int, error) {
     if 0 == len(unreached) {
-        return nil
+        return 0, nil
     }
 
     heldError := storedLastError("held behind outbox row "+strconv.FormatInt(failedId, 10)+", whose send failed: ", failure.cause)
 
-    for _, held := range unreached {
+    for heldIndex, held := range unreached {
         /* a cancelled run stops handing rows back: each write runs detached and bounded, so a signal would otherwise wait out one write per remaining row, and a row left claimed costs no more than the visibility timeout every interrupted batch already pays */
         if cancelErr := runtimeInstance.Context().Err(); nil != cancelErr {
-            return exception.NewError(
-                "outbox relay hold interrupted by the run's cancellation - the rows not handed back re-surface after the visibility timeout",
+            return heldIndex, exception.NewError(
+                "outbox relay hold interrupted by the run's cancellation - the rows not handed back are released",
                 exceptioncontract.Context{"failedId": failedId},
                 cancelErr,
             )
@@ -335,15 +341,15 @@ func (instance *Relay) holdUnreached(runtimeInstance containercontract.Runtime, 
             return instance.config.Repository.Reschedule(resolutionRuntime, held.Id, held.Attempts, failure.retryAt, heldError, held.ClaimToken)
         })
         if nil != holdErr {
-            return exception.NewError(
-                "outbox relay hold write failed after a failed send - the rows not handed back re-surface after the visibility timeout",
+            return heldIndex + 1, exception.NewError(
+                "outbox relay hold write failed after a failed send - the held row re-surfaces after the visibility timeout, the rows after it are released",
                 exceptioncontract.Context{"failedId": failedId, "heldId": held.Id},
                 holdErr,
             )
         }
     }
 
-    return nil
+    return len(unreached), nil
 }
 
 /* reportFailedSend writes one ERROR naming a row whose send the transport refused, under the same containment as every other record: the row's last_error carries the cause, and RunOnce reports nothing for a row it resolved, so without this record a broker outage leaves no trace in the process log. It is written once the row's resolution is, and the batch ends at the failed send, so a pass writes at most one such record. */

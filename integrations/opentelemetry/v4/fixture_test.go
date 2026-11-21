@@ -19,6 +19,9 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
 )
 
+/* conventionDurationBoundaries is the HTTP semantic conventions' advisory bucket list for http.server.request.duration, written out apart from the production default it pins */
+var conventionDurationBoundaries = []float64{0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10}
+
 func testRequestAndRuntime() (httpcontract.Request, containercontract.Runtime) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())

@@ -100,13 +100,13 @@ func (instance *lazyRepository) MarkDead(runtimeInstance containercontract.Runti
     return store.MarkDead(runtimeInstance, id, attempts, lastError, claimToken)
 }
 
-func (instance *lazyRepository) ReleaseClaims(runtimeInstance containercontract.Runtime, claimToken string) (int, error) {
+func (instance *lazyRepository) ReleaseClaims(runtimeInstance containercontract.Runtime, ids []int64, claimToken string) (int, error) {
     store, resolveErr := instance.resolveStore(runtimeInstance)
     if nil != resolveErr {
         return 0, resolveErr
     }
 
-    return store.ReleaseClaims(runtimeInstance, claimToken)
+    return store.ReleaseClaims(runtimeInstance, ids, claimToken)
 }
 
 func (instance *lazyRepository) RequeueDead(runtimeInstance containercontract.Runtime, options RequeueDeadOptions) (int, error) {

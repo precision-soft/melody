@@ -55,6 +55,10 @@ func (instance *K8sTemplate) RendersUserColumn() bool {
 
 /* Render renders one batch/v1 CronJob document per entry under a marker-carrying comment header, separated by the YAML document marker; heartbeat options are crontab-only and ignored here */
 func (instance *K8sTemplate) Render(entries []Entry, options RenderOptions) (string, error) {
+    if applicationNameErr := ValidateApplicationName(options.ApplicationName); nil != applicationNameErr {
+        return "", applicationNameErr
+    }
+
     /* an empty render needs no image: it is what --prune writes into a stale manifest, and an emptied configuration makes every earlier manifest stale */
     if 0 == len(entries) {
         return k8sHeaderBlock(instance.OwnershipMarker(options.ApplicationName)), nil

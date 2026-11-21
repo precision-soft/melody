@@ -22,17 +22,17 @@ type Repository interface {
 
     MarkDead(runtimeInstance containercontract.Runtime, id int64, attempts int, lastError string, claimToken string) error
 
-    /* ReleaseClaims hands back every row still claimed under claimToken: pending again and available now, its attempts and its delivery attempts unchanged, since a claim charges no delivery attempt and a row this claim reached keeps the one it recorded. Rows re-claimed under another token, sent or dead are untouched. The relay calls it when a batch ends with claimed rows it did not resolve; the visibility timeout stays the backstop. */
-    ReleaseClaims(runtimeInstance containercontract.Runtime, claimToken string) (released int, err error)
+    /* ReleaseClaims hands back the rows among ids still claimed under claimToken: pending again and available now, their attempts and their delivery attempts unchanged, since a claim charges no delivery attempt and a row this claim reached keeps the one it recorded. Rows re-claimed under another token, sent or dead are untouched; empty ids release nothing, an empty claimToken and more ids than the maximum batch size are refused before the store is touched. The relay calls it with the rows after the one a failed batch stopped at, that row keeping its claim until the visibility timeout, the backstop for a failed release too. */
+    ReleaseClaims(runtimeInstance containercontract.Runtime, ids []int64, claimToken string) (released int, err error)
 
-    /* RequeueDead returns dead rows to pending, available now, with attempts and delivery attempts reset to zero and last_error kept; empty Ids selects every dead row, bounded by Limit. */
+    /* RequeueDead returns dead rows to pending, available now, with attempts and delivery attempts reset to zero and last_error kept; empty Ids selects every dead row, bounded by Limit, and more Ids than Limit are refused. */
     RequeueDead(runtimeInstance containercontract.Runtime, options RequeueDeadOptions) (requeued int, err error)
 
     /* PruneSent deletes sent rows enqueued before SentBefore, bounded by Limit; a zero SentBefore is refused before the store is touched. */
     PruneSent(runtimeInstance containercontract.Runtime, options PruneSentOptions) (pruned int, err error)
 }
 
-/* RequeueDeadOptions selects the dead rows RequeueDead returns to pending: Ids, or every dead row when empty; Limit bounds the rows touched, 0 meaning the store's maximum batch size. */
+/* RequeueDeadOptions selects the dead rows RequeueDead returns to pending: Ids, or every dead row when Ids is nil or empty, so a caller that filtered its list down to nothing checks it before calling; Limit bounds the rows touched, 0 meaning the store's maximum batch size, and more Ids than the limit are refused rather than cut. The selection and the update are two statements: a concurrent requeue can leave the count below the rows selected, never a row requeued twice. */
 type RequeueDeadOptions struct {
     Ids []int64
 

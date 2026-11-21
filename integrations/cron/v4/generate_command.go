@@ -1318,7 +1318,7 @@ func configurationFromRuntime(runtimeInstance containercontract.Runtime) (config
     return configuration, nil
 }
 
-/* applicationIdentity answers the application's cli name, which the ownership line names. A configuration without a cli configuration answers the empty name, which the sweep refuses, and a name spanning lines is refused, since the ownership line has to be one line to be read back. */
+/* applicationIdentity answers the application's cli name, which the ownership line names. A configuration without a cli configuration answers the empty name, which the sweep refuses, and a name carrying a control character is refused before anything renders, since the ownership line has to be one line to be read back. */
 func applicationIdentity(configuration configcontract.Configuration) (string, error) {
     cliConfiguration := configuration.Cli()
     if true == isNilInterface(cliConfiguration) {
@@ -1326,12 +1326,8 @@ func applicationIdentity(configuration configcontract.Configuration) (string, er
     }
 
     applicationName := strings.TrimSpace(cliConfiguration.Name())
-    if true == strings.ContainsAny(applicationName, "\r\n") {
-        return "", exception.NewError(
-            "cron: the name the application runs under spans lines, so it cannot open the ownership line of a generated destination; configure a single-line cli name",
-            exceptioncontract.Context{"applicationName": applicationName},
-            nil,
-        )
+    if applicationNameErr := ValidateApplicationName(applicationName); nil != applicationNameErr {
+        return "", applicationNameErr
     }
 
     return applicationName, nil

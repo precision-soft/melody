@@ -17,14 +17,32 @@ const metricsRoute = "/metrics"
 /* metricsScrapeToken is the example's APP_METRICS_TOKEN (v3/.example/.env), the credential its development prometheus presents too: /metrics answers no caller without it */
 const metricsScrapeToken = "melody-example-metrics-scrape-token-0001"
 
-/* the metric names are matched by PREFIX rather than by their exact sanitised spelling. The opentelemetry instruments are declared as "http.server.request.count" and "http.server.request.duration" and the prometheus exporter rewrites both — dots to underscores, a "_total" suffix on the counter, the unit folded into the histogram's name ("http_server_request_duration_milliseconds"). Pinning the rewritten spelling would make this section fail on an exporter upgrade that changed a suffix while the metric itself kept working; the integration's own test matches by prefix for the same reason. */
-const (
-    metricsLifecycleCounterPrefix = "http_server_lifecycle_request_count"
-    metricsCounterPrefix          = "http_server_request_count"
-    metricsCounterSuffix          = "_total"
-    metricsHistogramPrefix        = "http_server_request_duration"
-    metricsHistogramCountSuffix   = "_count"
-)
+/* metricsSeriesSet names the exact exposition series the deltas are read from: handledCountName counts the requests the metrics middleware saw, lifecycleCountName the requests the handler decorator saw, short-circuited ones included, and durationCountName is the count series of the handled-request duration histogram. The names are matched whole, so one family never folds another's samples into a delta. */
+type metricsSeriesSet struct {
+    form               string
+    typeLine           string
+    handledCountName   string
+    lifecycleCountName string
+    durationCountName  string
+}
+
+/* metricsCounterSeriesSet is the exposition of the v3 integration: the exporter suffixes the "http.server.request.count" and "http.server.lifecycle.request.count" counters with "_total" and folds the millisecond unit into the "http.server.request.duration" histogram's name. */
+var metricsCounterSeriesSet = metricsSeriesSet{
+    form:               "the counter form",
+    typeLine:           "# TYPE http_server_request_count_total counter",
+    handledCountName:   "http_server_request_count_total",
+    lifecycleCountName: "http_server_lifecycle_request_count_total",
+    durationCountName:  "http_server_request_duration_milliseconds_count",
+}
+
+/* metricsHistogramSeriesSet is the exposition of the v4 integration: no counter, the "http.server.request.duration" and "melody.http.server.lifecycle.duration" histograms in seconds, each request one observation on the histogram's "_count" series, so the handled count and the duration count are the same series. */
+var metricsHistogramSeriesSet = metricsSeriesSet{
+    form:               "the histogram form",
+    typeLine:           "# TYPE http_server_request_duration_seconds histogram",
+    handledCountName:   "http_server_request_duration_seconds_count",
+    lifecycleCountName: "melody_http_server_lifecycle_duration_seconds_count",
+    durationCountName:  "http_server_request_duration_seconds_count",
+}
 
 /* metricsProbeRoute is the route this section calls, and metricsControlRoute is the route it must NOT touch. The route LABEL is the pattern the router matched, which carries no trailing slash. */
 const (
@@ -34,21 +52,21 @@ const (
     metricsControlRouteLabel = "/:_locale/i18n/greeting"
 )
 
-/* metricsRefusedRoute is a route the firewall refuses an anonymous caller with 401 before any middleware runs, and metricsRefusedRequestCount is how many such requests the section issues: the lifecycle counter must grow by exactly that many 401s while the middleware's 401 series stays where it was. */
+/* metricsRefusedRoute is a route the firewall refuses an anonymous caller with 401 before any middleware runs, and metricsRefusedRequestCount is how many such requests the section issues: the lifecycle count must grow by exactly that many 401s while the middleware's 401 series stays where it was. */
 const (
     metricsRefusedRoute        = "/categories/api/read/"
     metricsRefusedRequestCount = 2
 )
 
-/* metricsProbeRequestCount is how many probe requests the section issues; the counter delta must equal it exactly. */
+/* metricsProbeRequestCount is how many probe requests the section issues; the count delta must equal it exactly. */
 const metricsProbeRequestCount = 3
 
 /* metricsScrapeBudget bounds the wait for prometheus to report the example as up. The dev scrape interval is 5s (.dev/docker/prometheus/prometheus.yml), so this covers several intervals without turning a down target into a hung run. */
 const metricsScrapeBudget = 30 * time.Second
 
-/* runMetricsCheck asserts the metrics pipeline end to end, and it runs LAST of the example-over-http group because its assertions are on EXACT deltas: any request issued by a later section against the same application would move a counter this section already measured.
+/* runMetricsCheck asserts the metrics pipeline end to end, and it runs LAST of the example-over-http group because its assertions are on EXACT deltas: any request issued by a later section against the same application would move a count this section already read.
 
-   The delta assertions are the point. "The counter exists" is satisfied by a middleware that recorded one request and then stopped, and "the counter is above zero" is satisfied by requests from earlier sections. Growing by EXACTLY the number of requests issued is satisfied by neither, and the untouched control route is what separates "the counter grows" from "the counter grows for the route that was called". */
+   The delta assertions are the point. "The count exists" is satisfied by a middleware that recorded one request and then stopped, and "the count is above zero" is satisfied by requests from earlier sections. Growing by EXACTLY the number of requests issued is satisfied by neither, and the untouched control route is what separates "the count grows" from "the count grows for the route that was called". */
 func runMetricsCheck(baseUrl string) {
     client := newLiveExampleClient(baseUrl)
 
@@ -68,18 +86,31 @@ func runMetricsCheck(baseUrl string) {
 
     assertMetricsExpositionFormat(baseline)
 
-    probeBefore, probeBeforeFound := metricsRequestCount(baseline, metricsProbeRouteLabel)
+    seriesSet, seriesSetFound := selectMetricsSeriesSet(baseline)
+    if false == seriesSetFound {
+        fail(
+            "%s: %s carries neither %q nor %q after the control route was called — the request instrumentation is not exposed in a form this section reads: %s",
+            metricsLabel,
+            metricsRoute,
+            metricsHistogramSeriesSet.typeLine,
+            metricsCounterSeriesSet.typeLine,
+            exampleTruncate(baseline),
+        )
+    }
+    pass("%s exposes the request instrumentation in %s (%s)", metricsRoute, seriesSet.form, seriesSet.handledCountName)
+
+    probeBefore, probeBeforeFound := metricsRequestCount(baseline, seriesSet.handledCountName, metricsProbeRouteLabel)
     if false == probeBeforeFound {
         /* the probe route may legitimately have no series yet on a freshly restarted application, and zero is the right baseline for that case — but it must be reported, because it is also what a lost middleware looks like from here */
-        skip("%s: the probe route %s had no counter series before the probe requests (a freshly booted application)", metricsLabel, metricsProbeRouteLabel)
+        skip("%s: the probe route %s had no count series before the probe requests (a freshly booted application)", metricsLabel, metricsProbeRouteLabel)
     }
 
-    durationBefore, _ := metricsRequestDurationCount(baseline, metricsProbeRouteLabel)
+    durationBefore, _ := metricsRequestCount(baseline, seriesSet.durationCountName, metricsProbeRouteLabel)
 
-    controlBefore, controlBeforeFound := metricsRequestCount(baseline, metricsControlRouteLabel)
+    controlBefore, controlBeforeFound := metricsRequestCount(baseline, seriesSet.handledCountName, metricsControlRouteLabel)
     if false == controlBeforeFound {
         fail(
-            "%s: the control route %s has no counter series even after being called once — the control assertion below could not distinguish an unchanged series from a missing one",
+            "%s: the control route %s has no count series even after being called once — the control assertion below could not distinguish an unchanged series from a missing one",
             metricsLabel,
             metricsControlRouteLabel,
         )
@@ -90,8 +121,8 @@ func runMetricsCheck(baseUrl string) {
         requireLiveExampleStatus(metricsLabel, metricsProbeRoute, response, http.StatusOK)
     }
 
-    lifecycleRefusedBefore, _ := metricsStatusCount(baseline, metricsLifecycleCounterPrefix, "401")
-    handledRefusedBefore, _ := metricsStatusCount(baseline, metricsCounterPrefix, "401")
+    lifecycleRefusedBefore, _ := metricsStatusCount(baseline, seriesSet.lifecycleCountName, "401")
+    handledRefusedBefore, _ := metricsStatusCount(baseline, seriesSet.handledCountName, "401")
 
     for issued := 1; issued <= metricsRefusedRequestCount; issued++ {
         response := client.get(metricsLabel, metricsRefusedRoute)
@@ -100,10 +131,10 @@ func runMetricsCheck(baseUrl string) {
 
     final := readMetricsExposition(client)
 
-    probeAfter, probeAfterFound := metricsRequestCount(final, metricsProbeRouteLabel)
+    probeAfter, probeAfterFound := metricsRequestCount(final, seriesSet.handledCountName, metricsProbeRouteLabel)
     if false == probeAfterFound {
         fail(
-            "%s: after %d requests to %s the counter has NO series for it — the metrics middleware recorded nothing",
+            "%s: after %d requests to %s the request count has NO series for it — the metrics middleware recorded nothing",
             metricsLabel,
             metricsProbeRequestCount,
             metricsProbeRouteLabel,
@@ -112,7 +143,7 @@ func runMetricsCheck(baseUrl string) {
 
     if metricsProbeRequestCount != int(probeAfter-probeBefore) {
         fail(
-            "%s: the counter for %s grew by %g over %d requests, wanted exactly %d (%g -> %g)",
+            "%s: the request count for %s grew by %g over %d requests, wanted exactly %d (%g -> %g)",
             metricsLabel,
             metricsProbeRouteLabel,
             probeAfter-probeBefore,
@@ -122,12 +153,12 @@ func runMetricsCheck(baseUrl string) {
             probeAfter,
         )
     }
-    pass("the request counter for %s grew by exactly %d over %d requests", metricsProbeRouteLabel, metricsProbeRequestCount, metricsProbeRequestCount)
+    pass("the request count for %s grew by exactly %d over %d requests", metricsProbeRouteLabel, metricsProbeRequestCount, metricsProbeRequestCount)
 
-    durationAfter, durationAfterFound := metricsRequestDurationCount(final, metricsProbeRouteLabel)
+    durationAfter, durationAfterFound := metricsRequestCount(final, seriesSet.durationCountName, metricsProbeRouteLabel)
     if false == durationAfterFound {
         fail(
-            "%s: after %d requests to %s the duration histogram has NO series for it — the counter is recorded but the timing is not",
+            "%s: after %d requests to %s the duration histogram has NO series for it — the count is recorded but the timing is not",
             metricsLabel,
             metricsProbeRequestCount,
             metricsProbeRouteLabel,
@@ -146,17 +177,17 @@ func runMetricsCheck(baseUrl string) {
     }
     pass("the duration histogram count for %s grew by exactly %d as well", metricsProbeRouteLabel, metricsProbeRequestCount)
 
-    controlAfter, controlAfterFound := metricsRequestCount(final, metricsControlRouteLabel)
+    controlAfter, controlAfterFound := metricsRequestCount(final, seriesSet.handledCountName, metricsControlRouteLabel)
     if false == controlAfterFound {
         fail(
-            "%s: the control route %s LOST its counter series between the two scrapes — a series that disappears makes every delta above unreliable",
+            "%s: the control route %s LOST its count series between the two scrapes — a series that disappears makes every delta above unreliable",
             metricsLabel,
             metricsControlRouteLabel,
         )
     }
     if controlBefore != controlAfter {
         fail(
-            "%s: the counter for %s moved from %g to %g while only %s was called — requests are being attributed to the wrong route label",
+            "%s: the request count for %s moved from %g to %g while only %s was called — requests are being attributed to the wrong route label",
             metricsLabel,
             metricsControlRouteLabel,
             controlBefore,
@@ -166,10 +197,10 @@ func runMetricsCheck(baseUrl string) {
     }
     pass("the control route %s, which was not called, stayed at %g", metricsControlRouteLabel, controlAfter)
 
-    lifecycleRefusedAfter, lifecycleRefusedFound := metricsStatusCount(final, metricsLifecycleCounterPrefix, "401")
+    lifecycleRefusedAfter, lifecycleRefusedFound := metricsStatusCount(final, seriesSet.lifecycleCountName, "401")
     if false == lifecycleRefusedFound || metricsRefusedRequestCount != int(lifecycleRefusedAfter-lifecycleRefusedBefore) {
         fail(
-            "%s: the lifecycle counter's 401 series grew from %g to %g (found %v) over %d refusals of %s, wanted exactly %d — the handler decorator is not counting the firewall's short-circuits",
+            "%s: the lifecycle count's 401 series grew from %g to %g (found %v) over %d refusals of %s, wanted exactly %d — the handler decorator is not counting the firewall's short-circuits",
             metricsLabel,
             lifecycleRefusedBefore,
             lifecycleRefusedAfter,
@@ -180,7 +211,7 @@ func runMetricsCheck(baseUrl string) {
         )
     }
 
-    handledRefusedAfter, _ := metricsStatusCount(final, metricsCounterPrefix, "401")
+    handledRefusedAfter, _ := metricsStatusCount(final, seriesSet.handledCountName, "401")
     if handledRefusedBefore != handledRefusedAfter {
         fail(
             "%s: the metrics middleware's 401 series moved from %g to %g over refusals the firewall answers before the middleware runs — the lifecycle count is no longer the only one that sees them",
@@ -189,14 +220,27 @@ func runMetricsCheck(baseUrl string) {
             handledRefusedAfter,
         )
     }
-    pass("%d anonymous refusals of %s grew the lifecycle counter's 401 series by exactly %d and left the middleware's 401 series at %g: only the decorator sees a security short-circuit", metricsRefusedRequestCount, metricsRefusedRoute, metricsRefusedRequestCount, handledRefusedAfter)
+    pass("%d anonymous refusals of %s grew the lifecycle count's 401 series by exactly %d and left the middleware's 401 series at %g: only the decorator sees a security short-circuit", metricsRefusedRequestCount, metricsRefusedRoute, metricsRefusedRequestCount, handledRefusedAfter)
 
     assertPrometheusScrapesTheExample()
 }
 
-/* metricsStatusCount sums every GET series of a counter family answered with statusCode, whatever its route: the lifecycle family carries no route label, and the middleware's 401s are read across every route. */
-func metricsStatusCount(body string, counterPrefix string, statusCode string) (float64, bool) {
-    return prometheusSeriesSum(body, counterPrefix, metricsCounterSuffix, map[string]string{
+/* selectMetricsSeriesSet reads which form the exposition carries from its # TYPE line: the histogram form when the handled-request histogram is in seconds, the counter form when the handled-request counter is present, and nothing found when neither is. */
+func selectMetricsSeriesSet(body string) (metricsSeriesSet, bool) {
+    for _, seriesSet := range []metricsSeriesSet{metricsHistogramSeriesSet, metricsCounterSeriesSet} {
+        for _, line := range strings.Split(body, "\n") {
+            if seriesSet.typeLine == strings.TrimSpace(line) {
+                return seriesSet, true
+            }
+        }
+    }
+
+    return metricsSeriesSet{}, false
+}
+
+/* metricsStatusCount sums every GET series named seriesName answered with statusCode, whatever its route: the lifecycle family carries no route label, and the middleware's 401s are read across every route. */
+func metricsStatusCount(body string, seriesName string, statusCode string) (float64, bool) {
+    return prometheusSeriesSum(body, seriesName, map[string]string{
         "http_request_method":       "GET",
         "http_response_status_code": statusCode,
     })
@@ -227,16 +271,9 @@ func assertMetricsExpositionFormat(body string) {
     pass("%s answered a prometheus exposition body (%d bytes)", metricsRoute, len(body))
 }
 
-func metricsRequestCount(body string, routeLabel string) (float64, bool) {
-    return prometheusSeriesSum(body, metricsCounterPrefix, metricsCounterSuffix, map[string]string{
-        "http_route":                routeLabel,
-        "http_request_method":       "GET",
-        "http_response_status_code": "200",
-    })
-}
-
-func metricsRequestDurationCount(body string, routeLabel string) (float64, bool) {
-    return prometheusSeriesSum(body, metricsHistogramPrefix, metricsHistogramCountSuffix, map[string]string{
+/* metricsRequestCount sums the GET 200 series named seriesName recorded under routeLabel. */
+func metricsRequestCount(body string, seriesName string, routeLabel string) (float64, bool) {
+    return prometheusSeriesSum(body, seriesName, map[string]string{
         "http_route":                routeLabel,
         "http_request_method":       "GET",
         "http_response_status_code": "200",
@@ -246,10 +283,10 @@ func metricsRequestDurationCount(body string, routeLabel string) (float64, bool)
 /* prometheusLabelPattern matches one label pair of an exposition line, tolerating a backslash escape inside the value so a label carrying a quote or a comma cannot end the match early. */
 var prometheusLabelPattern = regexp.MustCompile(`([a-zA-Z_][a-zA-Z0-9_]*)="((?:[^"\\]|\\.)*)"`)
 
-/* prometheusSeriesSum sums the value of every series whose metric name starts with namePrefix, ends with nameSuffix, and carries all of the requested labels with the requested values. Extra labels are ignored: the otel exporter attaches otel_scope_* labels to everything, and a parser that demanded an exact label set would match nothing.
+/* prometheusSeriesSum sums the value of every series whose metric name is seriesName and which carries all of the requested labels with the requested values. Extra labels are ignored: the otel exporter attaches otel_scope_* labels to everything, and a parser that demanded an exact label set would match nothing.
 
-   The second return value is what makes the control assertion meaningful: a MISSING series and a series whose value is zero are different findings — the first means nothing was ever recorded under that label, the second means it was recorded and is genuinely at zero — and a parser that collapsed them into 0 would let "the control route stayed unchanged" pass on a scrape where the whole metric had disappeared. A matched line whose value does not parse as a number contributes nothing and does not count as found, which keeps a malformed exposition on the safe side of that distinction rather than silently reporting a wrong number. */
-func prometheusSeriesSum(body string, namePrefix string, nameSuffix string, labelList map[string]string) (float64, bool) {
+   The second return value is what makes the control assertion meaningful: a MISSING series and a series whose value is zero are different findings — the first means nothing was ever recorded under that label, the second means a value is recorded and is genuinely at zero — and a parser that collapsed them into 0 would let "the control route stayed unchanged" pass on a scrape where the whole metric had disappeared. A matched line whose value does not parse as a number contributes nothing and does not count as found, which keeps a malformed exposition on the safe side of that distinction rather than silently reporting a wrong number. */
+func prometheusSeriesSum(body string, seriesName string, labelList map[string]string) (float64, bool) {
     total := 0.0
     found := false
 
@@ -264,7 +301,7 @@ func prometheusSeriesSum(body string, namePrefix string, nameSuffix string, labe
             continue
         }
 
-        if false == strings.HasPrefix(name, namePrefix) || false == strings.HasSuffix(name, nameSuffix) {
+        if seriesName != name {
             continue
         }
 
