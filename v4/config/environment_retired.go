@@ -15,6 +15,12 @@ const frameworkEnvironmentKeyOwner = internal.EnvironmentKeyOwnerFramework
 var retiredEnvironmentKeyMap = map[string]string{
     "MELODY_HTTP_SESSION_PERSISTENCE_TIMEOUT": HttpSessionStorageTimeoutKey,
     "MELODY_PUBLIC_DIR":                       PublicDirectoryKey,
+    "MELODY_STATIC_ENABLE_CACHE":              StaticCacheDisabledKey,
+}
+
+/* retiredEnvironmentKeyNoteMap is keyed by the retired spelling of a key whose successor reads its value another way */
+var retiredEnvironmentKeyNoteMap = map[string]string{
+    "MELODY_STATIC_ENABLE_CACHE": "the value inverts: MELODY_STATIC_ENABLE_CACHE=false is MELODY_STATIC_CACHE_DISABLED=true",
 }
 
 /* RetiredEnvironmentKeys answers, sorted by key, every retired spelling the .env artifacts set, the framework's and the declared ones; presence counts, an empty line included. */
@@ -29,7 +35,7 @@ func (instance *Configuration) RetiredEnvironmentKeys() []configcontract.Retired
 
     for key := range instance.environment.values {
         if successor, isRetired := retiredEnvironmentKeyMap[key]; true == isRetired {
-            retiredKeys = append(retiredKeys, configcontract.RetiredEnvironmentKey{Key: key, Successor: successor, Owner: frameworkEnvironmentKeyOwner})
+            retiredKeys = append(retiredKeys, configcontract.RetiredEnvironmentKey{Key: key, Successor: successor, Owner: frameworkEnvironmentKeyOwner, Note: retiredEnvironmentKeyNoteMap[key]})
 
             continue
         }

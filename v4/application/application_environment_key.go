@@ -76,7 +76,12 @@ func (instance *Application) refuseRetiredEnvironmentKeys() {
 func retiredEnvironmentKeysContext(retiredKeys []configcontract.RetiredEnvironmentKey) []map[string]string {
     entries := make([]map[string]string, 0, len(retiredKeys))
     for _, retiredKey := range retiredKeys {
-        entries = append(entries, map[string]string{"key": retiredKey.Key, "successor": retiredKey.Successor, "owner": retiredKey.Owner})
+        entry := map[string]string{"key": retiredKey.Key, "successor": retiredKey.Successor, "owner": retiredKey.Owner}
+        if "" != retiredKey.Note {
+            entry["note"] = retiredKey.Note
+        }
+
+        entries = append(entries, entry)
     }
 
     return entries
@@ -85,7 +90,12 @@ func retiredEnvironmentKeysContext(retiredKeys []configcontract.RetiredEnvironme
 func retiredEnvironmentKeysMessage(retiredKeys []configcontract.RetiredEnvironmentKey) string {
     parts := make([]string, 0, len(retiredKeys))
     for _, retiredKey := range retiredKeys {
-        parts = append(parts, "the environment key "+retiredKey.Key+" is retired: rename it to "+retiredKey.Successor)
+        part := "the environment key " + retiredKey.Key + " is retired: rename it to " + retiredKey.Successor
+        if "" != retiredKey.Note {
+            part += ", and " + retiredKey.Note
+        }
+
+        parts = append(parts, part)
     }
 
     return strings.Join(parts, "; ")

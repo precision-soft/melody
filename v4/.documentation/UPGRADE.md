@@ -365,6 +365,14 @@ The six `service.<module>` names of a module's principal service, `service.cache
 
 **Remedy.** Rename the field to `CallTimeout`, `bound.Of(d)` as before, and re-key the query on `callTimeout`.
 
+### Static files: `MELODY_STATIC_CACHE_DISABLED` replaces `MELODY_STATIC_ENABLE_CACHE`
+
+**What changed.** The built-in file server's cache switch is `MELODY_STATIC_CACHE_DISABLED`, parameter `kernel.static.cache_disabled`, `false` by default, read through [`HttpConfiguration.StaticCacheDisabled()`](../config/contract/http.go), which replaces `StaticEnableCache()`; `StaticEnableCacheKey` and `KernelStaticEnableCache` are `StaticCacheDisabledKey` and `KernelStaticCacheDisabled`. `MELODY_STATIC_ENABLE_CACHE` is retired. A max age a `.env` artifact or an override sets beside `MELODY_STATIC_CACHE_DISABLED=true` refuses the boot naming both keys, where it was dropped unread.
+
+**Symptom.** A boot whose `.env` still sets `MELODY_STATIC_ENABLE_CACHE` fails with `the environment key MELODY_STATIC_ENABLE_CACHE is retired: rename it to MELODY_STATIC_CACHE_DISABLED, and the value inverts: MELODY_STATIC_ENABLE_CACHE=false is MELODY_STATIC_CACHE_DISABLED=true`. A boot that sets `MELODY_STATIC_CACHE_DISABLED=true` beside `MELODY_STATIC_CACHE_MAX_AGE` fails with `the static cache max age is set beside the disabled static cache`. A call of `StaticEnableCache()` no longer compiles.
+
+**Remedy.** **Invert the value when renaming the key**: `MELODY_STATIC_ENABLE_CACHE=false` is `MELODY_STATIC_CACHE_DISABLED=true`, and `MELODY_STATIC_ENABLE_CACHE=true` is the default, the line dropped or `MELODY_STATIC_CACHE_DISABLED=false`. Drop the max age from a file that disables the cache. Read `StaticCacheDisabled()` where `false == StaticEnableCache()` was read.
+
 ### Cors: `AllowOrigin` receives the request
 
 **What changed.** [`cors.Config`](../http/cors/service.go)'s origin function is `AllowOrigin func(request httpcontract.Request, origin string) bool`, where it was `AllowOriginFunc func(origin string) bool`, and `Service.OriginAllowed` takes the request first: `OriginAllowed(request, origin)`. The request's `RuntimeInstance()` reaches the context and the container, so a per-tenant decision reads its store through it; a lookup the function cannot make answers false, refusing the origin. A nil request handed to `OriginAllowed` while a function is configured panics naming `cors.Service.OriginAllowed`.
@@ -949,7 +957,7 @@ when it is cancelled, the body read included, and an absent runtime is refused w
 ### Http: the static file server is built from one `Config` struct, and a negative max age is refused
 
 **What changed.** [`static.NewFileServer`](../http/static/file_server.go) and [`middleware.StaticMiddleware`](../http/middleware/static.go) take one [`static.Config`](../http/static/option.go) struct, `Mode`, `PublicDirectory`, `IndexFile`, `StripPrefix`, `CacheDisabled`, `CacheMaxAge`, `WeakEtag`, `AllowedDotPrefixList`, `ExcludedPathList`, `Root` and `FileSystem`, whose zero value serves `public` under `.` with `index.html`, an hour's max age and `.well-known` the one dot-prefixed element retrieved. The third major built a `FileServerConfig` of seven positional parameters, set its two lists after through `SetAllowedDotPrefixList` and `SetExcludedPathList`, and wrapped it in `Options` with the root and the filesystem; all of them are removed. `CacheMaxAge` is a [`bound.Count`](../bound/limit.go): left out it is 3600, a value is at least 0, which is always revalidate, and unlimited is refused, as is a max age beside `CacheDisabled`, each naming `Config.CacheMaxAge`; a negative value read as the
-default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list refuses every dot-prefixed path. The built-in server reads `MELODY_STATIC_ENABLE_CACHE` and `MELODY_STATIC_CACHE_MAX_AGE` as before.
+default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list refuses every dot-prefixed path. The built-in server reads `MELODY_STATIC_CACHE_DISABLED` and `MELODY_STATIC_CACHE_MAX_AGE` (see [Static files: `MELODY_STATIC_CACHE_DISABLED`](#static-files-melody_static_cache_disabled-replaces-melody_static_enable_cache)).
 
 **Symptom.** `static.NewFileServerConfig`, `static.NewOptions` and the two setters no longer compile, and `StaticMiddleware` takes a `static.Config`. A negative `CacheMaxAge` panics at construction where it served an hour.
 

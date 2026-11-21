@@ -20,7 +20,8 @@ type HttpConfiguration interface {
 
     MaxRequestBodyBytes() bound.Resolved[int]
 
-    StaticEnableCache() bool
+    /* StaticCacheDisabled switches off the built-in file server's cache headers and validators; false by default. */
+    StaticCacheDisabled() bool
 
     StaticCacheMaxAge() bound.Resolved[int]
 

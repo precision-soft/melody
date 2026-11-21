@@ -567,7 +567,7 @@ func (instance *ExampleMiddlewareModule) RegisterHttpMiddlewares(
     staticConfig := static.Config{
         PublicDirectory:      httpConfiguration.PublicDirectory(),
         IndexFile:            httpConfiguration.StaticIndexFile(),
-        CacheDisabled:        false == httpConfiguration.StaticEnableCache(),
+        CacheDisabled:        httpConfiguration.StaticCacheDisabled(),
         AllowedDotPrefixList: []string{static.DefaultAllowedDotPrefix, ".artifacts"},
         Root:                 kernelInstance.Config().Kernel().ProjectDirectory(),
     }

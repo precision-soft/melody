@@ -653,13 +653,22 @@ func (instance *Configuration) buildHttpConfiguration() error {
         return staticCacheMaxAgeErr
     }
 
-    staticEnableCacheSwitch, staticEnableCacheErr := checkedParameterSwitch(instance.MustGet(KernelStaticEnableCache), StaticEnableCacheKey)
-    if nil != staticEnableCacheErr {
-        return staticEnableCacheErr
+    staticCacheDisabledSwitch, staticCacheDisabledErr := checkedParameterSwitch(instance.MustGet(KernelStaticCacheDisabled), StaticCacheDisabledKey)
+    if nil != staticCacheDisabledErr {
+        return staticCacheDisabledErr
     }
 
-    /* empty is unset; the default is on */
-    staticEnableCache := false == staticEnableCacheSwitch.IsSet || true == staticEnableCacheSwitch.Value
+    /* an empty line is unset and reads false, the cache on */
+    staticCacheDisabled := staticCacheDisabledSwitch.Value
+
+    /* the file server writes no max age once the cache is off, so one a deployment set beside the switch would be dropped unread */
+    if true == staticCacheDisabled && false == instance.MustGet(KernelStaticCacheMaxAge).IsDefault() {
+        return exception.NewError(
+            "the static cache max age is set beside the disabled static cache",
+            exceptioncontract.Context{"environmentKeys": []string{StaticCacheDisabledKey, StaticCacheMaxAgeKey}},
+            nil,
+        )
+    }
 
     staticExcludedPaths := splitConfigurationList(instance.MustGet(KernelStaticExcludedPaths).MustString())
 
@@ -726,7 +735,7 @@ func (instance *Configuration) buildHttpConfiguration() error {
         instance.MustGet(KernelPublicDirectory).MustString(),
         instance.MustGet(KernelStaticIndexFile).MustString(),
         httpMaxRequestBodyBytes,
-        staticEnableCache,
+        staticCacheDisabled,
         staticCacheMaxAge,
         staticExcludedPaths,
         sessionTtl,

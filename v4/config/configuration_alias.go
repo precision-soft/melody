@@ -24,7 +24,7 @@ func frameworkEnvironmentKeys() []configcontract.EnvironmentKey {
         frameworkEnvironmentKey(DefaultLocaleKey, KernelDefaultLocale, "en"),
         frameworkEnvironmentKey(PublicDirectoryKey, KernelPublicDirectory, "public"),
         frameworkEnvironmentKey(StaticIndexFileKey, KernelStaticIndexFile, "index.html"),
-        frameworkEnvironmentKey(StaticEnableCacheKey, KernelStaticEnableCache, "true"),
+        frameworkEnvironmentKey(StaticCacheDisabledKey, KernelStaticCacheDisabled, "false"),
         frameworkEnvironmentKey(StaticCacheMaxAgeKey, KernelStaticCacheMaxAge, strconv.Itoa(DefaultStaticCacheMaxAge)),
         frameworkEnvironmentKey(StaticExcludedPathsKey, KernelStaticExcludedPaths, ""),
         frameworkEnvironmentKey(HttpMaxRequestBodyBytesKey, KernelHttpMaxRequestBodyBytes, strconv.Itoa(DefaultHttpMaxRequestBodyBytes)),

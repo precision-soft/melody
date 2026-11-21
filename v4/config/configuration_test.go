@@ -1161,26 +1161,26 @@ func TestConfigurationSessionEmptyOnOutageIsASwitch(t *testing.T) {
     }
 }
 
-func TestConfigurationStaticEnableCacheReadsAnEmptyLineAsUnset(t *testing.T) {
+func TestConfigurationStaticCacheDisabledReadsAnEmptyLineAsUnset(t *testing.T) {
     for value, expected := range map[string]bool{
-        "":      true,
-        "  ":    true,
+        "":      false,
+        "  ":    false,
         "true":  true,
         "false": false,
     } {
-        configuration := newTeardownTimeoutConfiguration(t, map[string]string{StaticEnableCacheKey: value})
-        if expected != configuration.Http().StaticEnableCache() {
-            t.Fatalf("expected %q read as %v, got %v", value, expected, configuration.Http().StaticEnableCache())
+        configuration := newTeardownTimeoutConfiguration(t, map[string]string{StaticCacheDisabledKey: value})
+        if expected != configuration.Http().StaticCacheDisabled() {
+            t.Fatalf("expected %q read as %v, got %v", value, expected, configuration.Http().StaticCacheDisabled())
         }
     }
 
-    environment, environmentErr := NewEnvironment(context.Background(), &testEnvironmentSource{values: map[string]string{StaticEnableCacheKey: "maybe"}})
+    environment, environmentErr := NewEnvironment(context.Background(), &testEnvironmentSource{values: map[string]string{StaticCacheDisabledKey: "maybe"}})
     if nil != environmentErr {
         t.Fatalf("new environment error: %v", environmentErr)
     }
 
     _, configurationErr := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
-    if nil == configurationErr || StaticEnableCacheKey != exception.LogContext(configurationErr, exception.LogContextConfig{})["environmentKey"] {
+    if nil == configurationErr || StaticCacheDisabledKey != exception.LogContext(configurationErr, exception.LogContextConfig{})["environmentKey"] {
         t.Fatalf("expected the value refused naming the key, got %v", configurationErr)
     }
 }
@@ -1292,5 +1292,43 @@ func TestMarkSecret_ReachesAKeyWhoseLineReadsTheMarkedParameter(t *testing.T) {
 
     if false == configuration.MustGet("app.url").IsSecret() || false == configuration.MustGet("app.copy").IsSecret() {
         t.Fatalf("expected the parameters reading the line that reads the marked parameter marked")
+    }
+}
+
+func TestConfiguration_StaticCacheDisabledBesideAMaxAgeIsRefused(t *testing.T) {
+    _, configurationErr := newConfigurationFromValues(map[string]string{StaticCacheDisabledKey: "true", StaticCacheMaxAgeKey: "60"})
+    if nil == configurationErr {
+        t.Fatal("expected the max age beside the disabled cache refused")
+    }
+
+    environmentKeys, _ := exception.LogContext(configurationErr, exception.LogContextConfig{})["environmentKeys"].([]string)
+    if 2 != len(environmentKeys) || StaticCacheDisabledKey != environmentKeys[0] || StaticCacheMaxAgeKey != environmentKeys[1] {
+        t.Fatalf("expected the refusal to name both keys, got %v", configurationErr)
+    }
+
+    configuration := mustConfigurationFromValues(t, map[string]string{StaticCacheDisabledKey: "true"})
+    if false == configuration.Http().StaticCacheDisabled() {
+        t.Fatal("expected the switch alone admitted")
+    }
+
+    if _, enabledErr := newConfigurationFromValues(map[string]string{StaticCacheDisabledKey: "false", StaticCacheMaxAgeKey: "60"}); nil != enabledErr {
+        t.Fatalf("expected a max age beside the enabled cache admitted, got %v", enabledErr)
+    }
+}
+
+func TestConfiguration_TheRetiredStaticCacheKeyNamesItsSuccessorAndTheInversion(t *testing.T) {
+    configuration := mustConfigurationFromValues(t, map[string]string{"MELODY_STATIC_ENABLE_CACHE": "false"})
+
+    retiredKeys := configuration.RetiredEnvironmentKeys()
+    if 1 != len(retiredKeys) || "MELODY_STATIC_ENABLE_CACHE" != retiredKeys[0].Key || StaticCacheDisabledKey != retiredKeys[0].Successor {
+        t.Fatalf("expected the retired key with its successor, got %+v", retiredKeys)
+    }
+
+    if "the value inverts: MELODY_STATIC_ENABLE_CACHE=false is MELODY_STATIC_CACHE_DISABLED=true" != retiredKeys[0].Note {
+        t.Fatalf("expected the inversion noted, got %q", retiredKeys[0].Note)
+    }
+
+    if successor, isRetired := configuration.RetiredEnvironmentKeySuccessor("MELODY_STATIC_ENABLE_CACHE"); false == isRetired || StaticCacheDisabledKey != successor {
+        t.Fatalf("expected the successor answered, got %q %v", successor, isRetired)
     }
 }

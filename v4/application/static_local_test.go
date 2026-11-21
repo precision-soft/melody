@@ -87,7 +87,7 @@ func TestNewStaticFileServerConfig_ExcludedPrefixReachesTheMiddlewareRegisteredW
     configuration := newStaticExclusionTestConfiguration(t, map[string]string{
         config.PublicDirectoryKey:     publicDirectory,
         config.StaticExcludedPathsKey: "/private",
-        config.StaticEnableCacheKey:   "false",
+        config.StaticCacheDisabledKey: "true",
     })
 
     httpMiddleware := NewHttpMiddleware(
@@ -144,7 +144,7 @@ func TestNewStaticFileServerConfig_PathOutsideTheExclusionIsStillServedFromDisk(
     configuration := newStaticExclusionTestConfiguration(t, map[string]string{
         config.PublicDirectoryKey:     publicDirectory,
         config.StaticExcludedPathsKey: "/private",
-        config.StaticEnableCacheKey:   "false",
+        config.StaticCacheDisabledKey: "true",
     })
 
     httpMiddleware := NewHttpMiddleware(
@@ -214,7 +214,7 @@ func TestNewStaticFileServerConfig_CarriesTheCacheKeys(t *testing.T) {
     }
 
     disabledConfiguration := newStaticExclusionTestConfiguration(t, map[string]string{
-        config.StaticEnableCacheKey: "false",
+        config.StaticCacheDisabledKey: "true",
     })
 
     disabledConfig := newStaticFileServerConfig(nil, disabledConfiguration)

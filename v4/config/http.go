@@ -58,7 +58,7 @@ func newHttpConfiguration(
     publicDirectory string,
     staticIndexFile string,
     maxRequestBodyBytes bound.Resolved[int],
-    staticEnableCache bool,
+    staticCacheDisabled bool,
     staticCacheMaxAge bound.Resolved[int],
     staticExcludedPaths []string,
     sessionTtl bound.Resolved[time.Duration],
@@ -97,7 +97,7 @@ func newHttpConfiguration(
         publicDirectory:           publicDirectory,
         staticIndexFile:           staticIndexFile,
         maxRequestBodyBytes:       maxRequestBodyBytes,
-        staticEnableCache:         staticEnableCache,
+        staticCacheDisabled:       staticCacheDisabled,
         staticCacheMaxAge:         staticCacheMaxAge,
         staticExcludedPaths:       copiedStaticExcludedPaths,
         sessionTtl:                sessionTtl,
@@ -123,7 +123,7 @@ type httpConfiguration struct {
     publicDirectory           string
     staticIndexFile           string
     maxRequestBodyBytes       bound.Resolved[int]
-    staticEnableCache         bool
+    staticCacheDisabled       bool
     staticCacheMaxAge         bound.Resolved[int]
     staticExcludedPaths       []string
     sessionTtl                bound.Resolved[time.Duration]
@@ -171,8 +171,9 @@ func (instance *httpConfiguration) MaxRequestBodyBytes() bound.Resolved[int] {
     return instance.maxRequestBodyBytes
 }
 
-func (instance *httpConfiguration) StaticEnableCache() bool {
-    return instance.staticEnableCache
+/* StaticCacheDisabled is MELODY_STATIC_CACHE_DISABLED: true sends no cache header and no validator, false, the default, the max age and the validators. */
+func (instance *httpConfiguration) StaticCacheDisabled() bool {
+    return instance.staticCacheDisabled
 }
 
 /* StaticCacheMaxAge is the max-age in seconds the built-in file server sends, DefaultStaticCacheMaxAge when MELODY_STATIC_CACHE_MAX_AGE says nothing, zero admitted. */

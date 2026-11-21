@@ -616,6 +616,27 @@ func TestRetiredEnvironmentKeysMessage_JoinsInTheGivenOrder(t *testing.T) {
     }
 }
 
+func TestRetiredEnvironmentKeysMessage_AddsTheNoteOfAKeyWhoseValueInverts(t *testing.T) {
+    retiredKeys := []configcontract.RetiredEnvironmentKey{
+        {Key: "MELODY_STATIC_ENABLE_CACHE", Successor: config.StaticCacheDisabledKey, Owner: "framework", Note: "the value inverts: MELODY_STATIC_ENABLE_CACHE=false is MELODY_STATIC_CACHE_DISABLED=true"},
+        {Key: "MELODY_PUBLIC_DIR", Successor: config.PublicDirectoryKey, Owner: "framework"},
+    }
+
+    message := retiredEnvironmentKeysMessage(retiredKeys)
+    if "the environment key MELODY_STATIC_ENABLE_CACHE is retired: rename it to MELODY_STATIC_CACHE_DISABLED, and the value inverts: MELODY_STATIC_ENABLE_CACHE=false is MELODY_STATIC_CACHE_DISABLED=true; the environment key MELODY_PUBLIC_DIR is retired: rename it to MELODY_PUBLIC_DIRECTORY" != message {
+        t.Fatalf("unexpected message %q", message)
+    }
+
+    entries := retiredEnvironmentKeysContext(retiredKeys)
+    if retiredKeys[0].Note != entries[0]["note"] {
+        t.Fatalf("expected the note in the context, got %v", entries[0])
+    }
+
+    if _, noted := entries[1]["note"]; true == noted {
+        t.Fatalf("expected no note for a pure rename, got %v", entries[1])
+    }
+}
+
 func bootOverrideChild(t *testing.T, values map[string]string, overrides map[string]string, modules ...applicationcontract.Module) (string, string, bool) {
     t.Helper()
 

@@ -18,6 +18,8 @@ type RetiredEnvironmentKey struct {
     Key       string
     Successor string
     Owner     string
+    /* Note says what the rename alone does not, empty for a pure rename */
+    Note string
 }
 
 /* OverriddenEnvironmentKey is one key the .env artifacts set whose parameter the application overrode with a template that does not read it, with the owner that declared the key. */

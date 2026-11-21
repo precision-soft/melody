@@ -71,7 +71,7 @@ func TestNewStaticFileServerConfig_ExcludedPrefixReachesTheMiddlewareRegisteredW
     /* the built-in file server is the outermost middleware, so a path it answers is a path the application's own chain never sees. The exclusion is the only channel this instance has, because it is built inside the application rather than registered by it. */
     configuration := newStaticExclusionTestConfiguration(t, map[string]string{
         config.StaticExcludedPathsKey: "/private",
-        config.StaticEnableCacheKey:   "false",
+        config.StaticCacheDisabledKey: "true",
     })
 
     httpMiddleware := NewHttpMiddleware(
@@ -125,7 +125,7 @@ func TestNewStaticFileServerConfig_ExcludedPrefixReachesTheMiddlewareRegisteredW
 func TestNewStaticFileServerConfig_PathOutsideTheExclusionIsStillServedFromTheBinary(t *testing.T) {
     configuration := newStaticExclusionTestConfiguration(t, map[string]string{
         config.StaticExcludedPathsKey: "/private",
-        config.StaticEnableCacheKey:   "false",
+        config.StaticCacheDisabledKey: "true",
     })
 
     httpMiddleware := NewHttpMiddleware(
@@ -212,7 +212,7 @@ func TestNewStaticFileServerConfig_CarriesTheCacheKeys(t *testing.T) {
     }
 
     disabledConfiguration := newStaticExclusionTestConfiguration(t, map[string]string{
-        config.StaticEnableCacheKey: "false",
+        config.StaticCacheDisabledKey: "true",
     })
 
     disabledConfig := newStaticFileServerConfig(newStaticExclusionTestEmbeddedFiles(), disabledConfiguration)

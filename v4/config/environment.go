@@ -51,7 +51,7 @@ const (
     DefaultLocaleKey                 = "MELODY_DEFAULT_LOCALE"
     PublicDirectoryKey               = "MELODY_PUBLIC_DIRECTORY"
     StaticIndexFileKey               = "MELODY_STATIC_INDEX_FILE"
-    StaticEnableCacheKey             = "MELODY_STATIC_ENABLE_CACHE"
+    StaticCacheDisabledKey           = "MELODY_STATIC_CACHE_DISABLED"
     StaticCacheMaxAgeKey             = "MELODY_STATIC_CACHE_MAX_AGE"
     StaticExcludedPathsKey           = "MELODY_STATIC_EXCLUDED_PATHS"
 
@@ -86,7 +86,7 @@ const (
     KernelDefaultLocale                 = "kernel.default_locale"
     KernelPublicDirectory               = "kernel.public_directory"
     KernelStaticIndexFile               = "kernel.static.index_file"
-    KernelStaticEnableCache             = "kernel.static.enable_cache"
+    KernelStaticCacheDisabled           = "kernel.static.cache_disabled"
     KernelStaticCacheMaxAge             = "kernel.static.cache_max_age"
     KernelStaticExcludedPaths           = "kernel.static.excluded_paths"
 

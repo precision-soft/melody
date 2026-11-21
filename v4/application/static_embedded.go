@@ -35,7 +35,7 @@ func newStaticFileServerConfig(
         Mode:             static.ModeEmbedded,
         PublicDirectory:  configuration.Http().PublicDirectory(),
         IndexFile:        configuration.Http().StaticIndexFile(),
-        CacheDisabled:    false == configuration.Http().StaticEnableCache(),
+        CacheDisabled:    configuration.Http().StaticCacheDisabled(),
         ExcludedPathList: configuration.Http().StaticExcludedPaths(),
         Root:             "",
         FileSystem:       embeddedPublicFiles,

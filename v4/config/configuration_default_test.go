@@ -32,7 +32,7 @@ func TestRegisterDefaultParameters_DeclaresTheDefaultsAnApplicationInheritsByDec
         DefaultLocaleKey:             "en",
         PublicDirectoryKey:           "public",
         StaticIndexFileKey:           "index.html",
-        StaticEnableCacheKey:         "true",
+        StaticCacheDisabledKey:       "false",
         StaticCacheMaxAgeKey:         "3600",
     } {
         parameter := configuration.Get(frameworkParameter(key))
@@ -121,12 +121,12 @@ func TestFrameworkDefault_IsTextAndReadsLikeASetKey(t *testing.T) {
         }
     }
 
-    enableCache := configuration.Get(KernelStaticEnableCache)
-    if _, isText := enableCache.Value().(string); false == isText {
-        t.Fatalf("expected the static cache switch default as text, got %T", enableCache.Value())
+    cacheDisabled := configuration.Get(KernelStaticCacheDisabled)
+    if _, isText := cacheDisabled.Value().(string); false == isText {
+        t.Fatalf("expected the static cache switch default as text, got %T", cacheDisabled.Value())
     }
 
-    if boolValue, boolErr := enableCache.Bool(); nil != boolErr || true != boolValue {
-        t.Fatalf("expected true, got %v (%v)", boolValue, boolErr)
+    if boolValue, boolErr := cacheDisabled.Bool(); nil != boolErr || false != boolValue {
+        t.Fatalf("expected false, got %v (%v)", boolValue, boolErr)
     }
 }

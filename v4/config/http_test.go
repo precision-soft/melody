@@ -550,7 +550,7 @@ func TestNewHttpConfiguration_CompletesABarePortAndKeepsEveryAcceptedValue(t *te
         "public",
         "index.html",
         bound.Resolved[int]{Value: 2048},
-        true,
+        false,
         bound.Resolved[int]{Value: 3600},
         []string{"/internal"},
         bound.Resolved[time.Duration]{Value: time.Minute},
@@ -579,7 +579,7 @@ func TestNewHttpConfiguration_CompletesABarePortAndKeepsEveryAcceptedValue(t *te
     if 2048 != httpConfigurationInstance.MaxRequestBodyBytes().Value {
         t.Fatalf("unexpected body limit: %+v", httpConfigurationInstance.MaxRequestBodyBytes())
     }
-    if false == httpConfigurationInstance.StaticEnableCache() {
+    if true == httpConfigurationInstance.StaticCacheDisabled() {
         t.Fatalf("expected the static cache to be enabled")
     }
     if 3600 != httpConfigurationInstance.StaticCacheMaxAge().Value {

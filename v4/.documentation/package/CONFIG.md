@@ -88,7 +88,7 @@ Keys and parameters are two tables. A key is not a parameter: `Get("MELODY_HTTP_
 | `MELODY_DEFAULT_LOCALE`                   | `kernel.default_locale`                   | `"en"`                                             |
 | `MELODY_PUBLIC_DIRECTORY`                 | `kernel.public_directory`                 | `"public"` (set explicitly, it must exist)         |
 | `MELODY_STATIC_INDEX_FILE`                | `kernel.static.index_file`                | `"index.html"`                                     |
-| `MELODY_STATIC_ENABLE_CACHE`              | `kernel.static.enable_cache`              | `true`                                             |
+| `MELODY_STATIC_CACHE_DISABLED`            | `kernel.static.cache_disabled`            | `false`                                            |
 | `MELODY_STATIC_CACHE_MAX_AGE`             | `kernel.static.cache_max_age`             | `3600`                                             |
 | `MELODY_STATIC_EXCLUDED_PATHS`            | `kernel.static.excluded_paths`            | `""`                                               |
 
@@ -137,12 +137,13 @@ The `MELODY_` namespace belongs to the framework and the modules. Every loaded `
 
 A key that was renamed refuses the boot naming its successor, whatever its value, an empty one included, and with the successor set beside it too:
 
-| Retired key            | Successor                    | Owner             |
-|------------------------|------------------------------|-------------------|
-| `MELODY_PUBLIC_DIR`    | `MELODY_PUBLIC_DIRECTORY`    | the framework     |
-| `MELODY_CRON_LOGS_DIR` | `MELODY_CRON_LOGS_DIRECTORY` | the cron module   |
+| Retired key                  | Successor                      | Owner           |
+|------------------------------|--------------------------------|-----------------|
+| `MELODY_PUBLIC_DIR`          | `MELODY_PUBLIC_DIRECTORY`      | the framework   |
+| `MELODY_STATIC_ENABLE_CACHE` | `MELODY_STATIC_CACHE_DISABLED` | the framework   |
+| `MELODY_CRON_LOGS_DIR`       | `MELODY_CRON_LOGS_DIRECTORY`   | the cron module |
 
-`MELODY_CRON_LOGS_DIR` is a spelling of the unreleased fourth major, retired before its first release; `MELODY_PUBLIC_DIR` is the third major's key.
+`MELODY_CRON_LOGS_DIR` is a spelling of the unreleased fourth major, retired before its first release; `MELODY_PUBLIC_DIR` and `MELODY_STATIC_ENABLE_CACHE` are the third major's keys. The successor of `MELODY_STATIC_ENABLE_CACHE` reads its value the other way, so its refusal adds `, and the value inverts: MELODY_STATIC_ENABLE_CACHE=false is MELODY_STATIC_CACHE_DISABLED=true`, under `note` in the context.
 
 `Boot` judges the `.env` artifacts the process loads, embedded or on disk: `.env`, `.env.local` and the selected environment's two files, so a retired key in another environment's files refuses only the boot that selects it. It runs right after the modules declare their keys and before any other module hook, in every process shape, and names every retired key it finds in one refusal, `the environment key <key> is retired: rename it to <successor>`, joined with `; ` in key order; the refusal names keys, successors and owners, under `key`, `successor` and `owner`, and never a value, since a retired key may hold a credential. A process variable of a retired name is not configuration and is not read; the `application.environment.processVariableIgnored` boot warning names it with its `successor`, whatever its value. There is no door: the key's meaning is certain, nothing reads it, and booting on its silent default is the misconfiguration; the remedy is a one-line rename.
 
@@ -301,16 +302,16 @@ The value is a boolean in the spellings the container teardown order accepts, an
 
 ### Static file cache
 
-Whether a static response carries cache headers, and for how long. Read through [`Http().StaticEnableCache()`](../../config/http.go) and [`Http().StaticCacheMaxAge()`](../../config/http.go).
+Whether a static response carries cache headers, and for how long. Read through [`Http().StaticCacheDisabled()`](../../config/http.go) and [`Http().StaticCacheMaxAge()`](../../config/http.go).
 
-| Environment key               | Parameter name                | Default |
-|-------------------------------|-------------------------------|---------|
-| `MELODY_STATIC_ENABLE_CACHE`  | `kernel.static.enable_cache`  | `true`  |
-| `MELODY_STATIC_CACHE_MAX_AGE` | `kernel.static.cache_max_age` | `3600`  |
+| Environment key                | Parameter name                 | Default |
+|--------------------------------|--------------------------------|---------|
+| `MELODY_STATIC_CACHE_DISABLED` | `kernel.static.cache_disabled` | `false` |
+| `MELODY_STATIC_CACHE_MAX_AGE`  | `kernel.static.cache_max_age`  | `3600`  |
 
 The max age is a plain count of seconds. A negative value and `unlimited` fail the boot, and `0` means what it reads like: with the cache enabled, `MELODY_STATIC_CACHE_MAX_AGE=0` ships `Cache-Control: public, max-age=0` — always revalidate, with the `ETag`/`Last-Modified` machinery intact. [`NewFileServer`](../../http/static/file_server.go) refuses a negative or unlimited `CacheMaxAge` the same way, and takes the `3600` default only for a max age left out.
 
-The way to stop handing clients that hour is `MELODY_STATIC_ENABLE_CACHE=false`, which is not the same thing: the static response then carries no `Cache-Control`, no `ETag` and no `Last-Modified` at all, so there is no validator for a conditional request to present and the file server never answers `304 Not Modified`. With no headers to go on, a shared cache falls back to its own heuristics rather than to a revalidation you asked for. See [HTTP](HTTP.md) for what the entity tag is derived from and when it fails to change.
+The way to stop handing clients that hour is `MELODY_STATIC_CACHE_DISABLED=true`, which is not the same thing: the static response then carries no `Cache-Control`, no `ETag` and no `Last-Modified` at all, so there is no validator for a conditional request to present and the file server never answers `304 Not Modified`. With no headers to go on, a shared cache falls back to its own heuristics rather than to a revalidation you asked for. See [HTTP](HTTP.md) for what the entity tag is derived from and when it fails to change. A max age a `.env` artifact or an override sets beside `MELODY_STATIC_CACHE_DISABLED=true` refuses the boot naming both keys, since the disabled cache writes none; the default `3600` beside it is admitted.
 
 ### Static excluded paths
 
@@ -476,11 +477,11 @@ func example() configcontract.Configuration {
 
 ### Environment variable keys (`config`)
 
-- [`EnvironmentNameKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpSessionMaxSessionsKey`, `HttpShutdownTimeoutKey`, `HttpUnavailableRetryAfterKey`, `HttpSessionEmptyOnOutageKey`, `TeardownTimeoutKey`, `ScopeTeardownTimeoutKey`, `ContainerCreationWaitersKey`, `ContainerTeardownSequentialKey`, `CliNameKey`, `CliDescriptionKey`, `CliBootWarningsIgnoredKey`, `CliBootWarningsDisabledKey`, `LogPathKey`, `LogLevelKey`, `DefaultLocaleKey`, `PublicDirectoryKey`, `StaticIndexFileKey`, `StaticEnableCacheKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
+- [`EnvironmentNameKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpSessionMaxSessionsKey`, `HttpShutdownTimeoutKey`, `HttpUnavailableRetryAfterKey`, `HttpSessionEmptyOnOutageKey`, `TeardownTimeoutKey`, `ScopeTeardownTimeoutKey`, `ContainerCreationWaitersKey`, `ContainerTeardownSequentialKey`, `CliNameKey`, `CliDescriptionKey`, `CliBootWarningsIgnoredKey`, `CliBootWarningsDisabledKey`, `LogPathKey`, `LogLevelKey`, `DefaultLocaleKey`, `PublicDirectoryKey`, `StaticIndexFileKey`, `StaticCacheDisabledKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
 
 ### Kernel parameter names (`config`)
 
-- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnvironment`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpSessionMaxSessions`, `KernelHttpShutdownTimeout`, `KernelHttpUnavailableRetryAfter`, `KernelHttpSessionEmptyOnOutage`, `KernelTeardownTimeout`, `KernelScopeTeardownTimeout`, `KernelContainerCreationWaiters`, `KernelContainerTeardownSequential`, `KernelCliName`, `KernelCliDescription`, `KernelCliBootWarningsIgnored`, `KernelCliBootWarningsDisabled`, `KernelLogPath`, `KernelLogLevel`, `KernelDefaultLocale`, `KernelPublicDirectory`, `KernelStaticIndexFile`, `KernelStaticEnableCache`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDirectory`, `KernelLogsDirectory`, `KernelCacheDirectory`](../../config/environment.go)
+- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnvironment`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpSessionMaxSessions`, `KernelHttpShutdownTimeout`, `KernelHttpUnavailableRetryAfter`, `KernelHttpSessionEmptyOnOutage`, `KernelTeardownTimeout`, `KernelScopeTeardownTimeout`, `KernelContainerCreationWaiters`, `KernelContainerTeardownSequential`, `KernelCliName`, `KernelCliDescription`, `KernelCliBootWarningsIgnored`, `KernelCliBootWarningsDisabled`, `KernelLogPath`, `KernelLogLevel`, `KernelDefaultLocale`, `KernelPublicDirectory`, `KernelStaticIndexFile`, `KernelStaticCacheDisabled`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDirectory`, `KernelLogsDirectory`, `KernelCacheDirectory`](../../config/environment.go)
 
 ### Environment / mode / role constants (`config`)
 
