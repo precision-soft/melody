@@ -10,17 +10,13 @@ import (
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
 )
 
-/* ModuleConfig wires the outbox services: a prebuilt Store and Relay, or a StoreFactory and RelayFactory registered as the service providers and run at first resolution, for a database not available before Boot; setting both a prebuilt object and its factory panics at RegisterServices. Only the *Store or *Relay a factory returns is registered, so a factory resolves container-owned services rather than opening private connections. The relay never closes its transport, so the composition root registers the transport with the container, through messagebus.RegisterTransports or as a service of its own. */
+/* ModuleConfig wires the outbox services: Store and Relay are the providers of service.outbox.store and service.outbox.relay, run at first resolution, so a database not available before Boot is resolved when the store is first used. Only the *Store or *Relay a factory returns is registered, so a factory resolves container-owned services rather than opening private connections. A nil Relay registers no relay and no command. The relay never closes its transport, so the composition root registers the transport with the container, through messagebus.RegisterTransports or as a service of its own. */
 type ModuleConfig struct {
-    Store *Store
+    Store func(resolver containercontract.Resolver) (*Store, error)
 
-    Relay *Relay
+    Relay func(resolver containercontract.Resolver) (*Relay, error)
 
-    StoreFactory func(resolver containercontract.Resolver) (*Store, error)
-
-    RelayFactory func(resolver containercontract.Resolver) (*Relay, error)
-
-    /* RelayCommand configures the melody:outbox:relay command the module registers beside a Relay or a RelayFactory. */
+    /* RelayCommand configures the melody:outbox:relay command the module registers beside a Relay. */
     RelayCommand RelayCommandConfig
 }
 
@@ -41,49 +37,31 @@ func (instance *Module) Description() string {
 }
 
 func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRegistrar) {
-    if nil != instance.config.Store && nil != instance.config.StoreFactory {
-        exception.Panic(exception.NewError("outbox module received both a store and a store factory - set exactly one", nil, nil))
-    }
-
-    if nil != instance.config.Relay && nil != instance.config.RelayFactory {
-        exception.Panic(exception.NewError("outbox module received both a relay and a relay factory - set exactly one", nil, nil))
-    }
-
-    if nil == instance.config.Relay && nil == instance.config.RelayFactory && false == reflect.ValueOf(instance.config.RelayCommand).IsZero() {
+    if nil == instance.config.Relay && false == reflect.ValueOf(instance.config.RelayCommand).IsZero() {
         exception.Panic(exception.NewError(
             "the outbox module is handed a relay command configuration and has no relay",
-            map[string]any{"field": "ModuleConfig.RelayCommand", "requires": "ModuleConfig.Relay or ModuleConfig.RelayFactory"},
+            map[string]any{"field": "ModuleConfig.RelayCommand", "requires": "ModuleConfig.Relay"},
             nil,
         ))
     }
 
-    if nil != instance.config.StoreFactory {
-        registrar.RegisterService(ServiceStore, instance.config.StoreFactory, containercontract.RegisterOptions{})
-    } else if nil != instance.config.Store {
-        RegisterStoreService(registrar, instance.config.Store)
+    if nil != instance.config.Store {
+        registrar.RegisterService(ServiceStore, instance.config.Store, containercontract.RegisterOptions{})
     }
 
-    if nil != instance.config.RelayFactory {
-        registrar.RegisterService(ServiceRelay, instance.config.RelayFactory, containercontract.RegisterOptions{})
-    } else if nil != instance.config.Relay {
-        RegisterRelayService(registrar, instance.config.Relay)
+    if nil != instance.config.Relay {
+        registrar.RegisterService(ServiceRelay, instance.config.Relay, containercontract.RegisterOptions{})
     }
 }
 
 func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel) []clicontract.Command {
-    if nil != instance.config.RelayFactory {
-        return []clicontract.Command{
-            NewRelayCommandFromResolver(kernelInstance.ServiceContainer(), instance.config.RelayCommand),
-        }
+    if nil == instance.config.Relay {
+        return nil
     }
 
-    if nil != instance.config.Relay {
-        return []clicontract.Command{
-            NewRelayCommand(instance.config.Relay, instance.config.RelayCommand),
-        }
+    return []clicontract.Command{
+        NewRelayCommand(instance.config.RelayCommand),
     }
-
-    return nil
 }
 
 var (

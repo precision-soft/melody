@@ -121,7 +121,6 @@ var accessorWithoutRuntimeForm = map[string]string{
     "v4/openapi:InfoFromResolver":                                   "provider",
     "integrations/amqp/v4:TransportMustFromResolver":                "provider",
     "integrations/outbox/v4:RelayMustFromResolver":                  "provider",
-    "integrations/outbox/v4:NewRelayCommandFromResolver":            "constructor",
     "v4/cache:CacheMustFromResolver":                                "provider",
     "v4/storage:StorageMustFromResolver":                            "provider",
     "integrations/rueidis/v4:TokenStoreMustFromResolver":            "provider",

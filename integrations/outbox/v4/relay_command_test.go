@@ -5,7 +5,6 @@ import (
     "errors"
     "fmt"
     "io"
-    "reflect"
     "strings"
     "testing"
     "time"
@@ -39,11 +38,16 @@ func (instance *failingClaimRepository) ClaimDueMessages(ctx context.Context, li
 func runRelayCommand(t *testing.T, runtimeInstance containercontract.Runtime, relay *Relay, arguments []string) error {
     t.Helper()
 
-    return runRelayCommandWith(t, runtimeInstance, NewRelayCommand(relay, RelayCommandConfig{}), arguments)
+    return runRelayCommandWith(t, runtimeInstance, relay, NewRelayCommand(RelayCommandConfig{}), arguments)
 }
 
-func runRelayCommandWith(t *testing.T, runtimeInstance containercontract.Runtime, relayCommand *RelayCommand, arguments []string) error {
+/* runRelayCommandWith places the relay in the run's scope under service.outbox.relay, where the command resolves it; a nil relay leaves the scope as the test built it. */
+func runRelayCommandWith(t *testing.T, runtimeInstance containercontract.Runtime, relay *Relay, relayCommand *RelayCommand, arguments []string) error {
     t.Helper()
+
+    if nil != relay {
+        runtimeInstance.Scope().MustOverrideProtectedInstance(ServiceRelay, relay, containercontract.OverrideOptions{})
+    }
 
     capturing := &capturingCommand{Command: relayCommand, runtimeInstance: runtimeInstance}
 
@@ -115,19 +119,17 @@ func TestRelayCommand_BacksOffAfterFailureAndRecovers(t *testing.T) {
 }
 
 func TestNewRelayCommand_ResolvesTheMaxErrorBackoff(t *testing.T) {
-    relay := NewRelay(RelayConfig{Repository: &fakeRepository{}, Transport: &fakeTransport{}, Codec: &stringCodec{}})
-
-    if command := NewRelayCommand(relay, RelayCommandConfig{}); time.Minute != command.maxErrorBackoff {
+    if command := NewRelayCommand(RelayCommandConfig{}); time.Minute != command.maxErrorBackoff {
         t.Fatalf("expected the 1m default, got %s", command.maxErrorBackoff)
     }
 
-    if command := NewRelayCommandFromResolver(container.NewContainer(container.ContainerConfig{}), RelayCommandConfig{MaxErrorBackoff: bound.Of(3 * time.Second)}); 3*time.Second != command.maxErrorBackoff {
+    if command := NewRelayCommand(RelayCommandConfig{MaxErrorBackoff: bound.Of(3 * time.Second)}); 3*time.Second != command.maxErrorBackoff {
         t.Fatalf("expected the given 3s, got %s", command.maxErrorBackoff)
     }
 
     for _, refused := range []bound.Duration{bound.Of(time.Duration(0)), bound.Of(time.Microsecond), bound.UnlimitedDuration()} {
         expectPanicNamingField(t, "RelayCommandConfig.MaxErrorBackoff", func() {
-            NewRelayCommand(relay, RelayCommandConfig{MaxErrorBackoff: refused})
+            NewRelayCommand(RelayCommandConfig{MaxErrorBackoff: refused})
         })
     }
 }
@@ -136,10 +138,10 @@ func TestRelayCommand_TheMaxErrorBackoffCapsTheDoublingDelay(t *testing.T) {
     repository := &failingClaimRepository{failuresLeft: 3}
     relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{}, Codec: &stringCodec{}})
 
-    command := NewRelayCommand(relay, RelayCommandConfig{MaxErrorBackoff: bound.Of(10 * time.Millisecond)})
+    command := NewRelayCommand(RelayCommandConfig{MaxErrorBackoff: bound.Of(10 * time.Millisecond)})
 
     started := time.Now()
-    runErr := runRelayCommandWith(t, relayTestRuntime(), command, []string{"--limit", "4", "--interval", "50ms"})
+    runErr := runRelayCommandWith(t, relayTestRuntime(), relay, command, []string{"--limit", "4", "--interval", "50ms"})
     if nil != runErr {
         t.Fatalf("expected the fourth batch to recover, got %v", runErr)
     }
@@ -185,7 +187,7 @@ func TestRelayCommand_RetriesRelayResolutionWithBackoff(t *testing.T) {
 
     runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
-    relayCommand := NewRelayCommandFromResolver(serviceContainer, RelayCommandConfig{})
+    relayCommand := NewRelayCommand(RelayCommandConfig{})
 
     capturing := &capturingCommand{Command: relayCommand, runtimeInstance: runtimeInstance}
 
@@ -250,7 +252,7 @@ func TestRelayCommand_RejectsMalformedInterval(t *testing.T) {
     }
 }
 
-func TestNewRelayCommandFromResolver_DefersResolution(t *testing.T) {
+func TestNewRelayCommand_ConstructsBeforeTheRelayIsRegisteredAndDefersResolution(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     resolved := false
@@ -265,7 +267,7 @@ func TestNewRelayCommandFromResolver_DefersResolution(t *testing.T) {
         container.RegisterOptions{},
     )
 
-    command := NewRelayCommandFromResolver(serviceContainer, RelayCommandConfig{})
+    command := NewRelayCommand(RelayCommandConfig{})
 
     if true == resolved {
         t.Fatalf("expected no relay resolution before the first batch")
@@ -276,28 +278,19 @@ func TestNewRelayCommandFromResolver_DefersResolution(t *testing.T) {
     }
 }
 
-/* nilYieldingResolver models a userland decorating resolver that answers nil with no error — the shape the container's own door refuses, which is exactly why the command carries its own guard as latent defense, mirroring lazyRepository.resolveStore. */
-type nilYieldingResolver struct{}
+/* nilYieldingScope models a decorating scope that answers nil with no error, the shape the container's own door refuses, so the command's guard is reached only through such a scope. */
+type nilYieldingScope struct {
+    containercontract.Scope
+}
 
-func (instance nilYieldingResolver) Get(ctx context.Context, serviceName string) (any, error) {
+func (instance nilYieldingScope) Get(ctx context.Context, serviceName string) (any, error) {
     return (*Relay)(nil), nil
-}
-func (instance nilYieldingResolver) MustGet(ctx context.Context, serviceName string) any { return nil }
-func (instance nilYieldingResolver) GetByType(ctx context.Context, targetType reflect.Type) (any, error) {
-    return nil, nil
-}
-func (instance nilYieldingResolver) MustGetByType(ctx context.Context, targetType reflect.Type) any { return nil }
-func (instance nilYieldingResolver) Has(serviceName string) bool               { return true }
-func (instance nilYieldingResolver) HasType(targetType reflect.Type) bool      { return true }
-
-func (instance nilYieldingResolver) Runtime() containercontract.Runtime {
-    return nil
 }
 
 func TestRelayCommand_ANilRelayYieldIsAnErrorNotAPanic(t *testing.T) {
-    relayCommand := NewRelayCommandFromResolver(nilYieldingResolver{}, RelayCommandConfig{})
+    relayCommand := NewRelayCommand(RelayCommandConfig{})
 
-    relay, resolveErr := relayCommand.resolveRelay(runtime.NewRun(t.Context(), container.NewContainer(container.ContainerConfig{}).NewScope()))
+    relay, resolveErr := relayCommand.resolveRelay(runtime.NewRun(t.Context(), nilYieldingScope{Scope: container.NewContainer(container.ContainerConfig{}).NewScope()}))
 
     if nil != relay {
         t.Fatalf("expected no relay, got %v", relay)
@@ -491,7 +484,7 @@ func TestRelayCommand_ResolvesTheLazyRelayUnderTheRelayRuntime(t *testing.T) {
     }, container.RegisterOptions{})
 
     runtimeInstance := runtime.NewRun(context.WithValue(context.Background(), relayRuntimeKey{}, "run"), serviceContainer.NewScope())
-    relayCommand := NewRelayCommandFromResolver(serviceContainer, RelayCommandConfig{})
+    relayCommand := NewRelayCommand(RelayCommandConfig{})
     capturing := &capturingCommand{Command: relayCommand, runtimeInstance: runtimeInstance}
 
     if commandErr := melodycli.DispatchCommand(context.Background(), capturing, runtimeInstance, []string{relayCommand.Name(), "--limit", "1", "--interval", "1ms"}, io.Discard, melodycli.DispatchConfig{}); nil != commandErr {

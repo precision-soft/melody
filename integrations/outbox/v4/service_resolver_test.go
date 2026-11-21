@@ -18,27 +18,6 @@ func TestOutboxServiceNames_AreTheRegisteredNames(t *testing.T) {
     }
 }
 
-/* the registrars are the composition root's door: what they register under must be exactly what the readers below ask for, which is the pair no compiler checks */
-func TestRegisterStoreService_RegistersUnderTheNameTheReadersAsk(t *testing.T) {
-    registrar := &spyServiceRegistrar{}
-
-    RegisterStoreService(registrar, &Store{})
-
-    if false == containsName(registrar.names, ServiceStore) {
-        t.Fatalf("expected the store to be registered under %q, got %v", ServiceStore, registrar.names)
-    }
-}
-
-func TestRegisterRelayService_RegistersUnderTheNameTheReadersAsk(t *testing.T) {
-    registrar := &spyServiceRegistrar{}
-
-    RegisterRelayService(registrar, newModuleTestRelay())
-
-    if false == containsName(registrar.names, ServiceRelay) {
-        t.Fatalf("expected the relay to be registered under %q, got %v", ServiceRelay, registrar.names)
-    }
-}
-
 func TestStoreAndRelayReaders_AnswerWhatTheRegistrarsRegistered(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
@@ -94,5 +73,3 @@ func TestStoreAndRelayReaders_PanicWhenUnregistered(t *testing.T) {
         }()
     }
 }
-
-var _ ServiceRegistrar = (*spyServiceRegistrar)(nil)

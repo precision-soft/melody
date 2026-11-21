@@ -62,8 +62,8 @@ func Configure(ctx context.Context, app *melodyapplication.Application, applicat
     /* the outbox store and relay are service providers that resolve the shared *bun.DB at first use, so registering the module touches neither the outbox schema nor the transport. */
     if true == moduleInstance.catalogueWired {
         app.RegisterModule(melodyoutbox.NewModule(melodyoutbox.ModuleConfig{
-            StoreFactory: moduleInstance.outboxStoreFactory,
-            RelayFactory: moduleInstance.outboxRelayFactory,
+            Store: moduleInstance.outboxStoreFactory,
+            Relay: moduleInstance.outboxRelayFactory,
         }))
     }
 

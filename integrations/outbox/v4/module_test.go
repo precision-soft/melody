@@ -9,7 +9,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
-    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    "github.com/precision-soft/melody/v4/exception"
 )
 
 func assertPanicsWithMessage(t *testing.T, expected string, callback func()) {
@@ -77,21 +77,8 @@ func TestModule_NameAndDescription(t *testing.T) {
     }
 }
 
-func TestModule_RegisterServicesUsesCanonicalNames(t *testing.T) {
-    registrar := &spyServiceRegistrar{}
-
-    NewModule(ModuleConfig{
-        Store: &Store{},
-        Relay: newModuleTestRelay(),
-    }).RegisterServices(registrar)
-
-    if false == containsName(registrar.names, ServiceStore) {
-        t.Fatalf("expected the store registered under %q, got %v", ServiceStore, registrar.names)
-    }
-
-    if false == containsName(registrar.names, ServiceRelay) {
-        t.Fatalf("expected the relay registered under %q, got %v", ServiceRelay, registrar.names)
-    }
+func newModuleTestRelayFactory() func(resolver containercontract.Resolver) (*Relay, error) {
+    return func(resolver containercontract.Resolver) (*Relay, error) { return newModuleTestRelay(), nil }
 }
 
 func TestModule_RegisterServicesSkipsNilServices(t *testing.T) {
@@ -104,42 +91,8 @@ func TestModule_RegisterServicesSkipsNilServices(t *testing.T) {
     }
 }
 
-func TestModule_RegisterServicesPanicsOnStoreAndFactoryBothSet(t *testing.T) {
-    registrar := &spyServiceRegistrar{}
-
-    assertPanicsWithMessage(t, "outbox module received both a store and a store factory - set exactly one", func() {
-        NewModule(ModuleConfig{
-            Store: &Store{},
-            StoreFactory: func(resolver containercontract.Resolver) (*Store, error) {
-                return &Store{}, nil
-            },
-        }).RegisterServices(registrar)
-    })
-
-    if 0 != len(registrar.names) {
-        t.Fatalf("expected no service registered before the panic, got %v", registrar.names)
-    }
-}
-
-func TestModule_RegisterServicesPanicsOnRelayAndFactoryBothSet(t *testing.T) {
-    registrar := &spyServiceRegistrar{}
-
-    assertPanicsWithMessage(t, "outbox module received both a relay and a relay factory - set exactly one", func() {
-        NewModule(ModuleConfig{
-            Relay: newModuleTestRelay(),
-            RelayFactory: func(resolver containercontract.Resolver) (*Relay, error) {
-                return newModuleTestRelay(), nil
-            },
-        }).RegisterServices(registrar)
-    })
-
-    if 0 != len(registrar.names) {
-        t.Fatalf("expected no service registered before the panic, got %v", registrar.names)
-    }
-}
-
 func TestModule_RegisterCliCommandsExposesRelayCommand(t *testing.T) {
-    module := NewModule(ModuleConfig{Relay: newModuleTestRelay()})
+    module := NewModule(ModuleConfig{Relay: newModuleTestRelayFactory()})
 
     commands := module.RegisterCliCommands(nil)
     if 1 != len(commands) {
@@ -154,28 +107,16 @@ func TestModule_RegisterCliCommandsExposesRelayCommand(t *testing.T) {
 func TestModule_RegisterCliCommandsHandsTheCommandItsConfig(t *testing.T) {
     config := RelayCommandConfig{MaxErrorBackoff: bound.Of(3 * time.Second)}
 
-    prebuilt := NewModule(ModuleConfig{Relay: newModuleTestRelay(), RelayCommand: config}).RegisterCliCommands(nil)
-    if 1 != len(prebuilt) || 3*time.Second != prebuilt[0].(*RelayCommand).maxErrorBackoff {
-        t.Fatalf("expected the prebuilt relay's command to carry the given 3s cap, got %v", prebuilt)
-    }
-
-    factory := NewModule(ModuleConfig{
-        RelayFactory: func(resolver containercontract.Resolver) (*Relay, error) { return newModuleTestRelay(), nil },
-        RelayCommand: config,
-    }).RegisterCliCommands(&moduleTestKernel{serviceContainer: container.NewContainer(container.ContainerConfig{})})
-    if 1 != len(factory) || 3*time.Second != factory[0].(*RelayCommand).maxErrorBackoff {
-        t.Fatalf("expected the factory relay's command to carry the given 3s cap, got %v", factory)
+    commands := NewModule(ModuleConfig{Relay: newModuleTestRelayFactory(), RelayCommand: config}).RegisterCliCommands(nil)
+    if 1 != len(commands) || 3*time.Second != commands[0].(*RelayCommand).maxErrorBackoff {
+        t.Fatalf("expected the relay command to carry the given 3s cap, got %v", commands)
     }
 }
 
-type moduleTestKernel struct {
-    kernelcontract.Kernel
-    serviceContainer containercontract.Container
-}
-
-
-func (instance *moduleTestKernel) ServiceContainer() containercontract.Container {
-    return instance.serviceContainer
+func TestModule_RegisterCliCommandsRefusesAMaxErrorBackoffOutsideItsRule(t *testing.T) {
+    expectPanicNamingField(t, "RelayCommandConfig.MaxErrorBackoff", func() {
+        NewModule(ModuleConfig{Relay: newModuleTestRelayFactory(), RelayCommand: RelayCommandConfig{MaxErrorBackoff: bound.Of(time.Microsecond)}}).RegisterCliCommands(nil)
+    })
 }
 
 func TestModule_RegisterCliCommandsSkipsWithoutRelay(t *testing.T) {
@@ -186,24 +127,45 @@ func TestModule_RegisterCliCommandsSkipsWithoutRelay(t *testing.T) {
     }
 }
 
-func TestModule_RegisterServicesRegistersFactoryProviders(t *testing.T) {
-    registrar := &spyServiceRegistrar{}
+type containerServiceRegistrar struct {
+    containercontract.Container
+}
+
+func (instance *containerServiceRegistrar) RegisterService(serviceName string, provider any, options containercontract.RegisterOptions) {
+    instance.MustRegister(serviceName, provider, options)
+}
+
+func TestModule_RegisterServicesRegistersTheFactoriesAsProvidersRunAtFirstResolution(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+
+    store := &Store{}
+    relay := newModuleTestRelay()
+    storeCalls := 0
+    relayCalls := 0
 
     NewModule(ModuleConfig{
-        StoreFactory: func(resolver containercontract.Resolver) (*Store, error) {
-            return &Store{}, nil
-        },
-        RelayFactory: func(resolver containercontract.Resolver) (*Relay, error) {
-            return newModuleTestRelay(), nil
-        },
-    }).RegisterServices(registrar)
+        Store: func(resolver containercontract.Resolver) (*Store, error) {
+            storeCalls++
 
-    if false == containsName(registrar.names, ServiceStore) {
-        t.Fatalf("expected the store factory registered under %q, got %v", ServiceStore, registrar.names)
+            return store, nil
+        },
+        Relay: func(resolver containercontract.Resolver) (*Relay, error) {
+            relayCalls++
+
+            return relay, nil
+        },
+    }).RegisterServices(&containerServiceRegistrar{Container: serviceContainer})
+
+    if 0 != storeCalls || 0 != relayCalls {
+        t.Fatalf("expected no factory to run at registration, ran store %d relay %d", storeCalls, relayCalls)
     }
 
-    if false == containsName(registrar.names, ServiceRelay) {
-        t.Fatalf("expected the relay factory registered under %q, got %v", ServiceRelay, registrar.names)
+    if store != StoreMustFromResolver(t.Context(), serviceContainer) || relay != RelayMustFromResolver(t.Context(), serviceContainer) {
+        t.Fatal("expected the factories' instances under service.outbox.store and service.outbox.relay")
+    }
+
+    if 1 != storeCalls || 1 != relayCalls {
+        t.Fatalf("expected each factory to run once at first resolution, ran store %d relay %d", storeCalls, relayCalls)
     }
 }
 
@@ -211,16 +173,19 @@ func TestModule_ARelayCommandConfigurationWithNoRelayIsRefusedNamingIt(t *testin
     expectPanicNamingField(t, "ModuleConfig.RelayCommand", func() {
         NewModule(ModuleConfig{RelayCommand: RelayCommandConfig{MaxErrorBackoff: bound.Of(3 * time.Second)}}).RegisterServices(&spyServiceRegistrar{})
     })
+
+    defer func() {
+        recoveredErr, isError := recover().(error)
+        if false == isError || "ModuleConfig.Relay" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["requires"] {
+            t.Fatalf("expected the refusal to require ModuleConfig.Relay, got %v", recoveredErr)
+        }
+    }()
+
+    NewModule(ModuleConfig{RelayCommand: RelayCommandConfig{MaxErrorBackoff: bound.Of(3 * time.Second)}}).RegisterServices(&spyServiceRegistrar{})
 }
 
 func TestModule_ARelayCommandConfigurationBesideARelayIsAdmitted(t *testing.T) {
-    config := RelayCommandConfig{MaxErrorBackoff: bound.Of(3 * time.Second)}
-
-    NewModule(ModuleConfig{Relay: newModuleTestRelay(), RelayCommand: config}).RegisterServices(&spyServiceRegistrar{})
-    NewModule(ModuleConfig{
-        RelayFactory: func(resolver containercontract.Resolver) (*Relay, error) { return newModuleTestRelay(), nil },
-        RelayCommand: config,
-    }).RegisterServices(&spyServiceRegistrar{})
+    NewModule(ModuleConfig{Relay: newModuleTestRelayFactory(), RelayCommand: RelayCommandConfig{MaxErrorBackoff: bound.Of(3 * time.Second)}}).RegisterServices(&spyServiceRegistrar{})
 }
 
 func (instance *spyServiceRegistrar) ReservePhaseService(serviceName string, kind containercontract.Kind) error {

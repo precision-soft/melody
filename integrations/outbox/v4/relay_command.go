@@ -10,7 +10,6 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
-    "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
@@ -42,46 +41,27 @@ func resolveMaxErrorBackoff(config RelayCommandConfig) time.Duration {
     return maxErrorBackoff.Value
 }
 
-/* NewRelayCommand builds the command over a prebuilt relay; a nil relay and a limit outside its rule are refused. */
-func NewRelayCommand(relay *Relay, config RelayCommandConfig) *RelayCommand {
-    if nil == relay {
-        exception.Panic(exception.NewError("outbox relay command relay is nil", nil, nil))
-    }
-
-    return &RelayCommand{relay: relay, maxErrorBackoff: resolveMaxErrorBackoff(config)}
-}
-
-/* NewRelayCommandFromResolver builds the command against a lazily-resolved relay: the registered service.outbox.relay is resolved on the first batch rather than in the composition root, so a multi-database app can register the module with a resolver-backed relay factory and still get the built-in command without opening a database at boot. */
-func NewRelayCommandFromResolver(resolver containercontract.Resolver, config RelayCommandConfig) *RelayCommand {
-    if nil == resolver {
-        exception.Panic(exception.NewError("outbox relay command resolver is nil", nil, nil))
-    }
-
-    return &RelayCommand{relayLazy: container.Lazy[*Relay](resolver, ServiceRelay), maxErrorBackoff: resolveMaxErrorBackoff(config)}
+/* NewRelayCommand builds the command so it resolves service.outbox.relay from the run's scope at the first batch, which lets a process register the command without opening a database at boot; a limit outside its rule is refused. */
+func NewRelayCommand(config RelayCommandConfig) *RelayCommand {
+    return &RelayCommand{maxErrorBackoff: resolveMaxErrorBackoff(config)}
 }
 
 type RelayCommand struct {
-    relay           *Relay
-    relayLazy       *container.LazyService[*Relay]
     maxErrorBackoff time.Duration
 }
 
-/* resolveRelay returns the prebuilt relay, or resolves the lazy one — a successful resolution is memoized, a failed one is reported so the run loop treats it like a failed batch, backs off and retries instead of exiting. The nil-yield guard mirrors lazyRepository.resolveStore: LazyService.Resolve passes a nil yield through with a nil error, and the run loop would then dereference it and panic the relay process on what should have been one more retried failure. */
+/* resolveRelay resolves the run's relay; a failed resolution is reported so the run loop treats it like a failed batch, backs off and retries instead of exiting, and a nil yield is refused so the loop never dereferences it. */
 func (instance *RelayCommand) resolveRelay(runtimeInstance containercontract.Runtime) (*Relay, error) {
-    if nil != instance.relayLazy {
-        relay, resolveErr := instance.relayLazy.Resolve(runtimeInstance)
-        if nil != resolveErr {
-            return nil, resolveErr
-        }
-
-        if nil == relay {
-            return nil, exception.NewError("outbox: the registered relay resolved to nil", nil, nil)
-        }
-
-        return relay, nil
+    relay, resolveErr := runtime.FromRuntime[*Relay](runtimeInstance, ServiceRelay)
+    if nil != resolveErr {
+        return nil, resolveErr
     }
 
-    return instance.relay, nil
+    if nil == relay {
+        return nil, exception.NewError("outbox: the registered relay resolved to nil", nil, nil)
+    }
+
+    return relay, nil
 }
 
 func (instance *RelayCommand) Name() string {
@@ -136,11 +116,16 @@ func (instance *RelayCommand) Run(
 
     batches := 0
     errorBackoff := interval
+    var relay *Relay
 
     for {
-        /* the relay is resolved inside the loop: with a lazy relay a store outage at start-up surfaces here as an error that follows the same backoff-and-retry path as a failed batch, and a later successful resolution proceeds normally. */
+        /* the relay is resolved inside the loop and kept for the run once resolved: a store outage at start-up surfaces here as an error that follows the same backoff-and-retry path as a failed batch, and a later successful resolution proceeds normally. */
         published := 0
-        relay, runErr := instance.resolveRelay(relayRuntime)
+        var runErr error
+        if nil == relay {
+            relay, runErr = instance.resolveRelay(relayRuntime)
+        }
+
         if nil == runErr {
             published, runErr = relay.RunOnce(relayRuntime)
         }

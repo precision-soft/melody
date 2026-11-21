@@ -64,25 +64,37 @@ transactionErr := database.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx
 ### Wire the relay through the module
 
 ```go
-relay := outbox.NewRelay(outbox.RelayConfig{
-    Repository: store,
-    Transport:  amqpTransport,
-    Codec:      Codec{},
-    /* optional: Locker (e.g. the rueidis locker) as a single-drainer optimization; SKIP LOCKED already makes concurrent relays safe */
-    /* optional overrides: BatchSize, MaxAttempts, InitialBackoff, MaxBackoff, BackoffFactor, VisibilityTimeout, MaxDeliveryAttempts, LockName, LockTtl, ResolutionTimeout, UnavailableBackoff, UnavailableBackoffMax */
-})
-
 app.RegisterModule(
     outbox.NewModule(outbox.ModuleConfig{
-        Store: store,
-        Relay: relay,
+        Store: func(resolver containercontract.Resolver) (*outbox.Store, error) {
+            database, resolveErr := container.FromResolver[*bun.DB](resolver.Runtime().Context(), resolver, serviceDatabase)
+            if nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return outbox.NewStore(database, Codec{}), nil
+        },
+        Relay: func(resolver containercontract.Resolver) (*outbox.Relay, error) {
+            store, resolveErr := container.FromResolver[*outbox.Store](resolver.Runtime().Context(), resolver, outbox.ServiceStore)
+            if nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return outbox.NewRelay(outbox.RelayConfig{
+                Repository: store,
+                Transport:  amqpTransport,
+                Codec:      Codec{},
+                /* optional: Locker (e.g. the rueidis locker) as a single-drainer optimization; SKIP LOCKED already makes concurrent relays safe */
+                /* optional overrides: BatchSize, MaxAttempts, InitialBackoff, MaxBackoff, BackoffFactor, VisibilityTimeout, MaxDeliveryAttempts, LockName, LockTtl, ResolutionTimeout, UnavailableBackoff, UnavailableBackoffMax */
+            }), nil
+        },
     }),
 )
 ```
 
-The module registers the store and relay under the canonical container names `service.outbox.store` / `service.outbox.relay` (resolvable through `StoreMustFromResolver` / `RelayMustFromResolver`; code that holds a runtime, a handler enqueuing a message, reads the store with `StoreMustFromRuntime(runtimeInstance)`) and exposes the relay lifecycle command. A `RelayCommand` configuration with neither `Relay` nor `RelayFactory` fails the boot naming the field, since no command would read it.
+`ModuleConfig.Store` and `ModuleConfig.Relay` are the providers the module registers under the canonical container names `service.outbox.store` / `service.outbox.relay`, run at first resolution, so a database not available before boot is opened when the store is first used; a test that wants a prebuilt relay registers `func(resolver) (*outbox.Relay, error) { return relay, nil }` (resolvable through `StoreMustFromResolver` / `RelayMustFromResolver`; code that holds a runtime, a handler enqueuing a message, reads the store with `StoreMustFromRuntime(runtimeInstance)`) and exposes the relay lifecycle command. A nil `Relay` registers no relay and no command, and a `RelayCommand` configuration with no `Relay` fails the boot naming the field, since no command would read it.
 
-The relay sends through its transport and never closes it, and the registered `*Relay` has no `CloseWithContext` of its own — so the transport behind a prebuilt relay is closed by nobody unless the composition root registers it with the container, through `messagebus.RegisterTransports` or as a service of its own, for the ordered teardown to close. The same rule the [`ModuleConfig`](./module.go) GoDoc gives for factories holds here: a transport (or database) opened privately and handed to the relay lives exactly as long as the process. The framework's `v4/.example` registers its outbox transport as `service.outbox.transport` for that reason.
+The relay sends through its transport and never closes it, and the registered `*Relay` has no `CloseWithContext` of its own — so the transport behind the relay is closed by nobody unless the composition root registers it with the container, through `messagebus.RegisterTransports` or as a service of its own, for the ordered teardown to close. The same rule the [`ModuleConfig`](./module.go) GoDoc gives for factories holds here: a transport (or database) opened privately and handed to the relay lives exactly as long as the process. The framework's `v4/.example` registers its outbox transport as `service.outbox.transport` for that reason.
 
 ### Relay defaults
 
@@ -111,7 +123,7 @@ Every [`RelayConfig`](./relay.go) tunable is optional; a field left out takes th
 melody:outbox:relay [--interval 1s] [--idle-backoff 1s] [--limit 0]
 ```
 
-The command drains batches until interrupted (SIGINT/SIGTERM stop the loop; a signal that lands mid-batch aborts the drain: a send it cuts hands its row back due at once with its attempts unchanged, and whatever else stayed claimed re-surfaces after `VisibilityTimeout`): `--interval` is the poll cadence, `--idle-backoff` the sleep after an empty batch (the interval when absent), `--limit N` stops after `N` batches (for cron-style invocations). Consecutive batch failures back off exponentially, capped by `RelayCommandConfig.MaxErrorBackoff` (one minute when left out, at least 1ms, unlimited refused), so a repository outage does not tight-loop; the module builds its command with `ModuleConfig.RelayCommand`, and `NewRelayCommand(relay, config)` and `NewRelayCommandFromResolver(resolver, config)` take it beside their dependency. `NewRelayCommandFromResolver` and `NewLazyRepository`, built during boot over the container with no `service.outbox.relay` or `service.outbox.store` registered, fail the boot, naming the line that called them. A cancellation exits clean, but a genuine batch failure that merely coincides with the parent context's deadline is returned — a supervisor sees the failed drain. `Relay.RunOnce` stays available for embedding the drain into a custom loop.
+The command drains batches until interrupted (SIGINT/SIGTERM stop the loop; a signal that lands mid-batch aborts the drain: a send it cuts hands its row back due at once with its attempts unchanged, and whatever else stayed claimed re-surfaces after `VisibilityTimeout`): `--interval` is the poll cadence, `--idle-backoff` the sleep after an empty batch (the interval when absent), `--limit N` stops after `N` batches (for cron-style invocations). Consecutive batch failures back off exponentially, capped by `RelayCommandConfig.MaxErrorBackoff` (one minute when left out, at least 1ms, unlimited refused), so a repository outage does not tight-loop; the module builds its command with `ModuleConfig.RelayCommand`, and `NewRelayCommand(config)` resolves `service.outbox.relay` from the run's scope at the first batch, keeping it for the run, a failed resolution backed off and retried like a failed batch and a nil yield an error. `NewLazyRepository`, built during boot over the container with no `service.outbox.store` registered, fails the boot, naming the line that called it. A cancellation exits clean, but a genuine batch failure that merely coincides with the parent context's deadline is returned — a supervisor sees the failed drain. `Relay.RunOnce` stays available for embedding the drain into a custom loop.
 
 ## Delivery semantics
 
