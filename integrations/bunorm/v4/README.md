@@ -115,7 +115,7 @@ func RegisterDatabaseServices(registrar applicationcontract.ServiceRegistrar) {
         func(resolver containercontract.Resolver) (*melodybunorm.Manager, error) {
             registry := container.MustFromResolver[*melodybunorm.ManagerRegistry](resolver.Runtime().Context(), resolver, ServiceManagerRegistryId)
 
-            return registry.DefaultManager(resolver.Runtime())
+            return melodybunorm.For(resolver.Runtime(), registry).DefaultManager()
         },
         containercontract.RegisterOptions{},
     )
@@ -167,9 +167,21 @@ func (instance *ApiService) Database() {
 ### Consuming a non-default database
 
 ```go
-adminManager := registry.MustManager(runtimeInstance, ManagerAdminName)
+adminManager := melodybunorm.FromRuntime(runtimeInstance, ServiceManagerRegistryId).MustManager(ManagerAdminName)
 adminDatabase := adminManager.Database()
 ```
+
+### The bound registry
+
+A handler, a command or a subscriber calls the registry through [`bunorm.Bound`](./bound.go), the registry bound to the runtime it runs under: its nine doors, `Manager`, `MustManager`, `Database`, `MustDatabase`, `DefaultManager`, `MustDefaultManager`, `DefaultDatabase`, `MustDefaultDatabase` and `MigrationDatabase`, take no runtime, and `Runtime()` and `Registry()` answer the two halves. `FromRuntime(runtimeInstance, serviceName)` resolves the registry the application registered under its own name through the runtime's scope and binds it, the module registering none; `For(runtimeInstance, registry)` binds a registry already in hand and allocates nothing. The view is a value for one request, one run or one delivery, never kept in a service, a goroutine that outlives the runtime or a field; a call that needs another deadline binds again over `runtime.WithContext`.
+
+```go
+boundRegistry := melodybunorm.FromRuntime(runtimeInstance, ServiceManagerRegistryId)
+
+reportDatabase, openErr := boundRegistry.Database(ManagerAdminName)
+```
+
+A zero view, or one over no registry, refuses its five error doors with `manager registry is nil`, and its four `Must…` doors panic with that refusal. `MigrationDatabase` takes its hold through the view; the hold is released through `boundRegistry.Registry().CloseMigrationDatabase(name)`, which takes no runtime, as `HasProviderDefinition` and `CloseWithContext` do. The splitter has no view: `splitter.Reader(runtimeInstance)` is one call per query function. The wiring generator refuses a constructor argument of type `bunorm.Bound`, by value or by pointer: bind it inside the method, from the runtime.
 
 ### Read/write splitting
 

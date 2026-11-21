@@ -1066,6 +1066,8 @@ func TestResolveArguments_RefusesARuntimeBoundView(t *testing.T) {
         {Expression: "*melodysecurity.BoundTokenStore", Qualifier: "melodysecurity", ImportPath: "github.com/precision-soft/melody/v4/security", IsPointer: true},
         {Expression: "melodystorage.Bound", Qualifier: "melodystorage", ImportPath: "github.com/precision-soft/melody/v4/storage"},
         {Expression: "*melodystorage.Bound", Qualifier: "melodystorage", ImportPath: "github.com/precision-soft/melody/v4/storage", IsPointer: true},
+        {Expression: "melodybunorm.Bound", Qualifier: "melodybunorm", ImportPath: "github.com/precision-soft/melody/integrations/bunorm/v4"},
+        {Expression: "*melodybunorm.Bound", Qualifier: "melodybunorm", ImportPath: "github.com/precision-soft/melody/integrations/bunorm/v4", IsPointer: true},
     } {
         constructor := &Constructor{
             Name:      "NewViewHolder",
@@ -1154,6 +1156,10 @@ func TestViewTypes_ListsEveryBoundViewOfTheFourthMajor(t *testing.T) {
 
     if false == declared["github.com/precision-soft/melody/v4/storage.Bound"] {
         t.Fatalf("expected the walk to find the storage view, found %v", declared)
+    }
+
+    if false == declared["github.com/precision-soft/melody/integrations/bunorm/v4.Bound"] {
+        t.Fatalf("expected the walk to find the bunorm registry view, found %v", declared)
     }
 
     if false == reflect.DeepEqual(declared, viewTypes) {
