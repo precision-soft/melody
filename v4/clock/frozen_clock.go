@@ -57,7 +57,41 @@ func (instance *FrozenClock) NewTicker(interval time.Duration) clockcontract.Tic
     return newFrozenTicker(instance, time.NewTicker(interval))
 }
 
+/* NewTimer answers a timer on real wall time whose value is the frozen Now of the moment it fires; Advance and TravelTo neither fire nor suppress it. */
+func (instance *FrozenClock) NewTimer(duration time.Duration) clockcontract.Timer {
+    channelInstance := make(chan time.Time, 1)
+
+    return &frozenTimer{
+        channel: channelInstance,
+        timer: time.AfterFunc(duration, func() {
+            select {
+            case channelInstance <- instance.Now():
+            default:
+            }
+        }),
+    }
+}
+
 var _ clockcontract.Clock = (*FrozenClock)(nil)
+
+type frozenTimer struct {
+    channel chan time.Time
+    timer   *time.Timer
+}
+
+func (instance *frozenTimer) Channel() <-chan time.Time {
+    return instance.channel
+}
+
+func (instance *frozenTimer) Stop() bool {
+    return instance.timer.Stop()
+}
+
+func (instance *frozenTimer) Reset(duration time.Duration) bool {
+    return instance.timer.Reset(duration)
+}
+
+var _ clockcontract.Timer = (*frozenTimer)(nil)
 
 func newFrozenTicker(clockInstance *FrozenClock, ticker *time.Ticker) *frozenTicker {
     channelInstance := make(chan time.Time, 1)

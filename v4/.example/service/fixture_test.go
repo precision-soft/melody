@@ -292,6 +292,10 @@ func (instance *frozenClock) NewTicker(interval time.Duration) melodyclockcontra
     return melodyclock.NewSystemClock().NewTicker(interval)
 }
 
+func (instance *frozenClock) NewTimer(duration time.Duration) melodyclockcontract.Timer {
+    return melodyclock.NewSystemClock().NewTimer(duration)
+}
+
 var _ melodyclockcontract.Clock = (*frozenClock)(nil)
 
 var currencyQuoteInstant = time.Date(2026, time.September, 7, 9, 0, 0, 0, time.UTC)

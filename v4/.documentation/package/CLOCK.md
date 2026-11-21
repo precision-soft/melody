@@ -111,10 +111,15 @@ func example(ctx context.Context) (time.Time, error) {
 
 - [`type Clock`](../../clock/contract/clock.go)\
   `Now() time.Time`\
-  `NewTicker(interval time.Duration) clockcontract.Ticker`
+  `NewTicker(interval time.Duration) clockcontract.Ticker`\
+  `NewTimer(duration time.Duration) clockcontract.Timer` — fires once after the duration, at once for zero or less, as `time.NewTimer`
 - [`type Ticker`](../../clock/contract/ticker.go)\
   `Channel() <-chan time.Time`\
   `Stop()`
+- [`type Timer`](../../clock/contract/clock.go)\
+  `Channel() <-chan time.Time`\
+  `Stop() bool`\
+  `Reset(duration time.Duration) bool` — answering as `time.Timer`'s do
 
 ### Implementations (`clock`)
 
@@ -122,12 +127,14 @@ func example(ctx context.Context) (time.Time, error) {
     - [`NewSystemClock()`](../../clock/system_clock.go)
     - `Now() time.Time`
     - `NewTicker(interval time.Duration) clockcontract.Ticker`
+    - `NewTimer(duration time.Duration) clockcontract.Timer`
 - [`type FrozenClock`](../../clock/frozen_clock.go)
     - [`NewFrozenClock(time.Time)`](../../clock/frozen_clock.go)
     - `Now() time.Time`
     - `TravelTo(time.Time)`
     - `Advance(time.Duration)`
     - `NewTicker(interval time.Duration) clockcontract.Ticker`
+    - `NewTimer(duration time.Duration) clockcontract.Timer` — on real wall time, sending the frozen `Now` of the moment it fires; `Advance` and `TravelTo` neither fire nor suppress it
 
 ### Container helpers (`clock`)
 

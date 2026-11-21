@@ -557,6 +557,10 @@ func (instance *gateClock) NewTicker(interval time.Duration) clockcontract.Ticke
     return instance.inner.NewTicker(interval)
 }
 
+func (instance *gateClock) NewTimer(duration time.Duration) clockcontract.Timer {
+    return clock.NewSystemClock().NewTimer(duration)
+}
+
 /* the IssuedAt stamp and the insert must share one critical section: with the stamp read outside the lock, a RevokeBefore published between the stamp and the insert left the fresh token born already revoked. The gate holds put() open at its clock read; a RevokeBefore attempted in that window completing is the defect. */
 func TestInMemoryTokenStore_PutStampsAndInsertsAtomicallyAgainstRevokeBefore(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))

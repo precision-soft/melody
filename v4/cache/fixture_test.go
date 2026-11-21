@@ -7,6 +7,7 @@ import (
     "time"
 
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
+    "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -62,6 +63,10 @@ func (instance *cacheTestClock) NewTicker(interval time.Duration) clockcontract.
     return &cacheTestTicker{
         channel: make(chan time.Time),
     }
+}
+
+func (instance *cacheTestClock) NewTimer(duration time.Duration) clockcontract.Timer {
+    return clock.NewSystemClock().NewTimer(duration)
 }
 
 func assignTestValue(target any, value any) error {

@@ -63,3 +63,43 @@ func TestSystemClock_NewTicker_PanicsOnInvalidInterval(t *testing.T) {
         "invalid ticker interval",
     )
 }
+
+func TestSystemClock_NewTimerFiresOnceAfterTheDuration(t *testing.T) {
+    timer := NewSystemClock().NewTimer(10 * time.Millisecond)
+
+    select {
+    case <-timer.Channel():
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected the timer to fire")
+    }
+
+    select {
+    case <-timer.Channel():
+        t.Fatalf("expected the timer to fire once")
+    case <-time.After(30 * time.Millisecond):
+    }
+}
+
+func TestSystemClock_ATimerStoppedBeforeItFiresSendsNothingAndResetRearmsIt(t *testing.T) {
+    timer := NewSystemClock().NewTimer(time.Hour)
+
+    if false == timer.Stop() {
+        t.Fatalf("expected Stop to answer true for a timer that had not fired")
+    }
+
+    select {
+    case <-timer.Channel():
+        t.Fatalf("expected a stopped timer to send nothing")
+    case <-time.After(20 * time.Millisecond):
+    }
+
+    if true == timer.Reset(10*time.Millisecond) {
+        t.Fatalf("expected Reset of a stopped timer to answer false")
+    }
+
+    select {
+    case <-timer.Channel():
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected the reset timer to fire")
+    }
+}

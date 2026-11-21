@@ -189,3 +189,64 @@ func TestFrozenTickerStop_IsIdempotent(t *testing.T) {
     tickerInstance.Stop()
     tickerInstance.Stop()
 }
+
+func TestFrozenClock_NewTimerFiresOnWallTimeCarryingTheFrozenNow(t *testing.T) {
+    frozenTime := time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC)
+    clockInstance := NewFrozenClock(frozenTime)
+
+    timer := clockInstance.NewTimer(20 * time.Millisecond)
+
+    clockInstance.Advance(time.Hour)
+
+    select {
+    case fired := <-timer.Channel():
+        t.Fatalf("expected Advance not to fire the timer, got %v", fired)
+    case <-time.After(5 * time.Millisecond):
+    }
+
+    select {
+    case fired := <-timer.Channel():
+        if false == fired.Equal(frozenTime.Add(time.Hour)) {
+            t.Fatalf("expected the frozen Now, got %v", fired)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected the timer to fire on wall time")
+    }
+}
+
+func TestFrozenClock_ATimerStoppedSendsNothingAndResetRearmsIt(t *testing.T) {
+    clockInstance := NewFrozenClock(time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC))
+
+    timer := clockInstance.NewTimer(time.Hour)
+    if false == timer.Stop() {
+        t.Fatalf("expected Stop to answer true for a timer that had not fired")
+    }
+
+    timer.Reset(10 * time.Millisecond)
+
+    select {
+    case <-timer.Channel():
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected the reset timer to fire")
+    }
+}
+
+func TestFrozenClock_AStoppedTimerNeverFiresAndAFiredOneAnswersFalse(t *testing.T) {
+    clockInstance := NewFrozenClock(time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC))
+
+    stopped := clockInstance.NewTimer(20 * time.Millisecond)
+    stopped.Stop()
+
+    select {
+    case <-stopped.Channel():
+        t.Fatalf("expected a stopped timer never to fire")
+    case <-time.After(60 * time.Millisecond):
+    }
+
+    fired := clockInstance.NewTimer(time.Millisecond)
+    <-fired.Channel()
+
+    if true == fired.Stop() {
+        t.Fatalf("expected Stop of a fired timer to answer false")
+    }
+}

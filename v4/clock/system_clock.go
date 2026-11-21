@@ -27,7 +27,29 @@ func (instance *SystemClock) NewTicker(interval time.Duration) clockcontract.Tic
     return newSystemTicker(time.NewTicker(interval))
 }
 
+func (instance *SystemClock) NewTimer(duration time.Duration) clockcontract.Timer {
+    return &systemTimer{timer: time.NewTimer(duration)}
+}
+
 var _ clockcontract.Clock = (*SystemClock)(nil)
+
+type systemTimer struct {
+    timer *time.Timer
+}
+
+func (instance *systemTimer) Channel() <-chan time.Time {
+    return instance.timer.C
+}
+
+func (instance *systemTimer) Stop() bool {
+    return instance.timer.Stop()
+}
+
+func (instance *systemTimer) Reset(duration time.Duration) bool {
+    return instance.timer.Reset(duration)
+}
+
+var _ clockcontract.Timer = (*systemTimer)(nil)
 
 func newSystemTicker(ticker *time.Ticker) *systemTicker {
     return &systemTicker{

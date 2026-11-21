@@ -1274,6 +1274,10 @@ func (instance *testTypedNilClock) NewTicker(interval time.Duration) clockcontra
     return nil
 }
 
+func (instance *testTypedNilClock) NewTimer(duration time.Duration) clockcontract.Timer {
+    return clock.NewSystemClock().NewTimer(duration)
+}
+
 func TestEventDispatcher_ListenerExit_TravelsToTheProcessBoundary(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
 

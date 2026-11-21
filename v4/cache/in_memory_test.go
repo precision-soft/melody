@@ -1049,6 +1049,10 @@ func (instance *cacheTickableTestClock) NewTicker(interval time.Duration) clockc
     }
 }
 
+func (instance *cacheTickableTestClock) NewTimer(duration time.Duration) clockcontract.Timer {
+    return clock.NewSystemClock().NewTimer(duration)
+}
+
 var _ clockcontract.Clock = (*cacheTickableTestClock)(nil)
 
 func TestInMemoryBackend_EvictionToleratesARecencyListThatLostAgreementWithTheMap(t *testing.T) {
@@ -1546,6 +1550,10 @@ func (instance *parkingCacheClock) Now() time.Time {
 
 func (instance *parkingCacheClock) NewTicker(interval time.Duration) clockcontract.Ticker {
     return &cacheTestTicker{channel: instance.tickerChannel}
+}
+
+func (instance *parkingCacheClock) NewTimer(duration time.Duration) clockcontract.Timer {
+    return clock.NewSystemClock().NewTimer(duration)
 }
 
 func TestInMemoryBackend_CloseWithContextAnswersTheDeadlineOverAParkedCleanupLoopAndALaterCloseFinishes(t *testing.T) {

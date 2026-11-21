@@ -694,6 +694,10 @@ func (instance *parkingSessionClock) NewTicker(interval time.Duration) clockcont
     return &parkingSessionTicker{channel: instance.tickerChannel}
 }
 
+func (instance *parkingSessionClock) NewTimer(duration time.Duration) clockcontract.Timer {
+    return clock.NewSystemClock().NewTimer(duration)
+}
+
 func TestInMemoryStorage_CloseWithContextAnswersTheDeadlineOverAParkedCleanupLoopAndALaterCloseFinishes(t *testing.T) {
     clockInstance := &parkingSessionClock{tickerChannel: make(chan time.Time), parked: make(chan struct{}), release: make(chan struct{})}
     storage := NewInMemoryStorage(InMemoryStorageConfig{CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})

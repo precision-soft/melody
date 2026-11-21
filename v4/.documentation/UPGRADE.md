@@ -477,6 +477,14 @@ The six `service.<module>` names of a module's principal service, `service.cache
 
 **Remedy.** A listener whose failure must keep every listener behind it from running declares `FailureEndsDispatch: true`. Read every failure through `errors.Is` / `errors.As`, or through `Unwrap() []error` on a joined answer. A listener that answers a request returns nil.
 
+### Clock: a clock arms timers
+
+**What changed.** [`clockcontract.Clock`](../clock/contract/clock.go) carries `NewTimer(duration) Timer`, a `Timer` of `Channel()`, `Stop() bool` and `Reset(duration) bool` answering as `time.Timer`'s do. The frozen clock's timer runs on wall time and sends its frozen `Now`, as its ticker does.
+
+**Symptom.** `*C does not implement clockcontract.Clock (missing method NewTimer)` for a clock of the application's own, a test clock included.
+
+**Remedy.** Add `NewTimer`; a test clock with no timeline of its own answers `clock.NewSystemClock().NewTimer(duration)`.
+
 ### Validation: a constraint receives a validation context, and the validator takes the runtime
 
 **What changed.** [`validationcontract.Constraint`](../validation/contract/constraint.go) is `Validate(validationContext ValidationContext, value any) ValidationError`, where it took `(value, field)`: the context carries `Runtime`, `Field`, the path the error reports, and `Owner`, the struct that holds the field as a value, so a cross-field rule reads its sibling. [`Validator.Validate(runtimeInstance, data)`](../validation/validator.go) takes the runtime its constraints are handed, a nil one refused with "the runtime is nil or carries no context"; `Request.BindJsonAndValidate` and the json handler hand the request's. A fresh validator registers `min`, `max`, `regex`, `greaterThan` and `lessThan` as zero templates.
