@@ -67,8 +67,8 @@ import (
 )
 
 const (
-    ServiceManagerRegistryId = "service.database.manager.registry"
-    ServiceManagerDefaultId  = "service.database.manager.default"
+    ServiceManagerRegistryId = "service.bunorm.manager_registry"
+    ServiceManagerDefaultId  = "service.bunorm.default_manager"
 
     ManagerPrimaryName = "primary"
     ManagerAdminName   = "admin"

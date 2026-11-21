@@ -37,7 +37,7 @@ func (instance *moduleSpyRegistrar) MustRegister(serviceName string, provider an
 
 /* the service NAME is what RegisterHttpMiddlewares resolves the provider back by, and the two sit in different methods with nothing between them: a drift makes the middleware registration panic at boot on a service it just registered itself */
 func TestServiceTracerProvider_IsTheNameTheModuleRegistersUnder(t *testing.T) {
-    if "opentelemetry.otlp.tracer_provider" != ServiceTracerProvider {
+    if "service.opentelemetry.otlp.tracer_provider" != ServiceTracerProvider {
         t.Fatalf("expected the registered service name, got %q", ServiceTracerProvider)
     }
 

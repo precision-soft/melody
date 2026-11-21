@@ -134,3 +134,18 @@ func TestExampleProcessServiceInventoryOf_NamesTheModulePathOfTheMajorAndTheFour
         t.Fatalf("the cipher memoizes key material under a lock, classified %q", classification.category)
     }
 }
+
+func TestExampleServiceNameOf_ReSpellsTheFourthMajorsNamesOnly(t *testing.T) {
+    if "service.example.product.repository" != exampleServiceNameOf(exampleMajor{number: 3, label: "v3"}, "service.example.product.repository") {
+        t.Fatal("the third major keeps its dotted names")
+    }
+
+    if "service.example.product_repository" != exampleServiceNameOf(exampleMajor{number: 4, label: "v4"}, "service.example.product.repository") {
+        t.Fatal("the fourth major names its services by the grammar")
+    }
+
+    fourth := exampleProcessServiceInventoryOf(exampleMajor{number: 4, label: "v4"})
+    if _, found := fourth["service.http.url_generator"]; false == found {
+        t.Fatal("the fourth major's rows must carry the renamed framework names")
+    }
+}

@@ -110,10 +110,10 @@ type Seeder interface {
 
 /* the seeder services and their collection priorities: a product names its category and its currency, so those two are seeded first and a reset reads in the order the rows refer to each other. The schema carries no foreign key between the four tables, so the order is declared here rather than enforced by the database */
 const (
-    ServiceCategorySeeder = "service.example.seeder.category"
-    ServiceCurrencySeeder = "service.example.seeder.currency"
-    ServiceProductSeeder  = "service.example.seeder.product"
-    ServiceUserSeeder     = "service.example.seeder.user"
+    ServiceCategorySeeder = "service.example.seeder_category"
+    ServiceCurrencySeeder = "service.example.seeder_currency"
+    ServiceProductSeeder  = "service.example.seeder_product"
+    ServiceUserSeeder     = "service.example.seeder_user"
 
     CategorySeederPriority = 40
     CurrencySeederPriority = 30

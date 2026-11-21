@@ -13,7 +13,7 @@ import (
 )
 
 const (
-    ServiceProductRepository = "service.example.product.repository"
+    ServiceProductRepository = "service.example.product_repository"
 )
 
 /* ProductRepository carries a context and an error on every method, so a listing that cannot reach mysql says so rather than answering an empty catalogue, and a cancelled request stops its query. */

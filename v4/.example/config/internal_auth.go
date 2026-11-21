@@ -12,7 +12,7 @@ import (
 )
 
 /* ServiceInternalAuthSigner is the caller service's signer, built once at boot with the signer's default envelope lifetime. */
-const ServiceInternalAuthSigner = "service.example.internal_auth.signer"
+const ServiceInternalAuthSigner = "service.example.internal_auth_signer"
 
 /* a blank key id or application takes these; the secret is a credential and refuses the boot outside development */
 const (

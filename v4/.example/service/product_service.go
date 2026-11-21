@@ -16,7 +16,7 @@ import (
 )
 
 const (
-    ServiceProductService = "service-example-product-service"
+    ServiceProductService = "service.example.product_service"
 )
 
 //melody:service ServiceProductService

@@ -93,7 +93,7 @@ func NewStore(database *bun.DB) *Store {
 }
 
 /* ServiceStore is the container name of the store the two doors and the enrollment release read. */
-const ServiceStore = "service-example-two-factor-store"
+const ServiceStore = "service.example.two_factor_store"
 
 /* StoreSource answers the store a door acts on, at the moment it acts: StoreFromRuntime in production, a fixed store in tests. */
 type StoreSource func(runtimeInstance melodycontainercontract.Runtime) (*Store, error)

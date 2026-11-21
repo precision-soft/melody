@@ -304,6 +304,59 @@ A lock store closed by the teardown while the work still winds down now reads as
 
 **Remedy.** Import `RouteParameters` and write `data-route-parameters` when the helper is vendored again.
 
+### Container: service names follow one grammar
+
+**What changed.** Every service name follows `service.<module>.<snake_case_name>` (see [CONTAINER](package/CONTAINER.md#service-names)); the names that split one name's words by dots, or carried no `service.` prefix, are renamed, the Go constants keeping their names:
+
+| Constant | Old name | New name |
+|---|---|---|
+| `http.ServiceRouteRegistry` | `service.http.route.registry` | `service.http.route_registry` |
+| `http.ServiceUrlGenerator` | `service.http.url.generator` | `service.http.url_generator` |
+| `http.ServiceRequestContext` | `service.http.request.context` | `service.http.request_context` |
+| `migrate.DefaultManagerRegistryServiceId` | `service.database.manager.registry` | `service.bunorm.manager_registry` |
+| `otlp.ServiceTracerProvider` | `opentelemetry.otlp.tracer_provider` | `service.opentelemetry.otlp.tracer_provider` |
+
+The six `service.<module>` names of a module's principal service, `service.cache`, `service.clock`, `service.config`, `service.logger`, `service.serializer` and `service.validator`, are unchanged. No old name is kept beside the new one.
+
+**Symptom.** Code that resolves through the constants is unaffected. A name typed as a string, a `debug:container` filter or a wiring declaration naming an old name finds no service, and an override of an old name is refused with `service not registered in container`; a bunorm registry registered under `service.database.manager.registry` is no longer the one the migrate commands find by default.
+
+**Remedy.** Use the constants, or the new names of the table; register the bunorm registry under `migrate.DefaultManagerRegistryServiceId` or name yours through `ManagerRegistryServiceId`. The example's own names follow the grammar too, for an application that copied them:
+
+| Old name | New name |
+|---|---|
+| `service-example-archive-database` | `service.example.archive_database` |
+| `service-example-category-service` | `service.example.category_service` |
+| `service-example-currency-service` | `service.example.currency_service` |
+| `service-example-database` | `service.example.database` |
+| `service-example-database-registry` | `service.example.database_registry` |
+| `service-example-product-service` | `service.example.product_service` |
+| `service-example-rate-refresh-service` | `service.example.rate_refresh_service` |
+| `service-example-two-factor-store` | `service.example.two_factor_store` |
+| `service-example-user-service` | `service.example.user_service` |
+| `service.example.archive.locker` | `service.example.archive_locker` |
+| `service.example.archive.storage` | `service.example.archive_storage` |
+| `service.example.audit.schema` | `service.example.audit_schema` |
+| `service.example.catalog.journal.repository` | `service.example.catalog_journal_repository` |
+| `service.example.catalog.journal.service` | `service.example.catalog_journal_service` |
+| `service.example.catalog.notification.hub` | `service.example.catalog_notification_hub` |
+| `service.example.catalog.reading.repository` | `service.example.catalog_reading_repository` |
+| `service.example.catalog.storage` | `service.example.catalog_storage` |
+| `service.example.category.repository` | `service.example.category_repository` |
+| `service.example.currency.repository` | `service.example.currency_repository` |
+| `service.example.internal_auth.signer` | `service.example.internal_auth_signer` |
+| `service.example.product.repository` | `service.example.product_repository` |
+| `service.example.rates.http.client` | `service.example.rates_http_client` |
+| `service.example.report.export.http.client` | `service.example.report_export_http_client` |
+| `service.example.reporting.catalog.journal.source` | `service.example.reporting_catalog_journal_source` |
+| `service.example.security.token_namespace` | `service.example.security_token_namespace` |
+| `service.example.seeder.category` | `service.example.seeder_category` |
+| `service.example.seeder.currency` | `service.example.seeder_currency` |
+| `service.example.seeder.product` | `service.example.seeder_product` |
+| `service.example.seeder.user` | `service.example.seeder_user` |
+| `service.example.storage.bucket` | `service.example.storage_bucket` |
+| `service.example.user.repository` | `service.example.user_repository` |
+| `service.example.user.session.repository` | `service.example.user_session_repository` |
+
 ### Cors: `AllowOrigin` receives the request
 
 **What changed.** [`cors.Config`](../http/cors/service.go)'s origin function is `AllowOrigin func(request httpcontract.Request, origin string) bool`, where it was `AllowOriginFunc func(origin string) bool`, and `Service.OriginAllowed` takes the request first: `OriginAllowed(request, origin)`. The request's `RuntimeInstance()` reaches the context and the container, so a per-tenant decision reads its store through it; a lookup the function cannot make answers false, refusing the origin. A nil request handed to `OriginAllowed` while a function is configured panics naming `cors.Service.OriginAllowed`.

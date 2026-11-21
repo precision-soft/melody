@@ -17,7 +17,7 @@ import (
 )
 
 /* ServiceTracerProvider is the container name the OTLP tracer provider is registered under. It is registered wrapped in a closeable handle so the application's container shutdown flushes pending spans. */
-const ServiceTracerProvider = "opentelemetry.otlp.tracer_provider"
+const ServiceTracerProvider = "service.opentelemetry.otlp.tracer_provider"
 
 const defaultTracerName = "melody"
 

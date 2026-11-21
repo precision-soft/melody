@@ -7,10 +7,10 @@ import (
 )
 
 /* ServiceArchiveStorage is the container name of the handle onto the archive database. */
-const ServiceArchiveStorage = "service.example.archive.storage"
+const ServiceArchiveStorage = "service.example.archive_storage"
 
 /* ServiceArchiveLocker is the container name of the locker the archive's writers take, declared here because both the configuration that registers it and the command that resolves it need it, and a command may not import the configuration. It is a name of its own rather than the framework's general-purpose ServiceLocker because it is bound to the archive database: a pgsql advisory lock lives exactly as long as the session that took it, so a process that dies mid-refresh releases it when its connection drops. */
-const ServiceArchiveLocker = "service.example.archive.locker"
+const ServiceArchiveLocker = "service.example.archive_locker"
 
 /* ArchiveStorage is where the catalogue's readings are kept, or the absence of anywhere to keep them. melody:wiring:generate fills a constructor's arguments by type, so a repository asking for a *bun.DB could only be generated for an application that has one; this handle moves the question into a package the generator does not scan, and both *bun.DB handles are kept off the type index. */
 type ArchiveStorage struct {

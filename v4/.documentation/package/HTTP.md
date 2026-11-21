@@ -62,10 +62,10 @@ This package covers the HTTP runtime behavior inside Melody:
 
 The package defines service names for common HTTP services (see [`service_resolver.go`](../../http/service_resolver.go)) which are resolved from a [`container/contract.Container`](../../container/contract) at runtime.
 
-- `ServiceRouteRegistry` (`"service.http.route.registry"`)
-- `ServiceUrlGenerator` (`"service.http.url.generator"`)
+- `ServiceRouteRegistry` (`"service.http.route_registry"`)
+- `ServiceUrlGenerator` (`"service.http.url_generator"`)
 - `ServiceRouter` (`"service.http.router"`)
-- `ServiceRequestContext` (`"service.http.request.context"`)
+- `ServiceRequestContext` (`"service.http.request_context"`)
 
 These services are typically registered by the application/kernel wiring. Userland code may resolve them from the runtime container when needed.
 

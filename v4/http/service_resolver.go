@@ -11,10 +11,10 @@ import (
 )
 
 const (
-    ServiceRouteRegistry  = "service.http.route.registry"
-    ServiceUrlGenerator   = "service.http.url.generator"
+    ServiceRouteRegistry  = "service.http.route_registry"
+    ServiceUrlGenerator   = "service.http.url_generator"
     ServiceRouter         = "service.http.router"
-    ServiceRequestContext = "service.http.request.context"
+    ServiceRequestContext = "service.http.request_context"
 )
 
 func RouteRegistryMustFromRuntime(runtimeInstance containercontract.Runtime) httpcontract.RouteRegistry {

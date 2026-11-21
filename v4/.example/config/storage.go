@@ -36,7 +36,7 @@ func (instance *Module) buildStorage() {
 }
 
 /* ServiceStorageBucket is the example's bucket check, built at boot so a missing bucket fails Boot */
-const ServiceStorageBucket = "service.example.storage.bucket"
+const ServiceStorageBucket = "service.example.storage_bucket"
 
 type storageBucketReady struct{}
 

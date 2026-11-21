@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Breaking** — `option.go`: `DefaultManagerRegistryServiceId` is `service.bunorm.manager_registry`, where it was `service.database.manager.registry`, the container's one service-name grammar; a registry registered under the old name is named through `ManagerRegistryServiceId` or moved to the new one.
 - **Breaking** with the framework: the fourth major's runtime is read from `v4/container/contract` and built through `v4/container/runtime`, a runtime resolving through its scope only; `runtime.New` and `Runtime.Container()` are gone. See the framework's `UPGRADE.md`.
 - `base_command.go`, `command_create.go`: the migration commands resolve the manager registry under their run's context, the fourth major's resolver form.
 - **Behavioural change** — `base_command.go`: the migration commands hand their run's runtime to the registry's `MigrationDatabase`, so a cancelled run refuses before the dial; every run is on the provider's migration connection, labelled `(dedicated migration connection)`, and releases its hold through `CloseMigrationDatabase`, which leaves a pool the registry shares by identity open.

@@ -163,3 +163,16 @@ func TestRequestContextFromRuntime_ARuntimeOfAnotherKindIsRefusedNamingBothKinds
         }
     }
 }
+
+func TestServiceNames_FollowTheGrammar(t *testing.T) {
+    for serviceName, expected := range map[string]string{
+        ServiceRouteRegistry:  "service.http.route_registry",
+        ServiceUrlGenerator:   "service.http.url_generator",
+        ServiceRequestContext: "service.http.request_context",
+        ServiceRouter:         "service.http.router",
+    } {
+        if expected != serviceName {
+            t.Fatalf("expected %q, got %q", expected, serviceName)
+        }
+    }
+}

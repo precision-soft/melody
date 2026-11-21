@@ -13,7 +13,7 @@ import (
 )
 
 const (
-    ServiceUserRepository = "service.example.user.repository"
+    ServiceUserRepository = "service.example.user_repository"
 )
 
 /* UserRepository carries a context and an error on every method, so a lookup that cannot reach mysql says so rather than answering "no such user", which on the login path would read as a wrong password. */

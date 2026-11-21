@@ -14,7 +14,7 @@ import (
 )
 
 const (
-    ServiceCatalogJournalService = "service.example.catalog.journal.service"
+    ServiceCatalogJournalService = "service.example.catalog_journal_service"
 
     CatalogJournalSubjectProduct  = "product"
     CatalogJournalSubjectCategory = "category"

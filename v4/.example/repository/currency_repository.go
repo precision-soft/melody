@@ -14,7 +14,7 @@ import (
 )
 
 const (
-    ServiceCurrencyRepository = "service.example.currency.repository"
+    ServiceCurrencyRepository = "service.example.currency_repository"
 )
 
 /* CurrencyRepository carries a context and an error on every method, so a listing that cannot reach mysql says so rather than answering an empty nomenclature, and a cancelled request stops its query. */

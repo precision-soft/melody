@@ -10,7 +10,7 @@ import (
 )
 
 /* ServiceTokenNamespace names the token store's namespace on the shared redis, registered only when the store lives there */
-const ServiceTokenNamespace = "service.example.security.token_namespace"
+const ServiceTokenNamespace = "service.example.security_token_namespace"
 
 /* tokenNamespaceCallTimeout bounds each round trip of a clear, the bound the token store puts on its own */
 const tokenNamespaceCallTimeout = time.Second

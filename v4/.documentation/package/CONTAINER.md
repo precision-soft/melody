@@ -43,6 +43,10 @@ The container is responsible for:
 
 ## Configuration
 
+### Service names
+
+A service name follows one grammar, `service.<module>.<snake_case_name>`: `<module>` is the package or integration that registers it, a sub-module adding its own segment (`service.opentelemetry.otlp.tracer_provider`), and the name is one segment, its words joined by `_` (`service.http.url_generator`, `service.bunorm.manager_registry`, the example's `service.example.product_repository`). A module whose one principal service is what an application asks for most is named `service.<module>` alone: `service.cache`, `service.clock`, `service.config`, `service.logger`, `service.serializer` and `service.validator`. The `service.` namespace is protected from substitution, so a scoped registration takes a name outside it, as the example's request report trail does with `service-example-reporting-request-trail`.
+
 ### Type registration
 
 Services are always registered by name (`serviceName string`). By default a registration also registers the service under the type its provider declares as its result — an interface when the provider returns one —, strictly — typed resolution works out of the box, and a second service registered under the same type fails.

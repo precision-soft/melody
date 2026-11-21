@@ -12,7 +12,7 @@ import (
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
-const ServiceCatalogReadingRepository = "service.example.catalog.reading.repository"
+const ServiceCatalogReadingRepository = "service.example.catalog_reading_repository"
 
 /* CatalogReadingRecord is one reading of the catalogue as the archive holds it. It is not reporting.CatalogReading, whose FromCache describes the serving of one request, while the archive records what is read and when. */
 type CatalogReadingRecord struct {

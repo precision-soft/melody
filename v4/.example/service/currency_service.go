@@ -22,7 +22,7 @@ import (
 )
 
 const (
-    ServiceCurrencyService = "service-example-currency-service"
+    ServiceCurrencyService = "service.example.currency_service"
 )
 
 //melody:service ServiceCurrencyService

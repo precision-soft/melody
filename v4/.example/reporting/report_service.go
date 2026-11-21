@@ -291,7 +291,7 @@ func (instance *CatalogReportService) RefreshInterval() time.Duration {
 const ServiceRequestReportTrail = "service-example-reporting-request-trail"
 
 /* ServiceCatalogJournalSource is the lazy handle on the catalogue journal the request report trail writes through */
-const ServiceCatalogJournalSource = "service.example.reporting.catalog.journal.source"
+const ServiceCatalogJournalSource = "service.example.reporting_catalog_journal_source"
 
 /* the trail belongs to one request: it is built from the request context the kernel installs into every scope, and the directive makes the generator emit it into the scoped registration. A scoped service may take container singletons beside the request context. */
 //melody:scoped

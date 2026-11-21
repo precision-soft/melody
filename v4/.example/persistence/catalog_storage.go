@@ -9,10 +9,10 @@ import (
 )
 
 const (
-    ServiceCatalogStorage = "service.example.catalog.storage"
+    ServiceCatalogStorage = "service.example.catalog_storage"
 
     /* ServiceAuditSchema names the proof that the trail's tables exist, built at boot, so a schema that cannot be created fails the boot */
-    ServiceAuditSchema = "service.example.audit.schema"
+    ServiceAuditSchema = "service.example.audit_schema"
 
     /* AuditTable is the audit trail of the nomenclature. It is per major, like every other table the example owns, so three applications sharing one database do not write into each other's history. It is named here rather than inline because two doors read it: the registry that opens it, and the reset command that empties it. */
     AuditTable = "melody_example_v4_audit"

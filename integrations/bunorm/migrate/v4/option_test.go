@@ -5,7 +5,7 @@ import (
 )
 
 func TestOptions_TheDefaultsAreTheExportedConstants(t *testing.T) {
-    if "service.database.manager.registry" != DefaultManagerRegistryServiceId {
+    if "service.bunorm.manager_registry" != DefaultManagerRegistryServiceId {
         t.Fatalf("unexpected default registry service id: %q", DefaultManagerRegistryServiceId)
     }
 

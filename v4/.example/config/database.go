@@ -19,13 +19,13 @@ import (
 
 const (
     /* serviceDatabaseRegistry is the container name of the bunorm manager registry. The db:* family resolves the connection through it alone, so the operator and the application share one pool, and closing it at shutdown closes the pool. */
-    serviceDatabaseRegistry = "service-example-database-registry"
+    serviceDatabaseRegistry = "service.example.database_registry"
 
     /* serviceDatabase is the container name of the shared catalogue *bun.DB, the registry's default manager, resolved by name at first use by the outbox store and the encrypt database factories. */
-    serviceDatabase = "service-example-database"
+    serviceDatabase = "service.example.database"
 
     /* serviceArchiveDatabase is the container name of the postgres handle the reading archive is kept on, addressed by name and opened by its provider at the first resolution rather than at boot. */
-    serviceArchiveDatabase = "service-example-archive-database"
+    serviceArchiveDatabase = "service.example.archive_database"
 
     /* databaseManagerName names the catalogue's manager. The db:* commands are pinned to it rather than to the registry's default, because in an environment that wires the archive alone an unqualified db:migrate would otherwise aim the catalogue's mysql DDL at postgres. */
     databaseManagerName = "default"

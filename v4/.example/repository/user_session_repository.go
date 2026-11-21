@@ -14,7 +14,7 @@ import (
 )
 
 const (
-    ServiceUserSessionRepository = "service.example.user.session.repository"
+    ServiceUserSessionRepository = "service.example.user_session_repository"
 )
 
 /* UserSessionCap is the number of sessions one account holds at once: the sign-in that would open one more drops the account's oldest first. The session storage writes every live session on each save, so the cap bounds what one save costs by the accounts there are, not by the sign-ins an address can make over the session lifetime. */

@@ -13,7 +13,7 @@ import (
 )
 
 const (
-    ServiceCategoryRepository = "service.example.category.repository"
+    ServiceCategoryRepository = "service.example.category_repository"
 )
 
 /* CategoryRepository carries a context and an error on every method, so a listing that cannot reach mysql says so rather than answering an empty nomenclature, and a cancelled request stops its query. */

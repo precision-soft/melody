@@ -20,7 +20,7 @@ import (
 )
 
 const (
-    ServiceUserService = "service-example-user-service"
+    ServiceUserService = "service.example.user_service"
 )
 
 //melody:service ServiceUserService

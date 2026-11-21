@@ -15,7 +15,7 @@ import (
 )
 
 const (
-    ServiceCategoryService = "service-example-category-service"
+    ServiceCategoryService = "service.example.category_service"
 )
 
 //melody:service ServiceCategoryService

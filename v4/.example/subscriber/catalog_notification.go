@@ -10,7 +10,7 @@ import (
 )
 
 const (
-    ServiceCatalogNotificationHub = "service.example.catalog.notification.hub"
+    ServiceCatalogNotificationHub = "service.example.catalog_notification_hub"
 
     /* the topic every browser watching the nomenclature joins: the websocket handler sets no topic resolver, so a broadcast here reaches every open page */
     catalogNotificationTopic = "default"

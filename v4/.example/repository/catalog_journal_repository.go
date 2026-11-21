@@ -11,7 +11,7 @@ import (
 )
 
 const (
-    ServiceCatalogJournalRepository = "service.example.catalog.journal.repository"
+    ServiceCatalogJournalRepository = "service.example.catalog_journal_repository"
 
     /* the actions a journal entry can carry, the three things that happen to a nomenclature record */
     CatalogJournalActionCreated = "created"

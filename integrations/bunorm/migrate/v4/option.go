@@ -9,7 +9,7 @@ import (
 
 /* The defaults an Options field takes when left out. */
 const (
-    DefaultManagerRegistryServiceId = "service.database.manager.registry"
+    DefaultManagerRegistryServiceId = "service.bunorm.manager_registry"
     DefaultManagerFlagName          = "manager"
     DefaultCommandPrefix            = "db"
 )

@@ -20,12 +20,12 @@ import (
 
 /* The two outbound clients this application holds, named here because their consumers live in this package and in reporting and the registration lives in config. */
 const (
-    ServiceRatesHttpClient        = "service.example.rates.http.client"
-    ServiceReportExportHttpClient = "service.example.report.export.http.client"
+    ServiceRatesHttpClient        = "service.example.rates_http_client"
+    ServiceReportExportHttpClient = "service.example.report_export_http_client"
 )
 
 const (
-    ServiceRateRefreshService = "service-example-rate-refresh-service"
+    ServiceRateRefreshService = "service.example.rate_refresh_service"
 )
 
 /* ratesLatestTarget is relative: the client resolves a target against its base url by RFC 3986, so "/latest" would replace the base path and ask for a resource above the one configured. */
