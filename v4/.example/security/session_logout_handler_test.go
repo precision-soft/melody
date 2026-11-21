@@ -57,21 +57,32 @@ func TestSessionLogoutHandlerAnswersTheErrorOfARequestCarryingNoSession(t *testi
     }
 }
 
-func TestSessionLogoutHandlerReleasesTheSessionsRow(t *testing.T) {
+type logoutRuntimeMarkerKey struct{}
+
+func TestSessionLogoutHandlerReleasesTheSessionsRowThroughTheRuntimeItWasHanded(t *testing.T) {
     request, sessionInstance := requestCarryingSession(t)
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
-    request = melodyhttp.NewRequest(request.HttpRequest(), nil, runtimeInstance, nil)
+    handedRuntime := melodyruntime.NewRequest(context.WithValue(context.Background(), logoutRuntimeMarkerKey{}, "handed"), containerInstance.NewScope())
+    otherRuntime := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
+    request = melodyhttp.NewRequest(request.HttpRequest(), nil, otherRuntime, nil)
     _ = melodyhttp.SetRequestSession(request, sessionInstance)
 
-    index := &recordingSessionIndex{}
+    index := &runtimeRecordingSessionIndex{}
 
-    _, err := NewSessionLogoutHandler(index.lookup).Logout(runtimeInstance, request, melodysecuritycontract.LogoutInput{})
+    _, err := NewSessionLogoutHandler(index.lookupRecording).Logout(handedRuntime, request, melodysecuritycontract.LogoutInput{})
     if nil != err {
         t.Fatalf("the logout door failed: %v", err)
     }
 
     if 1 != len(index.releasedList) || sessionInstance.Id() != index.releasedList[0] {
         t.Fatalf("expected the row of %q released, got %v", sessionInstance.Id(), index.releasedList)
+    }
+
+    if 1 != len(index.runtimes) || handedRuntime != index.runtimes[0] {
+        t.Fatalf("expected the index looked up through the handed runtime, not the request's")
+    }
+
+    if 1 != len(index.releasedContexts) || "handed" != index.releasedContexts[0].Value(logoutRuntimeMarkerKey{}) {
+        t.Fatalf("expected the row released under the handed runtime's context")
     }
 }

@@ -508,3 +508,143 @@ func TestAccessDecisionManager_ANilRuntimeIsRefusedBeforeAnyVoter(t *testing.T) 
         })
     }
 }
+
+func TestAccessDecisionManager_AllowIfAllAbstainLeavesADeniedAttributeRefused(t *testing.T) {
+    token := &securityTestToken{roles: []string{"ROLE_ADMIN"}}
+
+    for name, strategy := range decisionStrategies() {
+        t.Run(name, func(t *testing.T) {
+            for votersName, voters := range map[string][]securitycontract.Voter{
+                "a denial alone": {
+                    &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
+                },
+                "a denial beside an abstention": {
+                    &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteAbstain},
+                    &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
+                },
+            } {
+                manager := NewAccessDecisionManager(strategy, voters, AccessDecisionManagerConfig{AllowIfAllAbstain: true})
+
+                if nil == manager.DecideAll(testRuntime(), token, []string{"ROLE_ADMIN"}, nil) {
+                    t.Fatalf("expected %s to stay refused under AllowIfAllAbstain", votersName)
+                }
+            }
+        })
+    }
+}
+
+func TestAccessDecisionManager_AllowIfTiedLeavesAConsensusMajorityDenialRefused(t *testing.T) {
+    manager := NewAccessDecisionManager(
+        securitycontract.DecisionStrategyConsensus,
+        []securitycontract.Voter{
+            &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted},
+            &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
+            &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
+        },
+        AccessDecisionManagerConfig{AllowIfTied: true},
+    )
+
+    if nil == manager.DecideAll(testRuntime(), &securityTestToken{roles: []string{"ROLE_ADMIN"}}, []string{"ROLE_ADMIN"}, nil) {
+        t.Fatalf("expected one grant against two denials to stay refused under AllowIfTied")
+    }
+}
+
+func TestAccessDecisionManager_AnInvalidVoteResultRefusesTheDecisionNamingTheVoter(t *testing.T) {
+    token := &securityTestToken{roles: []string{"ROLE_ADMIN"}}
+
+    for name, strategy := range decisionStrategies() {
+        t.Run(name, func(t *testing.T) {
+            for _, invalidResult := range []securitycontract.VoteResult{securitycontract.VoteResult(7), securitycontract.VoteResult(-1)} {
+                manager := NewAccessDecisionManager(
+                    strategy,
+                    []securitycontract.Voter{
+                        &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteAbstain},
+                        &securityTestVoter{attribute: "ROLE_ADMIN", result: invalidResult},
+                    },
+                    AccessDecisionManagerConfig{AllowIfAllAbstain: true, AllowIfTied: true},
+                )
+
+                decideErr := manager.DecideAll(testRuntime(), token, []string{"ROLE_ADMIN"}, nil)
+
+                var refusal *exception.Error
+                if false == errors.As(decideErr, &refusal) || "security voter answered an invalid vote result" != refusal.Message() {
+                    t.Fatalf("expected the invalid result %d to be refused by name, got %v", invalidResult, decideErr)
+                }
+
+                if 1 != refusal.Context()["index"] || int(invalidResult) != refusal.Context()["result"] {
+                    t.Fatalf("expected the refusal to name the voter's position and the value, got %v", refusal.Context())
+                }
+
+                if nil == manager.DecideAny(testRuntime(), token, []string{"ROLE_ADMIN"}, nil) {
+                    t.Fatalf("expected DecideAny to refuse the invalid result %d", invalidResult)
+                }
+            }
+        })
+    }
+}
+
+func TestAccessDecisionManager_AnEmptyAttributeIsRefusedBeforeAnyVoter(t *testing.T) {
+    for name, strategy := range decisionStrategies() {
+        t.Run(name, func(t *testing.T) {
+            voter := &fallibleTestVoter{attribute: "", result: securitycontract.VoteAbstain}
+            manager := NewAccessDecisionManager(
+                strategy,
+                []securitycontract.Voter{NewRoleVoter(), voter},
+                AccessDecisionManagerConfig{AllowIfAllAbstain: true},
+            )
+
+            if nil == manager.DecideAll(testRuntime(), NewAnonymousToken(), []string{""}, nil) {
+                t.Fatalf("expected an empty attribute to be refused under AllowIfAllAbstain")
+            }
+
+            if nil == manager.DecideAny(testRuntime(), NewAnonymousToken(), []string{""}, nil) {
+                t.Fatalf("expected DecideAny to refuse an empty attribute under AllowIfAllAbstain")
+            }
+
+            if 0 != len(voter.runtimes) {
+                t.Fatalf("expected no voter to be asked about an empty attribute, got %d calls", len(voter.runtimes))
+            }
+        })
+    }
+}
+
+func TestAccessDecisionManager_WithVotersKeepsAllowIfAllAbstain(t *testing.T) {
+    original := NewAccessDecisionManager(
+        securitycontract.DecisionStrategyUnanimous,
+        []securitycontract.Voter{NewRoleVoter()},
+        AccessDecisionManagerConfig{AllowIfAllAbstain: true},
+    )
+
+    copied := original.WithVoters([]securitycontract.Voter{&securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteAbstain}})
+
+    if err := copied.DecideAll(testRuntime(), &securityTestToken{roles: []string{"ROLE_ADMIN"}}, []string{"ROLE_ADMIN"}, nil); nil != err {
+        t.Fatalf("expected the copy to keep AllowIfAllAbstain and grant the all-abstained attribute, got %v", err)
+    }
+}
+
+func TestAccessDecisionManager_AManagerNotBuiltByTheConstructorIsRefused(t *testing.T) {
+    token := &securityTestToken{roles: []string{"ROLE_ADMIN"}}
+    voters := []securitycontract.Voter{&securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted}}
+
+    var nilManager *AccessDecisionManager
+
+    for name, testCase := range map[string]struct {
+        manager *AccessDecisionManager
+        message string
+    }{
+        "a struct literal":               {manager: (&AccessDecisionManager{}).WithVoters(voters), message: "access decision strategy is missing"},
+        "a literal with a foreign value": {manager: &AccessDecisionManager{voters: voters, strategy: securitycontract.DecisionStrategy(999)}, message: "invalid access decision strategy"},
+        "a nil manager":                  {manager: nilManager, message: "access decision manager is nil"},
+    } {
+        t.Run(name, func(t *testing.T) {
+            for doorName, decideErr := range map[string]error{
+                "DecideAll": testCase.manager.DecideAll(testRuntime(), token, []string{"ROLE_ADMIN"}, nil),
+                "DecideAny": testCase.manager.DecideAny(testRuntime(), token, []string{"ROLE_ADMIN"}, nil),
+            } {
+                if nil == decideErr || testCase.message != decideErr.Error() {
+                    t.Fatalf("expected %s to refuse with %q, got %v", doorName, testCase.message, decideErr)
+                }
+            }
+        })
+    }
+}

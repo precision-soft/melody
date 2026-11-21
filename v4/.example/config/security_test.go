@@ -14,6 +14,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/persistence"
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/route"
+    "github.com/precision-soft/melody/v4/.example/security"
     "github.com/precision-soft/melody/v4/bound"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
@@ -28,6 +29,7 @@ import (
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecurityconfig "github.com/precision-soft/melody/v4/security/config"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
+    melodysession "github.com/precision-soft/melody/v4/session"
 )
 
 /* compiledSecurityModule builds the module up to what RegisterSecurity reads — the internal-auth secrets, the token validators, and the impersonation resolver — and compiles the configuration it registers, so a test asks the rule table the same question the access-control listener asks. */
@@ -461,5 +463,98 @@ func TestRegisterSecurity_DeclaresWhichFirewallsAreStateless(t *testing.T) {
 
     if len(expected) != len(seen) {
         t.Fatalf("expected the firewalls %v, saw %v", expected, seen)
+    }
+}
+
+/* The main firewall as RegisterSecurity declares it, around the example's session resolver over an account repository that cannot answer: a protected page is told to retry, and a public one is served. */
+func TestRegisterSecurity_TheMainFirewallAnswersAnAccountLookupOutageWith503AndRetryAfter(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.buildInternalAuth()
+    moduleInstance.buildTokenAuth()
+    moduleInstance.buildImpersonation()
+
+    builder := melodysecurityconfig.NewBuilder()
+    moduleInstance.RegisterSecurity(builder)
+
+    var mainFirewall *melodysecurity.CompiledFirewall
+    for _, firewall := range builder.BuildAndCompile().Firewalls() {
+        if "main" == firewall.Name() {
+            mainFirewall = firewall
+        }
+    }
+    if nil == mainFirewall {
+        t.Fatal("expected the main firewall compiled")
+    }
+
+    failingLookup := func(runtimeInstance melodycontainercontract.Runtime, userId string) (*entity.User, bool, error) {
+        return nil, false, errors.New("the account repository is unavailable")
+    }
+
+    outageFirewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
+        Name:                  mainFirewall.Name(),
+        Matcher:               mainFirewall.Matcher(),
+        TokenSource:           melodysecurity.NewResolverTokenSource(security.SessionTokenResolver(failingLookup), melodysecurity.ResolverTokenSourceConfig{}),
+        AccessControl:         mainFirewall.AccessControl(),
+        AccessDecisionManager: mainFirewall.AccessDecisionManager(),
+        EntryPoint:            mainFirewall.EntryPoint(),
+        AccessDeniedHandler:   mainFirewall.AccessDeniedHandler(),
+        UnavailableRetryAfter: bound.Of(mainFirewall.UnavailableRetryAfter()),
+    })
+
+    for name, testCase := range map[string]struct {
+        path    string
+        refused bool
+    }{
+        "a protected page": {path: "/products/", refused: true},
+        "a public page":    {path: "/health", refused: false},
+    } {
+        t.Run(name, func(t *testing.T) {
+            containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+            melodycontainer.MustRegister[melodyloggingcontract.Logger](containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+                return melodylogging.NewNopLogger(), nil
+            }, melodycontainer.RegisterOptions{})
+            runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
+
+            dispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
+            kernel := &securityListenerKernel{dispatcher: dispatcher}
+            registry := melodysecurity.NewFirewallRegistry(melodysecurity.NewCompiledConfiguration([]*melodysecurity.CompiledFirewall{outageFirewall}, nil))
+            melodysecurity.RegisterKernelSecurityResolutionListener(kernel, registry)
+            melodysecurity.RegisterKernelAccessControlListener(kernel, registry)
+
+            manager := melodysession.NewManager(melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{}), melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
+            sessionInstance, sessionErr := manager.NewSession(runtimeInstance)
+            if nil != sessionErr {
+                t.Fatalf("session: %v", sessionErr)
+            }
+            sessionInstance.Set(security.SessionKeySecurityUserId, "user-1")
+            sessionInstance.Set(security.SessionKeySecurityRoles, []string{entity.RoleUser})
+            sessionInstance.Set(security.SessionKeySecurityCredentialVersion, security.SessionCredentialVersion("original-hash"))
+
+            httpRequest := httptest.NewRequest(nethttp.MethodGet, testCase.path, nil)
+            request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("main-outage", time.Now()))
+            _ = melodyhttp.SetRequestSession(request, sessionInstance)
+
+            requestEvent := melodyhttp.NewKernelRequestEvent(runtimeInstance, request)
+            if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, melodykernelcontract.EventKernelRequest, requestEvent); nil != dispatchErr {
+                t.Fatalf("dispatch: %v", dispatchErr)
+            }
+
+            if false == testCase.refused {
+                if nil != requestEvent.Refusal() || nil != requestEvent.Response() {
+                    t.Fatalf("expected the public page served, got refusal %v and response %v", requestEvent.Refusal(), requestEvent.Response())
+                }
+
+                return
+            }
+
+            response := requestEvent.Response()
+            if nil != requestEvent.Refusal() {
+                response = melodyhttp.RenderExceptionResponse(runtimeInstance, request, requestEvent.Refusal(), melodyhttp.ExceptionRenderConfig{})
+            }
+
+            if nil == response || nethttp.StatusServiceUnavailable != response.StatusCode() || "" == response.Headers().Get("Retry-After") {
+                t.Fatalf("expected 503 with a Retry-After, got %v", response)
+            }
+        })
     }
 }

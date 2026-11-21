@@ -356,7 +356,7 @@ func requestCarryingSessionAndJournal(t *testing.T) (melodyhttpcontract.Request,
     return request, sessionInstance, journal
 }
 
-func TestSessionTokenResolver_AFailedLookupAnswersAMarkedError(t *testing.T) {
+func TestSessionTokenResolver_AFailedLookupAnswersUnavailable(t *testing.T) {
     request, sessionInstance, journal := requestCarryingSessionAndJournal(t)
     sessionInstance.Set(SessionKeySecurityUserId, "user-2")
     sessionInstance.Set(SessionKeySecurityRoles, []string{"ROLE_EDITOR"})
@@ -376,8 +376,8 @@ func TestSessionTokenResolver_AFailedLookupAnswersAMarkedError(t *testing.T) {
         t.Fatalf("expected no token over a kept session, got %v, kept %v", token, sessionInstance.Has(SessionKeySecurityUserId))
     }
 
-    if false == exception.IsInfrastructureFailure(resolveErr) || false == errors.Is(resolveErr, lookupErr) {
-        t.Fatalf("expected the lookup failure marked as an outage, got %v", resolveErr)
+    if false == exception.AnswersUnavailable(resolveErr) || false == errors.Is(resolveErr, lookupErr) {
+        t.Fatalf("expected the lookup failure answered as unavailable, got %v", resolveErr)
     }
 
     if handedRuntime != lookupRuntime {

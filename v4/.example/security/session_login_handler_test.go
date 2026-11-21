@@ -13,6 +13,7 @@ import (
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
+    melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
@@ -125,7 +126,7 @@ func loginRequest(t *testing.T) (melodycontainercontract.Runtime, melodyhttpcont
     return runtimeInstance, request
 }
 
-func TestSessionLoginHandlerAnswersTheLookupsFailure(t *testing.T) {
+func TestSessionLoginHandlerAnswersTheLookupsFailureAsUnavailable(t *testing.T) {
     runtimeInstance, request := loginRequest(t)
 
     _, loginErr := NewSessionLoginHandler(refusingAccountLookup, nil).Login(
@@ -133,8 +134,8 @@ func TestSessionLoginHandlerAnswersTheLookupsFailure(t *testing.T) {
         request,
         melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-2", []string{"ROLE_EDITOR"}, nil)},
     )
-    if false == errors.Is(loginErr, errAccountRepositoryUnavailable) {
-        t.Fatalf("expected the lookup's failure, got %v", loginErr)
+    if false == errors.Is(loginErr, errAccountRepositoryUnavailable) || false == melodyexception.AnswersUnavailable(loginErr) {
+        t.Fatalf("expected the lookup's failure answered as unavailable, got %v", loginErr)
     }
 }
 

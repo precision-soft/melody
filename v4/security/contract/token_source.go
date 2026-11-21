@@ -9,7 +9,7 @@ import (
 type TokenSource interface {
     Name() string
 
-    /* Stateless reports that the source reads a credential the caller presents on every request (a bearer token, a signed envelope, an api key) and nothing a browser attaches by itself; a firewall whose source is stateless is exempt from the cross-site check. A source that reads a session or any cookie answers false, and so does a source that cannot know. */
+    /* Stateless reports that the source reads a credential the caller presents on every request (a bearer token, a signed envelope, an api key) and nothing a browser attaches by itself; the exemption from the cross-site check is that check's to apply. A source that reads a session or any cookie answers false, and so does a source that cannot know. */
     Stateless() bool
 
     Resolve(runtimeInstance containercontract.Runtime, request httpcontract.Request) (Token, error)

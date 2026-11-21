@@ -9,6 +9,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/route"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
+    melodyexceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -43,9 +44,14 @@ func (instance *sessionLoginHandler) Login(
 
     userIdentifier := input.Token.UserIdentifier()
 
+    /* marked as the resolver marks it, so the door answers an account repository that cannot answer 503 with Retry-After */
     user, found, lookupErr := instance.lookupUser(runtimeInstance, userIdentifier)
     if nil != lookupErr {
-        return nil, lookupErr
+        return nil, melodyexception.NewError(
+            "the account a sign-in names could not be read",
+            melodyexceptioncontract.Context{"userId": userIdentifier},
+            melodyexception.MarkInfrastructureFailure(lookupErr),
+        )
     }
 
     if false == found || nil == user || userIdentifier != user.Id || "" == user.Password || 0 == len(user.Roles) {

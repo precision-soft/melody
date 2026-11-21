@@ -128,8 +128,9 @@ type sessionAdmission struct {
 
 type recordingSessionIndex struct {
     admitErr     error
-    admittedList []sessionAdmission
-    releasedList []string
+    admittedList     []sessionAdmission
+    releasedList     []string
+    releasedContexts []context.Context
 }
 
 func (instance *recordingSessionIndex) Admit(ctx context.Context, userId string, previousSessionId string, sessionId string, createdAt time.Time, sessionLive func(sessionId string) (bool, error), release func(sessionId string) error) error {
@@ -144,6 +145,7 @@ func (instance *recordingSessionIndex) Admit(ctx context.Context, userId string,
 
 func (instance *recordingSessionIndex) Release(ctx context.Context, sessionId string) error {
     instance.releasedList = append(instance.releasedList, sessionId)
+    instance.releasedContexts = append(instance.releasedContexts, ctx)
 
     return nil
 }

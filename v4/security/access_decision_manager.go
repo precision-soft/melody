@@ -75,9 +75,13 @@ func (instance *AccessDecisionManager) Strategy() securitycontract.DecisionStrat
     return instance.strategy
 }
 
-/* DecideAll refuses a nil runtime before the attribute list is read and before any voter; a done context is not judged, since a role decision stays decidable. */
+/* DecideAll refuses a nil runtime, then a nil manager or one whose strategy the constructor refuses, before the attribute list is read and before any voter; a done context is not judged, since a role decision stays decidable. */
 func (instance *AccessDecisionManager) DecideAll(runtimeInstance containercontract.Runtime, token securitycontract.Token, attributes []string, subject any) error {
     if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return refuseErr
+    }
+
+    if refuseErr := instance.refuseUndecidable(); nil != refuseErr {
         return refuseErr
     }
 
@@ -102,6 +106,10 @@ func (instance *AccessDecisionManager) DecideAny(runtimeInstance containercontra
         return refuseErr
     }
 
+    if refuseErr := instance.refuseUndecidable(); nil != refuseErr {
+        return refuseErr
+    }
+
     var unavailableErr error
 
     for _, attribute := range attributes {
@@ -122,12 +130,46 @@ func (instance *AccessDecisionManager) DecideAny(runtimeInstance containercontra
     return exception.Forbidden("forbidden")
 }
 
+/* refuseUndecidable: a struct literal or a nil manager is refused, so it never decides under a strategy it was not built with */
+func (instance *AccessDecisionManager) refuseUndecidable() error {
+    if nil == instance {
+        return exception.NewError("access decision manager is nil", nil, nil)
+    }
+
+    if securitycontract.DecisionStrategyUnspecified == instance.strategy {
+        return exception.NewError(
+            "access decision strategy is missing",
+            exceptioncontract.Context{
+                "strategy": int(instance.strategy),
+            },
+            nil,
+        )
+    }
+
+    if false == isValidDecisionStrategy(instance.strategy) {
+        return exception.NewError(
+            "invalid access decision strategy",
+            exceptioncontract.Context{
+                "strategy": int(instance.strategy),
+            },
+            nil,
+        )
+    }
+
+    return nil
+}
+
 func (instance *AccessDecisionManager) decideSingleAttribute(runtimeInstance containercontract.Runtime, token securitycontract.Token, attribute string, subject any) error {
+    /* an empty attribute names no role or permission, so no voter's abstention can grant it */
+    if "" == attribute {
+        return exception.Forbidden("forbidden")
+    }
+
     grantedCount := 0
     deniedCount := 0
     abstainCount := 0
 
-    for _, voter := range instance.voters {
+    for index, voter := range instance.voters {
         if false == voter.Supports(attribute, subject) {
             continue
         }
@@ -135,6 +177,18 @@ func (instance *AccessDecisionManager) decideSingleAttribute(runtimeInstance con
         result, voteErr := castVote(runtimeInstance, voter, token, attribute, subject)
         if nil != voteErr {
             return voteErr
+        }
+
+        /* a result outside the three constants is the voter's defect, never read as an abstention */
+        if false == isValidVoteResult(result) {
+            return exception.NewError(
+                "security voter answered an invalid vote result",
+                exceptioncontract.Context{
+                    "index":  index,
+                    "result": int(result),
+                },
+                nil,
+            )
         }
 
         if securitycontract.VoteGranted == result {
@@ -230,6 +284,22 @@ func copyVoters(voters []securitycontract.Voter) []securitycontract.Voter {
     }
 
     return append([]securitycontract.Voter{}, voters...)
+}
+
+func isValidVoteResult(result securitycontract.VoteResult) bool {
+    if securitycontract.VoteAbstain == result {
+        return true
+    }
+
+    if securitycontract.VoteDenied == result {
+        return true
+    }
+
+    if securitycontract.VoteGranted == result {
+        return true
+    }
+
+    return false
 }
 
 func isValidDecisionStrategy(strategy securitycontract.DecisionStrategy) bool {
