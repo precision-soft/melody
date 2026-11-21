@@ -239,8 +239,9 @@ func (instance *resolverContext) bootScopedRefusal(serviceName string, serviceTy
 }
 
 /* phaseRefusal answers, for a name nothing registered answers through a scope a runtime bound, the refusal of a name reserved for another phase; an unbound scope keeps answering that the name is not registered, as the container does. */
+/* phaseRefusal judges the kind of the resolution in flight: the visible scope's bound kind, otherwise the kind the chain carries, a late creation or a handle over the container carrying its caller's, so the three sources a name is reached through answer alike */
 func (instance *resolverContext) phaseRefusal(serviceName string, serviceType reflect.Type) error {
-    if nil == instance.scopeInstance || "" == serviceName {
+    if "" == serviceName {
         return nil
     }
 
@@ -249,7 +250,11 @@ func (instance *resolverContext) phaseRefusal(serviceName string, serviceType re
         return nil
     }
 
-    scopeKind := instance.scopeInstance.boundRuntimeKind()
+    scopeKind := instance.kind
+    if true == instance.scopeVisible() {
+        scopeKind = instance.scopeInstance.boundRuntimeKind()
+    }
+
     if reservedKind == scopeKind || containercontract.KindDetached == scopeKind {
         return nil
     }

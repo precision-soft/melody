@@ -3,6 +3,7 @@ package runtime
 import (
     "context"
     "errors"
+    "reflect"
     "testing"
 
     "github.com/precision-soft/melody/v4/container"
@@ -235,5 +236,113 @@ func TestFromRuntime_TheRuntimesContextBoundsTheWaitOnACreationAnotherGoroutineR
 
     if ownerErr := <-ownerDone; nil != ownerErr {
         t.Fatalf("expected the owner to finish its build, got %v", ownerErr)
+    }
+}
+
+type byTypeProbe struct {
+    origin string
+}
+
+type byTypeCollected interface {
+    Origin() string
+}
+
+func (instance *byTypeProbe) Origin() string {
+    return instance.origin
+}
+
+/* a scoped registration is answered only inside a scope, so the doors that find it read the runtime's scope, never the container behind it */
+func newByTypeRuntime(t *testing.T) containercontract.Runtime {
+    t.Helper()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    if registerErr := serviceContainer.RegisterScoped(
+        "by.type.probe",
+        func(resolver containercontract.Resolver) (*byTypeProbe, error) {
+            return &byTypeProbe{origin: "scope"}, nil
+        },
+        container.RegisterOptions{},
+    ); nil != registerErr {
+        t.Fatalf("register: %v", registerErr)
+    }
+
+    if _, containerErr := container.FromResolverByType[*byTypeProbe](context.Background(), serviceContainer); nil == containerErr {
+        t.Fatalf("expected the container alone not to answer a scoped type")
+    }
+
+    return NewRun(context.Background(), serviceContainer.NewScope())
+}
+
+func TestFromRuntimeByType_ResolvesThroughTheRuntimesScope(t *testing.T) {
+    runtimeInstance := newByTypeRuntime(t)
+
+    probe, resolveErr := FromRuntimeByType[*byTypeProbe](runtimeInstance)
+    if nil != resolveErr || "scope" != probe.origin {
+        t.Fatalf("expected the scoped probe, got %v and %v", probe, resolveErr)
+    }
+
+    if "scope" != MustFromRuntimeByType[*byTypeProbe](runtimeInstance).origin {
+        t.Fatalf("expected the Must form to answer the scoped probe")
+    }
+
+    reflected, reflectErr := FromRuntimeByReflectType(runtimeInstance, reflect.TypeFor[*byTypeProbe]())
+    if nil != reflectErr || probe != reflected {
+        t.Fatalf("expected the reflect form to answer the same scoped probe, got %v and %v", reflected, reflectErr)
+    }
+
+    collected, collectErr := AllImplementingFromRuntime[byTypeCollected](runtimeInstance)
+    if nil != collectErr || 1 != len(collected) || "scope" != collected[0].Origin() {
+        t.Fatalf("expected the collection to gather the scoped probe, got %v and %v", collected, collectErr)
+    }
+
+    if mustCollected := MustAllImplementingFromRuntime[byTypeCollected](runtimeInstance); 1 != len(mustCollected) {
+        t.Fatalf("expected the Must collection to gather the scoped probe, got %v", mustCollected)
+    }
+}
+
+func TestFromRuntimeByType_EveryDoorRefusesAnAbsentRuntime(t *testing.T) {
+    for _, refusedRuntime := range []containercontract.Runtime{nil, (*typedNilRuntime)(nil), &typedNilRuntime{}} {
+        _, byTypeErr := FromRuntimeByType[*byTypeProbe](refusedRuntime)
+        _, reflectErr := FromRuntimeByReflectType(refusedRuntime, reflect.TypeFor[*byTypeProbe]())
+        _, collectErr := AllImplementingFromRuntime[byTypeCollected](refusedRuntime)
+
+        for doorName, doorErr := range map[string]error{"FromRuntimeByType": byTypeErr, "FromRuntimeByReflectType": reflectErr, "AllImplementingFromRuntime": collectErr} {
+            if nil == doorErr {
+                t.Fatalf("%s: expected the absent runtime refused", doorName)
+            }
+        }
+
+        assertByTypePanics(t, func() {
+            MustFromRuntimeByType[*byTypeProbe](refusedRuntime)
+        })
+        assertByTypePanics(t, func() {
+            MustAllImplementingFromRuntime[byTypeCollected](refusedRuntime)
+        })
+    }
+}
+
+func TestMustFromRuntimeByType_PanicsOnAMissingType(t *testing.T) {
+    runtimeInstance := NewRun(context.Background(), container.NewContainer(container.ContainerConfig{}).NewScope())
+
+    assertByTypePanics(t, func() {
+        MustFromRuntimeByType[*byTypeProbe](runtimeInstance)
+    })
+}
+
+func assertByTypePanics(t *testing.T, callback func()) {
+    t.Helper()
+
+    panicked := func() (recovered bool) {
+        defer func() {
+            recovered = nil != recover()
+        }()
+
+        callback()
+
+        return false
+    }()
+
+    if false == panicked {
+        t.Fatalf("expected the Must form to panic")
     }
 }

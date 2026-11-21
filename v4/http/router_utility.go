@@ -19,6 +19,7 @@ import (
 
     "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
@@ -169,7 +170,7 @@ func ControllerHandler(
                 continue
             }
 
-            dependency, err := runtimeInstance.Scope().GetByType(runtimeInstance.Context(), paramType)
+            dependency, err := runtime.FromRuntimeByReflectType(runtimeInstance, paramType)
             if nil != err {
                 return nil, err
             }

@@ -7,7 +7,7 @@ import (
     melodyapplication "github.com/precision-soft/melody/v4/application"
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
     melodyconfig "github.com/precision-soft/melody/v4/config"
-    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
 )
@@ -48,7 +48,7 @@ func (instance *ApplicationInformationCommand) Run(runtimeInstance melodycontain
 
 
     /* resolving the catalog report proves the generated wiring end to end: the service is registered only by melody:wiring:generate, and its provider pulls a collaborator from the container by type while reading three scalars from the parameters they are bound to. */
-    catalogReport := melodycontainer.MustFromResolverByType[*reporting.CatalogReportService](runtimeInstance.Context(), runtimeInstance.Scope())
+    catalogReport := melodyruntime.MustFromRuntimeByType[*reporting.CatalogReportService](runtimeInstance)
     fmt.Fprintln(writer, "catalog_report:", catalogReport.Title())
     fmt.Fprintln(writer, "catalog_report_page_size:", catalogReport.PageSize())
     fmt.Fprintln(writer, "catalog_report_refresh_interval:", catalogReport.RefreshInterval())

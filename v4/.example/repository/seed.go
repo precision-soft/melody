@@ -9,6 +9,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/security"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
 )
 
@@ -175,9 +176,10 @@ func RegisterSeeders(registrar melodycontainercontract.Registrar) {
     }
 }
 
-/* SeedAll writes the opening state of every nomenclature over a database just brought to the schema, the door example:db:reset uses: it collects every registered seeder in descending priority and runs each. A resolver holding no seeder is refused, since a reset that seeds nothing would leave empty tables behind a successful exit; over tables that hold rows it changes nothing. */
-func SeedAll(ctx context.Context, resolver melodycontainercontract.Resolver) error {
-    seederList, collectErr := melodycontainer.AllImplementing[Seeder](ctx, resolver)
+/* SeedAll writes the opening state of every nomenclature over a database just brought to the schema, the door example:db:reset uses: it collects every registered seeder in descending priority and runs each. A runtime whose scope holds no seeder is refused, since a reset that seeds nothing would leave empty tables behind a successful exit; over tables that hold rows it changes nothing. */
+func SeedAll(runtimeInstance melodycontainercontract.Runtime) error {
+    ctx := runtimeInstance.Context()
+    seederList, collectErr := melodyruntime.AllImplementingFromRuntime[Seeder](runtimeInstance)
     if nil != collectErr {
         return collectErr
     }

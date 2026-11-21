@@ -583,3 +583,62 @@ func TestLazy_AScopedHandleNamesAForeignOrAContainerScope(t *testing.T) {
         }
     }
 }
+
+type phaseHolder struct {
+    handle *container.LazyService[string]
+}
+
+/* a name reserved for the request phase and never registered answers alike through a handle retained at boot, a handle over the container and the caller's scope: not registered under a request, the refusal naming the caller's own kind under a run */
+func TestLazyService_APhaseReservedNameAnswersAlikeThroughEverySource(t *testing.T) {
+    for _, finishBootFirst := range []bool{false, true} {
+        serviceContainer := container.NewContainer(container.ContainerConfig{})
+        if reserveErr := serviceContainer.ReservePhaseService("app.phase.request", containercontract.KindRequest); nil != reserveErr {
+            t.Fatalf("reserve: %v", reserveErr)
+        }
+
+        container.MustRegister[*phaseHolder](serviceContainer, "app.phase.holder", func(resolver containercontract.Resolver) (*phaseHolder, error) {
+            return &phaseHolder{handle: container.Lazy[string](resolver, "app.phase.request")}, nil
+        }, containercontract.RegisterOptions{})
+
+        bootRuntime, finishBoot := runtime.NewBoot(t.Context(), serviceContainer)
+        holder := runtime.MustFromRuntime[*phaseHolder](bootRuntime, "app.phase.holder")
+        if true == finishBootFirst {
+            _ = finishBoot()
+        }
+
+        for _, callerRuntime := range []containercontract.Runtime{
+            runtime.NewRequest(t.Context(), serviceContainer.NewScope()),
+            runtime.NewRun(t.Context(), serviceContainer.NewScope()),
+        } {
+            _, retainedErr := holder.handle.Resolve(callerRuntime)
+            _, containerErr := container.Lazy[string](serviceContainer, "app.phase.request").Resolve(callerRuntime)
+            _, scopeErr := runtime.FromRuntime[string](callerRuntime, "app.phase.request")
+
+            for sourceName, sourceErr := range map[string]error{"retained at boot": retainedErr, "over the container": containerErr, "the caller's scope": scopeErr} {
+                if nil == sourceErr {
+                    t.Fatalf("%s under %s: expected an error", sourceName, callerRuntime.Kind())
+                }
+
+                kindRefused := errors.Is(sourceErr, containercontract.ErrRuntimeKindRefused)
+                if containercontract.KindRequest == callerRuntime.Kind() && true == kindRefused {
+                    t.Fatalf("%s under a request: expected not registered, got %v", sourceName, sourceErr)
+                }
+
+                if containercontract.KindRun == callerRuntime.Kind() {
+                    if false == kindRefused || "run" != exception.FromError(sourceErr).Context()["given"] {
+                        t.Fatalf("%s under a run: expected the refusal naming given=run, got %v", sourceName, sourceErr)
+                    }
+                }
+            }
+        }
+
+        for sourceName, resolver := range map[string]containercontract.Resolver{"the container": serviceContainer, "an unbound scope": serviceContainer.NewScope()} {
+            _, plainErr := container.FromResolver[string](t.Context(), resolver, "app.phase.request")
+            if nil == plainErr || true == errors.Is(plainErr, containercontract.ErrRuntimeKindRefused) {
+                t.Fatalf("expected %s read outside any runtime answered not registered, got %v", sourceName, plainErr)
+            }
+        }
+
+        _ = finishBoot()
+    }
+}

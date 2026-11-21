@@ -130,5 +130,8 @@ func example() int64 {
 
 - [`runtime.FromRuntime`](../../container/runtime/resolver.go)
 - [`runtime.MustFromRuntime`](../../container/runtime/resolver.go)
+- [`runtime.FromRuntimeByType`](../../container/runtime/resolver.go) and [`runtime.MustFromRuntimeByType`](../../container/runtime/resolver.go) — the one service registered under `T`
+- [`runtime.FromRuntimeByReflectType`](../../container/runtime/resolver.go) — the same lookup for a type held as a `reflect.Type`, the form an argument resolver needs
+- [`runtime.AllImplementingFromRuntime`](../../container/runtime/resolver.go) and [`runtime.MustAllImplementingFromRuntime`](../../container/runtime/resolver.go) — every service implementing `T`, in the container's collection order
 
-With a runtime in hand, resolve through it: `XMustFromRuntime(runtimeInstance)` where the package has that form, or `runtime.FromRuntime[T](runtimeInstance, name)` for a service of your own. `XFromResolver(ctx, resolver)` is the door of a provider, which holds a resolver.
+With a runtime in hand, resolve through it: `XMustFromRuntime(runtimeInstance)` where the package has that form, or `runtime.FromRuntime[T](runtimeInstance, name)` for a service of your own, `runtime.FromRuntimeByType[T](runtimeInstance)` by type and `runtime.AllImplementingFromRuntime[T](runtimeInstance)` for a collection. `XFromResolver(ctx, resolver)` is the door of a provider, which holds a resolver.

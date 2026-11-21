@@ -11,7 +11,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/reporting"
     "github.com/precision-soft/melody/v4/.example/repository"
     melodyclock "github.com/precision-soft/melody/v4/clock"
-    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
@@ -23,7 +23,7 @@ var catalogReadingsCsvHeader = []string{"taken_at", "headline", "product_count",
 /* ApiExportHandler answers the same readings as the history door, newest first and under the same limit, as a csv document a spreadsheet opens: the archive is read into memory, so the file is built here and named through the framework's Content-Disposition builder. */
 func ApiExportHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        reportService, resolveErr := melodycontainer.FromResolverByType[*reporting.CatalogReportService](runtimeInstance.Context(), runtimeInstance.Scope())
+        reportService, resolveErr := melodyruntime.FromRuntimeByType[*reporting.CatalogReportService](runtimeInstance)
         if nil != resolveErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the reading archive is unavailable", resolveErr), nil
         }

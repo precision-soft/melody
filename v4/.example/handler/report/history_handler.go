@@ -9,7 +9,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/presenter"
     "github.com/precision-soft/melody/v4/.example/reporting"
     melodybag "github.com/precision-soft/melody/v4/bag"
-    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
 )
@@ -28,7 +28,7 @@ const (
 /* ApiHistoryHandler answers the archive of catalogue readings, newest first, and beside it the current reading: the one the schedule left in the cache, or one taken now on a cold cache and left there. It never writes the archive, so a caller cannot fill the archive by asking to see it. */
 func ApiHistoryHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        reportService, resolveErr := melodycontainer.FromResolverByType[*reporting.CatalogReportService](runtimeInstance.Context(), runtimeInstance.Scope())
+        reportService, resolveErr := melodyruntime.FromRuntimeByType[*reporting.CatalogReportService](runtimeInstance)
         if nil != resolveErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the reading archive is unavailable", resolveErr), nil
         }

@@ -11,7 +11,6 @@ import (
     "github.com/precision-soft/melody/v4/.example/reporting"
     melodybound "github.com/precision-soft/melody/v4/bound"
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
-    melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
@@ -38,12 +37,12 @@ func (instance *CatalogReportRefreshCommand) Flags() []melodyclicontract.Flag {
 
 /* Run is what the schedule calls, so every request finds a warm reading rather than paying for it on a cold cache. The run is one unit under the archive's lock, taken first: a process that cannot take it skips the whole run and says so. The archive is written before the export, because it is the durable half and depends on nothing the sink does; the sink's refusal takes the exit code after the row is there, and an unreachable archive takes it after the reading and the export. */
 func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodycontainercontract.Runtime, commandContext *melodyclicontract.CommandContext) (runErr error) {
-    reportService, resolveErr := melodycontainer.FromResolverByType[*reporting.CatalogReportService](runtimeInstance.Context(), runtimeInstance.Scope())
+    reportService, resolveErr := melodyruntime.FromRuntimeByType[*reporting.CatalogReportService](runtimeInstance)
     if nil != resolveErr {
         return resolveErr
     }
 
-    exporter, exporterErr := melodycontainer.FromResolverByType[*reporting.CatalogReportExporter](runtimeInstance.Context(), runtimeInstance.Scope())
+    exporter, exporterErr := melodyruntime.FromRuntimeByType[*reporting.CatalogReportExporter](runtimeInstance)
     if nil != exporterErr {
         return exporterErr
     }

@@ -148,7 +148,7 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodycontainercontrac
             return databaseResetStepFailure("opening the audit transaction of the reseed", "catalogue", databaseLocationLabel(storage.Location()), transactionErr)
         }
 
-        if seedErr := repository.SeedAll(seedCtx, runtimeInstance.Scope()); nil != seedErr {
+        if seedErr := repository.SeedAll(melodyruntime.WithContext(runtimeInstance, seedCtx)); nil != seedErr {
             return databaseResetStepFailure("reseeding the nomenclature", "catalogue", databaseLocationLabel(storage.Location()), seedErr)
         }
 

@@ -110,7 +110,7 @@ func TestSourceWalk_NoFileNamesTheRemovedResolutionContextDoors(t *testing.T) {
 /* an accessor a provider reads stays resolver-only, and one whose bound view is still to come waits for it; every other named accessor has a runtime form beside it */
 var accessorWithoutRuntimeForm = map[string]string{
     "v4/container:MustFromResolver":                                 "generic door, its runtime form is runtime.MustFromRuntime",
-    "v4/container:MustFromResolverByType":                           "generic door, by type, resolved through runtime.MustFromRuntime by name",
+    "v4/container:MustFromResolverByType":                           "generic door, by type, its runtime form is runtime.MustFromRuntimeByType",
     "v4/cache:CacheBackendMustFromResolver":                         "provider",
     "v4/cache:CacheSerializerMustFromResolver":                      "provider",
     "v4/messagebus:ConsumeBusFromResolver":                          "provider",
@@ -187,11 +187,7 @@ func TestSourceWalk_EveryNamedResolverAccessorHasARuntimeFormOrADecision(t *test
     }
 }
 
-const (
-    byTypeHasNoRuntimeForm     = "by type, which has no runtime form"
-    collectionHasNoRuntimeForm = "a collection (AllImplementing), which has no runtime form"
-    exampleOwnAccessor         = "the example's own accessor, which R-0 step 6 moves to the runtime"
-)
+const exampleOwnAccessor = "the example's own accessor, which R-0 step 6 moves to the runtime"
 
 /* the calls a runtime-holding file of the fourth major still makes with a runtime's context and its scope apart, each counted; a provider-only or a view accessor's decision is the one in accessorWithoutRuntimeForm, keyed by the call's own package unless the allowance names the accessor */
 var runtimeHeldResolverCallAllowed = map[string]runtimeHeldResolverAllowance{
@@ -200,13 +196,7 @@ var runtimeHeldResolverCallAllowed = map[string]runtimeHeldResolverAllowance{
     "v4/messagebus/consume_command.go:ConsumeBusFromResolver":                        {count: 1, decision: "provider"},
     "v4/messagebus/consume_command.go:TransportsMustFromResolver":                    {count: 1, decision: "provider"},
     "v4/messagebus/consume_command.go:RetryPolicyFromResolver":                       {count: 1, decision: "provider"},
-    "v4/http/router_utility.go:GetByType":                                            {count: 1, decision: byTypeHasNoRuntimeForm},
     "v4/.example/handler/platform_check_handler.go:StorageMustFromResolver":          {count: 1, decision: "view", accessor: "v4/storage:StorageMustFromResolver"},
-    "v4/.example/cli/app_info_command.go:MustFromResolverByType":                     {count: 1, decision: byTypeHasNoRuntimeForm},
-    "v4/.example/cli/catalog_report_refresh_command.go:FromResolverByType":           {count: 2, decision: byTypeHasNoRuntimeForm},
-    "v4/.example/handler/report/export_handler.go:FromResolverByType":                {count: 1, decision: byTypeHasNoRuntimeForm},
-    "v4/.example/handler/report/history_handler.go:FromResolverByType":               {count: 1, decision: byTypeHasNoRuntimeForm},
-    "v4/.example/cli/database_reset_command.go:SeedAll":                              {count: 1, decision: collectionHasNoRuntimeForm},
     "v4/.example/cli/currency_refresh_rates_command.go:MustGetRateRefreshService":    {count: 1, decision: exampleOwnAccessor},
     "v4/.example/cli/database_reset_command.go:TokenNamespaceFromResolver":           {count: 1, decision: exampleOwnAccessor},
     "v4/.example/cli/product_list_command.go:MustGetCategoryService":                 {count: 1, decision: exampleOwnAccessor},
@@ -415,7 +405,7 @@ func TestSourceWalk_NoFourthMajorFileHandsARuntimesContextAndScopeToAResolverDoo
 
     for key, allowance := range runtimeHeldResolverCallAllowed {
         if "provider" != allowance.decision && "view" != allowance.decision {
-            if byTypeHasNoRuntimeForm != allowance.decision && collectionHasNoRuntimeForm != allowance.decision && exampleOwnAccessor != allowance.decision {
+            if exampleOwnAccessor != allowance.decision {
                 t.Errorf("the allowance for %s gives a decision the walk does not know: %s", key, allowance.decision)
             }
 
