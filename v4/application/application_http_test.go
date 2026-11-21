@@ -539,17 +539,32 @@ func TestAwaitHttpServerEnd_ReportsAServeErrorWhicheverBranchWins(t *testing.T) 
 }
 
 func TestRunHttp_CutsTheShutdownAtTheBudgetTheEnvironmentConfigured(t *testing.T) {
+    assertRunHttpCutsTheShutdownAtTheBudget(
+        t,
+        "127.0.0.1:34519",
+        map[string]string{config.HttpShutdownTimeoutKey: "50ms"},
+        ApplicationConfig{},
+    )
+}
+
+func TestRunHttp_CutsTheShutdownAtTheBudgetTheApplicationsFieldConfigured(t *testing.T) {
+    assertRunHttpCutsTheShutdownAtTheBudget(
+        t,
+        "127.0.0.1:34520",
+        map[string]string{},
+        ApplicationConfig{HttpShutdownTimeout: bound.Of(50 * time.Millisecond)},
+    )
+}
+
+func assertRunHttpCutsTheShutdownAtTheBudget(t *testing.T, address string, values map[string]string, applicationConfig ApplicationConfig) {
+    t.Helper()
+
     logger := &warningRecordingLogger{}
 
-    environment, environmentErr := config.NewEnvironment(context.Background(), 
-        &mapEnvironmentSource{
-            values: map[string]string{
-                config.HttpAddressKey:         "127.0.0.1:34519",
-                config.HttpShutdownTimeoutKey: "50ms",
-                config.ScopeTeardownTimeoutKey: "10ms",
-            },
-        },
-    )
+    values[config.HttpAddressKey] = address
+    values[config.ScopeTeardownTimeoutKey] = "10ms"
+
+    environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: values})
     if nil != environmentErr {
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
@@ -561,6 +576,7 @@ func TestRunHttp_CutsTheShutdownAtTheBudgetTheEnvironmentConfigured(t *testing.T
 
     applicationInstance := &Application{
         ctx:                  context.Background(),
+        applicationConfig:    applicationConfig,
         configuration:        configuration,
         runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
         kernel:               newTestKernel(),
@@ -591,7 +607,7 @@ func TestRunHttp_CutsTheShutdownAtTheBudgetTheEnvironmentConfigured(t *testing.T
     var connection net.Conn
     var dialErr error
     for attempt := 0; attempt < 200; attempt++ {
-        connection, dialErr = net.Dial("tcp", "127.0.0.1:34519")
+        connection, dialErr = net.Dial("tcp", address)
         if nil == dialErr {
             break
         }

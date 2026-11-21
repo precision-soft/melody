@@ -219,6 +219,12 @@ func TestJsonDirectoryLoader_RefusesADoneContext(t *testing.T) {
         t.Fatalf("expected the directory named, got %v", exception.FromError(loadErr).Context())
     }
 
+    missingDirectory := filepath.Join(directory, "missing")
+    _, missingErr := NewJsonDirectoryLoader(missingDirectory).Load(ctx)
+    if false == errors.Is(missingErr, context.Canceled) || missingDirectory != exception.FromError(missingErr).Context()["directory"] {
+        t.Fatalf("expected the done context refused before the directory is read, got %v", missingErr)
+    }
+
     _, nilErr := NewJsonDirectoryLoader(directory).Load(nil)
     if nil == nilErr || false == strings.Contains(nilErr.Error(), "the load context is nil") {
         t.Fatalf("expected a nil context refused, got %v", nilErr)

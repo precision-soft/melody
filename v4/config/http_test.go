@@ -612,7 +612,7 @@ func TestHttpConfiguration_AnInvalidPublicDirectoryIsNamedUnderPublicDirectory(t
 }
 
 func TestHttpConfiguration_RefusesAPublicUrlThatIsNoCleanBase(t *testing.T) {
-    for _, value := range []string{"ftp://x", "//x", "https://", "https://u:p@x", "https://x?a=1", "https://x/app?a=1", "https://x#f", "https://x?", "x.example.com", "mailto:x@example.com"} {
+    for _, value := range []string{"ftp://x", "//x", "https://", "https://u:p@x", "https://x?a=1", "https://x/app?a=1", "https://x#f", "https://x?", "x.example.com", "mailto:x@example.com", "https://:8443", "http://:80/app", "https://x//app", "https://x/a/../b", "https://x/./app", "https://x/%2E%2E/app"} {
         _, err := newConfigurationFromValues(map[string]string{HttpPublicUrlKey: value})
         refusal, isRefusal := err.(*exception.Error)
         if false == isRefusal {
@@ -636,13 +636,15 @@ func TestHttpConfiguration_RefusesAPublicUrlThatIsNoCleanBase(t *testing.T) {
 
 func TestHttpConfiguration_AdmitsAPublicUrlAndTrimsItsTrailingSlash(t *testing.T) {
     cases := map[string]string{
-        "":                          "",
-        "https://x":                 "https://x",
-        "https://x/":                "https://x",
-        "http://x.example.com:8080": "http://x.example.com:8080",
-        "https://x/app":             "https://x/app",
-        "https://x/app/":            "https://x/app",
-        "https://x/my%20app//":      "https://x/my%20app",
+        "":                           "",
+        "https://x":                  "https://x",
+        "https://x/":                 "https://x",
+        "http://x.example.com:8080":  "http://x.example.com:8080",
+        "https://x/app":              "https://x/app",
+        "https://x/app/":             "https://x/app",
+        "https://x/my%20app//":       "https://x/my%20app",
+        "https://x/a%2Fb":            "https://x/a%2Fb",
+        "http://[fe80::1%25eth0]/a/": "http://[fe80::1%25eth0]/a",
     }
 
     for value, expected := range cases {

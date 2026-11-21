@@ -29,6 +29,9 @@ type ConfigurationConfig struct {
 
     /* ParameterOverrides are the application's parameter overrides, by parameter name: a kernel.* one applied at construction, any other held for the module that declares the key feeding it. */
     ParameterOverrides map[string]string
+
+    /* HttpPublicUrl is the application's public base, ApplicationConfig.HttpPublicUrl: HttpConfiguration.PublicUrl answers it when MELODY_HTTP_PUBLIC_URL is unset, judged as the key is and refused naming the field. */
+    HttpPublicUrl string
 }
 
 func NewConfiguration(
@@ -43,9 +46,10 @@ func NewConfiguration(
     logger := logging.EmergencyLogger()
 
     configuration := &Configuration{
-        environment: environment,
-        parameters:  make(ParameterMap),
-        logger:      logger,
+        environment:   environment,
+        parameters:    make(ParameterMap),
+        logger:        logger,
+        httpPublicUrl: configurationConfig.HttpPublicUrl,
     }
 
     applyDefaultsErr := configuration.applyDefaults(projectDirectory)
@@ -107,6 +111,9 @@ type Configuration struct {
     cli         *cliConfiguration
     kernel      *kernelConfiguration
     http        *httpConfiguration
+
+    /* the application's public base, read when the key is unset */
+    httpPublicUrl string
 
     resolved bool
 
@@ -662,10 +669,16 @@ func (instance *Configuration) buildHttpConfiguration() error {
     staticCacheDisabled := staticCacheDisabledSwitch.Value
 
     /* the file server writes no max age once the cache is off, so one a deployment set beside the switch would be dropped unread */
-    if true == staticCacheDisabled && false == instance.MustGet(KernelStaticCacheMaxAge).IsDefault() {
+    if staticCacheMaxAgeParameter := instance.MustGet(KernelStaticCacheMaxAge); true == staticCacheDisabled && false == staticCacheMaxAgeParameter.IsDefault() {
+        refusalContext := exceptioncontract.Context{"environmentKeys": []string{StaticCacheDisabledKey, StaticCacheMaxAgeKey}}
+        if true == staticCacheMaxAgeParameter.IsOverridden() {
+            /* an override does not read the key, so the refusal names the parameter the override wrote */
+            refusalContext = exceptioncontract.Context{"environmentKeys": []string{StaticCacheDisabledKey}, "parameterName": KernelStaticCacheMaxAge, "overridden": true}
+        }
+
         return exception.NewError(
             "the static cache max age is set beside the disabled static cache",
-            exceptioncontract.Context{"environmentKeys": []string{StaticCacheDisabledKey, StaticCacheMaxAgeKey}},
+            refusalContext,
             nil,
         )
     }
@@ -728,9 +741,23 @@ func (instance *Configuration) buildHttpConfiguration() error {
         return serverLimitErr
     }
 
+    publicUrl := instance.MustGet(KernelHttpPublicUrl).MustString()
+    if "" == publicUrl {
+        normalizedPublicUrl, publicUrlRefusal := internal.NormalizePublicUrl(instance.httpPublicUrl)
+        if "" != publicUrlRefusal {
+            return exception.NewError(
+                "the public url is refused",
+                exceptioncontract.Context{"field": "ApplicationConfig.HttpPublicUrl", "key": HttpPublicUrlKey, "value": instance.httpPublicUrl, "reason": publicUrlRefusal},
+                nil,
+            )
+        }
+
+        publicUrl = normalizedPublicUrl
+    }
+
     httpConfigurationInstance, newHttpConfigurationErr := newHttpConfiguration(
         instance.MustGet(KernelHttpAddress).MustString(),
-        instance.MustGet(KernelHttpPublicUrl).MustString(),
+        publicUrl,
         instance.MustGet(KernelDefaultLocale).MustString(),
         instance.MustGet(KernelPublicDirectory).MustString(),
         instance.MustGet(KernelStaticIndexFile).MustString(),

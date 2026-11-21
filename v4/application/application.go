@@ -40,7 +40,6 @@ type Application struct {
     ctx                 context.Context
     applicationConfig   ApplicationConfig
     configuration       configcontract.Configuration
-    httpPublicUrl       string
     runtimeFlags        *RuntimeFlags
     kernel              kernelcontract.Kernel
     embeddedPublicFiles fs.FS

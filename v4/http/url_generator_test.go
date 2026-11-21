@@ -238,6 +238,25 @@ func newHelloUrlGenerator(t *testing.T, generatorConfig UrlGeneratorConfig) *Url
     return urlGenerator
 }
 
+func TestGeneratePath_AnswersAStaticSegmentPercentEncoded(t *testing.T) {
+    routeRegistry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(routeRegistry)
+    urlGenerator := NewUrlGenerator(routeRegistry, UrlGeneratorConfig{})
+
+    router.Handle(
+        "/über/:id",
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return EmptyResponse(200), nil
+        },
+        RouteOptions{Name: "over", Methods: []string{nethttp.MethodGet}},
+    )
+
+    pathValue, err := urlGenerator.GeneratePath("over", httpcontract.PathConfig{Parameters: map[string]string{"id": "a;b"}})
+    if nil != err || "/%C3%BCber/a;b" != pathValue {
+        t.Fatalf("expected the static segment percent-encoded and the parameter escaped by url.URL, got %q, %v", pathValue, err)
+    }
+}
+
 func TestGeneratePath_AppendsTheQueryAndTheFragmentAndSkipsAnEmptyKey(t *testing.T) {
     urlGenerator := newHelloUrlGenerator(t, UrlGeneratorConfig{})
 
@@ -287,10 +306,12 @@ func TestGenerateUrl_AnswersAnAbsoluteUrlBehindThePublicBase(t *testing.T) {
 
 func TestGenerateUrl_JoinsTheBasesPathWithOneSlash(t *testing.T) {
     cases := map[string]string{
-        "https://x.ro/app":  "https://x.ro/app/reset/t",
-        "https://x.ro/app/": "https://x.ro/app/reset/t",
-        "https://x.ro/":     "https://x.ro/reset/t",
-        "http://x.ro:8080":  "http://x.ro:8080/reset/t",
+        "https://x.ro/app":            "https://x.ro/app/reset/t",
+        "https://x.ro/app/":           "https://x.ro/app/reset/t",
+        "https://x.ro/":               "https://x.ro/reset/t",
+        "http://x.ro:8080":            "http://x.ro:8080/reset/t",
+        "https://x.ro/a%2Fb":          "https://x.ro/a%2Fb/reset/t",
+        "http://[fe80::1%25eth0]/app": "http://[fe80::1%25eth0]/app/reset/t",
     }
 
     for publicUrl, expected := range cases {
@@ -298,6 +319,11 @@ func TestGenerateUrl_JoinsTheBasesPathWithOneSlash(t *testing.T) {
         if nil != err || expected != urlValue {
             t.Fatalf("expected %q behind %q, got %q, %v", expected, publicUrl, urlValue, err)
         }
+    }
+
+    escapedToken, escapedTokenErr := newHelloUrlGenerator(t, UrlGeneratorConfig{PublicUrl: "https://x.ro/my%20app"}).GenerateUrl("user.reset", httpcontract.PathConfig{Parameters: map[string]string{"token": "a b"}})
+    if nil != escapedTokenErr || "https://x.ro/my%20app/reset/a%20b" != escapedToken {
+        t.Fatalf("expected the escaped token behind the escaped base, got %q, %v", escapedToken, escapedTokenErr)
     }
 
     root, rootErr := newHelloUrlGenerator(t, UrlGeneratorConfig{PublicUrl: "https://x.ro/app"}).GenerateUrl("home", httpcontract.PathConfig{})
@@ -319,7 +345,7 @@ func TestGenerateUrl_IsAnErrorNamingTheKeyWhenNoPublicBaseIsSet(t *testing.T) {
 }
 
 func TestNewUrlGenerator_RefusesAPublicUrlThatIsNoCleanBase(t *testing.T) {
-    for _, publicUrl := range []string{"ftp://x", "https://u:p@x", "https://x?a=1", "https://x#f", "//x"} {
+    for _, publicUrl := range []string{"ftp://x", "https://u:p@x", "https://x?a=1", "https://x#f", "//x", "https://:8443", "https://x//app", "https://x/a/../b"} {
         testhelper.AssertPanicsWithError(t, func() {
             NewUrlGenerator(NewRouteRegistry(), UrlGeneratorConfig{PublicUrl: publicUrl})
         }, "the public url is refused")

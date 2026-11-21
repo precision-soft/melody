@@ -1314,6 +1314,30 @@ func TestConfiguration_StaticCacheDisabledBesideAMaxAgeIsRefused(t *testing.T) {
     if _, enabledErr := newConfigurationFromValues(map[string]string{StaticCacheDisabledKey: "false", StaticCacheMaxAgeKey: "60"}); nil != enabledErr {
         t.Fatalf("expected a max age beside the enabled cache admitted, got %v", enabledErr)
     }
+
+    for _, maxAge := range []string{"3600", ""} {
+        if _, maxAgeErr := newConfigurationFromValues(map[string]string{StaticCacheDisabledKey: "true", StaticCacheMaxAgeKey: maxAge}); nil == maxAgeErr {
+            t.Fatalf("expected the max age line %q beside the disabled cache refused", maxAge)
+        }
+    }
+}
+
+func TestConfiguration_StaticCacheDisabledBesideAnOverriddenMaxAgeNamesTheParameter(t *testing.T) {
+    environment, environmentErr := NewEnvironment(context.Background(), &testEnvironmentSource{values: map[string]string{StaticCacheDisabledKey: "true"}})
+    if nil != environmentErr {
+        t.Fatalf("new environment error: %v", environmentErr)
+    }
+
+    _, configurationErr := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{ParameterOverrides: map[string]string{KernelStaticCacheMaxAge: "120"}})
+    if nil == configurationErr {
+        t.Fatal("expected the overridden max age beside the disabled cache refused")
+    }
+
+    refusalContext := exception.LogContext(configurationErr, exception.LogContextConfig{})
+    environmentKeys, _ := refusalContext["environmentKeys"].([]string)
+    if 1 != len(environmentKeys) || StaticCacheDisabledKey != environmentKeys[0] || KernelStaticCacheMaxAge != refusalContext["parameterName"] || true != refusalContext["overridden"] {
+        t.Fatalf("expected the refusal to name the switch and the overridden parameter, got %v", refusalContext)
+    }
 }
 
 func TestConfiguration_TheRetiredStaticCacheKeyNamesItsSuccessorAndTheInversion(t *testing.T) {
@@ -1330,5 +1354,36 @@ func TestConfiguration_TheRetiredStaticCacheKeyNamesItsSuccessorAndTheInversion(
 
     if successor, isRetired := configuration.RetiredEnvironmentKeySuccessor("MELODY_STATIC_ENABLE_CACHE"); false == isRetired || StaticCacheDisabledKey != successor {
         t.Fatalf("expected the successor answered, got %q %v", successor, isRetired)
+    }
+}
+
+func TestNewConfiguration_ThePublicUrlKeyWinsOverTheFieldAndTheFieldIsJudged(t *testing.T) {
+    newConfiguration := func(values map[string]string, httpPublicUrl string) (*Configuration, error) {
+        environment, environmentErr := NewEnvironment(context.Background(), &testEnvironmentSource{values: values})
+        if nil != environmentErr {
+            t.Fatalf("new environment error: %v", environmentErr)
+        }
+
+        return NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{HttpPublicUrl: httpPublicUrl})
+    }
+
+    configuration, configurationErr := newConfiguration(map[string]string{}, "https://field.example.com/app/")
+    if nil != configurationErr || "https://field.example.com/app" != configuration.Http().PublicUrl() {
+        t.Fatalf("expected the field normalised, got %v", configurationErr)
+    }
+
+    configuration, configurationErr = newConfiguration(map[string]string{HttpPublicUrlKey: "https://key.example.com"}, "https://field.example.com")
+    if nil != configurationErr || "https://key.example.com" != configuration.Http().PublicUrl() {
+        t.Fatalf("expected the key to win, got %v", configurationErr)
+    }
+
+    configuration, configurationErr = newConfiguration(map[string]string{}, "")
+    if nil != configurationErr || "" != configuration.Http().PublicUrl() {
+        t.Fatalf("expected no base, got %v", configurationErr)
+    }
+
+    _, configurationErr = newConfiguration(map[string]string{}, "https://x?a=1")
+    if nil == configurationErr || "ApplicationConfig.HttpPublicUrl" != exception.FromError(configurationErr).Context()["field"] {
+        t.Fatalf("expected the field refused naming it, got %v", configurationErr)
     }
 }

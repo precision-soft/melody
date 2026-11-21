@@ -247,7 +247,7 @@ func (instance *Application) bootContainer() {
             func(resolver containercontract.Resolver) (httpcontract.UrlGenerator, error) {
                 return http.NewUrlGenerator(
                     container.MustFromResolver[httpcontract.RouteRegistry](resolver.Runtime().Context(), resolver, http.ServiceRouteRegistry),
-                    http.UrlGeneratorConfig{PublicUrl: instance.httpPublicUrl},
+                    http.UrlGeneratorConfig{PublicUrl: instance.configuration.Http().PublicUrl()},
                 ), nil
             },
             container.RegisterOptions{},

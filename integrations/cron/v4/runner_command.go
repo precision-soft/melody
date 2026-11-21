@@ -54,7 +54,7 @@ type RunnerCommand struct {
     /* the zone every evaluated minute is rendered in, applied to the clock reading so nothing below needs to know it; nil means the process zone */
     location *time.Location
     /* the window a run whose entry names none of its own is given to unwind; an entry's own window is resolved onto the entry */
-    unwindGrace             time.Duration
+    shutdownTimeout         time.Duration
     outputCaptureLimit      int
     clockJumpResetThreshold time.Duration
     inFlight                sync.WaitGroup
@@ -223,7 +223,7 @@ func NewRunnerCommand(configuration *Configuration, config RunnerConfig) *Runner
         entries:                 entries,
         now:                     time.Now,
         location:                mustLoadConfiguredLocation(configuration.TimezoneName()),
-        unwindGrace:             runner.shutdownTimeout,
+        shutdownTimeout:         runner.shutdownTimeout,
         outputCaptureLimit:      runner.outputCaptureLimit,
         clockJumpResetThreshold: runner.clockJumpResetThreshold,
         userIgnoredCommands:     userIgnoredCommands,
@@ -275,7 +275,7 @@ func (instance *RunnerCommand) shutdownTimeoutOf(entry *scheduledRunEntry) time.
         return entry.shutdownTimeout
     }
 
-    return instance.unwindGrace
+    return instance.shutdownTimeout
 }
 
 func (instance *RunnerCommand) Name() string {
@@ -1164,8 +1164,8 @@ func (instance *RunnerCommand) shutdownAbandonError(entry *scheduledRunEntry) er
     return exception.NewError(
         "cron: scheduled command ignored the shutdown cancellation and did not return; it was abandoned and its container scope closed while it may still be running",
         exceptioncontract.Context{
-            "commandName": entry.commandName,
-            "unwindGrace": instance.shutdownTimeoutOf(entry).String(),
+            "commandName":     entry.commandName,
+            "shutdownTimeout": instance.shutdownTimeoutOf(entry).String(),
         },
         ErrCommandTimeout,
     )
@@ -1272,9 +1272,9 @@ func (instance *RunnerCommand) timeoutError(entry *scheduledRunEntry, abandoned 
         return exception.NewError(
             "cron: scheduled command exceeded its timeout and did not return; it was abandoned and its container scope closed while it may still be running",
             exceptioncontract.Context{
-                "commandName": entry.commandName,
-                "timeout":     entry.timeout.String(),
-                "unwindGrace": instance.shutdownTimeoutOf(entry).String(),
+                "commandName":     entry.commandName,
+                "timeout":         entry.timeout.String(),
+                "shutdownTimeout": instance.shutdownTimeoutOf(entry).String(),
             },
             commandTimeoutCause(runErr),
         )

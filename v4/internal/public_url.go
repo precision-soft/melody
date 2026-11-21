@@ -5,7 +5,7 @@ import (
     "strings"
 )
 
-/* NormalizePublicUrl answers the public base an absolute url is generated behind: an http or https url with a host, no user info, no query and no fragment, its path kept without the trailing slash; the empty value is no base. The reason names what is refused. */
+/* NormalizePublicUrl answers the public base an absolute url is generated behind: an http or https url with a host name, no user info, no query, no fragment and no empty, "." or ".." path segment, its path kept without the trailing slash and the whole written by url.URL, so the base it answers parses back to itself; the empty value is no base. The reason names what is refused. */
 func NormalizePublicUrl(value string) (string, string) {
     if "" == value {
         return "", ""
@@ -24,7 +24,7 @@ func NormalizePublicUrl(value string) (string, string) {
         return "", "a public url is http or https"
     }
 
-    if "" != parsed.Opaque || "" == parsed.Host {
+    if "" != parsed.Opaque || "" == parsed.Hostname() {
         return "", "a public url names a host"
     }
 
@@ -32,5 +32,18 @@ func NormalizePublicUrl(value string) (string, string) {
         return "", "a public url carries no user info"
     }
 
-    return parsed.Scheme + "://" + parsed.Host + strings.TrimRight(parsed.EscapedPath(), "/"), ""
+    escapedPath := strings.TrimRight(parsed.EscapedPath(), "/")
+    if "" != escapedPath {
+        for _, escapedSegment := range strings.Split(escapedPath, "/")[1:] {
+            segment, _ := url.PathUnescape(escapedSegment)
+            if "" == segment || "." == segment || ".." == segment {
+                return "", "a public url's path carries no empty, \".\" or \"..\" segment"
+            }
+        }
+    }
+
+    normalized := url.URL{Scheme: parsed.Scheme, Host: parsed.Host, RawPath: escapedPath}
+    normalized.Path, _ = url.PathUnescape(escapedPath)
+
+    return normalized.String(), ""
 }

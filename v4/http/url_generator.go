@@ -11,7 +11,7 @@ import (
     "github.com/precision-soft/melody/v4/internal"
 )
 
-/* UrlGeneratorConfig carries the public base GenerateUrl answers behind, empty for none; a base that is not an http or https url with a host, or that carries user info, a query or a fragment, is refused. */
+/* UrlGeneratorConfig carries the public base GenerateUrl answers behind, empty for none; a base that is not an http or https url with a host name, or that carries user info, a query, a fragment or an empty, "." or ".." path segment, is refused. */
 type UrlGeneratorConfig struct {
     PublicUrl string
 }
@@ -28,15 +28,20 @@ func NewUrlGenerator(routeRegistry httpcontract.RouteRegistry, generatorConfig U
         )
     }
 
+    var publicBase *url.URL
+    if "" != publicUrl {
+        publicBase, _ = url.Parse(publicUrl)
+    }
+
     return &UrlGenerator{
         routeRegistry: routeRegistry,
-        publicUrl:     publicUrl,
+        publicBase:    publicBase,
     }
 }
 
 type UrlGenerator struct {
     routeRegistry httpcontract.RouteRegistry
-    publicUrl     string
+    publicBase    *url.URL
 }
 
 func (instance *UrlGenerator) GeneratePath(routeName string, pathConfig httpcontract.PathConfig) (string, error) {
@@ -49,7 +54,7 @@ func (instance *UrlGenerator) GeneratePath(routeName string, pathConfig httpcont
 }
 
 func (instance *UrlGenerator) GenerateUrl(routeName string, pathConfig httpcontract.PathConfig) (string, error) {
-    if "" == instance.publicUrl {
+    if nil == instance.publicBase {
         return "", exception.NewError(
             "an absolute url needs the public url",
             exceptioncontract.Context{"key": config.HttpPublicUrlKey, "routeName": routeName},
@@ -62,9 +67,7 @@ func (instance *UrlGenerator) GenerateUrl(routeName string, pathConfig httpcontr
         return "", generateErr
     }
 
-    base, _ := url.Parse(instance.publicUrl)
-
-    return composeReference(url.URL{Scheme: base.Scheme, Host: base.Host}, base.EscapedPath()+generatedPath, pathConfig), nil
+    return composeReference(url.URL{Scheme: instance.publicBase.Scheme, Host: instance.publicBase.Host}, instance.publicBase.EscapedPath()+generatedPath, pathConfig), nil
 }
 
 /* composeReference writes the escaped path, the query without its empty key and the fragment through url.URL, so each part is escaped where it stands. */

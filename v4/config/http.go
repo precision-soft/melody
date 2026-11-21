@@ -149,7 +149,7 @@ func (instance *httpConfiguration) Address() string {
     return instance.address
 }
 
-/* PublicUrl is MELODY_HTTP_PUBLIC_URL as the deployment set it, its trailing slash trimmed, empty when unset. */
+/* PublicUrl is MELODY_HTTP_PUBLIC_URL as the deployment set it and the application's ApplicationConfig.HttpPublicUrl when the key is unset, its trailing slash trimmed, empty when neither names one. */
 func (instance *httpConfiguration) PublicUrl() string {
     return instance.publicUrl
 }

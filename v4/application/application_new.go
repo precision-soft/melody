@@ -31,7 +31,7 @@ type ApplicationConfig struct {
     EnvironmentFiles fs.FS
     /* PublicFiles is the embedded filesystem the file server serves under melody_static_embedded. */
     PublicFiles fs.FS
-    /* HttpPublicUrl is the public base an absolute url is generated behind, the default of MELODY_HTTP_PUBLIC_URL, which wins when a deployment sets it: an http or https url with a host and no user info, query or fragment, its path joined before every route's; empty is none. */
+    /* HttpPublicUrl is the public base an absolute url is generated behind, the default of MELODY_HTTP_PUBLIC_URL, which wins when a deployment sets it: an http or https url with a host name and no user info, query, fragment or empty, "." or ".." path segment, its path joined before every route's; Http().PublicUrl() answers the key, then this field; empty is none. */
     HttpPublicUrl string
     /* HttpShutdownTimeout is how long a stopping http server waits for the requests it admitted, the default of MELODY_HTTP_SHUTDOWN_TIMEOUT, which wins when a deployment sets it: 5s when left out, at least 1ms, unlimited refused. */
     HttpShutdownTimeout bound.Duration
@@ -101,7 +101,7 @@ func NewApplication(
         )
     }
 
-    configuration, newConfigurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{EnvironmentKeys: applicationConfig.EnvironmentKeys, ParameterOverrides: applicationConfig.ParameterOverrides})
+    configuration, newConfigurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{EnvironmentKeys: applicationConfig.EnvironmentKeys, ParameterOverrides: applicationConfig.ParameterOverrides, HttpPublicUrl: applicationConfig.HttpPublicUrl})
     if nil != newConfigurationErr {
         /* the wrap names construction, not resolution: NewConfiguration also fails on validation and on building its views, and a resolve failure already carries its own message */
         exception.Panic(
@@ -136,11 +136,6 @@ func NewApplication(
         exception.Panic(exception.NewError("the unavailable retry after is refused", nil, unavailableRetryAfterErr))
     }
 
-    httpPublicUrl, httpPublicUrlErr := resolveHttpPublicUrl(configuration, applicationConfig)
-    if nil != httpPublicUrlErr {
-        exception.Panic(exception.NewError("the http public url is refused", nil, httpPublicUrlErr))
-    }
-
     routeRegistry := http.NewRouteRegistry()
     httpRouter := http.NewRouterWithRouteRegistry(routeRegistry)
 
@@ -170,7 +165,6 @@ func NewApplication(
         ctx:                  ctx,
         applicationConfig:    applicationConfig,
         configuration:        configuration,
-        httpPublicUrl:        httpPublicUrl,
         runtimeFlags:         ParseRuntimeFlags(RuntimeFlagsConfig{Mode: configuration.Kernel().DefaultMode(), Role: configuration.Kernel().ProcessRole()}),
         kernel:               kernelInstance,
         embeddedPublicFiles:  embeddedPublicFiles,

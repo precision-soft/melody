@@ -1886,15 +1886,15 @@ func TestRunnerCommand_TheAbandonErrorNamesTheWindowTheRunWasActuallyGiven(t *te
         t.Fatalf("expected an exception error, got %T", invokeErr)
     }
 
-    unwindGrace := fmt.Sprintf("%v", reported.Context()["unwindGrace"])
-    if (30 * time.Millisecond).String() != unwindGrace {
-        t.Fatalf("the abandon must name the window this run was given, not the runner default; got %q", unwindGrace)
+    shutdownTimeout := fmt.Sprintf("%v", reported.Context()["shutdownTimeout"])
+    if (30 * time.Millisecond).String() != shutdownTimeout {
+        t.Fatalf("the abandon must name the window this run was given, not the runner default; got %q", shutdownTimeout)
     }
 }
 
 /* the outer select cannot be made to see both cases ready from outside the runner — the window is one scheduling instant — so the branch is driven directly, with the completion already in the channel, which is the state that window produces. */
 func TestResolveAbandonedRun_ACommandThatAlreadyAnsweredReportsItsOwnOutcome(t *testing.T) {
-    runner := &RunnerCommand{unwindGrace: runnerShutdownTimeoutRule.Default}
+    runner := &RunnerCommand{shutdownTimeout: runnerShutdownTimeoutRule.Default}
     entry := &scheduledRunEntry{commandName: "job:top", timeout: time.Minute}
 
     commandErr := errors.New("the command's own failure")
@@ -1920,7 +1920,7 @@ func TestResolveAbandonedRun_ACommandThatAlreadyAnsweredReportsItsOwnOutcome(t *
 }
 
 func TestResolveAbandonedRun_ACommandStillRunningIsReportedAbandoned(t *testing.T) {
-    runner := &RunnerCommand{unwindGrace: runnerShutdownTimeoutRule.Default}
+    runner := &RunnerCommand{shutdownTimeout: runnerShutdownTimeoutRule.Default}
     entry := &scheduledRunEntry{commandName: "job:top", timeout: time.Minute}
 
     resolved := runner.resolveAbandonedRun(
@@ -1943,7 +1943,7 @@ func TestResolveAbandonedRun_ACommandStillRunningIsReportedAbandoned(t *testing.
 
 /* a command that answered with its deadline already exceeded keeps its own error beside the timeout, the way the completion branch of the outer select reports it. */
 func TestResolveAbandonedRun_ADeadlineExceededAnswerCarriesBothFailures(t *testing.T) {
-    runner := &RunnerCommand{unwindGrace: runnerShutdownTimeoutRule.Default}
+    runner := &RunnerCommand{shutdownTimeout: runnerShutdownTimeoutRule.Default}
     entry := &scheduledRunEntry{commandName: "job:top", timeout: time.Minute}
 
     lapsedContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
@@ -2925,7 +2925,7 @@ func (instance *panicValueCommand) Run(runtimeInstance containercontract.Runtime
 
 /* a timeout carries the command's own failure down one chain: both stay reachable by identity, and the record built from that chain reaches the command's own context instead of stopping at the join */
 func TestTimeoutError_CarriesTheCommandFailureDownOneChain(t *testing.T) {
-    runner := &RunnerCommand{unwindGrace: runnerShutdownTimeoutRule.Default}
+    runner := &RunnerCommand{shutdownTimeout: runnerShutdownTimeoutRule.Default}
     entry := &scheduledRunEntry{commandName: "job:top", timeout: time.Minute}
 
     commandErr := exception.NewError(
@@ -2958,13 +2958,29 @@ func TestTimeoutError_CarriesTheCommandFailureDownOneChain(t *testing.T) {
 
 /* a timeout with no command failure keeps the sentinel alone as its cause, so the shape a caller reads does not change with the presence of a second error */
 func TestTimeoutError_WithoutACommandFailureWrapsTheSentinelAlone(t *testing.T) {
-    runner := &RunnerCommand{unwindGrace: runnerShutdownTimeoutRule.Default}
+    runner := &RunnerCommand{shutdownTimeout: runnerShutdownTimeoutRule.Default}
     entry := &scheduledRunEntry{commandName: "job:top", timeout: time.Minute}
 
     timeoutErr := runner.timeoutError(entry, true, nil)
 
     if ErrCommandTimeout != errors.Unwrap(timeoutErr) {
         t.Fatalf("expected the sentinel as the sole cause, got %v", errors.Unwrap(timeoutErr))
+    }
+}
+
+func TestRunnerCommand_TheAbandonErrorsNameTheWindowUnderShutdownTimeout(t *testing.T) {
+    runner := &RunnerCommand{shutdownTimeout: runnerShutdownTimeoutRule.Default}
+    entry := &scheduledRunEntry{commandName: "job:top", timeout: time.Minute, shutdownTimeout: 30 * time.Millisecond}
+
+    for name, abandonErr := range map[string]error{"timeout": runner.timeoutError(entry, true, nil), "shutdown": runner.shutdownAbandonError(entry)} {
+        abandonContext := exception.FromError(abandonErr).Context()
+        if (30*time.Millisecond).String() != abandonContext["shutdownTimeout"] {
+            t.Fatalf("%s: expected the window under shutdownTimeout, got %v", name, abandonContext)
+        }
+
+        if _, exists := abandonContext["unwindGrace"]; true == exists {
+            t.Fatalf("%s: expected no second key for the window, got %v", name, abandonContext)
+        }
     }
 }
 

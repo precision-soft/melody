@@ -374,28 +374,6 @@ func TestResolveSessionEmptyOnOutage_TheKeyWinsOverTheField(t *testing.T) {
     }
 }
 
-func TestResolveHttpPublicUrl_TheKeyWinsOverTheFieldAndTheFieldIsJudged(t *testing.T) {
-    publicUrl, publicUrlErr := resolveHttpPublicUrl(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{HttpPublicUrl: "https://field.example.com/app/"})
-    if nil != publicUrlErr || "https://field.example.com/app" != publicUrl {
-        t.Fatalf("expected the field normalised, got %q, %v", publicUrl, publicUrlErr)
-    }
-
-    publicUrl, publicUrlErr = resolveHttpPublicUrl(newLimitConfiguration(t, map[string]string{config.HttpPublicUrlKey: "https://key.example.com"}), ApplicationConfig{HttpPublicUrl: "https://field.example.com"})
-    if nil != publicUrlErr || "https://key.example.com" != publicUrl {
-        t.Fatalf("expected the key to win, got %q, %v", publicUrl, publicUrlErr)
-    }
-
-    publicUrl, publicUrlErr = resolveHttpPublicUrl(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{})
-    if nil != publicUrlErr || "" != publicUrl {
-        t.Fatalf("expected no base, got %q, %v", publicUrl, publicUrlErr)
-    }
-
-    _, publicUrlErr = resolveHttpPublicUrl(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{HttpPublicUrl: "https://x?a=1"})
-    if nil == publicUrlErr || "ApplicationConfig.HttpPublicUrl" != exception.FromError(publicUrlErr).Context()["field"] {
-        t.Fatalf("expected the field refused naming it, got %v", publicUrlErr)
-    }
-}
-
 func TestNewApplication_TheHttpPublicUrlFieldReachesTheUrlGenerator(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), HttpPublicUrl: "https://app.example.com/shop"})
     serviceContainer := applicationInstance.kernel.ServiceContainer()
@@ -412,6 +390,10 @@ func TestNewApplication_TheHttpPublicUrlFieldReachesTheUrlGenerator(t *testing.T
         },
         httpcontract.RouteOptions{Name: "product.list"},
     )
+
+    if publicUrl := applicationInstance.configuration.Http().PublicUrl(); "https://app.example.com/shop" != publicUrl {
+        t.Fatalf("expected the configuration to read the field's base, got %q", publicUrl)
+    }
 
     urlGenerator := container.MustFromResolver[httpcontract.UrlGenerator](context.Background(), serviceContainer, http.ServiceUrlGenerator)
     urlValue, urlErr := urlGenerator.GenerateUrl("product.list", httpcontract.PathConfig{})
