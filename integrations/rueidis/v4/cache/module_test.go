@@ -67,13 +67,13 @@ func TestModule_RegisterServicesForwardsTheBackendConfig(t *testing.T) {
 
     NewModule(ModuleConfig{
         Client:  &teardownSpyClient{},
-        Backend: BackendConfig{Prefix: "prefix", CommandTimeout: bound.Of(750 * time.Millisecond)},
+        Backend: BackendConfig{Prefix: "prefix", CallTimeout: bound.Of(750 * time.Millisecond)},
     }).RegisterServices(registrar)
 
     service := container.MustFromResolver[*BackendService](t.Context(), serviceContainer, melodycache.ServiceCacheBackend)
 
-    if 750*time.Millisecond != service.backend.commandTimeout {
-        t.Fatalf("expected the module to hand its backend config to the registered backend, got %v", service.backend.commandTimeout)
+    if 750*time.Millisecond != service.backend.callTimeout {
+        t.Fatalf("expected the module to hand its backend config to the registered backend, got %v", service.backend.callTimeout)
     }
 }
 

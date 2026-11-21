@@ -2251,8 +2251,8 @@ func TestEnsureConsumeChannel_AnswersTheCachedChannelWithItsOwnGeneration(t *tes
 }
 
 const (
-    wedgePublishTimeout       = 200 * time.Millisecond
-    wedgeWarmupPublishTimeout = 5 * time.Second
+    wedgeCallTimeout       = 200 * time.Millisecond
+    wedgeWarmupCallTimeout = 5 * time.Second
 )
 
 func newWedgeTestTransport(t *testing.T, connection *amqp091.Connection, dialer func() (*amqp091.Connection, error)) (*Transport, containercontract.Runtime) {
@@ -2266,7 +2266,7 @@ func newWedgeTestTransport(t *testing.T, connection *amqp091.Connection, dialer 
         Dialer:         dialer,
         Queue:          "melody.amqp.test.wedge",
         Registry:       registry,
-        PublishTimeout: bound.Of(wedgeWarmupPublishTimeout),
+        CallTimeout:    bound.Of(wedgeWarmupCallTimeout),
     })
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
@@ -2276,12 +2276,12 @@ func newWedgeTestTransport(t *testing.T, connection *amqp091.Connection, dialer 
         t.Fatalf("healthy send: %v", sendErr)
     }
 
-    transport.publishTimeout = wedgePublishTimeout
+    transport.callTimeout = wedgeCallTimeout
 
     return transport, runtimeInstance
 }
 
-func TestTransport_SendReturnsWithinThePublishTimeoutOnAWedgedWrite(t *testing.T) {
+func TestTransport_SendReturnsWithinTheCallTimeoutOnAWedgedWrite(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, gated := dialGated(t, dsn)
     transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
@@ -2340,8 +2340,8 @@ func TestTransport_ASecondSendOnAWedgedCallerOwnedConnectionIsRefusedAtOnce(t *t
     go func() { outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"}, nil)) }()
 
     firstErr := awaitOutcome(t, "send on a wedged write", outcome, 2*time.Second)
-    if nil == firstErr || false == strings.Contains(firstErr.Error(), "did not return within the publish timeout on a caller-owned connection") {
-        t.Fatalf("expected the first send to report the publish timeout on a caller-owned connection, got: %v", firstErr)
+    if nil == firstErr || false == strings.Contains(firstErr.Error(), "did not return within the call timeout on a caller-owned connection") {
+        t.Fatalf("expected the first send to report the call timeout on a caller-owned connection, got: %v", firstErr)
     }
 
     go func() { outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "while-wedged"}, nil)) }()
@@ -2401,7 +2401,7 @@ func TestClose_WaitsForTheInFlightPublishBeforeClosingTheChannel(t *testing.T) {
         queue:          "orders",
         closeSignal:    make(chan struct{}),
         reconnect:      defaultReconnect,
-        publishTimeout: 2 * time.Second,
+        callTimeout:    2 * time.Second,
         publishHalf:    publishHalf{joinBound: closeJoinTimeout},
     }
 
@@ -2417,12 +2417,12 @@ func TestClose_WaitsForTheInFlightPublishBeforeClosingTheChannel(t *testing.T) {
     awaitOutcome(t, "close after the publish released the mutex", closed, 2*time.Second)
 }
 
-func TestClose_GivesUpOnThePublishHalfAfterThePublishTimeout(t *testing.T) {
+func TestClose_GivesUpOnThePublishHalfAfterTheCallTimeout(t *testing.T) {
     instance := &Transport{
         queue:          "orders",
         closeSignal:    make(chan struct{}),
         reconnect:      defaultReconnect,
-        publishTimeout: 100 * time.Millisecond,
+        callTimeout:    100 * time.Millisecond,
         publishHalf:    publishHalf{joinBound: closeJoinTimeout},
     }
 
@@ -2432,7 +2432,7 @@ func TestClose_GivesUpOnThePublishHalfAfterThePublishTimeout(t *testing.T) {
     closed := make(chan error, 1)
     go func() { closed <- instance.CloseWithContext(t.Context()) }()
 
-    awaitOutcome(t, "close past the publish timeout", closed, 2*time.Second)
+    awaitOutcome(t, "close past the call timeout", closed, 2*time.Second)
 }
 
 func TestDecode_ReadsAByteArrayMessageTypeHeader(t *testing.T) {
@@ -2525,7 +2525,7 @@ func TestTransport_ASendQueuedBehindAnotherIsNotReportedAsAWedgedWrite(t *testin
 
     releaseTransportPublish()
 
-    if nil == sendErr || false == strings.Contains(sendErr.Error(), "did not reach the socket within the publish timeout") {
+    if nil == sendErr || false == strings.Contains(sendErr.Error(), "did not reach the socket within the call timeout") {
         t.Fatalf("expected the refusal to name the queue rather than a blocked write, got: %v", sendErr)
     }
 
@@ -3222,7 +3222,7 @@ func TestTransport_ACutOwnedConnectionIsLetGoBeforeTheAbandonReturns(t *testing.
     publishReturns := make(chan amqp091.Return)
     instance := &Transport{
         queue:          "orders",
-        publishTimeout: time.Second,
+        callTimeout:    time.Second,
         closeSignal:    make(chan struct{}),
         ownsConnection: true,
         connection:     wedge.connection,
@@ -3271,7 +3271,7 @@ func TestTransport_CloseNamesTheWriteLeftBlockedOnAConnectionAnEarlierAbandonCut
         Dialer:         func() (*amqp091.Connection, error) { return nil, errors.New("the fake broker is dialed once, by the test") },
         Queue:          "melody.amqp.test.fake.broker",
         Registry:       NewMessageRegistry(),
-        PublishTimeout: bound.Of(200 * time.Millisecond),
+        CallTimeout:    bound.Of(200 * time.Millisecond),
         CloseTimeout:   bound.Of(300 * time.Millisecond),
     })
 
@@ -3368,7 +3368,7 @@ func TestTransport_CloseWithContextReturnsWithinTheDeadlineWhenAnEarlierCutHasNo
         Dialer:         func() (*amqp091.Connection, error) { return nil, errors.New("the fake broker is dialed once, by the test") },
         Queue:          "melody.amqp.test.fake.broker",
         Registry:       NewMessageRegistry(),
-        PublishTimeout: bound.Of(200 * time.Millisecond),
+        CallTimeout:    bound.Of(200 * time.Millisecond),
     })
 
     transport.mutex.Lock()
@@ -3403,7 +3403,7 @@ func TestConnect_ADialThatLandsAfterCloseBeganIsClosedOffTheMutex(t *testing.T) 
     var transport *Transport
     transport = &Transport{
         queue:          "orders",
-        publishTimeout: time.Second,
+        callTimeout:    time.Second,
         closeSignal:    make(chan struct{}),
         dialer: func() (*amqp091.Connection, error) {
             transport.mutex.Lock()
@@ -3443,13 +3443,13 @@ func TestConnect_ADialThatLandsAfterCloseBeganIsClosedOffTheMutex(t *testing.T) 
     }
 }
 
-func TestDialInterruptibly_ADialThatLandsAfterTheCloseSignalIsClosedWithinOnePublishTimeout(t *testing.T) {
+func TestDialInterruptibly_ADialThatLandsAfterTheCloseSignalIsClosedWithinOneCallTimeout(t *testing.T) {
     fake := dialFakeBroker(t)
 
     release := make(chan struct{})
     transport := &Transport{
         queue:          "orders",
-        publishTimeout: 200 * time.Millisecond,
+        callTimeout:    200 * time.Millisecond,
         closeSignal:    make(chan struct{}),
         dialer: func() (*amqp091.Connection, error) {
             <-release
@@ -3704,7 +3704,7 @@ func TestTransport_ARequeueRepublishKeepsTryingThroughANack(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, _ := dialGated(t, dsn)
     transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
-    transport.publishTimeout = 5 * time.Second
+    transport.callTimeout = 5 * time.Second
 
     fullQueue := "melody.amqp.test.reject-publish"
     declareChannel, channelErr := connection.Channel()

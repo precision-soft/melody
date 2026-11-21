@@ -94,13 +94,13 @@ func TestRegisterBackendService_HandsTheConfigToTheBackend(t *testing.T) {
         ScanCount:      melodybound.Of(11),
         DeleteBatch:    melodybound.Of(13),
         MaxKeyLength:   melodybound.Of(7),
-        CommandTimeout: melodybound.Of(50 * time.Millisecond),
+        CallTimeout:    melodybound.Of(50 * time.Millisecond),
     })
 
     service := container.MustFromResolver[*BackendService](t.Context(), serviceContainer, melodycache.ServiceCacheBackend)
 
-    if 50*time.Millisecond != service.backend.commandTimeout || 7 != service.backend.maxKeyLength || 11 != service.backend.scanCount || 13 != service.backend.deleteBatch {
-        t.Fatalf("expected the config to reach the registered backend, got timeout %v, max key length %d, scan count %d and delete batch %d", service.backend.commandTimeout, service.backend.maxKeyLength, service.backend.scanCount, service.backend.deleteBatch)
+    if 50*time.Millisecond != service.backend.callTimeout || 7 != service.backend.maxKeyLength || 11 != service.backend.scanCount || 13 != service.backend.deleteBatch {
+        t.Fatalf("expected the config to reach the registered backend, got timeout %v, max key length %d, scan count %d and delete batch %d", service.backend.callTimeout, service.backend.maxKeyLength, service.backend.scanCount, service.backend.deleteBatch)
     }
 
     _ = service.Set(testRuntime(), "warm", []byte("x"), melodybound.UnlimitedDuration())
@@ -113,12 +113,12 @@ func TestRegisterBackendService_HandsTheConfigToTheBackend(t *testing.T) {
 
         return err
     })
-    if nil == getErr || false == errors.Is(getErr, context.DeadlineExceeded) || false == errors.Is(getErr, ErrCommandTimeout) {
+    if nil == getErr || false == errors.Is(getErr, context.DeadlineExceeded) || false == errors.Is(getErr, ErrCallTimeout) {
         t.Fatalf("expected the registered backend's read to be refused with its own deadline, got %v", getErr)
     }
 }
 
-func TestRegisterBackendService_AnAbsentCommandTimeoutRefusesAWedgedReadWithinOneSecond(t *testing.T) {
+func TestRegisterBackendService_AnAbsentCallTimeoutRefusesAWedgedReadWithinOneSecond(t *testing.T) {
     client, backendGate := dialGated(t)
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
@@ -138,7 +138,7 @@ func TestRegisterBackendService_AnAbsentCommandTimeoutRefusesAWedgedReadWithinOn
 
         return err
     })
-    if nil == getErr || false == errors.Is(getErr, context.DeadlineExceeded) || false == errors.Is(getErr, ErrCommandTimeout) {
+    if nil == getErr || false == errors.Is(getErr, context.DeadlineExceeded) || false == errors.Is(getErr, ErrCallTimeout) {
         t.Fatalf("expected the default-bounded read to be refused with its own deadline, got %v", getErr)
     }
 
@@ -154,8 +154,8 @@ func TestRegisterBackendService_AnAbsentConfigBoundsEachRoundTripAtOneSecond(t *
 
     service := container.MustFromResolver[*BackendService](t.Context(), serviceContainer, melodycache.ServiceCacheBackend)
 
-    if time.Second != service.backend.commandTimeout || defaultBackendPrefix != service.backend.prefix {
-        t.Fatalf("expected the default 1s budget and prefix, got %v and %q", service.backend.commandTimeout, service.backend.prefix)
+    if time.Second != service.backend.callTimeout || defaultBackendPrefix != service.backend.prefix {
+        t.Fatalf("expected the default 1s budget and prefix, got %v and %q", service.backend.callTimeout, service.backend.prefix)
     }
 }
 
@@ -166,7 +166,7 @@ func TestRegisterBackendService_RefusesAtTheCall(t *testing.T) {
         field  string
     }{
         "nil client":        {client: nil, config: BackendConfig{}, field: ""},
-        "unlimited timeout": {client: &teardownSpyClient{}, config: BackendConfig{CommandTimeout: melodybound.UnlimitedDuration()}, field: "BackendConfig.CommandTimeout"},
+        "unlimited timeout": {client: &teardownSpyClient{}, config: BackendConfig{CallTimeout: melodybound.UnlimitedDuration()}, field: "BackendConfig.CallTimeout"},
         "zero scan count":   {client: &teardownSpyClient{}, config: BackendConfig{ScanCount: melodybound.Of(0)}, field: "BackendConfig.ScanCount"},
     }
 

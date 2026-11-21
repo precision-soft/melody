@@ -93,7 +93,7 @@ func (instance *redisInfrastructure) Modules() []melodyapplicationcontract.Modul
             Backend: melodyrueidiscache.BackendConfig{
                 Prefix: cacheKeyPrefix(),
                 /* the default, written out: this budget is what keeps a store that stops answering from holding a request-path read */
-                CommandTimeout: bound.Of(time.Second),
+                CallTimeout: bound.Of(time.Second),
             },
         }),
     }

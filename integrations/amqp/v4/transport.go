@@ -48,8 +48,8 @@ var transportPublishReturnBufferRule = bound.Rule[int]{
 }
 
 /* sized to a full amqp handshake: a broker under a resource alarm holds publishers for seconds */
-var transportPublishTimeoutRule = bound.Rule[time.Duration]{
-    Name:    "TransportConfig.PublishTimeout",
+var transportCallTimeoutRule = bound.Rule[time.Duration]{
+    Name:    "TransportConfig.CallTimeout",
     Default: 30 * time.Second,
     Minimum: bound.TimeoutMinimum,
 }
@@ -70,7 +70,7 @@ const (
 /* a plain sentinel: a shared *exception.Error would carry its already-logged mark process-wide */
 var errReconnectInProgress = errors.New("amqp reconnect already in progress")
 
-var errPublishTimedOut = errors.New("amqp publish did not return within the publish timeout")
+var errPublishTimedOut = errors.New("amqp publish did not return within the call timeout")
 
 /* the broker refused the message itself, which is no outage */
 var errBrokerVerdict = errors.New("the broker refused the message")
@@ -110,9 +110,9 @@ func newTransport(config TransportConfig, parent componentParent) *Transport {
         exception.Panic(exception.FromError(publishReturnBufferErr))
     }
 
-    publishTimeout, publishTimeoutErr := bound.Resolve(config.PublishTimeout, transportPublishTimeoutRule)
-    if nil != publishTimeoutErr {
-        exception.Panic(exception.FromError(publishTimeoutErr))
+    callTimeout, callTimeoutErr := bound.Resolve(config.CallTimeout, transportCallTimeoutRule)
+    if nil != callTimeoutErr {
+        exception.Panic(exception.FromError(callTimeoutErr))
     }
 
     reconnect, reconnectErr := resolveReconnectOver(parent.reconnect, config.Reconnect)
@@ -141,7 +141,7 @@ func newTransport(config TransportConfig, parent componentParent) *Transport {
         publishReturnBuffer: publishReturnBuffer.Value,
         reconnect:           reconnect,
         delayBuckets:        delayBuckets,
-        publishTimeout:      publishTimeout.Value,
+        callTimeout:         callTimeout.Value,
         publishHalf:         publishHalf{joinBound: closeTimeout},
         closeSignal:         make(chan struct{}),
     }
@@ -165,8 +165,8 @@ type TransportConfig struct {
     PublishReturnBuffer bound.Count
     /* DelayBuckets are the ascending queue-level-ttl delay tiers, from 1ms to the 32-bit millisecond limit. */
     DelayBuckets []time.Duration
-    /* PublishTimeout bounds each of a send's turn wait, write and confirmation. */
-    PublishTimeout bound.Duration
+    /* CallTimeout bounds each of a send's turn wait, write and confirmation. */
+    CallTimeout bound.Duration
     /* CloseTimeout bounds each close stretch that cannot observe its signal: 30s by default, at least 1ms. */
     CloseTimeout bound.Duration
 }
@@ -186,7 +186,7 @@ type Transport struct {
     publishReturnBuffer int
     reconnect           resolvedReconnect
     delayBuckets        []time.Duration
-    publishTimeout      time.Duration
+    callTimeout         time.Duration
 
     mutex          sync.Mutex
     publishChannel *amqp091.Channel
@@ -299,7 +299,7 @@ func (instance *Transport) Nack(
 
 const closeJoinTimeout = 30 * time.Second
 
-/* CloseWithContext bounds the consume join and the channel closes by CloseTimeout, the publish join and an owned connection's close by PublishTimeout, all within the caller's deadline. */
+/* CloseWithContext bounds the consume join and the channel closes by CloseTimeout, the publish join and an owned connection's close by CallTimeout, all within the caller's deadline. */
 func (instance *Transport) CloseWithContext(closeContext context.Context) error {
     instance.mutex.Lock()
     instance.closing = true
@@ -310,7 +310,7 @@ func (instance *Transport) CloseWithContext(closeContext context.Context) error 
 
     instance.awaitConsumeLoopWithin(teardownStretchWithin(closeContext, instance.joinBound))
 
-    join := instance.joinPublishWithin(closeContext, instance.publishTimeout)
+    join := instance.joinPublishWithin(closeContext, instance.callTimeout)
     if true == join.joined {
         defer instance.publishMutex.Unlock()
     }
@@ -334,7 +334,7 @@ func (instance *Transport) CloseWithContext(closeContext context.Context) error 
     connectionCloseReturned := true
 
     if true == ownsConnection && nil != connection {
-        connectionCloseErr, reported, returned := instance.closeOwnedConnectionWithin(closeContext, instance.publishTimeout, join, connection)
+        connectionCloseErr, reported, returned := instance.closeOwnedConnectionWithin(closeContext, instance.callTimeout, join, connection)
         if true == reported {
             closeErrs = append(closeErrs, connectionCloseErr)
         }
@@ -534,7 +534,7 @@ func (instance *Transport) connect() (*amqp091.Connection, error) {
 
     if true == instance.closing {
         /* a late dial is closed on its own goroutine: under instance.mutex the close would hold CloseWithContext */
-        closeAbandonedConnection(connection, time.Now().Add(instance.publishTimeout))
+        closeAbandonedConnection(connection, time.Now().Add(instance.callTimeout))
 
         return nil, exception.NewError("amqp transport is closing", nil, nil)
     }
@@ -568,7 +568,7 @@ func (instance *Transport) dialInterruptibly() (*amqp091.Connection, error) {
     case result := <-outcome:
         return result.connection, result.err
     case <-instance.closeSignal:
-        drainAbandonedDial(outcome, instance.publishTimeout)
+        drainAbandonedDial(outcome, instance.callTimeout)
 
         return nil, exception.NewError("amqp transport is closing", nil, nil)
     }
@@ -738,7 +738,7 @@ func (instance *Transport) publishOnce(
         return nil, publishDisposition{channelFaulted: recoverable, furtherAttemptMayRecover: recoverable}, channelErr
     }
 
-    budget := instance.publishTimeout
+    budget := instance.callTimeout
     outcome := make(chan publishOutcome, 1)
     attempt := instance.beginPublish(budget)
 
@@ -767,7 +767,7 @@ func (instance *Transport) publishOnce(
                 confirmationRetryable = false
             }
 
-            outcome <- publishOutcome{disposition: publishDisposition{channelFaulted: confirmationRetryable, furtherAttemptMayRecover: confirmationRetryable}, err: exception.NewError("amqp publish confirmation wait failed", map[string]any{"queue": instance.queue, "exchange": exchange, "routingKey": routingKey, "publishTimeout": budget.String()}, waitErr)}
+            outcome <- publishOutcome{disposition: publishDisposition{channelFaulted: confirmationRetryable, furtherAttemptMayRecover: confirmationRetryable}, err: exception.NewError("amqp publish confirmation wait failed", map[string]any{"queue": instance.queue, "exchange": exchange, "routingKey": routingKey, "callTimeout": budget.String()}, waitErr)}
 
             return
         }
@@ -801,8 +801,8 @@ func (instance *Transport) publishOnce(
     if true == attempt.awaitTurn(ctx) {
         /* only the turn wait ran out, so nothing is torn down and a further attempt is worth making */
         return channel, publishDisposition{furtherAttemptMayRecover: true}, exception.NewError(
-            "amqp publish did not reach the socket within the publish timeout while earlier publishes on this transport still held it",
-            map[string]any{"queue": instance.queue, "exchange": exchange, "routingKey": routingKey, "publishTimeout": budget.String()},
+            "amqp publish did not reach the socket within the call timeout while earlier publishes on this transport still held it",
+            map[string]any{"queue": instance.queue, "exchange": exchange, "routingKey": routingKey, "callTimeout": budget.String()},
             errPublishTimedOut,
         )
     }
@@ -867,36 +867,36 @@ func (instance *Transport) abandonWedgedPublish(exchange string, routingKey stri
     }, channelConnection, written)
 
     errorContext := map[string]any{
-        "queue":          instance.queue,
-        "exchange":       exchange,
-        "routingKey":     routingKey,
-        "publishTimeout": instance.publishTimeout.String(),
+        "queue":       instance.queue,
+        "exchange":    exchange,
+        "routingKey":  routingKey,
+        "callTimeout": instance.callTimeout.String(),
     }
 
     switch verdict {
     case wedgedWriteWhileClosing:
         return publishDisposition{}, exception.NewError(
-            "amqp publish did not return within the publish timeout while the transport was closing",
+            "amqp publish did not return within the call timeout while the transport was closing",
             errorContext,
             errPublishTimedOut,
         )
     case wedgedWriteCut:
         return publishDisposition{channelFaulted: true, furtherAttemptMayRecover: true}, exception.NewError(
-            "amqp publish did not return within the publish timeout; the owned connection the write rode was torn down and is redialed on retry",
+            "amqp publish did not return within the call timeout; the owned connection the write rode was torn down and is redialed on retry",
             errorContext,
             errPublishTimedOut,
         )
     case wedgedWriteCutUnfreed:
         /* not a channel fault: a reset would park on the mutex the write still holds */
         return publishDisposition{furtherAttemptMayRecover: true}, exception.NewError(
-            "amqp publish did not return within the publish timeout; the owned connection the write rides is being torn down but the write has not returned, the channel is left to end with it",
+            "amqp publish did not return within the call timeout; the owned connection the write rides is being torn down but the write has not returned, the channel is left to end with it",
             errorContext,
             errPublishTimedOut,
         )
     }
 
     return publishDisposition{}, exception.NewError(
-        "amqp publish did not return within the publish timeout on a caller-owned connection; sends are refused until that write returns",
+        "amqp publish did not return within the call timeout on a caller-owned connection; sends are refused until that write returns",
         errorContext,
         errPublishTimedOut,
     )

@@ -23,20 +23,20 @@ const defaultBackendPrefix = "melody:cache:"
 
 const roundTripCauseGrace = 100 * time.Millisecond
 
-/* ErrCommandTimeout marks a round trip cut by CommandTimeout; it unwraps to context.DeadlineExceeded. */
-var ErrCommandTimeout error = commandTimeoutCause{}
+/* ErrCallTimeout marks a round trip cut by CallTimeout; it unwraps to context.DeadlineExceeded. */
+var ErrCallTimeout error = callTimeoutCause{}
 
-type commandTimeoutCause struct{}
+type callTimeoutCause struct{}
 
-func (commandTimeoutCause) Error() string {
-    return "the round trip ran past BackendConfig.CommandTimeout"
+func (callTimeoutCause) Error() string {
+    return "the round trip ran past BackendConfig.CallTimeout"
 }
 
-func (commandTimeoutCause) Unwrap() error {
+func (callTimeoutCause) Unwrap() error {
     return context.DeadlineExceeded
 }
 
-func (commandTimeoutCause) Timeout() bool {
+func (callTimeoutCause) Timeout() bool {
     return true
 }
 
@@ -54,8 +54,8 @@ type BackendConfig struct {
     /* MaxKeyLength bounds the key before the prefix: 1024 by default, at least 1. */
     MaxKeyLength bound.Count
 
-    /* CommandTimeout bounds every round trip on top of the runtime's context: 1s by default, at least 1ms. */
-    CommandTimeout bound.Duration
+    /* CallTimeout bounds every round trip on top of the runtime's context: 1s by default, at least 1ms. */
+    CallTimeout bound.Duration
 }
 
 var backendScanCountRule = bound.Rule[int]{
@@ -76,8 +76,8 @@ var backendMaxKeyLengthRule = bound.Rule[int]{
     Minimum: 1,
 }
 
-var backendCommandTimeoutRule = bound.Rule[time.Duration]{
-    Name:    "BackendConfig.CommandTimeout",
+var backendCallTimeoutRule = bound.Rule[time.Duration]{
+    Name:    "BackendConfig.CallTimeout",
     Default: time.Second,
     Minimum: bound.TimeoutMinimum,
 }
@@ -87,7 +87,7 @@ type resolvedBackend struct {
     scanCount      int
     deleteBatch    int
     maxKeyLength   int
-    commandTimeout time.Duration
+    callTimeout    time.Duration
 }
 
 func resolveBackendConfig(config BackendConfig) (resolvedBackend, error) {
@@ -106,9 +106,9 @@ func resolveBackendConfig(config BackendConfig) (resolvedBackend, error) {
         return resolvedBackend{}, maxKeyLengthErr
     }
 
-    commandTimeout, commandTimeoutErr := bound.Resolve(config.CommandTimeout, backendCommandTimeoutRule)
-    if nil != commandTimeoutErr {
-        return resolvedBackend{}, commandTimeoutErr
+    callTimeout, callTimeoutErr := bound.Resolve(config.CallTimeout, backendCallTimeoutRule)
+    if nil != callTimeoutErr {
+        return resolvedBackend{}, callTimeoutErr
     }
 
     prefix := config.Prefix
@@ -121,7 +121,7 @@ func resolveBackendConfig(config BackendConfig) (resolvedBackend, error) {
         scanCount:      scanCount.Value,
         deleteBatch:    deleteBatch.Value,
         maxKeyLength:   maxKeyLength.Value,
-        commandTimeout: commandTimeout.Value,
+        callTimeout:    callTimeout.Value,
     }, nil
 }
 
@@ -150,7 +150,7 @@ func newBackendFromResolved(client rueidis.Client, resolved resolvedBackend) *Ba
         scanCount:      resolved.scanCount,
         deleteBatch:    resolved.deleteBatch,
         maxKeyLength:   resolved.maxKeyLength,
-        commandTimeout: resolved.commandTimeout,
+        callTimeout:    resolved.callTimeout,
     }
 }
 
@@ -160,14 +160,14 @@ type Backend struct {
     scanCount      int
     deleteBatch    int
     maxKeyLength   int
-    commandTimeout time.Duration
+    callTimeout    time.Duration
     closed         atomic.Bool
 }
 
 type roundTripContext func() (context.Context, context.CancelFunc, func(error) error)
 
 func (instance *Backend) commandContext(ctx context.Context) (context.Context, context.CancelFunc) {
-    return context.WithTimeoutCause(ctx, instance.commandTimeout, ErrCommandTimeout)
+    return context.WithTimeoutCause(ctx, instance.callTimeout, ErrCallTimeout)
 }
 
 func (instance *Backend) roundTripError(commandContext context.Context, operation string, roundTripErr error) error {
@@ -193,18 +193,18 @@ func (instance *Backend) roundTripError(commandContext context.Context, operatio
         }
     }
 
-    if ErrCommandTimeout != context.Cause(commandContext) {
+    if ErrCallTimeout != context.Cause(commandContext) {
         return roundTripErr
     }
 
     return exception.NewError(
-        "cache round trip was cut by BackendConfig.CommandTimeout",
+        "cache round trip was cut by BackendConfig.CallTimeout",
         exceptioncontract.Context{
-            "field":          "BackendConfig.CommandTimeout",
-            "commandTimeout": instance.commandTimeout.String(),
-            "operation":      operation,
+            "field":       "BackendConfig.CallTimeout",
+            "callTimeout": instance.callTimeout.String(),
+            "operation":   operation,
         },
-        ErrCommandTimeout,
+        ErrCallTimeout,
     )
 }
 
@@ -655,8 +655,8 @@ func (instance *Backend) addToCounter(ctx context.Context, operation string, key
         []string{strconv.FormatInt(delta, 10), strconv.FormatInt(expiry.Milliseconds(), 10), refresh},
     ).AsInt64()
     if nil != err {
-        /* named before counterError, whose message would bury the command timeout */
-        if namedErr := instance.roundTripError(commandContext, operation, err); true == errors.Is(namedErr, ErrCommandTimeout) {
+        /* named before counterError, whose message would bury the call timeout */
+        if namedErr := instance.roundTripError(commandContext, operation, err); true == errors.Is(namedErr, ErrCallTimeout) {
             return 0, namedErr
         }
 

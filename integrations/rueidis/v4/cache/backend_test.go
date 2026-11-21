@@ -578,8 +578,8 @@ func TestNewBackend_AnAbsentConfigTakesTheDefaults(t *testing.T) {
         t.Fatalf("NewBackend returned an error: %v", backendErr)
     }
 
-    if defaultBackendPrefix != backend.prefix || 1000 != backend.scanCount || 500 != backend.deleteBatch || 1024 != backend.maxKeyLength || time.Second != backend.commandTimeout {
-        t.Fatalf("expected the default prefix, 1000, 500, 1024 and 1s, got %q, %d, %d, %d, %v", backend.prefix, backend.scanCount, backend.deleteBatch, backend.maxKeyLength, backend.commandTimeout)
+    if defaultBackendPrefix != backend.prefix || 1000 != backend.scanCount || 500 != backend.deleteBatch || 1024 != backend.maxKeyLength || time.Second != backend.callTimeout {
+        t.Fatalf("expected the default prefix, 1000, 500, 1024 and 1s, got %q, %d, %d, %d, %v", backend.prefix, backend.scanCount, backend.deleteBatch, backend.maxKeyLength, backend.callTimeout)
     }
 }
 
@@ -594,8 +594,8 @@ func TestNewBackend_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T) {
         "unlimited delete batch":          {config: BackendConfig{DeleteBatch: bound.UnlimitedCount()}, field: "BackendConfig.DeleteBatch"},
         "zero max key length":             {config: BackendConfig{MaxKeyLength: bound.Of(0)}, field: "BackendConfig.MaxKeyLength"},
         "unlimited max key length":        {config: BackendConfig{MaxKeyLength: bound.UnlimitedCount()}, field: "BackendConfig.MaxKeyLength"},
-        "sub-millisecond command timeout": {config: BackendConfig{CommandTimeout: bound.Of(time.Microsecond)}, field: "BackendConfig.CommandTimeout"},
-        "unlimited command timeout":       {config: BackendConfig{CommandTimeout: bound.UnlimitedDuration()}, field: "BackendConfig.CommandTimeout"},
+        "sub-millisecond call timeout": {config: BackendConfig{CallTimeout: bound.Of(time.Microsecond)}, field: "BackendConfig.CallTimeout"},
+        "unlimited call timeout":       {config: BackendConfig{CallTimeout: bound.UnlimitedDuration()}, field: "BackendConfig.CallTimeout"},
     }
 
     for name, testCase := range cases {
@@ -836,7 +836,7 @@ func TestIncrement_WrapsTheStoreRefusalWithTheKey(t *testing.T) {
     }
 }
 
-func TestCommandTimeout_BoundsTheContractCalls(t *testing.T) {
+func TestCallTimeout_BoundsTheContractCalls(t *testing.T) {
     _, client := liveBackend(t)
 
     bounded, boundedErr := NewBackend(client, BackendConfig{Prefix: "melody:test:" + t.Name() + ":"})
@@ -844,14 +844,14 @@ func TestCommandTimeout_BoundsTheContractCalls(t *testing.T) {
         t.Fatalf("backend: %v", boundedErr)
     }
 
-    bounded.commandTimeout = time.Nanosecond
+    bounded.callTimeout = time.Nanosecond
 
     _, _, getErr := bounded.Get(testRuntime(), "any")
     if nil == getErr {
         t.Fatal("expected the one-nanosecond bound to cut the call")
     }
 
-    if false == errors.Is(getErr, context.DeadlineExceeded) || false == errors.Is(getErr, ErrCommandTimeout) {
+    if false == errors.Is(getErr, context.DeadlineExceeded) || false == errors.Is(getErr, ErrCallTimeout) {
         t.Fatalf("expected the deadline to be the cause, got %v", getErr)
     }
 }
@@ -1115,7 +1115,7 @@ func (instance *delayedClient) Nodes() map[string]rueidis.Client {
     return delayed
 }
 
-func newDelayedNamespaceBackend(t *testing.T, delay time.Duration, commandTimeout time.Duration) (*Backend, []string) {
+func newDelayedNamespaceBackend(t *testing.T, delay time.Duration, callTimeout time.Duration) (*Backend, []string) {
     t.Helper()
 
     _, client := liveBackend(t)
@@ -1149,7 +1149,7 @@ func newDelayedNamespaceBackend(t *testing.T, delay time.Duration, commandTimeou
         Prefix:         prefix,
         ScanCount:      bound.Of(1),
         DeleteBatch:    bound.Of(1),
-        CommandTimeout: bound.Of(commandTimeout),
+        CallTimeout:    bound.Of(callTimeout),
     })
     if nil != backendErr {
         t.Fatalf("NewBackend: %v", backendErr)
@@ -1162,7 +1162,7 @@ func TestClear_BoundsEachRoundTripNotTheWalk(t *testing.T) {
     backend, keys := newDelayedNamespaceBackend(t, 20*time.Millisecond, 500*time.Millisecond)
 
     if clearErr := backend.Clear(testRuntime()); nil != clearErr {
-        t.Fatalf("expected a namespace wider than one command timeout cleared, got %v", clearErr)
+        t.Fatalf("expected a namespace wider than one call timeout cleared, got %v", clearErr)
     }
 
     values, manyErr := backend.Many(testRuntime(), keys)
@@ -1179,7 +1179,7 @@ func TestClearByPrefix_BoundsEachRoundTripNotTheWalk(t *testing.T) {
     backend, keys := newDelayedNamespaceBackend(t, 20*time.Millisecond, 500*time.Millisecond)
 
     if clearErr := backend.ClearByPrefix(testRuntime(), "key-"); nil != clearErr {
-        t.Fatalf("expected a subtree wider than one command timeout cleared, got %v", clearErr)
+        t.Fatalf("expected a subtree wider than one call timeout cleared, got %v", clearErr)
     }
 
     values, manyErr := backend.Many(testRuntime(), keys)
@@ -1214,7 +1214,7 @@ func TestClearByPrefix_TheCallersContextBoundsTheWholeWalk(t *testing.T) {
     }
 }
 
-func TestClear_AWedgedRoundTripIsCutByTheCommandTimeout(t *testing.T) {
+func TestClear_AWedgedRoundTripIsCutByTheCallTimeout(t *testing.T) {
     backend, _ := newDelayedNamespaceBackend(t, time.Hour, 50*time.Millisecond)
 
     finished := make(chan error, 1)
@@ -1224,11 +1224,11 @@ func TestClear_AWedgedRoundTripIsCutByTheCommandTimeout(t *testing.T) {
 
     select {
     case clearErr := <-finished:
-        if false == errors.Is(clearErr, context.DeadlineExceeded) || false == errors.Is(clearErr, ErrCommandTimeout) {
-            t.Fatalf("expected the command timeout to cut the round trip, got %v", clearErr)
+        if false == errors.Is(clearErr, context.DeadlineExceeded) || false == errors.Is(clearErr, ErrCallTimeout) {
+            t.Fatalf("expected the call timeout to cut the round trip, got %v", clearErr)
         }
     case <-time.After(10 * time.Second):
-        t.Fatalf("expected a wedged round trip cut at the command timeout")
+        t.Fatalf("expected a wedged round trip cut at the call timeout")
     }
 }
 
@@ -1331,12 +1331,12 @@ func TestBackend_ADoneContextIsAnsweredAfterTheArgumentsAndTouchesNothing(t *tes
     }
 }
 
-func TestBackend_ARoundTripCutByTheCommandTimeoutNamesTheField(t *testing.T) {
+func TestBackend_ARoundTripCutByTheCallTimeoutNamesTheField(t *testing.T) {
     _, client := liveBackend(t)
 
     backend, backendErr := NewBackend(&delayedClient{Client: client, delay: time.Hour}, BackendConfig{
         Prefix:         "melody:test:" + t.Name() + ":",
-        CommandTimeout: bound.Of(50 * time.Millisecond),
+        CallTimeout:    bound.Of(50 * time.Millisecond),
     })
     if nil != backendErr {
         t.Fatalf("NewBackend: %v", backendErr)
@@ -1350,8 +1350,8 @@ func TestBackend_ARoundTripCutByTheCommandTimeoutNamesTheField(t *testing.T) {
 
         select {
         case operationErr := <-finished:
-            if false == errors.Is(operationErr, context.DeadlineExceeded) || false == errors.Is(operationErr, ErrCommandTimeout) {
-                t.Fatalf("%s: expected the command timeout to cut the round trip, got %v", name, operationErr)
+            if false == errors.Is(operationErr, context.DeadlineExceeded) || false == errors.Is(operationErr, ErrCallTimeout) {
+                t.Fatalf("%s: expected the call timeout to cut the round trip, got %v", name, operationErr)
             }
 
             var melodyErr *exception.Error
@@ -1360,7 +1360,7 @@ func TestBackend_ARoundTripCutByTheCommandTimeoutNamesTheField(t *testing.T) {
             }
 
             namedErr := melodyErr
-            for nil != namedErr && "BackendConfig.CommandTimeout" != namedErr.Context()["field"] {
+            for nil != namedErr && "BackendConfig.CallTimeout" != namedErr.Context()["field"] {
                 var nextErr *exception.Error
                 if false == errors.As(namedErr.Unwrap(), &nextErr) {
                     nextErr = nil
@@ -1368,11 +1368,11 @@ func TestBackend_ARoundTripCutByTheCommandTimeoutNamesTheField(t *testing.T) {
                 namedErr = nextErr
             }
 
-            if nil == namedErr || "50ms" != namedErr.Context()["commandTimeout"] || name != namedErr.Context()["operation"] {
+            if nil == namedErr || "50ms" != namedErr.Context()["callTimeout"] || name != namedErr.Context()["operation"] {
                 t.Fatalf("%s: expected the error to name the field, the timeout and the door, got %v", name, operationErr)
             }
         case <-time.After(10 * time.Second):
-            t.Fatalf("%s: expected a wedged round trip cut at the command timeout", name)
+            t.Fatalf("%s: expected a wedged round trip cut at the call timeout", name)
         }
     }
 }
@@ -1387,7 +1387,7 @@ func (instance *deleteDelayedClient) DoMulti(ctx context.Context, commands ...ru
     return instance.Client.DoMulti(ctx, commands...)
 }
 
-func TestClear_ADeleteRoundTripCutByTheCommandTimeoutNamesTheField(t *testing.T) {
+func TestClear_ADeleteRoundTripCutByTheCallTimeoutNamesTheField(t *testing.T) {
     _, client := liveBackend(t)
 
     for _, operation := range []string{"Clear", "ClearByPrefix"} {
@@ -1402,7 +1402,7 @@ func TestClear_ADeleteRoundTripCutByTheCommandTimeoutNamesTheField(t *testing.T)
         }
         t.Cleanup(func() { _ = filler.Clear(testRuntime()) })
 
-        backend, backendErr := NewBackend(&deleteDelayedClient{Client: client}, BackendConfig{Prefix: prefix, CommandTimeout: bound.Of(50 * time.Millisecond)})
+        backend, backendErr := NewBackend(&deleteDelayedClient{Client: client}, BackendConfig{Prefix: prefix, CallTimeout: bound.Of(50 * time.Millisecond)})
         if nil != backendErr {
             t.Fatalf("NewBackend: %v", backendErr)
         }
@@ -1414,20 +1414,20 @@ func TestClear_ADeleteRoundTripCutByTheCommandTimeoutNamesTheField(t *testing.T)
             clearErr = backend.ClearByPrefix(testRuntime(), "key-")
         }
 
-        if false == errors.Is(clearErr, ErrCommandTimeout) {
-            t.Fatalf("%s: expected the delete round trip cut by the command timeout named, got %v", operation, clearErr)
+        if false == errors.Is(clearErr, ErrCallTimeout) {
+            t.Fatalf("%s: expected the delete round trip cut by the call timeout named, got %v", operation, clearErr)
         }
     }
 }
 
-func runWedgedOperations(t *testing.T, commandTimeout time.Duration, callerContext func() (context.Context, context.CancelFunc), check func(name string, operationErr error)) {
+func runWedgedOperations(t *testing.T, callTimeout time.Duration, callerContext func() (context.Context, context.CancelFunc), check func(name string, operationErr error)) {
     t.Helper()
 
     _, client := liveBackend(t)
 
     backend, backendErr := NewBackend(&delayedClient{Client: client, delay: time.Hour}, BackendConfig{
         Prefix:         "melody:test:" + t.Name() + ":",
-        CommandTimeout: bound.Of(commandTimeout),
+        CallTimeout:    bound.Of(callTimeout),
     })
     if nil != backendErr {
         t.Fatalf("NewBackend: %v", backendErr)
@@ -1450,30 +1450,30 @@ func runWedgedOperations(t *testing.T, commandTimeout time.Duration, callerConte
     }
 }
 
-func TestBackend_ACallersOwnDeadlineIsNotNamedTheCommandTimeout(t *testing.T) {
+func TestBackend_ACallersOwnDeadlineIsNotNamedTheCallTimeout(t *testing.T) {
     runWedgedOperations(t, time.Second, func() (context.Context, context.CancelFunc) {
         return context.WithTimeout(context.Background(), 20*time.Millisecond)
     }, func(name string, operationErr error) {
-        if false == errors.Is(operationErr, context.DeadlineExceeded) || true == errors.Is(operationErr, ErrCommandTimeout) {
-            t.Fatalf("%s: expected the caller's deadline answered without the command timeout's name, got %v", name, operationErr)
+        if false == errors.Is(operationErr, context.DeadlineExceeded) || true == errors.Is(operationErr, ErrCallTimeout) {
+            t.Fatalf("%s: expected the caller's deadline answered without the call timeout's name, got %v", name, operationErr)
         }
     })
 }
 
-func TestBackend_ACallersCancellationIsNotNamedTheCommandTimeout(t *testing.T) {
+func TestBackend_ACallersCancellationIsNotNamedTheCallTimeout(t *testing.T) {
     runWedgedOperations(t, time.Second, func() (context.Context, context.CancelFunc) {
         ctx, cancel := context.WithCancel(context.Background())
         time.AfterFunc(20*time.Millisecond, cancel)
 
         return ctx, cancel
     }, func(name string, operationErr error) {
-        if false == errors.Is(operationErr, context.Canceled) || true == errors.Is(operationErr, ErrCommandTimeout) {
-            t.Fatalf("%s: expected the caller's cancellation answered without the command timeout's name, got %v", name, operationErr)
+        if false == errors.Is(operationErr, context.Canceled) || true == errors.Is(operationErr, ErrCallTimeout) {
+            t.Fatalf("%s: expected the caller's cancellation answered without the call timeout's name, got %v", name, operationErr)
         }
     })
 }
 
-func TestBackend_ACounterCutByTheCommandTimeoutIsNotAnsweredAsAStoreFailure(t *testing.T) {
+func TestBackend_ACounterCutByTheCallTimeoutIsNotAnsweredAsAStoreFailure(t *testing.T) {
     runWedgedOperations(t, 50*time.Millisecond, func() (context.Context, context.CancelFunc) {
         return context.WithCancel(context.Background())
     }, func(name string, operationErr error) {
@@ -1481,31 +1481,31 @@ func TestBackend_ACounterCutByTheCommandTimeoutIsNotAnsweredAsAStoreFailure(t *t
             return
         }
 
-        if nil == operationErr || "cache round trip was cut by BackendConfig.CommandTimeout" != operationErr.Error() || true == strings.Contains(operationErr.Error(), counterStoreFailureMessage) {
-            t.Fatalf("%s: expected the command timeout's message, got %v", name, operationErr)
+        if nil == operationErr || "cache round trip was cut by BackendConfig.CallTimeout" != operationErr.Error() || true == strings.Contains(operationErr.Error(), counterStoreFailureMessage) {
+            t.Fatalf("%s: expected the call timeout's message, got %v", name, operationErr)
         }
     })
 }
 
-func TestRoundTripError_AnsweredOnlyForADeadlineTheCommandTimeoutCaused(t *testing.T) {
-    backend := &Backend{commandTimeout: 50 * time.Millisecond}
+func TestRoundTripError_AnsweredOnlyForADeadlineTheCallTimeoutCaused(t *testing.T) {
+    backend := &Backend{callTimeout: 50 * time.Millisecond}
 
-    commandTimedOut, cancelCommandTimedOut := context.WithTimeoutCause(context.Background(), time.Nanosecond, ErrCommandTimeout)
-    defer cancelCommandTimedOut()
-    <-commandTimedOut.Done()
+    callTimedOut, cancelCallTimedOut := context.WithTimeoutCause(context.Background(), time.Nanosecond, ErrCallTimeout)
+    defer cancelCallTimedOut()
+    <-callTimedOut.Done()
 
     callerContext, cancelCaller := context.WithTimeout(context.Background(), time.Nanosecond)
     defer cancelCaller()
     <-callerContext.Done()
-    callerTimedOut, cancelCallerTimedOut := context.WithTimeoutCause(callerContext, time.Hour, ErrCommandTimeout)
+    callerTimedOut, cancelCallerTimedOut := context.WithTimeoutCause(callerContext, time.Hour, ErrCallTimeout)
     defer cancelCallerTimedOut()
 
-    if nil != backend.roundTripError(commandTimedOut, "Get", nil) {
+    if nil != backend.roundTripError(callTimedOut, "Get", nil) {
         t.Fatal("expected no error answered as none")
     }
 
     redisErr := errors.New("ERR wrong number of arguments")
-    if redisErr != backend.roundTripError(commandTimedOut, "Get", redisErr) {
+    if redisErr != backend.roundTripError(callTimedOut, "Get", redisErr) {
         t.Fatal("expected an error that is no deadline answered as it came")
     }
 
@@ -1513,9 +1513,9 @@ func TestRoundTripError_AnsweredOnlyForADeadlineTheCommandTimeoutCaused(t *testi
         t.Fatalf("expected the caller's deadline answered as it came, got %v", namedErr)
     }
 
-    namedErr := backend.roundTripError(commandTimedOut, "Get", context.DeadlineExceeded)
-    if false == errors.Is(namedErr, ErrCommandTimeout) || false == errors.Is(namedErr, context.DeadlineExceeded) || false == exception.ChainIs(namedErr, ErrCommandTimeout) {
-        t.Fatalf("expected the command timeout named, got %v", namedErr)
+    namedErr := backend.roundTripError(callTimedOut, "Get", context.DeadlineExceeded)
+    if false == errors.Is(namedErr, ErrCallTimeout) || false == errors.Is(namedErr, context.DeadlineExceeded) || false == exception.ChainIs(namedErr, ErrCallTimeout) {
+        t.Fatalf("expected the call timeout named, got %v", namedErr)
     }
 }
 
@@ -1528,28 +1528,28 @@ func (instance earlyDeadlineContext) Deadline() (time.Time, bool) {
 }
 
 func TestRoundTripError_ADeadlineTheClientReadBeforeTheTimerFiredIsStillNamed(t *testing.T) {
-    backend := &Backend{commandTimeout: 30 * time.Millisecond}
+    backend := &Backend{callTimeout: 30 * time.Millisecond}
 
-    commandContext, cancel := context.WithTimeoutCause(context.Background(), 30*time.Millisecond, ErrCommandTimeout)
+    commandContext, cancel := context.WithTimeoutCause(context.Background(), 30*time.Millisecond, ErrCallTimeout)
     defer cancel()
 
     namedErr := backend.roundTripError(earlyDeadlineContext{Context: commandContext}, "Get", context.DeadlineExceeded)
-    if false == errors.Is(namedErr, ErrCommandTimeout) {
+    if false == errors.Is(namedErr, ErrCallTimeout) {
         t.Fatalf("expected a deadline the client answered before the timer fired named, got %v", namedErr)
     }
 
     callerContext, cancelCaller := context.WithTimeout(context.Background(), 30*time.Millisecond)
     defer cancelCaller()
-    callerBound, cancelCallerBound := context.WithTimeoutCause(callerContext, time.Hour, ErrCommandTimeout)
+    callerBound, cancelCallerBound := context.WithTimeoutCause(callerContext, time.Hour, ErrCallTimeout)
     defer cancelCallerBound()
 
-    if callerErr := backend.roundTripError(earlyDeadlineContext{Context: callerBound}, "Get", context.DeadlineExceeded); true == errors.Is(callerErr, ErrCommandTimeout) {
+    if callerErr := backend.roundTripError(earlyDeadlineContext{Context: callerBound}, "Get", context.DeadlineExceeded); true == errors.Is(callerErr, ErrCallTimeout) {
         t.Fatalf("expected the caller's deadline read early left unnamed, got %v", callerErr)
     }
 }
 
 func TestRoundTripError_ADeadlineThatNeverSignalsIsAnsweredUnnamedPastTheGrace(t *testing.T) {
-    backend := &Backend{commandTimeout: time.Second}
+    backend := &Backend{callTimeout: time.Second}
 
     answered := make(chan error, 1)
     go func() {
@@ -1566,12 +1566,16 @@ func TestRoundTripError_ADeadlineThatNeverSignalsIsAnsweredUnnamedPastTheGrace(t
     }
 }
 
-func TestErrCommandTimeout_UnwrapsToTheDeadlineAndIsATimeout(t *testing.T) {
-    if false == errors.Is(ErrCommandTimeout, context.DeadlineExceeded) {
+func TestErrCallTimeout_UnwrapsToTheDeadlineAndIsATimeout(t *testing.T) {
+    if "the round trip ran past BackendConfig.CallTimeout" != ErrCallTimeout.Error() {
+        t.Fatalf("expected the sentinel to name the field, got %q", ErrCallTimeout.Error())
+    }
+
+    if false == errors.Is(ErrCallTimeout, context.DeadlineExceeded) {
         t.Fatal("expected the sentinel to unwrap to the deadline")
     }
 
-    timeoutError, isTimeoutError := ErrCommandTimeout.(interface{ Timeout() bool })
+    timeoutError, isTimeoutError := ErrCallTimeout.(interface{ Timeout() bool })
     if false == isTimeoutError || false == timeoutError.Timeout() {
         t.Fatal("expected the sentinel to be a timeout")
     }

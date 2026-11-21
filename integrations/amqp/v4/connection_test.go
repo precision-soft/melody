@@ -34,8 +34,8 @@ func TestNewTransport_DefaultReconnectAndBuffer(t *testing.T) {
         t.Fatalf("expected the default publish return buffer 16, got %d", instance.publishReturnBuffer)
     }
 
-    if defaultPrefetch != instance.prefetch || 30*time.Second != instance.publishTimeout || closeJoinTimeout != instance.joinBound {
-        t.Fatalf("expected prefetch 10, publish timeout 30s and close timeout 30s, got %d / %s / %s", instance.prefetch, instance.publishTimeout, instance.joinBound)
+    if defaultPrefetch != instance.prefetch || 30*time.Second != instance.callTimeout || closeJoinTimeout != instance.joinBound {
+        t.Fatalf("expected prefetch 10, call timeout 30s and close timeout 30s, got %d / %s / %s", instance.prefetch, instance.callTimeout, instance.joinBound)
     }
 }
 
@@ -44,7 +44,7 @@ func TestNewTransport_PerTransportOverride(t *testing.T) {
     config.Reconnect = ReconnectConfig{InitialBackoff: bound.Of(5 * time.Second)}
     config.PublishReturnBuffer = bound.Of(64)
     config.Prefetch = bound.Of(7)
-    config.PublishTimeout = bound.Of(3 * time.Second)
+    config.CallTimeout = bound.Of(3 * time.Second)
     config.CloseTimeout = bound.Of(4 * time.Second)
 
     instance := NewTransport(config)
@@ -53,8 +53,8 @@ func TestNewTransport_PerTransportOverride(t *testing.T) {
         t.Fatalf("expected overridden initial backoff 5s, got %s", instance.reconnect.initialBackoff)
     }
 
-    if 64 != instance.publishReturnBuffer || 7 != instance.prefetch || 3*time.Second != instance.publishTimeout || 4*time.Second != instance.joinBound {
-        t.Fatalf("expected the given values to reach the transport, got %d / %d / %s / %s", instance.publishReturnBuffer, instance.prefetch, instance.publishTimeout, instance.joinBound)
+    if 64 != instance.publishReturnBuffer || 7 != instance.prefetch || 3*time.Second != instance.callTimeout || 4*time.Second != instance.joinBound {
+        t.Fatalf("expected the given values to reach the transport, got %d / %d / %s / %s", instance.publishReturnBuffer, instance.prefetch, instance.callTimeout, instance.joinBound)
     }
 }
 
@@ -69,9 +69,9 @@ func TestNewTransport_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T) {
         {name: "prefetch unlimited", mutate: func(config *TransportConfig) { config.Prefetch = bound.UnlimitedCount() }, field: "TransportConfig.Prefetch"},
         {name: "return buffer zero", mutate: func(config *TransportConfig) { config.PublishReturnBuffer = bound.Of(0) }, field: "TransportConfig.PublishReturnBuffer"},
         {name: "return buffer unlimited", mutate: func(config *TransportConfig) { config.PublishReturnBuffer = bound.UnlimitedCount() }, field: "TransportConfig.PublishReturnBuffer"},
-        {name: "publish timeout zero", mutate: func(config *TransportConfig) { config.PublishTimeout = bound.Of(time.Duration(0)) }, field: "TransportConfig.PublishTimeout"},
-        {name: "publish timeout below the minimum", mutate: func(config *TransportConfig) { config.PublishTimeout = bound.Of(time.Microsecond) }, field: "TransportConfig.PublishTimeout"},
-        {name: "publish timeout unlimited", mutate: func(config *TransportConfig) { config.PublishTimeout = bound.UnlimitedDuration() }, field: "TransportConfig.PublishTimeout"},
+        {name: "call timeout zero", mutate: func(config *TransportConfig) { config.CallTimeout = bound.Of(time.Duration(0)) }, field: "TransportConfig.CallTimeout"},
+        {name: "call timeout below the minimum", mutate: func(config *TransportConfig) { config.CallTimeout = bound.Of(time.Microsecond) }, field: "TransportConfig.CallTimeout"},
+        {name: "call timeout unlimited", mutate: func(config *TransportConfig) { config.CallTimeout = bound.UnlimitedDuration() }, field: "TransportConfig.CallTimeout"},
         {name: "close timeout zero", mutate: func(config *TransportConfig) { config.CloseTimeout = bound.Of(time.Duration(0)) }, field: "TransportConfig.CloseTimeout"},
         {name: "close timeout unlimited", mutate: func(config *TransportConfig) { config.CloseTimeout = bound.UnlimitedDuration() }, field: "TransportConfig.CloseTimeout"},
         {name: "reconnect initial above the cap", mutate: func(config *TransportConfig) {
