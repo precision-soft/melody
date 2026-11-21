@@ -51,3 +51,17 @@ func TestResolveByteRange_ReadsTheRule(t *testing.T) {
         }
     }
 }
+
+func TestRefuseNegativeByteRange_RefusesANegativeOffsetOrLengthOnly(t *testing.T) {
+    for name, byteRange := range map[string]ByteRange{"the zero value": {}, "a range": {Offset: 3, Length: 4}} {
+        if negativeErr := RefuseNegativeByteRange(byteRange); nil != negativeErr {
+            t.Fatalf("%s: expected nil, got %v", name, negativeErr)
+        }
+    }
+
+    for name, byteRange := range map[string]ByteRange{"a negative offset": {Offset: -1, Length: 1}, "a negative length": {Offset: 1, Length: -1}} {
+        if negativeErr := RefuseNegativeByteRange(byteRange); nil == negativeErr || "GetOptions.Range" != exception.FromError(negativeErr).Context()["field"] {
+            t.Fatalf("%s: expected the refusal naming GetOptions.Range, got %v", name, negativeErr)
+        }
+    }
+}

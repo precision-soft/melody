@@ -396,6 +396,10 @@ func (instance *Storage) Get(
         return storagecontract.Object{}, keyErr
     }
 
+    if negativeErr := storagecontract.RefuseNegativeByteRange(options.Range); nil != negativeErr {
+        return storagecontract.Object{}, negativeErr
+    }
+
     object, getErr := instance.client.GetObject(runtimeInstance.Context(), instance.bucket, normalizedKey, minio.GetObjectOptions{})
     if nil != getErr {
         return storagecontract.Object{}, exception.NewError("object storage get failed", map[string]any{"key": key, "bucket": instance.bucket}, getErr)
@@ -406,7 +410,7 @@ func (instance *Storage) Get(
     if nil != statErr {
         object.Close()
 
-        return storagecontract.Object{}, instance.statFailure("object storage get failed", key, statErr)
+        return storagecontract.Object{}, instance.statFailure(runtimeInstance.Context(), "object storage get failed", key, statErr)
     }
 
     objectInfo := objectInfoOf(key, minioInfo)
@@ -451,19 +455,28 @@ func (instance *Storage) Stat(
 
     minioInfo, statErr := instance.client.StatObject(runtimeInstance.Context(), instance.bucket, normalizedKey, minio.StatObjectOptions{})
     if nil != statErr {
-        return storagecontract.ObjectInfo{}, instance.statFailure("object storage stat failed", key, statErr)
+        return storagecontract.ObjectInfo{}, instance.statFailure(runtimeInstance.Context(), "object storage stat failed", key, statErr)
     }
 
     return objectInfoOf(key, minioInfo), nil
 }
 
-/* statFailure answers a failed HEAD: a key that names no object, a prefix included, carries ErrObjectNotFound beside minio's error, and any other failure carries minio's error alone */
-func (instance *Storage) statFailure(message string, key string, statErr error) error {
-    if "NoSuchKey" == minio.ToErrorResponse(statErr).Code {
-        return exception.NewError("object storage object not found", map[string]any{"key": key, "bucket": instance.bucket}, errors.Join(storagecontract.ErrObjectNotFound, statErr))
+/* statFailure answers a failed HEAD: a key that names no object, a prefix included, carries ErrObjectNotFound beside minio's error, and any other failure carries minio's error alone. A HEAD has no body, so minio reads every 404 of an object as NoSuchKey unless the server names the bucket, as MinIO does; the absence is confirmed by one HEAD of the bucket, on this path only, and a bucket that is gone, or cannot be asked, is a failure, never an absent key. */
+func (instance *Storage) statFailure(ctx context.Context, message string, key string, statErr error) error {
+    if "NoSuchKey" != minio.ToErrorResponse(statErr).Code {
+        return exception.NewError(message, map[string]any{"key": key, "bucket": instance.bucket}, statErr)
     }
 
-    return exception.NewError(message, map[string]any{"key": key, "bucket": instance.bucket}, statErr)
+    bucketExists, bucketErr := instance.client.BucketExists(ctx, instance.bucket)
+    if nil != bucketErr {
+        return exception.NewError(message, map[string]any{"key": key, "bucket": instance.bucket}, errors.Join(statErr, bucketErr))
+    }
+
+    if false == bucketExists {
+        return exception.NewError("object storage bucket does not exist", map[string]any{"key": key, "bucket": instance.bucket}, statErr)
+    }
+
+    return exception.NewError("object storage object not found", map[string]any{"key": key, "bucket": instance.bucket}, errors.Join(storagecontract.ErrObjectNotFound, statErr))
 }
 
 /* objectInfoOf maps the bucket's answer for the key asked; the entity tag loses the quotes of its header form */

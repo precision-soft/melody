@@ -92,6 +92,7 @@ func NewLocalStorage(baseDirectory string, config LocalStorageConfig) *LocalStor
     }
 }
 
+/* LocalStorage stores each object as a file under its base directory. It reads no context from the runtime it is handed, a local file operation taking none. The content type a Put declares is kept in a metadata object beside the file, so one whose metadata could pass 4096 bytes is refused naming PutOptions.ContentType. */
 type LocalStorage struct {
     baseDirectory     string
     temporaryStaleAge bound.Resolved[time.Duration]
@@ -113,6 +114,10 @@ func (instance *LocalStorage) Put(
     /* refused before anything is created, so a nil reader leaves neither a temporary object nor a directory behind */
     if nil == reader {
         return exception.NewError("storage payload reader is nil", map[string]any{"key": key}, nil)
+    }
+
+    if contentTypeErr := refuseStorageContentTypeTooLong(key, options.ContentType); nil != contentTypeErr {
+        return contentTypeErr
     }
 
     /* the base directory is created again if it was removed after the construction; os.OpenRoot then confines every key operation to it, each path component checked against symlink escape */
@@ -175,17 +180,17 @@ func (instance *LocalStorage) Put(
         return exception.NewError("could not flush the storage object", map[string]any{"key": key}, syncErr)
     }
 
+    /* read from the open file, so the content type is bound to the bytes this write flushed whatever happens to the name; the rename keeps the size and the modification time */
+    temporaryInfo, temporaryStatErr := file.Stat()
+    if nil != temporaryStatErr {
+        _ = file.Close()
+        _ = root.Remove(temporaryKey)
+        return exception.NewError("could not stat the storage object", map[string]any{"key": key}, temporaryStatErr)
+    }
+
     if closeErr := file.Close(); nil != closeErr {
         _ = root.Remove(temporaryKey)
         return exception.NewError("could not close the storage object", map[string]any{"key": key}, closeErr)
-    }
-
-    /* the content type is stored before the object it describes, bound to the temporary's size and modification time, which the rename keeps; between the two renames it describes no stored object, so it reads as none */
-    if "" != options.ContentType {
-        if metadataErr := writeStorageMetadata(root, relativeKey, temporaryKey, options.ContentType); nil != metadataErr {
-            _ = root.Remove(temporaryKey)
-            return exception.NewError("could not store the storage object's content type", map[string]any{"key": key}, metadataErr)
-        }
     }
 
     if renameErr := root.Rename(temporaryKey, relativeKey); nil != renameErr {
@@ -199,8 +204,11 @@ func (instance *LocalStorage) Put(
         return exception.NewError("could not store the storage object", map[string]any{"key": key}, renameErr)
     }
 
+    /* the content type is stored after the object it describes, so a failed rename above leaves the previous object and its content type as they were; until it lands, the previous metadata describes another write and reads as none */
     if "" == options.ContentType {
         _ = root.Remove(storageMetadataKey(relativeKey))
+    } else if metadataErr := writeStorageMetadata(root, relativeKey, temporaryInfo, options.ContentType); nil != metadataErr {
+        return exception.NewError("could not store the storage object's content type", map[string]any{"key": key}, metadataErr)
     }
 
     if false == instance.temporaryStaleAge.Unlimited {
@@ -321,6 +329,10 @@ func (instance *LocalStorage) Get(
         return storagecontract.Object{}, keyErr
     }
 
+    if negativeErr := storagecontract.RefuseNegativeByteRange(options.Range); nil != negativeErr {
+        return storagecontract.Object{}, negativeErr
+    }
+
     root, rootErr := os.OpenRoot(instance.baseDirectory)
     if nil != rootErr {
         return storagecontract.Object{}, exception.NewError("could not open the storage object", map[string]any{"key": key}, storageAbsenceCause(rootErr))
@@ -418,6 +430,25 @@ const storageMetadataObjectSuffix = "metadata"
 /* storageMetadataMaximumBytes bounds what is read of a metadata object; one larger describes no write of this storage and reads as none */
 const storageMetadataMaximumBytes = 4096
 
+/* refuseStorageContentTypeTooLong refuses a content type whose metadata object could pass storageMetadataMaximumBytes, judged on the longest size and modification time an encoding can carry, so a content type admitted is always read back */
+func refuseStorageContentTypeTooLong(key string, contentType string) error {
+    encoded, encodeErr := json.Marshal(storageMetadata{ContentType: contentType, Size: math.MaxInt64, ModifiedAtUnixNano: math.MinInt64})
+    if nil != encodeErr || storageMetadataMaximumBytes < len(encoded) {
+        return exception.NewError(
+            "the storage content type is too long to be stored",
+            exceptioncontract.Context{
+                "key":          key,
+                "field":        "PutOptions.ContentType",
+                "length":       len(contentType),
+                "maximumBytes": storageMetadataMaximumBytes,
+            },
+            encodeErr,
+        )
+    }
+
+    return nil
+}
+
 type storageMetadata struct {
     ContentType        string `json:"contentType"`
     Size               int64  `json:"size"`
@@ -428,13 +459,8 @@ func storageMetadataKey(relativeKey string) string {
     return filepath.Join(filepath.Dir(relativeKey), storageTemporaryPrefix(relativeKey)+storageMetadataObjectSuffix)
 }
 
-/* writeStorageMetadata stores the content type bound to the size and the modification time of the temporary object, through a temporary of its own renamed over the metadata name */
-func writeStorageMetadata(root *os.Root, relativeKey string, temporaryKey string, contentType string) error {
-    temporaryInfo, statErr := root.Lstat(temporaryKey)
-    if nil != statErr {
-        return statErr
-    }
-
+/* writeStorageMetadata stores the content type bound to the size and the modification time of the object written, through a temporary of its own renamed over the metadata name */
+func writeStorageMetadata(root *os.Root, relativeKey string, temporaryInfo os.FileInfo, contentType string) error {
     encoded, encodeErr := json.Marshal(storageMetadata{ContentType: contentType, Size: temporaryInfo.Size(), ModifiedAtUnixNano: temporaryInfo.ModTime().UnixNano()})
     if nil != encodeErr {
         return encodeErr
@@ -577,14 +603,17 @@ func storageRelativeKey(key string) (string, error) {
         return "", exception.NewError("storage key is empty or invalid", map[string]any{"key": key}, nil)
     }
 
-    /* a key spelled exactly like a temporary object would be swept by a later Put of the key whose digest it carries, so the reserved namespace is refused at every door */
-    if true == isStorageTemporaryObjectName(filepath.Base(cleaned)) {
-        return "", exception.NewError("storage key names a temp object of the reserved .melody-storage- namespace", map[string]any{"key": key}, nil)
-    }
+    /* every segment is judged, not only the leaf: a directory spelled like a reserved name would sit where another key's temporary or metadata object is written, and fail every write of that key */
+    for _, segment := range strings.Split(filepath.ToSlash(cleaned), "/") {
+        /* a key spelled exactly like a temporary object would be swept by a later Put of the key whose digest it carries, so the reserved namespace is refused at every door */
+        if true == isStorageTemporaryObjectName(segment) {
+            return "", exception.NewError("storage key names a temp object of the reserved .melody-storage- namespace", map[string]any{"key": key}, nil)
+        }
 
-    /* a key spelled like a metadata object would be read as the content type of another key, and replaced or removed by its writes */
-    if true == isStorageMetadataObjectName(filepath.Base(cleaned)) {
-        return "", exception.NewError("storage key names a metadata object of the reserved .melody-storage- namespace", map[string]any{"key": key}, nil)
+        /* a key spelled like a metadata object would be read as the content type of another key, and replaced or removed by its writes */
+        if true == isStorageMetadataObjectName(segment) {
+            return "", exception.NewError("storage key names a metadata object of the reserved .melody-storage- namespace", map[string]any{"key": key}, nil)
+        }
     }
 
     return cleaned, nil

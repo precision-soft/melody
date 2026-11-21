@@ -17,13 +17,13 @@ type GetOptions struct {
     Range ByteRange
 }
 
-/* ByteRange names a part of an object, Length bytes from Offset, judged by ResolveByteRange. The zero value is the whole object, and a zero Length reads from Offset to the end. A negative Offset or Length is refused before the backend is asked. An Offset at or past the end of an object answers an error whose chain carries ErrRangeNotSatisfiable, the offset 0 of an empty object excepted; a Length that runs past the end is clipped to it. Info.Size stays the whole object's size. */
+/* ByteRange names a part of an object, Length bytes from Offset, judged by ResolveByteRange. The zero value is the whole object, and a zero Length reads from Offset to the end. A negative Offset or Length is refused by RefuseNegativeByteRange before the backend is asked. An Offset at or past the end of an object answers an error whose chain carries ErrRangeNotSatisfiable, the offset 0 of an empty object excepted; a Length that runs past the end is clipped to it. Info.Size stays the whole object's size. */
 type ByteRange struct {
     Offset int64
     Length int64
 }
 
-/* ObjectInfo is what a storage knows about an object without reading it. Size is the whole object's size in bytes, whatever range was read. ContentType is what the Put that stored it declared, empty when it declared none or the backend holds none. ModifiedAt is when the object was last stored. EntityTag is the backend's tag of the stored bytes without quotes: the bucket's ETag on S3, and on the local backend a tag derived from the size and the modification time as the static file server derives its own, so weak-equivalent: it moves with every store, but two stores of equal size in the same instant share it. Key is the key the caller asked, as given. */
+/* ObjectInfo is what a storage knows about an object without reading it. Size is the whole object's size in bytes, whatever range was read. ContentType is what the Put that stored it declared; when it declared none, LocalStorage answers it empty and the S3 backend the store's default, application/octet-stream. ModifiedAt is when the object was last stored. EntityTag is the backend's tag of the stored bytes without quotes: the bucket's ETag on S3, and on the local backend a tag derived from the size and the modification time as the static file server derives its own, so weak-equivalent: it moves with every store, but two stores of equal size in the same instant share it. Key is the key the caller asked, as given. */
 type ObjectInfo struct {
     Size        int64
     ContentType string
@@ -32,7 +32,7 @@ type ObjectInfo struct {
     Key         string
 }
 
-/* Object is a stored object opened for reading. The caller closes Body, exactly once, also after a read failed; Body is read under the context of the runtime handed to the Get. Beside an error Object is the zero value and Body is nil: nothing is open. */
+/* Object is a stored object opened for reading. The caller closes Body, exactly once, also after a read failed; on the S3 backend Body is read under the context of the runtime handed to the Get, and LocalStorage's file reads take no context. Beside an error Object is the zero value and Body is nil: nothing is open. */
 type Object struct {
     Body io.ReadCloser
     Info ObjectInfo
@@ -47,7 +47,7 @@ type PresignConfig struct {
     Method string
 }
 
-/* Storage stores objects under keys. A key is folded as the backends document: a backslash reads as a separator, "." and empty segments and a leading slash fold away, and a ".." segment is refused by name. Every door takes the runtime it runs under first and runs under its context. Get and Stat of a key that names no object answer an error whose chain carries ErrObjectNotFound, and a failure to ask the backend never carries it; Delete of such a key answers nil; whether a key names an object is storage.Exists, derived from Stat. Further verbs, List or Copy, arrive as optional capability interfaces once v4.0.0 is tagged, never as methods of Storage. */
+/* Storage stores objects under keys. A key is folded as the backends document: a backslash reads as a separator, "." and empty segments and a leading slash fold away, and a ".." segment is refused by name. Every door takes the runtime it runs under first; the S3 backend runs under its context, and LocalStorage reads none, a local file operation taking no context. Get and Stat of a key that names no object answer an error whose chain carries ErrObjectNotFound, and a failure to ask the backend never carries it; Delete of such a key answers nil; whether a key names an object is storage.Exists, derived from Stat. Further verbs, List or Copy, arrive as optional capability interfaces once v4.0.0 is tagged, never as methods of Storage. */
 type Storage interface {
     /* Put stores the reader's bytes under the key. A non-negative size is a declaration the backend verifies, refusing a short or long stream; a negative size means the length is unknown, as http.Request.ContentLength uses it, and nothing is verified. */
     Put(runtimeInstance containercontract.Runtime, key string, reader io.Reader, size int64, options PutOptions) error

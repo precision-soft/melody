@@ -177,6 +177,13 @@ func objectServerCounting(t *testing.T, headStatuses []int, getStatus int, body 
     count := &objectRequestCount{}
 
     server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, httpRequest *nethttp.Request) {
+        /* the bucket the storage asks after an object's 404 exists, and is not counted among the object's requests */
+        if "/melody-test" == strings.TrimSuffix(httpRequest.URL.Path, "/") {
+            writer.WriteHeader(nethttp.StatusOK)
+
+            return
+        }
+
         status := getStatus
         count.mutex.Lock()
         if nethttp.MethodHead == httpRequest.Method {
@@ -357,7 +364,6 @@ func TestGetHandler_AnswersAnObjectOfExactlyTheInlineBound(t *testing.T) {
     }
 }
 
-
 func TestLinkHandler_SignsTheTtlAskedAndAnswers404ForAnAbsentObject(t *testing.T) {
     for target, expected := range map[string]string{
         "/storage/object/link?key=probe.txt&ttl=60": "60",
@@ -376,5 +382,12 @@ func TestLinkHandler_SignsTheTtlAskedAndAnswers404ForAnAbsentObject(t *testing.T
     status, records := answerOf(t, LinkHandler(objectServer(t, []int{nethttp.StatusNotFound}, nethttp.StatusOK)), "/storage/object/link?key=probe.txt")
     if nethttp.StatusNotFound != status || 0 != len(records) {
         t.Fatalf("expected 404 and no record for an absent object, got %d and %v", status, records)
+    }
+}
+
+func TestLinkHandler_AnswersAStoreRefusalWith500AndJournalsIt(t *testing.T) {
+    status, records := answerOf(t, LinkHandler(objectServer(t, []int{nethttp.StatusForbidden}, nethttp.StatusOK)), "/storage/object/link?key=probe.txt")
+    if nethttp.StatusInternalServerError != status || 1 != len(records) {
+        t.Fatalf("expected 500 and one record for a stat the store refused, got %d and %v", status, records)
     }
 }

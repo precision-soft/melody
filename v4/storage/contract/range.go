@@ -5,10 +5,10 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
-/* ResolveByteRange answers the offset and the length a Get reads of an object of the given size, the length clipped to the end, or the refusal of the range; every backend reads its range through here. */
-func ResolveByteRange(byteRange ByteRange, size int64) (int64, int64, error) {
+/* RefuseNegativeByteRange refuses a range whose Offset or Length is negative, naming GetOptions.Range; a backend calls it before it is asked anything, since the refusal needs no size. */
+func RefuseNegativeByteRange(byteRange ByteRange) error {
     if 0 > byteRange.Offset || 0 > byteRange.Length {
-        return 0, 0, exception.NewError(
+        return exception.NewError(
             "the storage range is negative",
             exceptioncontract.Context{
                 "field":  "GetOptions.Range",
@@ -17,6 +17,15 @@ func ResolveByteRange(byteRange ByteRange, size int64) (int64, int64, error) {
             },
             nil,
         )
+    }
+
+    return nil
+}
+
+/* ResolveByteRange answers the offset and the length a Get reads of an object of the given size, the length clipped to the end, or the refusal of the range; every backend reads its range through here. */
+func ResolveByteRange(byteRange ByteRange, size int64) (int64, int64, error) {
+    if negativeErr := RefuseNegativeByteRange(byteRange); nil != negativeErr {
+        return 0, 0, negativeErr
     }
 
     if size < byteRange.Offset || (size == byteRange.Offset && 0 < size) {

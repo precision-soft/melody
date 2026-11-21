@@ -10,13 +10,13 @@ import (
     storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
-/* Bound is a storage bound to one runtime: every door runs under its context, and so does the read of an Object.Body a Get answered, after the door returned. It is a value for one request, one run or one delivery, never kept in a service, a goroutine that outlives the runtime or a field: a service holds the storage and binds it at the top of each method. */
+/* Bound is a storage bound to one runtime: every door is handed it, and a backend that reads its context, as the S3 one does, reads the Object.Body a Get answered under it, after the door returned. It is a value for one request, one run or one delivery, never kept in a service, a goroutine that outlives the runtime or a field: a service holds the storage and binds it at the top of each method. */
 type Bound struct {
     runtimeInstance containercontract.Runtime
     storageInstance storagecontract.Storage
 }
 
-/* For binds the storage to the runtime; it allocates nothing and never panics, a nil of either being refused by the first door called. */
+/* For binds the storage to the runtime; it allocates nothing and never panics. A nil storage is refused by the first door called; a nil runtime is handed to the backend, whose to refuse it is, and no shipped backend refuses it yet. */
 func For(runtimeInstance containercontract.Runtime, storageInstance storagecontract.Storage) Bound {
     return Bound{
         runtimeInstance: runtimeInstance,

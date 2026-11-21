@@ -1477,3 +1477,145 @@ func TestLocalStorage_AMetadataObjectIsReadNoFurtherThanItsBound(t *testing.T) {
         t.Fatalf("expected the read bounded, it allocated %d bytes", allocated)
     }
 }
+
+func TestLocalStorage_GetRefusesANegativeRangeBeforeLookingForTheObject(t *testing.T) {
+    local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
+
+    for name, byteRange := range map[string]storagecontract.ByteRange{"a negative offset": {Offset: -1}, "a negative length": {Length: -1}} {
+        object, getErr := local.Get(testRuntime(), "absent.txt", storagecontract.GetOptions{Range: byteRange})
+        if nil == getErr || true == exception.ChainIs(getErr, storagecontract.ErrObjectNotFound) || nil != object.Body {
+            t.Fatalf("%s: expected the range refused, not the key found absent, got %v", name, getErr)
+        }
+
+        if "GetOptions.Range" != exception.FromError(getErr).Context()["field"] {
+            t.Fatalf("%s: expected the refusal to name GetOptions.Range, got %v", name, exception.FromError(getErr).Context())
+        }
+    }
+}
+
+/* the metadata encoding of the longest size and modification time spends 87 bytes beside the content type, so 4009 ascii bytes is the longest one admitted */
+func TestLocalStorage_PutRefusesAContentTypeTooLongToBeReadBack(t *testing.T) {
+    base := t.TempDir()
+    local := NewLocalStorage(base, LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    longest := "text/plain; name=" + strings.Repeat("a", 4009-len("text/plain; name="))
+
+    putErr := local.Put(runtimeInstance, "labels/too-long.txt", strings.NewReader("x"), 1, storagecontract.PutOptions{ContentType: longest + "a"})
+    if nil == putErr || "PutOptions.ContentType" != exception.FromError(putErr).Context()["field"] {
+        t.Fatalf("expected the content type refused naming PutOptions.ContentType, got %v", putErr)
+    }
+
+    if _, statErr := os.Lstat(filepath.Join(base, "labels")); false == os.IsNotExist(statErr) {
+        t.Fatalf("expected a refused put to create nothing, got %v", statErr)
+    }
+
+    if putErr := local.Put(runtimeInstance, "labels/longest.txt", strings.NewReader("x"), 1, storagecontract.PutOptions{ContentType: longest}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    if objectInfo, statErr := local.Stat(runtimeInstance, "labels/longest.txt"); nil != statErr || longest != objectInfo.ContentType {
+        t.Fatalf("expected the longest content type read back whole, got %d bytes (%v)", len(objectInfo.ContentType), statErr)
+    }
+
+    if entries, _ := os.ReadDir(filepath.Join(base, "labels")); 2 != len(entries) {
+        t.Fatalf("expected the object and its metadata only, got %d entries", len(entries))
+    }
+}
+
+func TestLocalStorage_RefusesAReservedNameAsAnySegmentOfTheKey(t *testing.T) {
+    local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    for expected, key := range map[string]string{
+        "metadata object of the reserved .melody-storage- namespace": "labels/" + reservedMetadataName("awb-1.pdf") + "/x",
+        "temp object of the reserved .melody-storage- namespace":     "labels/" + reservedTemporaryName("awb-1.pdf", "0123456789abcdef") + "/x",
+    } {
+        putErr := local.Put(runtimeInstance, key, strings.NewReader("x"), 1, storagecontract.PutOptions{})
+        _, getErr := local.Get(runtimeInstance, key, storagecontract.GetOptions{})
+        _, statErr := local.Stat(runtimeInstance, key)
+        deleteErr := local.Delete(runtimeInstance, key)
+
+        for door, doorErr := range map[string]error{"Put": putErr, "Get": getErr, "Stat": statErr, "Delete": deleteErr} {
+            if nil == doorErr || false == strings.Contains(doorErr.Error(), expected) {
+                t.Fatalf("%s of %q: expected the reserved segment refused, got %v", door, key, doorErr)
+            }
+        }
+    }
+
+    if putErr := local.Put(runtimeInstance, "labels/awb-1.pdf", strings.NewReader("%PDF"), 4, storagecontract.PutOptions{ContentType: "application/pdf"}); nil != putErr {
+        t.Fatalf("expected the sibling key stored with its content type, got %v", putErr)
+    }
+}
+
+/* temporaryRemovingReader unlinks the key's temporary objects once it is read, so the write completes on an unlinked file and its rename fails */
+type temporaryRemovingReader struct {
+    directory string
+    done      bool
+}
+
+func (instance *temporaryRemovingReader) Read(buffer []byte) (int, error) {
+    if true == instance.done {
+        return 0, io.EOF
+    }
+
+    instance.done = true
+    temporaryList, _ := filepath.Glob(filepath.Join(instance.directory, ".melody-storage-*.tmp"))
+    for _, temporary := range temporaryList {
+        _ = os.Remove(temporary)
+    }
+
+    buffer[0] = 'x'
+
+    return 1, nil
+}
+
+func TestLocalStorage_AFailedObjectRenameKeepsThePreviousContentType(t *testing.T) {
+    base := t.TempDir()
+    local := NewLocalStorage(base, LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    if putErr := local.Put(runtimeInstance, "labels/awb-1.pdf", strings.NewReader("%PDF"), 4, storagecontract.PutOptions{ContentType: "application/pdf"}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    if putErr := local.Put(runtimeInstance, "labels/awb-1.pdf", &temporaryRemovingReader{directory: filepath.Join(base, "labels")}, -1, storagecontract.PutOptions{ContentType: "text/plain"}); nil == putErr {
+        t.Fatal("expected the put to fail once its temporary object was removed")
+    }
+
+    object, getErr := local.Get(runtimeInstance, "labels/awb-1.pdf", storagecontract.GetOptions{})
+    if nil != getErr {
+        t.Fatalf("get: %v", getErr)
+    }
+    content, _ := io.ReadAll(object.Body)
+    _ = object.Body.Close()
+
+    if "%PDF" != string(content) || "application/pdf" != object.Info.ContentType {
+        t.Fatalf("expected the previous object and its content type, got %q as %q", string(content), object.Info.ContentType)
+    }
+}
+
+/* only a writer of the base directory can squat the metadata name now that no key may name it, but a failure there still answers the Put an error over the object it stored */
+func TestLocalStorage_AMetadataWriteThatFailsAnswersAnErrorOverTheStoredObject(t *testing.T) {
+    base := t.TempDir()
+    local := NewLocalStorage(base, LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    if mkdirErr := os.MkdirAll(filepath.Join(base, "labels", reservedMetadataName("awb-1.pdf"), "squatter"), 0o750); nil != mkdirErr {
+        t.Fatalf("mkdir: %v", mkdirErr)
+    }
+
+    putErr := local.Put(runtimeInstance, "labels/awb-1.pdf", strings.NewReader("%PDF"), 4, storagecontract.PutOptions{ContentType: "application/pdf"})
+    if nil == putErr || false == strings.Contains(putErr.Error(), "could not store the storage object's content type") {
+        t.Fatalf("expected the content type failure answered, got %v", putErr)
+    }
+
+    objectInfo, statErr := local.Stat(runtimeInstance, "labels/awb-1.pdf")
+    if nil != statErr || 4 != objectInfo.Size || "" != objectInfo.ContentType {
+        t.Fatalf("expected the object stored without a content type, got %+v (%v)", objectInfo, statErr)
+    }
+
+    if temporaryList, _ := filepath.Glob(filepath.Join(base, "labels", ".melody-storage-*.tmp")); 0 != len(temporaryList) {
+        t.Fatalf("expected no temporary left behind, got %v", temporaryList)
+    }
+}

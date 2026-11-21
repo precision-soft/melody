@@ -1365,11 +1365,13 @@ type scriptedObjectRequest struct {
     rangeHeader string
 }
 
-/* scriptedObjectServer answers a HEAD with headStatus and the object's headers, and a GET with getStatus and the body from the Range it asked, recording every request */
+/* scriptedObjectServer answers a HEAD of the object with headStatus and the object's headers, a HEAD of the bucket with bucketStatus, 200 when left zero, and a GET with getStatus and the body from the Range it asked, recording every request */
 type scriptedObjectServer struct {
-    server      *httptest.Server
-    mutex       sync.Mutex
-    requestList []scriptedObjectRequest
+    server        *httptest.Server
+    mutex         sync.Mutex
+    requestList   []scriptedObjectRequest
+    bucketStatus  int
+    noContentType bool
 }
 
 const scriptedLastModified = "Mon, 05 Oct 2026 10:00:00 GMT"
@@ -1380,7 +1382,18 @@ func newScriptedObjectServer(t *testing.T, headStatus int, getStatus int, body s
     recorder.server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
         recorder.mutex.Lock()
         recorder.requestList = append(recorder.requestList, scriptedObjectRequest{method: request.Method, path: request.URL.Path, rangeHeader: request.Header.Get("Range")})
+        bucketStatus := recorder.bucketStatus
+        noContentType := recorder.noContentType
         recorder.mutex.Unlock()
+
+        if "/melody-test" == strings.TrimSuffix(request.URL.Path, "/") {
+            if 0 == bucketStatus {
+                bucketStatus = http.StatusOK
+            }
+            writer.WriteHeader(bucketStatus)
+
+            return
+        }
 
         status := getStatus
         if http.MethodHead == request.Method {
@@ -1399,6 +1412,10 @@ func newScriptedObjectServer(t *testing.T, headStatus int, getStatus int, body s
         writer.Header().Set("ETag", "\"9a0364b9e99bb480dd25e1f0284c8555\"")
         writer.Header().Set("Last-Modified", scriptedLastModified)
         writer.Header().Set("Content-Type", "application/pdf")
+        if true == noContentType {
+            /* a nil value keeps net/http from sniffing one */
+            writer.Header()["Content-Type"] = nil
+        }
         if http.StatusOK == status || http.StatusPartialContent == status {
             writer.Header().Set("Content-Length", strconv.Itoa(len(served)))
         }
@@ -1439,6 +1456,18 @@ func (instance *scriptedObjectServer) methods() []string {
     }
 
     return methodList
+}
+
+func (instance *scriptedObjectServer) paths() []string {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    pathList := []string{}
+    for _, recorded := range instance.requestList {
+        pathList = append(pathList, recorded.method+" "+recorded.path)
+    }
+
+    return pathList
 }
 
 func scriptedObjectInfo(t *testing.T, key string, size int64) storagecontract.ObjectInfo {
@@ -1496,8 +1525,7 @@ func TestStorage_StatSendsOneHeadAndAnswersItsHeaders(t *testing.T) {
         t.Fatalf("stat: %v", statErr)
     }
 
-    expected := scriptedObjectInfo(t, "reports/report.pdf", 0)
-    expected.Size = objectInfo.Size
+    expected := scriptedObjectInfo(t, "reports/report.pdf", 13)
     if false == expected.ModifiedAt.Equal(objectInfo.ModifiedAt) {
         t.Fatalf("expected the modification time the bucket declared, got %v", objectInfo.ModifiedAt)
     }
@@ -1525,10 +1553,53 @@ func TestStorage_AnAbsentKeyAnswersObjectNotFoundAtGetAndStat(t *testing.T) {
         t.Fatalf("expected Stat to answer ErrObjectNotFound, got %v", statErr)
     }
 
-    for _, method := range recorder.methods() {
-        if http.MethodHead != method {
-            t.Fatalf("expected no request but HEADs for an absent key, got %v", recorder.methods())
+    if pathList := recorder.paths(); false == reflect.DeepEqual([]string{"HEAD /melody-test/absent.pdf", "HEAD /melody-test/", "HEAD /melody-test/absent.pdf", "HEAD /melody-test/"}, pathList) {
+        t.Fatalf("expected the HEAD of the key, then one HEAD of the bucket, at each door, got %v", pathList)
+    }
+}
+
+/* a HEAD carries no body, so a 404 of a missing bucket reads as NoSuchKey to minio; the bucket asked after it tells the two apart */
+func TestStorage_AMissingBucketIsNotObjectNotFound(t *testing.T) {
+    recorder := newScriptedObjectServer(t, http.StatusNotFound, http.StatusOK, "")
+    recorder.bucketStatus = http.StatusNotFound
+    store := recorder.newStorage(t)
+
+    object, getErr := store.Get(newRuntime(), "absent.pdf", storagecontract.GetOptions{})
+    if nil == getErr || true == exception.ChainIs(getErr, storagecontract.ErrObjectNotFound) || nil != object.Body || false == strings.Contains(getErr.Error(), "bucket does not exist") {
+        t.Fatalf("expected Get refused naming the bucket, without ErrObjectNotFound, got %v", getErr)
+    }
+
+    if _, statErr := store.Stat(newRuntime(), "absent.pdf"); nil == statErr || true == exception.ChainIs(statErr, storagecontract.ErrObjectNotFound) || false == strings.Contains(statErr.Error(), "bucket does not exist") {
+        t.Fatalf("expected Stat refused naming the bucket, without ErrObjectNotFound, got %v", statErr)
+    }
+
+    unaskable := newScriptedObjectServer(t, http.StatusNotFound, http.StatusOK, "")
+    unaskable.bucketStatus = http.StatusForbidden
+    if _, statErr := unaskable.newStorage(t).Stat(newRuntime(), "absent.pdf"); nil == statErr || true == exception.ChainIs(statErr, storagecontract.ErrObjectNotFound) {
+        t.Fatalf("expected a bucket that cannot be asked to answer a failure, got %v", statErr)
+    }
+}
+
+/* the bucket is asked on the not-found path only: a stored object and a refusal that is no absence cost no request of it */
+func TestStorage_TheBucketIsAskedOnlyAfterANotFound(t *testing.T) {
+    for _, headStatus := range []int{http.StatusOK, http.StatusForbidden} {
+        recorder := newScriptedObjectServer(t, headStatus, http.StatusOK, "%PDF-1.7 body")
+        _, _ = recorder.newStorage(t).Stat(newRuntime(), "reports/report.pdf")
+
+        if pathList := recorder.paths(); false == reflect.DeepEqual([]string{"HEAD /melody-test/reports/report.pdf"}, pathList) {
+            t.Fatalf("%d: expected one HEAD of the key and none of the bucket, got %v", headStatus, pathList)
         }
+    }
+}
+
+/* minio answers its own default for a HEAD that names no content type, so the S3 backend never answers an empty one */
+func TestStorage_AnObjectStoredWithoutAContentTypeReadsTheStoreDefault(t *testing.T) {
+    recorder := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "%PDF-1.7 body")
+    recorder.noContentType = true
+
+    objectInfo, statErr := recorder.newStorage(t).Stat(newRuntime(), "reports/report.pdf")
+    if nil != statErr || "application/octet-stream" != objectInfo.ContentType {
+        t.Fatalf("expected application/octet-stream, got %q (%v)", objectInfo.ContentType, statErr)
     }
 }
 
@@ -1674,5 +1745,50 @@ func TestStorage_GetSendsTheRangeAsked(t *testing.T) {
 
     if methodList := rangeRecorder.methods(); false == reflect.DeepEqual([]string{http.MethodHead}, methodList) {
         t.Fatalf("expected no GET for a refused range, got %v", methodList)
+    }
+}
+
+/* a range from offset 0 short of the end is cut by the reader alone: minio sends its GET without a Range header after a seek to 0 */
+func TestStorage_GetReadsTheFirstBytesOfTheObject(t *testing.T) {
+    recorder := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "0123456789")
+
+    object, getErr := recorder.newStorage(t).Get(newRuntime(), "digits.txt", storagecontract.GetOptions{Range: storagecontract.ByteRange{Length: 3}})
+    if nil != getErr {
+        t.Fatalf("get: %v", getErr)
+    }
+
+    content, _ := io.ReadAll(object.Body)
+    _ = object.Body.Close()
+
+    if "012" != string(content) || 10 != object.Info.Size {
+        t.Fatalf("expected the first three bytes of an object of 10, got %q of %d", string(content), object.Info.Size)
+    }
+
+    recorder.mutex.Lock()
+    requestList := append([]scriptedObjectRequest(nil), recorder.requestList...)
+    recorder.mutex.Unlock()
+
+    if 2 != len(requestList) || http.MethodHead != requestList[0].method || http.MethodGet != requestList[1].method || "" != requestList[1].rangeHeader {
+        t.Fatalf("expected one HEAD then one GET without a Range header, got %+v", requestList)
+    }
+}
+
+func TestStorage_GetRefusesANegativeRangeBeforeAskingTheBucket(t *testing.T) {
+    recorder := newScriptedObjectServer(t, http.StatusNotFound, http.StatusOK, "")
+    store := recorder.newStorage(t)
+
+    for name, byteRange := range map[string]storagecontract.ByteRange{"a negative offset": {Offset: -1}, "a negative length": {Length: -1}} {
+        object, getErr := store.Get(newRuntime(), "absent.pdf", storagecontract.GetOptions{Range: byteRange})
+        if nil == getErr || true == exception.ChainIs(getErr, storagecontract.ErrObjectNotFound) || nil != object.Body {
+            t.Fatalf("%s: expected the range refused, not the key found absent, got %v", name, getErr)
+        }
+
+        if "GetOptions.Range" != exception.FromError(getErr).Context()["field"] {
+            t.Fatalf("%s: expected the refusal to name GetOptions.Range, got %v", name, exception.FromError(getErr).Context())
+        }
+    }
+
+    if methodList := recorder.methods(); 0 != len(methodList) {
+        t.Fatalf("expected no request for a negative range, got %v", methodList)
     }
 }
