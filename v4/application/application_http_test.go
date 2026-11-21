@@ -45,11 +45,11 @@ func TestApplicationRegisterHttpRoute_AppendsRegistrarBeforeBoot(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.RegisterHttpRoute(
-        nethttp.MethodGet,
         "/test",
         func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, nil
         },
+        httpcontract.RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     if 1 != len(applicationInstance.httpRouteRegistrars) {
@@ -60,11 +60,11 @@ func TestApplicationRegisterHttpRoute_AppendsRegistrarBeforeBoot(t *testing.T) {
 func TestApplicationRegisterHttpRoute_RefusesDuringTheBootWindow(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         (&Application{booting: true}).RegisterHttpRoute(
-            nethttp.MethodGet,
             "/late",
             func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 return nil, nil
             },
+            httpcontract.RouteOptions{Methods: []string{nethttp.MethodGet}},
         )
     }, "may not register http routes from inside a module boot hook")
 }
@@ -76,13 +76,74 @@ func TestApplicationRegisterHttpRoute_PanicsAfterBoot(t *testing.T) {
 
     testhelper.AssertPanicsWithError(t, func() {
         applicationInstance.RegisterHttpRoute(
-            nethttp.MethodGet,
             "/test",
             func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 return nil, nil
             },
+            httpcontract.RouteOptions{Methods: []string{nethttp.MethodGet}},
         )
     }, "may not register http routes after boot")
+}
+
+func TestApplication_RegisterHttpRoute_CarriesTheOptionsToTheRouter(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+
+    options := httpcontract.RouteOptions{
+        Name:         "probe.update",
+        Methods:      []string{nethttp.MethodPut, nethttp.MethodPatch},
+        Requirements: map[string]string{"id": "[0-9]+"},
+    }
+
+    applicationInstance.RegisterHttpRoute(
+        "/probe/:id",
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return nil, nil
+        },
+        options,
+    )
+
+    options.Methods[0] = nethttp.MethodDelete
+    options.Requirements["id"] = "[a-z]+"
+
+    applicationInstance.bootHttp()
+
+    for _, route := range applicationInstance.kernel.HttpRouter().RouteDefinitions() {
+        if "probe.update" != route.Name() {
+            continue
+        }
+
+        if 2 != len(route.Methods()) || nethttp.MethodPut != route.Methods()[0] || nethttp.MethodPatch != route.Methods()[1] {
+            t.Fatalf("expected the route under both declared methods, got %v", route.Methods())
+        }
+
+        if "[0-9]+" != route.Requirements()["id"] {
+            t.Fatalf("expected the requirement declared at the call, got %v", route.Requirements())
+        }
+
+        return
+    }
+
+    t.Fatal("expected the route found by its name")
+}
+
+func TestApplication_RegisterHttpRoute_ZeroOptionsAnswerEveryMethod(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+
+    applicationInstance.RegisterHttpRoute(
+        "/every-method-probe",
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return nil, nil
+        },
+        httpcontract.RouteOptions{},
+    )
+
+    applicationInstance.bootHttp()
+
+    for _, method := range []string{nethttp.MethodGet, nethttp.MethodPost, nethttp.MethodDelete} {
+        if _, matched := applicationInstance.kernel.HttpRouter().Match(method, "/every-method-probe", "", ""); false == matched {
+            t.Fatalf("expected the zero options to answer %s", method)
+        }
+    }
 }
 
 func TestApplicationRegisterHttpMiddlewares_PanicsAfterBoot(t *testing.T) {
@@ -117,11 +178,11 @@ func TestBootHttp_HandsEveryDeclaredRouteToTheRouter(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.RegisterHttpRoute(
-        nethttp.MethodGet,
         "/boot-http-probe",
         func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, nil
         },
+        httpcontract.RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     applicationInstance.bootHttp()
@@ -142,11 +203,11 @@ func TestBootHttp_TheApplicationsRouteKeepsTheMethodItDeclared(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.RegisterHttpRoute(
-        nethttp.MethodPost,
         "/boot-http-post-probe",
         func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, nil
         },
+        httpcontract.RouteOptions{Methods: []string{nethttp.MethodPost}},
     )
 
     applicationInstance.bootHttp()

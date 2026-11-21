@@ -38,7 +38,6 @@ func main() {
     app := application.NewApplication(context.Background(), application.ApplicationConfig{})
 
     app.RegisterHttpRoute(
-        "GET",
         "/health",
         func(
             runtimeInstance melodycontainercontract.Runtime,
@@ -47,6 +46,7 @@ func main() {
         ) (melodyhttpcontract.Response, error) {
             return melodyhttp.NewResponse(nethttp.StatusOK, []byte(`{"status":"ok"}`)), nil
         },
+        melodyhttpcontract.RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     app.Run()

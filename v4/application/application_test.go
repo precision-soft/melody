@@ -55,7 +55,7 @@ func (instance dynamicRouteModule) RegisterHttpRoutes(kernelInstance kernelcontr
 func TestBoot_TheRootsRoutesRegisterBeforeAnyModules(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
-    applicationInstance.RegisterHttpRoute(nethttp.MethodGet, "/users/me", applicationBootRouteHandler())
+    applicationInstance.RegisterHttpRoute("/users/me", applicationBootRouteHandler(), httpcontract.RouteOptions{Methods: []string{nethttp.MethodGet}})
     applicationInstance.RegisterModule(dynamicRouteModule{fakeModule{name: "dynamic-route"}})
 
     kernelInstance := applicationInstance.Boot()

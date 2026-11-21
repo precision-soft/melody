@@ -260,7 +260,6 @@ func buildApplication(ctx context.Context, embeddedEnvironmentFiles fs.FS, embed
      */
 
     app.RegisterHttpRoute(
-        nethttp.MethodGet,
         "/ping",
         func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             _ = runtimeInstance
@@ -272,6 +271,7 @@ func buildApplication(ctx context.Context, embeddedEnvironmentFiles fs.FS, embed
                 []byte("pong"),
             ), nil
         },
+        httpcontract.RouteOptions{Name: "ping", Methods: []string{nethttp.MethodGet}},
     )
 
     return app
@@ -369,7 +369,7 @@ func run(ctx context.Context, embeddedEnvironmentFiles fs.FS, embeddedPublicFile
 - [`(*Application).RegisterModule(module)`](../../application/application_module.go)
 - [`(*Application).RegisterModuleProvider(provider)`](../../application/application_module.go) — registers every module returned by a [`ModuleProvider`](../../application/contract/module.go). `RegisterModule` also expands a module that additionally implements `ModuleProvider`, so a single registration can contribute a whole group of capability-modules. Each Melody integration ships a self-registering module via its `NewModule(ModuleConfig{...})` (e.g. `app.RegisterModule(amqp.NewModule(...))`) that wires that integration's services, parameters and commands in one call instead of hand-calling the individual `Register*` helpers. A module's `Name()`, folded to lower case, is its identity in the application: a second module of a name already registered in any case, the same instance reached again through a provider included, is recorded at the line that registered it and fails the boot at its start in the aggregated report of duplicate registrations as `module "<name>"`, with `already registered as "<first spelling>"` when the two spellings differ, running no hook and expanding no module it provides; an empty `Name()`, or one that begins or ends with whitespace, is refused where it is registered.
 - [`(*Application).RegisterCliCommand(command)`](../../application/application_cli.go)
-- [`(*Application).RegisterHttpRoute(method, pattern, handler)`](../../application/application_http.go)
+- [`(*Application).RegisterHttpRoute(pattern, handler, options)`](../../application/application_http.go) — queues one of the application's own routes with its `RouteOptions`, as `Router.Handle` registers one: a name, the methods, every method when they are empty, and the rest of the options, copied at the call
 - [`(*Application).RegisterHttpMiddlewares(middlewares []httpcontract.Middleware)`](../../application/application_http.go)
 - [`(*Application).RegisterHttpMiddlewareFactories(factories []applicationcontract.MiddlewareFactory)`](../../application/application_http.go)
 - [`(*Application).RegisterHttpHandlerDecorator(decorator)`](../../application/application_http.go) — see [Handler decorators](#handler-decorators)

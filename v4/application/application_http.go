@@ -3,7 +3,9 @@ package application
 import (
     "context"
     "errors"
+    "maps"
     nethttp "net/http"
+    "slices"
     "sync"
     "time"
 
@@ -24,11 +26,11 @@ import (
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
-/* RegisterHttpRoute queues one of the application's own routes. The queue drains before any module's RegisterHttpRoutes runs, so a root route wins the registration-order tie-break against a module route. */
+/* RegisterHttpRoute queues one of the application's own routes with what the options declare, as Router.Handle registers one, empty Methods answering every method; the lists and the maps are copied here, so the value can be reused before the boot registers it. The queue drains before any module's RegisterHttpRoutes runs, so a root route wins the registration-order tie-break against a module route. */
 func (instance *Application) RegisterHttpRoute(
-    method string,
     pattern string,
     handler httpcontract.Handler,
+    options httpcontract.RouteOptions,
 ) {
     if true == instance.registrationClosed() {
         exception.Panic(exception.NewError("may not register http routes after boot", nil, nil))
@@ -45,10 +47,17 @@ func (instance *Application) RegisterHttpRoute(
         )
     }
 
+    options.Methods = slices.Clone(options.Methods)
+    options.Schemes = slices.Clone(options.Schemes)
+    options.Locales = slices.Clone(options.Locales)
+    options.Requirements = maps.Clone(options.Requirements)
+    options.Defaults = maps.Clone(options.Defaults)
+    options.Attributes = maps.Clone(options.Attributes)
+
     instance.httpRouteRegistrars = append(
         instance.httpRouteRegistrars,
         func(kernelInstance kernelcontract.Kernel) {
-            kernelInstance.HttpRouter().Handle(pattern, handler, http.RouteOptions{Methods: []string{method}})
+            kernelInstance.HttpRouter().Handle(pattern, handler, options)
         },
     )
 }
