@@ -2,12 +2,14 @@ package handler
 
 import (
     "bytes"
+    "context"
     "io"
     nethttp "net/http"
     "time"
 
     melodybound "github.com/precision-soft/melody/v4/bound"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylock "github.com/precision-soft/melody/v4/lock"
@@ -21,6 +23,7 @@ func PlatformCheckHandler() melodyhttpcontract.Handler {
         storageInstance := melodystorage.StorageMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
         locker := melodylock.LockerMustFromRuntime(runtimeInstance)
 
+        /* a probe of the lock backend calls its doors one by one, Refresh included, which RunExclusive would hide */
         lockInstance := locker.CreateLock("example.platform.check", melodybound.Of(5*time.Second))
 
         acquired, acquireErr := lockInstance.Acquire(runtimeInstance)
@@ -32,7 +35,8 @@ func PlatformCheckHandler() melodyhttpcontract.Handler {
             return melodyhttp.JsonResponse(nethttp.StatusConflict, map[string]string{"status": "busy"})
         }
 
-        defer lockInstance.Release(runtimeInstance)
+        /* released on a runtime the request's cancellation does not reach, so a client that hung up does not leave the lock held for its ttl */
+        defer lockInstance.Release(melodyruntime.WithContext(runtimeInstance, context.WithoutCancel(runtimeInstance.Context())))
 
         if refreshErr := lockInstance.Refresh(runtimeInstance, melodybound.Of(5*time.Second)); nil != refreshErr {
             return nil, refreshErr

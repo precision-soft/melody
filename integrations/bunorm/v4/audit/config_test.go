@@ -2,11 +2,15 @@ package audit
 
 import (
     "context"
+    "errors"
     "fmt"
     "strings"
     "sync"
     "testing"
 
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
 )
 
@@ -82,10 +86,50 @@ func TestRegistry_RegisterConcurrentWithReadsIsSafe(t *testing.T) {
     wait.Wait()
 }
 
+func auditTestRuntime(ctx context.Context) containercontract.Runtime {
+    return runtime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
+}
+
+func TestRegistry_EnsureSchemaRefusesAnAbsentRuntimeBeforeAnyStatement(t *testing.T) {
+    registry := NewRegistry(RegistryConfig{DefaultTable: "melody_audit"})
+
+    var typedNilRuntime containercontract.Runtime = (*nilRuntimeForAudit)(nil)
+    for _, runtimeInstance := range []containercontract.Runtime{nil, typedNilRuntime, contextlessRuntimeForAudit{}} {
+        schemaErr := registry.EnsureSchema(runtimeInstance, newTestDatabase())
+        if nil == schemaErr || false == strings.Contains(schemaErr.Error(), "the runtime is nil or carries no context") {
+            t.Fatalf("expected the absent runtime refused before any statement, got %v", schemaErr)
+        }
+    }
+}
+
+type nilRuntimeForAudit struct {
+    containercontract.Runtime
+}
+
+/* a runtime that carries no context, refused like an absent one */
+type contextlessRuntimeForAudit struct {
+    containercontract.Runtime
+}
+
+func (instance contextlessRuntimeForAudit) Context() context.Context {
+    return nil
+}
+
+func TestRegistry_EnsureSchemaRunsUnderTheRuntimesContext(t *testing.T) {
+    registry := NewRegistry(RegistryConfig{DefaultTable: "melody_audit"})
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    schemaErr := registry.EnsureSchema(auditTestRuntime(cancelledContext), newTestDatabase())
+    if nil == schemaErr || false == errors.Is(schemaErr, context.Canceled) {
+        t.Fatalf("expected the statement run under the runtime's cancelled context, got %v", schemaErr)
+    }
+}
+
 func TestRegistry_EnsureSchemaNamesTheTableItCouldNotCreate(t *testing.T) {
     registry := NewRegistry(RegistryConfig{DefaultTable: "melody_audit"})
 
-    schemaErr := registry.EnsureSchema(context.Background(), newTestDatabase())
+    schemaErr := registry.EnsureSchema(auditTestRuntime(context.Background()), newTestDatabase())
     if nil == schemaErr {
         t.Fatalf("expected the offline database to fail the schema creation")
     }

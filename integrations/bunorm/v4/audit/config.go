@@ -1,12 +1,12 @@
 package audit
 
 import (
-    "context"
     "regexp"
     "slices"
     "sort"
     "sync"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/uptrace/bun"
 )
@@ -72,7 +72,13 @@ func (instance *Registry) Register(entity string, options EntityOptions) *Regist
     return instance
 }
 
-func (instance *Registry) EnsureSchema(ctx context.Context, database *bun.DB) error {
+/* EnsureSchema creates the transaction table and every entity's audit table when they are absent, under the runtime's context. It is a schema door, called once at boot under the boot runtime, a failure failing the boot, or from a command under its run; an absent runtime is refused before any statement. */
+func (instance *Registry) EnsureSchema(runtimeInstance containercontract.Runtime, database *bun.DB) error {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+        return nilErr
+    }
+
+    ctx := runtimeInstance.Context()
     if _, txErr := database.NewCreateTable().Model((*Transaction)(nil)).IfNotExists().Exec(ctx); nil != txErr {
         return exception.NewError("could not create the audit transaction table", map[string]any{"table": DefaultTransactionTable}, txErr)
     }

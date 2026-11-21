@@ -1,7 +1,6 @@
 package cli
 
 import (
-    "context"
     "errors"
     "fmt"
     "io"
@@ -135,7 +134,7 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodycontainercontrac
             fmt.Fprintf(writer, "catalogue reset: the token store released %d keys, every device token and revocation epoch of the removed accounts\n", released)
         }
 
-        if trailErr := clearAuditTrail(ctx, storage); nil != trailErr {
+        if trailErr := clearAuditTrail(runtimeInstance, storage); nil != trailErr {
             return databaseResetStepFailure("emptying the audit trail", "catalogue", databaseLocationLabel(storage.Location()), trailErr)
         }
 
@@ -257,14 +256,14 @@ func printDatabaseResetPlan(writer io.Writer, storage *persistence.CatalogStorag
     }
 }
 
-/* clearAuditTrail empties the two tables the audit registry keeps for this application, deleting rows rather than dropping tables because the schema is the registry's. It asks the registry's door to open the schema first, so the delete does not depend on a repository having created the tables before the command runs. */
-func clearAuditTrail(ctx context.Context, storage *persistence.CatalogStorage) error {
-    if schemaErr := storage.EnsureAuditSchema(ctx); nil != schemaErr {
+/* clearAuditTrail empties the two tables the audit registry keeps for this application, deleting rows rather than dropping tables because the schema is the registry's. It asks the registry's door to open the schema first, under the command's run, so the delete does not depend on the boot of the process that runs it having created the tables. */
+func clearAuditTrail(runtimeInstance melodycontainercontract.Runtime, storage *persistence.CatalogStorage) error {
+    if schemaErr := storage.EnsureAuditSchema(runtimeInstance); nil != schemaErr {
         return schemaErr
     }
 
     for _, table := range []string{persistence.AuditTable, melodyaudit.DefaultTransactionTable} {
-        if _, execErr := storage.Database().ExecContext(ctx, "DELETE FROM `"+table+"`"); nil != execErr {
+        if _, execErr := storage.Database().ExecContext(runtimeInstance.Context(), "DELETE FROM `"+table+"`"); nil != execErr {
             return execErr
         }
     }

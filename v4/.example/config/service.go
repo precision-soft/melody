@@ -51,6 +51,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
     )
 
     instance.registerCatalogStorageService(registrar)
+    instance.registerAuditSchemaService(registrar)
     instance.registerArchiveStorageService(registrar)
     registerCatalogJournalSourceService(registrar)
     repository.RegisterSeeders(registrar)
@@ -233,7 +234,7 @@ func resolvedSessionFilePath(sessionFilePath string, projectDirectory string) st
     return sessionFilePath
 }
 
-/* registerCatalogStorageService publishes the handle every repository is built on, registered with or without a connection because the generated wiring resolves the repository constructors' arguments by type. The handle is resolved rather than captured, so the container records the edge that teardown reads (storage, handle, registry, journal) and the registry's logger swap runs at the first repository resolution. */
+/* registerCatalogStorageService publishes the handle every repository is built on, registered with or without a connection because the generated wiring resolves the repository constructors' arguments by type. The handle is resolved rather than captured, so the container records the edge that teardown reads (storage, handle, registry, journal). */
 func (instance *Module) registerCatalogStorageService(registrar melodyapplicationcontract.ServiceRegistrar) {
     hasDatabase := instance.catalogueWired
     seedsAccounts := instance.isDevelopment()
@@ -253,6 +254,26 @@ func (instance *Module) registerCatalogStorageService(registrar melodyapplicatio
             return catalogStorageSeeding(persistence.NewCatalogStorageAt(database, instance.catalogLocation), seedsAccounts), nil
         },
         melodycontainer.RegisterOptions{},
+    )
+}
+
+/* registerAuditSchemaService creates the audit trail's tables at boot, under the boot runtime, so a schema that cannot be created fails the boot rather than the first audited write. No service built at boot before it resolves a repository, whose constructor seeds audited rows over these tables; requests and commands run after the boot. */
+func (instance *Module) registerAuditSchemaService(registrar melodyapplicationcontract.ServiceRegistrar) {
+    registrar.RegisterService(
+        persistence.ServiceAuditSchema,
+        func(resolver melodycontainercontract.Resolver) (*persistence.AuditSchema, error) {
+            storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](resolver.Runtime().Context(), resolver, persistence.ServiceCatalogStorage)
+            if nil != storageErr {
+                return nil, storageErr
+            }
+
+            if schemaErr := storage.EnsureAuditSchema(resolver.Runtime()); nil != schemaErr {
+                return nil, schemaErr
+            }
+
+            return &persistence.AuditSchema{}, nil
+        },
+        melodycontainer.RegisterOptions{BuiltAtBoot: true},
     )
 }
 

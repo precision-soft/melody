@@ -42,7 +42,7 @@ func MustGetProductRepository(ctx context.Context, resolver melodycontainercontr
     return melodycontainer.MustFromResolver[ProductRepository](ctx, resolver, ServiceProductRepository)
 }
 
-/* NewProductRepository answers the database-backed repository when a connection is configured and the in-memory one otherwise; the generated wiring fills it from the container, and the storage handle carries the choice. The migration set is applied and the table seeded on the way out, with the trail's own tables beside it, since an audited write is one transaction over both. */
+/* NewProductRepository answers the database-backed repository when a connection is configured and the in-memory one otherwise; the generated wiring fills it from the container, and the storage handle carries the choice. The migration set is applied and the table seeded on the way out, over the trail's own tables, which the boot created, since an audited write is one transaction over both. */
 //melody:service ServiceProductRepository
 func NewProductRepository(storage *persistence.CatalogStorage) (ProductRepository, error) {
     if false == storage.IsPersistent() {
@@ -52,11 +52,6 @@ func NewProductRepository(storage *persistence.CatalogStorage) (ProductRepositor
     migrateErr := migration.EnsureMigrated(context.Background(), storage.Database())
     if nil != migrateErr {
         return nil, migrateErr
-    }
-
-    ensureAuditSchemaErr := storage.EnsureAuditSchema(context.Background())
-    if nil != ensureAuditSchemaErr {
-        return nil, ensureAuditSchemaErr
     }
 
     /* a product row references its category and its currency by foreign key, so a resolution that reaches an emptied catalogue first seeds the two nomenclatures it names; both seeds change nothing over tables that hold rows */

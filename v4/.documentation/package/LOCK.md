@@ -41,21 +41,27 @@ Locking is opt-in. The core defines the contract and an in-memory `Locker` (sing
 
 ## Usage
 
+Userland takes a lock through [`RunExclusive`](#run-a-block-exclusively) or [`LeaderGate`](#elect-a-leader): they acquire under the caller's runtime, renew the lease while the work runs, hand the work a runtime cancelled before the lease could lapse, and release on a runtime the caller's cancellation does not reach.
+
 ```go
 locker := lock.NewInMemoryLocker(clock.NewSystemClock())
 
+ran, runErr := lock.RunExclusive(runtimeInstance, locker, "picking:order:42", lock.ExclusiveConfig{Ttl: bound.Of(30 * time.Second)}, func(heldRuntime containercontract.Runtime) error {
+    return pickOrder(heldRuntime, "42")
+})
+```
+
+The raw doors stay for a caller that drives the backend itself, a readiness probe that checks `Refresh` among them. Such a caller releases on a runtime detached from its cancellation, as the helpers do: a backend that runs the release under the runtime's context, the redis locker among them, refuses a request that already ended, and the lock stays held until its ttl. The mysql and pgsql lockers detach the release themselves, and the in-memory one reads no context:
+
+```go
 pickingLock := locker.CreateLock("picking:order:42", bound.Of(30*time.Second))
 
 acquired, acquireErr := pickingLock.Acquire(runtimeInstance)
-if nil != acquireErr {
+if nil != acquireErr || false == acquired {
     return acquireErr
 }
 
-if false == acquired {
-    return nil
-}
-
-defer pickingLock.Release(runtimeInstance)
+defer pickingLock.Release(runtime.WithContext(runtimeInstance, context.WithoutCancel(runtimeInstance.Context())))
 ```
 
 Redis-backed (`integrations/rueidis`):

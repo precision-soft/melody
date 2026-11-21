@@ -6,6 +6,7 @@ import (
     "errors"
     "fmt"
     "reflect"
+    "slices"
     "strings"
     "sync"
     "testing"
@@ -24,6 +25,7 @@ import (
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodylogging "github.com/precision-soft/melody/v4/logging"
+    melodymessagebus "github.com/precision-soft/melody/v4/messagebus"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     rueidis "github.com/redis/rueidis"
     bun "github.com/uptrace/bun"
@@ -111,6 +113,56 @@ func TestRegisterCatalogStorageService_SeedsTheAccountsInDevelopmentOnly(t *test
                 t.Fatalf("%s, database %v: expected SeedsAccounts %v, got %v", environmentCase.environment, nil != database, environmentCase.seedsAccounts, storage.SeedsAccounts())
             }
         }
+    }
+}
+
+/* the trail's tables are created at boot: the schema is a service built at boot, and a database that cannot create them answers the schema's failure, which fails the boot rather than the first audited write */
+func TestRegisterAuditSchemaService_IsBuiltAtBootAndAnswersASchemaItCannotCreate(t *testing.T) {
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    containerInstance.MustRegister(serviceDatabase, func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {
+        return newUndialedDatabase(), nil
+    }, melodycontainer.RegisterOptions{Closer: registryOwnedDatabaseCloser})
+
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.catalogueWired = true
+    moduleInstance.registerCatalogStorageService(containerRegistrar{Container: containerInstance})
+    moduleInstance.registerAuditSchemaService(containerRegistrar{Container: containerInstance})
+
+    builtAtBoot, isBootContainer := any(containerInstance).(interface{ BuiltAtBootServiceNames() []string })
+    if false == isBootContainer || false == slices.Contains(builtAtBoot.BuiltAtBootServiceNames(), persistence.ServiceAuditSchema) {
+        t.Fatalf("expected the audit schema built at boot")
+    }
+
+    _, schemaErr := melodycontainer.FromResolver[*persistence.AuditSchema](t.Context(), containerInstance, persistence.ServiceAuditSchema)
+    if nil == schemaErr || false == strings.Contains(schemaErr.Error(), "could not create the audit transaction table") {
+        t.Fatalf("expected the schema's failure answered, got %v", schemaErr)
+    }
+}
+
+/* the module's own registration builds the schema at boot, and first: a service built at boot ahead of it that reached a repository would seed audited rows before the trail's tables exist */
+func TestModuleRegisterServices_BuildsTheAuditSchemaFirstAtBoot(t *testing.T) {
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.messageBusTransport = melodymessagebus.NewInMemoryTransport(melodymessagebus.InMemoryTransportConfig{})
+    moduleInstance.RegisterServices(containerRegistrar{Container: containerInstance})
+
+    builtAtBoot := any(containerInstance).(interface{ BuiltAtBootServiceNames() []string }).BuiltAtBootServiceNames()
+    if 0 == len(builtAtBoot) || persistence.ServiceAuditSchema != builtAtBoot[0] {
+        t.Fatalf("expected the audit schema the first service built at boot, got %v", builtAtBoot)
+    }
+}
+
+/* without a database there is no trail: the schema is published without a statement */
+func TestRegisterAuditSchemaService_PublishesTheSchemaWithoutADatabase(t *testing.T) {
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.registerCatalogStorageService(containerRegistrar{Container: containerInstance})
+    moduleInstance.registerAuditSchemaService(containerRegistrar{Container: containerInstance})
+
+    schema, schemaErr := melodycontainer.FromResolver[*persistence.AuditSchema](t.Context(), containerInstance, persistence.ServiceAuditSchema)
+    if nil != schemaErr || nil == schema {
+        t.Fatalf("expected the schema published without a database, got %v", schemaErr)
     }
 }
 

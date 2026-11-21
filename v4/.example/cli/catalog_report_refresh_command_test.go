@@ -33,6 +33,16 @@ import (
 type refreshSequence struct {
     mutex  sync.Mutex
     events []string
+
+    acquireRuntime melodycontainercontract.Runtime
+    refreshRuntime melodycontainercontract.Runtime
+}
+
+func (instance *refreshSequence) recordRuntime(target *melodycontainercontract.Runtime, runtimeInstance melodycontainercontract.Runtime) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    *target = runtimeInstance
 }
 
 func (instance *refreshSequence) record(event string) {
@@ -103,6 +113,7 @@ func (instance *sequenceLock) Acquire(runtimeInstance melodycontainercontract.Ru
     }
 
     instance.sequence.record("acquire")
+    instance.sequence.recordRuntime(&instance.sequence.acquireRuntime, runtimeInstance)
 
     return instance.inner.Acquire(runtimeInstance)
 }
@@ -129,6 +140,7 @@ const readingCacheKeyUnderTest = "catalog.reading"
 func (instance *sequenceCache) Set(runtimeInstance melodycontainercontract.Runtime, key string, value any, ttl bound.Duration) error {
     if readingCacheKeyUnderTest == key {
         instance.sequence.record("refresh")
+        instance.sequence.recordRuntime(&instance.sequence.refreshRuntime, runtimeInstance)
     }
 
     return instance.Cache.Set(runtimeInstance, key, value, ttl)
@@ -325,6 +337,28 @@ func TestCatalogReportRefreshCommandDrivesLockRefreshArchiveExportInThatOrder(t 
     }
 }
 
+/* the reading is taken under the runtime the lock hands its holder, which is cancelled before the lease could lapse, not under the command's own: a run that lost its lease is told to stop */
+func TestCatalogReportRefreshCommandTakesTheReadingUnderTheRuntimeTheLockHolds(t *testing.T) {
+    fixture := newRefreshFixture(t, refreshFixtureOption{})
+
+    if _, runErr := runRefresh(t, fixture); nil != runErr {
+        t.Fatalf("expected the refresh to succeed, got %v", runErr)
+    }
+
+    fixture.sequence.mutex.Lock()
+    acquireRuntime, refreshRuntime := fixture.sequence.acquireRuntime, fixture.sequence.refreshRuntime
+    fixture.sequence.mutex.Unlock()
+
+    if nil == acquireRuntime || nil == refreshRuntime || acquireRuntime == refreshRuntime {
+        t.Fatalf("expected the reading taken under the held runtime, not the one the lock was taken under")
+    }
+
+    /* the held runtime ends with the hold, the command's own outlives it: a runtime over the command's own context would still be live */
+    if nil == refreshRuntime.Context().Err() || nil != acquireRuntime.Context().Err() {
+        t.Fatalf("expected the reading's runtime cancelled with the hold and the command's still live")
+    }
+}
+
 /* a reading the archive already holds at that instant is not a failure, and the run exits zero; the table alone would answer ARCHIVED false with nothing beside it, which reads as an archive that did not record the reading, so the console says why nothing was written */
 func TestCatalogReportRefreshCommandSaysWhyAReadingAlreadyRecordedIsNotArchivedAgain(t *testing.T) {
     fixture := newRefreshFixture(t, refreshFixtureOption{})
@@ -464,6 +498,29 @@ func TestCatalogReportRefreshCommandNamesTheArchivesOwnRefusalOnTheConsole(t *te
 }
 
 /* an error taking the lock, not a lock held elsewhere, is the archive being unreachable, and the reading and the export go on without it, so a connection lost between the open and the advisory lock does not cost the tick its reading and its export */
+/* a stop during the acquire is not a contender: the run says it was stopped, exits with the stop, and names no other process */
+func TestCatalogReportRefreshCommandSaysAStopDuringTheAcquireIsNotAnotherProcess(t *testing.T) {
+    sequence := &refreshSequence{}
+    fixture := newRefreshFixture(t, refreshFixtureOption{
+        lockerProvider: func(resolver melodycontainercontract.Resolver) (melodylockcontract.Locker, error) {
+            return &sequenceLocker{sequence: sequence, inner: melodylock.NewInMemoryLocker(melodyclock.NewSystemClock()), acquireErr: context.Canceled}, nil
+        },
+    })
+
+    stoppedContext, stop := context.WithCancel(context.Background())
+    stop()
+    fixture.runtime = melodyruntime.WithContext(fixture.runtime, stoppedContext)
+
+    output, runErr := runRefresh(t, fixture)
+    if false == errors.Is(runErr, context.Canceled) {
+        t.Fatalf("expected the stop to take the exit code, got %v", runErr)
+    }
+
+    if true == strings.Contains(output, "another process") {
+        t.Fatalf("expected no contender named for a stopped run, got %q", output)
+    }
+}
+
 func TestCatalogReportRefreshCommandReadsAndExportsWhenTheLockCannotBeTaken(t *testing.T) {
     sequence := &refreshSequence{}
     acquireErr := errors.New("pgsql lock acquire failed")

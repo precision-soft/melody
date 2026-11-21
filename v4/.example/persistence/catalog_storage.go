@@ -4,11 +4,15 @@ import (
     "context"
 
     melodyaudit "github.com/precision-soft/melody/integrations/bunorm/v4/audit"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     bun "github.com/uptrace/bun"
 )
 
 const (
     ServiceCatalogStorage = "service.example.catalog.storage"
+
+    /* ServiceAuditSchema names the proof that the trail's tables exist, built at boot, so a schema that cannot be created fails the boot */
+    ServiceAuditSchema = "service.example.audit.schema"
 
     /* AuditTable is the audit trail of the nomenclature. It is per major, like every other table the example owns, so three applications sharing one database do not write into each other's history. It is named here rather than inline because two doors read it: the registry that opens it, and the reset command that empties it. */
     AuditTable = "melody_example_v4_audit"
@@ -114,11 +118,14 @@ func (instance *CatalogStorage) Tracker() *melodyaudit.Tracker {
     return instance.tracker
 }
 
-/* EnsureAuditSchema creates the trail's tables when they are absent. They are deliberately outside the example's migration set — the audit registry opens its schema through the door of the module that owns it, as the set's own document says — so the storage that writes the trail is the door that creates it. */
-func (instance *CatalogStorage) EnsureAuditSchema(ctx context.Context) error {
+/* AuditSchema is the value the boot publishes once the trail's tables exist; it carries nothing. */
+type AuditSchema struct{}
+
+/* EnsureAuditSchema creates the trail's tables when they are absent, under the runtime it is handed: the audit schema's provider calls it at boot, so a schema that cannot be created fails the boot. They are deliberately outside the example's migration set — the audit registry opens its schema through the door of the module that owns it, as the set's own document says — so the storage that writes the trail is the door that creates it. */
+func (instance *CatalogStorage) EnsureAuditSchema(runtimeInstance melodycontainercontract.Runtime) error {
     if nil == instance.auditRegistry {
         return nil
     }
 
-    return instance.auditRegistry.EnsureSchema(ctx, instance.database)
+    return instance.auditRegistry.EnsureSchema(runtimeInstance, instance.database)
 }
