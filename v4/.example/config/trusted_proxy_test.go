@@ -535,7 +535,7 @@ func TestTrustedProxyResolver_ShutdownWaitsForTheRetryAndStartsNoOther(t *testin
     closed := make(chan struct{})
     go func() {
         for _, hook := range registrar.hookList {
-            hook()
+            hook(context.Background())
         }
         close(closed)
     }()
@@ -556,5 +556,29 @@ func TestTrustedProxyResolver_ShutdownWaitsForTheRetryAndStartsNoOther(t *testin
     case <-lookups:
         t.Fatal("expected no retry started after the shutdown")
     case <-time.After(100 * time.Millisecond):
+    }
+}
+
+func TestRegisterTrustedProxyShutdown_StopsWaitingWhenTheShutdownBudgetEnds(t *testing.T) {
+    resolver := resolverOver(t, "", func() time.Time { return time.Now() })
+    resolver.retries.Add(1)
+    t.Cleanup(resolver.retries.Done)
+
+    registrar := &recordingShutdownRegistrar{}
+    (&Module{trustedProxyResolver: resolver}).registerTrustedProxyShutdown(registrar)
+
+    expired, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    returned := make(chan struct{})
+    go func() {
+        registrar.hookList[0](expired)
+        close(returned)
+    }()
+
+    select {
+    case <-returned:
+    case <-time.After(2 * time.Second):
+        t.Fatal("expected the hook to return once the shutdown's context is done")
     }
 }

@@ -79,11 +79,9 @@ func createRefusal(
 func apiJsonErrorResponder(
     runtimeInstance melodycontainercontract.Runtime,
     request melodyhttpcontract.Request,
-    status int,
-    message string,
-    cause error,
+    refusal melodyhttp.JsonHandlerRefusal,
 ) (melodyhttpcontract.Response, error) {
-    return presenter.ApiRefusal(runtimeInstance, request, status, message, cause), nil
+    return presenter.ApiRefusal(runtimeInstance, request, refusal.Status, refusal.Message, refusal.Cause), nil
 }
 
 /* bound by the openapi descriptor in config; keep it exported */

@@ -135,7 +135,7 @@ func (instance *gatingTestKernel) Clock() clockcontract.Clock { return nil }
 
 var _ kernelcontract.Kernel = (*gatingTestKernel)(nil)
 
-func passthroughFactory() HttpMiddlewareFactory {
+func passthroughFactory() MiddlewareFactory {
     return func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
         return func(next httpcontract.Handler) httpcontract.Handler { return next }, nil
     }

@@ -13,18 +13,28 @@ import (
     "github.com/precision-soft/melody/v4/logging"
 )
 
-/* JsonHandlerErrorResponder renders the refusals JsonHandler makes before the handler runs. It is handed the failure itself beside the status and the message, whose cause carries the decoder's diagnosis and the validation collection under the validationErrors key. A responder that answers no response leaves the refusal to the framework. */
+/* JsonHandlerRefusal is one refusal JsonHandler makes before the handler runs; fields may be added. */
+type JsonHandlerRefusal struct {
+    /* Status is the http status the framework would answer. */
+    Status int
+
+    /* Message is the message the framework would answer. */
+    Message string
+
+    /* Cause is the failure itself, carrying the decoder's diagnosis and the validation collection under the validationErrors key. */
+    Cause error
+}
+
+/* JsonHandlerErrorResponder renders the refusals JsonHandler makes before the handler runs, handed the refusal. A responder that answers no response leaves the refusal to the framework. */
 type JsonHandlerErrorResponder func(
     runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
-    status int,
-    message string,
-    cause error,
+    refusal JsonHandlerRefusal,
 ) (httpcontract.Response, error)
 
 /* JsonHandlerConfig is what a json handler declares beyond the function it binds the body for; the zero value renders every refusal through the framework. */
 type JsonHandlerConfig struct {
-    /* ErrorResponder renders the refusals made before the handler runs, handed the failure beside the status and the message; nil leaves them to the framework. */
+    /* ErrorResponder renders the refusals made before the handler runs, handed the refusal; nil leaves them to the framework. */
     ErrorResponder JsonHandlerErrorResponder
 }
 
@@ -100,9 +110,7 @@ func jsonHandlerError(
         config.ErrorResponder,
         runtimeInstance,
         request,
-        status,
-        message,
-        refusalErr,
+        JsonHandlerRefusal{Status: status, Message: message, Cause: refusalErr},
     )
     if nil != responderErr {
         return nil, responderErr
@@ -120,10 +128,10 @@ func invokeJsonHandlerErrorResponderSafely(
     responder JsonHandlerErrorResponder,
     runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
-    status int,
-    message string,
-    cause error,
+    refusal JsonHandlerRefusal,
 ) (response httpcontract.Response, err error) {
+    cause := refusal.Cause
+
     defer func() {
         recoveredValue := recover()
         if nil == recoveredValue {
@@ -151,5 +159,5 @@ func invokeJsonHandlerErrorResponderSafely(
         )
     }()
 
-    return responder(runtimeInstance, request, status, message, cause)
+    return responder(runtimeInstance, request, refusal)
 }

@@ -111,19 +111,32 @@ func migrateModuleConfig() bunormmigrate.ModuleConfig {
 
 /* httpShutdownRegistrar is the one door of the application registerHubShutdown needs */
 type httpShutdownRegistrar interface {
-    OnHttpShutdown(hook func())
+    OnHttpShutdown(hook func(shutdownContext context.Context))
 }
 
 /* registerHubShutdown closes the hub when the http server begins to shut down: http.Server.Shutdown neither cancels an in-flight request's context nor tracks a hijacked connection, so a connected SSE or websocket client would otherwise hold the whole shutdown timeout. It is also the backplane's only close, since the hub's Shutdown drains and closes the backplane it holds; the container's teardown closes the hub again through its idempotent Close, the only close a process without an http server reaches. */
 func (instance *Module) registerHubShutdown(registrar httpShutdownRegistrar) {
-    registrar.OnHttpShutdown(instance.serverSentEventHub.Shutdown)
+    registrar.OnHttpShutdown(func(shutdownContext context.Context) {
+        instance.serverSentEventHub.Shutdown()
+    })
 }
 
-/* registerTrustedProxyShutdown waits, as the http server shuts down, for the retry of a failed balancer lookup running off the request path, so its warning reaches the journal before the container's teardown closes it */
+/* registerTrustedProxyShutdown waits, as the http server shuts down and within its budget, for the retry of a failed balancer lookup running off the request path, so its warning reaches the journal before the container's teardown closes it */
 func (instance *Module) registerTrustedProxyShutdown(registrar httpShutdownRegistrar) {
-    registrar.OnHttpShutdown(func() {
-        if nil != instance.trustedProxyResolver {
+    registrar.OnHttpShutdown(func(shutdownContext context.Context) {
+        if nil == instance.trustedProxyResolver {
+            return
+        }
+
+        closed := make(chan struct{})
+        go func() {
             instance.trustedProxyResolver.Close()
+            close(closed)
+        }()
+
+        select {
+        case <-closed:
+        case <-shutdownContext.Done():
         }
     })
 }

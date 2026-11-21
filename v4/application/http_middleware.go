@@ -28,8 +28,6 @@ const (
     MiddlewarePriorityDefault = 0
 )
 
-type MiddlewareFactory = applicationcontract.MiddlewareFactory
-
 type HttpMiddleware struct {
     staticConfig    static.Config
     definitions     []middlewarepipeline.HttpMiddlewareDefinition
@@ -89,7 +87,7 @@ func (instance *HttpMiddleware) useMiddlewares(priority int, middlewares []httpc
     }
 }
 
-func (instance *HttpMiddleware) useFactories(priority int, factories []MiddlewareFactory) {
+func (instance *HttpMiddleware) useFactories(priority int, factories []middlewarepipeline.MiddlewareFactory) {
     for factoryIndex, currentFactory := range factories {
         factoryInstance := currentFactory
 
@@ -106,7 +104,12 @@ func (instance *HttpMiddleware) useFactories(priority int, factories []Middlewar
             Groups:   []string{MiddlewareGroupHttp},
             Factory: func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
                 /* a factory that yields nil, or a typed nil, is refused at the build: an application factory has no way to declare a middleware inactive, so a nil is a wiring mistake that would otherwise run every request without it. A conditional middleware is left unregistered at the composition root. */
-                middlewareInstance := factoryInstance(kernelInstance)
+                middlewareInstance, factoryErr := factoryInstance(kernelInstance)
+                /* the builder refuses the build with it, naming the middleware */
+                if nil != factoryErr {
+                    return nil, factoryErr
+                }
+
                 if true == internal.IsNilInterface(middlewareInstance) {
                     return nil, exception.NewError(
                         "middleware factory returned nil",

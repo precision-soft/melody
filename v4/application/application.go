@@ -52,7 +52,7 @@ type Application struct {
     httpRouteRegistrars       []RouteRegistrar
     httpMiddlewares           *HttpMiddleware
     httpHandlerDecorators     []applicationcontract.HttpHandlerDecorator
-    httpShutdownHooks         []func()
+    httpShutdownHooks         []func(shutdownContext context.Context)
     securityConfiguration     *security.CompiledConfiguration
     bootWarnings              []internal.BootWarning
     /* the run writes the boot warnings when it starts and an exit handler when the process dies before that, so the two never write them twice */

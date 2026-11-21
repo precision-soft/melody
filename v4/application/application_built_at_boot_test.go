@@ -1,6 +1,7 @@
 package application
 
 import (
+    middlewarepipeline "github.com/precision-soft/melody/v4/http/middleware/pipeline"
     "context"
     "errors"
     "os"
@@ -133,13 +134,13 @@ type factoryCountingModule struct {
 
 func (instance *factoryCountingModule) RegisterHttpMiddlewares(kernelInstance kernelcontract.Kernel, registrar applicationcontract.HttpMiddlewareRegistrar) {
     registrar.Use(applicationcontract.MiddlewareRegistration{
-        Factories: []applicationcontract.MiddlewareFactory{
-            func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
+        Factories: []middlewarepipeline.MiddlewareFactory{
+            func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
                 *instance.built++
 
                 return func(next httpcontract.Handler) httpcontract.Handler {
                     return next
-                }
+                }, nil
             },
         },
     })

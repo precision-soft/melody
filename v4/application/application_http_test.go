@@ -1,6 +1,7 @@
 package application
 
 import (
+    middlewarepipeline "github.com/precision-soft/melody/v4/http/middleware/pipeline"
     "bufio"
     "context"
     "errors"
@@ -164,11 +165,11 @@ func TestApplicationRegisterHttpMiddlewareFactories_PanicsAfterBoot(t *testing.T
     applicationInstance.Boot()
 
     testhelper.AssertPanicsWithError(t, func() {
-        applicationInstance.RegisterHttpMiddlewareFactories([]MiddlewareFactory{
-            func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
+        applicationInstance.RegisterHttpMiddlewareFactories([]middlewarepipeline.MiddlewareFactory{
+            func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
                 return func(next httpcontract.Handler) httpcontract.Handler {
                     return next
-                }
+                }, nil
             },
         })
     }, "may not register http middleware factories after boot")
@@ -230,11 +231,11 @@ func TestApplicationRegisterHttpMiddlewares_HandsThemToThePipeline(t *testing.T)
         return next
     }})
 
-    applicationInstance.RegisterHttpMiddlewareFactories([]MiddlewareFactory{
-        func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
+    applicationInstance.RegisterHttpMiddlewareFactories([]middlewarepipeline.MiddlewareFactory{
+        func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
             return func(next httpcontract.Handler) httpcontract.Handler {
                 return next
-            }
+            }, nil
         },
     })
 
@@ -596,7 +597,7 @@ func TestAwaitHttpServerEnd_ReportsAServeErrorWhicheverBranchWins(t *testing.T) 
         cancelledContext, cancel := context.WithCancel(context.Background())
         cancel()
 
-        endErr := awaitHttpServerEnd(cancelledContext, &nethttp.Server{}, errorChannel, &warningRecordingLogger{}, time.Second, http.NewKernel(http.NewRouter(), http.KernelConfig{}), &sync.WaitGroup{})
+        endErr := awaitHttpServerEnd(cancelledContext, &nethttp.Server{}, errorChannel, &warningRecordingLogger{}, time.Second, http.NewKernel(http.NewRouter(), http.KernelConfig{}), &httpShutdownHookSet{})
         if nil == endErr {
             t.Fatalf("expected the serve error to be reported instead of a clean shutdown (iteration %d)", iteration)
         }
@@ -756,7 +757,7 @@ func TestAwaitHttpServerEnd_CutsTheShutdownAtTheConfiguredBudget(t *testing.T) {
     cancel()
 
     shutdownStartedAt := time.Now()
-    endErr := awaitHttpServerEnd(cancelledContext, httpServer, errorChannel, &warningRecordingLogger{}, 50*time.Millisecond, http.NewKernel(http.NewRouter(), http.KernelConfig{}), &sync.WaitGroup{})
+    endErr := awaitHttpServerEnd(cancelledContext, httpServer, errorChannel, &warningRecordingLogger{}, 50*time.Millisecond, http.NewKernel(http.NewRouter(), http.KernelConfig{}), &httpShutdownHookSet{})
     elapsed := time.Since(shutdownStartedAt)
 
     close(releaseHandler)
@@ -781,7 +782,7 @@ func TestAwaitHttpServerEnd_TreatsServerClosedAsACleanShutdown(t *testing.T) {
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    endErr := awaitHttpServerEnd(cancelledContext, &nethttp.Server{}, errorChannel, &warningRecordingLogger{}, time.Second, http.NewKernel(http.NewRouter(), http.KernelConfig{}), &sync.WaitGroup{})
+    endErr := awaitHttpServerEnd(cancelledContext, &nethttp.Server{}, errorChannel, &warningRecordingLogger{}, time.Second, http.NewKernel(http.NewRouter(), http.KernelConfig{}), &httpShutdownHookSet{})
     if nil != endErr {
         t.Fatalf("expected a clean shutdown for the server's own closed signal, got: %v", endErr)
     }
@@ -1357,7 +1358,7 @@ func TestAwaitHttpServerEnd_DrainsOpenScopesEvenWhenTheShutdownOverran(t *testin
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    endErr := awaitHttpServerEnd(cancelledContext, httpServer, errorChannel, &warningRecordingLogger{}, 50*time.Millisecond, httpKernel, &sync.WaitGroup{})
+    endErr := awaitHttpServerEnd(cancelledContext, httpServer, errorChannel, &warningRecordingLogger{}, 50*time.Millisecond, httpKernel, &httpShutdownHookSet{})
 
     close(releaseHandler)
 
@@ -1410,9 +1411,9 @@ func TestWrapHttpShutdownHook_FilesAPanicWhoseErrorOrUnwrapPanics(t *testing.T) 
     } {
         logger := &shutdownHookRecordLogger{Logger: logging.NewNopLogger()}
 
-        var hooksDone sync.WaitGroup
-        wrapHttpShutdownHook(func() { panic(testCase.panicValue) }, &hooksDone, logger)()
-        hooksDone.Wait()
+        hooks := &httpShutdownHookSet{}
+        wrapHttpShutdownHook(func(shutdownContext context.Context) { panic(testCase.panicValue) }, hooks, logger)()
+        hooks.done.Wait()
 
         if 1 != len(logger.messages) || testCase.message != logger.messages[0] {
             t.Fatalf("%s: expected one record %q, got %v", name, testCase.message, logger.messages)
@@ -2109,4 +2110,35 @@ func TestApplication_TheStartUpRecordSpellsTheEnvironment(t *testing.T) {
     }
 
     t.Fatalf("expected the start-up record, got %v", logger.infos)
+}
+
+func TestAwaitHttpServerEnd_HandsAShutdownHookTheShutdownsContext(t *testing.T) {
+    errorChannel := make(chan error, 1)
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    hooks := &httpShutdownHookSet{}
+    handed := make(chan context.Context, 1)
+    httpServer := &nethttp.Server{}
+    httpServer.RegisterOnShutdown(wrapHttpShutdownHook(func(shutdownContext context.Context) {
+        handed <- shutdownContext
+        errorChannel <- nethttp.ErrServerClosed
+    }, hooks, &warningRecordingLogger{}))
+
+    before := time.Now()
+    _ = awaitHttpServerEnd(cancelledContext, httpServer, errorChannel, &warningRecordingLogger{}, 50*time.Millisecond, http.NewKernel(http.NewRouter(), http.KernelConfig{}), hooks)
+
+    shutdownContext := <-handed
+
+    deadline, hasDeadline := shutdownContext.Deadline()
+    if false == hasDeadline || deadline.Before(before) || deadline.After(before.Add(time.Second)) {
+        t.Fatalf("expected the shutdown's deadline on the hook's context, got %v %v", deadline, hasDeadline)
+    }
+
+    select {
+    case <-shutdownContext.Done():
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected the hook's context done once the budget ends")
+    }
 }

@@ -397,9 +397,7 @@ func TestJsonHandler_KeepsTheRefusalWhenTheResponderAnswersNothing(t *testing.T)
         JsonHandlerConfig{ErrorResponder: func(
             currentRuntime containercontract.Runtime,
             request httpcontract.Request,
-            status int,
-            message string,
-            cause error,
+            refusal JsonHandlerRefusal,
         ) (httpcontract.Response, error) {
             return nil, nil
         }},
@@ -430,9 +428,7 @@ func TestJsonHandler_ContainsAPanickingResponder(t *testing.T) {
         JsonHandlerConfig{ErrorResponder: func(
             currentRuntime containercontract.Runtime,
             request httpcontract.Request,
-            status int,
-            message string,
-            cause error,
+            refusal JsonHandlerRefusal,
         ) (httpcontract.Response, error) {
             panic("responder exploded")
         }},
@@ -472,6 +468,7 @@ func TestJsonHandler_HandsTheResponderTheCauseItNeedsToRenderTheDetail(t *testin
     runtimeInstance := newJsonHandlerRuntime()
 
     var receivedCause error
+    var receivedRefusal JsonHandlerRefusal
     handler := JsonHandler(
         func(currentRuntime containercontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "ok"), nil
@@ -479,13 +476,12 @@ func TestJsonHandler_HandsTheResponderTheCauseItNeedsToRenderTheDetail(t *testin
         JsonHandlerConfig{ErrorResponder: func(
             currentRuntime containercontract.Runtime,
             request httpcontract.Request,
-            status int,
-            message string,
-            cause error,
+            refusal JsonHandlerRefusal,
         ) (httpcontract.Response, error) {
-            receivedCause = cause
+            receivedCause = refusal.Cause
+            receivedRefusal = refusal
 
-            return TextResponse(status, message), nil
+            return TextResponse(refusal.Status, refusal.Message), nil
         }},
     )
 
@@ -494,6 +490,10 @@ func TestJsonHandler_HandsTheResponderTheCauseItNeedsToRenderTheDetail(t *testin
 
     if _, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request); nil != handleErr {
         t.Fatalf("expected the responder's response to be served, got %v", handleErr)
+    }
+
+    if 0 == receivedRefusal.Status || "" == receivedRefusal.Message {
+        t.Fatalf("expected the responder to be handed the status and the message, got %+v", receivedRefusal)
     }
 
     if nil == receivedCause {

@@ -28,10 +28,10 @@ func (instance *countingBackplane) CloseWithContext(closeContext context.Context
 }
 
 type recordingShutdownRegistrar struct {
-    hookList []func()
+    hookList []func(shutdownContext context.Context)
 }
 
-func (instance *recordingShutdownRegistrar) OnHttpShutdown(hook func()) {
+func (instance *recordingShutdownRegistrar) OnHttpShutdown(hook func(shutdownContext context.Context)) {
     instance.hookList = append(instance.hookList, hook)
 }
 
@@ -50,7 +50,7 @@ func TestRegisterHubShutdown_RegistersTheHubsShutdownAloneAndItClosesTheBackplan
     }
 
     for _, hook := range registrar.hookList {
-        hook()
+        hook(context.Background())
     }
 
     if false == moduleInstance.serverSentEventHub.IsClosed() {

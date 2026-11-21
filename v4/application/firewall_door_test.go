@@ -1,6 +1,7 @@
 package application
 
 import (
+    middlewarepipeline "github.com/precision-soft/melody/v4/http/middleware/pipeline"
     "context"
     nethttp "net/http"
     "os"
@@ -8,7 +9,6 @@ import (
     "strings"
     "testing"
 
-    applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/http"
@@ -174,13 +174,13 @@ func TestBoot_RefusesARouteOnADoorsPath(t *testing.T) {
 func TestInstallHttpMiddlewares_RefusesARouteAFactoryPutOnADoorsPath(t *testing.T) {
     application := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
     application.RegisterModule(&firewallDoorTestModule{fakeModule: fakeModule{name: "door"}})
-    application.RegisterHttpMiddlewareFactories([]applicationcontract.MiddlewareFactory{
-        func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
+    application.RegisterHttpMiddlewareFactories([]middlewarepipeline.MiddlewareFactory{
+        func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
             kernelInstance.HttpRouter().Handle("/login/:step", bootCollisionTestHandler(), http.RouteOptions{Name: "late", Methods: []string{nethttp.MethodGet}})
 
             return func(next httpcontract.Handler) httpcontract.Handler {
                 return next
-            }
+            }, nil
         },
     })
 

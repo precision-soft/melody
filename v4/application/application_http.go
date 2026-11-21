@@ -7,6 +7,7 @@ import (
     nethttp "net/http"
     "slices"
     "sync"
+    "sync/atomic"
     "time"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
@@ -18,6 +19,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    middlewarepipeline "github.com/precision-soft/melody/v4/http/middleware/pipeline"
     "github.com/precision-soft/melody/v4/internal"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
@@ -70,7 +72,7 @@ func (instance *Application) RegisterHttpMiddlewares(middlewares []httpcontract.
     instance.httpMiddlewares.Use(applicationcontract.MiddlewareRegistration{Middlewares: middlewares})
 }
 
-func (instance *Application) RegisterHttpMiddlewareFactories(factories []applicationcontract.MiddlewareFactory) {
+func (instance *Application) RegisterHttpMiddlewareFactories(factories []middlewarepipeline.MiddlewareFactory) {
     if true == instance.registrationClosed() {
         exception.Panic(exception.NewError("may not register http middleware factories after boot", nil, nil))
     }
@@ -100,8 +102,8 @@ func (instance *Application) decorateHttpHandler(httpHandler nethttp.Handler) ne
     return httpHandler
 }
 
-/* OnHttpShutdown registers a callback that runs as soon as the http server begins shutting down, before it waits for connections to drain. It is how an application unwinds handlers the server cannot: `http.Server.Shutdown` neither cancels the contexts of in-flight requests nor tracks hijacked connections, so a Server-Sent Events stream or a websocket blocks the whole shutdown timeout and is then cut mid-flight. Closing the hub those handlers select on (`ServerSentEventHub.Shutdown`) releases them at once. */
-func (instance *Application) OnHttpShutdown(hook func()) {
+/* OnHttpShutdown registers a callback that runs as soon as the http server begins shutting down, before it waits for connections to drain, handed the shutdown's context, which carries the shutdown deadline and is done when its budget ends. It is how an application unwinds handlers the server cannot: `http.Server.Shutdown` neither cancels the contexts of in-flight requests nor tracks hijacked connections, so a Server-Sent Events stream or a websocket blocks the whole shutdown timeout and is then cut mid-flight. Closing the hub those handlers select on releases them at once. */
+func (instance *Application) OnHttpShutdown(hook func(shutdownContext context.Context)) {
     if true == instance.registrationClosed() {
         exception.Panic(exception.NewError("may not register http shutdown hooks after boot", nil, nil))
     }
@@ -196,10 +198,10 @@ func (instance *Application) runHttp(
     instance.writeBootWarnings(logger)
 
     /* net/http starts these on their own goroutines the moment Shutdown is called; each is wrapped to recover a panic through the framework logger and to be counted into shutdownHooksDone, which awaitHttpServerEnd joins */
-    var shutdownHooksDone sync.WaitGroup
+    shutdownHooks := &httpShutdownHookSet{}
     for _, hook := range instance.httpShutdownHooks {
         httpServer.RegisterOnShutdown(
-            wrapHttpShutdownHook(hook, &shutdownHooksDone, logger),
+            wrapHttpShutdownHook(hook, shutdownHooks, logger),
         )
     }
 
@@ -222,7 +224,7 @@ func (instance *Application) runHttp(
         logger,
         httpShutdownTimeout.Value,
         httpKernel,
-        &shutdownHooksDone,
+        shutdownHooks,
     )
 }
 
@@ -259,17 +261,20 @@ func awaitHttpServerEnd(
     logger loggingcontract.Logger,
     shutdownTimeout time.Duration,
     httpKernel httpcontract.Kernel,
-    shutdownHooksDone *sync.WaitGroup,
+    shutdownHooks *httpShutdownHookSet,
 ) error {
     select {
     case <-ctx.Done():
         shutdownContext, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
         defer cancel()
 
+        /* stored before Shutdown, which starts the hooks */
+        shutdownHooks.shutdownContext.Store(shutdownContext)
+
         shutdownErr := httpServer.Shutdown(shutdownContext)
 
         /* Shutdown never waits for the hooks it starts and reports quiescent at once when only hijacked connections remain, so the hooks are joined within the same budget */
-        waitForHttpShutdownHooks(shutdownHooksDone, shutdownContext)
+        waitForHttpShutdownHooks(&shutdownHooks.done, shutdownContext)
 
         /* every phase of the wind-down runs and each failing one contributes its cause: the drain behind a failed Shutdown is the wait a hijacked connection needs */
         runErrs := make([]error, 0, 3)
@@ -336,19 +341,34 @@ func markHttpRunErrorLogged(err error) error {
     return wrappedErr
 }
 
-/* wrapHttpShutdownHook adapts a shutdown hook for net/http's RegisterOnShutdown, which never joins the goroutine it starts: the wrapper counts the hook into hooksDone and recovers a panic through the framework logger. */
+/* httpShutdownHookSet counts the shutdown hooks net/http starts and holds the shutdown's context they are handed, stored before Shutdown starts them. */
+type httpShutdownHookSet struct {
+    done            sync.WaitGroup
+    shutdownContext atomic.Value
+}
+
+/* contextForHooks answers the shutdown's context, and a background context for a hook started by a Shutdown the application did not call */
+func (instance *httpShutdownHookSet) contextForHooks() context.Context {
+    if shutdownContext, isContext := instance.shutdownContext.Load().(context.Context); true == isContext {
+        return shutdownContext
+    }
+
+    return context.Background()
+}
+
+/* wrapHttpShutdownHook adapts a shutdown hook for net/http's RegisterOnShutdown, which never joins the goroutine it starts: the wrapper counts the hook into the set, hands it the shutdown's context and recovers a panic through the framework logger. */
 func wrapHttpShutdownHook(
-    hook func(),
-    hooksDone *sync.WaitGroup,
+    hook func(shutdownContext context.Context),
+    hooks *httpShutdownHookSet,
     logger loggingcontract.Logger,
 ) func() {
-    hooksDone.Add(1)
+    hooks.done.Add(1)
 
     return func() {
-        defer hooksDone.Done()
+        defer hooks.done.Done()
         defer recoverHttpShutdownHook(logger)
 
-        hook()
+        hook(hooks.contextForHooks())
     }
 }
 

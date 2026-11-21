@@ -315,7 +315,7 @@ func run(ctx context.Context, embeddedEnvironmentFiles fs.FS, embeddedPublicFile
 - [`HttpMiddlewareModule`](../../application/contract/http_middleware_module.go)
 - [`HttpMiddlewareRegistrar`](../../application/contract/http_middleware_module.go)
 - [`MiddlewareRegistration`](../../application/contract/http_middleware_module.go)
-- [`MiddlewareFactory`](../../application/contract/http_middleware_module.go) — `func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware`, the form of a `MiddlewareRegistration.Factories` entry
+- [`pipeline.MiddlewareFactory`](../../http/middleware/pipeline/definition.go) — `func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error)`, the form of a `MiddlewareRegistration.Factories` entry; an error refuses the build, naming the middleware
 - [`HttpHandlerDecoratorModule`](../../application/contract/http_handler_decorator_module.go)
 - [`HttpHandlerDecorator`](../../application/contract/http_handler_decorator_module.go)
 - [`CliModule`](../../application/contract/cli_module.go)
@@ -329,7 +329,6 @@ func run(ctx context.Context, embeddedEnvironmentFiles fs.FS, embeddedPublicFile
 - [`RuntimeFlags`](../../application/cli.go)
 - [`RouteRegistrar`](../../application/application.go) — `func(kernelInstance kernelcontract.Kernel)` function alias used for deferred HTTP route registration
 - [`HttpMiddleware`](../../application/http_middleware.go)
-- [`MiddlewareFactory`](../../application/http_middleware.go) — the alias of the contract type
 - [`SecurityModule`](../../application/security_module.go) — module contract for registering security configuration via `RegisterSecurity(builder *securityconfig.Builder)`
 
 ### Constants
@@ -371,9 +370,9 @@ func run(ctx context.Context, embeddedEnvironmentFiles fs.FS, embeddedPublicFile
 - [`(*Application).RegisterCliCommand(command)`](../../application/application_cli.go)
 - [`(*Application).RegisterHttpRoute(pattern, handler, options)`](../../application/application_http.go) — queues one of the application's own routes with its `RouteOptions`, as `Router.Handle` registers one: a name, the methods, every method when they are empty, and the rest of the options, copied at the call
 - [`(*Application).RegisterHttpMiddlewares(middlewares []httpcontract.Middleware)`](../../application/application_http.go)
-- [`(*Application).RegisterHttpMiddlewareFactories(factories []applicationcontract.MiddlewareFactory)`](../../application/application_http.go)
+- [`(*Application).RegisterHttpMiddlewareFactories(factories []pipeline.MiddlewareFactory)`](../../application/application_http.go)
 - [`(*Application).RegisterHttpHandlerDecorator(decorator)`](../../application/application_http.go) — see [Handler decorators](#handler-decorators)
-- [`(*Application).OnHttpShutdown(hook)`](../../application/application_http.go) — runs the moment the http server begins shutting down, before it waits for connections to drain, which is how a Server-Sent Events stream or a websocket is released instead of blocking the whole shutdown timeout
+- [`(*Application).OnHttpShutdown(hook func(shutdownContext context.Context))`](../../application/application_http.go) — runs the moment the http server begins shutting down, before it waits for connections to drain, handed the shutdown's context, which carries the shutdown deadline and is done when its budget ends, which is how a Server-Sent Events stream or a websocket is released instead of blocking the whole shutdown timeout
 
 ### Boot refusals and the process exit
 

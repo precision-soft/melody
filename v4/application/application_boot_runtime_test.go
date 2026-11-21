@@ -1,6 +1,7 @@
 package application
 
 import (
+    middlewarepipeline "github.com/precision-soft/melody/v4/http/middleware/pipeline"
     "context"
     "errors"
     "os"
@@ -243,13 +244,13 @@ type lateBootRuntimeFactoryModule struct {
 
 func (instance *lateBootRuntimeFactoryModule) RegisterHttpMiddlewares(kernelInstance kernelcontract.Kernel, registrar applicationcontract.HttpMiddlewareRegistrar) {
     registrar.Use(applicationcontract.MiddlewareRegistration{
-        Factories: []applicationcontract.MiddlewareFactory{
-            func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
+        Factories: []middlewarepipeline.MiddlewareFactory{
+            func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
                 _, instance.factoryErr = runtime.FromRuntime[configcontract.Configuration](kernelInstance.BootRuntime(), config.ServiceConfig)
 
                 return func(next httpcontract.Handler) httpcontract.Handler {
                     return next
-                }
+                }, nil
             },
         },
     })

@@ -5,7 +5,8 @@ import (
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
 )
 
-type HttpMiddlewareFactory func(kernel kernelcontract.Kernel) (httpcontract.Middleware, error)
+/* MiddlewareFactory builds a middleware against the booted kernel; an error refuses the build, naming the middleware. */
+type MiddlewareFactory func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error)
 
 /* HttpMiddlewareDefinition is one middleware of the pipeline as the builder orders it. Name and Factory are required at Build; a definition with an empty Name is skipped. The builder copies the lists when it takes the definition. */
 type HttpMiddlewareDefinition struct {
@@ -25,7 +26,7 @@ type HttpMiddlewareDefinition struct {
     /* EnabledEnvironments restricts the definition to the named environments; nil or empty enables it everywhere. */
     EnabledEnvironments []string
 
-    Factory HttpMiddlewareFactory
+    Factory MiddlewareFactory
 
     /* ReplaceExisting lets this definition take the place of the one earlier definition of the same Name the environment and the group admit; with none earlier it is admitted as a single definition; refused beside AllowDuplicates, and over a Name admitted more than once. */
     ReplaceExisting bool
