@@ -222,7 +222,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
     builder.AddFirewall(
         "main",
         melodysecurity.NewPathPrefixMatcher("/"),
-        melodysecurity.NewResolverTokenSource(security.SessionTokenResolver(sessionUserLookup)),
+        melodysecurity.NewResolverTokenSource(security.SessionTokenResolver(sessionUserLookup), melodysecurity.ResolverTokenSourceConfig{}),
         melodysecurityconfig.FirewallConfig{
             /* the sign-in spends the same per-address budget as the nomenclature's writes: a password guessed in a loop is refused with 429 once the budget runs out, whichever replica each guess reaches. Both doors are exposed to the route manifest, since the frontend resolves their urls by name. */
             Login: melodysecurityconfig.LoginConfig{
@@ -319,6 +319,7 @@ func (instance *Module) registerMetricsFirewall(builder *melodysecurityconfig.Bu
                     Roles:          []string{metricsScraperRole},
                 }),
             }),
+            melodysecurity.AuthenticatorTokenSourceConfig{Stateless: true},
         ),
         melodysecurityconfig.FirewallConfig{
             Override: melodysecurityconfig.FirewallOverride{

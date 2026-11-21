@@ -125,7 +125,7 @@ func (instance *firewallDoorTestModule) RegisterSecurity(builder *securityconfig
         security.NewPathPrefixMatcher("/"),
         security.NewResolverTokenSource(func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
             return security.NewAnonymousToken(), nil
-        }),
+        }, security.ResolverTokenSourceConfig{}),
         securityconfig.FirewallConfig{Login: securityconfig.LoginConfig{Path: "/login/check", Name: "door.login", Handler: &firewallDoorTestLoginHandler{}}},
     )
 }

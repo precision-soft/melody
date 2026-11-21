@@ -1377,3 +1377,9 @@ func TestHmacTokenSource_ReadsAnActorSignedWithTheLegacySpelling(t *testing.T) {
         t.Fatalf("expected the PascalCase actor read, got %v", actor)
     }
 }
+
+func TestHmacTokenSource_IsStateless(t *testing.T) {
+    if false == hmacTestSource(nil).Stateless() {
+        t.Fatalf("expected the hmac source to answer stateless")
+    }
+}

@@ -168,6 +168,10 @@ func (instance *anonymousProbeTokenSource) Name() string {
     return "anonymous"
 }
 
+func (instance *anonymousProbeTokenSource) Stateless() bool {
+    return false
+}
+
 func (instance *anonymousProbeTokenSource) Resolve(
     runtimeInstance containercontract.Runtime,
     request httpcontract.Request,

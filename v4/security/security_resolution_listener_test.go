@@ -26,6 +26,8 @@ type resolutionListenerTestTokenSource struct {
 
 func (instance *resolutionListenerTestTokenSource) Name() string { return "test" }
 
+func (instance *resolutionListenerTestTokenSource) Stateless() bool { return false }
+
 func (instance *resolutionListenerTestTokenSource) Resolve(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     return instance.resolveToken, instance.resolveErr
 }
@@ -33,6 +35,8 @@ func (instance *resolutionListenerTestTokenSource) Resolve(runtimeInstance conta
 type resolutionListenerTestPanickingTokenSource struct{}
 
 func (instance *resolutionListenerTestPanickingTokenSource) Name() string { return "panicking" }
+
+func (instance *resolutionListenerTestPanickingTokenSource) Stateless() bool { return false }
 
 func (instance *resolutionListenerTestPanickingTokenSource) Resolve(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     panic("database connection failed")
@@ -756,6 +760,8 @@ func TestSecurityResolutionListener_AnAsteriskFormTargetIsResolvedByTheRootFirew
 type resolutionListenerTestMarkedPanickingTokenSource struct{}
 
 func (instance *resolutionListenerTestMarkedPanickingTokenSource) Name() string { return "marked-panicking" }
+
+func (instance *resolutionListenerTestMarkedPanickingTokenSource) Stateless() bool { return false }
 
 func (instance *resolutionListenerTestMarkedPanickingTokenSource) Resolve(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     panic(exception.MarkInfrastructureFailure(errors.New("redis is down")))

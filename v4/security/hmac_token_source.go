@@ -134,6 +134,11 @@ func (instance *HmacTokenSource) Name() string {
     return hmacTokenSourceName
 }
 
+/* Stateless: the signed envelope is a header the caller writes on every request. */
+func (instance *HmacTokenSource) Stateless() bool {
+    return true
+}
+
 func (instance *HmacTokenSource) Resolve(
     runtimeInstance containercontract.Runtime,
     request httpcontract.Request,

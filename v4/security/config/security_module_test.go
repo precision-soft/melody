@@ -285,6 +285,10 @@ func (instance *typedNilTokenSourceProbe) Name() string {
     return "typed-nil-probe"
 }
 
+func (instance *typedNilTokenSourceProbe) Stateless() bool {
+    return false
+}
+
 func (instance *typedNilTokenSourceProbe) Resolve(
     runtimeInstance containercontract.Runtime,
     request httpcontract.Request,

@@ -66,7 +66,7 @@ func TestNewResolverTokenSource_NilResolverPanics(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
         func() {
-            _ = NewResolverTokenSource(nil)
+            _ = NewResolverTokenSource(nil, ResolverTokenSourceConfig{})
         },
         "token resolver is nil",
     )
@@ -77,6 +77,7 @@ func TestResolverTokenSource_NameIdentifiesTheSource(t *testing.T) {
         func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
             return nil, nil
         },
+        ResolverTokenSourceConfig{},
     )
 
     if "tokenResolver" != tokenSource.Name() {
@@ -92,6 +93,7 @@ func TestResolverTokenSource_ResolveAnswersAnonymousWhenTheResolverFindsNobody(t
         func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
             return nil, nil
         },
+        ResolverTokenSourceConfig{},
     )
 
     token, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
@@ -117,6 +119,7 @@ func TestResolverTokenSource_ResolveAnswersTheResolvedToken(t *testing.T) {
         func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
             return resolvedToken, nil
         },
+        ResolverTokenSourceConfig{},
     )
 
     token, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
@@ -142,6 +145,7 @@ func TestResolverTokenSource_ResolveHandsTheRequestToTheResolver(t *testing.T) {
 
             return nil, nil
         },
+        ResolverTokenSourceConfig{},
     )
 
     _, err := tokenSource.Resolve(runtimeInstance, request)
@@ -158,14 +162,14 @@ func TestNewAuthenticatorTokenSource_NilManagerPanics(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
         func() {
-            _ = NewAuthenticatorTokenSource(nil)
+            _ = NewAuthenticatorTokenSource(nil, AuthenticatorTokenSourceConfig{})
         },
         "authenticator manager is nil",
     )
 }
 
 func TestAuthenticatorTokenSource_NameIdentifiesTheSource(t *testing.T) {
-    tokenSource := NewAuthenticatorTokenSource(NewAuthenticatorManager(nil))
+    tokenSource := NewAuthenticatorTokenSource(NewAuthenticatorManager(nil), AuthenticatorTokenSourceConfig{})
 
     if "authenticatorManager" != tokenSource.Name() {
         t.Fatalf("expected the source to name itself authenticatorManager, got %q", tokenSource.Name())
@@ -189,6 +193,7 @@ func TestAuthenticatorTokenSource_ResolveAnswersAnonymousWhenNoAuthenticatorSupp
                 },
             },
         }),
+        AuthenticatorTokenSourceConfig{},
     )
 
     token, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
@@ -220,6 +225,7 @@ func TestAuthenticatorTokenSource_ResolveEmitsLoginSuccess(t *testing.T) {
                 },
             },
         }),
+        AuthenticatorTokenSourceConfig{},
     )
 
     token, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
@@ -251,6 +257,7 @@ func TestAuthenticatorTokenSource_ResolveAnnouncesRejectedCredentialsAsAFailure(
                 },
             },
         }),
+        AuthenticatorTokenSourceConfig{},
     )
 
     token, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
@@ -284,6 +291,7 @@ func TestAuthenticatorTokenSource_ResolveEmitsLoginFailureAndKeepsTheError(t *te
                 },
             },
         }),
+        AuthenticatorTokenSourceConfig{},
     )
 
     _, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
@@ -320,6 +328,7 @@ func TestAuthenticatorTokenSource_ResolveKeepsTheAuthenticationErrorWhenTheFailu
                 },
             },
         }),
+        AuthenticatorTokenSourceConfig{},
     )
 
     _, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
@@ -356,6 +365,7 @@ func TestAuthenticatorTokenSource_ResolveFailsWhenTheSuccessDispatchFails(t *tes
                 },
             },
         }),
+        AuthenticatorTokenSourceConfig{},
     )
 
     token, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
@@ -384,6 +394,7 @@ func TestAuthenticatorTokenSource_APendingSecondFactorIsNotAnnouncedAsAFailure(t
                 },
             },
         }),
+        AuthenticatorTokenSourceConfig{},
     )
 
     token, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
@@ -429,6 +440,7 @@ func TestAuthenticatorTokenSource_ARejectedSecondFactorIsAnnouncedAsAFailure(t *
                 },
             },
         }),
+        AuthenticatorTokenSourceConfig{},
     )
 
     token, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
@@ -478,6 +490,7 @@ func TestResolverTokenSource_ResolveReadsATypedNilTokenAsAbsent(t *testing.T) {
 
             return unassignedToken, nil
         },
+        ResolverTokenSourceConfig{},
     )
 
     token, err := tokenSource.Resolve(nil, nil)
@@ -505,6 +518,7 @@ func TestAuthenticatorTokenSource_AWrongApiKeyIsAnnouncedAsALoginFailure(t *test
                 Roles:          []string{"ROLE_SERVICE"},
             }),
         }),
+        AuthenticatorTokenSourceConfig{},
     )
 
     token, err := tokenSource.Resolve(
@@ -547,6 +561,7 @@ func TestAuthenticatorTokenSource_TheFirstSupportingAuthenticatorDecides(t *test
                 },
             },
         }),
+        AuthenticatorTokenSourceConfig{},
     )
 
     token, err := tokenSource.Resolve(
@@ -583,6 +598,7 @@ func TestAuthenticatorTokenSource_ResolveFailsWhenTheRejectedCredentialsDispatch
                 Roles:          []string{"ROLE_SERVICE"},
             }),
         }),
+        AuthenticatorTokenSourceConfig{},
     )
 
     _, err := tokenSource.Resolve(
@@ -618,6 +634,7 @@ func TestAuthenticatorTokenSource_AFailedLoginFailureDispatchKeepsTheStatusAndFi
                 },
             },
         }),
+        AuthenticatorTokenSourceConfig{},
     )
 
     _, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
@@ -656,6 +673,7 @@ func TestAuthenticatorTokenSource_AFailedRejectedCredentialsDispatchKeepsTheReje
                 Roles:          []string{"ROLE_SERVICE"},
             }),
         }),
+        AuthenticatorTokenSourceConfig{},
     )
 
     _, err := tokenSource.Resolve(
@@ -677,6 +695,7 @@ func authenticatorTokenSourceAnswering(token securitycontract.Token, err error) 
                 },
             },
         }),
+        AuthenticatorTokenSourceConfig{},
     )
 }
 
@@ -762,5 +781,29 @@ func TestKernel_AnAuthenticatorOutageServesAPublicRouteAndRefusesAProtectedOneWi
         if nethttp.StatusTooManyRequests != recorder.Code || "" != recorder.Header().Get("Retry-After") {
             t.Fatalf("expected a marked error that answers 429 to keep it on %s, got %d %q", path, recorder.Code, recorder.Header().Get("Retry-After"))
         }
+    }
+}
+
+func TestResolverTokenSource_IsStatefulUnlessItsConfigDeclaresOtherwise(t *testing.T) {
+    resolver := func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+        return nil, nil
+    }
+
+    if true == NewResolverTokenSource(resolver, ResolverTokenSourceConfig{}).Stateless() {
+        t.Fatalf("expected the zero config to declare the resolver source stateful")
+    }
+
+    if false == NewResolverTokenSource(resolver, ResolverTokenSourceConfig{Stateless: true}).Stateless() {
+        t.Fatalf("expected the declared resolver source to answer stateless")
+    }
+}
+
+func TestAuthenticatorTokenSource_IsStatefulUnlessItsConfigDeclaresOtherwise(t *testing.T) {
+    if true == NewAuthenticatorTokenSource(NewAuthenticatorManager(nil), AuthenticatorTokenSourceConfig{}).Stateless() {
+        t.Fatalf("expected the zero config to declare the authenticator source stateful")
+    }
+
+    if false == NewAuthenticatorTokenSource(NewAuthenticatorManager(nil), AuthenticatorTokenSourceConfig{Stateless: true}).Stateless() {
+        t.Fatalf("expected the declared authenticator source to answer stateless")
     }
 }

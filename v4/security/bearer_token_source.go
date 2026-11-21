@@ -39,6 +39,11 @@ func (instance *BearerTokenSource) Name() string {
     return "bearerToken"
 }
 
+/* Stateless: the bearer token is a header the caller writes on every request. */
+func (instance *BearerTokenSource) Stateless() bool {
+    return true
+}
+
 func (instance *BearerTokenSource) Resolve(
     runtimeInstance containercontract.Runtime,
     request httpcontract.Request,

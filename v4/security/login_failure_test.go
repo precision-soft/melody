@@ -61,6 +61,7 @@ func TestRaisesLoginFailure_TheTokenSourceRaisesTheEventForARefusedCredentialOnl
                         },
                     },
                 }),
+                AuthenticatorTokenSourceConfig{},
             )
 
             _, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))

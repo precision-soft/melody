@@ -159,6 +159,11 @@ func (instance *ImpersonationTokenSource) Name() string {
     return instance.inner.Name()
 }
 
+/* Stateless answers the inner source's: the switch header is one the caller writes, never a cookie. */
+func (instance *ImpersonationTokenSource) Stateless() bool {
+    return instance.inner.Stateless()
+}
+
 func (instance *ImpersonationTokenSource) Resolve(
     runtimeInstance containercontract.Runtime,
     request httpcontract.Request,

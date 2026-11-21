@@ -560,6 +560,10 @@ type anonymousDoorTokenSource struct{}
 
 func (instance *anonymousDoorTokenSource) Name() string { return "anonymous" }
 
+func (instance *anonymousDoorTokenSource) Stateless() bool {
+    return false
+}
+
 func (instance *anonymousDoorTokenSource) Resolve(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
     return melodysecurity.NewAnonymousToken(), nil
 }

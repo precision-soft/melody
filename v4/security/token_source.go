@@ -12,20 +12,31 @@ import (
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-func NewResolverTokenSource(resolver securitycontract.TokenResolver) *ResolverTokenSource {
+/* ResolverTokenSourceConfig: the zero value declares the source stateful, the protected answer. */
+type ResolverTokenSourceConfig struct {
+    /* Stateless declares that the resolver reads only a credential the caller presents on every request, nothing a browser attaches by itself; a resolver reading a session leaves it false. */
+    Stateless bool
+}
+
+func NewResolverTokenSource(resolver securitycontract.TokenResolver, config ResolverTokenSourceConfig) *ResolverTokenSource {
     if nil == resolver {
         exception.Panic(exception.NewError("token resolver is nil", nil, nil))
     }
 
-    return &ResolverTokenSource{resolver: resolver}
+    return &ResolverTokenSource{resolver: resolver, config: config}
 }
 
 type ResolverTokenSource struct {
     resolver securitycontract.TokenResolver
+    config   ResolverTokenSourceConfig
 }
 
 func (instance *ResolverTokenSource) Name() string {
     return "tokenResolver"
+}
+
+func (instance *ResolverTokenSource) Stateless() bool {
+    return instance.config.Stateless
 }
 
 func (instance *ResolverTokenSource) Resolve(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
@@ -44,20 +55,31 @@ func (instance *ResolverTokenSource) Resolve(runtimeInstance containercontract.R
 
 var _ securitycontract.TokenSource = (*ResolverTokenSource)(nil)
 
-func NewAuthenticatorTokenSource(manager *AuthenticatorManager) *AuthenticatorTokenSource {
+/* AuthenticatorTokenSourceConfig: the zero value declares the source stateful, the protected answer, since its authenticators are the application's. */
+type AuthenticatorTokenSourceConfig struct {
+    /* Stateless declares that every authenticator of the manager reads only a credential the caller presents on every request, nothing a browser attaches by itself. */
+    Stateless bool
+}
+
+func NewAuthenticatorTokenSource(manager *AuthenticatorManager, config AuthenticatorTokenSourceConfig) *AuthenticatorTokenSource {
     if nil == manager {
         exception.Panic(exception.NewError("authenticator manager is nil", nil, nil))
     }
 
-    return &AuthenticatorTokenSource{manager: manager}
+    return &AuthenticatorTokenSource{manager: manager, config: config}
 }
 
 type AuthenticatorTokenSource struct {
     manager *AuthenticatorManager
+    config  AuthenticatorTokenSourceConfig
 }
 
 func (instance *AuthenticatorTokenSource) Name() string {
     return "authenticatorManager"
+}
+
+func (instance *AuthenticatorTokenSource) Stateless() bool {
+    return instance.config.Stateless
 }
 
 func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {

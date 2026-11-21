@@ -413,6 +413,14 @@ The six `service.<module>` names of a module's principal service, `service.cache
 
 **Remedy.** Pass `security.AccessDecisionManagerConfig{}` for the outcomes as they were; name the strategy constant rather than its number.
 
+### Security: a token source declares whether it is stateless
+
+**What changed.** [`TokenSource`](../security/contract/token_source.go) gains `Stateless() bool`: true when the source reads only a credential the caller presents on every request (a bearer token, a signed envelope, an api key) and nothing a browser attaches by itself. The bearer and HMAC sources answer true; [`NewResolverTokenSource`](../security/token_source.go) and `NewAuthenticatorTokenSource` take `ResolverTokenSourceConfig{Stateless}` and `AuthenticatorTokenSourceConfig{Stateless}`, false by default; the impersonation source answers its inner one's. Nothing in the framework reads the answer yet; the cross-site check, which exempts a firewall whose source is stateless, reads it once it lands.
+
+**Symptom.** A `TokenSource` of the application's own misses `Stateless`; `NewResolverTokenSource(resolver)` and `NewAuthenticatorTokenSource(manager)` report not enough arguments.
+
+**Remedy.** Answer `false` unless the source reads only what the caller writes on every request; pass the zero config, or `Stateless: true` for a source of that kind.
+
 ### Security: an authenticator, a rule and a token resolver receive the runtime
 
 **What changed.** [`Authenticator.Authenticate`](../security/contract/authenticator.go) is `Authenticate(runtimeInstance, request) (Token, error)`, [`Rule.Check`](../security/contract/rule.go) is `Check(runtimeInstance, request) error` and [`TokenResolver`](../security/contract/token.go) is `func(runtimeInstance, request) (Token, error)`; `AuthenticatorManager.Authenticate` and `Firewall.Check` take the runtime first. The framework hands the runtime of the request it serves, and the TOTP second factor reads its stores through it. A resolver's error is answered as a token source's: refused with its status, `500` for a plain one, and read as unavailable when it carries `exception.MarkInfrastructureFailure`; a typed nil error is no error. `Supports`, `Applies` and `Matches` are unchanged.

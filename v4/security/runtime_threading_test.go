@@ -120,7 +120,7 @@ func TestResolverTokenSource_ResolveHandsTheRuntimeToTheResolver(t *testing.T) {
         seen = resolverRuntime
 
         return nil, nil
-    })
+    }, ResolverTokenSourceConfig{})
 
     if _, err := source.Resolve(runtimeInstance, newFirewallTestRequest("/x")); nil != err || runtimeInstance != seen {
         t.Fatalf("expected the resolver handed the source's runtime, got %v (%v)", seen, err)
@@ -131,7 +131,7 @@ func TestResolverTokenSource_ResolveAnswersTheResolversErrorAndNoToken(t *testin
     resolveErr := errors.New("the session store is down")
     source := NewResolverTokenSource(func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
         return NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil), resolveErr
-    })
+    }, ResolverTokenSourceConfig{})
 
     token, err := source.Resolve(newTestRuntime(), newFirewallTestRequest("/x"))
     if nil != token || false == errors.Is(err, resolveErr) {
@@ -147,7 +147,7 @@ func TestResolverTokenSource_ATypedNilResolverErrorIsNoError(t *testing.T) {
     var typedNil *typedNilResolverError
     source := NewResolverTokenSource(func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
         return NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil), typedNil
-    })
+    }, ResolverTokenSourceConfig{})
 
     token, err := source.Resolve(newTestRuntime(), newFirewallTestRequest("/x"))
     if nil != err || nil == token || false == token.IsAuthenticated() {
@@ -160,7 +160,7 @@ func TestAuthenticatorTokenSource_ResolveHandsItsRuntimeToTheAuthenticator(t *te
     authenticator := &runtimeRecordingAuthenticator{}
     runtimeInstance, _ := newTokenSourceTestRuntime(t)
 
-    source := NewAuthenticatorTokenSource(NewAuthenticatorManager([]securitycontract.Authenticator{authenticator}))
+    source := NewAuthenticatorTokenSource(NewAuthenticatorManager([]securitycontract.Authenticator{authenticator}), AuthenticatorTokenSourceConfig{})
     if _, err := source.Resolve(runtimeInstance, newSecurityTestRequest("GET", "/x", nil, newTestRuntime())); nil != err {
         t.Fatalf("unexpected error: %v", err)
     }

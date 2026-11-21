@@ -678,7 +678,7 @@ type doorReachUnknownModule struct {
 func (instance *doorReachUnknownModule) RegisterSecurity(builder *securityconfig.Builder) {
     anonymous := security.NewResolverTokenSource(func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
         return security.NewAnonymousToken(), nil
-    })
+    }, security.ResolverTokenSourceConfig{})
 
     builder.SetGlobal(securityconfig.GlobalConfig{AccessControl: security.NewAccessControl(nil)})
     builder.AddFirewall("main", unclaimedDoorMatcher{}, anonymous, securityconfig.FirewallConfig{Login: securityconfig.LoginConfig{Path: "/login", Handler: answeringLoginHandler{}}})

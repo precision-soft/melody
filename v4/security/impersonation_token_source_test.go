@@ -18,11 +18,16 @@ import (
 
 /* fixedTokenSource resolves a preset token, standing in for any primary source. */
 type fixedTokenSource struct {
-    token securitycontract.Token
+    token     securitycontract.Token
+    stateless bool
 }
 
 func (instance *fixedTokenSource) Name() string {
     return "fixed"
+}
+
+func (instance *fixedTokenSource) Stateless() bool {
+    return instance.stateless
 }
 
 func (instance *fixedTokenSource) Resolve(
@@ -579,4 +584,17 @@ func TestNewImpersonationTokenSource_RefusesAnUnknownRoleMode(t *testing.T) {
             RoleMode: ImpersonationRoleMode(7),
         })
     })
+}
+
+func TestImpersonationTokenSource_AnswersItsInnersStatelessness(t *testing.T) {
+    for _, stateless := range []bool{true, false} {
+        source := NewImpersonationTokenSource(ImpersonationTokenSourceConfig{
+            Inner: &fixedTokenSource{stateless: stateless},
+            Users: &mapUserResolver{usersById: map[string]securitycontract.Token{}},
+        })
+
+        if stateless != source.Stateless() {
+            t.Fatalf("expected the impersonation source to answer its inner's %v", stateless)
+        }
+    }
 }

@@ -263,3 +263,11 @@ func TestNewBearerTokenSource_ATypedNilEnricherIsRefused(t *testing.T) {
         NewBearerTokenSource(NewOpaqueTokenValidator(NewInMemoryTokenStore(InMemoryTokenStoreConfig{})), unassignedEnricher)
     })
 }
+
+func TestBearerTokenSource_IsStateless(t *testing.T) {
+    source := NewBearerTokenSource(NewOpaqueTokenValidator(NewInMemoryTokenStore(InMemoryTokenStoreConfig{})), nil)
+
+    if false == source.Stateless() {
+        t.Fatalf("expected the bearer source to answer stateless")
+    }
+}

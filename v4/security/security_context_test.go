@@ -12,7 +12,7 @@ func TestSecurityContext_IsGranted_TypedNilTokenAnswersFalse(t *testing.T) {
     firewall := NewCompiledFirewall(CompiledFirewallConfig{
         Name:                        "main",
         Matcher:                     NewPathPrefixMatcher("/"),
-        TokenSource:                 NewResolverTokenSource(func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) { return nil, nil }),
+        TokenSource:                 NewResolverTokenSource(func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) { return nil, nil }, ResolverTokenSourceConfig{}),
         AccessControl:               NewAccessControl(nil),
         AccessDecisionManager:       NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{NewRoleVoter()}, AccessDecisionManagerConfig{}),
         AccessDecisionManagerSource: SourceFirewall,
@@ -40,7 +40,7 @@ func TestSecurityContext_IsGranted_RefusesAnUnauthenticatedTokenTheVotersRefuse(
     firewall := NewCompiledFirewall(CompiledFirewallConfig{
         Name:                        "main",
         Matcher:                     NewPathPrefixMatcher("/"),
-        TokenSource:                 NewResolverTokenSource(func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) { return token, nil }),
+        TokenSource:                 NewResolverTokenSource(func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) { return token, nil }, ResolverTokenSourceConfig{}),
         AccessControl:               NewAccessControl(nil),
         AccessDecisionManager:       accessDecisionManager,
         AccessDecisionManagerSource: SourceFirewall,

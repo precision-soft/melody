@@ -426,3 +426,40 @@ func TestRegisterSecurity_TheInternalFirewallAnswersAGuardOutageWith503AndRetryA
         })
     }
 }
+
+func TestRegisterSecurity_DeclaresWhichFirewallsAreStateless(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.metricsToken = "scrape-secret"
+    moduleInstance.buildInternalAuth()
+    moduleInstance.buildTokenAuth()
+    moduleInstance.buildImpersonation()
+
+    builder := melodysecurityconfig.NewBuilder()
+    moduleInstance.RegisterSecurity(builder)
+
+    expected := map[string]bool{
+        "internal":    true,
+        "token":       true,
+        "deviceToken": true,
+        "metrics":     true,
+        "main":        false,
+    }
+
+    seen := map[string]bool{}
+    for _, firewall := range builder.BuildAndCompile().Firewalls() {
+        expectedStateless, known := expected[firewall.Name()]
+        if false == known {
+            t.Fatalf("firewall %q has no expected statelessness; name it here", firewall.Name())
+        }
+
+        if expectedStateless != firewall.TokenSource().Stateless() {
+            t.Fatalf("expected firewall %q to answer Stateless() %v", firewall.Name(), expectedStateless)
+        }
+
+        seen[firewall.Name()] = true
+    }
+
+    if len(expected) != len(seen) {
+        t.Fatalf("expected the firewalls %v, saw %v", expected, seen)
+    }
+}

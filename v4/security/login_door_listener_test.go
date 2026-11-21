@@ -119,6 +119,8 @@ type doorTokenSource struct {
 
 func (instance *doorTokenSource) Name() string { return "door" }
 
+func (instance *doorTokenSource) Stateless() bool { return false }
+
 func (instance *doorTokenSource) Resolve(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     if nil != instance.token {
         return instance.token, nil
@@ -1251,6 +1253,8 @@ func TestLoginDoor_WithoutAnAuthenticatorAHandlerRotationOutageIsASessionRefusal
 type sessionUnavailableTokenSource struct{}
 
 func (instance *sessionUnavailableTokenSource) Name() string { return "session" }
+
+func (instance *sessionUnavailableTokenSource) Stateless() bool { return false }
 
 func (instance *sessionUnavailableTokenSource) Resolve(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     if _, sessionErr := http.RequestSession(request); nil != sessionErr {

@@ -1587,7 +1587,7 @@ func TestServeHttp_AnAsteriskFormTargetAnswersTheRootFirewallsRefusal(t *testing
         MatcherDescription: "matcher:main",
         TokenSource: security.NewResolverTokenSource(func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
             return security.NewAnonymousToken(), nil
-        }),
+        }, security.ResolverTokenSourceConfig{}),
         AccessControl: security.NewAccessControl([]security.AccessControlRule{
             accesscontrol.NewRawPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{"ROLE_USER"}}),
         }),
@@ -1663,7 +1663,7 @@ func TestServeHttp_ASlashLessPathThatFoldsIsRefusedBeforeTheFirewallAndTheRouter
         MatcherDescription: "matcher:main",
         TokenSource: security.NewResolverTokenSource(func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
             return security.NewAnonymousToken(), nil
-        }),
+        }, security.ResolverTokenSourceConfig{}),
         AccessControl: security.NewAccessControl([]security.AccessControlRule{
             accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
             accesscontrol.NewExactRule("/public", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}}),
