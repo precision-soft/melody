@@ -20,7 +20,7 @@ func TestTwoFactorResetCommand_DeletesTheEnrollmentOfTheNamedAccount(t *testing.
     connector := &recordingResetConnector{}
     store := twofactor.NewStore(bun.NewDB(sql.OpenDB(connector), mysqldialect.New()))
 
-    account, known, findErr := fixture.userService.FindByUsername(context.Background(), "editor")
+    account, known, findErr := fixture.userService.FindByUsername(exampleTestRuntime(), "editor")
     if nil != findErr || false == known {
         t.Fatalf("expected the seeded editor, got %v %v", known, findErr)
     }
@@ -85,7 +85,7 @@ func TestTwoFactorResetCommand_ReadsTheDirectoryPastTheCache(t *testing.T) {
     connector := &recordingResetConnector{}
     store := twofactor.NewStore(bun.NewDB(sql.OpenDB(connector), mysqldialect.New()))
 
-    account, known, findErr := fixture.userService.FindByUsername(context.Background(), "editor")
+    account, known, findErr := fixture.userService.FindByUsername(exampleTestRuntime(), "editor")
     if nil != findErr || false == known {
         t.Fatalf("expected the seeded editor cached, got %v %v", known, findErr)
     }

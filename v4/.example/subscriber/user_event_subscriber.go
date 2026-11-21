@@ -7,6 +7,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/service"
     melodycache "github.com/precision-soft/melody/v4/cache"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
 )
@@ -52,22 +53,22 @@ func (instance *UserEventSubscriber) onUserCreated() melodyeventcontract.EventLi
             return nil
         }
 
-        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+        detachedCache := melodycache.FromRuntime(melodyruntime.WithContext(runtimeInstance, context.WithoutCancel(runtimeInstance.Context())))
 
-        byIdDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyUserById(payloadInstance.User().Id))
+        byIdDeleteErr := detachedCache.Delete(service.CacheKeyUserById(payloadInstance.User().Id))
         if nil != byIdDeleteErr {
             return byIdDeleteErr
         }
 
         usernameCacheKey := userUsernameCacheKey(payloadInstance.User().Username)
         if "" != usernameCacheKey {
-            byUsernameDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), usernameCacheKey)
+            byUsernameDeleteErr := detachedCache.Delete(usernameCacheKey)
             if nil != byUsernameDeleteErr {
                 return byUsernameDeleteErr
             }
         }
 
-        listDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyUserList)
+        listDeleteErr := detachedCache.Delete(service.CacheKeyUserList)
         if nil != listDeleteErr {
             return listDeleteErr
         }
@@ -92,16 +93,16 @@ func (instance *UserEventSubscriber) onUserUpdated() melodyeventcontract.EventLi
             return nil
         }
 
-        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+        detachedCache := melodycache.FromRuntime(melodyruntime.WithContext(runtimeInstance, context.WithoutCancel(runtimeInstance.Context())))
 
-        byIdDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyUserById(payloadInstance.User().Id))
+        byIdDeleteErr := detachedCache.Delete(service.CacheKeyUserById(payloadInstance.User().Id))
         if nil != byIdDeleteErr {
             return byIdDeleteErr
         }
 
         usernameCacheKey := userUsernameCacheKey(payloadInstance.User().Username)
         if "" != usernameCacheKey {
-            byUsernameDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), usernameCacheKey)
+            byUsernameDeleteErr := detachedCache.Delete(usernameCacheKey)
             if nil != byUsernameDeleteErr {
                 return byUsernameDeleteErr
             }
@@ -110,13 +111,13 @@ func (instance *UserEventSubscriber) onUserUpdated() melodyeventcontract.EventLi
         /* a rename leaves the by-username entry keyed on the spelling before the rename, so it is cleared under that name too: otherwise the pre-rename credentials would keep authenticating and that name could not be registered again */
         previousUsernameCacheKey := userUsernameCacheKey(payloadInstance.PreviousUsername())
         if "" != previousUsernameCacheKey && previousUsernameCacheKey != usernameCacheKey {
-            previousUsernameDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), previousUsernameCacheKey)
+            previousUsernameDeleteErr := detachedCache.Delete(previousUsernameCacheKey)
             if nil != previousUsernameDeleteErr {
                 return previousUsernameDeleteErr
             }
         }
 
-        listDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyUserList)
+        listDeleteErr := detachedCache.Delete(service.CacheKeyUserList)
         if nil != listDeleteErr {
             return listDeleteErr
         }
@@ -141,22 +142,22 @@ func (instance *UserEventSubscriber) onUserDeleted() melodyeventcontract.EventLi
             return nil
         }
 
-        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+        detachedCache := melodycache.FromRuntime(melodyruntime.WithContext(runtimeInstance, context.WithoutCancel(runtimeInstance.Context())))
 
-        byIdDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyUserById(payloadInstance.UserId()))
+        byIdDeleteErr := detachedCache.Delete(service.CacheKeyUserById(payloadInstance.UserId()))
         if nil != byIdDeleteErr {
             return byIdDeleteErr
         }
 
         usernameCacheKey := userUsernameCacheKey(payloadInstance.Username())
         if "" != usernameCacheKey {
-            byUsernameDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), usernameCacheKey)
+            byUsernameDeleteErr := detachedCache.Delete(usernameCacheKey)
             if nil != byUsernameDeleteErr {
                 return byUsernameDeleteErr
             }
         }
 
-        listDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyUserList)
+        listDeleteErr := detachedCache.Delete(service.CacheKeyUserList)
         if nil != listDeleteErr {
             return listDeleteErr
         }

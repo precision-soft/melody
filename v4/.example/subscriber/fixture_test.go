@@ -13,6 +13,8 @@ import (
     "github.com/uptrace/bun/dialect"
     "github.com/uptrace/bun/dialect/feature"
     "github.com/uptrace/bun/schema"
+    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
 )
 
 /* recordingDriver is the least a bun handle needs in order to EXECUTE a statement and say what it executed: the store under test deletes through Exec, and what a test reads is the statement bun composed and sent, not the answer a server would give. Every statement is answered as one row affected. The migration package keeps a twin of this shape; a test fixture cannot cross a package boundary, so it is written where this package can reach it. */
@@ -155,4 +157,12 @@ func fixedTwoFactorStore(store *twofactor.Store) twofactor.StoreSource {
     return func(runtimeInstance melodycontainercontract.Runtime) (*twofactor.Store, error) {
         return store, nil
     }
+}
+
+func exampleTestRuntime() melodycontainercontract.Runtime {
+    return exampleTestRuntimeUnder(context.Background())
+}
+
+func exampleTestRuntimeUnder(ctx context.Context) melodycontainercontract.Runtime {
+    return melodyruntime.NewRun(ctx, melodycontainer.NewContainer(melodycontainer.ContainerConfig{}).NewScope())
 }

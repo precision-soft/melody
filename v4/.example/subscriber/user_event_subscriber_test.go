@@ -27,12 +27,12 @@ type deleteCountingCache struct {
     deletes map[string]int
 }
 
-func (instance *deleteCountingCache) Delete(ctx context.Context, key string) error {
+func (instance *deleteCountingCache) Delete(runtimeInstance melodycontainercontract.Runtime, key string) error {
     instance.mutex.Lock()
     instance.deletes[key]++
     instance.mutex.Unlock()
 
-    return instance.Cache.Delete(ctx, key)
+    return instance.Cache.Delete(runtimeInstance, key)
 }
 
 /* userUpdateUnderTest answers a runtime holding only the cache: the listener drops its entries before it notifies, so the notification hub it cannot resolve ends the call after the drops under test */
@@ -74,7 +74,7 @@ func TestUserEventSubscriber_DropsBothSpellingsOnARename(t *testing.T) {
         service.CacheKeyUserList,
     }
     for _, key := range keyList {
-        if setErr := cacheInstance.Set(context.Background(), key, "stale", melodybound.UnlimitedDuration()); nil != setErr {
+        if setErr := cacheInstance.Set(exampleTestRuntime(), key, "stale", melodybound.UnlimitedDuration()); nil != setErr {
             t.Fatalf("prime %s: %v", key, setErr)
         }
     }
@@ -82,7 +82,7 @@ func TestUserEventSubscriber_DropsBothSpellingsOnARename(t *testing.T) {
     dispatchUserUpdated(runtimeInstance, renamed, "ada")
 
     for _, key := range keyList {
-        if held, _ := cacheInstance.Has(context.Background(), key); true == held {
+        if held, _ := cacheInstance.Has(exampleTestRuntime(), key); true == held {
             t.Fatalf("expected %s dropped after the rename", key)
         }
     }
@@ -95,5 +95,27 @@ func TestUserEventSubscriber_DeletesTheUsernameOnceWhenTheNameIsKept(t *testing.
 
     if deletes := cacheInstance.deletes[service.CacheKeyUserByUsername("grace")]; 1 != deletes {
         t.Fatalf("expected the kept username dropped once, got %d", deletes)
+    }
+}
+
+func TestUserEventSubscriber_DropsTheEntriesUnderACanceledEvent(t *testing.T) {
+    cacheInstance, runtimeInstance := userUpdateUnderTest(t)
+
+    keyList := []string{service.CacheKeyUserById("user-7"), service.CacheKeyUserList}
+    for _, key := range keyList {
+        if setErr := cacheInstance.Set(exampleTestRuntime(), key, "stale", melodybound.UnlimitedDuration()); nil != setErr {
+            t.Fatalf("prime %s: %v", key, setErr)
+        }
+    }
+
+    canceledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    dispatchUserUpdated(melodyruntime.WithContext(runtimeInstance, canceledContext), entity.NewUser("user-7", "grace", "hash", []string{entity.RoleUser}), "grace")
+
+    for _, key := range keyList {
+        if held, _ := cacheInstance.Has(exampleTestRuntime(), key); true == held {
+            t.Fatalf("expected %s dropped under the canceled event", key)
+        }
     }
 }

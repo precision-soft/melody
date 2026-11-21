@@ -1,7 +1,6 @@
 package cache
 
 import (
-    "context"
     "fmt"
     "reflect"
     "strings"
@@ -10,6 +9,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
 )
 
@@ -20,24 +20,24 @@ func TestRemember_AnswersTheTypeItsCallbackAnswers(t *testing.T) {
     } {
         manager, _ := newCacheTestManager(t)
 
-        callback := func(ctx context.Context, _ *RememberItem) (cacheTestUser, error) {
+        callback := func(runtimeInstance containercontract.Runtime, _ *RememberItem) (cacheTestUser, error) {
             return cacheTestUser{Name: "a", Tags: []string{"x"}}, nil
         }
 
-        missed, missErr := Remember(context.Background(), manager, "typed", config, callback)
-        hit, hitErr := Remember(context.Background(), manager, "typed", config, callback)
+        missed, missErr := Remember(For(testRuntime(), manager), "typed", config, callback)
+        hit, hitErr := Remember(For(testRuntime(), manager), "typed", config, callback)
         if nil != missErr || nil != hitErr || false == reflect.DeepEqual(missed, hit) || "a" != hit.Name {
             t.Fatalf("expected the miss and the hit to answer one user (protection disabled %v), got %#v / %#v (%v, %v)", config.StampedeProtectionDisabled, missed, hit, missErr, hitErr)
         }
 
-        computedGeneric, computedErr := Remember(context.Background(), manager, "typed.generic", config, func(ctx context.Context, _ *RememberItem) (any, error) {
+        computedGeneric, computedErr := Remember(For(testRuntime(), manager), "typed.generic", config, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             return 5, nil
         })
         if nil != computedErr || float64(5) != computedGeneric {
             t.Fatalf("expected the computing call of Remember[any] to answer the stored shape (protection disabled %v), got %#v (%v)", config.StampedeProtectionDisabled, computedGeneric, computedErr)
         }
 
-        generic, genericErr := Remember(context.Background(), manager, "typed", config, func(ctx context.Context, _ *RememberItem) (any, error) {
+        generic, genericErr := Remember(For(testRuntime(), manager), "typed", config, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             return nil, nil
         })
         if _, isMap := generic.(map[string]any); nil != genericErr || false == isMap {
@@ -54,7 +54,7 @@ func TestRemember_TwoTypesUnderOneKeyNeverShareAFlight(t *testing.T) {
 
     userAnswer := make(chan any, 1)
     go func() {
-        value, err := Remember(context.Background(), manager, "shared", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context, _ *RememberItem) (cacheTestUser, error) {
+        value, err := Remember(For(testRuntime(), manager), "shared", RememberConfig{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (cacheTestUser, error) {
             calls.Add(1)
             <-gate
             return cacheTestUser{Name: "user"}, nil
@@ -68,7 +68,7 @@ func TestRemember_TwoTypesUnderOneKeyNeverShareAFlight(t *testing.T) {
 
     listAnswer := make(chan any, 1)
     go func() {
-        value, err := Remember(context.Background(), manager, "shared", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context, _ *RememberItem) ([]string, error) {
+        value, err := Remember(For(testRuntime(), manager), "shared", RememberConfig{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) ([]string, error) {
             calls.Add(1)
             <-gate
             return []string{"list"}, nil
@@ -103,12 +103,12 @@ func TestRemember_TwoTypesUnderOneKeyNeverShareAFlight(t *testing.T) {
 func TestRemember_AnEntryOfAnotherTypeIsAMissThatHeals(t *testing.T) {
     manager, _ := newCacheTestManager(t)
 
-    if setErr := manager.Set(context.Background(), "k", "text", bound.Of(time.Minute)); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "k", "text", bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
     calls := 0
-    user, rememberErr := Remember(context.Background(), manager, "k", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context, _ *RememberItem) (cacheTestUser, error) {
+    user, rememberErr := Remember(For(testRuntime(), manager), "k", RememberConfig{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (cacheTestUser, error) {
         calls = calls + 1
         return cacheTestUser{Name: "healed"}, nil
     })
@@ -116,7 +116,7 @@ func TestRemember_AnEntryOfAnotherTypeIsAMissThatHeals(t *testing.T) {
         t.Fatalf("expected one recomputation over the other type, got %#v after %d calls (%v)", user, calls, rememberErr)
     }
 
-    if stored, exists, getErr := Get[cacheTestUser](context.Background(), manager, "k"); nil != getErr || false == exists || "healed" != stored.Name {
+    if stored, exists, getErr := Get[cacheTestUser](For(testRuntime(), manager), "k"); nil != getErr || false == exists || "healed" != stored.Name {
         t.Fatalf("expected the key healed, got %#v, %v, %v", stored, exists, getErr)
     }
 }
@@ -141,7 +141,7 @@ func TestRemember_AValueTheCacheCannotReadBackIsRefusedOnce(t *testing.T) {
         manager, _ := newCacheTestManager(t)
 
         calls := 0
-        _, rememberErr := Remember(context.Background(), manager, "stringer", config, func(ctx context.Context, _ *RememberItem) (cacheTestStringer, error) {
+        _, rememberErr := Remember(For(testRuntime(), manager), "stringer", config, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (cacheTestStringer, error) {
             calls = calls + 1
             return cacheTestNamed{Name: "a"}, nil
         })
@@ -153,7 +153,7 @@ func TestRemember_AValueTheCacheCannotReadBackIsRefusedOnce(t *testing.T) {
             t.Fatalf("expected the refusal to name the key, got %v", rememberErrContext(rememberErr))
         }
 
-        if hasValue, _ := manager.Has(context.Background(), "stringer"); true == hasValue || 1 != calls {
+        if hasValue, _ := manager.Has(testRuntime(), "stringer"); true == hasValue || 1 != calls {
             t.Fatalf("expected nothing stored after one call (protection disabled %v), stored %v after %d calls", config.StampedeProtectionDisabled, hasValue, calls)
         }
     }
@@ -163,13 +163,13 @@ func TestRemember_ANilValueOfAPointerTypeIsRememberedAsAHit(t *testing.T) {
     manager, _ := newCacheTestManager(t)
 
     calls := 0
-    callback := func(ctx context.Context, _ *RememberItem) (*cacheTestUser, error) {
+    callback := func(runtimeInstance containercontract.Runtime, _ *RememberItem) (*cacheTestUser, error) {
         calls = calls + 1
         return nil, nil
     }
 
     for index := 0; index < 2; index++ {
-        user, rememberErr := Remember(context.Background(), manager, "absent", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
+        user, rememberErr := Remember(For(testRuntime(), manager), "absent", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
         if nil != rememberErr || nil != user {
             t.Fatalf("expected the nil remembered, got %#v (%v)", user, rememberErr)
         }
@@ -180,7 +180,7 @@ func TestRemember_ANilValueOfAPointerTypeIsRememberedAsAHit(t *testing.T) {
     }
 
     t.Run("a nil of an interface type", func(t *testing.T) {
-        stringer, rememberErr := Remember(context.Background(), manager, "absent.stringer", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context, _ *RememberItem) (cacheTestStringer, error) {
+        stringer, rememberErr := Remember(For(testRuntime(), manager), "absent.stringer", RememberConfig{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (cacheTestStringer, error) {
             return nil, nil
         })
         if nil != rememberErr || nil != stringer {
@@ -204,12 +204,12 @@ func TestRememberedValue_AFlightOfAnotherTypeIsRefusedNotAsserted(t *testing.T) 
         t.Fatalf("expected the named refusal, got %v, %v", value, unboxErr)
     }
 
-    operations := newRememberOperations(nil, "k", func(ctx context.Context, _ *RememberItem) (int, error) { return 0, nil })
+    operations := newRememberOperations(nil, "k", func(runtimeInstance containercontract.Runtime, _ *RememberItem) (int, error) { return 0, nil })
     if _, roundTripErr := operations.roundTrip(rememberedValue[string]{value: "text"}); nil == roundTripErr {
         t.Fatalf("expected the round trip of another box refused")
     }
 
-    if storeErr := operations.store(context.Background(), rememberedValue[string]{value: "text"}, bound.Of(time.Minute)); nil == storeErr {
+    if storeErr := operations.store(testRuntime(), rememberedValue[string]{value: "text"}, bound.Of(time.Minute)); nil == storeErr {
         t.Fatalf("expected the store of another box refused")
     }
 }

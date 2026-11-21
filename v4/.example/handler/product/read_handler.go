@@ -1,7 +1,6 @@
 package product
 
 import (
-    "context"
     "errors"
     "fmt"
     "math"
@@ -29,7 +28,7 @@ func ApiReadAllHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         productService := service.MustGetProductService(runtimeInstance.Context(), runtimeInstance.Scope())
 
-        products, listErr := productService.List(runtimeInstance.Context())
+        products, listErr := productService.List(runtimeInstance)
         if nil != listErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to list products", listErr), nil
         }
@@ -62,7 +61,7 @@ func ApiReadHandler() melodyhttpcontract.Handler {
 
         productService := service.MustGetProductService(runtimeInstance.Context(), runtimeInstance.Scope())
 
-        product, found, findErr := productService.FindById(runtimeInstance.Context(), id)
+        product, found, findErr := productService.FindById(runtimeInstance, id)
         if nil != findErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to load product", findErr), nil
         }
@@ -72,13 +71,13 @@ func ApiReadHandler() melodyhttpcontract.Handler {
         }
 
         categoryService := service.MustGetCategoryService(runtimeInstance.Context(), runtimeInstance.Scope())
-        categories, categoriesErr := categoryService.List(runtimeInstance.Context())
+        categories, categoriesErr := categoryService.List(runtimeInstance)
         if nil != categoriesErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to load categories", categoriesErr), nil
         }
 
         currencyService := service.MustGetCurrencyService(runtimeInstance.Context(), runtimeInstance.Scope())
-        currencies, currenciesErr := currencyService.List(runtimeInstance.Context())
+        currencies, currenciesErr := currencyService.List(runtimeInstance)
         if nil != currenciesErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to load currencies", currenciesErr), nil
         }
@@ -135,12 +134,12 @@ type readResponse struct {
 
 /* productViewRecorder is the one door of the product service the read handler counts through */
 type productViewRecorder interface {
-    RecordView(ctx context.Context, id string) (int64, error)
+    RecordView(runtimeInstance melodycontainercontract.Runtime, id string) (int64, error)
 }
 
 /* recordedViews counts the read and answers the count, or nothing when the cache refused: the counter is a hint, so its failure is journaled at warning and the product is still answered */
 func recordedViews(runtimeInstance melodycontainercontract.Runtime, recorder productViewRecorder, productId string) *int64 {
-    views, recordErr := recorder.RecordView(runtimeInstance.Context(), productId)
+    views, recordErr := recorder.RecordView(runtimeInstance, productId)
     if nil != recordErr {
         examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
             "the product view could not be counted",

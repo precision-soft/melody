@@ -48,16 +48,15 @@ type ProductService struct {
     clock             melodyclockcontract.Clock
 }
 
-func (instance *ProductService) List(ctx context.Context) ([]*entity.Product, error) {
+func (instance *ProductService) List(runtimeInstance melodycontainercontract.Runtime) ([]*entity.Product, error) {
     products, rememberErr := cache.Remember(
-        ctx,
-        instance.cache,
+        cache.For(runtimeInstance, instance.cache),
         CacheKeyProductList,
         cache.RememberConfig{
             Ttl: bound.Of(entityCacheTtl),
         },
-        func(ctx context.Context, _ *cache.RememberItem) ([]*entity.Product, error) {
-            return instance.productRepository.All(ctx)
+        func(flightRuntime melodycontainercontract.Runtime, _ *cache.RememberItem) ([]*entity.Product, error) {
+            return instance.productRepository.All(flightRuntime.Context())
         },
     )
     if nil != rememberErr {
@@ -67,7 +66,7 @@ func (instance *ProductService) List(ctx context.Context) ([]*entity.Product, er
     return products, nil
 }
 
-func (instance *ProductService) FindById(ctx context.Context, id string) (*entity.Product, bool, error) {
+func (instance *ProductService) FindById(runtimeInstance melodycontainercontract.Runtime, id string) (*entity.Product, bool, error) {
     /* an identifier no cache key can carry names no row, so it is answered as absent without asking the cache */
     if false == CacheSafeIdentifier(id) {
         return nil, false, nil
@@ -76,11 +75,10 @@ func (instance *ProductService) FindById(ctx context.Context, id string) (*entit
     cacheKey := CacheKeyProductById(id)
 
     cached, rememberErr := rememberEntityOrAbsence(
-        ctx,
-        instance.cache,
+        cache.For(runtimeInstance, instance.cache),
         cacheKey,
-        func(ctx context.Context) (*entity.Product, error) {
-            product, found, findErr := instance.productRepository.FindById(ctx, id)
+        func(flightRuntime melodycontainercontract.Runtime) (*entity.Product, error) {
+            product, found, findErr := instance.productRepository.FindById(flightRuntime.Context(), id)
             if nil != findErr {
                 return nil, findErr
             }
@@ -126,8 +124,8 @@ func (instance *ProductService) refuseUnknownReferences(ctx context.Context, cat
 }
 
 /* RecordView counts one read of a product and answers the count so far. The counter is the cache backend's atomic increment, shared by every process on the shared cache; it is a hint rather than a ledger, since example:cache:clear and example:db:reset empty the namespace it lives in. */
-func (instance *ProductService) RecordView(ctx context.Context, id string) (int64, error) {
-    return instance.cache.Increment(ctx, CacheKeyProductViews(id), 1, melodycachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
+func (instance *ProductService) RecordView(runtimeInstance melodycontainercontract.Runtime, id string) (int64, error) {
+    return cache.For(runtimeInstance, instance.cache).Increment(CacheKeyProductViews(id), 1, melodycachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
 }
 
 func (instance *ProductService) Create(

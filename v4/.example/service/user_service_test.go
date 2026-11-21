@@ -39,17 +39,17 @@ func TestUserService_FindByUsernameAnswersANameTheTableCannotHoldAsAbsent(t *tes
     userService := NewUserService(userRepository, manager, nil)
 
     for _, username := range []string{strings.Repeat("a", 1000), strings.Repeat("é", 167), strings.Repeat("😀", 84), strings.Repeat("a", 256)} {
-        user, found, findErr := userService.FindByUsername(context.Background(), username)
+        user, found, findErr := userService.FindByUsername(exampleTestRuntime(), username)
         if nil != findErr || true == found || nil != user {
             t.Fatalf("expected a %d-byte name to be answered as absent without an error, got found=%v err=%v", len(username), found, findErr)
         }
     }
 
-    if _, found, findErr := userService.FindById(context.Background(), strings.Repeat("😀", 84)); nil != findErr || true == found {
+    if _, found, findErr := userService.FindById(exampleTestRuntime(), strings.Repeat("😀", 84)); nil != findErr || true == found {
         t.Fatalf("expected an id the key grammar refuses to be answered as absent without an error, got found=%v err=%v", found, findErr)
     }
 
-    user, found, findErr := userService.FindByUsername(context.Background(), "admin")
+    user, found, findErr := userService.FindByUsername(exampleTestRuntime(), "admin")
     if nil != findErr || false == found || nil == user {
         t.Fatalf("expected the seeded administrator to stay reachable, got found=%v err=%v", found, findErr)
     }
@@ -100,7 +100,7 @@ func TestUserService_AuthenticateReadsTheAccountPastTheCache(t *testing.T) {
 
     userService := NewUserService(userRepository, manager, nil)
 
-    cached, found, findErr := userService.FindByUsername(context.Background(), "editor")
+    cached, found, findErr := userService.FindByUsername(exampleTestRuntime(), "editor")
     if nil != findErr || false == found {
         t.Fatalf("expected the seeded editor to be cached, got found=%v err=%v", found, findErr)
     }
@@ -226,7 +226,7 @@ func TestUserService_GrantRoleHealsTheCacheWhenTheRoleIsAlreadyHeld(t *testing.T
     cacheInstance := newTtlRecordingCache()
     userService := NewUserService(userRepository, cacheInstance, refusing)
 
-    cached, found, _ := userService.FindByUsername(context.Background(), "user")
+    cached, found, _ := userService.FindByUsername(exampleTestRuntime(), "user")
     if false == found || 1 != len(cached.Roles) {
         t.Fatalf("expected the seeded account with one role, got %v", cached)
     }
@@ -236,7 +236,7 @@ func TestUserService_GrantRoleHealsTheCacheWhenTheRoleIsAlreadyHeld(t *testing.T
         t.Fatalf("expected the committed grant handed back beside its failed dispatch, got %v, %d, %v", granted, outcome, grantErr)
     }
 
-    if dropped, _, _ := userService.FindByUsername(context.Background(), "user"); 2 != len(dropped.Roles) {
+    if dropped, _, _ := userService.FindByUsername(exampleTestRuntime(), "user"); 2 != len(dropped.Roles) {
         t.Fatalf("expected the committed grant to drop the account's entries despite the failed dispatch, got %v", dropped.Roles)
     }
 
@@ -244,7 +244,7 @@ func TestUserService_GrantRoleHealsTheCacheWhenTheRoleIsAlreadyHeld(t *testing.T
         t.Fatalf("expected the re-run to find the role held, got %d, %v", outcome, grantErr)
     }
 
-    healed, _, _ := userService.FindByUsername(context.Background(), "user")
+    healed, _, _ := userService.FindByUsername(exampleTestRuntime(), "user")
     if 2 != len(healed.Roles) || entity.RoleEditor != healed.Roles[1] {
         t.Fatalf("expected the already-held answer to drop the stale entries so the directory is read again, got %v", healed.Roles)
     }
@@ -274,7 +274,7 @@ func TestUserService_GrantRoleAlreadyHeldDropsTheListEntryToo(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
     userService := NewUserService(userRepository, cacheInstance, dispatcher.dispatcher)
 
-    cached, found, _ := userService.FindByUsername(context.Background(), "editor")
+    cached, found, _ := userService.FindByUsername(exampleTestRuntime(), "editor")
     if false == found || false == slices.Contains(cached.Roles, entity.RoleEditor) {
         t.Fatalf("expected the seeded editor holding its role, got %v", cached)
     }
@@ -354,7 +354,7 @@ func TestFindByIdAnswersARowFoundForAnotherSpellingAsAbsentAndCachesNothing(t *t
     cacheInstance := newTtlRecordingCache()
     userService := NewUserService(&paddingUserRepository{UserRepository: inMemory}, cacheInstance, nil)
 
-    if _, padded, paddedErr := userService.FindById(context.Background(), editor.Id + " "); nil != paddedErr || true == padded {
+    if _, padded, paddedErr := userService.FindById(exampleTestRuntime(), editor.Id + " "); nil != paddedErr || true == padded {
         t.Fatalf("expected the padded identifier answered absent, got found=%v err=%v", padded, paddedErr)
     }
 
@@ -364,11 +364,11 @@ func TestFindByIdAnswersARowFoundForAnotherSpellingAsAbsentAndCachesNothing(t *t
         }
     }
 
-    if cached, exists, _ := melodycache.Get[*entity.UserProfile](context.Background(), cacheInstance, CacheKeyUserById(editor.Id + " ")); true == exists && nil != cached {
+    if cached, exists, _ := melodycache.Get[*entity.UserProfile](melodycache.For(exampleTestRuntime(), cacheInstance), CacheKeyUserById(editor.Id + " ")); true == exists && nil != cached {
         t.Fatalf("the padded identifier holds an account in the cache: %+v", cached)
     }
 
-    if _, canonical, canonicalErr := userService.FindById(context.Background(), editor.Id); nil != canonicalErr || false == canonical {
+    if _, canonical, canonicalErr := userService.FindById(exampleTestRuntime(), editor.Id); nil != canonicalErr || false == canonical {
         t.Fatalf("expected the canonical identifier found, got found=%v err=%v", canonical, canonicalErr)
     }
 
@@ -397,17 +397,17 @@ func TestUserService_TheReadDoorsEndOnTheCallersContext(t *testing.T) {
     userService := NewUserService(&slowUserRepository{}, newTtlRecordingCache(), nil)
 
     assertACanceledContextEndsTheRead(t, "List", func(ctx context.Context) error {
-        _, listErr := userService.List(ctx)
+        _, listErr := userService.List(exampleTestRuntimeUnder(ctx))
 
         return listErr
     })
     assertACanceledContextEndsTheRead(t, "FindById", func(ctx context.Context) error {
-        _, _, findErr := userService.FindById(ctx, "user-1")
+        _, _, findErr := userService.FindById(exampleTestRuntimeUnder(ctx), "user-1")
 
         return findErr
     })
     assertACanceledContextEndsTheRead(t, "FindByUsername", func(ctx context.Context) error {
-        _, _, findErr := userService.FindByUsername(ctx, "admin")
+        _, _, findErr := userService.FindByUsername(exampleTestRuntimeUnder(ctx), "admin")
 
         return findErr
     })
@@ -474,7 +474,7 @@ func TestUserService_DropAttemptsEveryKeyWhenOneDeleteFails(t *testing.T) {
         return failing
     })
 
-    dropErr := underTest.service.dropCachedAccount(context.Background(), "user-1", "user", "renamed")
+    dropErr := underTest.service.dropCachedAccount(exampleTestRuntime(), "user-1", "user", "renamed")
     if nil == dropErr {
         t.Fatal("expected the failed delete answered")
     }
@@ -508,16 +508,16 @@ func TestUserService_CachedEntriesCarryNoPasswordDigest(t *testing.T) {
         t.Fatalf("expected the seeded admin with a digest, got %v, %v", stored, findErr)
     }
 
-    if _, listErr := underTest.service.List(context.Background()); nil != listErr {
+    if _, listErr := underTest.service.List(exampleTestRuntime()); nil != listErr {
         t.Fatalf("list: %v", listErr)
     }
 
-    profile, found, findErr := underTest.service.FindById(context.Background(), stored.Id)
+    profile, found, findErr := underTest.service.FindById(exampleTestRuntime(), stored.Id)
     if nil != findErr || false == found || "admin" != profile.Username {
         t.Fatalf("expected the admin by id, got %v, %v", profile, findErr)
     }
 
-    if _, found, findErr := underTest.service.FindByUsername(context.Background(), "admin"); nil != findErr || false == found {
+    if _, found, findErr := underTest.service.FindByUsername(exampleTestRuntime(), "admin"); nil != findErr || false == found {
         t.Fatalf("expected the admin by name, got %v", findErr)
     }
 

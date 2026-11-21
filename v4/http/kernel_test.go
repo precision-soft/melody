@@ -20,6 +20,7 @@ import (
     "github.com/precision-soft/melody/v4/config"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -3977,11 +3978,10 @@ func TestKernel_TheWaitersOfOneRememberFlightFileOneRecordEach(t *testing.T) {
             entered.Done()
 
             _, rememberErr := cache.Remember(
-                context.Background(),
-                cacheManager,
+                cache.For(runtime.WithContext(runtimeInstance, context.Background()), cacheManager),
                 "the-flight",
                 cache.RememberConfig{Ttl: bound.Of(time.Minute)},
-                func(ctx context.Context, _ *cache.RememberItem) (any, error) {
+                func(_ containercontract.Runtime, _ *cache.RememberItem) (any, error) {
                     <-release
 
                     return nil, flightErr

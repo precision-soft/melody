@@ -40,16 +40,15 @@ type CategoryService struct {
     eventDispatcher    melodyeventcontract.EventDispatcher
 }
 
-func (instance *CategoryService) List(ctx context.Context) ([]*entity.Category, error) {
+func (instance *CategoryService) List(runtimeInstance melodycontainercontract.Runtime) ([]*entity.Category, error) {
     categories, rememberErr := melodycache.Remember(
-        ctx,
-        instance.cache,
+        melodycache.For(runtimeInstance, instance.cache),
         CacheKeyCategoryList,
         melodycache.RememberConfig{
             Ttl: melodybound.Of(entityCacheTtl),
         },
-        func(ctx context.Context, _ *melodycache.RememberItem) ([]*entity.Category, error) {
-            return instance.categoryRepository.All(ctx)
+        func(flightRuntime melodycontainercontract.Runtime, _ *melodycache.RememberItem) ([]*entity.Category, error) {
+            return instance.categoryRepository.All(flightRuntime.Context())
         },
     )
     if nil != rememberErr {
@@ -59,7 +58,7 @@ func (instance *CategoryService) List(ctx context.Context) ([]*entity.Category, 
     return categories, nil
 }
 
-func (instance *CategoryService) FindById(ctx context.Context, id string) (*entity.Category, bool, error) {
+func (instance *CategoryService) FindById(runtimeInstance melodycontainercontract.Runtime, id string) (*entity.Category, bool, error) {
     /* an identifier no cache key can carry names no row, so it is answered as absent without asking the cache */
     if false == CacheSafeIdentifier(id) {
         return nil, false, nil
@@ -68,11 +67,10 @@ func (instance *CategoryService) FindById(ctx context.Context, id string) (*enti
     cacheKey := CacheKeyCategoryById(id)
 
     cached, rememberErr := rememberEntityOrAbsence(
-        ctx,
-        instance.cache,
+        melodycache.For(runtimeInstance, instance.cache),
         cacheKey,
-        func(ctx context.Context) (*entity.Category, error) {
-            category, found, findErr := instance.categoryRepository.FindById(ctx, id)
+        func(flightRuntime melodycontainercontract.Runtime) (*entity.Category, error) {
+            category, found, findErr := instance.categoryRepository.FindById(flightRuntime.Context(), id)
             if nil != findErr {
                 return nil, findErr
             }

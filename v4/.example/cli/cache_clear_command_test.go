@@ -2,7 +2,6 @@ package cli
 
 import (
     "bytes"
-    "context"
     "errors"
     "strings"
     "testing"
@@ -22,7 +21,7 @@ func TestCacheClearCommandEmptiesTheCacheAndSaysWhatItReached(t *testing.T) {
     runtimeInstance, cacheInstance := newResetRuntimeWithArchive(t, persistence.NewCatalogStorage(nil), persistence.NewArchiveStorage(nil))
 
     cache := melodyruntime.MustFromRuntime[melodycachecontract.Cache](runtimeInstance, melodycache.ServiceCache)
-    if setErr := cache.Set(context.Background(), "zz-cached", "value", melodybound.Of(time.Hour)); nil != setErr {
+    if setErr := cache.Set(exampleTestRuntime(), "zz-cached", "value", melodybound.Of(time.Hour)); nil != setErr {
         t.Fatalf("planting an entry failed: %v", setErr)
     }
 
@@ -35,7 +34,7 @@ func TestCacheClearCommandEmptiesTheCacheAndSaysWhatItReached(t *testing.T) {
         t.Errorf("expected one clear, got %d", cacheInstance.clears())
     }
 
-    if _, exists, _ := melodycache.Get[any](context.Background(), cache, "zz-cached"); true == exists {
+    if _, exists, _ := melodycache.Get[any](melodycache.For(exampleTestRuntime(), cache), "zz-cached"); true == exists {
         t.Errorf("the planted entry survived the clear")
     }
 

@@ -106,9 +106,9 @@ type CatalogReading struct {
 }
 
 /* Reading yields the current reading, from the cache when the scheduled refresh left one there; a cached reading keeps the instant it was taken at, so the caller can tell how old the answer is. */
-func (instance *CatalogReportService) Reading(ctx context.Context) (*CatalogReading, error) {
+func (instance *CatalogReportService) Reading(runtimeInstance melodycontainercontract.Runtime) (*CatalogReading, error) {
     /* one round trip: Get answers presence and value together, so no entry can expire between two reads */
-    payload, cached, getErr := melodycache.Get[string](ctx, instance.cache, catalogReadingCacheKey)
+    payload, cached, getErr := melodycache.Get[string](melodycache.For(runtimeInstance, instance.cache), catalogReadingCacheKey)
     /* an entry of another type falls through to Refresh, which overwrites it */
     if nil != getErr && false == melodycache.IsDeserializationError(getErr) {
         return nil, getErr
@@ -128,14 +128,16 @@ func (instance *CatalogReportService) Reading(ctx context.Context) (*CatalogRead
         }
     }
 
-    return instance.Refresh(ctx)
+    return instance.Refresh(runtimeInstance)
 }
 
 /* Refresh takes a new reading and leaves it in the cache whatever was there before; the scheduled command calls it, so a request rarely computes one. */
-func (instance *CatalogReportService) Refresh(ctx context.Context) (*CatalogReading, error) {
+func (instance *CatalogReportService) Refresh(runtimeInstance melodycontainercontract.Runtime) (*CatalogReading, error) {
+    ctx := runtimeInstance.Context()
+
     recordedAt := instance.clock.Now()
 
-    products, listErr := instance.productService.List(ctx)
+    products, listErr := instance.productService.List(runtimeInstance)
     if nil != listErr {
         return nil, listErr
     }
@@ -149,7 +151,7 @@ func (instance *CatalogReportService) Refresh(ctx context.Context) (*CatalogRead
         " " + catalogReadingJournalCountField + strconv.Itoa(journalCount) +
         " " + catalogReadingRecordedAtField + recordedAt.UTC().Format(time.RFC3339)
 
-    setErr := instance.cache.Set(ctx, catalogReadingCacheKey, payload, melodybound.Of(catalogReadingLifetime(instance.refreshInterval)))
+    setErr := melodycache.For(runtimeInstance, instance.cache).Set(catalogReadingCacheKey, payload, melodybound.Of(catalogReadingLifetime(instance.refreshInterval)))
     if nil != setErr {
         return nil, setErr
     }

@@ -73,7 +73,7 @@ func (instance *CatalogReportRefreshCommand) Run(runtimeInstance melodycontainer
         }
     }
 
-    reading, refreshErr := reportService.Refresh(runtimeInstance.Context())
+    reading, refreshErr := reportService.Refresh(runtimeInstance)
     if nil != refreshErr {
         /* a reading that fails after the archive has refused carries both, so the second failure does not hide the first, which is the one that names the database */
         if nil != archiveFailure {

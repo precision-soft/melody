@@ -214,9 +214,9 @@ type stubViewRecorder struct {
     contexts  []context.Context
 }
 
-func (instance *stubViewRecorder) RecordView(ctx context.Context, id string) (int64, error) {
+func (instance *stubViewRecorder) RecordView(runtimeInstance melodycontainercontract.Runtime, id string) (int64, error) {
     instance.recorded = append(instance.recorded, id)
-    instance.contexts = append(instance.contexts, ctx)
+    instance.contexts = append(instance.contexts, runtimeInstance.Context())
 
     return instance.views, instance.recordErr
 }
@@ -316,7 +316,7 @@ func TestApiReadDoorsEndWithTheRequest(t *testing.T) {
         if nil != currencyListErr {
             t.Fatalf("read the currencies: %v", currencyListErr)
         }
-        if setErr := fixture.cache.Set(context.Background(), service.CacheKeyCurrencyList, currencyList, melodybound.UnlimitedDuration()); nil != setErr {
+        if setErr := fixture.cache.Set(exampleTestRuntime(), service.CacheKeyCurrencyList, currencyList, melodybound.UnlimitedDuration()); nil != setErr {
             t.Fatalf("prime the currencies: %v", setErr)
         }
         fixture.requestContext = endedRequestContext()
@@ -340,7 +340,7 @@ func TestApiReadDoorsEndWithTheRequest(t *testing.T) {
         if nil != categoryListErr {
             t.Fatalf("read the categories: %v", categoryListErr)
         }
-        if setErr := fixture.cache.Set(context.Background(), service.CacheKeyCategoryList, categoryList, melodybound.UnlimitedDuration()); nil != setErr {
+        if setErr := fixture.cache.Set(exampleTestRuntime(), service.CacheKeyCategoryList, categoryList, melodybound.UnlimitedDuration()); nil != setErr {
             t.Fatalf("prime the categories: %v", setErr)
         }
         fixture.requestContext = endedRequestContext()

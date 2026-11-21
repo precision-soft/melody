@@ -33,7 +33,7 @@ func TestCategoryService_FindByIdAnswersAPaddedIdentifierAsAbsentAndCachesNothin
     categoryService := NewCategoryService(&paddingCategoryRepository{CategoryRepository: categoryRepository}, newInMemoryProductRepositoryForTest(t), cacheInstance, nil)
 
     assertPaddedIdentifierAnsweredAbsent(t, cacheInstance, CacheKeyCategoryById, func(id string) (bool, error) {
-        _, found, findErr := categoryService.FindById(context.Background(), id)
+        _, found, findErr := categoryService.FindById(exampleTestRuntime(), id)
 
         return found, findErr
     }, "cat-1")
@@ -148,12 +148,12 @@ func TestCategoryService_TheReadDoorsEndOnTheCallersContext(t *testing.T) {
     categoryService := NewCategoryService(&slowCategoryRepository{}, nil, newTtlRecordingCache(), nil)
 
     assertACanceledContextEndsTheRead(t, "List", func(ctx context.Context) error {
-        _, listErr := categoryService.List(ctx)
+        _, listErr := categoryService.List(exampleTestRuntimeUnder(ctx))
 
         return listErr
     })
     assertACanceledContextEndsTheRead(t, "FindById", func(ctx context.Context) error {
-        _, _, findErr := categoryService.FindById(ctx, "cat-1")
+        _, _, findErr := categoryService.FindById(exampleTestRuntimeUnder(ctx), "cat-1")
 
         return findErr
     })

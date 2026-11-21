@@ -226,7 +226,7 @@ type valueCache struct {
     values map[string]any
 }
 
-func (instance *valueCache) Get(ctx context.Context, key string, target any) (bool, error) {
+func (instance *valueCache) Get(runtimeInstance melodycontainercontract.Runtime, key string, target any) (bool, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -242,7 +242,7 @@ func (instance *valueCache) Get(ctx context.Context, key string, target any) (bo
     return true, nil
 }
 
-func (instance *valueCache) Set(ctx context.Context, key string, value any, ttl melodybound.Duration) error {
+func (instance *valueCache) Set(runtimeInstance melodycontainercontract.Runtime, key string, value any, ttl melodybound.Duration) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -251,7 +251,7 @@ func (instance *valueCache) Set(ctx context.Context, key string, value any, ttl 
     return nil
 }
 
-func (instance *valueCache) Delete(ctx context.Context, key string) error {
+func (instance *valueCache) Delete(runtimeInstance melodycontainercontract.Runtime, key string) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -260,7 +260,7 @@ func (instance *valueCache) Delete(ctx context.Context, key string) error {
     return nil
 }
 
-func (instance *valueCache) Has(ctx context.Context, key string) (bool, error) {
+func (instance *valueCache) Has(runtimeInstance melodycontainercontract.Runtime, key string) (bool, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -269,7 +269,7 @@ func (instance *valueCache) Has(ctx context.Context, key string) (bool, error) {
     return exists, nil
 }
 
-func (instance *valueCache) Clear(ctx context.Context) error {
+func (instance *valueCache) Clear(runtimeInstance melodycontainercontract.Runtime) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -278,7 +278,7 @@ func (instance *valueCache) Clear(ctx context.Context) error {
     return nil
 }
 
-func (instance *valueCache) Many(ctx context.Context, keys []string, target any) error {
+func (instance *valueCache) Many(runtimeInstance melodycontainercontract.Runtime, keys []string, target any) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -290,7 +290,7 @@ func (instance *valueCache) RoundTrip(value any, target any) error {
     return assignCachedTestValue("", target, value)
 }
 
-func (instance *valueCache) SetMultiple(ctx context.Context, items map[string]any, ttl melodybound.Duration) error {
+func (instance *valueCache) SetMultiple(runtimeInstance melodycontainercontract.Runtime, items map[string]any, ttl melodybound.Duration) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -301,7 +301,7 @@ func (instance *valueCache) SetMultiple(ctx context.Context, items map[string]an
     return nil
 }
 
-func (instance *valueCache) DeleteMultiple(ctx context.Context, keys []string) error {
+func (instance *valueCache) DeleteMultiple(runtimeInstance melodycontainercontract.Runtime, keys []string) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -312,11 +312,11 @@ func (instance *valueCache) DeleteMultiple(ctx context.Context, keys []string) e
     return nil
 }
 
-func (instance *valueCache) Increment(ctx context.Context, key string, delta int64, options melodycachecontract.CounterOptions) (int64, error) {
+func (instance *valueCache) Increment(runtimeInstance melodycontainercontract.Runtime, key string, delta int64, options melodycachecontract.CounterOptions) (int64, error) {
     return 0, nil
 }
 
-func (instance *valueCache) Decrement(ctx context.Context, key string, delta int64, options melodycachecontract.CounterOptions) (int64, error) {
+func (instance *valueCache) Decrement(runtimeInstance melodycontainercontract.Runtime, key string, delta int64, options melodycachecontract.CounterOptions) (int64, error) {
     return 0, nil
 }
 

@@ -3,10 +3,14 @@ package wiring
 import (
     "context"
     "errors"
+    "go/ast"
     "go/format"
     "go/parser"
     "go/token"
+    "io/fs"
     "os"
+    "path/filepath"
+    "reflect"
     "strings"
     "testing"
 
@@ -1047,4 +1051,117 @@ func TestGenerate_ScopedShadowOfANamedContainerServiceBootsOnlyWithTheReplacesOp
             }
         })
     }
+}
+
+func TestResolveArguments_RefusesARuntimeBoundView(t *testing.T) {
+    bindSet := NewBindSet()
+    packageBinding := bindSet.Package("example.com/domain", "domain")
+
+    for _, viewReference := range []*TypeReference{
+        {Expression: "melodycache.Bound", Qualifier: "melodycache", ImportPath: "github.com/precision-soft/melody/v4/cache"},
+        {Expression: "*melodycache.Bound", Qualifier: "melodycache", ImportPath: "github.com/precision-soft/melody/v4/cache", IsPointer: true},
+    } {
+        constructor := &Constructor{
+            Name:      "NewViewHolder",
+            File:      "view_holder.go",
+            Line:      12,
+            Arguments: []*Argument{{Name: "products", Type: viewReference}},
+        }
+
+        _, _, resolveErr := resolveArguments(constructor, packageBinding, &GenerateRequest{BindSet: bindSet}, make(map[string]bool), &GenerateReport{GlobalBindReach: make(map[string][]string)})
+        if nil == resolveErr || false == strings.Contains(resolveErr.Error(), "a runtime-bound view is not a service") {
+            t.Fatalf("%s: expected the view refused, got %v", viewReference.Expression, resolveErr)
+        }
+
+        if "products" != exception.FromError(resolveErr).Context()["argument"] {
+            t.Fatalf("expected the refusal to name the argument, got %v", exception.FromError(resolveErr).Context())
+        }
+    }
+
+    constructor := &Constructor{
+        Name:      "NewOwnBoundHolder",
+        Arguments: []*Argument{{Name: "own", Type: &TypeReference{Expression: "*domain.Bound", Qualifier: "domain", ImportPath: "example.com/domain", IsPointer: true}}},
+    }
+
+    if _, _, resolveErr := resolveArguments(constructor, packageBinding, &GenerateRequest{BindSet: bindSet}, make(map[string]bool), &GenerateReport{GlobalBindReach: make(map[string][]string)}); nil != resolveErr {
+        t.Fatalf("expected an application's own Bound type resolved, got %v", resolveErr)
+    }
+}
+
+func TestViewTypes_ListsEveryBoundViewOfTheFourthMajor(t *testing.T) {
+    repositoryRoot := filepath.Join("..", "..")
+    roots := []string{filepath.Join(repositoryRoot, "v4")}
+    integrationRoots, _ := filepath.Glob(filepath.Join(repositoryRoot, "integrations", "*", "v4"))
+    nestedRoots, _ := filepath.Glob(filepath.Join(repositoryRoot, "integrations", "*", "*", "v4"))
+    roots = append(append(roots, integrationRoots...), nestedRoots...)
+
+    declared := map[string]bool{}
+    for _, root := range roots {
+        modulePath := readModulePath(t, filepath.Join(root, "go.mod"))
+        walkErr := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+            if nil != err {
+                return err
+            }
+
+            if true == entry.IsDir() && path != root && (strings.HasPrefix(entry.Name(), ".") || "testdata" == entry.Name()) {
+                return filepath.SkipDir
+            }
+
+            if true == entry.IsDir() || false == strings.HasSuffix(path, ".go") || true == strings.HasSuffix(path, "_test.go") {
+                return nil
+            }
+
+            parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
+            if nil != parseErr {
+                return parseErr
+            }
+
+            for _, declaration := range parsed.Decls {
+                general, isGeneral := declaration.(*ast.GenDecl)
+                if false == isGeneral || token.TYPE != general.Tok {
+                    continue
+                }
+
+                for _, specification := range general.Specs {
+                    typeSpecification := specification.(*ast.TypeSpec)
+                    if _, isStruct := typeSpecification.Type.(*ast.StructType); true == isStruct && "Bound" == typeSpecification.Name.Name {
+                        relative, _ := filepath.Rel(root, filepath.Dir(path))
+                        declared[filepath.ToSlash(filepath.Join(modulePath, relative))+".Bound"] = true
+                    }
+                }
+            }
+
+            return nil
+        })
+        if nil != walkErr {
+            t.Fatalf("walking %s: %v", root, walkErr)
+        }
+    }
+
+    if false == declared["github.com/precision-soft/melody/v4/cache.Bound"] {
+        t.Fatalf("expected the walk to find the cache view, found %v", declared)
+    }
+
+    if false == reflect.DeepEqual(declared, viewTypes) {
+        t.Fatalf("expected viewTypes to list exactly the declared views %v, got %v", declared, viewTypes)
+    }
+}
+
+func readModulePath(t *testing.T, goModPath string) string {
+    t.Helper()
+
+    content, readErr := os.ReadFile(goModPath)
+    if nil != readErr {
+        t.Fatalf("reading %s: %v", goModPath, readErr)
+    }
+
+    for _, line := range strings.Split(string(content), "\n") {
+        if true == strings.HasPrefix(line, "module ") {
+            return strings.TrimSpace(strings.TrimPrefix(line, "module "))
+        }
+    }
+
+    t.Fatalf("no module line in %s", goModPath)
+
+    return ""
 }

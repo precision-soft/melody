@@ -93,18 +93,38 @@ Two hazards belong to what is stored rather than to how long it lives, and neith
 
 ## Container integration
 
-The cache package exposes retrieval helpers for the three services (see [`cache/service_resolver.go`](../../cache/service_resolver.go)); each takes the container as it takes a scope:
+The cache package exposes retrieval helpers for the three services (see [`cache/service_resolver.go`](../../cache/service_resolver.go)); each takes the container as it takes a scope, the form a provider holding a resolver calls:
 
 - `cache.CacheMustFromResolver(ctx, resolver)`
 - `cache.CacheBackendMustFromResolver(ctx, resolver)`
 - `cache.CacheSerializerMustFromResolver(ctx, resolver)`
+
+Code holding a runtime, a handler, a command, a listener or a message handler, binds the cache to it instead: `cache.FromRuntime(runtimeInstance)` resolves the application's cache through the runtime's scope and answers a `cache.Bound`.
+
+## The bound view
+
+Every door of `cachecontract.Cache` takes the runtime it runs under first; that is the contract a manager, a decorator or a fake implements. Userland calls it through `cache.Bound`, a view bound once to its request, run or delivery, whose methods take no runtime:
+
+```go
+products := cache.FromRuntime(runtimeInstance)
+
+found, getErr := products.Get(productCacheKey, &product)
+deleteErr := products.Delete(productListCacheKey)
+views, incrementErr := products.Increment(productViewsCacheKey, 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
+```
+
+- `cache.For(runtimeInstance, cacheInstance)` binds a cache the caller already holds, the form a service writes: it keeps the unbound cache in a field and binds it at the top of each method.
+- A view is a value of one runtime: it is never kept in a service, a field or a goroutine that outlives the runtime, and no provider registers one, so the wiring generator refuses a constructor that asks for a `cache.Bound`.
+- A call that needs another deadline, or one that must outlive the caller's cancellation, binds again over a derived runtime: `cache.For(runtime.WithContext(runtimeInstance, context.WithoutCancel(runtimeInstance.Context())), cacheInstance)`.
+- Binding and calling through a view allocate nothing of their own; `cache.FromRuntime` costs the by-name resolution, so a function binds once and calls many times.
+- `RoundTrip` takes no runtime and is reached through `boundCache.Cache()`; `Runtime()` answers the runtime the view is bound to.
 
 ## Usage
 
 The example below demonstrates a typical Melody flow:
 
 1. Override the cache backend and cache service **before boot** (application wiring).
-2. Retrieve the cache from the runtime container.
+2. Bind the cache to the runtime.
 3. Use `Remember` for cache-aside reads with stampede protection.
 
 `Remember` answers the type its callback names, read back through the serializer into that type (see [`cache/json_serializer.go`](../../cache/json_serializer.go)); `Remember[any]` answers the encoding's generic form.
@@ -180,23 +200,16 @@ func registerCacheOverrides(
 }
 
 func loadUserProfile(
-    ctx context.Context,
     runtimeInstance containercontract.Runtime,
 ) (userProfile, error) {
-    cacheInstance := cache.CacheMustFromResolver(
-        ctx,
-        runtimeInstance.Scope(),
-    )
-
     return cache.Remember(
-        ctx,
-        cacheInstance,
+        cache.FromRuntime(runtimeInstance),
         userProfileCacheKey,
         cache.RememberConfig{
             Ttl: bound.Of(30 * time.Minute),
         },
-        func(ctx context.Context, _ *cache.RememberItem) (userProfile, error) {
-            _ = ctx
+        func(flightRuntime containercontract.Runtime, _ *cache.RememberItem) (userProfile, error) {
+            _ = flightRuntime
 
             return userProfile{
                 Id:   42,
@@ -209,24 +222,22 @@ func loadUserProfile(
 
 ### The callback's item
 
-The callback receives a `*cache.RememberItem` beside its context, through which it says what the store does with the value it computes: nothing said stores it under `RememberConfig.Ttl`, `item.SetTtl(ttl)` stores it under its own ttl, and `item.SkipStore()` answers it without storing it. An absence remembered for a short while and a found value kept longer is one callback:
+The callback receives a `*cache.RememberItem` beside its runtime, through which it says what the store does with the value it computes: nothing said stores it under `RememberConfig.Ttl`, `item.SetTtl(ttl)` stores it under its own ttl, and `item.SkipStore()` answers it without storing it. An absence remembered for a short while and a found value kept longer is one callback:
 
 ```go
 func findUser(
-    ctx context.Context,
-    cacheInstance cachecontract.Cache,
+    boundCache cache.Bound,
     key string,
-    load func(ctx context.Context) (*user, error),
+    load func(flightRuntime containercontract.Runtime) (*user, error),
 ) (*user, error) {
     return cache.Remember(
-        ctx,
-        cacheInstance,
+        boundCache,
         key,
         cache.RememberConfig{
             Ttl: bound.Of(time.Minute),
         },
-        func(ctx context.Context, item *cache.RememberItem) (*user, error) {
-            loaded, loadErr := load(ctx)
+        func(flightRuntime containercontract.Runtime, item *cache.RememberItem) (*user, error) {
+            loaded, loadErr := load(flightRuntime)
             if nil != loadErr {
                 return nil, loadErr
             }
@@ -244,8 +255,8 @@ func findUser(
 A value that must not be served from the cache, a partial answer of a degraded upstream for one, is answered and not stored:
 
 ```go
-func(ctx context.Context, item *cache.RememberItem) (report, error) {
-    computed, isPartial, computeErr := buildReport(ctx)
+func(flightRuntime containercontract.Runtime, item *cache.RememberItem) (report, error) {
+    computed, isPartial, computeErr := buildReport(flightRuntime)
     if nil != computeErr {
         return report{}, computeErr
     }
@@ -257,6 +268,10 @@ func(ctx context.Context, item *cache.RememberItem) (report, error) {
     return computed, nil
 }
 ```
+
+### The flight's runtime
+
+Under the stampede protection the callers of one key coalesce under a leader, and the computation belongs to the flight, not to any of them. The callback receives the flight's runtime, never a caller's: a run of its own, `KindRun` whatever the leader's kind, over the flight's context, in a scope the flight opens behind the leader's and closes once it completed. A callback resolves its services through it whichever request ends first, and a service it builds in that scope is closed with the flight; a name reserved for the request phase is refused inside a callback for every caller alike. A leader whose runtime opens no child run, the boot runtime, a provider's runtime or a scope of another implementation, lends its own scope over the flight's context: the computation runs on, and a resolution through that scope is refused once the boot finished or the provider returned. A leader whose scope is closed, a view kept past its request, is answered the closed scope's error, nothing computed or stored. With no flight, the stampede protection disabled or a cache the flight cannot tell apart by its pointer, the callback runs under the caller's runtime. Opening and closing the flight's scope costs about 27 allocations per led miss, not per caller; the read before the flight and every store run under a runtime derived without the cancellation of the caller's context, one allocation on every `Remember`.
 
 ## Footguns & caveats
 
@@ -271,10 +286,10 @@ func(ctx context.Context, item *cache.RememberItem) (report, error) {
 - The zero `RememberConfig` but for its required `Ttl` is the default: stampede protection on, a 30s wait, a **cancelable** flight. A `WaitTimeout` of `bound.Of(time.Duration(0))` means "no waiting": a result already memoized by the in-flight call is returned, anything still computing answers with the timeout error; `bound.UnlimitedDuration()` waits on the flight and the context alone.
 - Under the **cancelable** default the flight is canceled when its last waiter leaves, the next caller of the key replacing the canceled flight with a fresh leader, so a hung callback does not own its key. `Detached: true` is the **detached** flight: a leader whose waiters have all left keeps running with its final error written into an in-flight record nothing reads anymore, and a callback that never returns pins its single-flight entry for the life of the process: a later detached caller of the key joins it and waits until its own `WaitTimeout` or context ends, never past them, and a cancelable caller does not join it at all. Give long callbacks their own deadlines either way. The two settings compose one way to know: under the cancelable default a `WaitTimeout` **shorter than the callback** never stores — the lone waiter times out, the flight loses its last waiter and is canceled, the callback that honours its context returns the cancellation, and the next call leads a fresh flight to the same end, so the key is never populated. A bounded wait on a slow callback is paired with `Detached: true`, which lets the
   computation finish and store for the callers after.
-- The context, `Remember`'s first parameter, ties the **wait** to the request that opened it, and nothing else; a nil one is refused. A caller that serves an http request passes `request.HttpRequest().Context()` — the melody `Request` carries no `Context()` of its own — or the handler's `runtimeInstance.Context()`, which the kernel builds on that same context and which the example's handlers hand their services' read doors, so a client that disconnected releases the goroutine that served it, with its scope, its session and everything else the request reached, before the 30s wait ends. The context ends that one caller's wait with `cache remember wait canceled by the caller context`, carrying `context.Canceled` or `context.DeadlineExceeded` as the cause; it never ends the computation, which belongs to the leader and is awaited by everyone coalesced onto it. What cancels the computation is still the last waiter leaving, and only on the cancelable flight, the default. An answer already memoized when the wait begins is handed over whatever the context says. Where the **callback** is what should stop, give it its own deadline: the context it receives
-  is the flight's, not the caller's — except on the uncoalesced path (`StampedeProtectionDisabled`, or a value-kind `Cache`), where there is no flight and the callback runs under the caller's context.
-- Every operation of a `Cache` and a `Backend` takes the caller's context first. A nil or typed-nil context is refused with `cache context is nil` before anything else is judged, the closed backend included; a context already done answers its own error once the arguments are judged, before the store is touched, so a refused key still answers the key's refusal. The `rueidis` backend bounds each round trip by the earlier of the context's deadline and its `BackendConfig.CommandTimeout`, and a `Clear` walk by the context as a whole; a round trip its command timeout cut names the field, with its `ErrCommandTimeout` in the chain, while one the context's own deadline cut answers the context's error, wrapped on `Increment` and `Decrement` under `cache counter operation failed` (`errors.Is` holds).
-- `Remember` reads the cache and stores a computed value without the cancellation of the context each runs under, the caller's or the flight's, its values kept: a done context still answers a hit, and a value already computed is stored whoever left.
+- The runtime of the view, `Remember`'s first parameter, ties the **wait** to the request that opened it through its context, and nothing else; a nil runtime, a typed nil and one carrying no context or no scope are refused. A caller that serves an http request binds the handler's `runtimeInstance`, which the kernel builds on the request's context and which the example's handlers hand their services' read doors, so a client that disconnected releases the goroutine that served it, with its scope, its session and everything else the request reached, before the 30s wait ends. The context ends that one caller's wait with `cache remember wait canceled by the caller context`, carrying `context.Canceled` or `context.DeadlineExceeded` as the cause; it never ends the computation, which belongs to the leader and is awaited by everyone coalesced onto it. What cancels the computation is still the last waiter leaving, and only on the cancelable flight, the default. An answer already memoized when the wait begins is handed over whatever the context says. Where the **callback** is what should stop, give it its own deadline: the runtime it receives
+  is the flight's, not the caller's — except on the uncoalesced path (`StampedeProtectionDisabled`, or a value-kind `Cache`), where there is no flight and the callback runs under the caller's runtime.
+- Every operation of a `Cache` takes the runtime it runs under first, a nil runtime, a typed nil and one carrying no context refused with `the runtime is nil or carries no context` before anything else is judged; the manager hands its backend the runtime's context. Every operation of a `Backend` takes the caller's context first. A nil or typed-nil context is refused with `cache context is nil` before anything else is judged, the closed backend included; a context already done answers its own error once the arguments are judged, before the store is touched, so a refused key still answers the key's refusal. The `rueidis` backend bounds each round trip by the earlier of the context's deadline and its `BackendConfig.CommandTimeout`, and a `Clear` walk by the context as a whole; a round trip its command timeout cut names the field, with its `ErrCommandTimeout` in the chain, while one the context's own deadline cut answers the context's error, wrapped on `Increment` and `Decrement` under `cache counter operation failed` (`errors.Is` holds).
+- `Remember` reads the cache and stores a computed value under a runtime derived without the cancellation of the context each runs under, the caller's or the flight's, its values and its scope kept: a done context still answers a hit, and a value already computed is stored whoever left. The derived runtime is one allocation on every `Remember`, a hit included.
 - `Manager.Increment` and `Manager.Decrement` are backend-native, so a distributed backend keeps them atomic and the count is stored as decimal text rather than through the serializer. Each takes a [`CounterOptions`](../../cache/contract/counter.go): `Ttl` is the counter's lifetime, read as a write's (at least 1s, `bound.UnlimitedDuration()` for none, absent refused); `RefreshTtl` false writes it only when the call creates the key or finds it without an expiry, a fixed window, and true rewrites it on every call, a sliding window; an unlimited ttl writes no expiry, leaving one the key carries in place with `RefreshTtl` false and removing it with `RefreshTtl` true, so the counter is kept until it is deleted or evicted. The redis backend removes it with `PERSIST`. The redis backend writes the count and its expiry in one script, atomic under concurrent increments, with no `PEXPIRE … NX`, so it needs no Redis 7, but it needs scripting (`EVALSHA`/`EVAL`) allowed for the cache's redis user, with the commands the script runs under that user's permissions (`INCRBY`, `PTTL`, `PEXPIRE`, `PERSIST`, `GET`); after a script cache flush the first call makes two round trips under one `CommandTimeout`. A counter that expired reads as absent and the next increment starts from its delta. Read such a key with [`Manager.GetCounter`](../../cache/manager.go), never with `Get`, and do not mix `Set` onto the same key. See [`cache/manager.go`](../../cache/manager.go).
 - `Remember` uses a single-flight mechanism when stampede protection is enabled (default). See [`cache/remember.go`](../../cache/remember.go).
 - The callback's item is read once, when the callback returns without an error: a callback that fails or panics stores nothing whatever its item says, and an item kept and told something later changes no store. A ttl chosen through `SetTtl` is any ttl the cache admits, unlimited included, longer than the configuration's too, and one below a second is answered as the error naming `RememberItem.Ttl`, with nothing stored and no value answered; an absent one takes the choice back. `SkipStore` wins over `SetTtl` in either order: the caller and every waiter of the flight are answered the value, each a copy through `RoundTrip`, and the next call computes again, so under a skipped store coalescing is the only stampede protection left. `RememberConfig.Ttl` stays required even where every callback chooses, since it is judged before the cache is read. See [`cache/remember_item.go`](../../cache/remember_item.go).
@@ -294,18 +309,18 @@ func(ctx context.Context, item *cache.RememberItem) (report, error) {
 package main
 
 type Cache interface {
-    Get(ctx context.Context, key string, target any) (bool, error)
-    Set(ctx context.Context, key string, value any, ttl bound.Duration) error
-    Delete(ctx context.Context, key string) error
-    Has(ctx context.Context, key string) (bool, error)
-    Clear(ctx context.Context) error
+    Get(runtimeInstance containercontract.Runtime, key string, target any) (bool, error)
+    Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration) error
+    Delete(runtimeInstance containercontract.Runtime, key string) error
+    Has(runtimeInstance containercontract.Runtime, key string) (bool, error)
+    Clear(runtimeInstance containercontract.Runtime) error
 
-    Many(ctx context.Context, keys []string, target any) error
-    SetMultiple(ctx context.Context, items map[string]any, ttl bound.Duration) error
-    DeleteMultiple(ctx context.Context, keys []string) error
+    Many(runtimeInstance containercontract.Runtime, keys []string, target any) error
+    SetMultiple(runtimeInstance containercontract.Runtime, items map[string]any, ttl bound.Duration) error
+    DeleteMultiple(runtimeInstance containercontract.Runtime, keys []string) error
 
-    Increment(ctx context.Context, key string, delta int64, options CounterOptions) (int64, error)
-    Decrement(ctx context.Context, key string, delta int64, options CounterOptions) (int64, error)
+    Increment(runtimeInstance containercontract.Runtime, key string, delta int64, options CounterOptions) (int64, error)
+    Decrement(runtimeInstance containercontract.Runtime, key string, delta int64, options CounterOptions) (int64, error)
 
     RoundTrip(value any, target any) error
 
@@ -319,7 +334,8 @@ type Cache interface {
 
 ### Types
 
-- **cache.Manager** ([`cache/manager.go`](../../cache/manager.go))
+- **cache.Bound** ([`cache/bound.go`](../../cache/bound.go)) — the cache bound to one runtime: `Get`, `Set`, `Delete`, `Has`, `Clear`, `Many`, `SetMultiple`, `DeleteMultiple`, `Increment`, `Decrement` without the runtime, `Runtime()` and `Cache()`; a zero view or one over no cache is refused by its first door
+- **cache.Manager** ([`cache/manager.go`](../../cache/manager.go)) — every door refuses a nil runtime, a typed nil and one carrying no context before it reads anything; `GetCounter(runtimeInstance, key)` reads a counter
     - [`RoundTrip(value, target any) error`](../../cache/manager.go) — what a value stored through this manager reads back as, written into the target: one serializer round trip, run locally with no backend involved. `Remember` gives through it every caller of one flight a value of its own, the computing call the shape every hit answers, and refuses once a value the serializer writes but cannot read back
 - **cache.InMemoryBackend** ([`cache/in_memory.go`](../../cache/in_memory.go))
 - **cache.JsonSerializer** ([`cache/json_serializer.go`](../../cache/json_serializer.go))
@@ -332,6 +348,8 @@ type Cache interface {
 
 ### Constructors
 
+- `cache.For(runtimeInstance, cacheInstance) cache.Bound` ([`cache/bound.go`](../../cache/bound.go)) — allocates nothing and never panics
+- `cache.FromRuntime(runtimeInstance) cache.Bound` ([`cache/bound.go`](../../cache/bound.go)) — resolves `cache.ServiceCache` through the runtime's scope and panics where it is missing
 - `cache.NewManager(backend, serializer, config) *cache.Manager` ([`cache/manager.go`](../../cache/manager.go)) — the zero config does not own the backend, which the container path wants; `OwnsBackend` cascades Close into the backend, for the caller that builds both by hand.
 - `cache.NewInMemoryBackend(config) *cache.InMemoryBackend` ([`cache/in_memory.go`](../../cache/in_memory.go))
 - `cache.NewDeserializationError(keys, causeErr) *cache.DeserializationError` ([`cache/deserialization_error.go`](../../cache/deserialization_error.go))
@@ -348,12 +366,12 @@ type Cache interface {
 
 #### Cache-aside
 
-- `cache.Remember[T](ctx, cacheInstance, key, config, callback) (T, error)` ([`cache/remember.go`](../../cache/remember.go)) — `T` inferred from the callback, `func(ctx context.Context, item *cache.RememberItem) (T, error)`
+- `cache.Remember[T](boundCache, key, config, callback) (T, error)` ([`cache/remember.go`](../../cache/remember.go)) — `T` inferred from the callback, `func(runtimeInstance containercontract.Runtime, item *cache.RememberItem) (T, error)`, handed the flight's runtime
 
 #### Typed reads
 
-- `cache.Get[T](ctx, cacheInstance, key) (T, bool, error)` ([`cache/typed.go`](../../cache/typed.go)) — the zero `T` beside any error
-- `cache.Many[T](ctx, cacheInstance, keys) (map[string]T, error)` ([`cache/typed.go`](../../cache/typed.go)) — an empty map on no hit, the undecodable keys in a `DeserializationError` beside the entries that decoded
+- `cache.Get[T](boundCache, key) (T, bool, error)` ([`cache/typed.go`](../../cache/typed.go)) — the zero `T` beside any error
+- `cache.Many[T](boundCache, keys) (map[string]T, error)` ([`cache/typed.go`](../../cache/typed.go)) — an empty map on no hit, the undecodable keys in a `DeserializationError` beside the entries that decoded
 
 #### Errors
 

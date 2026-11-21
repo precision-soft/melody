@@ -97,7 +97,7 @@ func newCommandFixtureOverUsers(t *testing.T, dispatcherOf func(melodyeventcontr
                 service.CacheKeyUserByUsername(updatedEvent.User().Username),
                 service.CacheKeyUserList,
             } {
-                if deleteErr := cacheInstance.Delete(context.Background(), key); nil != deleteErr {
+                if deleteErr := cacheInstance.Delete(exampleTestRuntime(), key); nil != deleteErr {
                     return deleteErr
                 }
             }
@@ -291,7 +291,7 @@ type clearCountingCache struct {
     refusal    error
 }
 
-func (instance *clearCountingCache) Clear(ctx context.Context) error {
+func (instance *clearCountingCache) Clear(runtimeInstance melodycontainercontract.Runtime) error {
     instance.mutex.Lock()
     instance.clearCount = instance.clearCount + 1
     onClear := instance.onClear
@@ -306,7 +306,7 @@ func (instance *clearCountingCache) Clear(ctx context.Context) error {
         return refusal
     }
 
-    return instance.Cache.Clear(ctx)
+    return instance.Cache.Clear(runtimeInstance)
 }
 
 func (instance *clearCountingCache) clears() int {
@@ -473,4 +473,12 @@ func runtimeWithClock(t *testing.T, clockInstance melodyclockcontract.Clock) mel
     )
 
     return melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
+}
+
+func exampleTestRuntime() melodycontainercontract.Runtime {
+    return exampleTestRuntimeUnder(context.Background())
+}
+
+func exampleTestRuntimeUnder(ctx context.Context) melodycontainercontract.Runtime {
+    return melodyruntime.NewRun(ctx, melodycontainer.NewContainer(melodycontainer.ContainerConfig{}).NewScope())
 }

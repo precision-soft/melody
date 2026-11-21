@@ -57,7 +57,7 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
 
         userService := service.MustGetUserService(runtimeInstance.Context(), runtimeInstance.Scope())
 
-        _, exists, findErr := userService.FindByUsername(runtimeInstance.Context(), normalizedUsername)
+        _, exists, findErr := userService.FindByUsername(runtimeInstance, normalizedUsername)
         if nil != findErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to check username", findErr), nil
         }

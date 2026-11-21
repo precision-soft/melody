@@ -44,7 +44,7 @@ func ApiHistoryHandler() melodyhttpcontract.Handler {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the reading archive is unavailable", readErr), nil
         }
 
-        current, currentErr := reportService.Reading(runtimeInstance.Context())
+        current, currentErr := reportService.Reading(runtimeInstance)
         if nil != currentErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the current reading is unavailable", currentErr), nil
         }

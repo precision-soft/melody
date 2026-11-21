@@ -14,6 +14,9 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     "github.com/precision-soft/melody/v4/clock"
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
 )
 
@@ -29,18 +32,17 @@ func TestRemember_ReturnsCachedValueWithoutCallingCallback(t *testing.T) {
 
     cacheInstance := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    setErr := cacheInstance.Set(context.Background(), "k", "v", bound.UnlimitedDuration())
+    setErr := cacheInstance.Set(testRuntime(), "k", "v", bound.UnlimitedDuration())
     if nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
     called := false
     value, rememberErr := Remember(
-        context.Background(),
-        cacheInstance,
+        For(testRuntime(), cacheInstance),
         "k",
         RememberConfig{Ttl: bound.Of(time.Second)},
-        func(ctx context.Context, _ *RememberItem) (any, error) {
+        func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             called = true
             return "new", nil
         },
@@ -70,11 +72,10 @@ func TestRemember_CallsCallbackAndStoresValue(t *testing.T) {
 
     called := false
     value, rememberErr := Remember(
-        context.Background(),
-        cacheInstance,
+        For(testRuntime(), cacheInstance),
         "k",
         RememberConfig{Ttl: bound.Of(time.Second)},
-        func(ctx context.Context, _ *RememberItem) (any, error) {
+        func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             called = true
             return "computed", nil
         },
@@ -89,7 +90,7 @@ func TestRemember_CallsCallbackAndStoresValue(t *testing.T) {
         t.Fatalf("unexpected value")
     }
 
-    storedValue, exists, getErr := Get[any](context.Background(), cacheInstance, "k")
+    storedValue, exists, getErr := Get[any](For(testRuntime(), cacheInstance), "k")
     if nil != getErr {
         t.Fatalf("get error: %v", getErr)
     }
@@ -116,11 +117,10 @@ func TestRemember_PropagatesCallbackErrorAndDoesNotStore(t *testing.T) {
     expectedErr := errors.New("callback error")
 
     _, rememberErr := Remember(
-        context.Background(),
-        cacheInstance,
+        For(testRuntime(), cacheInstance),
         "k",
         RememberConfig{Ttl: bound.Of(time.Second)},
-        func(ctx context.Context, _ *RememberItem) (any, error) {
+        func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             return nil, expectedErr
         },
     )
@@ -131,7 +131,7 @@ func TestRemember_PropagatesCallbackErrorAndDoesNotStore(t *testing.T) {
         t.Fatalf("expected callback error to propagate")
     }
 
-    _, exists, getErr := Get[any](context.Background(), cacheInstance, "k")
+    _, exists, getErr := Get[any](For(testRuntime(), cacheInstance), "k")
     if nil != getErr {
         t.Fatalf("get error: %v", getErr)
     }
@@ -153,11 +153,10 @@ func TestRemember_AnUnlimitedTtlKeepsTheValue(t *testing.T) {
     cacheInstance := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
     _, rememberErr := Remember(
-        context.Background(),
-        cacheInstance,
+        For(testRuntime(), cacheInstance),
         "k",
         RememberConfig{Ttl: bound.UnlimitedDuration()},
-        func(ctx context.Context, _ *RememberItem) (any, error) {
+        func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             return "v", nil
         },
     )
@@ -167,7 +166,7 @@ func TestRemember_AnUnlimitedTtlKeepsTheValue(t *testing.T) {
 
     clockInstance.now = time.Unix(10+3600, 0)
 
-    value, exists, getErr := Get[any](context.Background(), cacheInstance, "k")
+    value, exists, getErr := Get[any](For(testRuntime(), cacheInstance), "k")
     if nil != getErr {
         t.Fatalf("get error: %v", getErr)
     }
@@ -198,7 +197,7 @@ func TestRemember_ProtectAgainstStampede_ExecutesCallbackOnce(t *testing.T) {
     releaseCallbackChannel := make(chan struct{})
 
     var callbackCalls int64
-    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
+    callback := func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
         atomic.AddInt64(&callbackCalls, 1)
         <-releaseCallbackChannel
         return "value", nil
@@ -216,8 +215,7 @@ func TestRemember_ProtectAgainstStampede_ExecutesCallbackOnce(t *testing.T) {
             defer waitGroup.Done()
 
             value, err := Remember(
-                context.Background(),
-                cacheManager,
+                For(testRuntime(), cacheManager),
                 "product.1",
                 RememberConfig{Ttl: bound.Of(time.Minute)},
                 callback,
@@ -283,7 +281,7 @@ func TestRemember_StampedeProtectionDisabled_AllowsParallelCallbackCalls(t *test
     releaseCallbackChannel := make(chan struct{})
 
     var callbackCalls int64
-    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
+    callback := func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
         atomic.AddInt64(&callbackCalls, 1)
         <-releaseCallbackChannel
         return "value", nil
@@ -306,8 +304,7 @@ func TestRemember_StampedeProtectionDisabled_AllowsParallelCallbackCalls(t *test
             defer waitGroup.Done()
 
             _, _ = Remember(
-                context.Background(),
-                cacheManager,
+                For(testRuntime(), cacheManager),
                 "product.2",
                 config,
                 callback,
@@ -358,7 +355,7 @@ func TestRemember_WaitTimeoutIsPerCaller_DoesNotPoisonInFlightCall(t *testing.T)
     releaseCallbackChannel := make(chan struct{})
 
     var callbackCalls int64
-    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
+    callback := func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
         atomic.AddInt64(&callbackCalls, 1)
         <-releaseCallbackChannel
         return "value", nil
@@ -369,8 +366,7 @@ func TestRemember_WaitTimeoutIsPerCaller_DoesNotPoisonInFlightCall(t *testing.T)
     resultChannelA := make(chan error, 1)
     go func() {
         _, err := Remember(
-            context.Background(),
-            cacheManager,
+            For(testRuntime(), cacheManager),
             "product.3",
             RememberConfig{Ttl: bound.Of(time.Minute), WaitTimeout: bound.UnlimitedDuration(), Detached: true},
             callback,
@@ -383,8 +379,7 @@ func TestRemember_WaitTimeoutIsPerCaller_DoesNotPoisonInFlightCall(t *testing.T)
     resultChannelB := make(chan error, 1)
     go func() {
         _, err := Remember(
-            context.Background(),
-            cacheManager,
+            For(testRuntime(), cacheManager),
             "product.3",
             RememberConfig{Ttl: bound.Of(time.Minute), WaitTimeout: bound.Of(100 * time.Millisecond), Detached: true},
             callback,
@@ -398,8 +393,7 @@ func TestRemember_WaitTimeoutIsPerCaller_DoesNotPoisonInFlightCall(t *testing.T)
     resultChannelCErr := make(chan error, 1)
     go func() {
         value, err := Remember(
-            context.Background(),
-            cacheManager,
+            For(testRuntime(), cacheManager),
             "product.3",
             RememberConfig{Ttl: bound.Of(time.Minute), WaitTimeout: bound.Of(150 * time.Millisecond), Detached: true},
             callback,
@@ -461,15 +455,15 @@ func TestRemember_CancelableLateJoinerIsNotPoisonedByCanceledCall(t *testing.T) 
     holdLeader := make(chan struct{})
 
     var callbackCalls int64
-    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
+    callback := func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
         call := atomic.AddInt64(&callbackCalls, 1)
         if 1 == call {
             close(callbackStarted)
-            <-ctx.Done()
+            <-runtimeInstance.Context().Done()
             close(callbackCanceled)
             <-holdLeader
 
-            return nil, ctx.Err()
+            return nil, runtimeInstance.Context().Err()
         }
 
         return "fresh", nil
@@ -478,8 +472,7 @@ func TestRemember_CancelableLateJoinerIsNotPoisonedByCanceledCall(t *testing.T) 
     timedOutChannel := make(chan error, 1)
     go func() {
         _, err := Remember(
-            context.Background(),
-            cacheManager,
+            For(testRuntime(), cacheManager),
             "product.late-joiner",
             RememberConfig{Ttl: bound.Of(time.Minute), WaitTimeout: bound.Of(30 * time.Millisecond)},
             callback,
@@ -500,8 +493,7 @@ func TestRemember_CancelableLateJoinerIsNotPoisonedByCanceledCall(t *testing.T) 
     joinerErrChannel := make(chan error, 1)
     go func() {
         value, err := Remember(
-            context.Background(),
-            cacheManager,
+            For(testRuntime(), cacheManager),
             "product.late-joiner",
             RememberConfig{Ttl: bound.Of(time.Minute), WaitTimeout: bound.Of(2 * time.Second)},
             callback,
@@ -551,13 +543,13 @@ func TestRemember_CancelableGroupIsSeparatedFromNonCancelableGroup(t *testing.T)
     var nonCancelableCalls int64
     var cancelableCalls int64
 
-    nonCancelableCallback := func(ctx context.Context, _ *RememberItem) (any, error) {
+    nonCancelableCallback := func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
         atomic.AddInt64(&nonCancelableCalls, 1)
         <-releaseCallbackNonCancelableChannel
         return "nonCancelable", nil
     }
 
-    cancelableCallback := func(ctx context.Context, _ *RememberItem) (any, error) {
+    cancelableCallback := func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
         atomic.AddInt64(&cancelableCalls, 1)
         <-releaseCallbackCancelableChannel
         return "cancelable", nil
@@ -568,8 +560,7 @@ func TestRemember_CancelableGroupIsSeparatedFromNonCancelableGroup(t *testing.T)
 
     go func() {
         value, _ := Remember(
-            context.Background(),
-            cacheManager,
+            For(testRuntime(), cacheManager),
             "product.4",
             RememberConfig{Ttl: bound.Of(time.Minute), WaitTimeout: bound.UnlimitedDuration(), Detached: true},
             nonCancelableCallback,
@@ -579,8 +570,7 @@ func TestRemember_CancelableGroupIsSeparatedFromNonCancelableGroup(t *testing.T)
 
     go func() {
         value, _ := Remember(
-            context.Background(),
-            cacheManager,
+            For(testRuntime(), cacheManager),
             "product.4",
             RememberConfig{Ttl: bound.Of(time.Minute), WaitTimeout: bound.UnlimitedDuration()},
             cancelableCallback,
@@ -623,11 +613,10 @@ func TestRemember_RefusesATypedNilCache(t *testing.T) {
     var typedNilManager *Manager
 
     _, rememberErr := Remember(
-        context.Background(),
-        typedNilManager,
+        For(testRuntime(), typedNilManager),
         "k",
         RememberConfig{Ttl: bound.Of(time.Second)},
-        func(ctx context.Context, _ *RememberItem) (any, error) {
+        func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             return "v", nil
         },
     )
@@ -652,7 +641,7 @@ func TestRemember_AConfigurationOfOnlyTheTtlKeepsStampedeProtection(t *testing.T
     leaderStartedChannel := make(chan struct{})
 
     var callbackCalls int64
-    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
+    callback := func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
         if 1 == atomic.AddInt64(&callbackCalls, 1) {
             close(leaderStartedChannel)
         }
@@ -662,7 +651,7 @@ func TestRemember_AConfigurationOfOnlyTheTtlKeepsStampedeProtection(t *testing.T
 
     leaderResultChannel := make(chan error, 1)
     go func() {
-        _, err := Remember(context.Background(), cacheManager, "zero.value.option", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
+        _, err := Remember(For(testRuntime(), cacheManager), "zero.value.option", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
         leaderResultChannel <- err
     }()
 
@@ -671,7 +660,7 @@ func TestRemember_AConfigurationOfOnlyTheTtlKeepsStampedeProtection(t *testing.T
     joinerResultChannel := make(chan error, 1)
     joinerValueChannel := make(chan any, 1)
     go func() {
-        value, err := Remember(context.Background(), cacheManager, "zero.value.option", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
+        value, err := Remember(For(testRuntime(), cacheManager), "zero.value.option", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
         joinerValueChannel <- value
         joinerResultChannel <- err
     }()
@@ -712,7 +701,7 @@ func TestRemember_ADeliberateProtectionOffWithZeroWaitIsNotCoalesced(t *testing.
     releaseCallbackChannel := make(chan struct{})
 
     var callbackCalls int64
-    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
+    callback := func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
         atomic.AddInt64(&callbackCalls, 1)
         <-releaseCallbackChannel
         return "value", nil
@@ -723,7 +712,7 @@ func TestRemember_ADeliberateProtectionOffWithZeroWaitIsNotCoalesced(t *testing.
     for index := 0; index < 2; index++ {
         go func() {
             defer waitGroup.Done()
-            _, _ = Remember(context.Background(), cacheManager, "protection.off.zero.wait", config, callback)
+            _, _ = Remember(For(testRuntime(), cacheManager), "protection.off.zero.wait", config, callback)
         }()
     }
 
@@ -750,11 +739,10 @@ func TestRemember_RecomputesOverACorruptPayload(t *testing.T) {
     }
 
     value, rememberErr := Remember(
-        context.Background(),
-        cacheManager,
+        For(testRuntime(), cacheManager),
         "poisoned",
         RememberConfig{Ttl: bound.UnlimitedDuration()},
-        func(ctx context.Context, _ *RememberItem) (any, error) {
+        func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             return "healed", nil
         },
     )
@@ -765,7 +753,7 @@ func TestRemember_RecomputesOverACorruptPayload(t *testing.T) {
         t.Fatalf("unexpected value: %v", value)
     }
 
-    storedValue, exists, getErr := Get[any](context.Background(), cacheManager, "poisoned")
+    storedValue, exists, getErr := Get[any](For(testRuntime(), cacheManager), "poisoned")
     if nil != getErr {
         t.Fatalf("expected the corrupt payload to have been overwritten, got: %v", getErr)
     }
@@ -784,11 +772,10 @@ func TestRemember_CallbackTypedNilErrorIsSuccess(t *testing.T) {
     cacheManager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
     value, rememberErr := Remember(
-        context.Background(),
-        cacheManager,
+        For(testRuntime(), cacheManager),
         "typed.nil.callback",
         RememberConfig{Ttl: bound.Of(time.Minute)},
-        func(ctx context.Context, _ *RememberItem) (any, error) {
+        func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             var typedNil *testRememberError
             return "computed", typedNil
         },
@@ -800,7 +787,7 @@ func TestRemember_CallbackTypedNilErrorIsSuccess(t *testing.T) {
         t.Fatalf("unexpected value: %v", value)
     }
 
-    storedValue, exists, getErr := Get[any](context.Background(), cacheManager, "typed.nil.callback")
+    storedValue, exists, getErr := Get[any](For(testRuntime(), cacheManager), "typed.nil.callback")
     if nil != getErr || false == exists || "computed" != storedValue.(string) {
         t.Fatalf("expected the computed value to have been stored, got exists=%v value=%v err=%v", exists, storedValue, getErr)
     }
@@ -816,48 +803,48 @@ type testValueKindCache struct {
     inner *Manager
 }
 
-func (instance testValueKindCache) Get(ctx context.Context, key string, target any) (bool, error) {
-    return instance.inner.Get(ctx, key, target)
+func (instance testValueKindCache) Get(runtimeInstance containercontract.Runtime, key string, target any) (bool, error) {
+    return instance.inner.Get(runtimeInstance, key, target)
 }
 
-func (instance testValueKindCache) Set(ctx context.Context, key string, value any, ttl bound.Duration) error {
-    return instance.inner.Set(ctx, key, value, ttl)
+func (instance testValueKindCache) Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration) error {
+    return instance.inner.Set(runtimeInstance, key, value, ttl)
 }
 
-func (instance testValueKindCache) Delete(ctx context.Context, key string) error {
-    return instance.inner.Delete(ctx, key)
+func (instance testValueKindCache) Delete(runtimeInstance containercontract.Runtime, key string) error {
+    return instance.inner.Delete(runtimeInstance, key)
 }
 
-func (instance testValueKindCache) Has(ctx context.Context, key string) (bool, error) {
-    return instance.inner.Has(ctx, key)
+func (instance testValueKindCache) Has(runtimeInstance containercontract.Runtime, key string) (bool, error) {
+    return instance.inner.Has(runtimeInstance, key)
 }
 
-func (instance testValueKindCache) Clear(ctx context.Context) error {
-    return instance.inner.Clear(ctx)
+func (instance testValueKindCache) Clear(runtimeInstance containercontract.Runtime) error {
+    return instance.inner.Clear(runtimeInstance)
 }
 
-func (instance testValueKindCache) Many(ctx context.Context, keys []string, target any) error {
-    return instance.inner.Many(ctx, keys, target)
+func (instance testValueKindCache) Many(runtimeInstance containercontract.Runtime, keys []string, target any) error {
+    return instance.inner.Many(runtimeInstance, keys, target)
 }
 
 func (instance testValueKindCache) RoundTrip(value any, target any) error {
     return instance.inner.RoundTrip(value, target)
 }
 
-func (instance testValueKindCache) SetMultiple(ctx context.Context, items map[string]any, ttl bound.Duration) error {
-    return instance.inner.SetMultiple(ctx, items, ttl)
+func (instance testValueKindCache) SetMultiple(runtimeInstance containercontract.Runtime, items map[string]any, ttl bound.Duration) error {
+    return instance.inner.SetMultiple(runtimeInstance, items, ttl)
 }
 
-func (instance testValueKindCache) DeleteMultiple(ctx context.Context, keys []string) error {
-    return instance.inner.DeleteMultiple(ctx, keys)
+func (instance testValueKindCache) DeleteMultiple(runtimeInstance containercontract.Runtime, keys []string) error {
+    return instance.inner.DeleteMultiple(runtimeInstance, keys)
 }
 
-func (instance testValueKindCache) Increment(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
-    return instance.inner.Increment(ctx, key, delta, options)
+func (instance testValueKindCache) Increment(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    return instance.inner.Increment(runtimeInstance, key, delta, options)
 }
 
-func (instance testValueKindCache) Decrement(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
-    return instance.inner.Decrement(ctx, key, delta, options)
+func (instance testValueKindCache) Decrement(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    return instance.inner.Decrement(runtimeInstance, key, delta, options)
 }
 
 func (instance testValueKindCache) CloseWithContext(closeContext context.Context) error {
@@ -877,7 +864,7 @@ func TestRemember_ValueKindCacheDoesNotCoalesce(t *testing.T) {
     firstStartedChannel := make(chan struct{})
 
     var callbackCalls int64
-    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
+    callback := func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
         if 1 == atomic.AddInt64(&callbackCalls, 1) {
             close(firstStartedChannel)
         }
@@ -887,7 +874,7 @@ func TestRemember_ValueKindCacheDoesNotCoalesce(t *testing.T) {
 
     firstResultChannel := make(chan error, 1)
     go func() {
-        _, err := Remember(context.Background(), valueKindCache, "value.kind", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
+        _, err := Remember(For(testRuntime(), valueKindCache), "value.kind", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
         firstResultChannel <- err
     }()
 
@@ -895,7 +882,7 @@ func TestRemember_ValueKindCacheDoesNotCoalesce(t *testing.T) {
 
     secondResultChannel := make(chan error, 1)
     go func() {
-        _, err := Remember(context.Background(), valueKindCache, "value.kind", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
+        _, err := Remember(For(testRuntime(), valueKindCache), "value.kind", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
         secondResultChannel <- err
     }()
 
@@ -932,48 +919,48 @@ type testPanickingSetCache struct {
     inner *Manager
 }
 
-func (instance *testPanickingSetCache) Get(ctx context.Context, key string, target any) (bool, error) {
-    return instance.inner.Get(ctx, key, target)
+func (instance *testPanickingSetCache) Get(runtimeInstance containercontract.Runtime, key string, target any) (bool, error) {
+    return instance.inner.Get(runtimeInstance, key, target)
 }
 
-func (instance *testPanickingSetCache) Set(ctx context.Context, key string, value any, ttl bound.Duration) error {
+func (instance *testPanickingSetCache) Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration) error {
     panic("backend exploded")
 }
 
-func (instance *testPanickingSetCache) Delete(ctx context.Context, key string) error {
-    return instance.inner.Delete(ctx, key)
+func (instance *testPanickingSetCache) Delete(runtimeInstance containercontract.Runtime, key string) error {
+    return instance.inner.Delete(runtimeInstance, key)
 }
 
-func (instance *testPanickingSetCache) Has(ctx context.Context, key string) (bool, error) {
-    return instance.inner.Has(ctx, key)
+func (instance *testPanickingSetCache) Has(runtimeInstance containercontract.Runtime, key string) (bool, error) {
+    return instance.inner.Has(runtimeInstance, key)
 }
 
-func (instance *testPanickingSetCache) Clear(ctx context.Context) error {
-    return instance.inner.Clear(ctx)
+func (instance *testPanickingSetCache) Clear(runtimeInstance containercontract.Runtime) error {
+    return instance.inner.Clear(runtimeInstance)
 }
 
-func (instance *testPanickingSetCache) Many(ctx context.Context, keys []string, target any) error {
-    return instance.inner.Many(ctx, keys, target)
+func (instance *testPanickingSetCache) Many(runtimeInstance containercontract.Runtime, keys []string, target any) error {
+    return instance.inner.Many(runtimeInstance, keys, target)
 }
 
 func (instance *testPanickingSetCache) RoundTrip(value any, target any) error {
     return instance.inner.RoundTrip(value, target)
 }
 
-func (instance *testPanickingSetCache) SetMultiple(ctx context.Context, items map[string]any, ttl bound.Duration) error {
-    return instance.inner.SetMultiple(ctx, items, ttl)
+func (instance *testPanickingSetCache) SetMultiple(runtimeInstance containercontract.Runtime, items map[string]any, ttl bound.Duration) error {
+    return instance.inner.SetMultiple(runtimeInstance, items, ttl)
 }
 
-func (instance *testPanickingSetCache) DeleteMultiple(ctx context.Context, keys []string) error {
-    return instance.inner.DeleteMultiple(ctx, keys)
+func (instance *testPanickingSetCache) DeleteMultiple(runtimeInstance containercontract.Runtime, keys []string) error {
+    return instance.inner.DeleteMultiple(runtimeInstance, keys)
 }
 
-func (instance *testPanickingSetCache) Increment(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
-    return instance.inner.Increment(ctx, key, delta, options)
+func (instance *testPanickingSetCache) Increment(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    return instance.inner.Increment(runtimeInstance, key, delta, options)
 }
 
-func (instance *testPanickingSetCache) Decrement(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
-    return instance.inner.Decrement(ctx, key, delta, options)
+func (instance *testPanickingSetCache) Decrement(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    return instance.inner.Decrement(runtimeInstance, key, delta, options)
 }
 
 func (instance *testPanickingSetCache) CloseWithContext(closeContext context.Context) error {
@@ -990,11 +977,10 @@ func TestRemember_CacheSidePanicIsNotBlamedOnTheCallback(t *testing.T) {
     panickingCache := &testPanickingSetCache{inner: NewManager(backend, NewJsonSerializer(), ManagerConfig{})}
 
     _, rememberErr := Remember(
-        context.Background(),
-        panickingCache,
+        For(testRuntime(), panickingCache),
         "panicking.set",
         RememberConfig{Ttl: bound.Of(time.Minute)},
-        func(ctx context.Context, _ *RememberItem) (any, error) {
+        func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             return "computed", nil
         },
     )
@@ -1024,13 +1010,13 @@ type testScriptedGetResult struct {
     err    error
 }
 
-func (instance *testScriptedCache) Get(ctx context.Context, key string, target any) (bool, error) {
+func (instance *testScriptedCache) Get(runtimeInstance containercontract.Runtime, key string, target any) (bool, error) {
     instance.stateMutex.Lock()
     defer instance.stateMutex.Unlock()
 
     index := instance.getCallCount
     instance.getCallCount = instance.getCallCount + 1
-    instance.getContexts = append(instance.getContexts, ctx)
+    instance.getContexts = append(instance.getContexts, runtimeInstance.Context())
 
     if index >= len(instance.getResults) {
         return false, nil
@@ -1048,12 +1034,12 @@ func (instance *testScriptedCache) Get(ctx context.Context, key string, target a
     return true, nil
 }
 
-func (instance *testScriptedCache) Set(ctx context.Context, key string, value any, ttl bound.Duration) error {
+func (instance *testScriptedCache) Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration) error {
     instance.stateMutex.Lock()
     defer instance.stateMutex.Unlock()
 
     instance.setCallCount = instance.setCallCount + 1
-    instance.setContexts = append(instance.setContexts, ctx)
+    instance.setContexts = append(instance.setContexts, runtimeInstance.Context())
     instance.setTtls = append(instance.setTtls, ttl)
 
     return instance.setErr
@@ -1073,13 +1059,13 @@ func (instance *testScriptedCache) setCalls() int {
     return instance.setCallCount
 }
 
-func (instance *testScriptedCache) Delete(ctx context.Context, key string) error { return nil }
+func (instance *testScriptedCache) Delete(runtimeInstance containercontract.Runtime, key string) error { return nil }
 
-func (instance *testScriptedCache) Has(ctx context.Context, key string) (bool, error) { return false, nil }
+func (instance *testScriptedCache) Has(runtimeInstance containercontract.Runtime, key string) (bool, error) { return false, nil }
 
-func (instance *testScriptedCache) Clear(ctx context.Context) error { return nil }
+func (instance *testScriptedCache) Clear(runtimeInstance containercontract.Runtime) error { return nil }
 
-func (instance *testScriptedCache) Many(ctx context.Context, keys []string, target any) error {
+func (instance *testScriptedCache) Many(runtimeInstance containercontract.Runtime, keys []string, target any) error {
     return nil
 }
 
@@ -1088,17 +1074,17 @@ func (instance *testScriptedCache) RoundTrip(value any, target any) error {
     return assignTestValue(target, value)
 }
 
-func (instance *testScriptedCache) SetMultiple(ctx context.Context, items map[string]any, ttl bound.Duration) error {
+func (instance *testScriptedCache) SetMultiple(runtimeInstance containercontract.Runtime, items map[string]any, ttl bound.Duration) error {
     return nil
 }
 
-func (instance *testScriptedCache) DeleteMultiple(ctx context.Context, keys []string) error { return nil }
+func (instance *testScriptedCache) DeleteMultiple(runtimeInstance containercontract.Runtime, keys []string) error { return nil }
 
-func (instance *testScriptedCache) Increment(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+func (instance *testScriptedCache) Increment(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
     return 0, nil
 }
 
-func (instance *testScriptedCache) Decrement(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+func (instance *testScriptedCache) Decrement(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
     return 0, nil
 }
 
@@ -1118,11 +1104,10 @@ func TestRemember_ACacheFailureThatIsNotACorruptPayloadEndsThere(t *testing.T) {
     callbackCalled := false
 
     value, rememberErr := Remember(
-        context.Background(),
-        manager,
+        For(testRuntime(), manager),
         "key",
         RememberConfig{Ttl: bound.Of(time.Minute)},
-        func(ctx context.Context, _ *RememberItem) (any, error) {
+        func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             callbackCalled = true
             return "computed", nil
         },
@@ -1144,11 +1129,10 @@ func TestRemember_ACacheFailureThatIsNotACorruptPayloadEndsThere(t *testing.T) {
     callbackCalled = false
 
     value, rememberErr = Remember(
-        context.Background(),
-        manager,
+        For(testRuntime(), manager),
         "key",
         RememberConfig{Ttl: bound.Of(time.Minute), StampedeProtectionDisabled: true},
-        func(ctx context.Context, _ *RememberItem) (any, error) {
+        func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             callbackCalled = true
             return "computed", nil
         },
@@ -1179,11 +1163,10 @@ func TestRemember_TheLeaderServesAValueThatAppearedBetweenTheTwoReads(t *testing
     callbackCalled := false
 
     value, rememberErr := Remember(
-        context.Background(),
-        scriptedCache,
+        For(testRuntime(), scriptedCache),
         "key",
         RememberConfig{Ttl: bound.Of(time.Minute)},
-        func(ctx context.Context, _ *RememberItem) (any, error) {
+        func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             callbackCalled = true
             return "computed", nil
         },
@@ -1218,11 +1201,10 @@ func TestRemember_ACacheFailureOnTheLeaderReReadCompletesTheFlightWithIt(t *test
     callbackCalled := false
 
     _, rememberErr := Remember(
-        context.Background(),
-        scriptedCache,
+        For(testRuntime(), scriptedCache),
         "key",
         RememberConfig{Ttl: bound.Of(time.Minute)},
-        func(ctx context.Context, _ *RememberItem) (any, error) {
+        func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             callbackCalled = true
             return "computed", nil
         },
@@ -1252,11 +1234,10 @@ func TestRemember_AFailedWriteIsReportedRatherThanSwallowed(t *testing.T) {
     }
 
     _, rememberErr := Remember(
-        context.Background(),
-        scriptedCache,
+        For(testRuntime(), scriptedCache),
         "key",
         RememberConfig{Ttl: bound.Of(time.Minute)},
-        func(ctx context.Context, _ *RememberItem) (any, error) {
+        func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             return "computed", nil
         },
     )
@@ -1277,11 +1258,10 @@ func TestRemember_WithoutStampedeProtectionBothFailuresReachTheCaller(t *testing
     scriptedCache := &testScriptedCache{}
 
     _, callbackFailureErr := Remember(
-        context.Background(),
-        scriptedCache,
+        For(testRuntime(), scriptedCache),
         "key",
         config,
-        func(ctx context.Context, _ *RememberItem) (any, error) {
+        func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             return nil, errors.New("computation refused")
         },
     )
@@ -1297,11 +1277,10 @@ func TestRemember_WithoutStampedeProtectionBothFailuresReachTheCaller(t *testing
     failingWriteCache := &testScriptedCache{setErr: errors.New("disk full")}
 
     _, writeFailureErr := Remember(
-        context.Background(),
-        failingWriteCache,
+        For(testRuntime(), failingWriteCache),
         "key",
         config,
-        func(ctx context.Context, _ *RememberItem) (any, error) {
+        func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             return "computed", nil
         },
     )
@@ -1323,11 +1302,10 @@ func TestRemember_ACallbackPanicIsReportedAsTheCallbacksOnBothPaths(t *testing.T
         scriptedCache := &testScriptedCache{}
 
         value, rememberErr := Remember(
-            context.Background(),
-            scriptedCache,
+            For(testRuntime(), scriptedCache),
             "key",
             testCase.config,
-            func(ctx context.Context, _ *RememberItem) (any, error) {
+            func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
                 panic("callback exploded")
             },
         )
@@ -1371,16 +1349,16 @@ func TestRemember_AnswersOneShapeOnMissAndHit(t *testing.T) {
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
+    callback := func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
         return 5, nil
     }
 
-    missValue, missErr := Remember(context.Background(), manager, "remember:shape", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
+    missValue, missErr := Remember(For(testRuntime(), manager), "remember:shape", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
     if nil != missErr {
         t.Fatalf("miss failed: %v", missErr)
     }
 
-    hitValue, hitErr := Remember(context.Background(), manager, "remember:shape", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
+    hitValue, hitErr := Remember(For(testRuntime(), manager), "remember:shape", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
     if nil != hitErr {
         t.Fatalf("hit failed: %v", hitErr)
     }
@@ -1401,11 +1379,10 @@ func TestRemember_StampedeProtectedMissAnswersTheStoredShape(t *testing.T) {
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
     value, rememberErr := Remember(
-        context.Background(),
-        manager,
+        For(testRuntime(), manager),
         "remember:stampede-shape",
         RememberConfig{Ttl: bound.Of(time.Minute)},
-        func(ctx context.Context, _ *RememberItem) (any, error) {
+        func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             return map[string]int{"a": 1}, nil
         },
     )
@@ -1429,8 +1406,8 @@ func TestExecuteRememberCallbackSafely_APanickingCallbackKeepsItsCauseAndItsStac
     )
 
     _, _, callbackErr := executeRememberCallbackSafely(
-        context.Background(),
-        func(ctx context.Context, _ *RememberItem) (any, error) {
+        testRuntime(),
+        func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             panic(panicValue)
         },
         "report:daily",
@@ -1465,8 +1442,8 @@ func TestExecuteRememberCallbackSafely_ATypedNilPanicValueIsNotHandedOnAsACause(
     var typedNil *exception.Error
 
     _, _, callbackErr := executeRememberCallbackSafely(
-        context.Background(),
-        func(ctx context.Context, _ *RememberItem) (any, error) {
+        testRuntime(),
+        func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             panic(typedNil)
         },
         "report:daily",
@@ -1510,12 +1487,15 @@ func TestExecuteRememberInFlightLeader_APanickingCacheAccessKeepsItsCauseAndItsS
         "report:daily",
         bound.Of(time.Minute),
         call,
-        testRememberOperations(&panickingRememberCache{panicValue: exception.NewError("cache get exploded", nil, rootCause)}, "report:daily", func(ctx context.Context, _ *RememberItem) (any, error) {
+        testRuntime(),
+        func() {},
+        nil,
+        testRememberOperations(&panickingRememberCache{panicValue: exception.NewError("cache get exploded", nil, rootCause)}, "report:daily", func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             return "value", nil
         }),
     )
 
-    _, waitErr := call.Wait(context.Background(), 5*time.Second, "report:daily")
+    _, waitErr := call.Wait(testRuntime(), 5*time.Second, "report:daily")
     if nil == waitErr {
         t.Fatal("expected the cache-side panic to surface as an error")
     }
@@ -1547,7 +1527,7 @@ type panickingRememberCache struct {
     panicValue error
 }
 
-func (instance *panickingRememberCache) Get(ctx context.Context, key string, target any) (bool, error) {
+func (instance *panickingRememberCache) Get(runtimeInstance containercontract.Runtime, key string, target any) (bool, error) {
     panic(instance.panicValue)
 }
 
@@ -1567,7 +1547,7 @@ func TestRemember_ACanceledCallerContextEndsThatWaitAndLeavesTheFlightForTheOthe
     callbackEnteredChannel := make(chan struct{})
 
     var callbackCalls int64
-    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
+    callback := func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
         atomic.AddInt64(&callbackCalls, 1)
         close(callbackEnteredChannel)
         <-releaseCallbackChannel
@@ -1577,8 +1557,7 @@ func TestRemember_ACanceledCallerContextEndsThatWaitAndLeavesTheFlightForTheOthe
     leaderErrorChannel := make(chan error, 1)
     go func() {
         _, err := Remember(
-            context.Background(),
-            cacheManager,
+            For(testRuntime(), cacheManager),
             "report.daily",
             RememberConfig{Ttl: bound.Of(time.Minute)},
             callback,
@@ -1593,8 +1572,7 @@ func TestRemember_ACanceledCallerContextEndsThatWaitAndLeavesTheFlightForTheOthe
     abandonedErrorChannel := make(chan error, 1)
     go func() {
         _, err := Remember(
-            abandonedContext,
-            cacheManager,
+            For(testRuntimeUnder(abandonedContext), cacheManager),
             "report.daily",
             RememberConfig{Ttl: bound.Of(time.Minute)},
             callback,
@@ -1658,13 +1636,12 @@ func TestRemember_WithoutStampedeProtectionTheCallbackRunsUnderTheCallerContext(
     var observedContextError error
 
     _, rememberErr := Remember(
-        callerContext,
-        cacheManager,
+        For(testRuntimeUnder(callerContext), cacheManager),
         "report.uncoalesced",
         RememberConfig{Ttl: bound.Of(time.Minute), StampedeProtectionDisabled: true},
-        func(ctx context.Context, _ *RememberItem) (any, error) {
+        func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             cancelCaller()
-            observedContextError = ctx.Err()
+            observedContextError = runtimeInstance.Context().Err()
             return "value", nil
         },
     )
@@ -1677,7 +1654,7 @@ func TestRemember_WithoutStampedeProtectionTheCallbackRunsUnderTheCallerContext(
         t.Fatalf("expected the computed value answered, got %v", rememberErr)
     }
 
-    if _, exists, getErr := Get[any](context.Background(), cacheManager, "report.uncoalesced"); nil != getErr || false == exists {
+    if _, exists, getErr := Get[any](For(testRuntime(), cacheManager), "report.uncoalesced"); nil != getErr || false == exists {
         t.Fatalf("expected the computed value stored though the caller left, got %v, %v", exists, getErr)
     }
 }
@@ -1702,13 +1679,13 @@ func TestRemember_AValueTheSerializerCannotReadBackIsNotStored(t *testing.T) {
         manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
         calls := 0
-        callback := func(ctx context.Context, _ *RememberItem) (any, error) {
+        callback := func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             calls = calls + 1
 
             return deeplyNestedValue(20000), nil
         }
 
-        _, rememberErr := Remember(context.Background(), manager, "remember:unreadable", config, callback)
+        _, rememberErr := Remember(For(testRuntime(), manager), "remember:unreadable", config, callback)
         if nil == rememberErr {
             t.Fatalf("expected the value the serializer cannot read back to be refused (protection disabled %v)", config.StampedeProtectionDisabled)
         }
@@ -1738,19 +1715,19 @@ func rememberWithABoundedWaitOnASlowCallback(t *testing.T, config RememberConfig
     release := make(chan struct{})
 
     var calls atomic.Int64
-    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
+    callback := func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
         calls.Add(1)
 
         select {
-        case <-ctx.Done():
-            return nil, ctx.Err()
+        case <-runtimeInstance.Context().Done():
+            return nil, runtimeInstance.Context().Err()
         case <-release:
             return "value", nil
         }
     }
 
     for call := 0; call < 3; call = call + 1 {
-        if _, rememberErr := Remember(context.Background(), manager, "remember:bounded-wait", config, callback); nil == rememberErr {
+        if _, rememberErr := Remember(For(testRuntime(), manager), "remember:bounded-wait", config, callback); nil == rememberErr {
             t.Fatalf("expected call %d to time out on the slow callback", call+1)
         }
 
@@ -1818,7 +1795,7 @@ func TestRemember_AValueTheSerializerCannotEncodeIsRefusedNamingTheKey(t *testin
         backend := NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Minute), Clock: clock.NewSystemClock()})
         manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-        _, rememberErr := Remember(context.Background(), manager, "remember:unencodable", config, func(ctx context.Context, _ *RememberItem) (any, error) {
+        _, rememberErr := Remember(For(testRuntime(), manager), "remember:unencodable", config, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             return math.NaN(), nil
         })
         if nil == rememberErr || "cache value serialization failed" != rememberErr.Error() {
@@ -1847,17 +1824,15 @@ func (instance *zzTypedNilContext) Done() <-chan struct{}       { return instanc
 func (instance *zzTypedNilContext) Err() error                  { return instance.parent.Err() }
 func (instance *zzTypedNilContext) Value(key any) any           { return instance.parent.Value(key) }
 
-func TestRemember_ANilOrTypedNilContextIsRefused(t *testing.T) {
-    var absentContext *zzTypedNilContext
-
-    for _, callerContext := range []context.Context{nil, absentContext} {
+func TestRemember_ANilOrTypedNilOrContextlessRuntimeIsRefused(t *testing.T) {
+    for _, refusedRuntime := range refusedTestRuntimes() {
         scriptedCache := &testScriptedCache{}
 
-        _, rememberErr := Remember(callerContext, scriptedCache, "key", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context, _ *RememberItem) (any, error) {
+        _, rememberErr := Remember(For(refusedRuntime, scriptedCache), "key", RememberConfig{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             return "value", nil
         })
-        if nil == rememberErr || "remember context is nil" != rememberErr.Error() {
-            t.Fatalf("expected the absent context to be refused, got %v", rememberErr)
+        if nil == rememberErr || refusedRuntimeMessage != rememberErr.Error() {
+            t.Fatalf("expected the absent runtime to be refused, got %v", rememberErr)
         }
 
         if 0 != scriptedCache.getCalls() {
@@ -1875,7 +1850,7 @@ func TestRemember_EveryCallerOfOneFlightOwnsItsAnswer(t *testing.T) {
     cacheManager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
     releaseCallbackChannel := make(chan struct{})
-    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
+    callback := func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
         <-releaseCallbackChannel
         return map[string]any{"owner": "none"}, nil
     }
@@ -1898,7 +1873,7 @@ func TestRemember_EveryCallerOfOneFlightOwnsItsAnswer(t *testing.T) {
     answers := make(chan map[string]any, callers)
     for index := 0; index < callers; index++ {
         go func() {
-            value, _ := Remember(context.Background(), cacheManager, "report.shared", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
+            value, _ := Remember(For(testRuntime(), cacheManager), "report.shared", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
             answer, _ := value.(map[string]any)
             answers <- answer
         }()
@@ -1945,7 +1920,7 @@ func TestRemember_AWaiterNeverReadsTheValueTheCallbackKept(t *testing.T) {
 
     var kept map[string]any
     releaseCallbackChannel := make(chan struct{})
-    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
+    callback := func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
         <-releaseCallbackChannel
         kept = map[string]any{"owner": "none"}
         return kept, nil
@@ -1969,7 +1944,7 @@ func TestRemember_AWaiterNeverReadsTheValueTheCallbackKept(t *testing.T) {
     answers := make(chan map[string]any, callers)
     for index := 0; index < callers; index++ {
         go func() {
-            value, _ := Remember(context.Background(), cacheManager, "report.kept", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
+            value, _ := Remember(For(testRuntime(), cacheManager), "report.kept", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
             answer, _ := value.(map[string]any)
             answers <- answer
         }()
@@ -2027,11 +2002,10 @@ func TestRemember_AStoredValueTheLeaderCannotCopyIsAnsweredAsAPlainHit(t *testin
     }
 
     value, rememberErr := Remember(
-        context.Background(),
-        scriptedCache,
+        For(testRuntime(), scriptedCache),
         "key",
         RememberConfig{Ttl: bound.Of(time.Minute)},
-        func(ctx context.Context, _ *RememberItem) (any, error) {
+        func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             return "computed", nil
         },
     )
@@ -2058,14 +2032,14 @@ func TestRemember_EveryWaiterReadsItsOwnValueTheLeaderCannotCopy(t *testing.T) {
 
     computations := 0
     call := newRememberInFlightCall(false)
-    executeRememberInFlightLeader(&rememberInFlightShard{inFlightByKey: map[rememberFlightKey]*rememberInFlightCall{}}, rememberFlightKey{key: "key"}, "key", bound.Of(time.Minute), call, testRememberOperations(scriptedCache, "key", func(ctx context.Context, _ *RememberItem) (any, error) {
+    executeRememberInFlightLeader(&rememberInFlightShard{inFlightByKey: map[rememberFlightKey]*rememberInFlightCall{}}, rememberFlightKey{key: "key"}, "key", bound.Of(time.Minute), call, testRuntime(), func() {}, nil, testRememberOperations(scriptedCache, "key", func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
         computations++
 
         return "computed", nil
     }))
 
-    firstBoxed, firstErr := call.answer()
-    secondBoxed, secondErr := call.answer()
+    firstBoxed, firstErr := call.answer(testRuntime())
+    secondBoxed, secondErr := call.answer(testRuntime())
     firstAnswer, secondAnswer := unboxTestAnswer(firstBoxed), unboxTestAnswer(secondBoxed)
     if nil != firstErr || nil != secondErr {
         t.Fatalf("expected both callers answered, got %v and %v", firstErr, secondErr)
@@ -2076,7 +2050,7 @@ func TestRemember_EveryWaiterReadsItsOwnValueTheLeaderCannotCopy(t *testing.T) {
     }
 
     /* the entry gone before the third caller read it is a miss: the caller computes as a lone miss would, and this cache refuses to store any value, the computed one included */
-    if _, goneErr := call.answer(); nil == goneErr || 1 != computations || false == strings.Contains(goneErr.Error(), "cache value serialization failed") {
+    if _, goneErr := call.answer(testRuntime()); nil == goneErr || 1 != computations || false == strings.Contains(goneErr.Error(), "cache value serialization failed") {
         t.Fatalf("expected the waiter to compute over the vanished entry and the store's refusal answered, got %v after %d computations", goneErr, computations)
     }
 }
@@ -2106,17 +2080,17 @@ func TestRemember_AWaiterComputesWhenTheUncopyableEntryVanishedBeforeItsRead(t *
 
     computations := 0
     call := newRememberInFlightCall(false)
-    executeRememberInFlightLeader(&rememberInFlightShard{inFlightByKey: map[rememberFlightKey]*rememberInFlightCall{}}, rememberFlightKey{key: "key"}, "key", bound.Of(time.Minute), call, testRememberOperations(scriptedCache, "key", func(ctx context.Context, _ *RememberItem) (any, error) {
+    executeRememberInFlightLeader(&rememberInFlightShard{inFlightByKey: map[rememberFlightKey]*rememberInFlightCall{}}, rememberFlightKey{key: "key"}, "key", bound.Of(time.Minute), call, testRuntime(), func() {}, nil, testRememberOperations(scriptedCache, "key", func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
         computations++
 
         return "computed", nil
     }))
 
-    if _, firstErr := call.answer(); nil != firstErr {
+    if _, firstErr := call.answer(testRuntime()); nil != firstErr {
         t.Fatalf("expected the first caller answered the leader's read, got %v", firstErr)
     }
 
-    secondBoxed, secondErr := call.answer()
+    secondBoxed, secondErr := call.answer(testRuntime())
     secondAnswer := unboxTestAnswer(secondBoxed)
     if nil != secondErr || "computed" != secondAnswer || 1 != computations || 1 != scriptedCache.setCallCount {
         t.Fatalf("expected the waiter to compute and store over the vanished entry, got %v (%v) after %d computations and %d stores", secondAnswer, secondErr, computations, scriptedCache.setCallCount)
@@ -2128,7 +2102,7 @@ func TestRemember_AnAbsentTtlOrOneBelowTheMinimumIsRefusedBeforeTheCacheIsRead(t
         scriptedCache := &testScriptedCache{}
         callbackCalled := false
 
-        _, rememberErr := Remember(context.Background(), scriptedCache, "key", RememberConfig{Ttl: refusedTtl}, func(ctx context.Context, _ *RememberItem) (any, error) {
+        _, rememberErr := Remember(For(testRuntime(), scriptedCache), "key", RememberConfig{Ttl: refusedTtl}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             callbackCalled = true
 
             return "value", nil
@@ -2146,7 +2120,7 @@ func TestRemember_AnAbsentTtlOrOneBelowTheMinimumIsRefusedBeforeTheCacheIsRead(t
 func TestRemember_ANegativeWaitTimeoutIsRefusedNamingTheField(t *testing.T) {
     scriptedCache := &testScriptedCache{}
 
-    _, rememberErr := Remember(context.Background(), scriptedCache, "key", RememberConfig{Ttl: bound.Of(time.Minute), WaitTimeout: bound.Of(-time.Second)}, func(ctx context.Context, _ *RememberItem) (any, error) {
+    _, rememberErr := Remember(For(testRuntime(), scriptedCache), "key", RememberConfig{Ttl: bound.Of(time.Minute), WaitTimeout: bound.Of(-time.Second)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
         return "value", nil
     })
     if nil == rememberErr || "RememberConfig.WaitTimeout" != exception.LogContext(rememberErr, exception.LogContextConfig{})["field"] {
@@ -2183,7 +2157,7 @@ func TestRemember_AnUnlimitedWaitIsHandedTheLeadersValue(t *testing.T) {
 
     leaderStarted := make(chan struct{})
     release := make(chan struct{})
-    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
+    callback := func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
         close(leaderStarted)
         <-release
 
@@ -2192,7 +2166,7 @@ func TestRemember_AnUnlimitedWaitIsHandedTheLeadersValue(t *testing.T) {
 
     leaderDone := make(chan error, 1)
     go func() {
-        _, err := Remember(context.Background(), cacheManager, "unlimited.wait", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
+        _, err := Remember(For(testRuntime(), cacheManager), "unlimited.wait", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
         leaderDone <- err
     }()
 
@@ -2201,7 +2175,7 @@ func TestRemember_AnUnlimitedWaitIsHandedTheLeadersValue(t *testing.T) {
     joinerValue := make(chan any, 1)
     joinerErr := make(chan error, 1)
     go func() {
-        value, err := Remember(context.Background(), cacheManager, "unlimited.wait", RememberConfig{Ttl: bound.Of(time.Minute), WaitTimeout: bound.UnlimitedDuration()}, callback)
+        value, err := Remember(For(testRuntime(), cacheManager), "unlimited.wait", RememberConfig{Ttl: bound.Of(time.Minute), WaitTimeout: bound.UnlimitedDuration()}, callback)
         joinerValue <- value
         joinerErr <- err
     }()
@@ -2230,8 +2204,8 @@ func TestRemember_TheCallerReadsUnderItsContextAndTheFlightReadsAndStoresUnderIt
 
     var flightContext context.Context
 
-    _, rememberErr := Remember(callerContext, scriptedCache, "flight.contexts", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context, _ *RememberItem) (any, error) {
-        flightContext = ctx
+    _, rememberErr := Remember(For(testRuntimeUnder(callerContext), scriptedCache), "flight.contexts", RememberConfig{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
+        flightContext = runtimeInstance.Context()
         return "value", nil
     })
     if nil != rememberErr {
@@ -2266,7 +2240,7 @@ func TestReadOwnStoredValue_ReadsUnderTheFlightContext(t *testing.T) {
     scriptedCache := &testScriptedCache{getResults: []testScriptedGetResult{{value: "stored", exists: true}}}
     flightContext := context.WithValue(context.Background(), rememberContextKey{}, "flight")
 
-    boxed, readErr := readOwnStoredValue("own.read", bound.Of(time.Minute), flightContext, testRememberOperations(scriptedCache, "own.read", func(ctx context.Context, _ *RememberItem) (any, error) {
+    boxed, readErr := readOwnStoredValue("own.read", bound.Of(time.Minute), testRuntimeUnder(flightContext), testRememberOperations(scriptedCache, "own.read", func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
         return "computed", nil
     }))
     value := unboxTestAnswer(boxed)
@@ -2281,7 +2255,7 @@ func TestReadOwnStoredValue_ReadsUnderTheFlightContext(t *testing.T) {
     t.Run("a waiter's own computation honours its own item", func(t *testing.T) {
         missingCache := &testScriptedCache{}
 
-        boxed, readErr := readOwnStoredValue("own.compute", bound.Of(time.Minute), flightContext, testRememberOperations(missingCache, "own.compute", func(ctx context.Context, item *RememberItem) (any, error) {
+        boxed, readErr := readOwnStoredValue("own.compute", bound.Of(time.Minute), testRuntimeUnder(flightContext), testRememberOperations(missingCache, "own.compute", func(runtimeInstance containercontract.Runtime, item *RememberItem) (any, error) {
             item.SetTtl(bound.Of(5 * time.Second))
 
             return "computed", nil
@@ -2301,14 +2275,14 @@ func TestRemember_ADoneCallerContextStillAnswersAHit(t *testing.T) {
     defer backend.CloseWithContext(context.Background())
 
     cacheManager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
-    if setErr := cacheManager.Set(context.Background(), "report.hit", "stored", bound.Of(time.Minute)); nil != setErr {
+    if setErr := cacheManager.Set(testRuntime(), "report.hit", "stored", bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("planting: %v", setErr)
     }
 
     canceledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    value, rememberErr := Remember(canceledContext, cacheManager, "report.hit", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context, _ *RememberItem) (any, error) {
+    value, rememberErr := Remember(For(testRuntimeUnder(canceledContext), cacheManager), "report.hit", RememberConfig{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
         return "computed", nil
     })
     if nil != rememberErr || "stored" != value {
@@ -2322,7 +2296,7 @@ func TestRemember_ALeaderWhoseWaitersLeftStillStoresWhatItComputed(t *testing.T)
 
     cacheManager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    _, rememberErr := Remember(context.Background(), cacheManager, "report.slow", RememberConfig{Ttl: bound.Of(time.Minute), WaitTimeout: bound.Of(20 * time.Millisecond)}, func(ctx context.Context, _ *RememberItem) (any, error) {
+    _, rememberErr := Remember(For(testRuntime(), cacheManager), "report.slow", RememberConfig{Ttl: bound.Of(time.Minute), WaitTimeout: bound.Of(20 * time.Millisecond)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
         time.Sleep(200 * time.Millisecond)
         return "computed", nil
     })
@@ -2332,7 +2306,7 @@ func TestRemember_ALeaderWhoseWaitersLeftStillStoresWhatItComputed(t *testing.T)
 
     deadline := time.Now().Add(5 * time.Second)
     for time.Now().Before(deadline) {
-        if _, exists, _ := Get[any](context.Background(), cacheManager, "report.slow"); true == exists {
+        if _, exists, _ := Get[any](For(testRuntime(), cacheManager), "report.slow"); true == exists {
             return
         }
 
@@ -2354,7 +2328,7 @@ func TestRemember_APlainDecoratorKeepsEveryGuarantee(t *testing.T) {
 
     t.Run("every caller of one flight owns its answer", func(t *testing.T) {
         releaseCallbackChannel := make(chan struct{})
-        callback := func(ctx context.Context, _ *RememberItem) (any, error) {
+        callback := func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             <-releaseCallbackChannel
             return map[string]any{"owner": "none"}, nil
         }
@@ -2377,7 +2351,7 @@ func TestRemember_APlainDecoratorKeepsEveryGuarantee(t *testing.T) {
         answers := make(chan map[string]any, callers)
         for index := 0; index < callers; index++ {
             go func() {
-                value, _ := Remember(context.Background(), decorated, "decorated.shared", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
+                value, _ := Remember(For(testRuntime(), decorated), "decorated.shared", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
                 answer, _ := value.(map[string]any)
                 answers <- answer
             }()
@@ -2406,7 +2380,7 @@ func TestRemember_APlainDecoratorKeepsEveryGuarantee(t *testing.T) {
     })
 
     t.Run("the computing call answers the stored shape", func(t *testing.T) {
-        value, rememberErr := Remember(context.Background(), decorated, "decorated.shape", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context, _ *RememberItem) (any, error) {
+        value, rememberErr := Remember(For(testRuntime(), decorated), "decorated.shape", RememberConfig{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             return 5, nil
         })
         if nil != rememberErr {
@@ -2419,15 +2393,323 @@ func TestRemember_APlainDecoratorKeepsEveryGuarantee(t *testing.T) {
     })
 
     t.Run("a value that cannot be read back is refused with nothing stored", func(t *testing.T) {
-        _, rememberErr := Remember(context.Background(), decorated, "decorated.unreadable", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context, _ *RememberItem) (any, error) {
+        _, rememberErr := Remember(For(testRuntime(), decorated), "decorated.unreadable", RememberConfig{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
             return deeplyNestedValue(20000), nil
         })
         if nil == rememberErr {
             t.Fatalf("expected the value the cache cannot read back to be refused")
         }
 
-        if hasValue, _ := decorated.Has(context.Background(), "decorated.unreadable"); true == hasValue {
+        if hasValue, _ := decorated.Has(testRuntime(), "decorated.unreadable"); true == hasValue {
             t.Fatalf("expected the refused value to stay out of the store")
         }
     })
+}
+
+const rememberFlightServiceName = "remember.flight.probe"
+
+type rememberFlightScopedProbe struct {
+    closed chan struct{}
+}
+
+func (instance *rememberFlightScopedProbe) CloseWithContext(closeContext context.Context) error {
+    close(instance.closed)
+
+    return nil
+}
+
+func newRememberFlightContainer(t *testing.T, probeList chan *rememberFlightScopedProbe) containercontract.Container {
+    t.Helper()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    registerErr := serviceContainer.Register(
+        rememberFlightServiceName,
+        func(resolver containercontract.Resolver) (string, error) {
+            return "resolved", nil
+        },
+        containercontract.RegisterOptions{TypeRegistrationDisabled: true},
+    )
+    if nil != registerErr {
+        t.Fatalf("register: %v", registerErr)
+    }
+
+    scopedErr := serviceContainer.RegisterScoped(
+        "remember.flight.scoped",
+        func(resolver containercontract.Resolver) (*rememberFlightScopedProbe, error) {
+            probe := &rememberFlightScopedProbe{closed: make(chan struct{})}
+            probeList <- probe
+
+            return probe, nil
+        },
+        containercontract.RegisterOptions{TypeRegistrationDisabled: true},
+    )
+    if nil != scopedErr {
+        t.Fatalf("register scoped: %v", scopedErr)
+    }
+
+    return serviceContainer
+}
+
+func TestRemember_TheFlightComputesInAScopeOfItsOwnThatOutlivesTheLeadersRequest(t *testing.T) {
+    serviceContainer := newRememberFlightContainer(t, make(chan *rememberFlightScopedProbe, 4))
+    cacheManager := NewManager(NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour)}), NewJsonSerializer(), ManagerConfig{OwnsBackend: true})
+    defer cacheManager.CloseWithContext(context.Background())
+
+    leaderScope := serviceContainer.NewScope()
+    leaderRuntime := runtime.NewRequest(context.Background(), leaderScope)
+
+    callbackEntered := make(chan struct{})
+    releaseCallback := make(chan struct{})
+    var callbackKind containercontract.Kind
+    var callbackScope containercontract.Scope
+    callback := func(runtimeInstance containercontract.Runtime, _ *RememberItem) (string, error) {
+        close(callbackEntered)
+        <-releaseCallback
+
+        callbackKind = runtimeInstance.Kind()
+        callbackScope = runtimeInstance.Scope()
+
+        return runtime.FromRuntime[string](runtimeInstance, rememberFlightServiceName)
+    }
+
+    config := RememberConfig{Ttl: bound.Of(time.Minute), Detached: true}
+    leaderAnswer := make(chan error, 1)
+    go func() {
+        _, rememberErr := Remember(For(leaderRuntime, cacheManager), "flight.scope", config, callback)
+        leaderAnswer <- rememberErr
+    }()
+
+    <-callbackEntered
+
+    waiterAnswer := make(chan string, 1)
+    waiterError := make(chan error, 1)
+    go func() {
+        value, rememberErr := Remember(For(testRuntime(), cacheManager), "flight.scope", config, callback)
+        waiterAnswer <- value
+        waiterError <- rememberErr
+    }()
+
+    if closeErr := leaderScope.Close(); nil != closeErr {
+        t.Fatalf("closing the leader's scope: %v", closeErr)
+    }
+    close(releaseCallback)
+
+    if rememberErr := <-waiterError; nil != rememberErr {
+        t.Fatalf("expected the waiter answered the value the callback resolved, got %v", rememberErr)
+    }
+
+    if "resolved" != <-waiterAnswer {
+        t.Fatalf("expected the waiter answered the resolved value")
+    }
+
+    <-leaderAnswer
+
+    if containercontract.KindRun != callbackKind {
+        t.Fatalf("expected the flight to compute under a run, got %s", callbackKind)
+    }
+
+    if leaderScope == callbackScope {
+        t.Fatalf("expected the flight's scope to be its own, not the leader's")
+    }
+}
+
+func TestRemember_TheFlightClosesTheScopeItOpened(t *testing.T) {
+    probeList := make(chan *rememberFlightScopedProbe, 4)
+    serviceContainer := newRememberFlightContainer(t, probeList)
+    cacheManager := NewManager(NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour)}), NewJsonSerializer(), ManagerConfig{OwnsBackend: true})
+    defer cacheManager.CloseWithContext(context.Background())
+
+    callerRuntime := runtime.NewRequest(context.Background(), serviceContainer.NewScope())
+    value, rememberErr := Remember(For(callerRuntime, cacheManager), "flight.close", RememberConfig{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (string, error) {
+        _, resolveErr := runtime.FromRuntime[*rememberFlightScopedProbe](runtimeInstance, "remember.flight.scoped")
+
+        return "computed", resolveErr
+    })
+    if nil != rememberErr || "computed" != value {
+        t.Fatalf("expected the computed value, got %q and %v", value, rememberErr)
+    }
+
+    probe := <-probeList
+    select {
+    case <-probe.closed:
+    case <-time.After(5 * time.Second):
+        t.Fatalf("expected the flight's scope closed once the flight completed")
+    }
+
+    select {
+    case <-callerRuntime.Context().Done():
+        t.Fatalf("the caller's runtime is not the flight's to end")
+    default:
+    }
+}
+
+func TestRemember_WithoutAFlightTheCallbackRunsUnderTheCallersRuntime(t *testing.T) {
+    serviceContainer := newRememberFlightContainer(t, make(chan *rememberFlightScopedProbe, 4))
+    cacheManager := NewManager(NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour)}), NewJsonSerializer(), ManagerConfig{OwnsBackend: true})
+    defer cacheManager.CloseWithContext(context.Background())
+
+    callerScope := serviceContainer.NewScope()
+    callerRuntime := runtime.NewRequest(context.Background(), callerScope)
+
+    var callbackRuntime containercontract.Runtime
+    _, rememberErr := Remember(For(callerRuntime, cacheManager), "flight.none", RememberConfig{Ttl: bound.Of(time.Minute), StampedeProtectionDisabled: true}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (string, error) {
+        callbackRuntime = runtimeInstance
+
+        return "computed", nil
+    })
+    if nil != rememberErr {
+        t.Fatalf("remember: %v", rememberErr)
+    }
+
+    if callerRuntime != callbackRuntime {
+        t.Fatalf("expected the caller's runtime handed to the callback")
+    }
+}
+
+func TestRemember_AWaiterThatComputesResolvesThroughItsOwnScope(t *testing.T) {
+    serviceContainer := newRememberFlightContainer(t, make(chan *rememberFlightScopedProbe, 4))
+    scriptedCache := &mapRefusingScriptedCache{
+        testScriptedCache: &testScriptedCache{
+            getResults: []testScriptedGetResult{
+                {value: map[string]any{"owner": "leader"}, exists: true, err: nil},
+                {value: nil, exists: false, err: nil},
+            },
+        },
+    }
+
+    flightScope := serviceContainer.NewScope()
+    flightRuntime := runtime.NewRun(context.Background(), flightScope)
+
+    call := newRememberInFlightCall(true)
+    executeRememberInFlightLeader(&rememberInFlightShard{inFlightByKey: map[rememberFlightKey]*rememberInFlightCall{}}, rememberFlightKey{key: "key"}, "key", bound.Of(time.Minute), call, flightRuntime, func() { _ = flightScope.Close() }, nil, testRememberOperations(scriptedCache, "key", func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
+        if contextErr := runtimeInstance.Context().Err(); nil != contextErr {
+            return nil, contextErr
+        }
+
+        return runtime.FromRuntime[string](runtimeInstance, rememberFlightServiceName)
+    }))
+
+    if _, firstErr := call.answer(testRuntime()); nil != firstErr {
+        t.Fatalf("expected the first caller the leader's read, got %v", firstErr)
+    }
+
+    /* the waiter's context is done, the flight's is not: the computation runs under the flight's */
+    waiterContext, cancelWaiter := context.WithCancel(context.Background())
+    cancelWaiter()
+    waiterRuntime := runtime.NewRequest(waiterContext, serviceContainer.NewScope())
+    boxed, waiterErr := call.answer(waiterRuntime)
+    if nil != waiterErr {
+        t.Fatalf("expected the waiter to resolve through its own scope, got %v", waiterErr)
+    }
+
+    if "resolved" != unboxTestAnswer(boxed) {
+        t.Fatalf("expected the waiter's own computation, got %v", unboxTestAnswer(boxed))
+    }
+}
+
+func TestRemember_AFlightLedAtBootComputesUnderTheBootsScope(t *testing.T) {
+    serviceContainer := newRememberFlightContainer(t, make(chan *rememberFlightScopedProbe, 4))
+    cacheManager := NewManager(NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour)}), NewJsonSerializer(), ManagerConfig{OwnsBackend: true})
+    defer cacheManager.CloseWithContext(context.Background())
+
+    bootRuntime, finishBoot := runtime.NewBoot(context.Background(), serviceContainer)
+    defer func() { _ = finishBoot() }()
+
+    var callbackKind containercontract.Kind
+    value, rememberErr := Remember(For(bootRuntime, cacheManager), "flight.boot", RememberConfig{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (string, error) {
+        callbackKind = runtimeInstance.Kind()
+
+        return runtime.FromRuntime[string](runtimeInstance, rememberFlightServiceName)
+    })
+    if nil != rememberErr || "resolved" != value {
+        t.Fatalf("expected the boot-led flight to resolve, got %q and %v", value, rememberErr)
+    }
+
+    if containercontract.KindBoot != callbackKind {
+        t.Fatalf("expected the boot's kind lent to the flight, got %s", callbackKind)
+    }
+}
+
+func TestRemember_AFlightLedAtBootComputesUnderTheFlightsContext(t *testing.T) {
+    serviceContainer := newRememberFlightContainer(t, make(chan *rememberFlightScopedProbe, 4))
+    cacheManager := NewManager(NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour)}), NewJsonSerializer(), ManagerConfig{OwnsBackend: true})
+    defer cacheManager.CloseWithContext(context.Background())
+
+    bootRuntime, finishBoot := runtime.NewBoot(context.Background(), serviceContainer)
+    defer func() { _ = finishBoot() }()
+
+    canceled := make(chan struct{})
+    _, rememberErr := Remember(For(bootRuntime, cacheManager), "flight.boot.cancel", RememberConfig{Ttl: bound.Of(time.Minute), WaitTimeout: bound.Of(10 * time.Millisecond)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (string, error) {
+        <-runtimeInstance.Context().Done()
+        close(canceled)
+
+        return "", runtimeInstance.Context().Err()
+    })
+    if nil == rememberErr {
+        t.Fatalf("expected the boot leader's wait to time out")
+    }
+
+    select {
+    case <-canceled:
+    case <-time.After(5 * time.Second):
+        t.Fatalf("expected the flight's context canceled once its last waiter left")
+    }
+}
+
+func TestRemember_AViewKeptPastItsClosedScopeIsAnsweredTheClosedScopeAndStoresNothing(t *testing.T) {
+    serviceContainer := newRememberFlightContainer(t, make(chan *rememberFlightScopedProbe, 4))
+    cacheManager := NewManager(NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour)}), NewJsonSerializer(), ManagerConfig{OwnsBackend: true})
+    defer cacheManager.CloseWithContext(context.Background())
+
+    keptScope := serviceContainer.NewScope()
+    keptView := For(runtime.NewRequest(context.Background(), keptScope), cacheManager)
+    if closeErr := keptScope.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    computed := false
+    _, rememberErr := Remember(keptView, "flight.kept", RememberConfig{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (string, error) {
+        computed = true
+
+        return "computed", nil
+    })
+    if false == errors.Is(rememberErr, container.ErrScopeClosed) {
+        t.Fatalf("expected the closed scope's error, got %v", rememberErr)
+    }
+
+    if true == computed {
+        t.Fatalf("expected nothing computed under a closed scope")
+    }
+
+    if held, _ := cacheManager.Has(testRuntime(), "flight.kept"); true == held {
+        t.Fatalf("expected nothing stored under a closed scope")
+    }
+}
+
+/* scopelessTestRuntime carries a context and no scope, which only a runtime of another implementation can */
+type scopelessTestRuntime struct {
+    containercontract.Runtime
+}
+
+func (instance scopelessTestRuntime) Context() context.Context {
+    return context.Background()
+}
+
+func (instance scopelessTestRuntime) Scope() containercontract.Scope {
+    return nil
+}
+
+func TestRemember_ARuntimeWithoutAScopeIsRefused(t *testing.T) {
+    scriptedCache := &testScriptedCache{}
+
+    _, rememberErr := Remember(For(scopelessTestRuntime{}, scriptedCache), "key", RememberConfig{Ttl: bound.Of(time.Minute)}, func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
+        return "value", nil
+    })
+    if nil == rememberErr || "the runtime carries no scope" != rememberErr.Error() {
+        t.Fatalf("expected the scopeless runtime refused, got %v", rememberErr)
+    }
+
+    if 0 != scriptedCache.getCalls() {
+        t.Fatalf("expected the cache not read under a refused runtime")
+    }
 }

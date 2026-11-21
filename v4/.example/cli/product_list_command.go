@@ -1,7 +1,6 @@
 package cli
 
 import (
-    "context"
     "fmt"
     "io"
     "strconv"
@@ -61,7 +60,7 @@ func (instance *ProductListCommand) Run(runtimeInstance melodycontainercontract.
     categoryService := service.MustGetCategoryService(runtimeInstance.Context(), runtimeInstance.Scope())
     currencyService := service.MustGetCurrencyService(runtimeInstance.Context(), runtimeInstance.Scope())
 
-    products, listErr := productService.List(runtimeInstance.Context())
+    products, listErr := productService.List(runtimeInstance)
     if nil != listErr {
         return listErr
     }
@@ -81,7 +80,7 @@ func (instance *ProductListCommand) Run(runtimeInstance melodycontainercontract.
     }
 
     /* both nomenclatures are read once and answered from a map rather than looked up per product and per column; a name missing between the two reads renders as "-", while a nomenclature lost to the run's own interruption ends the run, since dashes would exit zero on a run the operator stopped. */
-    categoryNameById, categoryListErr := nameById(runtimeInstance.Context(), categoryService.List, func(category *entity.Category) (string, string) {
+    categoryNameById, categoryListErr := nameById(runtimeInstance, categoryService.List, func(category *entity.Category) (string, string) {
         return category.Id, category.Name
     })
     if nil != categoryListErr && nil != runtimeInstance.Context().Err() {
@@ -89,7 +88,7 @@ func (instance *ProductListCommand) Run(runtimeInstance melodycontainercontract.
     }
     journalLostNomenclature(runtimeInstance, "category", categoryListErr)
 
-    currencyNameById, currencyListErr := nameById(runtimeInstance.Context(), currencyService.List, func(currency *entity.Currency) (string, string) {
+    currencyNameById, currencyListErr := nameById(runtimeInstance, currencyService.List, func(currency *entity.Currency) (string, string) {
         return currency.Id, currency.Name
     })
     if nil != currencyListErr && nil != runtimeInstance.Context().Err() {
@@ -125,8 +124,8 @@ func (instance *ProductListCommand) Run(runtimeInstance melodycontainercontract.
 }
 
 /* nameById reads a whole nomenclature once and keys its names by identifier. A read that fails answers an empty map beside its error, so every name renders as a dash, the listing keeps rendering, and the caller journals the loss. */
-func nameById[Entity any](ctx context.Context, list func(context.Context) ([]*Entity, error), identify func(*Entity) (string, string)) (map[string]string, error) {
-    entityList, listErr := list(ctx)
+func nameById[Entity any](runtimeInstance melodycontainercontract.Runtime, list func(melodycontainercontract.Runtime) ([]*Entity, error), identify func(*Entity) (string, string)) (map[string]string, error) {
+    entityList, listErr := list(runtimeInstance)
     if nil != listErr {
         return map[string]string{}, listErr
     }

@@ -74,7 +74,7 @@ type refusingCache struct {
     melodycachecontract.Cache
 }
 
-func (instance *refusingCache) Delete(ctx context.Context, key string) error {
+func (instance *refusingCache) Delete(runtimeInstance melodycontainercontract.Runtime, key string) error {
     return errors.New("redis: connection refused")
 }
 

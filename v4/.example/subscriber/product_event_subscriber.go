@@ -9,6 +9,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/service"
     melodycache "github.com/precision-soft/melody/v4/cache"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
@@ -46,16 +47,16 @@ func (instance *ProductEventSubscriber) onProductCreated() melodyeventcontract.E
             return nil
         }
 
-        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+        detachedCache := melodycache.FromRuntime(melodyruntime.WithContext(runtimeInstance, context.WithoutCancel(runtimeInstance.Context())))
 
-        productByIdCacheDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), 
+        productByIdCacheDeleteErr := detachedCache.Delete(
             service.CacheKeyProductById(payloadInstance.Product().Id),
         )
         if nil != productByIdCacheDeleteErr {
             return productByIdCacheDeleteErr
         }
 
-        productListCacheDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyProductList)
+        productListCacheDeleteErr := detachedCache.Delete(service.CacheKeyProductList)
         if nil != productListCacheDeleteErr {
             return productListCacheDeleteErr
         }
@@ -81,16 +82,16 @@ func (instance *ProductEventSubscriber) onProductUpdated() melodyeventcontract.E
         }
 
         logger := melodylogging.LoggerMustFromRuntime(runtimeInstance)
-        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+        detachedCache := melodycache.FromRuntime(melodyruntime.WithContext(runtimeInstance, context.WithoutCancel(runtimeInstance.Context())))
 
-        productByIdCacheDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), 
+        productByIdCacheDeleteErr := detachedCache.Delete(
             service.CacheKeyProductById(payloadInstance.Product().Id),
         )
         if nil != productByIdCacheDeleteErr {
             return productByIdCacheDeleteErr
         }
 
-        productListCacheDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyProductList)
+        productListCacheDeleteErr := detachedCache.Delete(service.CacheKeyProductList)
         if nil != productListCacheDeleteErr {
             return productListCacheDeleteErr
         }
@@ -129,21 +130,21 @@ func (instance *ProductEventSubscriber) onProductDeleted() melodyeventcontract.E
             return nil
         }
 
-        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+        detachedCache := melodycache.FromRuntime(melodyruntime.WithContext(runtimeInstance, context.WithoutCancel(runtimeInstance.Context())))
 
-        productByIdCacheDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), 
+        productByIdCacheDeleteErr := detachedCache.Delete(
             service.CacheKeyProductById(payloadInstance.ProductId()),
         )
         if nil != productByIdCacheDeleteErr {
             return productByIdCacheDeleteErr
         }
 
-        productListCacheDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyProductList)
+        productListCacheDeleteErr := detachedCache.Delete(service.CacheKeyProductList)
         if nil != productListCacheDeleteErr {
             return productListCacheDeleteErr
         }
 
-        productViewsCacheDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyProductViews(payloadInstance.ProductId()))
+        productViewsCacheDeleteErr := detachedCache.Delete(service.CacheKeyProductViews(payloadInstance.ProductId()))
         if nil != productViewsCacheDeleteErr {
             return productViewsCacheDeleteErr
         }

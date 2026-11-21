@@ -97,16 +97,15 @@ func isUsableRate(rate float64) bool {
     return minUsableRate <= rate && rate <= maxUsableRate
 }
 
-func (instance *CurrencyService) List(ctx context.Context) ([]*entity.Currency, error) {
+func (instance *CurrencyService) List(runtimeInstance melodycontainercontract.Runtime) ([]*entity.Currency, error) {
     currencies, rememberErr := melodycache.Remember(
-        ctx,
-        instance.cache,
+        melodycache.For(runtimeInstance, instance.cache),
         CacheKeyCurrencyList,
         melodycache.RememberConfig{
             Ttl: melodybound.Of(entityCacheTtl),
         },
-        func(ctx context.Context, _ *melodycache.RememberItem) ([]*entity.Currency, error) {
-            return instance.currencyRepository.All(ctx)
+        func(flightRuntime melodycontainercontract.Runtime, _ *melodycache.RememberItem) ([]*entity.Currency, error) {
+            return instance.currencyRepository.All(flightRuntime.Context())
         },
     )
     if nil != rememberErr {
@@ -116,7 +115,7 @@ func (instance *CurrencyService) List(ctx context.Context) ([]*entity.Currency, 
     return currencies, nil
 }
 
-func (instance *CurrencyService) FindById(ctx context.Context, id string) (*entity.Currency, bool, error) {
+func (instance *CurrencyService) FindById(runtimeInstance melodycontainercontract.Runtime, id string) (*entity.Currency, bool, error) {
     /* an identifier no cache key can carry names no row, so it is answered as absent without asking the cache */
     if false == CacheSafeIdentifier(id) {
         return nil, false, nil
@@ -125,11 +124,10 @@ func (instance *CurrencyService) FindById(ctx context.Context, id string) (*enti
     cacheKey := CacheKeyCurrencyById(id)
 
     cached, rememberErr := rememberEntityOrAbsence(
-        ctx,
-        instance.cache,
+        melodycache.For(runtimeInstance, instance.cache),
         cacheKey,
-        func(ctx context.Context) (*entity.Currency, error) {
-            currency, found, findErr := instance.currencyRepository.FindById(ctx, id)
+        func(flightRuntime melodycontainercontract.Runtime) (*entity.Currency, error) {
+            currency, found, findErr := instance.currencyRepository.FindById(flightRuntime.Context(), id)
             if nil != findErr {
                 return nil, findErr
             }
@@ -276,7 +274,7 @@ func (instance *CurrencyService) UpdateRate(
     }
 
     if true == quote.NamesTheSameReadingAs(currency.Quote()) {
-        if dropErr := instance.healCachedCurrency(context.WithoutCancel(ctx), currency); nil != dropErr {
+        if dropErr := instance.healCachedCurrency(detachedRuntime(runtimeInstance, ctx), currency); nil != dropErr {
             return nil, RateUpdateUnchanged, dropErr
         }
 
@@ -307,7 +305,7 @@ func (instance *CurrencyService) UpdateRate(
             return current, RateUpdateStale, nil
         }
 
-        if dropErr := instance.healCachedCurrency(context.WithoutCancel(ctx), current); nil != dropErr {
+        if dropErr := instance.healCachedCurrency(detachedRuntime(runtimeInstance, ctx), current); nil != dropErr {
             return nil, RateUpdateUnchanged, dropErr
         }
 
@@ -342,19 +340,20 @@ func isOlderReading(quote entity.RateQuote, held entity.RateQuote) bool {
 }
 
 /* healCachedCurrency makes the two entries a currency is served from, the same two the updated listener drops, agree with a row that did not move, without the event. Each entry is read first and dropped only when it is not the row, compared field for field, because the heal stands in for any invalidation that failed before it, the rename's included. An absent entry is left absent: the next reader fills it from the row. */
-func (instance *CurrencyService) healCachedCurrency(ctx context.Context, currency *entity.Currency) error {
+func (instance *CurrencyService) healCachedCurrency(runtimeInstance melodycontainercontract.Runtime, currency *entity.Currency) error {
     byIdKey := CacheKeyCurrencyById(currency.Id)
+    boundCache := melodycache.For(runtimeInstance, instance.cache)
 
-    cached, exists, getErr := melodycache.Get[*entity.Currency](ctx, instance.cache, byIdKey)
+    cached, exists, getErr := melodycache.Get[*entity.Currency](boundCache, byIdKey)
     if nil != getErr || (true == exists && false == cachedCurrencyIsRow(cached, currency)) {
-        if byIdErr := instance.cache.Delete(ctx, byIdKey); nil != byIdErr {
+        if byIdErr := boundCache.Delete(byIdKey); nil != byIdErr {
             return byIdErr
         }
     }
 
-    cachedList, listExists, listErr := melodycache.Get[[]*entity.Currency](ctx, instance.cache, CacheKeyCurrencyList)
+    cachedList, listExists, listErr := melodycache.Get[[]*entity.Currency](boundCache, CacheKeyCurrencyList)
     if nil != listErr || (true == listExists && false == cachedListCarriesRow(cachedList, currency)) {
-        return instance.cache.Delete(ctx, CacheKeyCurrencyList)
+        return boundCache.Delete(CacheKeyCurrencyList)
     }
 
     return nil

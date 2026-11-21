@@ -6,6 +6,7 @@ import (
     "sync/atomic"
     "time"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
 )
 
@@ -44,7 +45,7 @@ type rememberInFlightCall struct {
 
     /* master is the value the flight answers, never handed out itself: the first caller to take the answer gets result, a copy made apart from it, and every later one a copy of master through copyOf, so no two callers share a map or a slice */
     master      any
-    copyOf      func(value any) (any, error)
+    copyOf      func(waiterRuntime containercontract.Runtime, value any) (any, error)
     resultTaken atomic.Bool
 
     waitersCount atomic.Int64
@@ -96,13 +97,15 @@ func (instance *rememberInFlightCall) IsCanceled() bool {
     return nil != instance.context.Err()
 }
 
-/* Wait ends on whichever comes first: the flight, the caller's context, or the timeout. The caller leaves, never the flight; the flight's cancelability decides what happens when the last one leaves. A background context contributes a nil channel, which no select chooses. */
-func (instance *rememberInFlightCall) Wait(callerContext context.Context, waitTimeout time.Duration, key string) (any, error) {
+/* Wait ends on whichever comes first: the flight, the caller's runtime's context, or the timeout. The caller leaves, never the flight; the flight's cancelability decides what happens when the last one leaves. A background context contributes a nil channel, which no select chooses. */
+func (instance *rememberInFlightCall) Wait(callerRuntime containercontract.Runtime, waitTimeout time.Duration, key string) (any, error) {
+    callerContext := callerRuntime.Context()
+
     /* a zero timeout means no waiting, not no answer: an already memoized result is taken, and only a flight still in the air answers with the timeout */
     if 0 == waitTimeout {
         select {
         case <-instance.done:
-            return instance.answer()
+            return instance.answer(callerRuntime)
         default:
         }
 
@@ -112,14 +115,14 @@ func (instance *rememberInFlightCall) Wait(callerContext context.Context, waitTi
     /* an already memoized answer is taken whatever the caller's context says, so the select does not choose at random between a finished flight and a context lapsing in the same instant */
     select {
     case <-instance.done:
-        return instance.answer()
+        return instance.answer(callerRuntime)
     default:
     }
 
     if 0 > waitTimeout {
         select {
         case <-instance.done:
-            return instance.answer()
+            return instance.answer(callerRuntime)
         case <-callerContext.Done():
             return nil, newRememberWaitCanceledError(callerContext, key)
         }
@@ -130,7 +133,7 @@ func (instance *rememberInFlightCall) Wait(callerContext context.Context, waitTi
 
     select {
     case <-instance.done:
-        return instance.answer()
+        return instance.answer(callerRuntime)
     case <-callerContext.Done():
         return nil, newRememberWaitCanceledError(callerContext, key)
     case <-timer.C:
@@ -162,7 +165,7 @@ func newRememberWaitCanceledError(callerContext context.Context, key string) err
 }
 
 /* CompleteWithCopies completes the flight with an answer each caller owns: result goes to the first caller and a copy of master, made by copyOf, to every later one */
-func (instance *rememberInFlightCall) CompleteWithCopies(result any, master any, copyOf func(value any) (any, error)) {
+func (instance *rememberInFlightCall) CompleteWithCopies(result any, master any, copyOf func(waiterRuntime containercontract.Runtime, value any) (any, error)) {
     instance.doneOnce.Do(
         func() {
             instance.result = result
@@ -173,8 +176,8 @@ func (instance *rememberInFlightCall) CompleteWithCopies(result any, master any,
     )
 }
 
-/* answer is what a caller takes from a completed flight: its own copy where the flight was completed with copies, the one result otherwise */
-func (instance *rememberInFlightCall) answer() (any, error) {
+/* answer is what a caller takes from a completed flight: its own copy, made under its own runtime, where the flight was completed with copies, the one result otherwise */
+func (instance *rememberInFlightCall) answer(callerRuntime containercontract.Runtime) (any, error) {
     if nil != instance.err || nil == instance.copyOf {
         return instance.result, instance.err
     }
@@ -183,7 +186,7 @@ func (instance *rememberInFlightCall) answer() (any, error) {
         return instance.result, nil
     }
 
-    return instance.copyOf(instance.master)
+    return instance.copyOf(callerRuntime, instance.master)
 }
 
 func (instance *rememberInFlightCall) Complete(result any, err error) {

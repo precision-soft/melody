@@ -26,7 +26,7 @@ func TestProductService_RecordViewCountsEachReadOnTheProductsOwnCounter(t *testi
     productService := NewProductService(nil, nil, nil, manager, nil, nil)
 
     for expected := int64(1); expected <= 2; expected++ {
-        views, recordErr := productService.RecordView(context.Background(), "prod-1")
+        views, recordErr := productService.RecordView(exampleTestRuntime(), "prod-1")
         if nil != recordErr {
             t.Fatalf("record: %v", recordErr)
         }
@@ -36,12 +36,12 @@ func TestProductService_RecordViewCountsEachReadOnTheProductsOwnCounter(t *testi
         }
     }
 
-    other, otherErr := productService.RecordView(context.Background(), "prod-2")
+    other, otherErr := productService.RecordView(exampleTestRuntime(), "prod-2")
     if nil != otherErr || 1 != other {
         t.Fatalf("expected another product to count from one, got %d (%v)", other, otherErr)
     }
 
-    stored, exists, readErr := manager.GetCounter(context.Background(), CacheKeyProductViews("prod-1"))
+    stored, exists, readErr := manager.GetCounter(exampleTestRuntime(), CacheKeyProductViews("prod-1"))
     if nil != readErr || false == exists || 2 != stored {
         t.Fatalf("expected the counter under the product's key to hold 2, got %d exists=%t (%v)", stored, exists, readErr)
     }
@@ -98,7 +98,7 @@ func TestProductService_FindByIdAnswersAPaddedIdentifierAsAbsentAndCachesNothing
     productService := NewProductService(&paddingProductRepository{ProductRepository: newInMemoryProductRepositoryForTest(t)}, nil, nil, cacheInstance, nil, &frozenClock{instant: currencyQuoteInstant})
 
     assertPaddedIdentifierAnsweredAbsent(t, cacheInstance, CacheKeyProductById, func(id string) (bool, error) {
-        _, found, findErr := productService.FindById(context.Background(), id)
+        _, found, findErr := productService.FindById(exampleTestRuntime(), id)
 
         return found, findErr
     }, "prod-1")
@@ -193,12 +193,12 @@ func TestProductService_TheReadDoorsEndOnTheCallersContext(t *testing.T) {
     productService := NewProductService(&slowProductRepository{}, nil, nil, newTtlRecordingCache(), nil, melodyclock.NewSystemClock())
 
     assertACanceledContextEndsTheRead(t, "List", func(ctx context.Context) error {
-        _, listErr := productService.List(ctx)
+        _, listErr := productService.List(exampleTestRuntimeUnder(ctx))
 
         return listErr
     })
     assertACanceledContextEndsTheRead(t, "FindById", func(ctx context.Context) error {
-        _, _, findErr := productService.FindById(ctx, "prod-1")
+        _, _, findErr := productService.FindById(exampleTestRuntimeUnder(ctx), "prod-1")
 
         return findErr
     })
@@ -213,12 +213,12 @@ func TestTheCatalogueListIsAnsweredTypedFromACacheWrittenByAnotherProcess(t *tes
 
     instant := time.Date(2026, 11, 18, 23, 0, 0, 0, time.UTC)
     stored := []*entity.Product{entity.NewProduct("prod-1", "Book", "A book", "cat-1", 12.5, "cur-1", 3, instant, instant)}
-    if setErr := writer.Set(context.Background(), CacheKeyProductList, stored, melodybound.Of(entityCacheTtl)); nil != setErr {
+    if setErr := writer.Set(exampleTestRuntime(), CacheKeyProductList, stored, melodybound.Of(entityCacheTtl)); nil != setErr {
         t.Fatalf("set: %v", setErr)
     }
 
     /* no repository: a read that reached it would panic, so the list can only come from the store */
-    products, listErr := NewProductService(nil, nil, nil, reader, nil, nil).List(context.Background())
+    products, listErr := NewProductService(nil, nil, nil, reader, nil, nil).List(exampleTestRuntime())
     if nil != listErr || 1 != len(products) || *stored[0] != *products[0] {
         t.Fatalf("expected the stored list answered typed, got %#v (%v)", products, listErr)
     }

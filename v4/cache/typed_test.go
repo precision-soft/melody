@@ -11,6 +11,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     "github.com/precision-soft/melody/v4/clock"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 type cacheTestUser struct {
@@ -68,16 +69,16 @@ func newCacheTestManager(t *testing.T) (*Manager, *cacheTestCountingBackend) {
 func TestGet_AnswersTheTypeAsked(t *testing.T) {
     manager, _ := newCacheTestManager(t)
 
-    if setErr := manager.Set(context.Background(), "k", cacheTestUser{Name: "a", Tags: []string{"x"}}, bound.Of(time.Minute)); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "k", cacheTestUser{Name: "a", Tags: []string{"x"}}, bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
-    user, exists, getErr := Get[cacheTestUser](context.Background(), manager, "k")
+    user, exists, getErr := Get[cacheTestUser](For(testRuntime(), manager), "k")
     if nil != getErr || false == exists || false == reflect.DeepEqual(cacheTestUser{Name: "a", Tags: []string{"x"}}, user) {
         t.Fatalf("expected the user read back typed, got %#v, %v, %v", user, exists, getErr)
     }
 
-    generic, exists, getErr := Get[any](context.Background(), manager, "k")
+    generic, exists, getErr := Get[any](For(testRuntime(), manager), "k")
     if _, isMap := generic.(map[string]any); nil != getErr || false == exists || false == isMap {
         t.Fatalf("expected the generic read to answer a map, got %T, %v, %v", generic, exists, getErr)
     }
@@ -86,11 +87,11 @@ func TestGet_AnswersTheTypeAsked(t *testing.T) {
 func TestGet_AnswersTheZeroValueBesideAnError(t *testing.T) {
     manager, _ := newCacheTestManager(t)
 
-    if setErr := manager.Set(context.Background(), "k", "text", bound.Of(time.Minute)); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "k", "text", bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
-    user, exists, getErr := Get[cacheTestUser](context.Background(), manager, "k")
+    user, exists, getErr := Get[cacheTestUser](For(testRuntime(), manager), "k")
     if false == IsDeserializationError(getErr) || true == exists || false == reflect.DeepEqual(cacheTestUser{}, user) {
         t.Fatalf("expected the zero user beside a deserialization error, got %#v, %v, %v", user, exists, getErr)
     }
@@ -100,7 +101,7 @@ type halfFillingCache struct {
     cachecontract.Cache
 }
 
-func (instance *halfFillingCache) Get(ctx context.Context, key string, target any) (bool, error) {
+func (instance *halfFillingCache) Get(runtimeInstance containercontract.Runtime, key string, target any) (bool, error) {
     if user, isUser := target.(*cacheTestUser); true == isUser {
         user.Name = "half written"
     }
@@ -108,19 +109,19 @@ func (instance *halfFillingCache) Get(ctx context.Context, key string, target an
     return false, errors.New("the store failed after writing")
 }
 
-func (instance *halfFillingCache) Many(ctx context.Context, keys []string, target any) error {
+func (instance *halfFillingCache) Many(runtimeInstance containercontract.Runtime, keys []string, target any) error {
     return nil
 }
 
 func TestGet_AnswersTheZeroValueBesideAFailureOfACacheThatWroteTheTarget(t *testing.T) {
-    user, exists, getErr := Get[cacheTestUser](context.Background(), &halfFillingCache{}, "k")
+    user, exists, getErr := Get[cacheTestUser](For(testRuntime(), &halfFillingCache{}), "k")
     if nil == getErr || true == exists || false == reflect.DeepEqual(cacheTestUser{}, user) {
         t.Fatalf("expected the zero user beside the failure, got %#v, %v, %v", user, exists, getErr)
     }
 }
 
 func TestMany_AnswersAnEmptyMapWhereTheCacheLeftTheTargetNil(t *testing.T) {
-    values, manyErr := Many[cacheTestUser](context.Background(), &halfFillingCache{}, []string{"k"})
+    values, manyErr := Many[cacheTestUser](For(testRuntime(), &halfFillingCache{}), []string{"k"})
     if nil != manyErr || nil == values {
         t.Fatalf("expected an empty non-nil map, got %#v, %v", values, manyErr)
     }
@@ -130,12 +131,12 @@ type corruptBatchCache struct {
     cachecontract.Cache
 }
 
-func (instance *corruptBatchCache) Many(ctx context.Context, keys []string, target any) error {
+func (instance *corruptBatchCache) Many(runtimeInstance containercontract.Runtime, keys []string, target any) error {
     return NewDeserializationError(keys, errors.New("corrupt"))
 }
 
 func TestMany_AnswersAnEmptyMapBesideADeserializationErrorWhereTheCacheLeftTheTargetNil(t *testing.T) {
-    values, manyErr := Many[cacheTestUser](context.Background(), &corruptBatchCache{}, []string{"k"})
+    values, manyErr := Many[cacheTestUser](For(testRuntime(), &corruptBatchCache{}), []string{"k"})
     if false == IsDeserializationError(manyErr) || nil == values {
         t.Fatalf("expected an empty non-nil map beside the deserialization error, got %#v, %v", values, manyErr)
     }
@@ -149,11 +150,11 @@ type cacheTestSummary struct {
 func TestGet_UnderJsonAnObjectWrittenAsOneStructReadsAsAnotherStruct(t *testing.T) {
     manager, _ := newCacheTestManager(t)
 
-    if setErr := manager.Set(context.Background(), "k", cacheTestUser{Name: "a"}, bound.Of(time.Minute)); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "k", cacheTestUser{Name: "a"}, bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
-    summary, exists, getErr := Get[cacheTestSummary](context.Background(), manager, "k")
+    summary, exists, getErr := Get[cacheTestSummary](For(testRuntime(), manager), "k")
     if nil != getErr || false == exists || (cacheTestSummary{}) != summary {
         t.Fatalf("expected json to read the object as a hit of the zero summary, got %#v, %v, %v", summary, exists, getErr)
     }
@@ -162,7 +163,7 @@ func TestGet_UnderJsonAnObjectWrittenAsOneStructReadsAsAnotherStruct(t *testing.
 func TestMany_AnswersAnEmptyMapOnNoHit(t *testing.T) {
     manager, _ := newCacheTestManager(t)
 
-    values, manyErr := Many[cacheTestUser](context.Background(), manager, []string{"absent"})
+    values, manyErr := Many[cacheTestUser](For(testRuntime(), manager), []string{"absent"})
     if nil != manyErr || nil == values || 0 != len(values) {
         t.Fatalf("expected an empty non-nil map, got %#v, %v", values, manyErr)
     }
@@ -171,11 +172,11 @@ func TestMany_AnswersAnEmptyMapOnNoHit(t *testing.T) {
 func TestGetAndMany_RefuseATypedNilCache(t *testing.T) {
     var typedNil *Manager
 
-    if _, _, getErr := Get[string](context.Background(), typedNil, "k"); nil == getErr || "cache instance is nil" != getErr.Error() {
+    if _, _, getErr := Get[string](For(testRuntime(), typedNil), "k"); nil == getErr || "cache instance is nil" != getErr.Error() {
         t.Fatalf("expected Get to refuse a typed-nil cache, got %v", getErr)
     }
 
-    if _, manyErr := Many[string](context.Background(), typedNil, []string{"k"}); nil == manyErr || "cache instance is nil" != manyErr.Error() {
+    if _, manyErr := Many[string](For(testRuntime(), typedNil), []string{"k"}); nil == manyErr || "cache instance is nil" != manyErr.Error() {
         t.Fatalf("expected Many to refuse a typed-nil cache, got %v", manyErr)
     }
 }
@@ -183,11 +184,11 @@ func TestGetAndMany_RefuseATypedNilCache(t *testing.T) {
 func TestGet_ANilStoredValueIsAHitOfTheZeroValue(t *testing.T) {
     manager, _ := newCacheTestManager(t)
 
-    if setErr := manager.Set(context.Background(), "k", nil, bound.Of(time.Minute)); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "k", nil, bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
-    user, exists, getErr := Get[*cacheTestUser](context.Background(), manager, "k")
+    user, exists, getErr := Get[*cacheTestUser](For(testRuntime(), manager), "k")
     if nil != getErr || false == exists || nil != user {
         t.Fatalf("expected a hit of the nil pointer, got %#v, %v, %v", user, exists, getErr)
     }
@@ -196,12 +197,12 @@ func TestGet_ANilStoredValueIsAHitOfTheZeroValue(t *testing.T) {
 func TestManager_Get_OverwritesTheTargetWhole(t *testing.T) {
     manager, _ := newCacheTestManager(t)
 
-    if setErr := manager.Set(context.Background(), "k", cacheTestUser{Name: "new"}, bound.Of(time.Minute)); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "k", cacheTestUser{Name: "new"}, bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
     target := cacheTestUser{Name: "old", Tags: []string{"x"}, Meta: map[string]int{"a": 1}}
-    exists, getErr := manager.Get(context.Background(), "k", &target)
+    exists, getErr := manager.Get(testRuntime(), "k", &target)
     if nil != getErr || false == exists {
         t.Fatalf("expected a hit, got %v, %v", exists, getErr)
     }
@@ -229,7 +230,7 @@ func TestManager_Get_LeavesTheTargetOnAMissAFailureAndACorruptPayload(t *testing
     t.Run("miss", func(t *testing.T) {
         manager, _ := newCacheTestManager(t)
         target := held
-        if exists, getErr := manager.Get(context.Background(), "absent", &target); nil != getErr || true == exists || "held" != target.Name {
+        if exists, getErr := manager.Get(testRuntime(), "absent", &target); nil != getErr || true == exists || "held" != target.Name {
             t.Fatalf("expected the target kept on a miss, got %#v, %v, %v", target, exists, getErr)
         }
     })
@@ -237,7 +238,7 @@ func TestManager_Get_LeavesTheTargetOnAMissAFailureAndACorruptPayload(t *testing
     t.Run("failure", func(t *testing.T) {
         manager, _ := newCacheTestManager(t)
         target := held
-        if exists, getErr := manager.Get(context.Background(), "", &target); nil == getErr || true == exists || "held" != target.Name {
+        if exists, getErr := manager.Get(testRuntime(), "", &target); nil == getErr || true == exists || "held" != target.Name {
             t.Fatalf("expected the target kept on a refused key, got %#v, %v, %v", target, exists, getErr)
         }
     })
@@ -252,7 +253,7 @@ func TestManager_Get_LeavesTheTargetOnAMissAFailureAndACorruptPayload(t *testing
         }
 
         target := held
-        exists, getErr := manager.Get(context.Background(), "corrupt", &target)
+        exists, getErr := manager.Get(testRuntime(), "corrupt", &target)
         if false == IsDeserializationError(getErr) || true == exists || "held" != target.Name {
             t.Fatalf("expected the target kept beside a deserialization error, got %#v, %v, %v", target, exists, getErr)
         }
@@ -269,7 +270,7 @@ func TestManager_Get_RefusesATargetThatIsNoNonNilPointer(t *testing.T) {
 
     var typedNil *cacheTestUser
     for name, target := range map[string]any{"nil": nil, "struct value": cacheTestUser{}, "typed nil pointer": typedNil} {
-        exists, getErr := manager.Get(context.Background(), "k", target)
+        exists, getErr := manager.Get(testRuntime(), "k", target)
         if nil == getErr || true == exists || true == IsDeserializationError(getErr) {
             t.Fatalf("%s: expected a refusal that is no deserialization error, got %v, %v", name, exists, getErr)
         }
@@ -283,34 +284,35 @@ func TestManager_Get_RefusesATargetThatIsNoNonNilPointer(t *testing.T) {
 func TestManager_Get_APayloadOfAnotherTypeIsADeserializationError(t *testing.T) {
     manager, _ := newCacheTestManager(t)
 
-    if setErr := manager.Set(context.Background(), "k", "text", bound.Of(time.Minute)); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "k", "text", bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
     var user cacheTestUser
-    if _, getErr := manager.Get(context.Background(), "k", &user); false == IsDeserializationError(getErr) {
+    if _, getErr := manager.Get(testRuntime(), "k", &user); false == IsDeserializationError(getErr) {
         t.Fatalf("expected a deserialization error, got %v", getErr)
     }
 }
 
-func TestManager_Get_ANilContextIsRefusedBeforeTheTarget(t *testing.T) {
+func TestManager_Get_ANilRuntimeIsRefusedBeforeTheTarget(t *testing.T) {
     manager, _ := newCacheTestManager(t)
 
-    //nolint:staticcheck // the nil context is the input under test
-    if _, getErr := manager.Get(nil, "k", nil); nil == getErr || "cache context is nil" != getErr.Error() {
-        t.Fatalf("expected the context refusal first, got %v", getErr)
+    for _, refusedRuntime := range refusedTestRuntimes() {
+        if _, getErr := manager.Get(refusedRuntime, "k", nil); nil == getErr || refusedRuntimeMessage != getErr.Error() {
+            t.Fatalf("expected the runtime refusal first, got %v", getErr)
+        }
     }
 }
 
 func TestManager_Many_ReplacesTheMapWithTheDecodedEntries(t *testing.T) {
     manager, _ := newCacheTestManager(t)
 
-    if setErr := manager.Set(context.Background(), "a", cacheTestUser{Name: "a"}, bound.Of(time.Minute)); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "a", cacheTestUser{Name: "a"}, bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
     target := map[string]cacheTestUser{"stale": {Name: "stale"}}
-    if manyErr := manager.Many(context.Background(), []string{"a", "absent"}, &target); nil != manyErr {
+    if manyErr := manager.Many(testRuntime(), []string{"a", "absent"}, &target); nil != manyErr {
         t.Fatalf("many error: %v", manyErr)
     }
 
@@ -319,12 +321,12 @@ func TestManager_Many_ReplacesTheMapWithTheDecodedEntries(t *testing.T) {
     }
 
     var nilTarget map[string]cacheTestUser
-    if manyErr := manager.Many(context.Background(), []string{"a"}, &nilTarget); nil != manyErr || 1 != len(nilTarget) {
+    if manyErr := manager.Many(testRuntime(), []string{"a"}, &nilTarget); nil != manyErr || 1 != len(nilTarget) {
         t.Fatalf("expected a nil map behind the pointer admitted, got %#v, %v", nilTarget, manyErr)
     }
 
     var generic map[string]any
-    if manyErr := manager.Many(context.Background(), []string{"a"}, &generic); nil != manyErr {
+    if manyErr := manager.Many(testRuntime(), []string{"a"}, &generic); nil != manyErr {
         t.Fatalf("many error: %v", manyErr)
     }
 
@@ -342,7 +344,7 @@ func TestManager_Many_RefusesATargetThatIsNoPointerToAStringKeyedMap(t *testing.
         "int keyed":    &map[int]cacheTestUser{},
         "map value":    map[string]cacheTestUser{},
     } {
-        if manyErr := manager.Many(context.Background(), []string{"k"}, target); nil == manyErr || true == IsDeserializationError(manyErr) {
+        if manyErr := manager.Many(testRuntime(), []string{"k"}, target); nil == manyErr || true == IsDeserializationError(manyErr) {
             t.Fatalf("%s: expected a refusal that is no deserialization error, got %v", name, manyErr)
         }
     }
@@ -357,7 +359,7 @@ func TestManager_Many_LeavesTheTargetWhenTheBackendFails(t *testing.T) {
     backend.manyErr = errors.New("the store is down")
 
     target := map[string]cacheTestUser{"held": {Name: "held"}}
-    if manyErr := manager.Many(context.Background(), []string{"held"}, &target); nil == manyErr {
+    if manyErr := manager.Many(testRuntime(), []string{"held"}, &target); nil == manyErr {
         t.Fatalf("expected the backend failure answered")
     }
 

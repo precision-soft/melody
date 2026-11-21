@@ -16,20 +16,20 @@ import (
 func TestProductEventSubscriber_DropsTheViewCounterOnDelete(t *testing.T) {
     cacheInstance, runtimeInstance := userUpdateUnderTest(t)
 
-    if _, incrementErr := cacheInstance.Increment(context.Background(), service.CacheKeyProductViews("prod-7"), 3, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil != incrementErr {
+    if _, incrementErr := cacheInstance.Increment(exampleTestRuntime(), service.CacheKeyProductViews("prod-7"), 3, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil != incrementErr {
         t.Fatalf("prime the counter: %v", incrementErr)
     }
-    if _, incrementErr := cacheInstance.Increment(context.Background(), service.CacheKeyProductViews("prod-8"), 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil != incrementErr {
+    if _, incrementErr := cacheInstance.Increment(exampleTestRuntime(), service.CacheKeyProductViews("prod-8"), 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil != incrementErr {
         t.Fatalf("prime the neighbour's counter: %v", incrementErr)
     }
 
     listener := NewProductEventSubscriber().SubscribedEvents()[event.ProductDeletedEventName][0].Listener()
     _ = listener(runtimeInstance, melodyevent.NewEvent(event.ProductDeletedEventName, event.NewProductDeletedEvent("prod-7"), melodyclock.NewSystemClock().Now()))
 
-    if held, _ := cacheInstance.Has(context.Background(), service.CacheKeyProductViews("prod-7")); true == held {
+    if held, _ := cacheInstance.Has(exampleTestRuntime(), service.CacheKeyProductViews("prod-7")); true == held {
         t.Fatalf("expected the deleted product's view counter dropped")
     }
-    if held, _ := cacheInstance.Has(context.Background(), service.CacheKeyProductViews("prod-8")); false == held {
+    if held, _ := cacheInstance.Has(exampleTestRuntime(), service.CacheKeyProductViews("prod-8")); false == held {
         t.Fatalf("expected another product's view counter kept")
     }
 }
@@ -37,7 +37,7 @@ func TestProductEventSubscriber_DropsTheViewCounterOnDelete(t *testing.T) {
 func TestProductEventSubscriber_DropsTheEntriesUnderARequestContextAlreadyDone(t *testing.T) {
     cacheInstance, runtimeInstance := userUpdateUnderTest(t)
 
-    if _, incrementErr := cacheInstance.Increment(context.Background(), service.CacheKeyProductViews("prod-7"), 3, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil != incrementErr {
+    if _, incrementErr := cacheInstance.Increment(exampleTestRuntime(), service.CacheKeyProductViews("prod-7"), 3, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil != incrementErr {
         t.Fatalf("prime the counter: %v", incrementErr)
     }
 
@@ -48,7 +48,7 @@ func TestProductEventSubscriber_DropsTheEntriesUnderARequestContextAlreadyDone(t
     listener := NewProductEventSubscriber().SubscribedEvents()[event.ProductDeletedEventName][0].Listener()
     _ = listener(canceledRuntime, melodyevent.NewEvent(event.ProductDeletedEventName, event.NewProductDeletedEvent("prod-7"), melodyclock.NewSystemClock().Now()))
 
-    if held, _ := cacheInstance.Has(context.Background(), service.CacheKeyProductViews("prod-7")); true == held {
+    if held, _ := cacheInstance.Has(exampleTestRuntime(), service.CacheKeyProductViews("prod-7")); true == held {
         t.Fatalf("expected the view counter dropped although the request context was done")
     }
 }

@@ -8,7 +8,35 @@ import (
 
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
 )
+
+func testRuntime() containercontract.Runtime {
+    return testRuntimeUnder(context.Background())
+}
+
+func testRuntimeUnder(ctx context.Context) containercontract.Runtime {
+    return runtime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
+}
+
+/* contextlessTestRuntime carries no context, which no constructor of the runtime package builds; with its typed nil and the nil runtime it is what every door refuses before it reads anything */
+type contextlessTestRuntime struct {
+    containercontract.Runtime
+}
+
+func (instance *contextlessTestRuntime) Context() context.Context {
+    return nil
+}
+
+const refusedRuntimeMessage = "the runtime is nil or carries no context"
+
+func refusedTestRuntimes() []containercontract.Runtime {
+    var typedNil *contextlessTestRuntime
+
+    return []containercontract.Runtime{nil, typedNil, &contextlessTestRuntime{}}
+}
 
 /* the cache sweep is the one thing in this package that reads a clock, so its doubles are shared by every test file that builds a backend. */
 type cacheTestTicker struct {
@@ -58,7 +86,7 @@ func assignTestValue(target any, value any) error {
     return nil
 }
 
-func testRememberOperations(cacheInstance cachecontract.Cache, key string, callback func(ctx context.Context, item *RememberItem) (any, error)) rememberOperations {
+func testRememberOperations(cacheInstance cachecontract.Cache, key string, callback func(runtimeInstance containercontract.Runtime, item *RememberItem) (any, error)) rememberOperations {
     return newRememberOperations(cacheInstance, key, callback)
 }
 

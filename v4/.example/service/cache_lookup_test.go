@@ -1,6 +1,7 @@
 package service
 
 import (
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     "context"
     "sync"
     "sync/atomic"
@@ -64,10 +65,9 @@ func TestRememberEntityOrAbsenceBoundsAnAbsence(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
 
     value, rememberErr := rememberEntityOrAbsence(
-        context.Background(),
-        cacheInstance,
+        melodycache.For(exampleTestRuntime(), cacheInstance),
         "absent-key",
-        func(ctx context.Context) (*string, error) {
+        func(runtimeInstance melodycontainercontract.Runtime) (*string, error) {
             return nil, nil
         },
     )
@@ -95,10 +95,9 @@ func TestRememberEntityOrAbsenceLeavesAFoundEntityUnbounded(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
 
     value, rememberErr := rememberEntityOrAbsence(
-        context.Background(),
-        cacheInstance,
+        melodycache.For(exampleTestRuntime(), cacheInstance),
         "found-key",
-        func(ctx context.Context) (*string, error) {
+        func(runtimeInstance melodycontainercontract.Runtime) (*string, error) {
             return lookupTestEntity(), nil
         },
     )
@@ -119,17 +118,16 @@ func TestRememberEntityOrAbsenceLeavesAFoundEntityUnbounded(t *testing.T) {
 /* a found entity re-stored on a hit would cost one cache write per request served from memory */
 func TestRememberEntityOrAbsenceAnswersAFoundHitWithoutWritingItBack(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
-    if setErr := cacheInstance.Set(context.Background(), "hit-key", lookupTestEntity(), melodybound.Of(entityCacheTtl)); nil != setErr {
+    if setErr := cacheInstance.Set(exampleTestRuntime(), "hit-key", lookupTestEntity(), melodybound.Of(entityCacheTtl)); nil != setErr {
         t.Fatalf("seed: %v", setErr)
     }
 
     loaderCalls := 0
 
     value, rememberErr := rememberEntityOrAbsence(
-        context.Background(),
-        cacheInstance,
+        melodycache.For(exampleTestRuntime(), cacheInstance),
         "hit-key",
-        func(ctx context.Context) (*string, error) {
+        func(runtimeInstance melodycontainercontract.Runtime) (*string, error) {
             loaderCalls++
 
             recomputed := "recomputed"
@@ -158,15 +156,14 @@ func TestRememberEntityOrAbsenceAnswersAFoundHitWithoutWritingItBack(t *testing.
    keeps trying still lapses on its own schedule. */
 func TestRememberEntityOrAbsenceLeavesARememberedAbsenceUntouched(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
-    if setErr := cacheInstance.Set(context.Background(), "absent-hit-key", nil, melodybound.Of(absenceCacheTtl)); nil != setErr {
+    if setErr := cacheInstance.Set(exampleTestRuntime(), "absent-hit-key", nil, melodybound.Of(absenceCacheTtl)); nil != setErr {
         t.Fatalf("seed: %v", setErr)
     }
 
     value, rememberErr := rememberEntityOrAbsence(
-        context.Background(),
-        cacheInstance,
+        melodycache.For(exampleTestRuntime(), cacheInstance),
         "absent-hit-key",
-        func(ctx context.Context) (*string, error) {
+        func(runtimeInstance melodycontainercontract.Runtime) (*string, error) {
             t.Fatalf("the loader ran over a remembered absence")
 
             return nil, nil
@@ -194,7 +191,7 @@ func TestFindByUsernameBoundsTheAbsenceItRemembers(t *testing.T) {
     userService := NewUserService(userRepository, cacheInstance, nil)
 
     for attempt := 0; 2 > attempt; attempt++ {
-        _, found, findErr := userService.FindByUsername(context.Background(), "zz-absent-name")
+        _, found, findErr := userService.FindByUsername(exampleTestRuntime(), "zz-absent-name")
         if nil != findErr {
             t.Fatalf("find by username: %v", findErr)
         }
@@ -241,10 +238,9 @@ func TestRememberEntityOrAbsenceWritesAFoundValueOnceForEveryWaiterOfOneLoad(t *
             started.Done()
 
             value, rememberErr := rememberEntityOrAbsence(
-                context.Background(),
-                cacheInstance,
+                melodycache.For(exampleTestRuntime(), cacheInstance),
                 "coalesced-key",
-                func(ctx context.Context) (*string, error) {
+                func(runtimeInstance melodycontainercontract.Runtime) (*string, error) {
                     loaderRuns.Add(1)
                     <-release
 
@@ -289,14 +285,14 @@ func TestRememberEntityOrAbsenceWritesAFoundValueOnceForEveryWaiterOfOneLoad(t *
 /* the helper reads the store only through Remember: a read of its own before it would add one read to every miss */
 func TestRememberEntityOrAbsenceReadsTheStoreAsRememberAloneDoes(t *testing.T) {
     helperCache := newTtlRecordingCache()
-    if _, rememberErr := rememberEntityOrAbsence(context.Background(), helperCache, "read-key", func(ctx context.Context) (*string, error) {
+    if _, rememberErr := rememberEntityOrAbsence(melodycache.For(exampleTestRuntime(), helperCache), "read-key", func(runtimeInstance melodycontainercontract.Runtime) (*string, error) {
         return lookupTestEntity(), nil
     }); nil != rememberErr {
         t.Fatalf("helper: %v", rememberErr)
     }
 
     bareCache := newTtlRecordingCache()
-    if _, rememberErr := melodycache.Remember(context.Background(), bareCache, "read-key", melodycache.RememberConfig{Ttl: melodybound.Of(absenceCacheTtl)}, func(ctx context.Context, _ *melodycache.RememberItem) (*string, error) {
+    if _, rememberErr := melodycache.Remember(melodycache.For(exampleTestRuntime(), bareCache), "read-key", melodycache.RememberConfig{Ttl: melodybound.Of(absenceCacheTtl)}, func(runtimeInstance melodycontainercontract.Runtime, _ *melodycache.RememberItem) (*string, error) {
         return lookupTestEntity(), nil
     }); nil != rememberErr {
         t.Fatalf("remember: %v", rememberErr)
@@ -322,16 +318,16 @@ func TestTheCatalogueListsAreRememberedUnderTheEntityBound(t *testing.T) {
     userRepository, _ := repository.NewUserRepository(storage)
     userService := NewUserService(userRepository, cacheInstance, nil)
 
-    if _, listErr := productService.List(ctx); nil != listErr {
+    if _, listErr := productService.List(exampleTestRuntimeUnder(ctx)); nil != listErr {
         t.Fatalf("products: %v", listErr)
     }
-    if _, listErr := categoryService.List(ctx); nil != listErr {
+    if _, listErr := categoryService.List(exampleTestRuntimeUnder(ctx)); nil != listErr {
         t.Fatalf("categories: %v", listErr)
     }
-    if _, listErr := currencyService.List(ctx); nil != listErr {
+    if _, listErr := currencyService.List(exampleTestRuntimeUnder(ctx)); nil != listErr {
         t.Fatalf("currencies: %v", listErr)
     }
-    if _, listErr := userService.List(ctx); nil != listErr {
+    if _, listErr := userService.List(exampleTestRuntimeUnder(ctx)); nil != listErr {
         t.Fatalf("users: %v", listErr)
     }
 

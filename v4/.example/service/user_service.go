@@ -43,16 +43,15 @@ type UserService struct {
     eventDispatcher melodyeventcontract.EventDispatcher
 }
 
-func (instance *UserService) List(ctx context.Context) ([]*entity.UserProfile, error) {
+func (instance *UserService) List(runtimeInstance melodycontainercontract.Runtime) ([]*entity.UserProfile, error) {
     users, rememberErr := melodycache.Remember(
-        ctx,
-        instance.cache,
+        melodycache.For(runtimeInstance, instance.cache),
         CacheKeyUserList,
         melodycache.RememberConfig{
             Ttl: melodybound.Of(entityCacheTtl),
         },
-        func(ctx context.Context, _ *melodycache.RememberItem) ([]*entity.UserProfile, error) {
-            users, allErr := instance.userRepository.All(ctx)
+        func(flightRuntime melodycontainercontract.Runtime, _ *melodycache.RememberItem) ([]*entity.UserProfile, error) {
+            users, allErr := instance.userRepository.All(flightRuntime.Context())
             if nil != allErr {
                 return nil, allErr
             }
@@ -74,7 +73,7 @@ func (instance *UserService) List(ctx context.Context) ([]*entity.UserProfile, e
     return users, nil
 }
 
-func (instance *UserService) FindById(ctx context.Context, id string) (*entity.UserProfile, bool, error) {
+func (instance *UserService) FindById(runtimeInstance melodycontainercontract.Runtime, id string) (*entity.UserProfile, bool, error) {
     /* an identifier no cache key can carry names no row, so it is answered as absent without asking the cache */
     if false == CacheSafeIdentifier(id) {
         return nil, false, nil
@@ -83,11 +82,10 @@ func (instance *UserService) FindById(ctx context.Context, id string) (*entity.U
     cacheKey := CacheKeyUserById(id)
 
     cached, rememberErr := rememberEntityOrAbsence(
-        ctx,
-        instance.cache,
+        melodycache.For(runtimeInstance, instance.cache),
         cacheKey,
-        func(ctx context.Context) (*entity.UserProfile, error) {
-            user, found, findErr := instance.userRepository.FindById(ctx, id)
+        func(flightRuntime melodycontainercontract.Runtime) (*entity.UserProfile, error) {
+            user, found, findErr := instance.userRepository.FindById(flightRuntime.Context(), id)
             if nil != findErr {
                 return nil, findErr
             }
@@ -120,7 +118,7 @@ func (instance *UserService) findByUsernameUncached(ctx context.Context, usernam
     return instance.userRepository.FindByUsername(ctx, normalizedUsername)
 }
 
-func (instance *UserService) FindByUsername(ctx context.Context, username string) (*entity.UserProfile, bool, error) {
+func (instance *UserService) FindByUsername(runtimeInstance melodycontainercontract.Runtime, username string) (*entity.UserProfile, bool, error) {
     /* CacheSafeIdentifier also refuses the empty spelling, and a name longer than the user table holds is answered as absent on the anonymous login door */
     normalizedUsername := repository.NormalizedUsername(username)
     if false == CacheSafeIdentifier(normalizedUsername) {
@@ -130,11 +128,10 @@ func (instance *UserService) FindByUsername(ctx context.Context, username string
     cacheKey := CacheKeyUserByUsername(normalizedUsername)
 
     cached, rememberErr := rememberEntityOrAbsence(
-        ctx,
-        instance.cache,
+        melodycache.For(runtimeInstance, instance.cache),
         cacheKey,
-        func(ctx context.Context) (*entity.UserProfile, error) {
-            user, found, findErr := instance.userRepository.FindByUsername(ctx, normalizedUsername)
+        func(flightRuntime melodycontainercontract.Runtime) (*entity.UserProfile, error) {
+            user, found, findErr := instance.userRepository.FindByUsername(flightRuntime.Context(), normalizedUsername)
             if nil != findErr {
                 return nil, findErr
             }
@@ -171,7 +168,7 @@ func (instance *UserService) Create(
         return nil, createErr
     }
 
-    dropErr := instance.dropCachedAccount(context.WithoutCancel(runtimeInstance.Context()), user.Id, user.Username)
+    dropErr := instance.dropCachedAccount(detachedRuntime(runtimeInstance, runtimeInstance.Context()), user.Id, user.Username)
 
     createdEvent := event.NewUserCreatedEvent(user)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
@@ -204,7 +201,7 @@ func (instance *UserService) GrantRole(
             return account, outcome, nil
         }
 
-        if dropErr := instance.dropCachedAccount(context.WithoutCancel(ctx), account.Id, account.Username); nil != dropErr {
+        if dropErr := instance.dropCachedAccount(detachedRuntime(runtimeInstance, ctx), account.Id, account.Username); nil != dropErr {
             return nil, outcome, dropErr
         }
 
@@ -215,7 +212,7 @@ func (instance *UserService) GrantRole(
         return nil, outcome, nil
     }
 
-    dropErr := instance.dropCachedAccount(context.WithoutCancel(ctx), account.Id, account.Username)
+    dropErr := instance.dropCachedAccount(detachedRuntime(runtimeInstance, ctx), account.Id, account.Username)
 
     updatedEvent := event.NewUserUpdatedEvent(account, account.Username)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
@@ -231,7 +228,7 @@ func (instance *UserService) GrantRole(
 }
 
 /* dropCachedAccount drops the entries an account is served from — by id, the list and by each name given — once the write committed and before its event runs, so a failing listener cannot leave them standing; every key is attempted and the failures are answered joined */
-func (instance *UserService) dropCachedAccount(ctx context.Context, id string, usernameList ...string) error {
+func (instance *UserService) dropCachedAccount(runtimeInstance melodycontainercontract.Runtime, id string, usernameList ...string) error {
     keyList := []string{CacheKeyUserById(id), CacheKeyUserList}
     for _, username := range usernameList {
         normalizedUsername := repository.NormalizedUsername(username)
@@ -244,9 +241,10 @@ func (instance *UserService) dropCachedAccount(ctx context.Context, id string, u
         }
     }
 
+    boundCache := melodycache.For(runtimeInstance, instance.cache)
     dropErrList := make([]error, 0)
     for _, key := range keyList {
-        if deleteErr := instance.cache.Delete(ctx, key); nil != deleteErr {
+        if deleteErr := boundCache.Delete(key); nil != deleteErr {
             dropErrList = append(dropErrList, deleteErr)
         }
     }
@@ -270,7 +268,7 @@ func (instance *UserService) Update(
         return nil, false, nil
     }
 
-    dropErr := instance.dropCachedAccount(context.WithoutCancel(runtimeInstance.Context()), after.Id, before.Username, after.Username)
+    dropErr := instance.dropCachedAccount(detachedRuntime(runtimeInstance, runtimeInstance.Context()), after.Id, before.Username, after.Username)
 
     updatedEvent := event.NewUserUpdatedEvent(after, before.Username)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
@@ -300,7 +298,7 @@ func (instance *UserService) DeleteById(
         return false, nil
     }
 
-    dropErr := instance.dropCachedAccount(context.WithoutCancel(runtimeInstance.Context()), removed.Id, removed.Username)
+    dropErr := instance.dropCachedAccount(detachedRuntime(runtimeInstance, runtimeInstance.Context()), removed.Id, removed.Username)
 
     deletedEvent := event.NewUserDeletedEvent(removed.Id, removed.Username)
     _, dispatchErr := instance.eventDispatcher.DispatchName(

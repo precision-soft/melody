@@ -205,7 +205,7 @@ type readingCache struct {
     ttls   map[string]melodybound.Duration
 }
 
-func (instance *readingCache) Get(ctx context.Context, key string, target any) (bool, error) {
+func (instance *readingCache) Get(runtimeInstance melodycontainercontract.Runtime, key string, target any) (bool, error) {
     value, exists := instance.values[key]
     if false == exists {
         return false, nil
@@ -218,7 +218,7 @@ func (instance *readingCache) Get(ctx context.Context, key string, target any) (
     return true, nil
 }
 
-func (instance *readingCache) Set(ctx context.Context, key string, value any, ttl melodybound.Duration) error {
+func (instance *readingCache) Set(runtimeInstance melodycontainercontract.Runtime, key string, value any, ttl melodybound.Duration) error {
     instance.values[key] = value
 
     if nil == instance.ttls {
@@ -229,25 +229,25 @@ func (instance *readingCache) Set(ctx context.Context, key string, value any, tt
     return nil
 }
 
-func (instance *readingCache) Delete(ctx context.Context, key string) error {
+func (instance *readingCache) Delete(runtimeInstance melodycontainercontract.Runtime, key string) error {
     delete(instance.values, key)
 
     return nil
 }
 
-func (instance *readingCache) Has(ctx context.Context, key string) (bool, error) {
+func (instance *readingCache) Has(runtimeInstance melodycontainercontract.Runtime, key string) (bool, error) {
     _, exists := instance.values[key]
 
     return exists, nil
 }
 
-func (instance *readingCache) Clear(ctx context.Context) error {
+func (instance *readingCache) Clear(runtimeInstance melodycontainercontract.Runtime) error {
     instance.values = map[string]any{}
 
     return nil
 }
 
-func (instance *readingCache) Many(ctx context.Context, keys []string, target any) error {
+func (instance *readingCache) Many(runtimeInstance melodycontainercontract.Runtime, keys []string, target any) error {
     return assignCachedTestValues(keys, target, instance.values)
 }
 
@@ -256,7 +256,7 @@ func (instance *readingCache) RoundTrip(value any, target any) error {
     return assignCachedTestValue("", target, value)
 }
 
-func (instance *readingCache) SetMultiple(ctx context.Context, items map[string]any, ttl melodybound.Duration) error {
+func (instance *readingCache) SetMultiple(runtimeInstance melodycontainercontract.Runtime, items map[string]any, ttl melodybound.Duration) error {
     for key, value := range items {
         instance.values[key] = value
     }
@@ -264,7 +264,7 @@ func (instance *readingCache) SetMultiple(ctx context.Context, items map[string]
     return nil
 }
 
-func (instance *readingCache) DeleteMultiple(ctx context.Context, keys []string) error {
+func (instance *readingCache) DeleteMultiple(runtimeInstance melodycontainercontract.Runtime, keys []string) error {
     for _, key := range keys {
         delete(instance.values, key)
     }
@@ -272,11 +272,11 @@ func (instance *readingCache) DeleteMultiple(ctx context.Context, keys []string)
     return nil
 }
 
-func (instance *readingCache) Increment(ctx context.Context, key string, delta int64, options melodycachecontract.CounterOptions) (int64, error) {
+func (instance *readingCache) Increment(runtimeInstance melodycontainercontract.Runtime, key string, delta int64, options melodycachecontract.CounterOptions) (int64, error) {
     return 0, nil
 }
 
-func (instance *readingCache) Decrement(ctx context.Context, key string, delta int64, options melodycachecontract.CounterOptions) (int64, error) {
+func (instance *readingCache) Decrement(runtimeInstance melodycontainercontract.Runtime, key string, delta int64, options melodycachecontract.CounterOptions) (int64, error) {
     return 0, nil
 }
 
@@ -496,13 +496,13 @@ func TestCatalogReadingFromTheCacheKeepsTheInstantItWasTakenAt(t *testing.T) {
 
     reportService := newReportServiceUnderTest(t, clockInstance, cacheInstance)
 
-    if _, refreshErr := reportService.Refresh(context.Background()); nil != refreshErr {
+    if _, refreshErr := reportService.Refresh(exampleTestRuntime()); nil != refreshErr {
         t.Fatalf("refresh: %v", refreshErr)
     }
 
     clockInstance.Advance(90 * time.Second)
 
-    reading, readingErr := reportService.Reading(context.Background())
+    reading, readingErr := reportService.Reading(exampleTestRuntime())
     if nil != readingErr {
         t.Fatalf("reading: %v", readingErr)
     }
@@ -524,7 +524,7 @@ func TestCatalogReadingTakesAFreshReadingWhenTheCachedPayloadCarriesNoInstant(t 
 
     reportService := newReportServiceUnderTest(t, clockInstance, cacheInstance)
 
-    reading, readingErr := reportService.Reading(context.Background())
+    reading, readingErr := reportService.Reading(exampleTestRuntime())
     if nil != readingErr {
         t.Fatalf("reading: %v", readingErr)
     }
@@ -547,7 +547,7 @@ func TestArchiveRecordsTheReadingUnderTheInstantItStatesAboutItself(t *testing.T
 
     reportService, runtimeInstance := newReportServiceWithArchive(t, clockInstance, cacheInstance, archive)
 
-    reading, refreshErr := reportService.Refresh(context.Background())
+    reading, refreshErr := reportService.Refresh(exampleTestRuntime())
     if nil != refreshErr {
         t.Fatalf("refresh: %v", refreshErr)
     }
@@ -584,7 +584,7 @@ func TestArchiveTreatsAReadingAlreadyRecordedAsNotWrittenRatherThanAsAFailure(t 
 
     reportService, runtimeInstance := newReportServiceWithArchive(t, clockInstance, cacheInstance, archive)
 
-    first, _ := reportService.Refresh(context.Background())
+    first, _ := reportService.Refresh(exampleTestRuntime())
     if recorded, _ := reportService.Archive(runtimeInstance, first); false == recorded {
         t.Fatal("expected the first archive to write")
     }
@@ -618,7 +618,7 @@ func TestArchiveHandsBackAFailureThatIsNotADuplicate(t *testing.T) {
 
     reportService, runtimeInstance := newReportServiceWithArchive(t, clockInstance, cacheInstance, archive)
 
-    reading, _ := reportService.Refresh(context.Background())
+    reading, _ := reportService.Refresh(exampleTestRuntime())
 
     recorded, archiveErr := reportService.Archive(runtimeInstance, reading)
     if nil == archiveErr {
@@ -733,7 +733,7 @@ func TestArchiveResolvesTheRepositoryAtTheCallAndNotAtConstruction(t *testing.T)
 
     reportService, _ := newReportServiceWithArchive(t, clockInstance, cacheInstance, nil)
 
-    reading, refreshErr := reportService.Refresh(context.Background())
+    reading, refreshErr := reportService.Refresh(exampleTestRuntime())
     if nil != refreshErr {
         t.Fatalf("expected the reading to be taken without an archive on the container, got %v", refreshErr)
     }
@@ -755,7 +755,7 @@ func TestCatalogReadingTakesAFreshReadingWhenTheCachedInstantDoesNotParse(t *tes
 
     reportService := newReportServiceUnderTest(t, clockInstance, cacheInstance)
 
-    reading, readingErr := reportService.Reading(context.Background())
+    reading, readingErr := reportService.Reading(exampleTestRuntime())
     if nil != readingErr {
         t.Fatalf("reading: %v", readingErr)
     }
@@ -772,7 +772,7 @@ func TestCatalogReadingTakesAFreshReadingOverAnEntryOfAnotherType(t *testing.T) 
 
     reportService := newReportServiceUnderTest(t, clockInstance, cacheInstance)
 
-    reading, readingErr := reportService.Reading(context.Background())
+    reading, readingErr := reportService.Reading(exampleTestRuntime())
     if nil != readingErr {
         t.Fatalf("reading: %v", readingErr)
     }
@@ -793,7 +793,7 @@ func TestCatalogRefreshCachesTheReadingPastTheHourlySchedule(t *testing.T) {
 
     reportService := newReportServiceUnderTest(t, clockInstance, cacheInstance)
 
-    if _, refreshErr := reportService.Refresh(context.Background()); nil != refreshErr {
+    if _, refreshErr := reportService.Refresh(exampleTestRuntime()); nil != refreshErr {
         t.Fatalf("refresh: %v", refreshErr)
     }
 
@@ -880,7 +880,7 @@ func TestCatalogReportServiceRefresh_ListsTheProductsThroughItsContext(t *testin
     ctx, cancel := context.WithCancel(context.Background())
     cancel()
 
-    if _, refreshErr := reportService.Refresh(ctx); false == errors.Is(refreshErr, context.Canceled) {
+    if _, refreshErr := reportService.Refresh(exampleTestRuntimeUnder(ctx)); false == errors.Is(refreshErr, context.Canceled) {
         t.Fatalf("expected the reading to end on its caller's context, got %v", refreshErr)
     }
 }
@@ -891,12 +891,12 @@ func TestCatalogReadingHeadlineCountsTheProductsTheReadingCounted(t *testing.T) 
     cacheInstance := &readingCache{values: map[string]any{}}
     reportService := newReportServiceUnderTest(t, clockInstance, cacheInstance)
 
-    fresh, refreshErr := reportService.Refresh(context.Background())
+    fresh, refreshErr := reportService.Refresh(exampleTestRuntime())
     if nil != refreshErr || "catalog: 0 entries" != fresh.Headline {
         t.Fatalf("expected the fresh reading to count its products, got %v %v", fresh, refreshErr)
     }
 
-    cached, readErr := reportService.Reading(context.Background())
+    cached, readErr := reportService.Reading(exampleTestRuntime())
     if nil != readErr || false == cached.FromCache || "catalog: 0 entries" != cached.Headline {
         t.Fatalf("expected the cached reading to keep the count it was taken with, got %+v %v", cached, readErr)
     }
@@ -930,8 +930,8 @@ func TestCatalogReadingHeadlineCountsTheProductsNotTheJournal(t *testing.T) {
         t.Fatalf("new report service: %v", buildErr)
     }
 
-    fresh, _ := reportService.Refresh(context.Background())
-    cached, _ := reportService.Reading(context.Background())
+    fresh, _ := reportService.Refresh(exampleTestRuntime())
+    cached, _ := reportService.Reading(exampleTestRuntime())
     if "catalog: 3 entries" != fresh.Headline || "catalog: 3 entries" != cached.Headline || false == cached.FromCache {
         t.Fatalf("expected both readings to count three products, got %q and %q", fresh.Headline, cached.Headline)
     }

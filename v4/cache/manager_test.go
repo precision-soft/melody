@@ -57,12 +57,12 @@ func TestManager_SetGetManySetMultipleDeleteMultipleClearDeleteHasClose(t *testi
 
     cacheInstance := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    setErr := cacheInstance.Set(context.Background(), "a", "1", bound.UnlimitedDuration())
+    setErr := cacheInstance.Set(testRuntime(), "a", "1", bound.UnlimitedDuration())
     if nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
-    value, exists, getErr := Get[any](context.Background(), cacheInstance, "a")
+    value, exists, getErr := Get[any](For(testRuntime(), cacheInstance), "a")
     if nil != getErr {
         t.Fatalf("get error: %v", getErr)
     }
@@ -73,7 +73,7 @@ func TestManager_SetGetManySetMultipleDeleteMultipleClearDeleteHasClose(t *testi
         t.Fatalf("unexpected value")
     }
 
-    hasValue, hasErr := cacheInstance.Has(context.Background(), "a")
+    hasValue, hasErr := cacheInstance.Has(testRuntime(), "a")
     if nil != hasErr {
         t.Fatalf("has error: %v", hasErr)
     }
@@ -81,7 +81,7 @@ func TestManager_SetGetManySetMultipleDeleteMultipleClearDeleteHasClose(t *testi
         t.Fatalf("expected has true")
     }
 
-    many, manyErr := Many[any](context.Background(), cacheInstance, []string{"a", "b"})
+    many, manyErr := Many[any](For(testRuntime(), cacheInstance), []string{"a", "b"})
     if nil != manyErr {
         t.Fatalf("many error: %v", manyErr)
     }
@@ -93,7 +93,7 @@ func TestManager_SetGetManySetMultipleDeleteMultipleClearDeleteHasClose(t *testi
     }
 
     setMultipleErr := cacheInstance.SetMultiple(
-        context.Background(),
+        testRuntime(),
         map[string]any{
             "b": "2",
             "c": "3",
@@ -104,7 +104,7 @@ func TestManager_SetGetManySetMultipleDeleteMultipleClearDeleteHasClose(t *testi
         t.Fatalf("setMultiple error: %v", setMultipleErr)
     }
 
-    many, manyErr = Many[any](context.Background(), cacheInstance, []string{"a", "b", "c"})
+    many, manyErr = Many[any](For(testRuntime(), cacheInstance), []string{"a", "b", "c"})
     if nil != manyErr {
         t.Fatalf("many error: %v", manyErr)
     }
@@ -115,12 +115,12 @@ func TestManager_SetGetManySetMultipleDeleteMultipleClearDeleteHasClose(t *testi
         t.Fatalf("unexpected many[c]")
     }
 
-    deleteMultipleErr := cacheInstance.DeleteMultiple(context.Background(), []string{"b", "c"})
+    deleteMultipleErr := cacheInstance.DeleteMultiple(testRuntime(), []string{"b", "c"})
     if nil != deleteMultipleErr {
         t.Fatalf("deleteMultiple error: %v", deleteMultipleErr)
     }
 
-    _, exists, getErr = Get[any](context.Background(), cacheInstance, "b")
+    _, exists, getErr = Get[any](For(testRuntime(), cacheInstance), "b")
     if nil != getErr {
         t.Fatalf("get error: %v", getErr)
     }
@@ -128,12 +128,12 @@ func TestManager_SetGetManySetMultipleDeleteMultipleClearDeleteHasClose(t *testi
         t.Fatalf("expected b deleted")
     }
 
-    deleteErr := cacheInstance.Delete(context.Background(), "a")
+    deleteErr := cacheInstance.Delete(testRuntime(), "a")
     if nil != deleteErr {
         t.Fatalf("delete error: %v", deleteErr)
     }
 
-    _, exists, getErr = Get[any](context.Background(), cacheInstance, "a")
+    _, exists, getErr = Get[any](For(testRuntime(), cacheInstance), "a")
     if nil != getErr {
         t.Fatalf("get error: %v", getErr)
     }
@@ -141,17 +141,17 @@ func TestManager_SetGetManySetMultipleDeleteMultipleClearDeleteHasClose(t *testi
         t.Fatalf("expected a deleted")
     }
 
-    setErr = cacheInstance.Set(context.Background(), "x", "y", bound.UnlimitedDuration())
+    setErr = cacheInstance.Set(testRuntime(), "x", "y", bound.UnlimitedDuration())
     if nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
-    clearErr := cacheInstance.Clear(context.Background())
+    clearErr := cacheInstance.Clear(testRuntime())
     if nil != clearErr {
         t.Fatalf("clear error: %v", clearErr)
     }
 
-    _, exists, getErr = Get[any](context.Background(), cacheInstance, "x")
+    _, exists, getErr = Get[any](For(testRuntime(), cacheInstance), "x")
     if nil != getErr {
         t.Fatalf("get error: %v", getErr)
     }
@@ -210,7 +210,7 @@ func TestManager_Get_TypesTheDeserializationFailure(t *testing.T) {
         t.Fatalf("set error: %v", setErr)
     }
 
-    _, exists, getErr := Get[any](context.Background(), manager, "corrupt")
+    _, exists, getErr := Get[any](For(testRuntime(), manager), "corrupt")
     if nil == getErr {
         t.Fatalf("expected a deserialization error")
     }
@@ -230,17 +230,17 @@ func TestManager_Many_SkipsCorruptEntriesAndNamesThem(t *testing.T) {
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    if setErr := manager.Set(context.Background(), "good.one", "1", bound.UnlimitedDuration()); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "good.one", "1", bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
-    if setErr := manager.Set(context.Background(), "good.two", "2", bound.UnlimitedDuration()); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "good.two", "2", bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
     if setErr := backend.Set(context.Background(), "corrupt", []byte("{not json"), bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
-    result, manyErr := Many[any](context.Background(), manager, []string{"good.one", "corrupt", "good.two", "missing"})
+    result, manyErr := Many[any](For(testRuntime(), manager), []string{"good.one", "corrupt", "good.two", "missing"})
     if nil == manyErr {
         t.Fatalf("expected an error naming the corrupt entry")
     }
@@ -276,7 +276,7 @@ func TestManager_SetMultipleNamesTheRefusedKeysDeterministically(t *testing.T) {
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
     for round := 0; round < 50; round++ {
-        setErr := manager.SetMultiple(context.Background(), map[string]any{"b.bad": make(chan int), "a.bad": make(chan int), "good": "kept"}, bound.UnlimitedDuration())
+        setErr := manager.SetMultiple(testRuntime(), map[string]any{"b.bad": make(chan int), "a.bad": make(chan int), "good": "kept"}, bound.UnlimitedDuration())
         if nil == setErr {
             t.Fatalf("expected a serialization error from SetMultiple")
         }
@@ -322,7 +322,7 @@ func TestManager_SetMultipleAnswersARefusalWhenTheSerializersErrorTextPanics(t *
             recoveredValue = recover()
         }()
 
-        setErr = manager.SetMultiple(context.Background(), map[string]any{"a.bad": "first", "b.bad": "second"}, bound.UnlimitedDuration())
+        setErr = manager.SetMultiple(testRuntime(), map[string]any{"a.bad": "first", "b.bad": "second"}, bound.UnlimitedDuration())
     }()
 
     if nil != recoveredValue {
@@ -375,7 +375,7 @@ func TestManager_Set_NamesTheKeyOnSerializationFailure(t *testing.T) {
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    setErr := manager.Set(context.Background(), "unserializable", make(chan int), bound.UnlimitedDuration())
+    setErr := manager.Set(testRuntime(), "unserializable", make(chan int), bound.UnlimitedDuration())
     if nil == setErr {
         t.Fatalf("expected a serialization error")
     }
@@ -388,7 +388,7 @@ func TestManager_Set_NamesTheKeyOnSerializationFailure(t *testing.T) {
         t.Fatalf("expected the error context to name the key, got: %v", exceptionErr.Context())
     }
 
-    setMultipleErr := manager.SetMultiple(context.Background(), map[string]any{"multi.bad": make(chan int)}, bound.UnlimitedDuration())
+    setMultipleErr := manager.SetMultiple(testRuntime(), map[string]any{"multi.bad": make(chan int)}, bound.UnlimitedDuration())
     if nil == setMultipleErr {
         t.Fatalf("expected a serialization error from SetMultiple")
     }
@@ -469,11 +469,11 @@ func TestManager_ReadsTypedNilBackendErrorsAsSuccess(t *testing.T) {
 
     manager := NewManager(&cacheTestTypedNilErrorBackend{inner: inner}, NewJsonSerializer(), ManagerConfig{})
 
-    if setErr := manager.Set(context.Background(), "a", "1", bound.UnlimitedDuration()); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "a", "1", bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("expected the typed-nil Set error to read as success, got: %v", setErr)
     }
 
-    value, exists, getErr := Get[any](context.Background(), manager, "a")
+    value, exists, getErr := Get[any](For(testRuntime(), manager), "a")
     if nil != getErr {
         t.Fatalf("expected the typed-nil Get error to read as success, got: %v", getErr)
     }
@@ -487,11 +487,11 @@ func TestManager_GetCounterReadsWhatIncrementWrote(t *testing.T) {
     manager := NewManager(NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Hour), Clock: clockInstance}), NewJsonSerializer(), ManagerConfig{OwnsBackend: true})
     defer manager.CloseWithContext(context.Background())
 
-    if _, incrementErr := manager.Increment(context.Background(), "visits", 5, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil != incrementErr {
+    if _, incrementErr := manager.Increment(testRuntime(), "visits", 5, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil != incrementErr {
         t.Fatalf("unexpected increment error: %v", incrementErr)
     }
 
-    value, exists, getCounterErr := manager.GetCounter(context.Background(), "visits")
+    value, exists, getCounterErr := manager.GetCounter(testRuntime(), "visits")
     if nil != getCounterErr {
         t.Fatalf("unexpected error: %v", getCounterErr)
     }
@@ -510,7 +510,7 @@ func TestManager_GetCounterReportsAnAbsentKey(t *testing.T) {
     manager := NewManager(NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Hour), Clock: clockInstance}), NewJsonSerializer(), ManagerConfig{OwnsBackend: true})
     defer manager.CloseWithContext(context.Background())
 
-    if _, exists, getCounterErr := manager.GetCounter(context.Background(), "missing"); nil != getCounterErr || true == exists {
+    if _, exists, getCounterErr := manager.GetCounter(testRuntime(), "missing"); nil != getCounterErr || true == exists {
         t.Fatalf("expected an absent counter to report exists=false with no error, got exists=%v err=%v", exists, getCounterErr)
     }
 }
@@ -520,11 +520,11 @@ func TestManager_GetCounterRejectsANonCounterPayload(t *testing.T) {
     manager := NewManager(NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Hour), Clock: clockInstance}), NewJsonSerializer(), ManagerConfig{OwnsBackend: true})
     defer manager.CloseWithContext(context.Background())
 
-    if setErr := manager.Set(context.Background(), "greeting", "hello", bound.Of(time.Hour)); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "greeting", "hello", bound.Of(time.Hour)); nil != setErr {
         t.Fatalf("unexpected set error: %v", setErr)
     }
 
-    if _, _, getCounterErr := manager.GetCounter(context.Background(), "greeting"); nil == getCounterErr {
+    if _, _, getCounterErr := manager.GetCounter(testRuntime(), "greeting"); nil == getCounterErr {
         t.Fatalf("expected a serialized value to be refused by GetCounter")
     }
 }
@@ -535,11 +535,11 @@ func TestManager_GetCounterKeepsThePayloadOutOfTheChain(t *testing.T) {
     manager := NewManager(NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Hour), Clock: clockInstance}), NewJsonSerializer(), ManagerConfig{OwnsBackend: true})
     defer manager.CloseWithContext(context.Background())
 
-    if setErr := manager.Set(context.Background(), "greeting", "a-secret-greeting", bound.Of(time.Hour)); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "greeting", "a-secret-greeting", bound.Of(time.Hour)); nil != setErr {
         t.Fatalf("unexpected set error: %v", setErr)
     }
 
-    _, _, getCounterErr := manager.GetCounter(context.Background(), "greeting")
+    _, _, getCounterErr := manager.GetCounter(testRuntime(), "greeting")
     if nil == getCounterErr {
         t.Fatalf("expected a serialized value to be refused by GetCounter")
     }
@@ -561,11 +561,11 @@ func TestManager_DecrementCountsDownAndLeavesACounterGetCounterCanRead(t *testin
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    if _, incrementErr := manager.Increment(context.Background(), "remaining", 10, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil != incrementErr {
+    if _, incrementErr := manager.Increment(testRuntime(), "remaining", 10, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil != incrementErr {
         t.Fatalf("unexpected increment error: %v", incrementErr)
     }
 
-    newValue, decrementErr := manager.Decrement(context.Background(), "remaining", 3, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
+    newValue, decrementErr := manager.Decrement(testRuntime(), "remaining", 3, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil != decrementErr {
         t.Fatalf("unexpected decrement error: %v", decrementErr)
     }
@@ -574,7 +574,7 @@ func TestManager_DecrementCountsDownAndLeavesACounterGetCounterCanRead(t *testin
         t.Fatalf("expected the decrement to count down to 7, got %d", newValue)
     }
 
-    storedValue, exists, getCounterErr := manager.GetCounter(context.Background(), "remaining")
+    storedValue, exists, getCounterErr := manager.GetCounter(testRuntime(), "remaining")
     if nil != getCounterErr || false == exists {
         t.Fatalf("unexpected get counter result: %t, %v", exists, getCounterErr)
     }
@@ -584,7 +584,7 @@ func TestManager_DecrementCountsDownAndLeavesACounterGetCounterCanRead(t *testin
     }
 
     /* a counter written by Decrement crosses zero into the negatives rather than clamping: a remaining-quota counter that stopped at zero would report the same value for "exactly used up" and "overdrawn by a thousand" */
-    newValue, decrementErr = manager.Decrement(context.Background(), "remaining", 10, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
+    newValue, decrementErr = manager.Decrement(testRuntime(), "remaining", 10, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil != decrementErr {
         t.Fatalf("unexpected decrement error: %v", decrementErr)
     }
@@ -602,7 +602,7 @@ func TestManager_DecrementOnAnAbsentKeyStartsFromZero(t *testing.T) {
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    newValue, decrementErr := manager.Decrement(context.Background(), "never.written", 2, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
+    newValue, decrementErr := manager.Decrement(testRuntime(), "never.written", 2, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil != decrementErr {
         t.Fatalf("unexpected decrement error: %v", decrementErr)
     }
@@ -618,7 +618,7 @@ func TestManager_ABackendFailureTravelsOutOfEveryRead(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    if setErr := manager.Set(context.Background(), "key", "value", bound.UnlimitedDuration()); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "key", "value", bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("unexpected set error: %v", setErr)
     }
 
@@ -626,7 +626,7 @@ func TestManager_ABackendFailureTravelsOutOfEveryRead(t *testing.T) {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    value, exists, getErr := Get[any](context.Background(), manager, "key")
+    value, exists, getErr := Get[any](For(testRuntime(), manager), "key")
     if nil == getErr {
         t.Fatalf("expected Get to report the closed backend, got %v, %t", value, exists)
     }
@@ -637,7 +637,7 @@ func TestManager_ABackendFailureTravelsOutOfEveryRead(t *testing.T) {
         t.Fatalf("unexpected Get error: %v", getErr)
     }
 
-    manyResult, manyErr := Many[any](context.Background(), manager, []string{"key"})
+    manyResult, manyErr := Many[any](For(testRuntime(), manager), []string{"key"})
     if nil == manyErr {
         t.Fatalf("expected Many to report the closed backend, got %v", manyResult)
     }
@@ -648,7 +648,7 @@ func TestManager_ABackendFailureTravelsOutOfEveryRead(t *testing.T) {
         t.Fatalf("unexpected Many error: %v", manyErr)
     }
 
-    counterValue, counterExists, counterErr := manager.GetCounter(context.Background(), "key")
+    counterValue, counterExists, counterErr := manager.GetCounter(testRuntime(), "key")
     if nil == counterErr {
         t.Fatalf("expected GetCounter to report the closed backend, got %d, %t", counterValue, counterExists)
     }
@@ -669,11 +669,11 @@ func TestManager_ManyDeserializesARepeatedKeyOnlyOnce(t *testing.T) {
     countingSerializer := &cacheTestCountingSerializer{inner: NewJsonSerializer()}
     manager := NewManager(backend, countingSerializer, ManagerConfig{})
 
-    if setErr := manager.Set(context.Background(), "key", "value", bound.UnlimitedDuration()); nil != setErr {
+    if setErr := manager.Set(testRuntime(), "key", "value", bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("unexpected set error: %v", setErr)
     }
 
-    result, manyErr := Many[any](context.Background(), manager, []string{"key", "key", "key"})
+    result, manyErr := Many[any](For(testRuntime(), manager), []string{"key", "key", "key"})
     if nil != manyErr {
         t.Fatalf("unexpected many error: %v", manyErr)
     }
@@ -752,7 +752,7 @@ func TestManager_SetMultipleCarriesTheReasonOfEveryRefusedKey(t *testing.T) {
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    setErr := manager.SetMultiple(context.Background(), map[string]any{
+    setErr := manager.SetMultiple(testRuntime(), map[string]any{
         "":     make(chan int),
         "mmm":  func() {},
         "fine": "value",
@@ -788,11 +788,11 @@ func TestManager_GetCounterRefusesWhatIncrementRefuses(t *testing.T) {
             t.Fatalf("unexpected set error: %v", setErr)
         }
 
-        if _, _, getCounterErr := manager.GetCounter(context.Background(), "visits"); nil == getCounterErr {
+        if _, _, getCounterErr := manager.GetCounter(testRuntime(), "visits"); nil == getCounterErr {
             t.Fatalf("expected %q refused as no counter", payload)
         }
 
-        if _, incrementErr := manager.Increment(context.Background(), "visits", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil == incrementErr {
+        if _, incrementErr := manager.Increment(testRuntime(), "visits", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil == incrementErr {
             t.Fatalf("expected Increment to refuse %q as well", payload)
         }
     }
@@ -808,17 +808,17 @@ func TestManager_EveryDoorHandsTheCallersContextToTheBackend(t *testing.T) {
     cancel()
 
     doors := map[string]func() error{
-        "Get":            func() error { _, _, err := Get[any](canceledContext, manager, "key"); return err },
-        "Set":            func() error { return manager.Set(canceledContext, "key", "value", bound.Of(time.Minute)) },
-        "Delete":         func() error { return manager.Delete(canceledContext, "key") },
-        "Has":            func() error { _, err := manager.Has(canceledContext, "key"); return err },
-        "Clear":          func() error { return manager.Clear(canceledContext) },
-        "Many":           func() error { _, err := Many[any](canceledContext, manager, []string{"key"}); return err },
-        "SetMultiple":    func() error { return manager.SetMultiple(canceledContext, map[string]any{"key": "value"}, bound.Of(time.Minute)) },
-        "DeleteMultiple": func() error { return manager.DeleteMultiple(canceledContext, []string{"key"}) },
-        "Increment":      func() error { _, err := manager.Increment(canceledContext, "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); return err },
-        "Decrement":      func() error { _, err := manager.Decrement(canceledContext, "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); return err },
-        "GetCounter":     func() error { _, _, err := manager.GetCounter(canceledContext, "counter"); return err },
+        "Get":            func() error { _, _, err := Get[any](For(testRuntimeUnder(canceledContext), manager), "key"); return err },
+        "Set":            func() error { return manager.Set(testRuntimeUnder(canceledContext), "key", "value", bound.Of(time.Minute)) },
+        "Delete":         func() error { return manager.Delete(testRuntimeUnder(canceledContext), "key") },
+        "Has":            func() error { _, err := manager.Has(testRuntimeUnder(canceledContext), "key"); return err },
+        "Clear":          func() error { return manager.Clear(testRuntimeUnder(canceledContext)) },
+        "Many":           func() error { _, err := Many[any](For(testRuntimeUnder(canceledContext), manager), []string{"key"}); return err },
+        "SetMultiple":    func() error { return manager.SetMultiple(testRuntimeUnder(canceledContext), map[string]any{"key": "value"}, bound.Of(time.Minute)) },
+        "DeleteMultiple": func() error { return manager.DeleteMultiple(testRuntimeUnder(canceledContext), []string{"key"}) },
+        "Increment":      func() error { _, err := manager.Increment(testRuntimeUnder(canceledContext), "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); return err },
+        "Decrement":      func() error { _, err := manager.Decrement(testRuntimeUnder(canceledContext), "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); return err },
+        "GetCounter":     func() error { _, _, err := manager.GetCounter(testRuntimeUnder(canceledContext), "counter"); return err },
     }
 
     for door, call := range doors {
@@ -838,20 +838,46 @@ func (instance refusingSerializer) Deserialize(payload []byte, target any) error
     return errors.New("deserialization refused")
 }
 
-func TestManager_ANilContextIsRefusedBeforeTheValueIsSerialized(t *testing.T) {
+func TestManager_ANilRuntimeIsRefusedBeforeTheValueIsSerialized(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour)})
     defer backend.CloseWithContext(context.Background())
 
     manager := NewManager(backend, refusingSerializer{}, ManagerConfig{})
 
-    var absentContext context.Context
+    for _, refusedRuntime := range refusedTestRuntimes() {
+        if setErr := manager.Set(refusedRuntime, "key", "value", bound.Of(time.Minute)); nil == setErr || refusedRuntimeMessage != setErr.Error() {
+            t.Fatalf("Set: expected the runtime refused first, got %v", setErr)
+        }
 
-    if setErr := manager.Set(absentContext, "key", "value", bound.Of(time.Minute)); nil == setErr || "cache context is nil" != setErr.Error() {
-        t.Fatalf("Set: expected the nil context refused first, got %v", setErr)
+        if setErr := manager.SetMultiple(refusedRuntime, map[string]any{"key": "value"}, bound.Of(time.Minute)); nil == setErr || refusedRuntimeMessage != setErr.Error() {
+            t.Fatalf("SetMultiple: expected the runtime refused first, got %v", setErr)
+        }
     }
+}
 
-    if setErr := manager.SetMultiple(absentContext, map[string]any{"key": "value"}, bound.Of(time.Minute)); nil == setErr || "cache context is nil" != setErr.Error() {
-        t.Fatalf("SetMultiple: expected the nil context refused first, got %v", setErr)
+func TestManager_EveryDoorRefusesAnAbsentRuntime(t *testing.T) {
+    manager, _ := newCacheTestManager(t)
+
+    for _, refusedRuntime := range refusedTestRuntimes() {
+        var target any
+        var targets map[string]any
+        _, getErr := manager.Get(refusedRuntime, "k", &target)
+        setErr := manager.Set(refusedRuntime, "k", "v", bound.Of(time.Minute))
+        deleteErr := manager.Delete(refusedRuntime, "k")
+        _, hasErr := manager.Has(refusedRuntime, "k")
+        clearErr := manager.Clear(refusedRuntime)
+        manyErr := manager.Many(refusedRuntime, []string{"k"}, &targets)
+        setMultipleErr := manager.SetMultiple(refusedRuntime, map[string]any{"k": "v"}, bound.Of(time.Minute))
+        deleteMultipleErr := manager.DeleteMultiple(refusedRuntime, []string{"k"})
+        _, incrementErr := manager.Increment(refusedRuntime, "c", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
+        _, decrementErr := manager.Decrement(refusedRuntime, "c", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
+        _, _, getCounterErr := manager.GetCounter(refusedRuntime, "c")
+
+        for doorName, doorErr := range map[string]error{"Get": getErr, "Set": setErr, "Delete": deleteErr, "Has": hasErr, "Clear": clearErr, "Many": manyErr, "SetMultiple": setMultipleErr, "DeleteMultiple": deleteMultipleErr, "Increment": incrementErr, "Decrement": decrementErr, "GetCounter": getCounterErr} {
+            if nil == doorErr || refusedRuntimeMessage != doorErr.Error() {
+                t.Fatalf("%s: expected the runtime refused, got %v", doorName, doorErr)
+            }
+        }
     }
 }
 
@@ -861,17 +887,17 @@ func TestManager_ACounterHandsItsOptionsToTheBackend(t *testing.T) {
     defer manager.CloseWithContext(context.Background())
 
     window := cachecontract.CounterOptions{Ttl: bound.Of(time.Minute)}
-    manager.Increment(context.Background(), "up", 1, window)
-    manager.Decrement(context.Background(), "down", 1, window)
+    manager.Increment(testRuntime(), "up", 1, window)
+    manager.Decrement(testRuntime(), "down", 1, window)
 
     clockInstance.now = clockInstance.now.Add(61 * time.Second)
     for _, key := range []string{"up", "down"} {
-        if _, exists, _ := manager.GetCounter(context.Background(), key); true == exists {
+        if _, exists, _ := manager.GetCounter(testRuntime(), key); true == exists {
             t.Fatalf("expected %s gone at the ttl the options carried", key)
         }
     }
 
-    if _, refusedErr := manager.Increment(context.Background(), "refused", 1, cachecontract.CounterOptions{}); nil == refusedErr {
+    if _, refusedErr := manager.Increment(testRuntime(), "refused", 1, cachecontract.CounterOptions{}); nil == refusedErr {
         t.Fatal("expected an absent ttl refused through the manager")
     }
 }
@@ -882,13 +908,13 @@ func TestManager_ASlidingCounterKeepsItsRefreshThroughTheManager(t *testing.T) {
     defer manager.CloseWithContext(context.Background())
 
     sliding := cachecontract.CounterOptions{Ttl: bound.Of(time.Minute), RefreshTtl: true}
-    manager.Increment(context.Background(), "hits", 1, sliding)
+    manager.Increment(testRuntime(), "hits", 1, sliding)
 
     clockInstance.now = clockInstance.now.Add(40 * time.Second)
-    manager.Decrement(context.Background(), "hits", 1, sliding)
+    manager.Decrement(testRuntime(), "hits", 1, sliding)
 
     clockInstance.now = clockInstance.now.Add(40 * time.Second)
-    if _, exists, _ := manager.GetCounter(context.Background(), "hits"); false == exists {
+    if _, exists, _ := manager.GetCounter(testRuntime(), "hits"); false == exists {
         t.Fatal("expected the sliding window kept alive through the manager")
     }
 }

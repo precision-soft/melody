@@ -361,6 +361,21 @@ type pendingScopedProvider struct {
     resolvedArguments []*resolvedArgument
 }
 
+/* viewTypes are the runtime-bound views, a value of one request, run or delivery that no provider registers, so a constructor asking for one is refused at generation rather than at its first resolution; every view the framework declares is listed here */
+var viewTypes = map[string]bool{
+    "github.com/precision-soft/melody/v4/cache.Bound": true,
+}
+
+func isViewType(typeReference *TypeReference) bool {
+    if nil == typeReference {
+        return false
+    }
+
+    expression := typeReference.Expression
+
+    return viewTypes[typeReference.ImportPath+"."+expression[strings.LastIndex(expression, ".")+1:]]
+}
+
 func resolveArguments(
     constructor *Constructor,
     packageBinding *PackageBinding,
@@ -375,6 +390,20 @@ func resolveArguments(
         resolved := &resolvedArgument{
             argument:     argument,
             variableName: argument.Name,
+        }
+
+        if true == isViewType(argument.Type) {
+            return nil, nil, exception.NewError(
+                "a runtime-bound view is not a service: bind it inside the method, from the runtime",
+                map[string]any{
+                    "constructor": constructor.Name,
+                    "argument":    argument.Name,
+                    "type":        argument.Type.Expression,
+                    "file":        constructor.File,
+                    "line":        constructor.Line,
+                },
+                nil,
+            )
         }
 
         if false == argument.IsScalar {

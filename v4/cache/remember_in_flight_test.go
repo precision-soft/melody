@@ -55,7 +55,7 @@ func TestRememberInFlightCall_WaitZeroTakesACompletedResult(t *testing.T) {
     completedCall := newRememberInFlightCall(false)
     completedCall.Complete("ready", nil)
 
-    value, waitErr := completedCall.Wait(context.Background(), 0, "k")
+    value, waitErr := completedCall.Wait(testRuntime(), 0, "k")
     if nil != waitErr {
         t.Fatalf("expected the completed result without waiting, got: %v", waitErr)
     }
@@ -65,7 +65,7 @@ func TestRememberInFlightCall_WaitZeroTakesACompletedResult(t *testing.T) {
 
     pendingCall := newRememberInFlightCall(false)
 
-    _, pendingErr := pendingCall.Wait(context.Background(), 0, "k")
+    _, pendingErr := pendingCall.Wait(testRuntime(), 0, "k")
     if nil == pendingErr {
         t.Fatalf("expected the pending flight to answer with the timeout")
     }
@@ -83,7 +83,7 @@ func waitForRememberCallAnswer(
     answerChannel := make(chan error, 1)
 
     go func() {
-        _, waitErr := call.Wait(callerContext, waitTimeout, "report:daily")
+        _, waitErr := call.Wait(testRuntimeUnder(callerContext), waitTimeout, "report:daily")
         answerChannel <- waitErr
     }()
 
@@ -147,7 +147,7 @@ func TestRememberInFlightCall_WaitTakesAMemoizedResultOverACanceledCallerContext
     cancel()
 
     for _, waitTimeout := range []time.Duration{-1, time.Hour} {
-        value, waitErr := call.Wait(canceledContext, waitTimeout, "report:daily")
+        value, waitErr := call.Wait(testRuntimeUnder(canceledContext), waitTimeout, "report:daily")
         if nil != waitErr {
             t.Fatalf("wait timeout %s: expected the memoized result, got: %v", waitTimeout, waitErr)
         }
@@ -165,7 +165,7 @@ func TestRememberInFlightCall_WaitWithoutACallerContextParksUntilTheFlightAnswer
         call.Complete("late", nil)
     }()
 
-    value, waitErr := call.Wait(context.Background(), -1, "report:daily")
+    value, waitErr := call.Wait(testRuntime(), -1, "report:daily")
     if nil != waitErr {
         t.Fatalf("expected the flight's answer, got: %v", waitErr)
     }
@@ -184,7 +184,7 @@ func TestRememberInFlightCall_AMemoizedResultBeatsALapsedContextEveryTime(t *tes
         call.Complete("ready", nil)
 
         for _, waitTimeout := range []time.Duration{-1, time.Hour} {
-            value, waitErr := call.Wait(canceledContext, waitTimeout, "report:daily")
+            value, waitErr := call.Wait(testRuntimeUnder(canceledContext), waitTimeout, "report:daily")
             if nil != waitErr {
                 t.Fatalf("attempt %d, wait timeout %s: expected the memoized result, got: %v", attempt, waitTimeout, waitErr)
             }

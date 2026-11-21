@@ -198,7 +198,7 @@ func primeListing(t *testing.T, cacheInstance melodycachecontract.Cache, cacheKe
         t.Fatalf("read %s: %v", cacheKey, listingErr)
     }
 
-    if setErr := cacheInstance.Set(context.Background(), cacheKey, listing, melodybound.UnlimitedDuration()); nil != setErr {
+    if setErr := cacheInstance.Set(exampleTestRuntime(), cacheKey, listing, melodybound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("prime %s: %v", cacheKey, setErr)
     }
 }
