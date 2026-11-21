@@ -51,8 +51,7 @@ func (instance *CatalogReportExporter) Export(
         return false, resolveErr
     }
 
-    response, requestErr := client.Post(
-        runtimeInstance.Context(),
+    response, requestErr := httpclient.For(runtimeInstance, client).Post(
         instance.exportEndpoint,
         exportPayload{
             RecordedAt: reading.RecordedAt.UTC().Format(reportExportInstantLayout),

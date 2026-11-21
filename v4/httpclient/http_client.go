@@ -14,6 +14,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpclientcontract "github.com/precision-soft/melody/v4/httpclient/contract"
@@ -373,32 +374,32 @@ func redactAuthorityUserinfo(value string, authorityStart int) string {
 }
 
 /* Get, like every request door, is bound to the context and refuses a nil one. */
-func (instance *HttpClient) Get(contextInstance context.Context, urlString string, options RequestOptions) (httpclientcontract.Response, error) {
-    return instance.Request(contextInstance, nethttp.MethodGet, urlString, options)
+func (instance *HttpClient) Get(runtimeInstance containercontract.Runtime, urlString string, options RequestOptions) (httpclientcontract.Response, error) {
+    return instance.Request(runtimeInstance, nethttp.MethodGet, urlString, options)
 }
 
 /* Post sends the body as json; a Body or a Json in the options beside it is refused. */
-func (instance *HttpClient) Post(contextInstance context.Context, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
-    return instance.requestWithJson(contextInstance, nethttp.MethodPost, urlString, body, options)
+func (instance *HttpClient) Post(runtimeInstance containercontract.Runtime, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
+    return instance.requestWithJson(runtimeInstance, nethttp.MethodPost, urlString, body, options)
 }
 
 /* Put sends the body as json; a Body or a Json in the options beside it is refused. */
-func (instance *HttpClient) Put(contextInstance context.Context, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
-    return instance.requestWithJson(contextInstance, nethttp.MethodPut, urlString, body, options)
+func (instance *HttpClient) Put(runtimeInstance containercontract.Runtime, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
+    return instance.requestWithJson(runtimeInstance, nethttp.MethodPut, urlString, body, options)
 }
 
 /* Patch sends the body as json; a Body or a Json in the options beside it is refused. */
-func (instance *HttpClient) Patch(contextInstance context.Context, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
-    return instance.requestWithJson(contextInstance, nethttp.MethodPatch, urlString, body, options)
+func (instance *HttpClient) Patch(runtimeInstance containercontract.Runtime, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
+    return instance.requestWithJson(runtimeInstance, nethttp.MethodPatch, urlString, body, options)
 }
 
-func (instance *HttpClient) Delete(contextInstance context.Context, urlString string, options RequestOptions) (httpclientcontract.Response, error) {
-    return instance.Request(contextInstance, nethttp.MethodDelete, urlString, options)
+func (instance *HttpClient) Delete(runtimeInstance containercontract.Runtime, urlString string, options RequestOptions) (httpclientcontract.Response, error) {
+    return instance.Request(runtimeInstance, nethttp.MethodDelete, urlString, options)
 }
 
-func (instance *HttpClient) Request(contextInstance context.Context, method string, urlString string, options RequestOptions) (httpclientcontract.Response, error) {
-    if true == internal.IsNilInterface(contextInstance) {
-        return nil, exception.NewError("request context is nil", nil, nil)
+func (instance *HttpClient) Request(runtimeInstance containercontract.Runtime, method string, urlString string, options RequestOptions) (httpclientcontract.Response, error) {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+        return nil, nilErr
     }
 
     requestOptions, err := resolveRequestOptions(options, nil, false)
@@ -406,12 +407,12 @@ func (instance *HttpClient) Request(contextInstance context.Context, method stri
         return nil, err
     }
 
-    return instance.exchange(contextInstance, method, urlString, requestOptions)
+    return instance.exchange(runtimeInstance.Context(), method, urlString, requestOptions)
 }
 
-func (instance *HttpClient) requestWithJson(contextInstance context.Context, method string, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
-    if true == internal.IsNilInterface(contextInstance) {
-        return nil, exception.NewError("request context is nil", nil, nil)
+func (instance *HttpClient) requestWithJson(runtimeInstance containercontract.Runtime, method string, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+        return nil, nilErr
     }
 
     requestOptions, err := resolveRequestOptions(options, body, true)
@@ -419,7 +420,7 @@ func (instance *HttpClient) requestWithJson(contextInstance context.Context, met
         return nil, err
     }
 
-    return instance.exchange(contextInstance, method, urlString, requestOptions)
+    return instance.exchange(runtimeInstance.Context(), method, urlString, requestOptions)
 }
 
 func (instance *HttpClient) exchange(contextInstance context.Context, method string, urlString string, requestOptions resolvedRequestOptions) (httpclientcontract.Response, error) {
@@ -483,13 +484,13 @@ func (instance *HttpClient) exchange(contextInstance context.Context, method str
 
 /* RequestStream hands the caller a response whose body is still on the wire, bound to the context: cancelling it ends the request and the body read. The caller owns the response and closes it on every path, since the stream carries no whole-stream deadline unless the request sets its Timeout to a value; absent and unlimited both leave it unbounded. The response body cap bounds the stream as it bounds a buffered body, the default included. */
 func (instance *HttpClient) RequestStream(
-    contextInstance context.Context,
+    runtimeInstance containercontract.Runtime,
     method string,
     urlString string,
     options RequestOptions,
 ) (httpclientcontract.StreamResponse, error) {
-    if true == internal.IsNilInterface(contextInstance) {
-        return nil, exception.NewError("request context is nil", nil, nil)
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+        return nil, nilErr
     }
 
     requestOptions, err := resolveRequestOptions(options, nil, false)
@@ -497,7 +498,7 @@ func (instance *HttpClient) RequestStream(
         return nil, err
     }
 
-    requestInstance, err := instance.buildRequest(contextInstance, method, urlString, requestOptions)
+    requestInstance, err := instance.buildRequest(runtimeInstance.Context(), method, urlString, requestOptions)
     if nil != err {
         return nil, err
     }

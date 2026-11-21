@@ -9,8 +9,28 @@ import (
     "sync/atomic"
     "testing"
 
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
 )
+
+func testRuntime() containercontract.Runtime {
+    return testRuntimeUnder(context.Background())
+}
+
+func testRuntimeUnder(ctx context.Context) containercontract.Runtime {
+    return runtime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
+}
+
+/* contextlessTestRuntime carries no context, which no constructor of the runtime package builds */
+type contextlessTestRuntime struct {
+    containercontract.Runtime
+}
+
+func (instance *contextlessTestRuntime) Context() context.Context {
+    return nil
+}
 
 func newTestHttpClient(t *testing.T, config HttpClientConfig) *HttpClient {
     t.Helper()

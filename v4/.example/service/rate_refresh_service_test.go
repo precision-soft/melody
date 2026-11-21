@@ -76,7 +76,7 @@ func TestReadRateDocument_ReadsTheDocumentInOneExchangeWhenTheProviderAnswers(t 
         _, _ = writer.Write([]byte(rateDocumentBody))
     })
 
-    reading, attempts, err := readRateDocument(context.Background(), provider.client(t), melodyclock.NewSystemClock())
+    reading, attempts, err := readRateDocument(httpclient.For(exampleTestRuntime(), provider.client(t)), melodyclock.NewSystemClock())
     if nil != err {
         t.Fatalf("reading the document failed: %v", err)
     }
@@ -109,7 +109,7 @@ func TestReadRateDocument_SpendsEveryAttemptOnAProviderThatKeepsRefusing(t *test
         writer.WriteHeader(http.StatusServiceUnavailable)
     })
 
-    _, attempts, err := readRateDocument(context.Background(), provider.client(t), melodyclock.NewSystemClock())
+    _, attempts, err := readRateDocument(httpclient.For(exampleTestRuntime(), provider.client(t)), melodyclock.NewSystemClock())
     if nil == err {
         t.Fatal("a provider that answered 503 to every attempt was read successfully")
     }
@@ -145,7 +145,7 @@ func TestReadRateDocument_AnswersACancellationDuringTheLastExchangeAsTheCause(t 
         cancel()
     }()
 
-    _, attempts, err := readRateDocument(ctx, provider.client(t), melodyclock.NewSystemClock())
+    _, attempts, err := readRateDocument(httpclient.For(exampleTestRuntimeUnder(ctx), provider.client(t)), melodyclock.NewSystemClock())
     if nil == err {
         t.Fatal("a reading whose run was cancelled mid-exchange succeeded")
     }
@@ -179,7 +179,7 @@ func TestReadRateDocument_TakesTheReadingFromAProviderThatRecoversOnTheSecondAtt
         _, _ = writer.Write([]byte(rateDocumentBody))
     })
 
-    reading, attempts, err := readRateDocument(context.Background(), provider.client(t), melodyclock.NewSystemClock())
+    reading, attempts, err := readRateDocument(httpclient.For(exampleTestRuntime(), provider.client(t)), melodyclock.NewSystemClock())
     if nil != err {
         t.Fatalf("a provider that recovered was not read: %v", err)
     }
@@ -201,7 +201,7 @@ func TestReadRateDocument_DoesNotRepeatARequestTheProviderRefusedAsWrong(t *test
         writer.WriteHeader(http.StatusNotFound)
     })
 
-    _, attempts, err := readRateDocument(context.Background(), provider.client(t), melodyclock.NewSystemClock())
+    _, attempts, err := readRateDocument(httpclient.For(exampleTestRuntime(), provider.client(t)), melodyclock.NewSystemClock())
     if nil == err {
         t.Fatal("a 404 was read as a rate document")
     }
@@ -222,7 +222,7 @@ func TestReadRateDocument_DoesNotRepeatAnAnswerThatIsNotARateDocument(t *testing
         _, _ = writer.Write([]byte("not json at all"))
     })
 
-    _, attempts, err := readRateDocument(context.Background(), provider.client(t), melodyclock.NewSystemClock())
+    _, attempts, err := readRateDocument(httpclient.For(exampleTestRuntime(), provider.client(t)), melodyclock.NewSystemClock())
     if nil == err {
         t.Fatal("a body that is not json was read as a rate document")
     }

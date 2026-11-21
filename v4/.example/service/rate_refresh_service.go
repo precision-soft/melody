@@ -99,7 +99,7 @@ func (instance *RateRefreshService) Refresh(runtimeInstance melodycontainercontr
         return RateRefreshOutcome{Configured: true}, resolveErr
     }
 
-    reading, attempts, readErr := readRateDocument(runtimeInstance.Context(), client, instance.clock)
+    reading, attempts, readErr := readRateDocument(httpclient.For(runtimeInstance, client), instance.clock)
     if nil != readErr {
         return RateRefreshOutcome{Configured: true, Attempts: attempts}, readErr
     }
@@ -315,7 +315,8 @@ type rateReading struct {
 }
 
 /* readRateDocument spends up to rateRefreshAttemptCount exchanges on one reading. Only a call that produced no answer and a 5xx answer are retried: a 4xx repeats the caller's mistake and an undecodable body is not sent twice by a working provider. A cancellation of the run stops the wait between attempts and the exchange in flight alike and is answered as the cause, never retried; an exchange is otherwise bounded by the client's own timeout. */
-func readRateDocument(ctx context.Context, client *httpclient.HttpClient, clockInstance melodyclockcontract.Clock) (rateReading, int, error) {
+func readRateDocument(rates httpclient.Bound, clockInstance melodyclockcontract.Clock) (rateReading, int, error) {
+    ctx := rates.Runtime().Context()
     var lastErr error
 
     for attempt := 1; attempt <= rateRefreshAttemptCount; attempt++ {
@@ -332,7 +333,7 @@ func readRateDocument(ctx context.Context, client *httpclient.HttpClient, clockI
         }
 
         sentAt := clockInstance.Now()
-        response, requestErr := client.Get(ctx, ratesLatestTarget, httpclient.RequestOptions{})
+        response, requestErr := rates.Get(ratesLatestTarget, httpclient.RequestOptions{})
         receivedAt := clockInstance.Now()
         if nil != requestErr && nil != ctx.Err() {
             return rateReading{}, attempt, exception.NewError(

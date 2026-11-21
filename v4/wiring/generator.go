@@ -363,7 +363,8 @@ type pendingScopedProvider struct {
 
 /* viewTypes are the runtime-bound views, a value of one request, run or delivery that no provider registers, so a constructor asking for one is refused at generation rather than at its first resolution; every view the framework declares is listed here */
 var viewTypes = map[string]bool{
-    "github.com/precision-soft/melody/v4/cache.Bound": true,
+    "github.com/precision-soft/melody/v4/cache.Bound":      true,
+    "github.com/precision-soft/melody/v4/httpclient.Bound": true,
 }
 
 func isViewType(typeReference *TypeReference) bool {

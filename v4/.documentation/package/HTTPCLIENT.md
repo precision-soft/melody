@@ -44,6 +44,9 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/httpclient"
 )
 
@@ -63,9 +66,8 @@ func newApiClient() (*httpclient.HttpClient, error) {
     )
 }
 
-func callHealthEndpoint(ctx context.Context, client *httpclient.HttpClient) (string, error) {
-    response, requestErr := client.Get(
-        ctx,
+func callHealthEndpoint(runtimeInstance containercontract.Runtime, client *httpclient.HttpClient) (string, error) {
+    response, requestErr := httpclient.For(runtimeInstance, client).Get(
         "/health",
         httpclient.RequestOptions{},
     )
@@ -91,9 +93,19 @@ func main() {
         _ = client.CloseWithContext(context.Background())
     }()
 
-    _, _ = callHealthEndpoint(context.Background(), client)
+    runtimeInstance := runtime.NewRun(context.Background(), container.NewContainer(container.ContainerConfig{}).NewScope())
+
+    _, _ = callHealthEndpoint(runtimeInstance, client)
 }
 ```
+
+## The bound view
+
+Every door of `httpclientcontract.Client` takes the runtime it runs under first, the request built over the runtime's context, so cancelling it ends the request; a nil runtime, a typed nil and one carrying no context are refused with `the runtime is nil or carries no context` before anything reaches `net/http`. Userland calls the client through `httpclient.Bound`, bound once to its request, run or delivery, whose methods take no runtime:
+
+- `httpclient.For(runtimeInstance, clientInstance)` binds a client the caller holds; it allocates nothing and never panics, a nil client refused by the first door with `http client instance is nil`.
+- `httpclient.FromRuntime(runtimeInstance, serviceName)` resolves the client the application registered under its own name through the runtime's scope and binds it; the framework registers none, so an application registers each client it needs, `registrar.RegisterService(name, func(resolver containercontract.Resolver) (*httpclient.HttpClient, error) { return httpclient.NewHttpClient(config) }, containercontract.RegisterOptions{})`, and a name nothing registered panics as `runtime.MustFromRuntime` does.
+- A view is a value of one runtime: never kept in a service, a field or a goroutine that outlives it; the wiring generator refuses a constructor that asks for an `httpclient.Bound`. A call that needs another deadline binds again over `runtime.WithContext(runtimeInstance, deadlineContext)`.
 
 ## Footguns & caveats
 
@@ -146,15 +158,18 @@ The two idle pools are decided each on its own: `MaxIdleConnections` bounds the 
 - [`type HttpClient`](../../httpclient/http_client.go)
     - [`NewDefaultHttpClient()`](../../httpclient/http_client.go)
     - [`NewHttpClient(HttpClientConfig) (*HttpClient, error)`](../../httpclient/http_client.go)
-    - [`(*HttpClient).Get(contextInstance context.Context, urlString string, options RequestOptions) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
-    - [`(*HttpClient).Post(contextInstance context.Context, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
-    - [`(*HttpClient).Put(contextInstance context.Context, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
-    - [`(*HttpClient).Patch(contextInstance context.Context, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
-    - [`(*HttpClient).Delete(contextInstance context.Context, urlString string, options RequestOptions) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
-    - [`(*HttpClient).Request(contextInstance context.Context, method string, urlString string, options RequestOptions) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
-    - [`(*HttpClient).RequestStream(contextInstance context.Context, method string, urlString string, options RequestOptions) (httpclientcontract.StreamResponse, error)`](../../httpclient/http_client.go) — cancelling the context ends the request and the body read
+    - [`(*HttpClient).Get(runtimeInstance containercontract.Runtime, urlString string, options RequestOptions) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).Post(runtimeInstance containercontract.Runtime, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).Put(runtimeInstance containercontract.Runtime, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).Patch(runtimeInstance containercontract.Runtime, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).Delete(runtimeInstance containercontract.Runtime, urlString string, options RequestOptions) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).Request(runtimeInstance containercontract.Runtime, method string, urlString string, options RequestOptions) (httpclientcontract.Response, error)`](../../httpclient/http_client.go)
+    - [`(*HttpClient).RequestStream(runtimeInstance containercontract.Runtime, method string, urlString string, options RequestOptions) (httpclientcontract.StreamResponse, error)`](../../httpclient/http_client.go) — cancelling the runtime's context ends the request and the body read
     - [`(*HttpClient).SetHeader(key string, value string)`](../../httpclient/http_client.go) — stores the canonical spelling; the one setting a built client still takes, so a credential rotates without rebuilding the connection pool
     - [`(*HttpClient).CloseWithContext(closeContext context.Context) error`](../../httpclient/http_client.go) — releases the idle connections the client's transport holds
+- [`type Bound`](../../httpclient/bound.go) — the client bound to one runtime: `Get`, `Post`, `Put`, `Patch`, `Delete`, `Request` and `RequestStream` without the runtime, `Runtime()` and `Client()`
+    - [`For(runtimeInstance, clientInstance) Bound`](../../httpclient/bound.go)
+    - [`FromRuntime(runtimeInstance, serviceName) Bound`](../../httpclient/bound.go)
 - [`type HttpClientConfig`](../../httpclient/http_client_config.go) — `BaseUrl`, `Timeout bound.Duration`, `Headers`, `Transport TransportConfig`, `RedirectsDisabled`, `MaxRedirects bound.Count`; `RedirectsDisabled` hands a redirect back as the response it is, status and `Location` included, instead of following it, where a `POST` answered 301, 302 or 303 is otherwise re-sent by `net/http` as a `GET` without its body
 - [`type TransportConfig`](../../httpclient/transport_config.go) — `bound` fields, `KeepAliveDisabled` and `IdleConnectionsDisabled`
 - [`type RequestOptions`](../../httpclient/request_option.go) and [`type BasicAuth`](../../httpclient/request_option.go) — the contract's structs

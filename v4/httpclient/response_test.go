@@ -53,7 +53,7 @@ func TestResponse_StatusHeadersAndRequestCarryWhatTheExchangeProduced(t *testing
     client := NewDefaultHttpClient()
     defer client.CloseWithContext(context.Background())
 
-    response, requestErr := client.Get(context.Background(), server.URL+"/things", RequestOptions{Query: map[string]string{"page": "2"}})
+    response, requestErr := client.Get(testRuntime(), server.URL+"/things", RequestOptions{Query: map[string]string{"page": "2"}})
     if nil != requestErr {
         t.Fatalf("unexpected request error: %v", requestErr)
     }

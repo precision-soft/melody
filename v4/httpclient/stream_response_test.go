@@ -92,7 +92,7 @@ func TestStreamResponse_HeadersCarryWhatTheServerSent(t *testing.T) {
     client := NewDefaultHttpClient()
     defer client.CloseWithContext(context.Background())
 
-    streamResponse, requestErr := client.RequestStream(context.Background(), http.MethodGet, server.URL, RequestOptions{})
+    streamResponse, requestErr := client.RequestStream(testRuntime(), http.MethodGet, server.URL, RequestOptions{})
     if nil != requestErr {
         t.Fatalf("unexpected request error: %v", requestErr)
     }
