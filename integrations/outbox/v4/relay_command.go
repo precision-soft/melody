@@ -22,32 +22,43 @@ const defaultPollInterval = 1 * time.Second
 
 /* RelayCommandConfig configures the melody:outbox:relay command's run loop. The poll interval, the idle backoff and the batch limit stay the run's flags. */
 type RelayCommandConfig struct {
-    /* MaxErrorBackoff caps the doubling delay between RunOnce retries after consecutive failures: 1m when left out, at least 1ms, unlimited refused, since a persistent repository outage must neither tight-loop the relay nor push the retry horizon out for good. */
-    MaxErrorBackoff bound.Duration
+    /* ErrorBackoff is the delay between RunOnce retries after consecutive failures: Initial left out is the run's poll interval, capped at Max, doubled after every failure, capped at 1m, unlimited refused, since a persistent repository outage must neither tight-loop the relay nor push the retry horizon out for good. */
+    ErrorBackoff bound.Backoff
 }
 
-var relayCommandMaxErrorBackoffRule = bound.Rule[time.Duration]{
-    Name:    "RelayCommandConfig.MaxErrorBackoff",
-    Default: time.Minute,
-    Minimum: bound.TimeoutMinimum,
-}
-
-func resolveMaxErrorBackoff(config RelayCommandConfig) time.Duration {
-    maxErrorBackoff, resolveErr := bound.Resolve(config.MaxErrorBackoff, relayCommandMaxErrorBackoffRule)
-    if nil != resolveErr {
-        exception.Panic(exception.FromError(resolveErr))
-    }
-
-    return maxErrorBackoff.Value
+var relayCommandErrorBackoffRule = bound.BackoffRule{
+    Name:           "RelayCommandConfig.ErrorBackoff",
+    InitialDefault: bound.TimeoutMinimum,
+    MaxDefault:     time.Minute,
+    FactorDefault:  2,
 }
 
 /* NewRelayCommand builds the command so it resolves service.outbox.relay from the run's scope at the first batch, which lets a process register the command without opening a database at boot; a limit outside its rule is refused. */
 func NewRelayCommand(config RelayCommandConfig) *RelayCommand {
-    return &RelayCommand{maxErrorBackoff: resolveMaxErrorBackoff(config)}
+    errorBackoff, resolveErr := bound.ResolveBackoff(config.ErrorBackoff, relayCommandErrorBackoffRule)
+    if nil != resolveErr {
+        exception.Panic(exception.FromError(resolveErr))
+    }
+
+    return &RelayCommand{
+        errorBackoff:            errorBackoff,
+        errorBackoffFromTheRun:  true == config.ErrorBackoff.Initial.IsAbsent(),
+    }
 }
 
 type RelayCommand struct {
-    maxErrorBackoff time.Duration
+    errorBackoff            bound.ResolvedBackoff
+    errorBackoffFromTheRun  bool
+}
+
+/* runErrorBackoff answers the error backoff of a run polling at interval: an Initial left out is the interval, capped at Max. */
+func (instance *RelayCommand) runErrorBackoff(interval time.Duration) bound.ResolvedBackoff {
+    errorBackoff := instance.errorBackoff
+    if true == instance.errorBackoffFromTheRun {
+        errorBackoff.Initial = min(interval, errorBackoff.Max)
+    }
+
+    return errorBackoff
 }
 
 /* resolveRelay resolves the run's relay; a failed resolution is reported so the run loop treats it like a failed batch, backs off and retries instead of exiting, and a nil yield is refused so the loop never dereferences it. */
@@ -115,7 +126,8 @@ func (instance *RelayCommand) Run(
     logger := logging.LoggerFromRuntime(relayRuntime)
 
     batches := 0
-    errorBackoff := interval
+    errorBackoff := instance.runErrorBackoff(interval)
+    consecutiveFailures := 0
     var relay *Relay
 
     for {
@@ -148,20 +160,16 @@ func (instance *RelayCommand) Run(
 
             instance.logRunError(logger, runErr, published)
 
-            /* double the delay on consecutive failures so a persistent outage does not tight-loop, clamped to the cap; any successful run resets it below. */
-            if false == sleepInterruptible(runContext, errorBackoff) {
+            /* the delay grows over consecutive failures so a persistent outage does not tight-loop; any successful run resets it below */
+            consecutiveFailures++
+            if false == sleepInterruptible(runContext, errorBackoff.Delay(consecutiveFailures)) {
                 return nil
-            }
-
-            errorBackoff = errorBackoff * 2
-            if errorBackoff > instance.maxErrorBackoff || 0 >= errorBackoff {
-                errorBackoff = instance.maxErrorBackoff
             }
 
             continue
         }
 
-        errorBackoff = interval
+        consecutiveFailures = 0
 
         if 0 < limit && batches >= limit {
             return nil

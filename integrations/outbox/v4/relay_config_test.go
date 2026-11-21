@@ -22,12 +22,9 @@ func TestResolveRelayConfig_AnEmptyConfigIsEveryRuleDefault(t *testing.T) {
         BatchSize:             100,
         MaxAttempts:           12,
         MaxDeliveryAttempts:   24,
-        InitialBackoff:        15 * time.Second,
-        MaxBackoff:            10 * time.Minute,
-        BackoffFactor:         2,
+        Backoff:               bound.ResolvedBackoff{Initial: 15 * time.Second, Max: 10 * time.Minute, Factor: 2},
         ResolutionTimeout:     5 * time.Second,
-        UnavailableBackoff:    15 * time.Second,
-        UnavailableBackoffMax: time.Minute,
+        UnavailableBackoff:    bound.ResolvedBackoff{Initial: 15 * time.Second, Max: time.Minute, Factor: 2},
     }
 
     if expected != resolved {
@@ -46,9 +43,7 @@ func TestResolveRelayConfig_AGivenConfigReachesTheRelay(t *testing.T) {
         BatchSize:           bound.Of(3),
         MaxAttempts:         bound.Of(4),
         MaxDeliveryAttempts: bound.Of(5),
-        InitialBackoff:      bound.Of(6 * time.Millisecond),
-        MaxBackoff:          bound.Of(7 * time.Millisecond),
-        BackoffFactor:       1.5,
+        Backoff:             bound.Backoff{Initial: bound.Of(6 * time.Millisecond), Max: bound.Of(7 * time.Millisecond), Factor: 1.5},
         ResolutionTimeout:   bound.Of(9 * time.Millisecond),
     })
 
@@ -57,7 +52,7 @@ func TestResolveRelayConfig_AGivenConfigReachesTheRelay(t *testing.T) {
         t.Fatalf("expected the given lease, visibility and counts, got %+v", config)
     }
 
-    if 6*time.Millisecond != config.InitialBackoff || 7*time.Millisecond != config.MaxBackoff || 1.5 != config.BackoffFactor || 9*time.Millisecond != config.ResolutionTimeout {
+    if (bound.ResolvedBackoff{Initial: 6 * time.Millisecond, Max: 7 * time.Millisecond, Factor: 1.5}) != config.Backoff || 9*time.Millisecond != config.ResolutionTimeout {
         t.Fatalf("expected the given backoff and budgets, got %+v", config)
     }
 }
@@ -80,11 +75,11 @@ func TestResolveRelayConfig_RefusesALimitOutsideItsRuleNamingTheField(t *testing
         {name: "max delivery attempts zero", config: RelayConfig{MaxDeliveryAttempts: bound.Of(0)}, field: "RelayConfig.MaxDeliveryAttempts"},
         {name: "max delivery attempts unlimited", config: RelayConfig{MaxDeliveryAttempts: bound.UnlimitedCount()}, field: "RelayConfig.MaxDeliveryAttempts"},
         {name: "max delivery attempts at max attempts", config: RelayConfig{MaxDeliveryAttempts: bound.Of(12)}, field: "RelayConfig.MaxDeliveryAttempts"},
-        {name: "initial backoff below the minimum", config: RelayConfig{InitialBackoff: bound.Of(time.Microsecond)}, field: "RelayConfig.InitialBackoff"},
-        {name: "initial backoff above the default cap", config: RelayConfig{InitialBackoff: bound.Of(time.Hour)}, field: "RelayConfig.InitialBackoff"},
-        {name: "max backoff unlimited", config: RelayConfig{MaxBackoff: bound.UnlimitedDuration()}, field: "RelayConfig.MaxBackoff"},
-        {name: "factor below one", config: RelayConfig{BackoffFactor: 0.5}, field: "RelayConfig.BackoffFactor"},
-        {name: "factor NaN", config: RelayConfig{BackoffFactor: math.NaN()}, field: "RelayConfig.BackoffFactor"},
+        {name: "initial backoff below the minimum", config: RelayConfig{Backoff: bound.Backoff{Initial: bound.Of(time.Microsecond)}}, field: "RelayConfig.Backoff.Initial"},
+        {name: "initial backoff above the default cap", config: RelayConfig{Backoff: bound.Backoff{Initial: bound.Of(time.Hour)}}, field: "RelayConfig.Backoff.Initial"},
+        {name: "max backoff unlimited", config: RelayConfig{Backoff: bound.Backoff{Max: bound.UnlimitedDuration()}}, field: "RelayConfig.Backoff.Max"},
+        {name: "factor below one", config: RelayConfig{Backoff: bound.Backoff{Factor: 0.5}}, field: "RelayConfig.Backoff.Factor"},
+        {name: "factor NaN", config: RelayConfig{Backoff: bound.Backoff{Factor: math.NaN()}}, field: "RelayConfig.Backoff.Factor"},
         {name: "resolution timeout zero", config: RelayConfig{ResolutionTimeout: bound.Of(time.Duration(0))}, field: "RelayConfig.ResolutionTimeout"},
         {name: "resolution timeout unlimited", config: RelayConfig{ResolutionTimeout: bound.UnlimitedDuration()}, field: "RelayConfig.ResolutionTimeout"},
     }
@@ -98,23 +93,23 @@ func TestResolveRelayConfig_RefusesALimitOutsideItsRuleNamingTheField(t *testing
 }
 
 func TestResolveRelayConfig_AnInitialBackoffAboveTheCapIsRefusedNamingBoth(t *testing.T) {
-    _, resolveErr := resolveRelayConfig(RelayConfig{InitialBackoff: bound.Of(time.Second), MaxBackoff: bound.Of(500 * time.Millisecond)})
-    expectErrorNamingField(t, resolveErr, "RelayConfig.InitialBackoff")
+    _, resolveErr := resolveRelayConfig(RelayConfig{Backoff: bound.Backoff{Initial: bound.Of(time.Second), Max: bound.Of(500 * time.Millisecond)}})
+    expectErrorNamingField(t, resolveErr, "RelayConfig.Backoff.Initial")
 
-    if "RelayConfig.MaxBackoff" != exception.LogContext(resolveErr, exception.LogContextConfig{})["cappedBy"] {
+    if "RelayConfig.Backoff.Max" != exception.LogContext(resolveErr, exception.LogContextConfig{})["cappedBy"] {
         t.Fatalf("expected the refusal to name the cap, got %v", exception.LogContext(resolveErr, exception.LogContextConfig{}))
     }
 
-    if _, equalErr := resolveRelayConfig(RelayConfig{InitialBackoff: bound.Of(time.Second), MaxBackoff: bound.Of(time.Second)}); nil != equalErr {
+    if _, equalErr := resolveRelayConfig(RelayConfig{Backoff: bound.Backoff{Initial: bound.Of(time.Second), Max: bound.Of(time.Second)}}); nil != equalErr {
         t.Fatalf("expected an initial backoff equal to the cap admitted, got %v", equalErr)
     }
 }
 
 func TestResolveRelayConfig_AnUnavailableBackoffAboveItsMaximumIsRefusedNamingBoth(t *testing.T) {
-    _, resolveErr := resolveRelayConfig(RelayConfig{UnavailableBackoff: bound.Of(time.Minute), UnavailableBackoffMax: bound.Of(time.Second)})
-    expectErrorNamingField(t, resolveErr, "RelayConfig.UnavailableBackoff")
+    _, resolveErr := resolveRelayConfig(RelayConfig{UnavailableBackoff: bound.Backoff{Initial: bound.Of(time.Minute), Max: bound.Of(time.Second)}})
+    expectErrorNamingField(t, resolveErr, "RelayConfig.UnavailableBackoff.Initial")
 
-    if "RelayConfig.UnavailableBackoffMax" != exception.LogContext(resolveErr, exception.LogContextConfig{})["cappedBy"] {
+    if "RelayConfig.UnavailableBackoff.Max" != exception.LogContext(resolveErr, exception.LogContextConfig{})["cappedBy"] {
         t.Fatalf("expected the refusal to name the cap, got %v", exception.LogContext(resolveErr, exception.LogContextConfig{}))
     }
 }
@@ -161,4 +156,39 @@ func TestNewRelay_ANilDependencyIsRefusedNamingTheField(t *testing.T) {
     expectPanicNamingField(t, "RelayConfig.Codec", func() {
         NewRelay(RelayConfig{Repository: &fakeRepository{}, Transport: &fakeTransport{}})
     })
+}
+
+func TestResolveRelayConfig_TheDefaultRetryAndOutageWaitsDoubleToTheirCaps(t *testing.T) {
+    resolved, resolveErr := resolveRelayConfig(RelayConfig{})
+    if nil != resolveErr {
+        t.Fatalf("unexpected error: %v", resolveErr)
+    }
+
+    retry := []time.Duration{15 * time.Second, 30 * time.Second, time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute, 10 * time.Minute, 10 * time.Minute}
+    for index, want := range retry {
+        if delay := resolved.Backoff.Delay(index + 1); want != delay {
+            t.Fatalf("retry attempt %d: expected %s, got %s", index+1, want, delay)
+        }
+    }
+
+    outage := []time.Duration{15 * time.Second, 30 * time.Second, time.Minute, time.Minute}
+    for index, want := range outage {
+        if delay := resolved.UnavailableBackoff.Delay(index + 1); want != delay {
+            t.Fatalf("outage pass %d: expected %s, got %s", index+1, want, delay)
+        }
+    }
+}
+
+func TestResolveRelayConfig_TheUnavailableBackoffHasItsOwnFactor(t *testing.T) {
+    resolved, resolveErr := resolveRelayConfig(RelayConfig{Backoff: bound.Backoff{Factor: 3}, UnavailableBackoff: bound.Backoff{Factor: 1}})
+    if nil != resolveErr {
+        t.Fatalf("unexpected error: %v", resolveErr)
+    }
+
+    if 3 != resolved.Backoff.Factor || 1 != resolved.UnavailableBackoff.Factor {
+        t.Fatalf("expected the retry factor 3 beside the outage factor 1, got %v and %v", resolved.Backoff.Factor, resolved.UnavailableBackoff.Factor)
+    }
+
+    _, refusedErr := resolveRelayConfig(RelayConfig{UnavailableBackoff: bound.Backoff{Factor: 0.5}})
+    expectErrorNamingField(t, refusedErr, "RelayConfig.UnavailableBackoff.Factor")
 }

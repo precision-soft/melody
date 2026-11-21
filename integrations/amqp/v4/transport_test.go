@@ -515,8 +515,9 @@ func TestTransport_ReconnectsAfterConnectionDrop(t *testing.T) {
     }
 }
 
-func TestNextBackoff_GrowsAndCaps(t *testing.T) {
+func TestTransport_TheDefaultReconnectWaitsDoubleFromOneSecondToTheCap(t *testing.T) {
     expected := []time.Duration{
+        time.Second,
         2 * time.Second,
         4 * time.Second,
         8 * time.Second,
@@ -527,11 +528,9 @@ func TestNextBackoff_GrowsAndCaps(t *testing.T) {
 
     instance := &Transport{reconnect: defaultReconnect}
 
-    current := instance.reconnect.initialBackoff
     for index, want := range expected {
-        current = nextReconnectBackoff(instance.reconnect, current)
-        if want != current {
-            t.Fatalf("step %d: expected %s, got %s", index, want, current)
+        if delay := instance.reconnect.Delay(index + 1); want != delay {
+            t.Fatalf("attempt %d: expected %s, got %s", index+1, want, delay)
         }
     }
 }
@@ -585,7 +584,7 @@ func TestSubscribeWithRetry_RetriesThenStopsOnContextCancel(t *testing.T) {
     instance := &Transport{
         queue:       "orders",
         closeSignal: make(chan struct{}),
-        reconnect:   resolvedReconnect{initialBackoff: time.Millisecond, maxBackoff: time.Millisecond, backoffFactor: 2},
+        reconnect:   bound.ResolvedBackoff{Initial: time.Millisecond, Max: time.Millisecond, Factor: 2},
         dialer: func() (*amqp091.Connection, error) {
             calls++
             if 3 <= calls {
@@ -613,7 +612,7 @@ func TestSubscribeWithRetry_ZeroBackoffDoesNotBusyLoop(t *testing.T) {
     instance := &Transport{
         queue:       "orders",
         closeSignal: make(chan struct{}),
-        reconnect:   resolvedReconnect{initialBackoff: 0, maxBackoff: time.Second, backoffFactor: 2},
+        reconnect:   bound.ResolvedBackoff{Initial: 0, Max: time.Second, Factor: 2},
         dialer: func() (*amqp091.Connection, error) {
             calls++
 
@@ -643,7 +642,7 @@ func TestConsumeLoop_ZeroBackoffDoesNotBusyLoop(t *testing.T) {
     instance := &Transport{
         queue:       "orders",
         closeSignal: make(chan struct{}),
-        reconnect:   resolvedReconnect{initialBackoff: 0, maxBackoff: time.Second, backoffFactor: 2},
+        reconnect:   bound.ResolvedBackoff{Initial: 0, Max: time.Second, Factor: 2},
         dialer: func() (*amqp091.Connection, error) {
             calls++
 
@@ -920,7 +919,7 @@ func TestConsumeLoop_StaticLiveConnectionRecoversFromChannelOnlyLoss(t *testing.
         queue:       "orders",
         connection:  &amqp091.Connection{},
         closeSignal: make(chan struct{}),
-        reconnect:   resolvedReconnect{initialBackoff: 5 * time.Second, maxBackoff: 5 * time.Second, backoffFactor: 2},
+        reconnect:   bound.ResolvedBackoff{Initial: 5 * time.Second, Max: 5 * time.Second, Factor: 2},
     }
 
     deliveries := make(chan amqp091.Delivery)
@@ -1199,11 +1198,11 @@ func TestReopenConsume_CloseUnblocksGoroutineParkedOnBackoff(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
 
-    backoff := 10 * time.Second
+    attempt := 5
     done := make(chan error, 1)
 
     go func() {
-        _, _, _, reopenErr := transport.reopenConsume(runtimeInstance, &backoff)
+        _, _, _, reopenErr := transport.reopenConsume(runtimeInstance, &attempt)
         done <- reopenErr
     }()
 
@@ -1299,7 +1298,7 @@ func TestClose_ReturnsPromptlyWhileALoopIsStuckInTheDialer(t *testing.T) {
     instance := &Transport{
         queue:       "orders",
         closeSignal: make(chan struct{}),
-        reconnect:   resolvedReconnect{initialBackoff: time.Millisecond, maxBackoff: time.Millisecond, backoffFactor: 2},
+        reconnect:   bound.ResolvedBackoff{Initial: time.Millisecond, Max: time.Millisecond, Factor: 2},
         dialer: func() (*amqp091.Connection, error) {
             once.Do(func() {
                 close(dialing)
@@ -1911,7 +1910,7 @@ func TestPublishRequeue_RetriesABoundedNumberOfTimesBeforeGivingUp(t *testing.T)
     instance := &Transport{
         queue:       "orders",
         closeSignal: make(chan struct{}),
-        reconnect:   resolvedReconnect{initialBackoff: time.Millisecond, maxBackoff: time.Millisecond, backoffFactor: 1},
+        reconnect:   bound.ResolvedBackoff{Initial: time.Millisecond, Max: time.Millisecond, Factor: 1},
         dialer: func() (*amqp091.Connection, error) {
             dialCount++
 
@@ -1940,7 +1939,7 @@ func TestPublishRequeue_ClosingTransportStopsWithoutRetrying(t *testing.T) {
     instance := &Transport{
         queue:       "orders",
         closeSignal: make(chan struct{}),
-        reconnect:   resolvedReconnect{initialBackoff: time.Millisecond, maxBackoff: time.Millisecond, backoffFactor: 1},
+        reconnect:   bound.ResolvedBackoff{Initial: time.Millisecond, Max: time.Millisecond, Factor: 1},
         closing:     true,
         dialer: func() (*amqp091.Connection, error) {
             dialCount++
@@ -2168,7 +2167,7 @@ func TestClose_DrainsAConnectionTheDialYieldsAfterTheInterrupt(t *testing.T) {
     instance := &Transport{
         queue:       "orders",
         closeSignal: make(chan struct{}),
-        reconnect:   resolvedReconnect{initialBackoff: time.Millisecond, maxBackoff: time.Millisecond, backoffFactor: 2},
+        reconnect:   bound.ResolvedBackoff{Initial: time.Millisecond, Max: time.Millisecond, Factor: 2},
         dialer: func() (*amqp091.Connection, error) {
             once.Do(func() {
                 close(dialing)
@@ -3827,7 +3826,7 @@ func TestTransport_ARequeueRepublishKeepsTryingThroughANack(t *testing.T) {
     }
 
     retryBackoff := 50 * time.Millisecond
-    transport.reconnect = resolvedReconnect{initialBackoff: retryBackoff, maxBackoff: retryBackoff, backoffFactor: 1}
+    transport.reconnect = bound.ResolvedBackoff{Initial: retryBackoff, Max: retryBackoff, Factor: 1}
     loggerRuntime, logger := newRecordingLoggerRuntime(context.Background())
 
     startedAt := time.Now()
@@ -3893,5 +3892,43 @@ func TestTransport_SendOverAConnectionThatIsGoneIsMarkedUnavailable(t *testing.T
     sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "gone"}, nil))
     if nil == sendErr || false == exception.IsInfrastructureFailure(sendErr) {
         t.Fatalf("expected a send over a connection that is gone marked unavailable, got %v", sendErr)
+    }
+}
+
+func TestSubscribeWithRetry_TheWaitGrowsByTheFactorOverConsecutiveFailures(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    var mutex sync.Mutex
+    dialedAt := make([]time.Time, 0, 4)
+    instance := &Transport{
+        queue:       "orders",
+        closeSignal: make(chan struct{}),
+        reconnect:   bound.ResolvedBackoff{Initial: 20 * time.Millisecond, Max: 10 * time.Second, Factor: 3},
+        dialer: func() (*amqp091.Connection, error) {
+            mutex.Lock()
+            dialedAt = append(dialedAt, time.Now())
+            if 4 <= len(dialedAt) {
+                cancel()
+            }
+            mutex.Unlock()
+
+            return nil, exception.NewError("dial refused", nil, nil)
+        },
+    }
+
+    if _, _, _, subscribeErr := instance.subscribeWithRetry(newReconnectRuntime(ctx)); nil == subscribeErr {
+        t.Fatal("expected an error after the context is cancelled")
+    }
+
+    mutex.Lock()
+    defer mutex.Unlock()
+
+    if 4 > len(dialedAt) {
+        t.Fatalf("expected four dials, got %d", len(dialedAt))
+    }
+
+    if gap := dialedAt[3].Sub(dialedAt[2]); 180*time.Millisecond > gap {
+        t.Fatalf("expected the third wait to have grown to 180ms, waited %s", gap)
     }
 }

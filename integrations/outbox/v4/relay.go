@@ -4,6 +4,7 @@ import (
     "context"
     "errors"
     "fmt"
+    "math"
     "runtime/debug"
     "strconv"
     "strings"
@@ -53,22 +54,14 @@ type RelayConfig struct {
     /* MaxDeliveryAttempts caps how many delivery attempts the relay records for a single row (RecordDeliveryAttempt, once per row it reaches after a claim) before it is dead-lettered as poison, regardless of whether its sends ever returned an error. It is the safety net for a row that crashes (or hangs past the visibility timeout) the relay between claim and resolve: such a row's send-failure attempt count never advances, so without this cap it would re-surface forever and never reach MaxAttempts. It must exceed MaxAttempts because every recorded attempt — including a normal retry's — counts toward it: twice MaxAttempts when left out, saturating at math.MaxInt, a value at or below MaxAttempts refused naming both, unlimited refused. */
     MaxDeliveryAttempts bound.Count
 
-    /* InitialBackoff and MaxBackoff bound the retry delay: 15s and 10m when left out, at least 1ms, unlimited refused, an initial above the cap refused naming both. */
-    InitialBackoff bound.Duration
-
-    MaxBackoff bound.Duration
-
-    /* BackoffFactor grows the retry delay: 2 when left out, below 1 or NaN refused. */
-    BackoffFactor float64
+    /* Backoff is the retry delay after a send failure: 15s first, doubled after every attempt, capped at 10m, each field taking that default when left out. */
+    Backoff bound.Backoff
 
     /* ResolutionTimeout bounds one resolution write — sent, rescheduled or dead — on its own detached context: 5s when left out, at least 1ms, unlimited refused. */
     ResolutionTimeout bound.Duration
 
-    /* UnavailableBackoff is how long a row whose send met an unreachable transport waits, the send failure marked by exception.MarkInfrastructureFailure: no attempt is charged, and the wait grows by BackoffFactor over the consecutive outage passes: 15s when left out, at least 1ms, unlimited refused. */
-    UnavailableBackoff bound.Duration
-
-    /* UnavailableBackoffMax caps that wait: 1m when left out, at least 1ms, unlimited refused, below UnavailableBackoff refused. */
-    UnavailableBackoffMax bound.Duration
+    /* UnavailableBackoff is how long a row whose send met an unreachable transport waits, the send failure marked by exception.MarkInfrastructureFailure: no attempt is charged, and the wait grows over the consecutive outage passes: 15s first, doubled after every pass, capped at 1m, each field taking that default when left out. */
+    UnavailableBackoff bound.Backoff
 }
 
 /* NewRelay builds the relay; a nil Repository, Transport or Codec and a limit outside its rule are refused naming the field. */
@@ -574,19 +567,9 @@ func (instance *Relay) handBackOutage(runtimeInstance containercontract.Runtime,
     return instance.handBackUncharged(runtimeInstance, unavailable, time.Now().Add(instance.outageBackoff(passes)), true)
 }
 
-/* outageBackoff grows UnavailableBackoff by BackoffFactor per consecutive outage pass, capped by UnavailableBackoffMax */
+/* outageBackoff is the UnavailableBackoff delay of the given consecutive outage pass */
 func (instance *Relay) outageBackoff(passes int64) time.Duration {
-    delay := float64(instance.config.UnavailableBackoff)
-    maximum := float64(instance.config.UnavailableBackoffMax)
-
-    for step := int64(1); step < passes; step++ {
-        delay = delay * instance.config.BackoffFactor
-        if delay >= maximum {
-            return instance.config.UnavailableBackoffMax
-        }
-    }
-
-    return time.Duration(delay)
+    return instance.config.UnavailableBackoff.Delay(int(min(passes, int64(math.MaxInt32))))
 }
 
 /* endOutage resets the outage passes on a delivered row and, when an outage was running, writes one INFO record that the transport answers again */
@@ -746,27 +729,7 @@ func outboxMessageId(id int64) string {
     return "melody-outbox-" + strconv.FormatInt(id, 10)
 }
 
-/* nextBackoff is the delay before the next attempt: InitialBackoff grown by BackoffFactor for each prior attempt, capped at MaxBackoff. */
+/* nextBackoff is the delay before the next attempt: the Backoff delay of the attempts already made. */
 func (instance *Relay) nextBackoff(attempts int) time.Duration {
-    delay := instance.config.InitialBackoff
-    maxBackoff := instance.config.MaxBackoff
-
-    for step := 1; step < attempts; step++ {
-        /* grow in float space and clamp before converting: a very large MaxBackoff and a high factor can push the product past the int64 range, where time.Duration(float64) wraps to a negative duration and defeats the `>= MaxBackoff` clamp, causing an immediate-retry storm. */
-        next := float64(delay) * instance.config.BackoffFactor
-        if next >= float64(maxBackoff) {
-            return maxBackoff
-        }
-
-        delay = time.Duration(next)
-        if 0 > delay {
-            return maxBackoff
-        }
-    }
-
-    if delay > maxBackoff || 0 > delay {
-        return maxBackoff
-    }
-
-    return delay
+    return instance.config.Backoff.Delay(attempts)
 }

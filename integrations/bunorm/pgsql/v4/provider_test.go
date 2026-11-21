@@ -150,7 +150,7 @@ func TestNewProvider_KeepsTheConfiguredValues(t *testing.T) {
         Insecure:      true,
         Pool:          PoolConfig{MaxOpenConnections: bound.Of(10), MaxIdleConnections: bound.Of(2)},
         Timeout:       TimeoutConfig{ConnectTimeout: bound.Of(time.Second), ReadTimeout: bound.Of(2 * time.Second)},
-        Retry:         RetryConfig{MaxAttempts: bound.Of(4), BackoffMultiplier: 3.0},
+        Retry:         RetryConfig{MaxAttempts: bound.Of(4), Backoff: bound.Backoff{Factor: 3.0}},
         PostBuildHook: hook,
     })
 
@@ -162,7 +162,7 @@ func TestNewProvider_KeepsTheConfiguredValues(t *testing.T) {
         t.Fatalf("expected the configured deadlines, got %+v", provider.timeout)
     }
 
-    if 4 != provider.retry.maxAttempts || 3.0 != provider.retry.backoffMultiplier {
+    if 4 != provider.retry.maxAttempts || 3.0 != provider.retry.backoff.Factor {
         t.Fatalf("expected the configured retry, got %+v", provider.retry)
     }
 
@@ -176,8 +176,8 @@ func TestNewProvider_PanicsNamingAFieldOutsideItsRule(t *testing.T) {
         NewProvider(ProviderConfig{Timeout: TimeoutConfig{ConnectTimeout: bound.UnlimitedDuration()}})
     })
 
-    expectPanicNamingField(t, "RetryConfig.BackoffMultiplier", func() {
-        NewProvider(ProviderConfig{Retry: RetryConfig{BackoffMultiplier: math.NaN()}})
+    expectPanicNamingField(t, "RetryConfig.Backoff.Factor", func() {
+        NewProvider(ProviderConfig{Retry: RetryConfig{Backoff: bound.Backoff{Factor: math.NaN()}}})
     })
 }
 
@@ -192,7 +192,7 @@ func TestMigrationProvider_KeepsHookRetryAndTransportOverTheMigrationShape(t *te
             hookCalled = true
             return nil
         },
-        Retry:   RetryConfig{MaxAttempts: bound.Of(5), InitialDelay: bound.Of(time.Second), MaxDelay: bound.Of(10 * time.Second)},
+        Retry:   RetryConfig{MaxAttempts: bound.Of(5), Backoff: bound.Backoff{Initial: bound.Of(time.Second), Max: bound.Of(10 * time.Second)}},
         Timeout: TimeoutConfig{ConnectTimeout: bound.Of(7 * time.Second), ReadTimeout: bound.Of(30 * time.Second), WriteTimeout: bound.Of(30 * time.Second)},
     })
 
@@ -278,7 +278,7 @@ func TestProviderOpenWithRetryAndNilLoggerDoesNotPanic(t *testing.T) {
     provider := NewProvider(ProviderConfig{
         Insecure: true,
         Timeout:  TimeoutConfig{ConnectTimeout: bound.Of(100 * time.Millisecond)},
-        Retry:    RetryConfig{MaxAttempts: bound.Of(2), InitialDelay: bound.Of(time.Millisecond), MaxDelay: bound.Of(5 * time.Millisecond)},
+        Retry:    RetryConfig{MaxAttempts: bound.Of(2), Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond), Max: bound.Of(5 * time.Millisecond)}},
     })
 
     database, openErr := provider.Open(
@@ -374,9 +374,9 @@ var _ net.Error = (*stubTimeoutError)(nil)
 
 var _ net.Error = (*stubTemporaryError)(nil)
 
-func TestComputeBackoffDelayGrowsExponentiallyAndClampsAtMaxDelay(t *testing.T) {
+func TestComputeBackoffDelayGrowsExponentiallyAndClampsAtTheMaxBackoff(t *testing.T) {
     provider := NewProvider(ProviderConfig{
-        Retry: RetryConfig{MaxAttempts: bound.Of(3), InitialDelay: bound.Of(100 * time.Millisecond), MaxDelay: bound.Of(250 * time.Millisecond)},
+        Retry: RetryConfig{MaxAttempts: bound.Of(3), Backoff: bound.Backoff{Initial: bound.Of(100 * time.Millisecond), Max: bound.Of(250 * time.Millisecond)}},
     })
 
     if 100*time.Millisecond != provider.computeBackoffDelay(1) {
@@ -527,7 +527,7 @@ func TestProviderOpenForMigrationCancelsTheRetrySleep(t *testing.T) {
     provider := NewProvider(ProviderConfig{
         Insecure: true,
         Timeout:  TimeoutConfig{ConnectTimeout: bound.Of(50 * time.Millisecond)},
-        Retry:    RetryConfig{MaxAttempts: bound.Of(5), InitialDelay: bound.Of(2 * time.Second), MaxDelay: bound.Of(2 * time.Second), BackoffMultiplier: 1.0},
+        Retry:    RetryConfig{MaxAttempts: bound.Of(5), Backoff: bound.Backoff{Initial: bound.Of(2 * time.Second), Max: bound.Of(2 * time.Second), Factor: 1.0}},
     })
 
     ctx, cancel := context.WithCancel(context.Background())
@@ -582,7 +582,7 @@ func TestProviderOpenCancelsTheRetrySleep(t *testing.T) {
     provider := NewProvider(ProviderConfig{
         Insecure: true,
         Timeout:  TimeoutConfig{ConnectTimeout: bound.Of(50 * time.Millisecond)},
-        Retry:    RetryConfig{MaxAttempts: bound.Of(5), InitialDelay: bound.Of(2 * time.Second), MaxDelay: bound.Of(2 * time.Second), BackoffMultiplier: 1.0},
+        Retry:    RetryConfig{MaxAttempts: bound.Of(5), Backoff: bound.Backoff{Initial: bound.Of(2 * time.Second), Max: bound.Of(2 * time.Second), Factor: 1.0}},
     })
 
     ctx, cancel := context.WithCancel(context.Background())
@@ -787,7 +787,7 @@ func TestOpenWithRetry_ACancellationDuringTheBackoffIsRecordedAndMarked(t *testi
 
     provider := NewProvider(ProviderConfig{
         Timeout: TimeoutConfig{ConnectTimeout: bound.Of(50 * time.Millisecond)},
-        Retry:   RetryConfig{MaxAttempts: bound.Of(5), InitialDelay: bound.Of(2 * time.Second), MaxDelay: bound.Of(2 * time.Second), BackoffMultiplier: 1.0},
+        Retry:   RetryConfig{MaxAttempts: bound.Of(5), Backoff: bound.Backoff{Initial: bound.Of(2 * time.Second), Max: bound.Of(2 * time.Second), Factor: 1.0}},
     })
 
     ctx, cancel := context.WithCancel(context.Background())
@@ -830,7 +830,7 @@ func TestOpenWithRetry_TheRetryWarningCarriesTheDiagnosticShapeTheTerminalRecord
 
     provider := NewProvider(ProviderConfig{
         Timeout: TimeoutConfig{ConnectTimeout: bound.Of(time.Second), ReadTimeout: bound.Of(time.Second), WriteTimeout: bound.Of(time.Second)},
-        Retry:   RetryConfig{MaxAttempts: bound.Of(2), InitialDelay: bound.Of(time.Millisecond), MaxDelay: bound.Of(2 * time.Millisecond)},
+        Retry:   RetryConfig{MaxAttempts: bound.Of(2), Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond), Max: bound.Of(2 * time.Millisecond)}},
     })
 
     _, openErr := provider.Open(
@@ -1013,7 +1013,7 @@ func TestProviderOpenWithNilLoggerWritesTheTerminalRecordToStandardError(t *test
 
     provider := NewProvider(ProviderConfig{
         Timeout: TimeoutConfig{ConnectTimeout: bound.Of(100 * time.Millisecond), ReadTimeout: bound.Of(100 * time.Millisecond), WriteTimeout: bound.Of(100 * time.Millisecond)},
-        Retry:   RetryConfig{MaxAttempts: bound.Of(1), InitialDelay: bound.Of(time.Millisecond), MaxDelay: bound.Of(5 * time.Millisecond)},
+        Retry:   RetryConfig{MaxAttempts: bound.Of(1), Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond), Max: bound.Of(5 * time.Millisecond)}},
     })
 
     database, openErr := provider.Open(
@@ -1051,7 +1051,7 @@ func TestProviderOpenWithNilLoggerWritesTheTerminalRecordToStandardError(t *test
 /* TestComputeBackoffDelayAnswersAConstantMultiplierInBoundedTime guards the cost, written as a DEADLINE because that is the only way the cost is observable: a multiplier of exactly 1 is a valid constant backoff, and a growth walked attempt by attempt would cost its own square at the largest attempt, where the closed form is one math.Pow. The 250ms window is shorter than such a walk while leaving the closed form ample slack, and the value is asserted beside the deadline so the probe cannot pass by answering quickly and wrongly. */
 func TestComputeBackoffDelayAnswersAConstantMultiplierInBoundedTime(t *testing.T) {
     provider := NewProvider(ProviderConfig{
-        Retry: RetryConfig{InitialDelay: bound.Of(10 * time.Millisecond), MaxDelay: bound.Of(5 * time.Second), BackoffMultiplier: 1.0},
+        Retry: RetryConfig{Backoff: bound.Backoff{Initial: bound.Of(10 * time.Millisecond), Max: bound.Of(5 * time.Second), Factor: 1.0}},
     })
 
     answered := make(chan time.Duration, 1)
@@ -1072,7 +1072,7 @@ func TestComputeBackoffDelayAnswersAConstantMultiplierInBoundedTime(t *testing.T
 /* an attempt of zero is not an attempt already made: it reads as the first one, which is the answer the growth this replaced gave it by never running. Without the reading the unsigned subtraction wraps to four billion steps of growth and the delay leaves for the ceiling. */
 func TestComputeBackoffDelayReadsAZeroAttemptAsTheFirst(t *testing.T) {
     provider := NewProvider(ProviderConfig{
-        Retry: RetryConfig{MaxAttempts: bound.Of(3), InitialDelay: bound.Of(100 * time.Millisecond), MaxDelay: bound.Of(250 * time.Millisecond)},
+        Retry: RetryConfig{MaxAttempts: bound.Of(3), Backoff: bound.Backoff{Initial: bound.Of(100 * time.Millisecond), Max: bound.Of(250 * time.Millisecond)}},
     })
 
     if 100*time.Millisecond != provider.computeBackoffDelay(0) {
@@ -1159,7 +1159,7 @@ func TestOpen_AnOutageIsFiledAsUnreachableAndARefusalIsNot(t *testing.T) {
         t.Fatalf("expected the driver failure reachable under the class, got %v", openErr)
     }
 
-    retrying := NewProvider(ProviderConfig{Insecure: true, Timeout: TimeoutConfig{ConnectTimeout: bound.Of(100 * time.Millisecond)}, Retry: RetryConfig{MaxAttempts: bound.Of(2), InitialDelay: bound.Of(time.Millisecond), MaxDelay: bound.Of(time.Millisecond), BackoffMultiplier: 1}})
+    retrying := NewProvider(ProviderConfig{Insecure: true, Timeout: TimeoutConfig{ConnectTimeout: bound.Of(100 * time.Millisecond)}, Retry: RetryConfig{MaxAttempts: bound.Of(2), Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond), Max: bound.Of(time.Millisecond), Factor: 1}}})
     database, openErr = retrying.Open(testRuntime(), unreachable, nil)
     if nil != database {
         _ = database.Close()
@@ -1323,7 +1323,7 @@ func TestOpenWithRetry_AnAbsentAttemptBudgetTakesTheDefaultBudget(t *testing.T) 
 
     provider := NewProvider(ProviderConfig{
         Timeout: TimeoutConfig{ConnectTimeout: bound.Of(time.Second), ReadTimeout: bound.Of(time.Second), WriteTimeout: bound.Of(time.Second)},
-        Retry:   RetryConfig{InitialDelay: bound.Of(time.Millisecond), MaxDelay: bound.Of(2 * time.Millisecond)},
+        Retry:   RetryConfig{Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond), Max: bound.Of(2 * time.Millisecond)}},
     })
 
     if _, openErr := provider.Open(testRuntimeUnder(context.Background()), newTestParameters("127.0.0.1", "1", "melody", "melody", "melody"), logger); nil == openErr {
@@ -1625,7 +1625,7 @@ func TestOpen_TheCancellationRefusalsCarryTheCallersCause(t *testing.T) {
 
     provider := NewProvider(ProviderConfig{
         Timeout: TimeoutConfig{ConnectTimeout: bound.Of(50 * time.Millisecond)},
-        Retry:   RetryConfig{MaxAttempts: bound.Of(5), InitialDelay: bound.Of(2 * time.Second), MaxDelay: bound.Of(2 * time.Second), BackoffMultiplier: 1.0},
+        Retry:   RetryConfig{MaxAttempts: bound.Of(5), Backoff: bound.Backoff{Initial: bound.Of(2 * time.Second), Max: bound.Of(2 * time.Second), Factor: 1.0}},
     })
 
     backoffContext, cancelBackoff := context.WithCancelCause(context.Background())

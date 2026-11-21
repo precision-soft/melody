@@ -212,7 +212,7 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
 }
 
 func TestShouldResetReconnectBackoff(t *testing.T) {
-    initialBackoff := defaultReconnect.initialBackoff
+    initialBackoff := defaultReconnect.Initial
 
     if true == reconnectBackoffShouldReset(defaultReconnect, initialBackoff-time.Nanosecond) {
         t.Fatalf("expected no backoff reset for a subscription that died sooner than the initial backoff")
@@ -1173,14 +1173,14 @@ func TestNewServerSentEventBackplane_AGivenConfigReachesTheBackplane(t *testing.
         Hub:          hub,
         Exchange:     "melody.custom",
         Logger:       logger,
-        Reconnect:    ReconnectConfig{BackoffFactor: 3},
+        Reconnect:    ReconnectConfig{Backoff: bound.Backoff{Factor: 3}},
         CallTimeout:  bound.Of(250 * time.Millisecond),
         CloseTimeout: bound.Of(4 * time.Second),
     })
     defer backplane.CloseWithContext(context.Background())
 
-    if 250*time.Millisecond != backplane.callTimeout || 4*time.Second != backplane.joinBound || 3.0 != backplane.reconnect.backoffFactor {
-        t.Fatalf("expected 250ms / 4s / 3, got %s / %s / %v", backplane.callTimeout, backplane.joinBound, backplane.reconnect.backoffFactor)
+    if 250*time.Millisecond != backplane.callTimeout || 4*time.Second != backplane.joinBound || 3.0 != backplane.reconnect.Factor {
+        t.Fatalf("expected 250ms / 4s / 3, got %s / %s / %v", backplane.callTimeout, backplane.joinBound, backplane.reconnect.Factor)
     }
 
     if "melody.custom" != backplane.exchange || logger != backplane.logger {
@@ -1219,7 +1219,7 @@ func TestNewServerSentEventBackplane_ARefusedLimitLeavesTheHubWithoutABackplane(
         {name: "call timeout below the minimum", config: ServerSentEventBackplaneConfig{CallTimeout: bound.Of(time.Microsecond)}, field: "ServerSentEventBackplaneConfig.CallTimeout"},
         {name: "call timeout unlimited", config: ServerSentEventBackplaneConfig{CallTimeout: bound.UnlimitedDuration()}, field: "ServerSentEventBackplaneConfig.CallTimeout"},
         {name: "close timeout unlimited", config: ServerSentEventBackplaneConfig{CloseTimeout: bound.UnlimitedDuration()}, field: "ServerSentEventBackplaneConfig.CloseTimeout"},
-        {name: "reconnect factor below one", config: ServerSentEventBackplaneConfig{Reconnect: ReconnectConfig{BackoffFactor: 0.5}}, field: "ReconnectConfig.BackoffFactor"},
+        {name: "reconnect factor below one", config: ServerSentEventBackplaneConfig{Reconnect: ReconnectConfig{Backoff: bound.Backoff{Factor: 0.5}}}, field: "ReconnectConfig.Backoff.Factor"},
     }
 
     for _, testCase := range cases {
@@ -1252,13 +1252,13 @@ func TestNewServerSentEventBackplane_ARefusedLimitLeavesTheHubWithoutABackplane(
 }
 
 func TestProviderNewServerSentEventBackplane_InheritsTheProvidersReconnectAndCloseTimeout(t *testing.T) {
-    provider := NewProvider(ProviderConfig{Reconnect: ReconnectConfig{InitialBackoff: bound.Of(2 * time.Second)}, CloseTimeout: bound.Of(6 * time.Second)})
+    provider := NewProvider(ProviderConfig{Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(2 * time.Second)}}, CloseTimeout: bound.Of(6 * time.Second)})
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     backplane := provider.NewServerSentEventBackplane(ServerSentEventBackplaneConfig{Dialer: refusingDialer, Hub: hub})
     defer backplane.CloseWithContext(context.Background())
 
-    if 2*time.Second != backplane.reconnect.initialBackoff || 6*time.Second != backplane.joinBound {
-        t.Fatalf("expected the provider's 2s initial backoff and 6s close timeout, got %s / %s", backplane.reconnect.initialBackoff, backplane.joinBound)
+    if 2*time.Second != backplane.reconnect.Initial || 6*time.Second != backplane.joinBound {
+        t.Fatalf("expected the provider's 2s initial backoff and 6s close timeout, got %s / %s", backplane.reconnect.Initial, backplane.joinBound)
     }
 }
 

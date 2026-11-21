@@ -30,14 +30,11 @@ type RetryPolicy struct {
     /* MaxRetries is how many times a failed message is re-handled before it is exhausted; 3 when left out, 0 for none, unlimited refused. */
     MaxRetries bound.Count
 
-    /* BaseDelay is the delay before the first retry, multiplied by the attempt and capped by MaxDelay; 1s when left out, at least 1ms, unlimited refused. */
-    BaseDelay bound.Duration
+    /* Backoff is the delay before each retry: 1s before the first, doubled for every retry after it, capped at 1h, each field taking that default when left out. */
+    Backoff bound.Backoff
 
     /* FailureTransport receives an exhausted message; nil for none, a typed nil refused. */
     FailureTransport messagebuscontract.Transport
-
-    /* MaxDelay caps the retry delay; 1h when left out, at least 1ms, unlimited refused. */
-    MaxDelay bound.Duration
 
     /* FailureRequeueDelay is the delay before an exhausted message the failure transport rejected is requeued; 5s when left out, at least 1ms, unlimited refused. */
     FailureRequeueDelay bound.Duration
@@ -61,16 +58,11 @@ var retryMaxRetriesRule = bound.Rule[int]{
     Minimum: 0,
 }
 
-var retryBaseDelayRule = bound.Rule[time.Duration]{
-    Name:    "RetryPolicy.BaseDelay",
-    Default: time.Second,
-    Minimum: bound.TimeoutMinimum,
-}
-
-var retryMaxDelayRule = bound.Rule[time.Duration]{
-    Name:    "RetryPolicy.MaxDelay",
-    Default: time.Hour,
-    Minimum: bound.TimeoutMinimum,
+var retryBackoffRule = bound.BackoffRule{
+    Name:           "RetryPolicy.Backoff",
+    InitialDefault: time.Second,
+    MaxDefault:     time.Hour,
+    FactorDefault:  2,
 }
 
 var retryFailureRequeueDelayRule = bound.Rule[time.Duration]{
@@ -112,9 +104,8 @@ func NewConsumeCommand(config ConsumeCommandConfig) *ConsumeCommand {
 
 type resolvedRetryPolicy struct {
     MaxRetries                     int
-    BaseDelay                      time.Duration
+    Backoff                        bound.ResolvedBackoff
     FailureTransport               messagebuscontract.Transport
-    MaxDelay                       time.Duration
     FailureRequeueDelay            time.Duration
     MaxDeadLetterAttempts          int
     MaxDeadLetterAttemptsUnlimited bool
@@ -136,14 +127,9 @@ func resolveRetryPolicy(retryPolicy RetryPolicy) (resolvedRetryPolicy, error) {
         return resolvedRetryPolicy{}, maxRetriesErr
     }
 
-    baseDelay, baseDelayErr := bound.Resolve(retryPolicy.BaseDelay, retryBaseDelayRule)
-    if nil != baseDelayErr {
-        return resolvedRetryPolicy{}, baseDelayErr
-    }
-
-    maxDelay, maxDelayErr := bound.Resolve(retryPolicy.MaxDelay, retryMaxDelayRule)
-    if nil != maxDelayErr {
-        return resolvedRetryPolicy{}, maxDelayErr
+    backoff, backoffErr := bound.ResolveBackoff(retryPolicy.Backoff, retryBackoffRule)
+    if nil != backoffErr {
+        return resolvedRetryPolicy{}, backoffErr
     }
 
     failureRequeueDelay, failureRequeueDelayErr := bound.Resolve(retryPolicy.FailureRequeueDelay, retryFailureRequeueDelayRule)
@@ -158,9 +144,8 @@ func resolveRetryPolicy(retryPolicy RetryPolicy) (resolvedRetryPolicy, error) {
 
     return resolvedRetryPolicy{
         MaxRetries:                     maxRetries.Value,
-        BaseDelay:                      baseDelay.Value,
+        Backoff:                        backoff,
         FailureTransport:               retryPolicy.FailureTransport,
-        MaxDelay:                       maxDelay.Value,
         FailureRequeueDelay:            failureRequeueDelay.Value,
         MaxDeadLetterAttempts:          maxDeadLetterAttempts.Value,
         MaxDeadLetterAttemptsUnlimited: maxDeadLetterAttempts.Unlimited,
@@ -612,19 +597,7 @@ func (instance *consumeSession) retryDelay(attempt int) time.Duration {
         return 0
     }
 
-    maxDelay := instance.retryPolicy.MaxDelay
-
-    /* the quotient stays int64, since truncated to int it wraps on a 32-bit build and turns the first retry into a full MaxDelay wait */
-    if int64(attempt) > int64(maxDelay/instance.retryPolicy.BaseDelay) {
-        return maxDelay
-    }
-
-    delay := instance.retryPolicy.BaseDelay * time.Duration(attempt)
-    if delay > maxDelay || 0 > delay {
-        return maxDelay
-    }
-
-    return delay
+    return instance.retryPolicy.Backoff.Delay(attempt)
 }
 
 func (instance *consumeSession) failureRequeueDelay() time.Duration {

@@ -41,7 +41,7 @@ func TestNewTransport_DefaultReconnectAndBuffer(t *testing.T) {
 
 func TestNewTransport_PerTransportOverride(t *testing.T) {
     config := newTestTransportConfig()
-    config.Reconnect = ReconnectConfig{InitialBackoff: bound.Of(5 * time.Second)}
+    config.Reconnect = ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(5 * time.Second)}}
     config.PublishReturnBuffer = bound.Of(64)
     config.Prefetch = bound.Of(7)
     config.CallTimeout = bound.Of(3 * time.Second)
@@ -49,8 +49,8 @@ func TestNewTransport_PerTransportOverride(t *testing.T) {
 
     instance := NewTransport(config)
 
-    if 5*time.Second != instance.reconnect.initialBackoff {
-        t.Fatalf("expected overridden initial backoff 5s, got %s", instance.reconnect.initialBackoff)
+    if 5*time.Second != instance.reconnect.Initial {
+        t.Fatalf("expected overridden initial backoff 5s, got %s", instance.reconnect.Initial)
     }
 
     if 64 != instance.publishReturnBuffer || 7 != instance.prefetch || 3*time.Second != instance.callTimeout || 4*time.Second != instance.joinBound {
@@ -75,8 +75,8 @@ func TestNewTransport_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T) {
         {name: "close timeout zero", mutate: func(config *TransportConfig) { config.CloseTimeout = bound.Of(time.Duration(0)) }, field: "TransportConfig.CloseTimeout"},
         {name: "close timeout unlimited", mutate: func(config *TransportConfig) { config.CloseTimeout = bound.UnlimitedDuration() }, field: "TransportConfig.CloseTimeout"},
         {name: "reconnect initial above the cap", mutate: func(config *TransportConfig) {
-            config.Reconnect = ReconnectConfig{InitialBackoff: bound.Of(2 * time.Minute)}
-        }, field: "ReconnectConfig.InitialBackoff"},
+            config.Reconnect = ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(2 * time.Minute)}}
+        }, field: "ReconnectConfig.Backoff.Initial"},
     }
 
     for _, testCase := range cases {
@@ -129,7 +129,7 @@ func TestNewProvider_ResolvesEveryFieldToItsDefault(t *testing.T) {
 func TestNewProvider_AGivenConfigReachesTheProvider(t *testing.T) {
     provider := NewProvider(ProviderConfig{
         Heartbeat:    bound.Of(time.Second),
-        Reconnect:    ReconnectConfig{InitialBackoff: bound.Of(2 * time.Second), MaxBackoff: bound.Of(time.Minute), BackoffFactor: 3},
+        Reconnect:    ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(2 * time.Second), Max: bound.Of(time.Minute), Factor: 3}},
         CloseTimeout: bound.Of(5 * time.Second),
     })
 
@@ -137,7 +137,7 @@ func TestNewProvider_AGivenConfigReachesTheProvider(t *testing.T) {
         t.Fatalf("expected heartbeat 1s and close timeout 5s, got %s / %s", provider.heartbeat, provider.parent.closeTimeout)
     }
 
-    if (resolvedReconnect{initialBackoff: 2 * time.Second, maxBackoff: time.Minute, backoffFactor: 3}) != provider.parent.reconnect {
+    if (bound.ResolvedBackoff{Initial: 2 * time.Second, Max: time.Minute, Factor: 3}) != provider.parent.reconnect {
         t.Fatalf("expected 2s / 1m / 3, got %+v", provider.parent.reconnect)
     }
 }
@@ -152,8 +152,8 @@ func TestNewProvider_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T) {
         {name: "heartbeat unlimited", config: ProviderConfig{Heartbeat: bound.UnlimitedDuration()}, field: "ProviderConfig.Heartbeat"},
         {name: "close timeout below the minimum", config: ProviderConfig{CloseTimeout: bound.Of(time.Microsecond)}, field: "ProviderConfig.CloseTimeout"},
         {name: "close timeout unlimited", config: ProviderConfig{CloseTimeout: bound.UnlimitedDuration()}, field: "ProviderConfig.CloseTimeout"},
-        {name: "reconnect factor below one", config: ProviderConfig{Reconnect: ReconnectConfig{BackoffFactor: 0.5}}, field: "ReconnectConfig.BackoffFactor"},
-        {name: "reconnect initial above the cap", config: ProviderConfig{Reconnect: ReconnectConfig{InitialBackoff: bound.Of(2 * time.Minute)}}, field: "ReconnectConfig.InitialBackoff"},
+        {name: "reconnect factor below one", config: ProviderConfig{Reconnect: ReconnectConfig{Backoff: bound.Backoff{Factor: 0.5}}}, field: "ReconnectConfig.Backoff.Factor"},
+        {name: "reconnect initial above the cap", config: ProviderConfig{Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(2 * time.Minute)}}}, field: "ReconnectConfig.Backoff.Initial"},
     }
 
     for _, testCase := range cases {
@@ -166,20 +166,20 @@ func TestNewProvider_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T) {
 }
 
 func TestProviderNewTransport_GeneralLayerInherited(t *testing.T) {
-    provider := NewProvider(ProviderConfig{Reconnect: ReconnectConfig{InitialBackoff: bound.Of(2 * time.Second), MaxBackoff: bound.Of(time.Minute)}, CloseTimeout: bound.Of(7 * time.Second)})
+    provider := NewProvider(ProviderConfig{Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(2 * time.Second), Max: bound.Of(time.Minute)}}, CloseTimeout: bound.Of(7 * time.Second)})
 
     instance := provider.NewTransport(newTestTransportConfig())
 
-    if 2*time.Second != instance.reconnect.initialBackoff {
-        t.Fatalf("expected general initial backoff 2s, got %s", instance.reconnect.initialBackoff)
+    if 2*time.Second != instance.reconnect.Initial {
+        t.Fatalf("expected general initial backoff 2s, got %s", instance.reconnect.Initial)
     }
 
-    if time.Minute != instance.reconnect.maxBackoff {
-        t.Fatalf("expected general max backoff 1m, got %s", instance.reconnect.maxBackoff)
+    if time.Minute != instance.reconnect.Max {
+        t.Fatalf("expected general max backoff 1m, got %s", instance.reconnect.Max)
     }
 
-    if 2.0 != instance.reconnect.backoffFactor {
-        t.Fatalf("expected default backoff factor 2.0, got %v", instance.reconnect.backoffFactor)
+    if 2.0 != instance.reconnect.Factor {
+        t.Fatalf("expected default backoff factor 2.0, got %v", instance.reconnect.Factor)
     }
 
     if 7*time.Second != instance.joinBound {
@@ -188,20 +188,20 @@ func TestProviderNewTransport_GeneralLayerInherited(t *testing.T) {
 }
 
 func TestProviderNewTransport_TransportOverridesGeneral(t *testing.T) {
-    provider := NewProvider(ProviderConfig{Reconnect: ReconnectConfig{InitialBackoff: bound.Of(2 * time.Second), MaxBackoff: bound.Of(time.Minute)}, CloseTimeout: bound.Of(7 * time.Second)})
+    provider := NewProvider(ProviderConfig{Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(2 * time.Second), Max: bound.Of(time.Minute)}}, CloseTimeout: bound.Of(7 * time.Second)})
 
     config := newTestTransportConfig()
-    config.Reconnect = ReconnectConfig{MaxBackoff: bound.Of(10 * time.Second)}
+    config.Reconnect = ReconnectConfig{Backoff: bound.Backoff{Max: bound.Of(10 * time.Second)}}
     config.CloseTimeout = bound.Of(3 * time.Second)
 
     instance := provider.NewTransport(config)
 
-    if 2*time.Second != instance.reconnect.initialBackoff {
-        t.Fatalf("expected inherited initial backoff 2s, got %s", instance.reconnect.initialBackoff)
+    if 2*time.Second != instance.reconnect.Initial {
+        t.Fatalf("expected inherited initial backoff 2s, got %s", instance.reconnect.Initial)
     }
 
-    if 10*time.Second != instance.reconnect.maxBackoff {
-        t.Fatalf("expected overridden max backoff 10s, got %s", instance.reconnect.maxBackoff)
+    if 10*time.Second != instance.reconnect.Max {
+        t.Fatalf("expected overridden max backoff 10s, got %s", instance.reconnect.Max)
     }
 
     if 3*time.Second != instance.joinBound {
@@ -213,9 +213,9 @@ func TestProviderNewTransport_ACapLoweredUnderTheProvidersInitialIsRefusedNaming
     provider := NewProvider(ProviderConfig{})
 
     config := newTestTransportConfig()
-    config.Reconnect = ReconnectConfig{MaxBackoff: bound.Of(500 * time.Millisecond)}
+    config.Reconnect = ReconnectConfig{Backoff: bound.Backoff{Max: bound.Of(500 * time.Millisecond)}}
 
-    expectPanicNamingField(t, "ReconnectConfig.InitialBackoff", func() {
+    expectPanicNamingField(t, "ReconnectConfig.Backoff.Initial", func() {
         provider.NewTransport(config)
     })
 }

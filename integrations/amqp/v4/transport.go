@@ -184,7 +184,7 @@ type Transport struct {
     deadLetter    bool
 
     publishReturnBuffer int
-    reconnect           resolvedReconnect
+    reconnect           bound.ResolvedBackoff
     delayBuckets        []time.Duration
     callTimeout         time.Duration
 
@@ -272,9 +272,9 @@ var _ messagebuscontract.Subscription = (*subscription)(nil)
 func (instance *Transport) subscribeWithRetry(
     runtimeInstance containercontract.Runtime,
 ) (*amqp091.Channel, uint64, <-chan amqp091.Delivery, error) {
-    backoff := instance.reconnect.initialBackoff
+    attempt := 1
 
-    return instance.retrySubscribe(runtimeInstance, &backoff, true, "amqp initial subscribe failed, retrying")
+    return instance.retrySubscribe(runtimeInstance, &attempt, true, "amqp initial subscribe failed, retrying")
 }
 
 func (instance *Transport) Ack(
@@ -1026,7 +1026,7 @@ func (instance *Transport) consumeLoop(
 
     out := subscriptionInstance.envelopes
 
-    backoff := instance.reconnect.initialBackoff
+    attempt := 1
 
     for {
         startedAt := time.Now()
@@ -1061,16 +1061,16 @@ func (instance *Transport) consumeLoop(
         instance.resetConsumeChannel(channel)
 
         if true == reconnectBackoffShouldReset(instance.reconnect, time.Since(startedAt)) {
-            backoff = instance.reconnect.initialBackoff
+            attempt = 1
         } else {
-            if false == instance.waitForRetry(runtimeInstance, backoff) {
+            if false == instance.waitForRetry(runtimeInstance, instance.reconnect.Delay(attempt)) {
                 return
             }
 
-            backoff = nextReconnectBackoff(instance.reconnect, backoff)
+            attempt++
         }
 
-        reopenedChannel, reopenedGeneration, reopenedDeliveries, reopenErr := instance.reopenConsume(runtimeInstance, &backoff)
+        reopenedChannel, reopenedGeneration, reopenedDeliveries, reopenErr := instance.reopenConsume(runtimeInstance, &attempt)
         if nil != reopenErr {
             if nil == runtimeInstance.Context().Err() && false == instance.isClosing() {
                 endErr = reopenErr
@@ -1201,7 +1201,7 @@ func (instance *Transport) waitForRetry(
 
 func (instance *Transport) retrySubscribe(
     runtimeInstance containercontract.Runtime,
-    backoff *time.Duration,
+    attempt *int,
     resetEachAttempt bool,
     logMessage string,
 ) (*amqp091.Channel, uint64, <-chan amqp091.Delivery, error) {
@@ -1225,19 +1225,19 @@ func (instance *Transport) retrySubscribe(
             instance.resetConsumeChannel(channel)
         }
 
-        if false == instance.waitForRetry(runtimeInstance, *backoff) {
+        if false == instance.waitForRetry(runtimeInstance, instance.reconnect.Delay(*attempt)) {
             return nil, 0, nil, subscribeErr
         }
 
-        *backoff = nextReconnectBackoff(instance.reconnect, *backoff)
+        *attempt = *attempt + 1
     }
 }
 
 func (instance *Transport) reopenConsume(
     runtimeInstance containercontract.Runtime,
-    backoff *time.Duration,
+    attempt *int,
 ) (*amqp091.Channel, uint64, <-chan amqp091.Delivery, error) {
-    return instance.retrySubscribe(runtimeInstance, backoff, true, "amqp reconnect attempt failed, backing off")
+    return instance.retrySubscribe(runtimeInstance, attempt, true, "amqp reconnect attempt failed, backing off")
 }
 
 func (instance *Transport) republish(
@@ -1287,17 +1287,13 @@ func (instance *Transport) publishRequeue(
     routingKey string,
     publishing amqp091.Publishing,
 ) error {
-    backoff := instance.reconnect.initialBackoff
-
     var lastErr error
 
     for attempt := 0; attempt < republishAttemptCount; attempt++ {
         if 0 < attempt {
-            if false == instance.waitForRetry(runtimeInstance, backoff) {
+            if false == instance.waitForRetry(runtimeInstance, instance.reconnect.Delay(attempt)) {
                 return lastErr
             }
-
-            backoff = nextReconnectBackoff(instance.reconnect, backoff)
         }
 
         recoverable, publishErr := instance.publishRecoverable(runtimeInstance.Context(), exchange, routingKey, publishing)

@@ -105,17 +105,17 @@ func TestModule_RegisterCliCommandsExposesRelayCommand(t *testing.T) {
 }
 
 func TestModule_RegisterCliCommandsHandsTheCommandItsConfig(t *testing.T) {
-    config := RelayCommandConfig{MaxErrorBackoff: bound.Of(3 * time.Second)}
+    config := RelayCommandConfig{ErrorBackoff: bound.Backoff{Max: bound.Of(3 * time.Second)}}
 
     commands := NewModule(ModuleConfig{Relay: newModuleTestRelayFactory(), RelayCommand: config}).RegisterCliCommands(nil)
-    if 1 != len(commands) || 3*time.Second != commands[0].(*RelayCommand).maxErrorBackoff {
+    if 1 != len(commands) || 3*time.Second != commands[0].(*RelayCommand).errorBackoff.Max {
         t.Fatalf("expected the relay command to carry the given 3s cap, got %v", commands)
     }
 }
 
-func TestModule_RegisterCliCommandsRefusesAMaxErrorBackoffOutsideItsRule(t *testing.T) {
-    expectPanicNamingField(t, "RelayCommandConfig.MaxErrorBackoff", func() {
-        NewModule(ModuleConfig{Relay: newModuleTestRelayFactory(), RelayCommand: RelayCommandConfig{MaxErrorBackoff: bound.Of(time.Microsecond)}}).RegisterCliCommands(nil)
+func TestModule_RegisterCliCommandsRefusesAnErrorBackoffOutsideItsRule(t *testing.T) {
+    expectPanicNamingField(t, "RelayCommandConfig.ErrorBackoff.Max", func() {
+        NewModule(ModuleConfig{Relay: newModuleTestRelayFactory(), RelayCommand: RelayCommandConfig{ErrorBackoff: bound.Backoff{Max: bound.Of(time.Microsecond)}}}).RegisterCliCommands(nil)
     })
 }
 
@@ -171,7 +171,7 @@ func TestModule_RegisterServicesRegistersTheFactoriesAsProvidersRunAtFirstResolu
 
 func TestModule_ARelayCommandConfigurationWithNoRelayIsRefusedNamingIt(t *testing.T) {
     expectPanicNamingField(t, "ModuleConfig.RelayCommand", func() {
-        NewModule(ModuleConfig{RelayCommand: RelayCommandConfig{MaxErrorBackoff: bound.Of(3 * time.Second)}}).RegisterServices(&spyServiceRegistrar{})
+        NewModule(ModuleConfig{RelayCommand: RelayCommandConfig{ErrorBackoff: bound.Backoff{Max: bound.Of(3 * time.Second)}}}).RegisterServices(&spyServiceRegistrar{})
     })
 
     defer func() {
@@ -181,11 +181,11 @@ func TestModule_ARelayCommandConfigurationWithNoRelayIsRefusedNamingIt(t *testin
         }
     }()
 
-    NewModule(ModuleConfig{RelayCommand: RelayCommandConfig{MaxErrorBackoff: bound.Of(3 * time.Second)}}).RegisterServices(&spyServiceRegistrar{})
+    NewModule(ModuleConfig{RelayCommand: RelayCommandConfig{ErrorBackoff: bound.Backoff{Max: bound.Of(3 * time.Second)}}}).RegisterServices(&spyServiceRegistrar{})
 }
 
 func TestModule_ARelayCommandConfigurationBesideARelayIsAdmitted(t *testing.T) {
-    NewModule(ModuleConfig{Relay: newModuleTestRelayFactory(), RelayCommand: RelayCommandConfig{MaxErrorBackoff: bound.Of(3 * time.Second)}}).RegisterServices(&spyServiceRegistrar{})
+    NewModule(ModuleConfig{Relay: newModuleTestRelayFactory(), RelayCommand: RelayCommandConfig{ErrorBackoff: bound.Backoff{Max: bound.Of(3 * time.Second)}}}).RegisterServices(&spyServiceRegistrar{})
 }
 
 func (instance *spyServiceRegistrar) ReservePhaseService(serviceName string, kind containercontract.Kind) error {

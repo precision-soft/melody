@@ -3,9 +3,11 @@ package rueidis
 import (
     "context"
     "errors"
-    "math"
+    "sync"
     "testing"
     "time"
+
+    redisclient "github.com/redis/rueidis"
 
     "github.com/precision-soft/melody/v4/bound"
     melodyhttp "github.com/precision-soft/melody/v4/http"
@@ -78,26 +80,17 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
     }
 }
 
-func TestNextServerSentEventBackplaneBackoff_GrowsAndCaps(t *testing.T) {
-    instance := &ServerSentEventBackplane{reconnect: resolvedReconnect{initialBackoff: time.Second, maxBackoff: 4 * time.Second, backoffFactor: 2.0}}
-
-    expected := []time.Duration{2 * time.Second, 4 * time.Second, 4 * time.Second}
-
-    current := instance.reconnect.initialBackoff
-    for index, want := range expected {
-        current = instance.nextServerSentEventBackplaneBackoff(current)
-        if want != current {
-            t.Fatalf("step %d: expected %s, got %s", index, want, current)
-        }
+func TestServerSentEventBackplane_TheDefaultReconnectWaitsDoubleFromOneSecondToTheCap(t *testing.T) {
+    reconnect, resolveErr := resolveReconnect(ReconnectConfig{})
+    if nil != resolveErr {
+        t.Fatalf("unexpected error: %v", resolveErr)
     }
-}
 
-/* an extreme factor overflows the product into a negative duration; the growth function collapses both ends onto the cap so the resubscribe loop never spins with a zero delay */
-func TestNextServerSentEventBackplaneBackoff_ExtremeFactorCollapsesOntoTheCap(t *testing.T) {
-    instance := &ServerSentEventBackplane{reconnect: resolvedReconnect{initialBackoff: time.Second, maxBackoff: 30 * time.Second, backoffFactor: math.Inf(1)}}
-
-    if 30*time.Second != instance.nextServerSentEventBackplaneBackoff(time.Second) {
-        t.Fatalf("expected the overflowing backoff to collapse onto the cap")
+    expected := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second, 30 * time.Second}
+    for index, want := range expected {
+        if delay := reconnect.Delay(index + 1); want != delay {
+            t.Fatalf("attempt %d: expected %s, got %s", index+1, want, delay)
+        }
     }
 }
 
@@ -112,7 +105,7 @@ func TestNewServerSentEventBackplane_AnAbsentConfigTakesTheDefaults(t *testing.T
         t.Fatalf("expected the default channel, a 1s budget and a typed-nil logger read as none, got %q, %v, %v", backplane.channel, backplane.callTimeout, backplane.logger)
     }
 
-    expected := resolvedReconnect{initialBackoff: time.Second, maxBackoff: 30 * time.Second, backoffFactor: 2.0}
+    expected := bound.ResolvedBackoff{Initial: time.Second, Max: 30 * time.Second, Factor: 2.0}
     if expected != backplane.reconnect {
         t.Fatalf("expected the default reconnect backoff %+v, got %+v", expected, backplane.reconnect)
     }
@@ -125,8 +118,8 @@ func TestNewServerSentEventBackplane_RefusesALimitOutsideItsRuleNamingTheField(t
     }{
         "unlimited call timeout":        {config: ServerSentEventBackplaneConfig{CallTimeout: bound.UnlimitedDuration()}, field: "ServerSentEventBackplaneConfig.CallTimeout"},
         "sub-millisecond call timeout":  {config: ServerSentEventBackplaneConfig{CallTimeout: bound.Of(time.Microsecond)}, field: "ServerSentEventBackplaneConfig.CallTimeout"},
-        "initial backoff above the cap": {config: ServerSentEventBackplaneConfig{Reconnect: ReconnectConfig{InitialBackoff: bound.Of(2 * time.Minute)}}, field: "ReconnectConfig.InitialBackoff"},
-        "sub-unit backoff factor":       {config: ServerSentEventBackplaneConfig{Reconnect: ReconnectConfig{BackoffFactor: 0.5}}, field: "ReconnectConfig.BackoffFactor"},
+        "initial backoff above the cap": {config: ServerSentEventBackplaneConfig{Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(2 * time.Minute)}}}, field: "ReconnectConfig.Backoff.Initial"},
+        "sub-unit backoff factor":       {config: ServerSentEventBackplaneConfig{Reconnect: ReconnectConfig{Backoff: bound.Backoff{Factor: 0.5}}}, field: "ReconnectConfig.Backoff.Factor"},
     }
 
     for name, testCase := range cases {
@@ -196,9 +189,7 @@ func TestNewServerSentEventBackplane_AGivenConfigReachesTheBackplane(t *testing.
         Channel: "melody:sse:test:given",
         Logger:  logger,
         Reconnect: ReconnectConfig{
-            InitialBackoff: bound.Of(2 * time.Second),
-            MaxBackoff:     bound.Of(7 * time.Second),
-            BackoffFactor:  3,
+            Backoff: bound.Backoff{Initial: bound.Of(2 * time.Second), Max: bound.Of(7 * time.Second), Factor: 3},
         },
         CallTimeout: bound.Of(750 * time.Millisecond),
     })
@@ -208,7 +199,7 @@ func TestNewServerSentEventBackplane_AGivenConfigReachesTheBackplane(t *testing.
         t.Fatalf("expected the given channel, logger and budget, got %q, %v, %v", backplane.channel, backplane.logger, backplane.callTimeout)
     }
 
-    expected := resolvedReconnect{initialBackoff: 2 * time.Second, maxBackoff: 7 * time.Second, backoffFactor: 3}
+    expected := bound.ResolvedBackoff{Initial: 2 * time.Second, Max: 7 * time.Second, Factor: 3}
     if expected != backplane.reconnect {
         t.Fatalf("expected the given reconnect backoff %+v, got %+v", expected, backplane.reconnect)
     }
@@ -232,13 +223,13 @@ func TestServerSentEventBackplane_PublishAppliesCallTimeout(t *testing.T) {
 }
 
 func TestShouldResetBackplaneBackoff(t *testing.T) {
-    instance := &ServerSentEventBackplane{reconnect: resolvedReconnect{initialBackoff: time.Second}}
+    instance := &ServerSentEventBackplane{reconnect: bound.ResolvedBackoff{Initial: time.Second}}
 
     if true == instance.shouldResetBackplaneBackoff(10*time.Microsecond) {
         t.Fatalf("a sub-second subscription (such as an immediate nil Receive return) must NOT reset backoff, otherwise listen() busy-loops re-subscribing with zero delay")
     }
 
-    if true == instance.shouldResetBackplaneBackoff(instance.reconnect.initialBackoff-time.Millisecond) {
+    if true == instance.shouldResetBackplaneBackoff(instance.reconnect.Initial-time.Millisecond) {
         t.Fatalf("a subscription shorter than the healthy threshold must not reset backoff")
     }
 
@@ -271,5 +262,80 @@ func TestServerSentEventBackplane_AListenerThatLeftAnswersNilEvenPastTheDeadline
         if closeErr := backplane.CloseWithContext(closeContext); nil != closeErr {
             t.Fatalf("expected a listener that left to answer nil, got %v", closeErr)
         }
+    }
+}
+
+/* scriptedReceiveClient answers each Receive after the duration its script gives, recording when each call started and returned */
+type scriptedReceiveClient struct {
+    redisclient.Client
+    mutex      sync.Mutex
+    lifetimes  []time.Duration
+    startedAt  []time.Time
+    returnedAt []time.Time
+}
+
+func (instance *scriptedReceiveClient) Receive(ctx context.Context, subscribe redisclient.Completed, fn func(message redisclient.PubSubMessage)) error {
+    instance.mutex.Lock()
+    index := len(instance.startedAt)
+    instance.startedAt = append(instance.startedAt, time.Now())
+    instance.mutex.Unlock()
+
+    lifetime := time.Hour
+    if index < len(instance.lifetimes) {
+        lifetime = instance.lifetimes[index]
+    }
+
+    select {
+    case <-time.After(lifetime):
+    case <-ctx.Done():
+    }
+
+    instance.mutex.Lock()
+    instance.returnedAt = append(instance.returnedAt, time.Now())
+    instance.mutex.Unlock()
+
+    return errors.New("subscription lost")
+}
+
+func (instance *scriptedReceiveClient) calls() ([]time.Time, []time.Time) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]time.Time(nil), instance.startedAt...), append([]time.Time(nil), instance.returnedAt...)
+}
+
+func TestServerSentEventBackplane_ASubscriptionThatLivedTheInitialBackoffResetsTheGrowth(t *testing.T) {
+    client := &scriptedReceiveClient{
+        Client:    newTokenStoreClient(t),
+        lifetimes: []time.Duration{0, 0, 0, 60 * time.Millisecond, 0},
+    }
+
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+    backplane := NewServerSentEventBackplane(client, hub, ServerSentEventBackplaneConfig{
+        Channel:   "melody:sse:test:reset",
+        Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(50 * time.Millisecond), Max: bound.Of(10 * time.Second)}},
+    })
+    defer backplane.CloseWithContext(context.Background())
+
+    deadline := time.Now().Add(5 * time.Second)
+    for {
+        startedAt, returnedAt := client.calls()
+        if 6 <= len(startedAt) && 5 <= len(returnedAt) {
+            if gap := startedAt[4].Sub(returnedAt[3]); 40*time.Millisecond < gap {
+                t.Fatalf("expected the re-subscription after a subscription that lived the initial backoff to be immediate, waited %s", gap)
+            }
+
+            if gap := startedAt[5].Sub(returnedAt[4]); 300*time.Millisecond <= gap {
+                t.Fatalf("expected the growth reset to the initial 50ms after the long-lived subscription, waited %s", gap)
+            }
+
+            return
+        }
+
+        if true == time.Now().After(deadline) {
+            t.Fatalf("expected six subscriptions, got %d", len(startedAt))
+        }
+
+        time.Sleep(5 * time.Millisecond)
     }
 }

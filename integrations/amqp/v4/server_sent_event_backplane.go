@@ -56,7 +56,7 @@ type ServerSentEventBackplane struct {
     exchange      string
     origin        string
     logger        loggingcontract.Logger
-    reconnect     resolvedReconnect
+    reconnect     bound.ResolvedBackoff
     callTimeout   time.Duration
 
     mutex          sync.Mutex
@@ -363,7 +363,7 @@ func (instance *ServerSentEventBackplane) abandonWedgedPublish(channelConnection
 func (instance *ServerSentEventBackplane) listen() {
     defer instance.wait.Done()
 
-    backoff := instance.reconnect.initialBackoff
+    attempt := 1
 
     for {
         if nil != instance.ctx.Err() || true == instance.isClosing() {
@@ -381,11 +381,11 @@ func (instance *ServerSentEventBackplane) listen() {
 
             instance.logError("amqp sse backplane subscribe failed, backing off", subscribeErr)
 
-            if false == instance.sleep(backoff) {
+            if false == instance.sleep(instance.reconnect.Delay(attempt)) {
                 return
             }
 
-            backoff = nextReconnectBackoff(instance.reconnect, backoff)
+            attempt++
 
             continue
         }
@@ -394,16 +394,16 @@ func (instance *ServerSentEventBackplane) listen() {
         instance.forward(deliveries)
 
         if true == reconnectBackoffShouldReset(instance.reconnect, time.Since(startedAt)) {
-            backoff = instance.reconnect.initialBackoff
+            attempt = 1
 
             continue
         }
 
-        if false == instance.sleep(backoff) {
+        if false == instance.sleep(instance.reconnect.Delay(attempt)) {
             return
         }
 
-        backoff = nextReconnectBackoff(instance.reconnect, backoff)
+        attempt++
     }
 }
 

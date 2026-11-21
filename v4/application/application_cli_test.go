@@ -585,7 +585,7 @@ func TestBootCli_TheRegisteredContainerCommandDescribesTheApplicationsContainer(
 }
 
 func TestNewApplication_HandsTheMessageBusRetryToTheConsumeCommandItRegisters(t *testing.T) {
-    retry := messagebus.RetryPolicy{MaxRetries: bound.Of(7), BaseDelay: bound.Of(time.Millisecond)}
+    retry := messagebus.RetryPolicy{MaxRetries: bound.Of(7), Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond)}}
 
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), MessageBus: MessageBusConfig{Retry: retry}})
 

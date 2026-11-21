@@ -565,15 +565,13 @@ func TestRelay_ALockerThatRefusesTheLockIsTheRunsError(t *testing.T) {
     }
 }
 
-/* negative control: a pathologically large MaxBackoff and factor must not overflow the int64 duration into a negative value (which would defeat the cap and cause an immediate-retry storm). */
+/* negative control: a pathologically large Backoff.Max and factor must not overflow the int64 duration into a negative value (which would defeat the cap and cause an immediate-retry storm). */
 func TestRelay_NextBackoffDoesNotOverflowWithLargeMax(t *testing.T) {
     relay := NewRelay(RelayConfig{
         Repository:     &fakeRepository{},
         Transport:      &fakeTransport{},
         Codec:          &stringCodec{},
-        InitialBackoff: bound.Of(time.Hour),
-        MaxBackoff:     bound.Of(time.Duration(math.MaxInt64)),
-        BackoffFactor:  1000,
+        Backoff:        bound.Backoff{Initial: bound.Of(time.Hour), Max: bound.Of(time.Duration(math.MaxInt64)), Factor: 1000},
     })
 
     for _, attempts := range []int{1, 3, 8, 20, 100} {
@@ -788,9 +786,7 @@ func TestRelay_NextBackoffCapsAtMax(t *testing.T) {
         Repository:     &fakeRepository{},
         Transport:      &fakeTransport{},
         Codec:          &stringCodec{},
-        InitialBackoff: bound.Of(time.Second),
-        MaxBackoff:     bound.Of(5 * time.Second),
-        BackoffFactor:  2,
+        Backoff:        bound.Backoff{Initial: bound.Of(time.Second), Max: bound.Of(5 * time.Second), Factor: 2},
     })
 
     if time.Second != relay.nextBackoff(1) {
@@ -1865,7 +1861,7 @@ func TestRelay_AnOutageNeverReachesTheAttemptCapsAndItsBackoffGrowsToItsMaximum(
     transport := &fakeTransport{unavailable: true}
     logger := &recordingLogger{}
 
-    relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}, MaxAttempts: bound.Of(1), UnavailableBackoff: bound.Of(time.Second), UnavailableBackoffMax: bound.Of(5 * time.Second)})
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}, MaxAttempts: bound.Of(1), UnavailableBackoff: bound.Backoff{Initial: bound.Of(time.Second), Max: bound.Of(5 * time.Second)}})
 
     for pass := 0; pass < 10; pass++ {
         before := time.Now()

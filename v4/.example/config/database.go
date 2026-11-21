@@ -82,9 +82,8 @@ func (instance *Module) catalogProviderDefinition() (melodybunorm.ProviderDefini
     /* the catalogue is opened by the first request or command that reads it, never at boot, so its retry budget is request-sized; only transient errors (connection refused) retry, so a real misconfiguration still fails fast, and a database not yet up is refused by name and opened again by the next resolution. */
     provider := melodymysql.NewProvider(melodymysql.ProviderConfig{
         Retry: melodymysql.RetryConfig{
-            MaxAttempts:  bound.Of(lazyOpenAttempts),
-            InitialDelay: bound.Of(lazyOpenFirstBackoff),
-            MaxDelay:     bound.Of(lazyOpenMaxBackoff),
+            MaxAttempts: bound.Of(lazyOpenAttempts),
+            Backoff:     bound.Backoff{Initial: bound.Of(lazyOpenFirstBackoff), Max: bound.Of(lazyOpenMaxBackoff)},
         },
         Insecure: instance.booleanSwitch(environmentKeyMysqlInsecure, parameterMysqlInsecure),
     })
@@ -117,9 +116,8 @@ func (instance *Module) archiveProviderDefinition() (melodybunorm.ProviderDefini
 
     provider := melodypgsql.NewProvider(melodypgsql.ProviderConfig{
         Retry: melodypgsql.RetryConfig{
-            MaxAttempts:  bound.Of(lazyOpenAttempts),
-            InitialDelay: bound.Of(lazyOpenFirstBackoff),
-            MaxDelay:     bound.Of(lazyOpenMaxBackoff),
+            MaxAttempts: bound.Of(lazyOpenAttempts),
+            Backoff:     bound.Backoff{Initial: bound.Of(lazyOpenFirstBackoff), Max: bound.Of(lazyOpenMaxBackoff)},
         },
         Insecure: instance.booleanSwitch(environmentKeyPgsqlInsecure, parameterPgsqlInsecure),
     })

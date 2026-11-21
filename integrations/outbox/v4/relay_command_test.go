@@ -118,27 +118,27 @@ func TestRelayCommand_BacksOffAfterFailureAndRecovers(t *testing.T) {
     }
 }
 
-func TestNewRelayCommand_ResolvesTheMaxErrorBackoff(t *testing.T) {
-    if command := NewRelayCommand(RelayCommandConfig{}); time.Minute != command.maxErrorBackoff {
-        t.Fatalf("expected the 1m default, got %s", command.maxErrorBackoff)
+func TestNewRelayCommand_ResolvesTheErrorBackoff(t *testing.T) {
+    if command := NewRelayCommand(RelayCommandConfig{}); time.Minute != command.errorBackoff.Max || 2 != command.errorBackoff.Factor || false == command.errorBackoffFromTheRun {
+        t.Fatalf("expected the 1m doubling default starting from the run's interval, got %+v", command.errorBackoff)
     }
 
-    if command := NewRelayCommand(RelayCommandConfig{MaxErrorBackoff: bound.Of(3 * time.Second)}); 3*time.Second != command.maxErrorBackoff {
-        t.Fatalf("expected the given 3s, got %s", command.maxErrorBackoff)
+    if command := NewRelayCommand(RelayCommandConfig{ErrorBackoff: bound.Backoff{Max: bound.Of(3 * time.Second)}}); 3*time.Second != command.errorBackoff.Max {
+        t.Fatalf("expected the given 3s, got %s", command.errorBackoff.Max)
     }
 
     for _, refused := range []bound.Duration{bound.Of(time.Duration(0)), bound.Of(time.Microsecond), bound.UnlimitedDuration()} {
-        expectPanicNamingField(t, "RelayCommandConfig.MaxErrorBackoff", func() {
-            NewRelayCommand(RelayCommandConfig{MaxErrorBackoff: refused})
+        expectPanicNamingField(t, "RelayCommandConfig.ErrorBackoff.Max", func() {
+            NewRelayCommand(RelayCommandConfig{ErrorBackoff: bound.Backoff{Max: refused}})
         })
     }
 }
 
-func TestRelayCommand_TheMaxErrorBackoffCapsTheDoublingDelay(t *testing.T) {
+func TestRelayCommand_TheErrorBackoffMaxCapsTheDoublingDelay(t *testing.T) {
     repository := &failingClaimRepository{failuresLeft: 3}
     relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{}, Codec: &stringCodec{}})
 
-    command := NewRelayCommand(RelayCommandConfig{MaxErrorBackoff: bound.Of(10 * time.Millisecond)})
+    command := NewRelayCommand(RelayCommandConfig{ErrorBackoff: bound.Backoff{Max: bound.Of(10 * time.Millisecond)}})
 
     started := time.Now()
     runErr := runRelayCommandWith(t, relayTestRuntime(), relay, command, []string{"--limit", "4", "--interval", "50ms"})
@@ -146,14 +146,14 @@ func TestRelayCommand_TheMaxErrorBackoffCapsTheDoublingDelay(t *testing.T) {
         t.Fatalf("expected the fourth batch to recover, got %v", runErr)
     }
 
-    /* capped: 50ms, then 10ms, 10ms; the 1m default would wait 50ms, 100ms, 200ms, and a loop that skipped the delay would wait nothing */
+    /* capped: the interval is above the cap, so 10ms, 10ms, 10ms; the 1m default would wait 50ms, 100ms, 200ms, and a loop that skipped the delay would wait nothing */
     elapsed := time.Since(started)
     if 250*time.Millisecond <= elapsed {
         t.Fatalf("expected the doubling delay capped at 10ms, the run took %s", elapsed)
     }
 
-    if 70*time.Millisecond > elapsed {
-        t.Fatalf("expected the three failed batches to wait 50ms, 10ms and 10ms, the run took %s", elapsed)
+    if 30*time.Millisecond > elapsed {
+        t.Fatalf("expected the three failed batches to wait 10ms each, the run took %s", elapsed)
     }
 }
 
@@ -493,5 +493,69 @@ func TestRelayCommand_ResolvesTheLazyRelayUnderTheRelayRuntime(t *testing.T) {
 
     if containercontract.KindRun != seenKind || "run" != seenValue {
         t.Fatalf("the relay's provider read %s / %v, wanted the run kind over the run's context", seenKind, seenValue)
+    }
+}
+
+func TestRelayCommand_TheDefaultErrorBackoffDoublesFromThePollIntervalToOneMinute(t *testing.T) {
+    errorBackoff := NewRelayCommand(RelayCommandConfig{}).runErrorBackoff(time.Second)
+
+    expected := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 32 * time.Second, time.Minute, time.Minute}
+    for index, want := range expected {
+        if delay := errorBackoff.Delay(index + 1); want != delay {
+            t.Fatalf("failure %d: expected %s, got %s", index+1, want, delay)
+        }
+    }
+
+    if time.Minute != NewRelayCommand(RelayCommandConfig{}).runErrorBackoff(2*time.Minute).Initial {
+        t.Fatal("expected an interval above the cap to start the error backoff at the cap")
+    }
+
+    if 5*time.Second != NewRelayCommand(RelayCommandConfig{ErrorBackoff: bound.Backoff{Initial: bound.Of(5 * time.Second)}}).runErrorBackoff(time.Second).Initial {
+        t.Fatal("expected a given Initial to win over the poll interval")
+    }
+}
+
+/* scriptedClaimRepository fails the claims its script marks and records when each claim was made */
+type scriptedClaimRepository struct {
+    fakeRepository
+    failures  []bool
+    claimedAt []time.Time
+}
+
+func (instance *scriptedClaimRepository) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration) ([]Pending, error) {
+    index := len(instance.claimedAt)
+    instance.claimedAt = append(instance.claimedAt, time.Now())
+
+    if index < len(instance.failures) && true == instance.failures[index] {
+        return nil, errors.New("repository down")
+    }
+
+    return instance.fakeRepository.ClaimDueMessages(runtimeInstance, limit, visibility)
+}
+
+func TestRelayCommand_TheErrorBackoffGrowsOverConsecutiveFailuresAndASuccessResetsIt(t *testing.T) {
+    repository := &scriptedClaimRepository{failures: []bool{true, true, false, true, false}}
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{}, Codec: &stringCodec{}})
+
+    command := NewRelayCommand(RelayCommandConfig{ErrorBackoff: bound.Backoff{Initial: bound.Of(40 * time.Millisecond), Max: bound.Of(10 * time.Second)}})
+    if runErr := runRelayCommandWith(t, relayTestRuntime(), relay, command, []string{"--limit", "5", "--interval", "1ms"}); nil != runErr {
+        t.Fatalf("expected the fifth batch to succeed, got %v", runErr)
+    }
+
+    gaps := make([]time.Duration, 0, 4)
+    for index := 1; index < len(repository.claimedAt); index++ {
+        gaps = append(gaps, repository.claimedAt[index].Sub(repository.claimedAt[index-1]))
+    }
+
+    if 4 != len(gaps) {
+        t.Fatalf("expected five claims, got %d", len(repository.claimedAt))
+    }
+
+    if 80*time.Millisecond > gaps[1] {
+        t.Fatalf("expected the second consecutive failure to wait the doubled 80ms, waited %s", gaps[1])
+    }
+
+    if 40*time.Millisecond > gaps[3] || 80*time.Millisecond <= gaps[3] {
+        t.Fatalf("expected the first failure after a success to wait the initial 40ms again, waited %s", gaps[3])
     }
 }

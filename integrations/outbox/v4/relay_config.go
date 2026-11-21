@@ -20,7 +20,6 @@ const maximumBatchSize = 100000
 /* defaultMaxDeliveryAttemptsFactor multiplies the resolved MaxAttempts to derive the default MaxDeliveryAttempts, leaving generous head-room above the send-failure retry path so only a genuinely stuck (crash-poison) row trips the claim cap. */
 const defaultMaxDeliveryAttemptsFactor = 2
 
-const defaultRelayBackoffFactor = 2.0
 
 var relayLockTtlRule = bound.Rule[time.Duration]{
     Name:    "RelayConfig.LockTtl",
@@ -52,28 +51,18 @@ var relayMaxDeliveryAttemptsRule = bound.Rule[int]{
     Minimum: 1,
 }
 
-var relayInitialBackoffRule = bound.Rule[time.Duration]{
-    Name:    "RelayConfig.InitialBackoff",
-    Default: 15 * time.Second,
-    Minimum: bound.TimeoutMinimum,
+var relayBackoffRule = bound.BackoffRule{
+    Name:           "RelayConfig.Backoff",
+    InitialDefault: 15 * time.Second,
+    MaxDefault:     10 * time.Minute,
+    FactorDefault:  2,
 }
 
-var relayMaxBackoffRule = bound.Rule[time.Duration]{
-    Name:    "RelayConfig.MaxBackoff",
-    Default: 10 * time.Minute,
-    Minimum: bound.TimeoutMinimum,
-}
-
-var relayUnavailableBackoffRule = bound.Rule[time.Duration]{
-    Name:    "RelayConfig.UnavailableBackoff",
-    Default: 15 * time.Second,
-    Minimum: bound.TimeoutMinimum,
-}
-
-var relayUnavailableBackoffMaxRule = bound.Rule[time.Duration]{
-    Name:    "RelayConfig.UnavailableBackoffMax",
-    Default: time.Minute,
-    Minimum: bound.TimeoutMinimum,
+var relayUnavailableBackoffRule = bound.BackoffRule{
+    Name:           "RelayConfig.UnavailableBackoff",
+    InitialDefault: 15 * time.Second,
+    MaxDefault:     time.Minute,
+    FactorDefault:  2,
 }
 
 var relayResolutionTimeoutRule = bound.Rule[time.Duration]{
@@ -93,12 +82,9 @@ type resolvedRelay struct {
     BatchSize             int
     MaxAttempts           int
     MaxDeliveryAttempts   int
-    InitialBackoff        time.Duration
-    MaxBackoff            time.Duration
-    BackoffFactor         float64
+    Backoff               bound.ResolvedBackoff
     ResolutionTimeout     time.Duration
-    UnavailableBackoff    time.Duration
-    UnavailableBackoffMax time.Duration
+    UnavailableBackoff    bound.ResolvedBackoff
 }
 
 func resolveRelayConfig(config RelayConfig) (resolvedRelay, error) {
@@ -121,11 +107,7 @@ func resolveRelayConfig(config RelayConfig) (resolvedRelay, error) {
     }{
         {limit: config.LockTtl, rule: relayLockTtlRule, target: &resolved.LockTtl},
         {limit: config.VisibilityTimeout, rule: relayVisibilityTimeoutRule, target: &resolved.VisibilityTimeout},
-        {limit: config.InitialBackoff, rule: relayInitialBackoffRule, target: &resolved.InitialBackoff},
-        {limit: config.MaxBackoff, rule: relayMaxBackoffRule, target: &resolved.MaxBackoff},
         {limit: config.ResolutionTimeout, rule: relayResolutionTimeoutRule, target: &resolved.ResolutionTimeout},
-        {limit: config.UnavailableBackoff, rule: relayUnavailableBackoffRule, target: &resolved.UnavailableBackoff},
-        {limit: config.UnavailableBackoffMax, rule: relayUnavailableBackoffMaxRule, target: &resolved.UnavailableBackoffMax},
     }
 
     for _, duration := range durations {
@@ -158,48 +140,19 @@ func resolveRelayConfig(config RelayConfig) (resolvedRelay, error) {
 
     resolved.MaxDeliveryAttempts = maxDeliveryAttempts
 
-    if resolved.MaxBackoff < resolved.InitialBackoff {
-        return resolvedRelay{}, exception.NewError(
-            "the initial backoff exceeds the maximum backoff",
-            exceptioncontract.Context{
-                "field":    "RelayConfig.InitialBackoff",
-                "value":    resolved.InitialBackoff.String(),
-                "maximum":  resolved.MaxBackoff.String(),
-                "cappedBy": "RelayConfig.MaxBackoff",
-            },
-            nil,
-        )
+    backoff, backoffErr := bound.ResolveBackoff(config.Backoff, relayBackoffRule)
+    if nil != backoffErr {
+        return resolvedRelay{}, backoffErr
     }
 
-    if resolved.UnavailableBackoffMax < resolved.UnavailableBackoff {
-        return resolvedRelay{}, exception.NewError(
-            "the unavailable backoff exceeds its maximum",
-            exceptioncontract.Context{
-                "field":    "RelayConfig.UnavailableBackoff",
-                "value":    resolved.UnavailableBackoff.String(),
-                "maximum":  resolved.UnavailableBackoffMax.String(),
-                "cappedBy": "RelayConfig.UnavailableBackoffMax",
-            },
-            nil,
-        )
+    resolved.Backoff = backoff
+
+    unavailableBackoff, unavailableBackoffErr := bound.ResolveBackoff(config.UnavailableBackoff, relayUnavailableBackoffRule)
+    if nil != unavailableBackoffErr {
+        return resolvedRelay{}, unavailableBackoffErr
     }
 
-    resolved.BackoffFactor = config.BackoffFactor
-    if 0 == resolved.BackoffFactor {
-        resolved.BackoffFactor = defaultRelayBackoffFactor
-    }
-
-    /* the not-at-least-1 form is deliberate: NaN fails every comparison, so `1 > NaN` would let a NaN factor through */
-    if false == (resolved.BackoffFactor >= 1) {
-        return resolvedRelay{}, exception.NewError(
-            "the backoff factor is below 1",
-            exceptioncontract.Context{
-                "field": "RelayConfig.BackoffFactor",
-                "value": strconv.FormatFloat(config.BackoffFactor, 'g', -1, 64),
-            },
-            nil,
-        )
-    }
+    resolved.UnavailableBackoff = unavailableBackoff
 
     return resolved, nil
 }

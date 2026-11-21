@@ -35,6 +35,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `relay.go`: the relay hands the resolved `RelayConfig.LockTtl` to the `Locker` as a `bound.Duration`, the fourth major's lock contract form.
 - `relay.go`: the relay stamps the message id through `messagebus.NewEnvelope(message, []messagebuscontract.Stamp{...})`, the fourth major's envelope form.
 - `relay.go` and `relay_command.go`: the log records are built through `exception.LogContext(err, exception.LogContextConfig{...})`, the fourth major's form, which takes the extra context in a struct; nothing of this module's own surface changes.
+- **Breaking** — `relay.go`, `relay_config.go`, `relay_command.go`: `RelayConfig.InitialBackoff`, `MaxBackoff` and `BackoffFactor` are one `RelayConfig.Backoff bound.Backoff` (15s, 10m, 2); `RelayConfig.UnavailableBackoff` and `UnavailableBackoffMax` are one `RelayConfig.UnavailableBackoff bound.Backoff` (15s, 1m) with its own `Factor` (2), where the outage wait borrowed `BackoffFactor`; `RelayCommandConfig.MaxErrorBackoff` is `RelayCommandConfig.ErrorBackoff bound.Backoff`, its `Initial` left out the run's `--interval` capped at its `Max` (1m), so a poll interval above the cap starts the error backoff at the cap; every refusal names `<Struct>.<Field>.Initial`, `.Max` or `.Factor`, and the relay, outage and command waits are `ResolvedBackoff.Delay`, the sequences on the defaults unchanged.
 
 ### Fixed
 

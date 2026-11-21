@@ -68,7 +68,7 @@ type Provider struct {
 
 /* componentParent is what a transport or a backplane takes for the fields its config leaves out. */
 type componentParent struct {
-    reconnect    resolvedReconnect
+    reconnect    bound.ResolvedBackoff
     closeTimeout time.Duration
 }
 

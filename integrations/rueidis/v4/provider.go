@@ -98,7 +98,7 @@ func (instance *Provider) Open(parameters ConnectionParameters) (rueidis.Client,
             },
         )
 
-        /* the wait takes no context: a lazy open on a request or during a shutdown sleeps the schedule, bounded by MaxAttempts × MaxDelay of the retry configuration */
+        /* the wait takes no context: a lazy open on a request or during a shutdown sleeps the schedule, bounded by MaxAttempts × Backoff.Max of the retry configuration */
         time.Sleep(delay)
     }
 }
@@ -156,26 +156,7 @@ func (instance *Provider) isTransientError(inputErr error) bool {
 }
 
 func (instance *Provider) computeBackoffDelay(attempt int) time.Duration {
-    initialDelay := instance.retry.initialDelay
-    maxDelay := instance.retry.maxDelay
-    backoffMultiplier := instance.retry.backoffMultiplier
-
-    /* grow the delay in float space and cap it at maxDelay before converting to time.Duration, or a large attempt count overflows the conversion to a negative duration that slips past the cap */
-    maxDelayFloat := float64(maxDelay)
-    delay := float64(initialDelay)
-
-    for step := 1; step < attempt; step = step + 1 {
-        delay = delay * backoffMultiplier
-        if delay >= maxDelayFloat {
-            return maxDelay
-        }
-    }
-
-    if delay >= maxDelayFloat {
-        return maxDelay
-    }
-
-    return time.Duration(delay)
+    return instance.retry.backoff.Delay(attempt)
 }
 
 func (instance *Provider) open(parameters ConnectionParameters) (rueidis.Client, error) {

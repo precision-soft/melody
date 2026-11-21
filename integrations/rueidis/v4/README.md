@@ -48,16 +48,16 @@ least once. Every value in this package that could close a client it merely borr
 
 ```go
 provider := rueidis.NewProvider(rueidis.ProviderConfig{
-    Retry: rueidis.RetryConfig{MaxAttempts: bound.Of(10), InitialDelay: bound.Of(time.Second)},
+    Retry: rueidis.RetryConfig{MaxAttempts: bound.Of(10), Backoff: bound.Backoff{Initial: bound.Of(time.Second)}},
 })
 ```
 
-| Field               | Default | Rule                                                                                         |
-|---------------------|---------|----------------------------------------------------------------------------------------------|
-| `MaxAttempts`       | `3`     | Total attempts, the first included; at least `1`, unlimited refused.                         |
-| `InitialDelay`      | `500ms` | Delay before the second attempt; at least `1ms`, unlimited refused.                          |
-| `MaxDelay`          | `5s`    | Cap on the grown delay; at least `1ms`, unlimited refused.                                   |
-| `BackoffMultiplier` | `2.0`   | Growth per attempt, `0` the default; below `1` or `NaN` refused, exactly `1` a constant one. |
+| Field             | Default | Rule                                                                                         |
+|-------------------|---------|----------------------------------------------------------------------------------------------|
+| `MaxAttempts`     | `3`     | Total attempts, the first included; at least `1`, unlimited refused.                         |
+| `Backoff.Initial` | `500ms` | Delay before the second attempt; at least `1ms`, unlimited refused, never above `Max`.       |
+| `Backoff.Max`     | `5s`    | Cap on the grown delay; at least `1ms`, unlimited refused.                                   |
+| `Backoff.Factor`  | `2.0`   | Growth per attempt, `0` the default; below `1` or `NaN` refused, exactly `1` a constant one. |
 
 Every attempt is reported in the journal `ProviderConfig.Logger` names: a warning per retry, an error when the attempts run out — a single attempt included — and an info line when a later attempt succeeds. The provider is built before the container resolves a logger, so without one the records reach the emergency logger — standard error, outside the application's journal — rather than nothing.
 
@@ -167,7 +167,7 @@ defer func() {
 
 - `Channel` — the shared pub/sub channel every instance publishes to and subscribes on; empty is the default `melody:sse`. Give each application its own channel when several share a Redis instance.
 - `Logger` — a `logging/contract.Logger` for subscription failures and reconnect attempts; nil or a typed nil leaves them silent.
-- `Reconnect` — the backoff the subscription re-subscribes with after a connection drop, a [`ReconnectConfig`](./reconnect_config.go): `InitialBackoff` 1s and `MaxBackoff` 30s when left out, both at least 1ms, unlimited refused; `BackoffFactor` 2 when left out, exactly 1 a constant backoff. A factor below 1 or NaN is refused, since it would decay the wait toward zero, and so is an initial backoff above the cap, naming both fields.
+- `Reconnect` — the backoff the subscription re-subscribes with after a connection drop, a [`ReconnectConfig`](./reconnect_config.go) whose `Backoff` is a `bound.Backoff`: `Initial` 1s and `Max` 30s when left out, both at least 1ms, unlimited refused; `Factor` 2 when left out, exactly 1 a constant backoff. A factor below 1 or NaN is refused, since it would decay the wait toward zero, and so is an initial backoff above the cap, naming both fields.
 - `CallTimeout` — bounds one publish round trip: 1s when left out, at least 1ms, unlimited refused. The caller is typically an http handler broadcasting an event, and its context carries no deadline, so without a bound an unresponsive store holds the request instead of failing it. A publish that runs out of time is counted in `hub.BackplaneFailures()` like any other failed replication — the event reaches the local subscribers but not the other instances — so surface that counter as a metric if cross-instance delivery matters, and raise the timeout for a store whose round trip legitimately exceeds it. The timeout derives from the backplane's own context, so `CloseWithContext` also cancels a publish still in flight.
 
 ## Cache backend

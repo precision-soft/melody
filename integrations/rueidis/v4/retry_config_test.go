@@ -15,23 +15,21 @@ func TestResolveRetry_AnAbsentFieldTakesItsDefault(t *testing.T) {
         t.Fatalf("expected the zero retry to resolve, got %v", resolveErr)
     }
 
-    if 3 != resolved.maxAttempts || 500*time.Millisecond != resolved.initialDelay || 5*time.Second != resolved.maxDelay || 2.0 != resolved.backoffMultiplier {
+    if 3 != resolved.maxAttempts || (bound.ResolvedBackoff{Initial: 500 * time.Millisecond, Max: 5 * time.Second, Factor: 2}) != resolved.backoff {
         t.Fatalf("expected the default retry 3 / 500ms / 5s / 2, got %+v", resolved)
     }
 }
 
 func TestResolveRetry_KeepsTheConfiguredValues(t *testing.T) {
     resolved, resolveErr := resolveRetry(RetryConfig{
-        MaxAttempts:       bound.Of(1),
-        InitialDelay:      bound.Of(time.Millisecond),
-        MaxDelay:          bound.Of(time.Second),
-        BackoffMultiplier: 1,
+        MaxAttempts: bound.Of(1),
+        Backoff:     bound.Backoff{Initial: bound.Of(time.Millisecond), Max: bound.Of(time.Second), Factor: 1},
     })
     if nil != resolveErr {
         t.Fatalf("expected the retry to resolve, got %v", resolveErr)
     }
 
-    if 1 != resolved.maxAttempts || time.Millisecond != resolved.initialDelay || time.Second != resolved.maxDelay || 1 != resolved.backoffMultiplier {
+    if 1 != resolved.maxAttempts || (bound.ResolvedBackoff{Initial: time.Millisecond, Max: time.Second, Factor: 1}) != resolved.backoff {
         t.Fatalf("expected a single attempt over a constant backoff, got %+v", resolved)
     }
 }
@@ -43,13 +41,13 @@ func TestResolveRetry_RefusesAFieldOutsideItsRuleNamingIt(t *testing.T) {
     }{
         {field: "RetryConfig.MaxAttempts", config: RetryConfig{MaxAttempts: bound.Of(0)}},
         {field: "RetryConfig.MaxAttempts", config: RetryConfig{MaxAttempts: bound.UnlimitedCount()}},
-        {field: "RetryConfig.InitialDelay", config: RetryConfig{InitialDelay: bound.Of(time.Microsecond)}},
-        {field: "RetryConfig.InitialDelay", config: RetryConfig{InitialDelay: bound.UnlimitedDuration()}},
-        {field: "RetryConfig.MaxDelay", config: RetryConfig{MaxDelay: bound.Of(time.Microsecond)}},
-        {field: "RetryConfig.MaxDelay", config: RetryConfig{MaxDelay: bound.UnlimitedDuration()}},
-        {field: "RetryConfig.BackoffMultiplier", config: RetryConfig{BackoffMultiplier: 0.5}},
-        {field: "RetryConfig.BackoffMultiplier", config: RetryConfig{BackoffMultiplier: -1}},
-        {field: "RetryConfig.BackoffMultiplier", config: RetryConfig{BackoffMultiplier: math.NaN()}},
+        {field: "RetryConfig.Backoff.Initial", config: RetryConfig{Backoff: bound.Backoff{Initial: bound.Of(time.Microsecond)}}},
+        {field: "RetryConfig.Backoff.Initial", config: RetryConfig{Backoff: bound.Backoff{Initial: bound.UnlimitedDuration()}}},
+        {field: "RetryConfig.Backoff.Max", config: RetryConfig{Backoff: bound.Backoff{Max: bound.Of(time.Microsecond)}}},
+        {field: "RetryConfig.Backoff.Max", config: RetryConfig{Backoff: bound.Backoff{Max: bound.UnlimitedDuration()}}},
+        {field: "RetryConfig.Backoff.Factor", config: RetryConfig{Backoff: bound.Backoff{Factor: 0.5}}},
+        {field: "RetryConfig.Backoff.Factor", config: RetryConfig{Backoff: bound.Backoff{Factor: -1}}},
+        {field: "RetryConfig.Backoff.Factor", config: RetryConfig{Backoff: bound.Backoff{Factor: math.NaN()}}},
     } {
         _, resolveErr := resolveRetry(testCase.config)
         expectErrorNamingField(t, resolveErr, testCase.field)
@@ -89,7 +87,7 @@ func TestIsTransientError(t *testing.T) {
 /* the backoff grows geometrically from the initial delay and is capped at the max delay. */
 func TestComputeBackoffDelay(t *testing.T) {
     provider := NewProvider(ProviderConfig{
-        Retry: RetryConfig{MaxAttempts: bound.Of(10), InitialDelay: bound.Of(time.Second), MaxDelay: bound.Of(5 * time.Second)},
+        Retry: RetryConfig{MaxAttempts: bound.Of(10), Backoff: bound.Backoff{Initial: bound.Of(time.Second), Max: bound.Of(5 * time.Second)}},
     })
 
     cases := map[int]time.Duration{
@@ -122,5 +120,19 @@ func TestComputeBackoffDelay_AbsentValuesTakeTheDefaults(t *testing.T) {
 
     if 5*time.Second != provider.computeBackoffDelay(10) {
         t.Fatalf("expected the default max delay clamp of 5s, got %s", provider.computeBackoffDelay(10))
+    }
+}
+
+func TestResolveRetry_TheDefaultWaitsDoubleFromHalfASecondToTheCap(t *testing.T) {
+    resolved, resolveErr := resolveRetry(RetryConfig{})
+    if nil != resolveErr {
+        t.Fatalf("unexpected error: %v", resolveErr)
+    }
+
+    expected := []time.Duration{500 * time.Millisecond, time.Second, 2 * time.Second, 4 * time.Second, 5 * time.Second, 5 * time.Second}
+    for index, want := range expected {
+        if delay := resolved.backoff.Delay(index + 1); want != delay {
+            t.Fatalf("attempt %d: expected %s, got %s", index+1, want, delay)
+        }
     }
 }

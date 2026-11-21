@@ -33,6 +33,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Breaking** — `service_resolver.go`: `ServiceRegistrar.RegisterService` takes the framework's `RegisterOptions` struct last, the fourth major's registration form, where it took variadic `RegisterOption` functions; the application satisfies it as before.
 - `transport.go`: a decoded delivery is built with `messagebus.NewEnvelope(message, stamps)`, the fourth major's envelope form, where it spread the stamps into the variadic; the readme's bus and consumer samples take the fourth major's slice and config forms.
 - `server_sent_event_backplane.go` and `transport.go`: the log records are built through `exception.LogContext(err, exception.LogContextConfig{...})`, the fourth major's form, which takes the extra context in a struct; nothing of this module's own surface changes.
+- **Breaking** — `reconnect_config.go`: `ReconnectConfig.InitialBackoff`, `MaxBackoff` and `BackoffFactor` are one `ReconnectConfig.Backoff bound.Backoff` (1s, 30s, 2), each field left out still the parent's, the merged backoff refused naming `ReconnectConfig.Backoff.<field>`; the transport's subscribe, consume and republish loops and the backplane's re-subscription count their attempts and wait `ResolvedBackoff.Delay(attempt)`, the sequences on the defaults unchanged.
 
 ### Removed
 

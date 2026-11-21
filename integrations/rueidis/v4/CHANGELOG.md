@@ -52,6 +52,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Breaking** — `cache/backend_service.go`: `BackendFromRuntime` answers the registered service's `Backend`, where it minted a handle bound to the runtime's context; the request's context travels with each call instead.
 - **Breaking** — `client_config.go`: `ClientConfig.ConnWriteTimeout` is renamed `ClientConfig.ConnectionWriteTimeout`; the value still reaches the library's `ConnWriteTimeout`.
 - **Breaking** — `client_config.go`: `ClientConfig.SelectDb` is renamed `ClientConfig.SelectDatabase`, and the connection's journal context names it `selectDatabase`; the value still reaches the library's `SelectDB`.
+- **Breaking** — `retry_config.go`, `reconnect_config.go`: `RetryConfig.InitialDelay`, `MaxDelay` and `BackoffMultiplier` are one `RetryConfig.Backoff bound.Backoff` (500ms, 5s, 2), and `ReconnectConfig.InitialBackoff`, `MaxBackoff` and `BackoffFactor` one `ReconnectConfig.Backoff` (1s, 30s, 2), resolved by `bound.ResolveBackoff` and refused naming `RetryConfig.Backoff.<field>` and `ReconnectConfig.Backoff.<field>`; a retry `Max` below its `Initial` is refused where the first wait was capped; the open retry and the backplane's re-subscription wait `ResolvedBackoff.Delay(attempt)`, the sequences on the defaults unchanged.
 
 ### Removed
 

@@ -243,7 +243,7 @@ func TestProvider_OpenWithRetry_ReportsEachRetryAndTheExhaustionOnTheLoggerItIsH
     provider := NewProvider(ProviderConfig{
         Client:  ClientConfig{DialTimeout: bound.Of(250 * time.Millisecond), ConnectionWriteTimeout: bound.Of(250 * time.Millisecond)},
         Timeout: TimeoutConfig{ConnectTimeout: bound.Of(500 * time.Millisecond), CommandTimeout: bound.Of(500 * time.Millisecond)},
-        Retry:   RetryConfig{MaxAttempts: bound.Of(2), InitialDelay: bound.Of(time.Millisecond), MaxDelay: bound.Of(time.Millisecond), BackoffMultiplier: 1},
+        Retry:   RetryConfig{MaxAttempts: bound.Of(2), Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond), Max: bound.Of(time.Millisecond), Factor: 1}},
         Logger:  logger,
     })
 
@@ -291,7 +291,7 @@ func TestProvider_AnAbsentRetryDialsThreeTimesAndASingleAttemptOnce(t *testing.T
         retry    RetryConfig
         attempts int
     }{
-        {name: "absent", retry: RetryConfig{InitialDelay: bound.Of(time.Millisecond), MaxDelay: bound.Of(time.Millisecond)}, attempts: 3},
+        {name: "absent", retry: RetryConfig{Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond), Max: bound.Of(time.Millisecond)}}, attempts: 3},
         {name: "single", retry: RetryConfig{MaxAttempts: bound.Of(1)}, attempts: 1},
     } {
         t.Run(testCase.name, func(t *testing.T) {

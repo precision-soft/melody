@@ -134,7 +134,7 @@ func TestConsume_ExhaustsRetriesAndRoutesToFailureTransport(t *testing.T) {
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := newConsumeCommandOver(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), FailureTransport: failure, BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), FailureTransport: failure, Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond)}, MaxDeadLetterAttempts: bound.UnlimitedCount()}})
 
     if consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, source, 3, 1); nil != consumeErr {
         t.Fatalf("unexpected consume error: %v", consumeErr)
@@ -176,7 +176,7 @@ func TestConsume_AMessageExhaustedOnTheFailureTransportItselfIsNotSentBackToIt(t
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := newConsumeCommandOver(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), FailureTransport: failure, BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), FailureTransport: failure, Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond)}, MaxDeadLetterAttempts: bound.UnlimitedCount()}})
 
     if consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, failure, 1, 1); nil != consumeErr {
         t.Fatalf("unexpected consume error: %v", consumeErr)
@@ -214,7 +214,7 @@ func TestConsume_ExhaustedWithoutFailureTransportDropsMessage(t *testing.T) {
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := newConsumeCommandOver(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond)}, MaxDeadLetterAttempts: bound.UnlimitedCount()}})
 
     if consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, source, 3, 1); nil != consumeErr {
         t.Fatalf("unexpected consume error: %v", consumeErr)
@@ -306,7 +306,7 @@ func TestConsume_BoundedDeadLetterStopsRequeueAfterMax(t *testing.T) {
         MaxRetries:            bound.Of(0),
         FailureTransport:      &alwaysFailingTransport{},
         MaxDeadLetterAttempts: bound.Of(2),
-        BaseDelay:             bound.Of(time.Millisecond),
+        Backoff:               bound.Backoff{Initial: bound.Of(time.Millisecond)},
     })
 
     source := &recordingNackTransport{}
@@ -332,7 +332,7 @@ func TestConsume_UnlimitedDeadLetterAttemptsKeepRequeueing(t *testing.T) {
     command, runtimeInstance := newAlwaysFailingConsumeCommand(t, RetryPolicy{
         MaxRetries:            bound.Of(0),
         FailureTransport:      &alwaysFailingTransport{},
-        BaseDelay:             bound.Of(time.Millisecond),
+        Backoff:               bound.Backoff{Initial: bound.Of(time.Millisecond)},
         MaxDeadLetterAttempts: bound.UnlimitedCount(),
     })
 
@@ -350,7 +350,7 @@ func TestNewConsumeCommand_AbsentRetryPolicyResolvesTheDefaults(t *testing.T) {
         "container":  NewConsumeCommand(ConsumeCommandConfig{}),
     } {
         policy := command.retryPolicy
-        if 3 != policy.MaxRetries || time.Second != policy.BaseDelay || time.Hour != policy.MaxDelay || 5*time.Second != policy.FailureRequeueDelay || 5 != policy.MaxDeadLetterAttempts || true == policy.MaxDeadLetterAttemptsUnlimited {
+        if 3 != policy.MaxRetries || (bound.ResolvedBackoff{Initial: time.Second, Max: time.Hour, Factor: 2}) != policy.Backoff || 5*time.Second != policy.FailureRequeueDelay || 5 != policy.MaxDeadLetterAttempts || true == policy.MaxDeadLetterAttemptsUnlimited {
             t.Fatalf("%s: expected the default retry policy, got %+v", name, policy)
         }
         if 30*time.Second != command.shutdownTimeout {
@@ -381,9 +381,11 @@ func TestNewConsumeCommand_RefusesAFieldOutsideItsRuleByName(t *testing.T) {
     }{
         "max retries unlimited":           {ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.UnlimitedCount()}}, "the limit does not admit unlimited", "RetryPolicy.MaxRetries"},
         "max retries negative":            {ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(-1)}}, "the limit is below its minimum", "RetryPolicy.MaxRetries"},
-        "base delay below 1ms":            {ConsumeCommandConfig{Retry: RetryPolicy{BaseDelay: bound.Of(time.Microsecond)}}, "the limit is below its minimum", "RetryPolicy.BaseDelay"},
-        "base delay unlimited":            {ConsumeCommandConfig{Retry: RetryPolicy{BaseDelay: bound.UnlimitedDuration()}}, "the limit does not admit unlimited", "RetryPolicy.BaseDelay"},
-        "max delay below 1ms":             {ConsumeCommandConfig{Retry: RetryPolicy{MaxDelay: bound.Of(time.Microsecond)}}, "the limit is below its minimum", "RetryPolicy.MaxDelay"},
+        "initial backoff below 1ms":       {ConsumeCommandConfig{Retry: RetryPolicy{Backoff: bound.Backoff{Initial: bound.Of(time.Microsecond)}}}, "the limit is below its minimum", "RetryPolicy.Backoff.Initial"},
+        "initial backoff unlimited":       {ConsumeCommandConfig{Retry: RetryPolicy{Backoff: bound.Backoff{Initial: bound.UnlimitedDuration()}}}, "the limit does not admit unlimited", "RetryPolicy.Backoff.Initial"},
+        "max backoff below 1ms":           {ConsumeCommandConfig{Retry: RetryPolicy{Backoff: bound.Backoff{Max: bound.Of(time.Microsecond)}}}, "the limit is below its minimum", "RetryPolicy.Backoff.Max"},
+        "max backoff below initial":       {ConsumeCommandConfig{Retry: RetryPolicy{Backoff: bound.Backoff{Initial: bound.Of(2 * time.Hour)}}}, "the initial backoff exceeds the maximum backoff", "RetryPolicy.Backoff.Initial"},
+        "backoff factor below 1":          {ConsumeCommandConfig{Retry: RetryPolicy{Backoff: bound.Backoff{Factor: 0.5}}}, "the backoff factor is below 1", "RetryPolicy.Backoff.Factor"},
         "failure requeue delay below 1ms": {ConsumeCommandConfig{Retry: RetryPolicy{FailureRequeueDelay: bound.Of(time.Microsecond)}}, "the limit is below its minimum", "RetryPolicy.FailureRequeueDelay"},
         "dead letter attempts zero":       {ConsumeCommandConfig{Retry: RetryPolicy{MaxDeadLetterAttempts: bound.Of(0)}}, "the limit is below its minimum", "RetryPolicy.MaxDeadLetterAttempts"},
         "shutdown timeout below 1ms":      {ConsumeCommandConfig{ShutdownTimeout: bound.Of(time.Microsecond)}, "the limit is below its minimum", "ConsumeCommandConfig.ShutdownTimeout"},
@@ -410,7 +412,7 @@ func TestNewConsumeCommand_RefusesAFieldOutsideItsRuleByName(t *testing.T) {
 func TestConsume_AbsentDeadLetterAttemptsStopRequeueAtFive(t *testing.T) {
     command, runtimeInstance := newAlwaysFailingConsumeCommand(t, RetryPolicy{
         MaxRetries:       bound.Of(0),
-        BaseDelay:        bound.Of(time.Millisecond),
+        Backoff:          bound.Backoff{Initial: bound.Of(time.Millisecond)},
         FailureTransport: &alwaysFailingTransport{},
     })
 
@@ -689,7 +691,7 @@ func TestConsumeFrom_ShutdownTimeoutKeepsTheNackContextAlive(t *testing.T) {
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := newConsumeCommandOver(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}, ShutdownTimeout: bound.Of(5 * time.Second)})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond)}, MaxDeadLetterAttempts: bound.UnlimitedCount()}, ShutdownTimeout: bound.Of(5 * time.Second)})
 
     done := make(chan error, 1)
     go func() {
@@ -728,45 +730,55 @@ func TestConsumeFrom_ShutdownTimeoutKeepsTheNackContextAlive(t *testing.T) {
 }
 
 func TestRetryDelay_IsCappedAndOverflowSafe(t *testing.T) {
-    capped := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(5), BaseDelay: bound.Of(time.Hour), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
-    if retryMaxDelayRule.Default != mustConsumeSession(capped, nil).retryDelay(100) {
-        t.Fatalf("expected the linear delay to be capped at %v, got %v", retryMaxDelayRule.Default, mustConsumeSession(capped, nil).retryDelay(100))
+    capped := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(5), Backoff: bound.Backoff{Initial: bound.Of(time.Hour)}, MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+    if retryBackoffRule.MaxDefault != mustConsumeSession(capped, nil).retryDelay(100) {
+        t.Fatalf("expected the delay to be capped at %v, got %v", retryBackoffRule.MaxDefault, mustConsumeSession(capped, nil).retryDelay(100))
     }
 
-    huge := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(5), BaseDelay: bound.Of(time.Duration(1) << 60), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+    huge := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(5), Backoff: bound.Backoff{Initial: bound.Of(time.Hour), Factor: 1 << 60}, MaxDeadLetterAttempts: bound.UnlimitedCount()}})
     delay := mustConsumeSession(huge, nil).retryDelay(64)
-    if 0 > delay || delay > retryMaxDelayRule.Default {
+    if 0 > delay || delay > retryBackoffRule.MaxDefault {
         t.Fatalf("expected a non-negative, capped delay, got %v", delay)
     }
 
-    linear := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(3), BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+    linear := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(3), Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond)}, MaxDeadLetterAttempts: bound.UnlimitedCount()}})
     if 2*time.Millisecond != mustConsumeSession(linear, nil).retryDelay(2) {
-        t.Fatalf("expected the delay to grow by BaseDelay per attempt, got %v", mustConsumeSession(linear, nil).retryDelay(2))
+        t.Fatalf("expected the delay doubled after the first retry, got %v", mustConsumeSession(linear, nil).retryDelay(2))
+    }
+}
+
+func TestRetryDelay_TheDefaultBackoffDoublesFromOneSecond(t *testing.T) {
+    session := mustConsumeSession(newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{}), nil)
+
+    for attempt, expected := range map[int]time.Duration{0: 0, 1: time.Second, 2: 2 * time.Second, 3: 4 * time.Second, 13: time.Hour} {
+        if expected != session.retryDelay(attempt) {
+            t.Fatalf("attempt %d: expected %s, got %s", attempt, expected, session.retryDelay(attempt))
+        }
     }
 }
 
 func TestFailureRequeueDelay_IsTheConfiguredDelayWhateverTheBackoff(t *testing.T) {
-    absent := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{BaseDelay: bound.Of(time.Hour)}})
+    absent := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{Backoff: bound.Backoff{Initial: bound.Of(time.Hour)}}})
     if retryFailureRequeueDelayRule.Default != mustConsumeSession(absent, nil).failureRequeueDelay() {
         t.Fatalf("expected the default failure requeue delay beside a long backoff, got %v", mustConsumeSession(absent, nil).failureRequeueDelay())
     }
 
-    configured := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{BaseDelay: bound.Of(time.Second), FailureRequeueDelay: bound.Of(time.Minute)}})
+    configured := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{Backoff: bound.Backoff{Initial: bound.Of(time.Second)}, FailureRequeueDelay: bound.Of(time.Minute)}})
     if time.Minute != mustConsumeSession(configured, nil).failureRequeueDelay() {
         t.Fatalf("expected the configured failure requeue delay, got %v", mustConsumeSession(configured, nil).failureRequeueDelay())
     }
 }
 
-func TestRetryDelay_MaxDelayOverride(t *testing.T) {
-    command := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(5), BaseDelay: bound.Of(time.Hour), MaxDelay: bound.Of(10 * time.Minute), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+func TestRetryDelay_MaxBackoffOverride(t *testing.T) {
+    command := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(5), Backoff: bound.Backoff{Initial: bound.Of(time.Minute), Max: bound.Of(10 * time.Minute)}, MaxDeadLetterAttempts: bound.UnlimitedCount()}})
 
     if 10*time.Minute != mustConsumeSession(command, nil).retryDelay(100) {
-        t.Fatalf("expected the delay to be capped at the overridden MaxDelay 10m, got %v", mustConsumeSession(command, nil).retryDelay(100))
+        t.Fatalf("expected the delay to be capped at the overridden Backoff.Max 10m, got %v", mustConsumeSession(command, nil).retryDelay(100))
     }
 }
 
 func TestFailureRequeueDelay_Override(t *testing.T) {
-    command := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(3), FailureRequeueDelay: bound.Of(7 * time.Second), BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+    command := newConsumeCommandOver(NewManager("test", nil), ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(3), FailureRequeueDelay: bound.Of(7 * time.Second), Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond)}, MaxDeadLetterAttempts: bound.UnlimitedCount()}})
 
     if 7*time.Second != mustConsumeSession(command, nil).failureRequeueDelay() {
         t.Fatalf("expected the overridden failure requeue delay 7s, got %v", mustConsumeSession(command, nil).failureRequeueDelay())
@@ -792,7 +804,7 @@ func TestConsume_PanickingHandlerFlowsIntoRetryPipeline(t *testing.T) {
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := newConsumeCommandOver(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), FailureTransport: failure, BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+    command := newConsumeCommandOver(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), FailureTransport: failure, Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond)}, MaxDeadLetterAttempts: bound.UnlimitedCount()}})
 
     if consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, source, 3, 1); nil != consumeErr {
         t.Fatalf("unexpected consume error: %v", consumeErr)
@@ -1109,7 +1121,7 @@ func TestConsume_AMessageRequeuedForEverCarriesOneStampPerCounter(t *testing.T) 
     command, runtimeInstance := newAlwaysFailingConsumeCommand(t, RetryPolicy{
         MaxRetries:            bound.Of(0),
         FailureTransport:      &alwaysFailingTransport{},
-        BaseDelay:             bound.Of(time.Millisecond),
+        Backoff:               bound.Backoff{Initial: bound.Of(time.Millisecond)},
         MaxDeadLetterAttempts: bound.UnlimitedCount(),
     })
 
@@ -1130,7 +1142,7 @@ func TestConsume_AMessageRequeuedForEverCarriesOneStampPerCounter(t *testing.T) 
 }
 
 func TestConsume_AMessageRetriedManyTimesCarriesOneRedeliveryStamp(t *testing.T) {
-    command, runtimeInstance := newAlwaysFailingConsumeCommand(t, RetryPolicy{MaxRetries: bound.Of(50), BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()})
+    command, runtimeInstance := newAlwaysFailingConsumeCommand(t, RetryPolicy{MaxRetries: bound.Of(50), Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond)}, MaxDeadLetterAttempts: bound.UnlimitedCount()})
 
     source := &recordingNackTransport{}
     envelopeInstance := NewEnvelope(consumeTestMessage{Value: 1}, nil)

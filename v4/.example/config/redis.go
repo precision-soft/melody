@@ -46,9 +46,8 @@ func (instance *Module) buildRedis() {
     /* retry the initial connection with backoff so a cold-start race against the redis container does not hard-fail the boot, mirroring the database wiring. Only transient errors (connection refused) retry. */
     provider := melodyrueidis.NewProvider(melodyrueidis.ProviderConfig{
         Retry: melodyrueidis.RetryConfig{
-            MaxAttempts:  bound.Of(10),
-            InitialDelay: bound.Of(time.Second),
-            MaxDelay:     bound.Of(5 * time.Second),
+            MaxAttempts: bound.Of(10),
+            Backoff:     bound.Backoff{Initial: bound.Of(time.Second), Max: bound.Of(5 * time.Second)},
         },
     })
 

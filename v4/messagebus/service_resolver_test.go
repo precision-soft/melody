@@ -84,7 +84,7 @@ func TestNewConsumeCommand_ResolvesTheBusAndTransportsAtRunAndKeepsTheConfigsRet
         map[string]messagebuscontract.Transport{"async": transport},
     )
 
-    command := NewConsumeCommand(ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(7), BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+    command := NewConsumeCommand(ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(7), Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond)}, MaxDeadLetterAttempts: bound.UnlimitedCount()}})
     session := mustConsumeSession(command, runtimeInstance)
 
     if consumeBus != session.bus {
@@ -96,8 +96,8 @@ func TestNewConsumeCommand_ResolvesTheBusAndTransportsAtRunAndKeepsTheConfigsRet
     if 7 != session.retryPolicy.MaxRetries {
         t.Fatalf("expected the config's retry policy, got MaxRetries=%d", session.retryPolicy.MaxRetries)
     }
-    if 0 >= session.retryPolicy.MaxDelay {
-        t.Fatalf("expected the resolved retry policy to be normalized (MaxDelay > 0), got %v", session.retryPolicy.MaxDelay)
+    if 0 >= session.retryPolicy.Backoff.Max {
+        t.Fatalf("expected the resolved retry policy to be normalized (Backoff.Max > 0), got %v", session.retryPolicy.Backoff.Max)
     }
 
     if consumeErr := session.consumeFrom(runtimeInstance, session.transports["async"], 1, 1); nil != consumeErr {

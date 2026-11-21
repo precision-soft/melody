@@ -5,7 +5,6 @@ import (
     "crypto/tls"
     "database/sql"
     "fmt"
-    "math"
     "net"
     "reflect"
     "strings"
@@ -309,23 +308,7 @@ func (instance *Provider) toConnectionContext(
 }
 
 func (instance *Provider) computeBackoffDelay(attempt int) time.Duration {
-    initialDelay := instance.retry.initialDelay
-    maxDelay := instance.retry.maxDelay
-
-    /* the first attempt waits the initial delay, so the growth is over the attempts already made; a non-positive attempt reads as the first */
-    if 1 > attempt {
-        attempt = 1
-    }
-
-    /* the growth is computed in closed form and capped in float space before the conversion: a large attempt count overflows the float64 to int64 conversion into a negative duration that slips past a > cap, and the not-less-than form keeps an infinite growth capped too */
-    maxDelayFloat := float64(maxDelay)
-    delay := float64(initialDelay) * math.Pow(instance.retry.backoffMultiplier, float64(attempt-1))
-
-    if false == (delay < maxDelayFloat) {
-        return maxDelay
-    }
-
-    return time.Duration(delay)
+    return instance.retry.backoff.Delay(attempt)
 }
 
 /* containsTransientMarker matches a marker as a word, bounded by any character that is not a letter, a digit or an underscore, so "eof" inside an identifier such as geofences does not read a permanent failure as transient. */

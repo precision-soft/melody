@@ -31,7 +31,7 @@ type ServerSentEventBackplane struct {
     channel     string
     origin      string
     logger      loggingcontract.Logger
-    reconnect   resolvedReconnect
+    reconnect   bound.ResolvedBackoff
     callTimeout time.Duration
 
     ctx    context.Context
@@ -157,7 +157,7 @@ func (instance *ServerSentEventBackplane) CloseWithContext(closeContext context.
 func (instance *ServerSentEventBackplane) listen() {
     defer close(instance.listenerDone)
 
-    backoff := instance.reconnect.initialBackoff
+    attempt := 1
 
     for {
         if nil != instance.ctx.Err() {
@@ -180,23 +180,23 @@ func (instance *ServerSentEventBackplane) listen() {
         }
 
         if true == instance.shouldResetBackplaneBackoff(time.Since(startedAt)) {
-            backoff = instance.reconnect.initialBackoff
+            attempt = 1
 
             continue
         }
 
         select {
-        case <-time.After(backoff):
+        case <-time.After(instance.reconnect.Delay(attempt)):
         case <-instance.ctx.Done():
             return
         }
 
-        backoff = instance.nextServerSentEventBackplaneBackoff(backoff)
+        attempt++
     }
 }
 
 func (instance *ServerSentEventBackplane) shouldResetBackplaneBackoff(subscriptionDuration time.Duration) bool {
-    return instance.reconnect.initialBackoff <= subscriptionDuration
+    return instance.reconnect.Initial <= subscriptionDuration
 }
 
 func (instance *ServerSentEventBackplane) handle(message rueidis.PubSubMessage) {
@@ -220,16 +220,6 @@ func (instance *ServerSentEventBackplane) logError(message string, err error) {
     }
 
     instance.logger.Error(message, exception.LogContext(err, exception.LogContextConfig{}))
-}
-
-func (instance *ServerSentEventBackplane) nextServerSentEventBackplaneBackoff(current time.Duration) time.Duration {
-    /* an extreme factor overflows the product and the duration conversion lands negative; both ends collapse onto the cap so the loop never resubscribes with a zero delay */
-    next := time.Duration(float64(current) * instance.reconnect.backoffFactor)
-    if next <= 0 || next > instance.reconnect.maxBackoff {
-        return instance.reconnect.maxBackoff
-    }
-
-    return next
 }
 
 func newBackplaneOrigin() string {

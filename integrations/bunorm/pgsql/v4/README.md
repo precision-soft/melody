@@ -38,9 +38,9 @@ Every limit is a [`bound`](../../../../v4/bound) limit: left out it takes the li
 | `TimeoutConfig` | `ReadTimeout`           | `30s`   | `1ms`   | admitted, no deadline                               |
 | `TimeoutConfig` | `WriteTimeout`          | `30s`   | `1ms`   | admitted, no deadline                               |
 | `RetryConfig`   | `MaxAttempts`           | `3`     | `1`     | refused                                             |
-| `RetryConfig`   | `InitialDelay`          | `500ms` | `1ms`   | refused                                             |
-| `RetryConfig`   | `MaxDelay`              | `5s`    | `1ms`   | refused                                             |
-| `RetryConfig`   | `BackoffMultiplier`     | `2`     | `1`     | a plain float; below `1` or `NaN` refused           |
+| `RetryConfig`   | `Backoff.Initial`       | `500ms` | `1ms`   | refused; never above `Backoff.Max`                  |
+| `RetryConfig`   | `Backoff.Max`           | `5s`    | `1ms`   | refused                                             |
+| `RetryConfig`   | `Backoff.Factor`        | `2`     | `1`     | a plain float; below `1` or `NaN` refused           |
 
 `MaxIdleConnections: bound.Of(0)` keeps no idle connection, for a serverless or proxy-pooled database. The connect timeout cannot be lifted: it bounds the dial, the initial ping and the post-build hook, and a database that never answers must still fail the open. Only transient failures are retried; a non-transient error fails at once. Every terminal failure is journaled through the logger the open is handed and marked as logged, a single attempt's included.
 

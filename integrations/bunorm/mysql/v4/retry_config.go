@@ -1,12 +1,9 @@
 package mysql
 
 import (
-    "strconv"
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
-    "github.com/precision-soft/melody/v4/exception"
-    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
 /* RetryConfig is the retry an open makes on a transient failure; its zero value is the default retry, and a single attempt is written as MaxAttempts bound.Of(1). */
@@ -14,14 +11,8 @@ type RetryConfig struct {
     /* MaxAttempts counts the attempts, the first one included: 3 by default, at least 1, unlimited refused, since an open retried for ever hides a dead database from the boot and from a read/write splitter. */
     MaxAttempts bound.Count
 
-    /* InitialDelay is the wait before the second attempt: 500ms by default, at least 1ms, unlimited refused. */
-    InitialDelay bound.Duration
-
-    /* MaxDelay caps the wait between two attempts: 5s by default, at least 1ms, unlimited refused. */
-    MaxDelay bound.Duration
-
-    /* BackoffMultiplier grows the wait from one attempt to the next: 2 when left out, exactly 1 a constant backoff, below 1 or NaN refused, since a multiplier under 1 decays the wait into a re-dial storm. */
-    BackoffMultiplier float64
+    /* Backoff is the wait between two attempts: 500ms before the second, doubled for every attempt after it, capped at 5s, each field taking that default when left out; a Factor below 1 is refused, since it decays the wait into a re-dial storm. */
+    Backoff bound.Backoff
 }
 
 var retryMaxAttemptsRule = bound.Rule[int]{
@@ -30,25 +21,16 @@ var retryMaxAttemptsRule = bound.Rule[int]{
     Minimum: 1,
 }
 
-var retryInitialDelayRule = bound.Rule[time.Duration]{
-    Name:    "RetryConfig.InitialDelay",
-    Default: 500 * time.Millisecond,
-    Minimum: bound.TimeoutMinimum,
+var retryBackoffRule = bound.BackoffRule{
+    Name:           "RetryConfig.Backoff",
+    InitialDefault: 500 * time.Millisecond,
+    MaxDefault:     5 * time.Second,
+    FactorDefault:  2,
 }
-
-var retryMaxDelayRule = bound.Rule[time.Duration]{
-    Name:    "RetryConfig.MaxDelay",
-    Default: 5 * time.Second,
-    Minimum: bound.TimeoutMinimum,
-}
-
-const defaultBackoffMultiplier = 2.0
 
 type resolvedRetry struct {
-    maxAttempts       int
-    initialDelay      time.Duration
-    maxDelay          time.Duration
-    backoffMultiplier float64
+    maxAttempts int
+    backoff     bound.ResolvedBackoff
 }
 
 func resolveRetry(config RetryConfig) (resolvedRetry, error) {
@@ -57,37 +39,13 @@ func resolveRetry(config RetryConfig) (resolvedRetry, error) {
         return resolvedRetry{}, maxAttemptsErr
     }
 
-    initialDelay, initialDelayErr := bound.Resolve(config.InitialDelay, retryInitialDelayRule)
-    if nil != initialDelayErr {
-        return resolvedRetry{}, initialDelayErr
-    }
-
-    maxDelay, maxDelayErr := bound.Resolve(config.MaxDelay, retryMaxDelayRule)
-    if nil != maxDelayErr {
-        return resolvedRetry{}, maxDelayErr
-    }
-
-    backoffMultiplier := config.BackoffMultiplier
-    if 0 == backoffMultiplier {
-        backoffMultiplier = defaultBackoffMultiplier
-    }
-
-    /* the not-at-least-1 form is deliberate: NaN fails every comparison, so `1 > NaN` would let a NaN multiplier through and poison the float-space growth of the backoff */
-    if false == (backoffMultiplier >= 1) {
-        return resolvedRetry{}, exception.NewError(
-            "the backoff multiplier is below 1",
-            exceptioncontract.Context{
-                "field": "RetryConfig.BackoffMultiplier",
-                "value": strconv.FormatFloat(config.BackoffMultiplier, 'g', -1, 64),
-            },
-            nil,
-        )
+    backoff, backoffErr := bound.ResolveBackoff(config.Backoff, retryBackoffRule)
+    if nil != backoffErr {
+        return resolvedRetry{}, backoffErr
     }
 
     return resolvedRetry{
-        maxAttempts:       maxAttempts.Value,
-        initialDelay:      initialDelay.Value,
-        maxDelay:          maxDelay.Value,
-        backoffMultiplier: backoffMultiplier,
+        maxAttempts: maxAttempts.Value,
+        backoff:     backoff,
     }, nil
 }
