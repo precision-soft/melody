@@ -187,14 +187,14 @@ func newProductDoorFixtureOver(t *testing.T, wrap func(stores productDoorStores)
 }
 
 /* call runs a door as an editor with the body and the route parameters given and answers the status and the body */
-func (instance *productDoorFixture) call(t *testing.T, handler melodyhttpcontract.Handler, method string, body string, params map[string]string) (int, string) {
+func (instance *productDoorFixture) call(t *testing.T, handler melodyhttpcontract.Handler, method string, body string, parameters map[string]string) (int, string) {
     t.Helper()
 
-    return instance.callAt(t, handler, method, "/products/api/", body, params)
+    return instance.callAt(t, handler, method, "/products/api/", body, parameters)
 }
 
 /* callAt is call at a target of the caller's, so a door's query is read as the client sent it */
-func (instance *productDoorFixture) callAt(t *testing.T, handler melodyhttpcontract.Handler, method string, target string, body string, params map[string]string) (int, string) {
+func (instance *productDoorFixture) callAt(t *testing.T, handler melodyhttpcontract.Handler, method string, target string, body string, parameters map[string]string) (int, string) {
     t.Helper()
 
     runtimeInstance := melodyruntime.NewRequest(instance.requestContext, instance.container.NewScope())
@@ -216,7 +216,7 @@ func (instance *productDoorFixture) callAt(t *testing.T, handler melodyhttpcontr
 
     request := melodyhttp.NewRequest(
         httpRequest,
-        params,
+        parameters,
         runtimeInstance,
         melodyhttp.NewRequestContext("product-door-test", time.Now()),
     )

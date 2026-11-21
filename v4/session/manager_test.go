@@ -1259,19 +1259,19 @@ func TestManager_SaveSession_RefusalNamesTheSessionByAOneWayReferenceNotTheRawId
         t.Fatalf("expected a melody error carrying context, got %T", err)
     }
 
-    sessionRef := contextProvider.Context()["sessionRef"]
+    sessionReference := contextProvider.Context()["sessionReference"]
 
-    if rawId == sessionRef {
-        t.Fatalf("the raw session id must not travel in the refusal context, got %v", sessionRef)
+    if rawId == sessionReference {
+        t.Fatalf("the raw session id must not travel in the refusal context, got %v", sessionReference)
     }
 
-    if sessionIdLogReference(rawId) != sessionRef {
-        t.Fatalf("expected the truncated digest of the id, got %v", sessionRef)
+    if sessionIdLogReference(rawId) != sessionReference {
+        t.Fatalf("expected the truncated digest of the id, got %v", sessionReference)
     }
 
-    reference, ok := sessionRef.(string)
+    reference, ok := sessionReference.(string)
     if false == ok || 16 != len(reference) {
-        t.Fatalf("expected a sixteen character reference, got %v", sessionRef)
+        t.Fatalf("expected a sixteen character reference, got %v", sessionReference)
     }
 }
 
@@ -1804,8 +1804,12 @@ func TestManager_RegenerateSession_ReturnsTheStorageFailureOfTheIdProbe(t *testi
         t.Fatalf("expected the refusal to name the door, got %v", err)
     }
 
-    if _, hasReference := melodyErr.Context()["sessionRef"]; false == hasReference {
+    if _, hasReference := melodyErr.Context()["sessionReference"]; false == hasReference {
         t.Fatalf("expected the refusal to carry the session reference, got %v", melodyErr.Context())
+    }
+
+    if _, hasRetiredKey := melodyErr.Context()["sessionRef"]; true == hasRetiredKey {
+        t.Fatalf("expected the reference under sessionReference only, got %v", melodyErr.Context())
     }
 
     if false == strings.Contains(err.Error(), "the probe storage is unavailable") && nil == errors.Unwrap(err) {
@@ -1825,7 +1829,7 @@ func TestManager_InvalidIdRefusalsOfRegenerateAndDeleteCarryTheReference(t *test
             t.Fatalf("%s: expected an exception error, got %v", name, err)
         }
 
-        if _, hasReference := melodyErr.Context()["sessionRef"]; false == hasReference {
+        if _, hasReference := melodyErr.Context()["sessionReference"]; false == hasReference {
             t.Fatalf("%s: expected the refusal to carry the session reference, got %v", name, melodyErr.Context())
         }
     }
@@ -2683,5 +2687,25 @@ func TestManager_EveryDoorRefusesARuntimeWithoutAScope(t *testing.T) {
 
     if 0 != storage.loadCalls+storage.saveCalls+storage.deleteCalls {
         t.Fatalf("expected no storage call under a scopeless runtime")
+    }
+}
+
+func TestContextEndedError_NamesTheSessionReferenceUnderItsOneKey(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    endedErr := contextEndedError(ctx, "Manager.SaveSession", "session-123")
+    errorContext := exception.FromError(endedErr).Context()
+
+    if sessionIdLogReference("session-123") != errorContext["sessionReference"] {
+        t.Fatalf("expected the reference of the session, got %v", errorContext)
+    }
+
+    if _, hasRetiredKey := errorContext["sessionRef"]; true == hasRetiredKey {
+        t.Fatalf("expected the reference under sessionReference only, got %v", errorContext)
+    }
+
+    if _, named := exception.FromError(contextEndedError(ctx, "Manager.SaveSession", "")).Context()["sessionReference"]; true == named {
+        t.Fatal("expected no reference without a session id")
     }
 }

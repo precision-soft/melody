@@ -13,7 +13,7 @@ OpenAPI generation is opt-in. The generator reads route metadata from the [`http
     - [`NewRegistry`](../../openapi/registry.go)
     - [`Descriptor`](../../openapi/registry.go)
     - [`TypeOf`](../../openapi/registry.go)
-    - [`DescribeTyped[Req, Resp]`](../../openapi/describe_typed.go) with [`DescribeConfig`, `Response[T]`](../../openapi/describe_typed.go)
+    - [`DescribeTyped[RequestBody, ResponseBody]`](../../openapi/describe_typed.go) with [`DescribeConfig`, `Response[T]`](../../openapi/describe_typed.go)
 - Generate the document:
     - [`Generate`](../../openapi/generator.go)
     - [`Document`](../../openapi/document.go) and the OpenAPI 3.0 object model (`Document`/`Schema` carry `servers`/`security`/`tags`/`externalDocs` and `description`/`maximum`/`exclusiveMaximum`)
@@ -126,7 +126,7 @@ command := openapi.NewGenerateCommand(
 
 `Describe` stores a copy of the descriptor's `Tags` and `Responses` and `Get` answers a copy, so a tag list built once and appended to between routes describes each route with the tags it had at that moment, and a reader of `Get` cannot write into the registry from the request path.
 
-For the common single-request / single-response route, [`DescribeTyped[Req, Resp]`](../../openapi/describe_typed.go) takes the types as parameters instead of a `Descriptor` literal:
+For the common single-request / single-response route, [`DescribeTyped[RequestBody, ResponseBody]`](../../openapi/describe_typed.go) takes the types as parameters instead of a `Descriptor` literal:
 
 ```go
 openapi.DescribeTyped[ProductCreateRequest, ProductView](
@@ -179,7 +179,7 @@ The example application registers a registry (`config/openapi.go`) and the comma
 - [`(*Registry).Describe(routeName string, descriptor Descriptor) *Registry`](../../openapi/registry.go)
 - [`(*Registry).MarkServing()`](../../openapi/registry.go)
 - [`TypeOf[T any]() reflect.Type`](../../openapi/registry.go)
-- [`DescribeTyped[Req, Resp any](registry *Registry, routeName string, status int, config DescribeConfig)`](../../openapi/describe_typed.go) — [`DescribeConfig`](../../openapi/describe_typed.go) holds `Summary`, `Description`, `Tags` and `Responses`, the zero value adding nothing, and [`Response[T any](status int) ResponseDescription`](../../openapi/describe_typed.go) builds one entry of `Responses`, a status repeating another replacing it
+- [`DescribeTyped[RequestBody, ResponseBody any](registry *Registry, routeName string, status int, config DescribeConfig)`](../../openapi/describe_typed.go) — [`DescribeConfig`](../../openapi/describe_typed.go) holds `Summary`, `Description`, `Tags` and `Responses`, the zero value adding nothing, and [`Response[T any](status int) ResponseDescription`](../../openapi/describe_typed.go) builds one entry of `Responses`, a status repeating another replacing it
 - [`Generate(info Info, routeDefinitions []httpcontract.RouteDefinition, registry *Registry) *Document`](../../openapi/generator.go)
 - [`NewGenerateCommand(info Info, registry *Registry) *GenerateCommand`](../../openapi/generate_command.go)
 - [`NewGenerateCommandFromContainer() *GenerateCommand`](../../openapi/generate_command.go) — the auto-registered form, resolving the `Info` and the `Registry` from the container at run time

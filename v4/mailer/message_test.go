@@ -502,7 +502,7 @@ func TestRenderMessage_InlineAndRegularAttachmentNestRelatedInsideMixed(t *testi
 
     topHeader, bodyReader := splitMimeHeaderAndBody(t, payload)
 
-    topMediaType, topParams, parseErr := mime.ParseMediaType(topHeader.Get("Content-Type"))
+    topMediaType, topParameters, parseErr := mime.ParseMediaType(topHeader.Get("Content-Type"))
     if nil != parseErr {
         t.Fatalf("parse top content-type: %v", parseErr)
     }
@@ -510,13 +510,13 @@ func TestRenderMessage_InlineAndRegularAttachmentNestRelatedInsideMixed(t *testi
         t.Fatalf("expected top-level multipart/mixed, got %q", topMediaType)
     }
 
-    mixedReader := multipart.NewReader(bodyReader, topParams["boundary"])
+    mixedReader := multipart.NewReader(bodyReader, topParameters["boundary"])
 
     relatedPart, relatedErr := mixedReader.NextPart()
     if nil != relatedErr {
         t.Fatalf("read first mixed part: %v", relatedErr)
     }
-    relatedMediaType, relatedParams, relatedParseErr := mime.ParseMediaType(relatedPart.Header.Get("Content-Type"))
+    relatedMediaType, relatedParameters, relatedParseErr := mime.ParseMediaType(relatedPart.Header.Get("Content-Type"))
     if nil != relatedParseErr {
         t.Fatalf("parse first part content-type: %v", relatedParseErr)
     }
@@ -524,7 +524,7 @@ func TestRenderMessage_InlineAndRegularAttachmentNestRelatedInsideMixed(t *testi
         t.Fatalf("expected first mixed part to be multipart/related, got %q", relatedMediaType)
     }
 
-    relatedReader := multipart.NewReader(relatedPart, relatedParams["boundary"])
+    relatedReader := multipart.NewReader(relatedPart, relatedParameters["boundary"])
 
     bodyPart, bodyPartErr := relatedReader.NextPart()
     if nil != bodyPartErr {

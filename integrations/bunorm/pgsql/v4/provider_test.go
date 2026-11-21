@@ -25,7 +25,7 @@ import (
     "github.com/uptrace/bun/schema"
 )
 
-func newTestParams(host string, port string, database string, user string, password string) bunorm.ConnectionParameters {
+func newTestParameters(host string, port string, database string, user string, password string) bunorm.ConnectionParameters {
     return bunorm.ConnectionParameters{
         Host:     host,
         Port:     port,
@@ -53,7 +53,7 @@ func TestOpen_ASingleAttemptOpenRoutesBunDiagnosticsIntoTheJournal(t *testing.T)
 
     _, openErr := provider.Open(
         testRuntimeUnder(context.Background()),
-        newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"),
+        newTestParameters("203.0.113.1", "5432", "melody", "melody", "melody"),
         logger,
     )
     if nil == openErr {
@@ -88,7 +88,7 @@ func TestOpen_AnEmptyPortDialsTheDefaultAndAnUnlimitedReadDeadlineReachesTheConn
         Retry: singleAttemptRetry,
     })
 
-    _, openErr := provider.Open(testRuntimeUnder(context.Background()), newTestParams("203.0.113.1", "", "melody", "melody", "melody"), &capturingProviderLogger{})
+    _, openErr := provider.Open(testRuntimeUnder(context.Background()), newTestParameters("203.0.113.1", "", "melody", "melody", "melody"), &capturingProviderLogger{})
     if nil == openErr || nil == seen {
         t.Fatalf("expected the hook to see the connector and end the open, got %v", openErr)
     }
@@ -113,7 +113,7 @@ func TestOpen_TheConnectorReceivesEveryDeadlineTheTimeoutConfigNames(t *testing.
 
     _, openErr := provider.Open(
         testRuntimeUnder(context.Background()),
-        newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"),
+        newTestParameters("203.0.113.1", "5432", "melody", "melody", "melody"),
         &capturingProviderLogger{},
     )
     if nil == openErr {
@@ -243,7 +243,7 @@ func TestProviderOpenBuildsConnectorAndAbortsOnPostBuildHookError(t *testing.T) 
 
     database, openErr := provider.Open(
         testRuntime(),
-        newTestParams("db.internal", "5432", "melody", "melody_user", "melody_password"),
+        newTestParameters("db.internal", "5432", "melody", "melody_user", "melody_password"),
         nil,
     )
     if nil != database {
@@ -283,7 +283,7 @@ func TestProviderOpenWithRetryAndNilLoggerDoesNotPanic(t *testing.T) {
 
     database, openErr := provider.Open(
         testRuntime(),
-        newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody"),
+        newTestParameters("127.0.0.1", "1", "melody_unreachable", "melody", "melody"),
         nil,
     )
     if nil != database {
@@ -310,7 +310,7 @@ func TestProviderOpenWithAnAbsentConnectTimeoutConnects(t *testing.T) {
 
     database, openErr := provider.Open(
         testRuntime(),
-        newTestParams(
+        newTestParameters(
             host,
             os.Getenv("PGSQL_PORT"),
             os.Getenv("PGSQL_DATABASE"),
@@ -539,7 +539,7 @@ func TestProviderOpenForMigrationCancelsTheRetrySleep(t *testing.T) {
     start := time.Now()
     database, openErr := provider.OpenForMigration(
         testRuntimeUnder(ctx),
-        newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody"),
+        newTestParameters("127.0.0.1", "1", "melody_unreachable", "melody", "melody"),
         nil,
     )
     elapsed := time.Since(start)
@@ -594,7 +594,7 @@ func TestProviderOpenCancelsTheRetrySleep(t *testing.T) {
     start := time.Now()
     database, openErr := provider.Open(
         testRuntimeUnder(ctx),
-        newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody"),
+        newTestParameters("127.0.0.1", "1", "melody_unreachable", "melody", "melody"),
         nil,
     )
     elapsed := time.Since(start)
@@ -643,7 +643,7 @@ func TestProviderDefaultReadDeadlineAllowsAnElevenSecondQuery(t *testing.T) {
 
     database, openErr := provider.Open(
         testRuntime(),
-        newTestParams(
+        newTestParameters(
             host,
             os.Getenv("PGSQL_PORT"),
             os.Getenv("PGSQL_DATABASE"),
@@ -679,7 +679,7 @@ func TestOpen_ACancellationMidDialReachesTheAttemptInFlight(t *testing.T) {
     started := time.Now()
     _, openErr := provider.Open(
         testRuntimeUnder(midFlightContext),
-        newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"),
+        newTestParameters("203.0.113.1", "5432", "melody", "melody", "melody"),
         nil,
     )
     elapsed := time.Since(started)
@@ -743,7 +743,7 @@ func TestOpenWithRetry_ACancelledOpenIsAWarningRatherThanANonTransientOutage(t *
 
     _, openErr := provider.Open(
         testRuntimeUnder(cancelledContext),
-        newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"),
+        newTestParameters("203.0.113.1", "5432", "melody", "melody", "melody"),
         logger,
     )
     if nil == openErr {
@@ -790,7 +790,7 @@ func TestOpenWithRetry_ACancellationDuringTheBackoffIsRecordedAndMarked(t *testi
 
     _, openErr := provider.Open(
         testRuntimeUnder(ctx),
-        newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody"),
+        newTestParameters("127.0.0.1", "1", "melody_unreachable", "melody", "melody"),
         logger,
     )
     if nil == openErr {
@@ -827,7 +827,7 @@ func TestOpenWithRetry_TheRetryWarningCarriesTheDiagnosticShapeTheTerminalRecord
 
     _, openErr := provider.Open(
         testRuntimeUnder(context.Background()),
-        newTestParams("127.0.0.1", "1", "melody", "melody", "melody"),
+        newTestParameters("127.0.0.1", "1", "melody", "melody", "melody"),
         logger,
     )
     if nil == openErr {
@@ -912,7 +912,7 @@ func openObservingTheTlsPosture(t *testing.T, config ProviderConfig) *tls.Config
 
     provider := NewProvider(config)
 
-    _, openErr := provider.Open(testRuntime(), newTestParams("db.internal", "5432", "melody", "melody_user", "melody_password"), nil)
+    _, openErr := provider.Open(testRuntime(), newTestParameters("db.internal", "5432", "melody", "melody_user", "melody_password"), nil)
     if false == errors.Is(openErr, stopBeforeDial) {
         t.Fatalf("expected the hook to stop the attempt before the dial, got %v", openErr)
     }
@@ -958,7 +958,7 @@ func TestToConnectionContextCarriesThePoolAndTimeoutConfiguration(t *testing.T) 
     provider := NewProvider(ProviderConfig{Pool: PoolConfig{MaxOpenConnections: bound.UnlimitedCount()}})
 
     connectionContext := provider.toConnectionContext(
-        newTestParams("host", "5432", "database", "user", "password"),
+        newTestParameters("host", "5432", "database", "user", "password"),
         "rewritten-host:5433",
     )
 
@@ -1010,7 +1010,7 @@ func TestProviderOpenWithNilLoggerWritesTheTerminalRecordToStandardError(t *test
 
     database, openErr := provider.Open(
         testRuntime(),
-        newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody"),
+        newTestParameters("127.0.0.1", "1", "melody_unreachable", "melody", "melody"),
         nil,
     )
 
@@ -1086,17 +1086,17 @@ func TestProviderOpen_RefusesAnEmptyDatabaseUserOrHostBeforeBuildingTheConnector
 
     testCases := []struct {
         name     string
-        params   bunorm.ConnectionParameters
+        parameters   bunorm.ConnectionParameters
         expected string
     }{
-        {name: "empty database", params: newTestParams("db.internal", "5432", "", "melody_user", "melody_password"), expected: "the database name is empty"},
-        {name: "empty user", params: newTestParams("db.internal", "5432", "melody", "", "melody_password"), expected: "the user is empty"},
-        {name: "empty host", params: newTestParams("", "5432", "melody", "melody_user", "melody_password"), expected: "the host is empty"},
+        {name: "empty database", parameters: newTestParameters("db.internal", "5432", "", "melody_user", "melody_password"), expected: "the database name is empty"},
+        {name: "empty user", parameters: newTestParameters("db.internal", "5432", "melody", "", "melody_password"), expected: "the user is empty"},
+        {name: "empty host", parameters: newTestParameters("", "5432", "melody", "melody_user", "melody_password"), expected: "the host is empty"},
     }
 
     for _, testCase := range testCases {
         t.Run(testCase.name, func(t *testing.T) {
-            database, openErr := provider.Open(testRuntime(), testCase.params, nil)
+            database, openErr := provider.Open(testRuntime(), testCase.parameters, nil)
             if nil != database {
                 _ = database.Close()
                 t.Fatal("expected no database handle for a refused parameter set")
@@ -1133,7 +1133,7 @@ func TestDialAddressOf_BracketsABareIpv6Literal(t *testing.T) {
 
 /* an outage the provider could not get past — the single-attempt open of a closed port, and the retry budget spent on it — is filed under bunorm.ErrDatabaseUnreachable, the one class a read/write splitter absorbs by reading from the primary; a refusal given by name is not, so a misconfigured replica is refused instead of served from the primary in silence. The driver failure stays reachable under the class. */
 func TestOpen_AnOutageIsFiledAsUnreachableAndARefusalIsNot(t *testing.T) {
-    unreachable := newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody")
+    unreachable := newTestParameters("127.0.0.1", "1", "melody_unreachable", "melody", "melody")
 
     singleAttempt := NewProvider(ProviderConfig{Insecure: true, Timeout: TimeoutConfig{ConnectTimeout: bound.Of(100 * time.Millisecond)}, Retry: singleAttemptRetry})
     database, openErr := singleAttempt.Open(testRuntime(), unreachable, nil)
@@ -1166,7 +1166,7 @@ func TestOpen_AnOutageIsFiledAsUnreachableAndARefusalIsNot(t *testing.T) {
         t.Fatalf("expected the terminal record's mark kept on the unreachable failure, got %v", openErr)
     }
 
-    database, openErr = singleAttempt.Open(testRuntime(), newTestParams("", "5432", "melody", "melody", "melody"), nil)
+    database, openErr = singleAttempt.Open(testRuntime(), newTestParameters("", "5432", "melody", "melody", "melody"), nil)
     if nil != database {
         _ = database.Close()
         t.Fatal("expected no database handle for an empty host")
@@ -1234,7 +1234,7 @@ func TestOpen_ACallersExpiredDeadlineIsNotAnUnreachableDatabase(t *testing.T) {
     expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
     defer cancel()
 
-    _, openErr := NewProvider(ProviderConfig{Retry: singleAttemptRetry}).Open(testRuntimeUnder(expired), newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"), nil)
+    _, openErr := NewProvider(ProviderConfig{Retry: singleAttemptRetry}).Open(testRuntimeUnder(expired), newTestParameters("203.0.113.1", "5432", "melody", "melody", "melody"), nil)
     if nil == openErr {
         t.Fatal("expected the open under an expired deadline to be refused")
     }
@@ -1255,7 +1255,7 @@ func TestOpenWithRetry_ACallersExpiredDeadlineIsACleanStopWithoutARetry(t *testi
     expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
     defer cancel()
 
-    _, openErr := NewProvider(ProviderConfig{Retry: RetryConfig{}}).Open(testRuntimeUnder(expired), newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"), logger)
+    _, openErr := NewProvider(ProviderConfig{Retry: RetryConfig{}}).Open(testRuntimeUnder(expired), newTestParameters("203.0.113.1", "5432", "melody", "melody", "melody"), logger)
     if nil == openErr || false == errors.Is(openErr, context.DeadlineExceeded) {
         t.Fatalf("expected the caller's deadline kept as the cause, got %v", openErr)
     }
@@ -1274,14 +1274,14 @@ func TestOpen_ALiveServerRefusalSpelledAroundAMarkerIsNotFiledAsUnreachable(t *t
 
     provider := NewProvider(ProviderConfig{Insecure: true, Timeout: TimeoutConfig{ConnectTimeout: bound.Of(5 * time.Second)}, Retry: singleAttemptRetry})
 
-    for _, params := range []bunorm.ConnectionParameters{
-        newTestParams(host, os.Getenv("PGSQL_PORT"), "timeout", os.Getenv("PGSQL_USER"), os.Getenv("PGSQL_PASSWORD")),
-        newTestParams(host, os.Getenv("PGSQL_PORT"), os.Getenv("PGSQL_DATABASE"), "eof", "eof"),
+    for _, parameters := range []bunorm.ConnectionParameters{
+        newTestParameters(host, os.Getenv("PGSQL_PORT"), "timeout", os.Getenv("PGSQL_USER"), os.Getenv("PGSQL_PASSWORD")),
+        newTestParameters(host, os.Getenv("PGSQL_PORT"), os.Getenv("PGSQL_DATABASE"), "eof", "eof"),
     } {
-        database, openErr := provider.Open(testRuntime(), params, nil)
+        database, openErr := provider.Open(testRuntime(), parameters, nil)
         if nil != database {
             _ = database.Close()
-            t.Fatalf("expected the refusal for %s/%s", params.Database, params.User)
+            t.Fatalf("expected the refusal for %s/%s", parameters.Database, parameters.User)
         }
 
         if "" == sqlStateOf(openErr) {
@@ -1289,7 +1289,7 @@ func TestOpen_ALiveServerRefusalSpelledAroundAMarkerIsNotFiledAsUnreachable(t *t
         }
 
         if true == errors.Is(openErr, bunorm.ErrDatabaseUnreachable) {
-            t.Fatalf("expected the refusal for %s/%s handed back by name, got it filed as unreachable: %v", params.Database, params.User, openErr)
+            t.Fatalf("expected the refusal for %s/%s handed back by name, got it filed as unreachable: %v", parameters.Database, parameters.User, openErr)
         }
     }
 }
@@ -1318,7 +1318,7 @@ func TestOpenWithRetry_AnAbsentAttemptBudgetTakesTheDefaultBudget(t *testing.T) 
         Retry:   RetryConfig{InitialDelay: bound.Of(time.Millisecond), MaxDelay: bound.Of(2 * time.Millisecond)},
     })
 
-    if _, openErr := provider.Open(testRuntimeUnder(context.Background()), newTestParams("127.0.0.1", "1", "melody", "melody", "melody"), logger); nil == openErr {
+    if _, openErr := provider.Open(testRuntimeUnder(context.Background()), newTestParameters("127.0.0.1", "1", "melody", "melody", "melody"), logger); nil == openErr {
         t.Fatal("expected the open against a refused port to fail")
     }
 
@@ -1364,7 +1364,7 @@ func TestOpen_AnOpenHandedNoLoggerLeavesBunDiagnosticsWhereTheLastRoutingPutThem
 
     _, openErr := provider.Open(
         testRuntimeUnder(context.Background()),
-        newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"),
+        newTestParameters("203.0.113.1", "5432", "melody", "melody", "melody"),
         nil,
     )
     if nil == openErr {
@@ -1397,7 +1397,7 @@ func TestOpen_AnAlreadyCancelledOpenLeavesBunDiagnosticsWhereTheLastRoutingPutTh
 
     _, openErr := NewProvider(ProviderConfig{Retry: singleAttemptRetry}).Open(
         testRuntimeUnder(cancelledContext),
-        newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"),
+        newTestParameters("203.0.113.1", "5432", "melody", "melody", "melody"),
         handed,
     )
     if nil == openErr {
@@ -1443,7 +1443,7 @@ func TestOpenWithRetry_ASingleAttemptDialsOnceAndFilesTheOutageAsUnreachable(t *
         },
     })
 
-    _, openErr := provider.Open(testRuntimeUnder(context.Background()), newTestParams("127.0.0.1", "1", "melody", "melody", "melody"), logger)
+    _, openErr := provider.Open(testRuntimeUnder(context.Background()), newTestParameters("127.0.0.1", "1", "melody", "melody", "melody"), logger)
     if false == errors.Is(openErr, bunorm.ErrDatabaseUnreachable) {
         t.Fatalf("expected the refused port filed as unreachable, got %v", openErr)
     }
@@ -1474,7 +1474,7 @@ func TestProvider_OpenReturnsOnACyclicChainFromAPostBuildHook(t *testing.T) {
     })
 
     assertReturnsOnACyclicChain(t, func() {
-        if _, openErr := provider.Open(testRuntime(), newTestParams("unused", "5432", "db", "user", "password"), nil); nil == openErr {
+        if _, openErr := provider.Open(testRuntime(), newTestParameters("unused", "5432", "db", "user", "password"), nil); nil == openErr {
             t.Error("expected the hook's refusal")
         }
     })
@@ -1515,10 +1515,10 @@ func TestProvider_BothDoorsRefuseARuntimeThatCarriesNoContext(t *testing.T) {
 
     doors := map[string]func(runtimeInstance containercontract.Runtime, logger *capturingProviderLogger) (*bun.DB, error){
         "Open": func(runtimeInstance containercontract.Runtime, logger *capturingProviderLogger) (*bun.DB, error) {
-            return provider.Open(runtimeInstance, newTestParams("127.0.0.1", "1", "melody", "melody", "melody"), logger)
+            return provider.Open(runtimeInstance, newTestParameters("127.0.0.1", "1", "melody", "melody", "melody"), logger)
         },
         "OpenForMigration": func(runtimeInstance containercontract.Runtime, logger *capturingProviderLogger) (*bun.DB, error) {
-            return provider.OpenForMigration(runtimeInstance, newTestParams("127.0.0.1", "1", "melody", "melody", "melody"), logger)
+            return provider.OpenForMigration(runtimeInstance, newTestParameters("127.0.0.1", "1", "melody", "melody", "melody"), logger)
         },
     }
 
@@ -1569,7 +1569,7 @@ func TestOpenForMigration_TheConnectorReceivesTheConnectTimeoutAndTheLiftedDeadl
         Retry: singleAttemptRetry,
     })
 
-    if _, openErr := provider.OpenForMigration(testRuntime(), newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"), &capturingProviderLogger{}); nil == openErr {
+    if _, openErr := provider.OpenForMigration(testRuntime(), newTestParameters("203.0.113.1", "5432", "melody", "melody", "melody"), &capturingProviderLogger{}); nil == openErr {
         t.Fatal("expected the hook's refusal to end the open")
     }
 
@@ -1593,7 +1593,7 @@ func TestOpen_ADoneContextIsRefusedBeforeTheHookRuns(t *testing.T) {
     doneContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    _, openErr := provider.Open(testRuntimeUnder(doneContext), newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"), &capturingProviderLogger{})
+    _, openErr := provider.Open(testRuntimeUnder(doneContext), newTestParameters("203.0.113.1", "5432", "melody", "melody", "melody"), &capturingProviderLogger{})
     if nil == openErr || false == strings.Contains(openErr.Error(), "database open cancelled before the attempt") || false == errors.Is(openErr, context.Canceled) {
         t.Fatalf("expected the refusal before the attempt carrying the cancellation, got %v", openErr)
     }
@@ -1610,7 +1610,7 @@ func TestOpen_TheCancellationRefusalsCarryTheCallersCause(t *testing.T) {
     doneContext, cancelDone := context.WithCancelCause(context.Background())
     cancelDone(callerCause)
 
-    _, refusedErr := NewProvider(ProviderConfig{Retry: singleAttemptRetry}).Open(testRuntimeUnder(doneContext), newTestParams("203.0.113.1", "5432", "melody", "melody", "melody"), &capturingProviderLogger{})
+    _, refusedErr := NewProvider(ProviderConfig{Retry: singleAttemptRetry}).Open(testRuntimeUnder(doneContext), newTestParameters("203.0.113.1", "5432", "melody", "melody", "melody"), &capturingProviderLogger{})
     if false == errors.Is(refusedErr, callerCause) || false == errors.Is(refusedErr, context.Canceled) {
         t.Fatalf("expected the refusal before the attempt to carry the cause and the cancellation, got %v", refusedErr)
     }
@@ -1626,7 +1626,7 @@ func TestOpen_TheCancellationRefusalsCarryTheCallersCause(t *testing.T) {
         cancelBackoff(callerCause)
     }()
 
-    _, backoffErr := provider.Open(testRuntimeUnder(backoffContext), newTestParams("127.0.0.1", "1", "melody_unreachable", "melody", "melody"), &capturingProviderLogger{})
+    _, backoffErr := provider.Open(testRuntimeUnder(backoffContext), newTestParameters("127.0.0.1", "1", "melody_unreachable", "melody", "melody"), &capturingProviderLogger{})
     if false == strings.Contains(fmt.Sprintf("%v", backoffErr), "retry cancelled") || false == errors.Is(backoffErr, callerCause) || false == errors.Is(backoffErr, context.Canceled) {
         t.Fatalf("expected the backoff refusal to carry the cause and the cancellation, got %v", backoffErr)
     }

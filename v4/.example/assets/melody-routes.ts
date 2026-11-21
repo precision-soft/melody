@@ -25,7 +25,7 @@ export interface RouteManifest {
     routes: RouteManifestEntry[];
 }
 
-export type RouteParams = Record<string, string | number | boolean | undefined>;
+export type RouteParameters = Record<string, string | number | boolean | undefined>;
 
 export class RouteGenerator {
     private readonly byName: Map<string, RouteManifestEntry>;
@@ -39,10 +39,10 @@ export class RouteGenerator {
     }
 
     /* path builds the path (and query string) for a named route, substituting `:param`,
-     * `:param?`, `*name` and `*name...` placeholders per segment from params (falling back
-     * to the route's defaults) and appending any leftover params and the explicit query as
+     * `:param?`, `*name` and `*name...` placeholders per segment from parameters (falling back
+     * to the route's defaults) and appending any leftover parameters and the explicit query as
      * query-string parameters. */
-    path(name: string, params: RouteParams = {}, query: RouteParams = {}): string {
+    path(name: string, parameters: RouteParameters = {}, query: RouteParameters = {}): string {
         const entry = this.byName.get(name);
         if (undefined === entry) {
             throw new Error(`unknown route: ${name}`);
@@ -51,7 +51,7 @@ export class RouteGenerator {
         const consumed = new Set<string>();
 
         const lookup = (key: string): string | undefined => {
-            const value = params[key] ?? entry.defaults?.[key];
+            const value = parameters[key] ?? entry.defaults?.[key];
             return undefined === value ? undefined : String(value);
         };
 
@@ -132,7 +132,7 @@ export class RouteGenerator {
         const path = 0 === resultSegments.length ? "/" : `/${resultSegments.join("/")}`;
 
         const search = new URLSearchParams();
-        for (const [key, value] of Object.entries(params)) {
+        for (const [key, value] of Object.entries(parameters)) {
             if (false === consumed.has(key) && undefined !== value) {
                 search.append(key, String(value));
             }

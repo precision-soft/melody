@@ -325,14 +325,14 @@ func acceptsGzip(acceptEncoding string) bool {
         /* a q outside the RFC 7231 qvalue grammar drops the entry, as every negotiating reader in this tree does */
         quality := 1.0
         qualityValid := true
-        for _, rawParam := range parts[1:] {
+        for _, rawParameter := range parts[1:] {
             /* the parameter name is case-insensitive, so a refusal spelled "Q=0" weighs the same as "q=0" */
-            param := strings.ToLower(strings.TrimSpace(rawParam))
-            if false == strings.HasPrefix(param, "q=") {
+            parameter := strings.ToLower(strings.TrimSpace(rawParameter))
+            if false == strings.HasPrefix(parameter, "q=") {
                 continue
             }
 
-            parsedQuality, valid := internal.ParseQualityValue(strings.TrimSpace(param[2:]))
+            parsedQuality, valid := internal.ParseQualityValue(strings.TrimSpace(parameter[2:]))
             if false == valid {
                 qualityValid = false
 

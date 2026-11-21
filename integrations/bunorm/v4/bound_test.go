@@ -114,11 +114,11 @@ func (instance *boundRecordingProvider) record(door string, runtimeInstance cont
     return database, nil
 }
 
-func (instance *boundRecordingProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *boundRecordingProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.record("Open", runtimeInstance)
 }
 
-func (instance *boundRecordingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *boundRecordingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.record("OpenForMigration", runtimeInstance)
 }
 

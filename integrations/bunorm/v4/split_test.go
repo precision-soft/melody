@@ -20,23 +20,23 @@ import (
 /* unreachableSplitProvider fails the way a provider fails on an outage it could not get past: filed under ErrDatabaseUnreachable, the one class the splitter absorbs */
 type unreachableSplitProvider struct{}
 
-func (instance *unreachableSplitProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *unreachableSplitProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return nil, exception.NewError("database connection failed", nil, DatabaseUnreachable(errors.New("replica is down")))
 }
 
-func (instance *unreachableSplitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *unreachableSplitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 /* refusingSplitProvider fails the way a provider refuses by name — a parameter left empty, a password the server refused — or the way a provider that files nothing under the class fails: a plain error, terminal by nature */
 type refusingSplitProvider struct{}
 
-func (instance *refusingSplitProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *refusingSplitProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return nil, errors.New("pgsql database open refused: the user is empty")
 }
 
-func (instance *refusingSplitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *refusingSplitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 func TestReadWriteSplitter_WriterIsPrimaryReaderRoundRobins(t *testing.T) {
@@ -171,12 +171,12 @@ func TestNewReadWriteSplitter_RefusesAnEmptyReplicaName(t *testing.T) {
 
 type noDatabaseSplitProvider struct{}
 
-func (instance *noDatabaseSplitProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *noDatabaseSplitProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return nil, nil
 }
 
-func (instance *noDatabaseSplitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *noDatabaseSplitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 /* a provider answering neither a database nor an error is the wiring mistake the registry refuses by name; folded into the fallback it routed every read of that replica to the primary forever, with no signal that the replica was dead */
@@ -238,12 +238,12 @@ func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderRefused(t *testing.
 /* journaledUnreachableSplitProvider fails as unreachableSplitProvider does after journaling the failure and marking it logged, as the providers' terminal branches do */
 type journaledUnreachableSplitProvider struct{}
 
-func (instance *journaledUnreachableSplitProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *journaledUnreachableSplitProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return nil, exception.MarkLogged(exception.NewError("database connection failed", nil, DatabaseUnreachable(errors.New("primary is down"))))
 }
 
-func (instance *journaledUnreachableSplitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *journaledUnreachableSplitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 /* the double failure over a primary the provider already journaled stays marked logged, so it is not filed a second time; over an unmarked primary failure it stays unmarked */
@@ -282,7 +282,7 @@ type switchableSplitProvider struct {
     openCount int
 }
 
-func (instance *switchableSplitProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *switchableSplitProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.openCount++
     if true == instance.down {
         return nil, exception.NewError("database connection failed", nil, DatabaseUnreachable(errors.New("replica is down")))
@@ -293,8 +293,8 @@ func (instance *switchableSplitProvider) Open(runtimeInstance containercontract.
     return database, nil
 }
 
-func (instance *switchableSplitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *switchableSplitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 /* inside the retry interval an unreachable replica's reads go to the primary without dialling it, so a dead replica does not cost every read a connect timeout; past the interval it is dialled again */
@@ -451,12 +451,12 @@ func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
 
 type cyclicSplitProvider struct{}
 
-func (instance *cyclicSplitProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *cyclicSplitProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return nil, newCyclicChainError()
 }
 
-func (instance *cyclicSplitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *cyclicSplitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 func TestReadWriteSplitter_ReaderReturnsOnACyclicChainFromAProvider(t *testing.T) {
@@ -486,7 +486,7 @@ type stallingSplitProvider struct {
     opens   atomic.Int64
 }
 
-func (instance *stallingSplitProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *stallingSplitProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     if 1 < instance.opens.Add(1) {
         instance.entered <- struct{}{}
         <-instance.stall
@@ -495,8 +495,8 @@ func (instance *stallingSplitProvider) Open(runtimeInstance containercontract.Ru
     return nil, exception.NewError("database connection failed", nil, DatabaseUnreachable(errors.New("replica is down")))
 }
 
-func (instance *stallingSplitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *stallingSplitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 func TestReadWriteSplitter_OneReaderProbesALapsedReplicaWhileTheOthersKeepThePrimary(t *testing.T) {
@@ -567,7 +567,7 @@ type departingCallerReplicaProvider struct {
     entered chan struct{}
 }
 
-func (instance *departingCallerReplicaProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *departingCallerReplicaProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     if 1 < instance.opens.Add(1) {
         database, _ := newCloseRaceDatabase()
 
@@ -580,8 +580,8 @@ func (instance *departingCallerReplicaProvider) Open(runtimeInstance containerco
     return nil, exception.NewError("database connection failed", nil, DatabaseUnreachable(runtimeInstance.Context().Err()))
 }
 
-func (instance *departingCallerReplicaProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *departingCallerReplicaProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 /* a replica open the caller's own context ended answers that refusal: the replica is not remembered unreachable, the primary is not opened in its place, and the next read under a live context dials the replica again */

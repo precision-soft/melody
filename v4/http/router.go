@@ -623,7 +623,7 @@ func (instance *Router) match(method string, path string, host string, scheme st
     }
 
     bestHandler := httpcontract.Handler(nil)
-    var bestParams map[string]string
+    var bestParameters map[string]string
     var bestAttributes map[string]any
 
     allowedMethodsSet := make(map[string]struct{})
@@ -682,7 +682,7 @@ func (instance *Router) match(method string, path string, host string, scheme st
             routeDefinition.priority > bestPriority ||
             (routeDefinition.priority == bestPriority && (0 > bestIndex || index < bestIndex)) {
             bestHandler = routeDefinition.handler
-            bestParams = parameters
+            bestParameters = parameters
             bestAttributes = routeDefinition.attributes
             bestPriority = routeDefinition.priority
             bestIndex = index
@@ -708,7 +708,7 @@ func (instance *Router) match(method string, path string, host string, scheme st
     }
 
     /* the attributes are deep-copied, since the registry's map lives for the process; a pointer or struct inside stays shared */
-    return bestHandler, bestParams, internal.CopyAnyMap(bestAttributes)
+    return bestHandler, bestParameters, internal.CopyAnyMap(bestAttributes)
 }
 
 func (instance *Router) findRouteCandidates(pathSegments []string) []int {

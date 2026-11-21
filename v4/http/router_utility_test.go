@@ -1829,7 +1829,7 @@ func TestWriteResponse_ADeletedSessionIsRecordedAtWarningWithTheRequestCoordinat
         &stubSessionManager{
             saveErr: exception.NewError(
                 "session was deleted and cannot be saved again",
-                map[string]any{"sessionRef": sessionIdLogReference("session-123")},
+                map[string]any{"sessionReference": sessionIdLogReference("session-123")},
                 session.ErrSessionDeleted,
             ),
         },
@@ -1854,10 +1854,14 @@ func TestWriteResponse_ADeletedSessionIsRecordedAtWarningWithTheRequestCoordinat
         t.Fatalf("the raw session id must not reach the log, got %v", record.context["sessionId"])
     }
 
-    for key, expected := range map[string]any{"sessionRef": sessionIdLogReference("session-123"), "method": nethttp.MethodPost, "path": "/account/settings"} {
+    for key, expected := range map[string]any{"sessionReference": sessionIdLogReference("session-123"), "method": nethttp.MethodPost, "path": "/account/settings"} {
         if expected != record.context[key] {
             t.Fatalf("expected %q to be %v, got %v in %v", key, expected, record.context[key], record.context)
         }
+    }
+
+    if _, hasRetiredKey := record.context["sessionRef"]; true == hasRetiredKey {
+        t.Fatalf("expected the reference under sessionReference only, got %v", record.context)
     }
 }
 
@@ -1889,7 +1893,7 @@ func TestWriteResponse_ASaveOutageStaysAtErrorAndNamesTheSessionAndTheRoute(t *t
         t.Fatalf("the raw session id must not reach the log, got %v", record.context["sessionId"])
     }
 
-    for key, expected := range map[string]any{"sessionRef": sessionIdLogReference("session-456"), "method": nethttp.MethodPost, "path": "/account/settings"} {
+    for key, expected := range map[string]any{"sessionReference": sessionIdLogReference("session-456"), "method": nethttp.MethodPost, "path": "/account/settings"} {
         if expected != record.context[key] {
             t.Fatalf("expected %q to be %v, got %v in %v", key, expected, record.context[key], record.context)
         }
@@ -1924,7 +1928,7 @@ func TestWriteResponse_ADeleteOutageStaysAtErrorAndNamesTheSessionAndTheRoute(t 
         t.Fatalf("the raw session id must not reach the log, got %v", record.context["sessionId"])
     }
 
-    for key, expected := range map[string]any{"sessionRef": sessionIdLogReference("session-789"), "method": nethttp.MethodPost, "path": "/account/settings"} {
+    for key, expected := range map[string]any{"sessionReference": sessionIdLogReference("session-789"), "method": nethttp.MethodPost, "path": "/account/settings"} {
         if expected != record.context[key] {
             t.Fatalf("expected %q to be %v, got %v in %v", key, expected, record.context[key], record.context)
         }

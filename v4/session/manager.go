@@ -178,7 +178,7 @@ func (instance *Manager) Session(runtimeInstance containercontract.Runtime, sess
         return nil, exception.NewError(
             "could not load the session",
             map[string]any{
-                "sessionRef": sessionIdLogReference(sessionId),
+                "sessionReference": sessionIdLogReference(sessionId),
             },
             exception.MarkInfrastructureFailure(err),
         )
@@ -248,7 +248,7 @@ func (instance *Manager) RegenerateSession(runtimeInstance containercontract.Run
         return nil, exception.NewError(
             "session id is invalid in regenerate session",
             map[string]any{
-                "sessionRef": sessionIdLogReference(previousId),
+                "sessionReference": sessionIdLogReference(previousId),
             },
             nil,
         )
@@ -262,7 +262,7 @@ func (instance *Manager) RegenerateSession(runtimeInstance containercontract.Run
         return nil, exception.NewError(
             "session id could not be minted in regenerate session",
             map[string]any{
-                "sessionRef": sessionIdLogReference(previousId),
+                "sessionReference": sessionIdLogReference(previousId),
             },
             mintErr,
         )
@@ -332,7 +332,7 @@ func (instance *Manager) SaveSession(runtimeInstance containercontract.Runtime, 
         return exception.NewError(
             "session id is invalid in save session",
             map[string]any{
-                "sessionRef": sessionIdLogReference(sessionId),
+                "sessionReference": sessionIdLogReference(sessionId),
             },
             nil,
         )
@@ -360,7 +360,7 @@ func (instance *Manager) SaveSession(runtimeInstance containercontract.Runtime, 
         return exception.NewError(
             "could not save the session",
             map[string]any{
-                "sessionRef": sessionIdLogReference(sessionId),
+                "sessionReference": sessionIdLogReference(sessionId),
             },
             exception.MarkInfrastructureFailure(saveErr),
         )
@@ -389,7 +389,7 @@ func (instance *Manager) deleteSessionRecordingCause(runtimeInstance containerco
         return exception.NewError(
             "session id is invalid in delete session",
             map[string]any{
-                "sessionRef": sessionIdLogReference(sessionId),
+                "sessionReference": sessionIdLogReference(sessionId),
             },
             nil,
         )
@@ -435,7 +435,7 @@ func (instance *Manager) deleteSessionRecordingCause(runtimeInstance containerco
         return exception.NewError(
             "could not delete the session",
             map[string]any{
-                "sessionRef": sessionIdLogReference(sessionId),
+                "sessionReference": sessionIdLogReference(sessionId),
             },
             exception.MarkInfrastructureFailure(deleteErr),
         )
@@ -455,7 +455,7 @@ func (instance *Manager) buriedIdRefusal(sessionId string, attempt string) error
         return exception.NewError(
             "session was rotated away and cannot be "+attempt,
             map[string]any{
-                "sessionRef": sessionIdLogReference(sessionId),
+                "sessionReference": sessionIdLogReference(sessionId),
             },
             errors.Join(ErrSessionDeleted, ErrSessionRotated),
         )
@@ -464,7 +464,7 @@ func (instance *Manager) buriedIdRefusal(sessionId string, attempt string) error
     return exception.NewError(
         "session was deleted and cannot be "+attempt,
         map[string]any{
-            "sessionRef": sessionIdLogReference(sessionId),
+            "sessionReference": sessionIdLogReference(sessionId),
         },
         ErrSessionDeleted,
     )
@@ -482,7 +482,7 @@ func contextEndedError(ctx context.Context, door string, sessionId string) error
     }
 
     if "" != sessionId {
-        errorContext["sessionRef"] = sessionIdLogReference(sessionId)
+        errorContext["sessionReference"] = sessionIdLogReference(sessionId)
     }
 
     return exception.NewError(

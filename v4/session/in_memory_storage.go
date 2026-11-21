@@ -60,7 +60,7 @@ func NewInMemoryStorage(config InMemoryStorageConfig) *InMemoryStorage {
         clockInstance = clock.NewSystemClock()
     }
 
-    cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
+    cleanupContext, cleanupCancel := context.WithCancel(context.Background())
 
     storage := &InMemoryStorage{
         sessions:        make(map[string]inMemorySessionEntry),
@@ -72,7 +72,7 @@ func NewInMemoryStorage(config InMemoryStorageConfig) *InMemoryStorage {
         clock:           clockInstance,
     }
 
-    go storage.cleanupLoop(cleanupCtx)
+    go storage.cleanupLoop(cleanupContext)
 
     return storage
 }

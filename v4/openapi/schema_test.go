@@ -1453,7 +1453,7 @@ type parametersOnNonParameterizableRequest struct {
     Name  string `json:"name" validate:"notBlank(mode=hard)"`
 }
 
-func TestBuildSchema_ParamsOnNonParameterizableConstraintIsUnsatisfiable(t *testing.T) {
+func TestBuildSchema_ParametersOnNonParameterizableConstraintIsUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
     buildSchema(reflect.TypeOf(parametersOnNonParameterizableRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
@@ -1505,7 +1505,7 @@ type parametersOnNonParameterizableStructRequest struct {
     Plain  parametersOnNonParameterizableRequest  `json:"plain" validate:"email(strict=yes)"`
 }
 
-func TestBuildSchema_ParamsOnNonParameterizableConstraintOnStructIsUnsatisfiable(t *testing.T) {
+func TestBuildSchema_ParametersOnNonParameterizableConstraintOnStructIsUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
     buildSchema(reflect.TypeOf(parametersOnNonParameterizableStructRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
 

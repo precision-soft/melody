@@ -31,12 +31,12 @@ type fakeDatabaseProvider struct {
     database *bun.DB
 }
 
-func (instance *fakeDatabaseProvider) Open(runtimeInstance containercontract.Runtime, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *fakeDatabaseProvider) Open(runtimeInstance containercontract.Runtime, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.database, nil
 }
 
 /* the migration door answers the pool Open answered, which the registry shares by identity */
-func (instance *fakeDatabaseProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *fakeDatabaseProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.database, nil
 }
 

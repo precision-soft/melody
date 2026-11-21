@@ -1983,3 +1983,45 @@ func TestRunHttp_AModulesSessionPolicyGivesWayToTheApplicationsDefault(t *testin
         t.Fatalf("expected the application's default, the refusal, over the module's empty session, got %d", status)
     }
 }
+
+type infoRecordingLogger struct {
+    warningRecordingLogger
+    infos []string
+}
+
+func (instance *infoRecordingLogger) Info(message string, context loggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.infos = append(instance.infos, message)
+}
+
+func TestApplication_TheStartUpRecordSpellsTheEnvironment(t *testing.T) {
+    logger := &infoRecordingLogger{}
+
+    applicationInstance := newSessionBoundTestApplication(t, config.ModeHttp, map[string]string{config.HttpSessionTtlKey: "1h"}, logger)
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if runErr := applicationInstance.runHttp(cancelledContext); nil != runErr {
+        t.Fatalf("unexpected run http error: %v", runErr)
+    }
+
+    expected := "with environment `" + applicationInstance.configuration.Kernel().Environment() + "`"
+
+    logger.mutex.Lock()
+    defer logger.mutex.Unlock()
+
+    for _, message := range logger.infos {
+        if true == strings.HasPrefix(message, "starting http server on ") {
+            if false == strings.HasSuffix(message, expected) {
+                t.Fatalf("expected the start-up record to end with %q, got %q", expected, message)
+            }
+
+            return
+        }
+    }
+
+    t.Fatalf("expected the start-up record, got %v", logger.infos)
+}

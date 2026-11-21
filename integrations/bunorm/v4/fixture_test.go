@@ -110,7 +110,7 @@ type delayedDiagnosticProvider struct {
     resume  chan struct{}
 }
 
-func (instance *delayedDiagnosticProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *delayedDiagnosticProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     RouteDiagnostics(logger)
     close(instance.entered)
     <-instance.resume
@@ -119,14 +119,14 @@ func (instance *delayedDiagnosticProvider) Open(runtimeInstance containercontrac
     return nil, errors.New("delayed open refused")
 }
 
-func (instance *delayedDiagnosticProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *delayedDiagnosticProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 /* routingProvider routes bun's channel with the logger its open receives, as the mysql and pgsql providers do, and answers a stub database */
 type routingProvider struct{}
 
-func (instance *routingProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *routingProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     RouteDiagnostics(logger)
 
     database, _ := newCloseRaceDatabase()
@@ -134,8 +134,8 @@ func (instance *routingProvider) Open(runtimeInstance containercontract.Runtime,
     return database, nil
 }
 
-func (instance *routingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *routingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 /* errorOnlyLogger reports only the error level as enabled, the shape of a logger with a threshold */

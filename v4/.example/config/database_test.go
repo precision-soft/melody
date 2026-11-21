@@ -297,14 +297,14 @@ type recordingProvider struct {
     openedWith []melodyloggingcontract.Logger
 }
 
-func (instance *recordingProvider) Open(runtimeInstance melodycontainercontract.Runtime, params melodybunorm.ConnectionParameters, logger melodyloggingcontract.Logger) (*bun.DB, error) {
+func (instance *recordingProvider) Open(runtimeInstance melodycontainercontract.Runtime, parameters melodybunorm.ConnectionParameters, logger melodyloggingcontract.Logger) (*bun.DB, error) {
     instance.openedWith = append(instance.openedWith, logger)
 
     return newUndialedDatabase(), nil
 }
 
-func (instance *recordingProvider) OpenForMigration(runtimeInstance melodycontainercontract.Runtime, params melodybunorm.ConnectionParameters, logger melodyloggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *recordingProvider) OpenForMigration(runtimeInstance melodycontainercontract.Runtime, parameters melodybunorm.ConnectionParameters, logger melodyloggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 /* databaseServicesOver registers the database services of a module whose registry declares the catalogue and the archive over recording providers, beside a logger service that counts its resolutions; the buffer that logger writes into is returned, so a test reads where a record written through the logger an open receives lands */
@@ -534,14 +534,14 @@ type runtimeRecordingProvider struct {
     openedUnder []context.Context
 }
 
-func (instance *runtimeRecordingProvider) Open(runtimeInstance melodycontainercontract.Runtime, params melodybunorm.ConnectionParameters, logger melodyloggingcontract.Logger) (*bun.DB, error) {
+func (instance *runtimeRecordingProvider) Open(runtimeInstance melodycontainercontract.Runtime, parameters melodybunorm.ConnectionParameters, logger melodyloggingcontract.Logger) (*bun.DB, error) {
     instance.openedUnder = append(instance.openedUnder, runtimeInstance.Context())
 
     return newUndialedDatabase(), nil
 }
 
-func (instance *runtimeRecordingProvider) OpenForMigration(runtimeInstance melodycontainercontract.Runtime, params melodybunorm.ConnectionParameters, logger melodyloggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *runtimeRecordingProvider) OpenForMigration(runtimeInstance melodycontainercontract.Runtime, parameters melodybunorm.ConnectionParameters, logger melodyloggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 /* each handle the module registers is opened under the runtime of the resolution that publishes it: the open's context carries that resolution's deadline */

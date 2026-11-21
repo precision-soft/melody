@@ -28,9 +28,9 @@ type JsonHandlerConfig struct {
     ErrorResponder JsonHandlerErrorResponder
 }
 
-/* JsonHandler binds the request body into Req, validates it and calls handle, reading the body through the door Request.BindJson uses: the configured limit with its 413, the decoder's diagnosis as the refusal's cause, an empty or null body refused. A nil handle is refused at construction. */
-func JsonHandler[Req any](
-    handle func(runtimeInstance containercontract.Runtime, request httpcontract.Request, body Req) (httpcontract.Response, error),
+/* JsonHandler binds the request body into RequestBody, validates it and calls handle, reading the body through the door Request.BindJson uses: the configured limit with its 413, the decoder's diagnosis as the refusal's cause, an empty or null body refused. A nil handle is refused at construction. */
+func JsonHandler[RequestBody any](
+    handle func(runtimeInstance containercontract.Runtime, request httpcontract.Request, body RequestBody) (httpcontract.Response, error),
     config JsonHandlerConfig,
 ) httpcontract.Handler {
     if nil == handle {
@@ -40,7 +40,7 @@ func JsonHandler[Req any](
     }
 
     return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-        var body Req
+        var body RequestBody
 
         if bindErr := bindJsonBody(request, &body); nil != bindErr {
             return jsonHandlerError(config, runtimeInstance, request, bindErr)
@@ -64,7 +64,7 @@ func JsonHandler[Req any](
     }
 }
 
-/* boundBodyIsNil reads every kind a json null can leave nil, reflecting over the typed value; an invalid Value, Req as an unset `any`, reads as nil. */
+/* boundBodyIsNil reads every kind a json null can leave nil, reflecting over the typed value; an invalid Value, RequestBody as an unset `any`, reads as nil. */
 func boundBodyIsNil(body any) bool {
     bodyValue := reflect.ValueOf(body)
 

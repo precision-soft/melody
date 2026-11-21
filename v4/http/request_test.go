@@ -200,9 +200,9 @@ func TestRequest_Input_FallsBackToParameters(t *testing.T) {
 
 func TestRequest_ParametersCopied(t *testing.T) {
     httpRequest := httptest.NewRequest("GET", "/test", nil)
-    originalParams := map[string]string{"id": "1"}
+    originalParameters := map[string]string{"id": "1"}
 
-    request := NewRequest(httpRequest, originalParams, nil, nil)
+    request := NewRequest(httpRequest, originalParameters, nil, nil)
 
     parameters := request.Parameters()
     parameters["id"] = "modified"
@@ -557,9 +557,9 @@ func TestRequest_Input_PrefersThePostBodyOverTheQuery(t *testing.T) {
 }
 
 func TestRequest_Input_PrefersTheQueryOverTheRouteParameters(t *testing.T) {
-    httpRequest := httptest.NewRequest("GET", "/articles/fromParams?id=fromQuery", nil)
+    httpRequest := httptest.NewRequest("GET", "/articles/fromParameters?id=fromQuery", nil)
 
-    request := NewRequest(httpRequest, map[string]string{"id": "fromParams"}, nil, nil)
+    request := NewRequest(httpRequest, map[string]string{"id": "fromParameters"}, nil, nil)
 
     if "fromQuery" != request.Input("id") {
         t.Fatalf("expected the query to win over the route parameters, got %q", request.Input("id"))
@@ -567,11 +567,11 @@ func TestRequest_Input_PrefersTheQueryOverTheRouteParameters(t *testing.T) {
 }
 
 func TestRequest_Input_FallsThroughToTheRouteParametersOnly(t *testing.T) {
-    httpRequest := httptest.NewRequest("GET", "/articles/fromParams", nil)
+    httpRequest := httptest.NewRequest("GET", "/articles/fromParameters", nil)
 
-    request := NewRequest(httpRequest, map[string]string{"id": "fromParams"}, nil, nil)
+    request := NewRequest(httpRequest, map[string]string{"id": "fromParameters"}, nil, nil)
 
-    if "fromParams" != request.Input("id") {
+    if "fromParameters" != request.Input("id") {
         t.Fatalf("expected the route parameter when no other source carries the key, got %q", request.Input("id"))
     }
 }

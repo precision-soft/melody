@@ -463,12 +463,12 @@ func callDoor(
     door melodyhttpcontract.Handler,
     method string,
     path string,
-    routeParams map[string]string,
+    routeParameters map[string]string,
     body string,
 ) (int, string) {
     t.Helper()
 
-    return callDoorBoundedTo(t, runtimeInstance, door, method, path, routeParams, body, 0)
+    return callDoorBoundedTo(t, runtimeInstance, door, method, path, routeParameters, body, 0)
 }
 
 /* callDoorBoundedTo runs a door over a body bounded as the kernel's MELODY_HTTP_MAX_REQUEST_BODY_BYTES bounds it; zero leaves it unbounded */
@@ -478,7 +478,7 @@ func callDoorBoundedTo(
     door melodyhttpcontract.Handler,
     method string,
     path string,
-    routeParams map[string]string,
+    routeParameters map[string]string,
     body string,
     bodyLimit int64,
 ) (int, string) {
@@ -493,7 +493,7 @@ func callDoorBoundedTo(
 
     request := melodyhttp.NewRequest(
         httpRequest,
-        routeParams,
+        routeParameters,
         runtimeInstance,
         melodyhttp.NewRequestContext("user-door-test", time.Now()),
     )

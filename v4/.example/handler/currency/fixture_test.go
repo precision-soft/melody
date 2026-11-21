@@ -159,7 +159,7 @@ func (instance *currencyDoorFixture) call(
     runtimeInstance melodycontainercontract.Runtime,
     method string,
     body string,
-    params map[string]string,
+    parameters map[string]string,
 ) (int, string) {
     t.Helper()
 
@@ -169,7 +169,7 @@ func (instance *currencyDoorFixture) call(
 
     request := melodyhttp.NewRequest(
         httpRequest,
-        params,
+        parameters,
         runtimeInstance,
         melodyhttp.NewRequestContext("currency-door-test", time.Now()),
     )

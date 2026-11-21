@@ -29,14 +29,14 @@ type DescribeConfig struct {
 }
 
 /* DescribeTyped describes the route from its typed request and its success response under status, with what the config adds. */
-func DescribeTyped[Req any, Resp any](registry *Registry, routeName string, status int, config DescribeConfig) *Registry {
+func DescribeTyped[RequestBody any, ResponseBody any](registry *Registry, routeName string, status int, config DescribeConfig) *Registry {
     descriptor := Descriptor{
-        RequestType: TypeOf[Req](),
+        RequestType: TypeOf[RequestBody](),
         Summary:     config.Summary,
         Description: config.Description,
         Tags:        config.Tags,
         Responses: map[int]reflect.Type{
-            status: TypeOf[Resp](),
+            status: TypeOf[ResponseBody](),
         },
     }
 

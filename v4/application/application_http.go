@@ -190,7 +190,7 @@ func (instance *Application) runHttp(
     }
 
     logger.Info(
-        "starting http server on `"+configuration.Http().Address()+"` with env `"+configuration.Kernel().Environment()+"`",
+        "starting http server on `"+configuration.Http().Address()+"` with environment `"+configuration.Kernel().Environment()+"`",
         nil,
     )
 

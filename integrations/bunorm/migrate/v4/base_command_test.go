@@ -25,12 +25,12 @@ import (
 
 type stubProvider struct{}
 
-func (instance *stubProvider) Open(runtimeInstance containercontract.Runtime, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *stubProvider) Open(runtimeInstance containercontract.Runtime, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return nil, errors.New("stub provider open must not be called for an unknown manager")
 }
 
-func (instance *stubProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *stubProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 func TestResolveDatabase_UnknownManagerReturnsErrorInsteadOfPanic(t *testing.T) {
@@ -271,11 +271,11 @@ type migrationCapableDatabaseProvider struct {
     migrationDatabase *bun.DB
 }
 
-func (instance *migrationCapableDatabaseProvider) Open(runtimeInstance containercontract.Runtime, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *migrationCapableDatabaseProvider) Open(runtimeInstance containercontract.Runtime, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.database, nil
 }
 
-func (instance *migrationCapableDatabaseProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *migrationCapableDatabaseProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.migrationDatabase, nil
 }
 
@@ -408,11 +408,11 @@ type migrationCapableTestProvider struct {
     migrationOpens    int
 }
 
-func (instance *migrationCapableTestProvider) Open(runtimeInstance containercontract.Runtime, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *migrationCapableTestProvider) Open(runtimeInstance containercontract.Runtime, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.ordinaryDatabase, nil
 }
 
-func (instance *migrationCapableTestProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *migrationCapableTestProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.migrationOpens = instance.migrationOpens + 1
 
     return instance.migrationDatabase, nil

@@ -51,7 +51,7 @@ type fakeProvider struct {
     openCount int
 }
 
-func (instance *fakeProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *fakeProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.openCount = instance.openCount + 1
 
     /* a real stub database: the registry refuses a provider answering neither a database nor an error */
@@ -60,8 +60,8 @@ func (instance *fakeProvider) Open(runtimeInstance containercontract.Runtime, pa
     return database, nil
 }
 
-func (instance *fakeProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *fakeProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 type blockingProvider struct {
@@ -69,7 +69,7 @@ type blockingProvider struct {
     releaseOpen chan struct{}
 }
 
-func (instance *blockingProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *blockingProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     close(instance.openStarted)
     <-instance.releaseOpen
 
@@ -79,8 +79,8 @@ func (instance *blockingProvider) Open(runtimeInstance containercontract.Runtime
     return database, nil
 }
 
-func (instance *blockingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *blockingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 type panickingProvider struct {
@@ -89,7 +89,7 @@ type panickingProvider struct {
     startOnce   sync.Once
 }
 
-func (instance *panickingProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *panickingProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.startOnce.Do(
         func() {
             close(instance.openStarted)
@@ -100,8 +100,8 @@ func (instance *panickingProvider) Open(runtimeInstance containercontract.Runtim
     panic("bunorm provider open exploded")
 }
 
-func (instance *panickingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *panickingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 func TestNewManagerRegistry_ErrorsWhenLoggerIsNil(t *testing.T) {
@@ -559,15 +559,15 @@ type closeRaceProvider struct {
     releaseOpen chan struct{}
 }
 
-func (instance *closeRaceProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *closeRaceProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     close(instance.openStarted)
     <-instance.releaseOpen
 
     return instance.database, nil
 }
 
-func (instance *closeRaceProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *closeRaceProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 var (
@@ -679,11 +679,11 @@ type migrationCapableProvider struct {
     migrationOpenCount int
 }
 
-func (instance *migrationCapableProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *migrationCapableProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.ordinaryDatabase, nil
 }
 
-func (instance *migrationCapableProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *migrationCapableProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.migrationOpenCount = instance.migrationOpenCount + 1
 
     return instance.migrationDatabase, nil
@@ -697,11 +697,11 @@ type migrationContextRecordingProvider struct {
     migrationDatabase *bun.DB
 }
 
-func (instance *migrationContextRecordingProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *migrationContextRecordingProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return nil, errors.New("the ordinary open must not run for a migration database")
 }
 
-func (instance *migrationContextRecordingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *migrationContextRecordingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.observed = runtimeInstance.Context()
 
     return instance.migrationDatabase, nil
@@ -818,11 +818,11 @@ type sharedPoolProvider struct {
     database *bun.DB
 }
 
-func (instance *sharedPoolProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *sharedPoolProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.database, nil
 }
 
-func (instance *sharedPoolProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *sharedPoolProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.database, nil
 }
 
@@ -944,14 +944,14 @@ type nilPairProvider struct {
     openCount int
 }
 
-func (instance *nilPairProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *nilPairProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.openCount = instance.openCount + 1
 
     return nil, nil
 }
 
-func (instance *nilPairProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *nilPairProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 func TestManagerRegistry_RefusesProviderReturningNeitherDatabaseNorError(t *testing.T) {
@@ -991,12 +991,12 @@ type databaseBesideErrorProvider struct {
     openErr  error
 }
 
-func (instance *databaseBesideErrorProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *databaseBesideErrorProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.database, instance.openErr
 }
 
-func (instance *databaseBesideErrorProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *databaseBesideErrorProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 func TestManagerRegistry_ClosesTheDatabaseAProviderReturnsBesideAnError(t *testing.T) {
@@ -1052,12 +1052,12 @@ type pinnedDatabaseProvider struct {
     database *bun.DB
 }
 
-func (instance *pinnedDatabaseProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *pinnedDatabaseProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.database, nil
 }
 
-func (instance *pinnedDatabaseProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *pinnedDatabaseProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 func TestManagerRegistry_CloseNamesEveryDatabaseThatFailedToClose(t *testing.T) {
@@ -1139,13 +1139,13 @@ type configurableMigrationProvider struct {
     releaseOpen       chan struct{}
 }
 
-func (instance *configurableMigrationProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *configurableMigrationProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     database, _ := newCloseRaceDatabase()
 
     return database, nil
 }
 
-func (instance *configurableMigrationProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *configurableMigrationProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     if nil != instance.openStarted {
         close(instance.openStarted)
         <-instance.releaseOpen
@@ -1313,12 +1313,12 @@ type erroringProvider struct {
     openErr error
 }
 
-func (instance *erroringProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *erroringProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return nil, instance.openErr
 }
 
-func (instance *erroringProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *erroringProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 func TestManagerRegistry_MigrationDatabasePropagatesTheOpenFailure(t *testing.T) {
@@ -1400,13 +1400,13 @@ type contextRecordingProvider struct {
     sentinel error
 }
 
-func (instance *contextRecordingProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *contextRecordingProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.observed = runtimeInstance.Context()
 
     return nil, instance.sentinel
 }
 
-func (instance *contextRecordingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *contextRecordingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return nil, errors.New("the migration door must not run for a manager")
 }
 
@@ -1489,7 +1489,7 @@ type idiomaticPanickingProvider struct {
     panicValue  any
 }
 
-func (instance *idiomaticPanickingProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *idiomaticPanickingProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.startOnce.Do(
         func() {
             close(instance.openStarted)
@@ -1500,8 +1500,8 @@ func (instance *idiomaticPanickingProvider) Open(runtimeInstance containercontra
     panic(instance.panicValue)
 }
 
-func (instance *idiomaticPanickingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *idiomaticPanickingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 /* the coalesced waiter receives the same diagnosis the re-raised panic carries to its own boundary: the panic value as the cause and the stack of the goroutine that raised it. Stringified into the context alone, the waiter's error named the definition and the bare message and nothing else — the same failure told two ways, decided only by which goroutine the caller happened to be on. */
@@ -1814,12 +1814,12 @@ type fixedDatabaseProvider struct {
     database *bun.DB
 }
 
-func (instance *fixedDatabaseProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *fixedDatabaseProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return instance.database, nil
 }
 
-func (instance *fixedDatabaseProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *fixedDatabaseProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 func TestManagerRegistry_CloseRefusesAnotherCallerWhileAPoolIsStillTearingDown(t *testing.T) {
@@ -1913,18 +1913,18 @@ func TestNewManagerRegistry_AConstructionRefusalNamesTheDefinitionItIsAbout(t *t
 
 func TestNewManagerRegistry_RefusesAnEmptyHostOrDatabaseNamingTheFieldAndTheDefinition(t *testing.T) {
     for _, testCase := range []struct {
-        params   ConnectionParameters
+        parameters   ConnectionParameters
         sentinel error
         field    string
     }{
-        {params: ConnectionParameters{Database: "melody"}, sentinel: ErrConnectionHostIsRequired, field: "ProviderDefinition.Parameters.Host"},
-        {params: ConnectionParameters{Host: "127.0.0.1"}, sentinel: ErrConnectionDatabaseIsRequired, field: "ProviderDefinition.Parameters.Database"},
+        {parameters: ConnectionParameters{Database: "melody"}, sentinel: ErrConnectionHostIsRequired, field: "ProviderDefinition.Parameters.Host"},
+        {parameters: ConnectionParameters{Host: "127.0.0.1"}, sentinel: ErrConnectionDatabaseIsRequired, field: "ProviderDefinition.Parameters.Database"},
     } {
         _, refusalErr := NewManagerRegistry(
             &fakeLogger{},
             []ProviderDefinition{
                 ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
-                ProviderDefinition{Name: "analytics", Provider: &fakeProvider{}, Parameters: testCase.params},
+                ProviderDefinition{Name: "analytics", Provider: &fakeProvider{}, Parameters: testCase.parameters},
             },
         )
         assertConstructionRefusalNames(t, refusalErr, testCase.sentinel, 1, "analytics")
@@ -1962,7 +1962,7 @@ type goexitProvider struct {
     startOnce   sync.Once
 }
 
-func (instance *goexitProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *goexitProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.startOnce.Do(
         func() {
             close(instance.openStarted)
@@ -1977,8 +1977,8 @@ func (instance *goexitProvider) Open(runtimeInstance containercontract.Runtime, 
     return nil, nil
 }
 
-func (instance *goexitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *goexitProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 func TestManagerRegistry_AProviderThatExitsItsGoroutineIsNotReportedAsAPanic(t *testing.T) {
@@ -2048,7 +2048,7 @@ type errorBesideAPanickingCloseProvider struct {
     startOnce   sync.Once
 }
 
-func (instance *errorBesideAPanickingCloseProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *errorBesideAPanickingCloseProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.startOnce.Do(
         func() {
             close(instance.openStarted)
@@ -2061,8 +2061,8 @@ func (instance *errorBesideAPanickingCloseProvider) Open(runtimeInstance contain
     return instance.database, errors.New("the provider refused the dial")
 }
 
-func (instance *errorBesideAPanickingCloseProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *errorBesideAPanickingCloseProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 type panickingCloseConnector struct{}
@@ -2417,7 +2417,7 @@ type loggerRecordingProvider struct {
     loggers []loggingcontract.Logger
 }
 
-func (instance *loggerRecordingProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *loggerRecordingProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.mutex.Lock()
     instance.loggers = append(instance.loggers, logger)
     instance.mutex.Unlock()
@@ -2427,8 +2427,8 @@ func (instance *loggerRecordingProvider) Open(runtimeInstance containercontract.
     return database, nil
 }
 
-func (instance *loggerRecordingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *loggerRecordingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 func (instance *loggerRecordingProvider) received() []loggingcontract.Logger {
@@ -2649,7 +2649,7 @@ type contextWatchingProvider struct {
     endedBy error
 }
 
-func (instance *contextWatchingProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *contextWatchingProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     ctx := runtimeInstance.Context()
 
     instance.once.Do(func() {
@@ -2662,8 +2662,8 @@ func (instance *contextWatchingProvider) Open(runtimeInstance containercontract.
     return nil, ctx.Err()
 }
 
-func (instance *contextWatchingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *contextWatchingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 /* the registry's close signal ends an open still in flight, even under a caller whose own context never ends: an open left to itself would go on retrying after the teardown, each attempt routing bun's diagnostics back onto the logger the teardown handed back, so the close has nothing to abandon */
@@ -2726,7 +2726,7 @@ type ownRefusalAfterCloseProvider struct {
 
 var errProviderOwnRefusal = errors.New("password authentication failed for user probe")
 
-func (instance *ownRefusalAfterCloseProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *ownRefusalAfterCloseProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.once.Do(func() {
         close(instance.entered)
     })
@@ -2736,8 +2736,8 @@ func (instance *ownRefusalAfterCloseProvider) Open(runtimeInstance containercont
     return nil, errProviderOwnRefusal
 }
 
-func (instance *ownRefusalAfterCloseProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *ownRefusalAfterCloseProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 func TestManagerRegistry_AnOpenRefusedOnTheProvidersOwnGroundsAfterTheCloseKeepsThatRefusal(t *testing.T) {
@@ -2988,14 +2988,14 @@ type journalingContextWatchingProvider struct {
     contextWatchingProvider
 }
 
-func (instance *journalingContextWatchingProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    _, openErr := instance.contextWatchingProvider.Open(runtimeInstance, params, logger)
+func (instance *journalingContextWatchingProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    _, openErr := instance.contextWatchingProvider.Open(runtimeInstance, parameters, logger)
 
     return nil, exception.MarkLogged(exception.NewError("database open cancelled", nil, openErr))
 }
 
-func (instance *journalingContextWatchingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *journalingContextWatchingProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 /* the registry's refusal over an open the provider already journaled stays marked logged, so the kernel or the console does not file it a second time; over an unmarked failure the refusal stays unmarked */
@@ -3123,7 +3123,7 @@ type cyclicRefusalAfterCloseProvider struct {
     once    sync.Once
 }
 
-func (instance *cyclicRefusalAfterCloseProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *cyclicRefusalAfterCloseProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.once.Do(func() {
         close(instance.entered)
     })
@@ -3133,8 +3133,8 @@ func (instance *cyclicRefusalAfterCloseProvider) Open(runtimeInstance containerc
     return nil, newCyclicChainError()
 }
 
-func (instance *cyclicRefusalAfterCloseProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *cyclicRefusalAfterCloseProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 func TestManagerRegistry_AnOpenRefusedOnACyclicChainAfterTheCloseAnswersItsWaiter(t *testing.T) {
@@ -3305,7 +3305,7 @@ type racingMigrationProvider struct {
     databases chan *bun.DB
 }
 
-func (instance *racingMigrationProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *racingMigrationProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.arrived.Done()
     instance.arrived.Wait()
 
@@ -3448,7 +3448,7 @@ func newGatedProvider() *gatedProvider {
     return &gatedProvider{entered: make(chan struct{}), release: make(chan struct{})}
 }
 
-func (instance *gatedProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *gatedProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     if 1 < instance.opens.Add(1) {
         database, _ := newCloseRaceDatabase()
 
@@ -3476,8 +3476,8 @@ func (instance *gatedProvider) Open(runtimeInstance containercontract.Runtime, p
     return database, nil
 }
 
-func (instance *gatedProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.Open(runtimeInstance, params, logger)
+func (instance *gatedProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.Open(runtimeInstance, parameters, logger)
 }
 
 func newGatedRegistry(t *testing.T, provider Provider) *ManagerRegistry {
@@ -3660,11 +3660,11 @@ type countingMigrationProvider struct {
     migrationOpens int
 }
 
-func (instance *countingMigrationProvider) Open(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *countingMigrationProvider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return nil, errors.New("the ordinary open must not run for a migration database")
 }
 
-func (instance *countingMigrationProvider) OpenForMigration(runtimeInstance containercontract.Runtime, params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *countingMigrationProvider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.migrationOpens = instance.migrationOpens + 1
 
     database, _ := newCloseRaceDatabase()

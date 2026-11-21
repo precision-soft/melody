@@ -24,7 +24,7 @@ const routes = new RouteGenerator(manifestJson as RouteManifest);
 /* /users/api/read/42/ */
 const userPath = routes.path("example.users.api.read", {id: 42});
 
-/* /users/api/read/42/?tab=orders — leftover params become query string */
+/* /users/api/read/42/?tab=orders — leftover parameters become query string */
 const userOrdersPath = routes.path("example.users.api.read", {id: 42, tab: "orders"});
 
 /* guard before generating, e.g. for optionally-exposed routes */

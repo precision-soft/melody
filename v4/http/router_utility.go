@@ -752,7 +752,7 @@ func logSessionPersistenceEvent(
 
     if "" != sessionId {
         /* the id is a live bearer credential, so only a one-way reference is logged */
-        recordContext["sessionRef"] = sessionIdLogReference(sessionId)
+        recordContext["sessionReference"] = sessionIdLogReference(sessionId)
     }
 
     if false == internal.IsNilInterface(request) && nil != request.HttpRequest() {

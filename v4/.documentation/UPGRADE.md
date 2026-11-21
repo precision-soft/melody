@@ -288,6 +288,22 @@ A lock store closed by the teardown while the work still winds down now reads as
 
 **Remedy.** `GeneratePath(name, httpcontract.PathConfig{Parameters: parameters})`; where a relative path with a query is wanted, `GeneratePath(name, httpcontract.PathConfig{Parameters: parameters, Query: url.Values{"page": {"2"}}})` in place of `GenerateUrl`. Set `MELODY_HTTP_PUBLIC_URL` or `ApplicationConfig.HttpPublicUrl` to the url the application is served under before calling `GenerateUrl`.
 
+### Logs: the session reference is `sessionReference`
+
+**What changed.** The log and error context key that carries the digest of a session id, written by the session manager, the request's session reader and the session persistence records, is `sessionReference`, where it was `sessionRef`; the value is unchanged and no record carries both keys. The http start-up record reads "starting http server on `…` with environment `…`".
+
+**Symptom.** Nothing fails: a dashboard, an alert or a log query keyed on `sessionRef`, or matching the start-up text "with env", stops matching.
+
+**Remedy.** Re-key the query on `sessionReference` and match "with environment".
+
+### Http, openapi: the type parameters are `RequestBody` and `ResponseBody`
+
+**What changed.** The type parameter of [`JsonHandler`](../http/typed_handler.go) is `RequestBody` and those of [`DescribeTyped`](../openapi/describe_typed.go) are `RequestBody` and `ResponseBody`; `NewRequest` names its route parameter map `routeParameters`. The example's frontend helper `melody-routes.ts` exports `RouteParameters` and reads `data-route-parameters`.
+
+**Symptom.** None for Go code: a type parameter's name is not part of a call. A frontend that vendored the helper and imports `RouteParams`, or writes `data-route-params`, no longer type checks or is no longer read.
+
+**Remedy.** Import `RouteParameters` and write `data-route-parameters` when the helper is vendored again.
+
 ### Cors: `AllowOrigin` receives the request
 
 **What changed.** [`cors.Config`](../http/cors/service.go)'s origin function is `AllowOrigin func(request httpcontract.Request, origin string) bool`, where it was `AllowOriginFunc func(origin string) bool`, and `Service.OriginAllowed` takes the request first: `OriginAllowed(request, origin)`. The request's `RuntimeInstance()` reaches the context and the container, so a per-tenant decision reads its store through it; a lookup the function cannot make answers false, refusing the origin. A nil request handed to `OriginAllowed` while a function is configured panics naming `cors.Service.OriginAllowed`.
@@ -1148,7 +1164,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 ### Http: `JsonHandler` takes a configuration struct
 
-**What changed.** [`JsonHandler`](../http/typed_handler.go)`[Req](handle, JsonHandlerConfig)` takes the struct last, `ErrorResponder` its one field, nil leaving the refusals to the framework. `JsonHandlerOption` and `WithJsonHandlerErrorResponder` are removed.
+**What changed.** [`JsonHandler`](../http/typed_handler.go)`[RequestBody](handle, JsonHandlerConfig)` takes the struct last, `ErrorResponder` its one field, nil leaving the refusals to the framework. `JsonHandlerOption` and `WithJsonHandlerErrorResponder` are removed.
 
 **Symptom.** `JsonHandler(handle)` and `JsonHandler(handle, WithJsonHandlerErrorResponder(responder))` no longer compile.
 
@@ -1534,9 +1550,9 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **What changed.** [`DescribeTyped`](../openapi/describe_typed.go) takes a `DescribeConfig{Summary, Description, Tags, Responses}` after the status, the zero value adding nothing; `Response[T](status)` builds a `ResponseDescription`, an entry of `Responses`. `DescribeOption`, `WithSummary`, `WithDescription`, `WithTags` and `WithResponse` are removed.
 
-**Symptom.** `DescribeTyped[Req, Resp](registry, name, 201, openapi.WithSummary(...), openapi.WithTags(...))` no longer compiles.
+**Symptom.** `DescribeTyped[RequestBody, ResponseBody](registry, name, 201, openapi.WithSummary(...), openapi.WithTags(...))` no longer compiles.
 
-**Remedy.** `DescribeTyped[Req, Resp](registry, name, 201, openapi.DescribeConfig{Summary: "...", Tags: []string{"..."}, Responses: []openapi.ResponseDescription{openapi.Response[NotFound](404)}})`.
+**Remedy.** `DescribeTyped[RequestBody, ResponseBody](registry, name, 201, openapi.DescribeConfig{Summary: "...", Tags: []string{"..."}, Responses: []openapi.ResponseDescription{openapi.Response[NotFound](404)}})`.
 
 ### Storage: the local storage declares its temp sweep in one struct
 
@@ -3172,7 +3188,7 @@ See [`package/SESSION.md`](./package/SESSION.md) for what a rotation has to guar
 
 ### Session: `RegenerateSession` returns a failed id probe instead of panicking
 
-**What changed.** [`Manager.RegenerateSession`](../session/manager.go) returns a storage failure met while probing the fresh id as an error naming the door, with `sessionRef` and the failure as its cause, where it panicked with the raw failure. The fresh id is minted before the previous entry is removed, so the session in use stays intact. `NewSession` answers the same failure as its error, marked; see the section "Session: `Manager.Session` and `NewSession` answer an error".
+**What changed.** [`Manager.RegenerateSession`](../session/manager.go) returns a storage failure met while probing the fresh id as an error naming the door, with `sessionReference` and the failure as its cause, where it panicked with the raw failure. The fresh id is minted before the previous entry is removed, so the session in use stays intact. `NewSession` answers the same failure as its error, marked; see the section "Session: `Manager.Session` and `NewSession` answer an error".
 
 **Symptom.** A storage outage during a rotation surfaces as the error `RegenerateSession` (and `http.RegenerateRequestSession`) returns, not as a panic a recovery caught.
 
@@ -3647,7 +3663,7 @@ grammar is refused rather than surviving as literal text — nobody types `${...
 
 ### Http: the end of a session is a warning, not a storage outage
 
-**What changed.** When another request ends a session while this one is running, the response path records it at **warning** under its own name. The two genuine failures on that path — a save that could not land and a delete that could not land — keep the error level. All of them now carry a one-way reference to the session id (`sessionRef`, never the id itself), the request method and the path.
+**What changed.** When another request ends a session while this one is running, the response path records it at **warning** under its own name. The two genuine failures on that path — a save that could not land and a delete that could not land — keep the error level. All of them now carry a one-way reference to the session id (`sessionReference`, never the id itself), the request method and the path.
 
 **Symptom.** `session was deleted while the request was in flight` moves from `error` to `warning`. An alert counting session errors will see its volume drop, by exactly the traffic that was never a failure: a user logging out in one tab produced one of these per concurrent request in the others.
 

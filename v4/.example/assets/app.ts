@@ -9,7 +9,7 @@
 
 import qrcode from "qrcode-generator";
 
-import {RouteGenerator, RouteManifest, RouteParams} from "./melody-routes";
+import {RouteGenerator, RouteManifest, RouteParameters} from "./melody-routes";
 
 /* jQuery is loaded separately by the pages and is not bundled here. */
 declare const $: any;
@@ -33,7 +33,7 @@ const routeGenerator = new RouteGenerator(
     window.melodyRoutes ?? {routes: []},
 );
 
-const route = (routeName: string, parameters?: RouteParams): string => {
+const route = (routeName: string, parameters?: RouteParameters): string => {
     return routeGenerator.path(String(routeName ?? ""), parameters ?? {});
 };
 
@@ -144,19 +144,19 @@ const resolveDataRoutes = (): void => {
             return;
         }
 
-        const paramsJsonString = String(node.attr("data-route-params") ?? "").trim();
-        let params: RouteParams = {};
+        const parametersJsonString = String(node.attr("data-route-parameters") ?? "").trim();
+        let parameters: RouteParameters = {};
 
-        if ("" !== paramsJsonString) {
+        if ("" !== parametersJsonString) {
             try {
-                params = JSON.parse(paramsJsonString);
+                parameters = JSON.parse(parametersJsonString);
             } catch (err) {
-                params = {};
+                parameters = {};
             }
         }
 
         try {
-            const url = route(routeName, params);
+            const url = route(routeName, parameters);
 
             if (true === node.is("a")) {
                 node.attr("href", url);

@@ -351,8 +351,12 @@ func TestRequestSession_EmptyOnOutageNamesTheSessionTheCookiePointsAt(t *testing
             t.Fatalf("expected one warning, got %d", len(logger.warningContexts))
         }
 
-        sessionRef, named := logger.warningContexts[0]["sessionRef"]
-        if true == cookiePresent && (false == named || sessionIdLogReference(sessionOutageTestCookieValue) != sessionRef) {
+        sessionReference, named := logger.warningContexts[0]["sessionReference"]
+        if _, hasRetiredKey := logger.warningContexts[0]["sessionRef"]; true == hasRetiredKey {
+            t.Fatalf("expected the reference under sessionReference only, got %v", logger.warningContexts[0])
+        }
+
+        if true == cookiePresent && (false == named || sessionIdLogReference(sessionOutageTestCookieValue) != sessionReference) {
             t.Fatalf("expected the warning to name the cookie's session, got %v", logger.warningContexts[0])
         }
 

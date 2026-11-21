@@ -25,7 +25,7 @@ const requestAttributeSession = "_session"
 
 func NewRequest(
     httpRequest *nethttp.Request,
-    routeParams map[string]string,
+    routeParameters map[string]string,
     runtimeInstance containercontract.Runtime,
     requestContext httpcontract.RequestContext,
 ) *Request {
@@ -35,8 +35,8 @@ func NewRequest(
         )
     }
 
-    if nil == routeParams {
-        routeParams = map[string]string{}
+    if nil == routeParameters {
+        routeParameters = map[string]string{}
     }
 
     queryBag := bag.NewParameterBagFromValues(httpRequest.URL.Query())
@@ -93,7 +93,7 @@ func NewRequest(
 
     return &Request{
         httpRequest:     httpRequest,
-        parameters:      routeParams,
+        parameters:      routeParameters,
         query:           queryBag,
         post:            postBag,
         attributes:      attributesBag,

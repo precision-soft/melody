@@ -197,7 +197,7 @@ func (instance *requestSession) sessionReferenceContext() exceptioncontract.Cont
         return nil
     }
 
-    return exceptioncontract.Context{"sessionRef": sessionIdLogReference(instance.cookieValue)}
+    return exceptioncontract.Context{"sessionReference": sessionIdLogReference(instance.cookieValue)}
 }
 
 func (instance *requestSession) loadedSession() sessioncontract.Session {
