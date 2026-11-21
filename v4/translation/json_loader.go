@@ -1,6 +1,7 @@
 package translation
 
 import (
+    "context"
     "encoding/json"
     "os"
     "path/filepath"
@@ -21,7 +22,16 @@ type JsonDirectoryLoader struct {
     directory string
 }
 
-func (instance *JsonDirectoryLoader) Load() ([]translationcontract.Catalog, error) {
+/* Load reads every <domain>.<locale>.json of the directory under ctx, which is judged before the directory is read and before each file, so a done context answers its error and no catalog. */
+func (instance *JsonDirectoryLoader) Load(ctx context.Context) ([]translationcontract.Catalog, error) {
+    if nil == ctx {
+        return nil, exception.NewError("the load context is nil", map[string]any{"door": "JsonDirectoryLoader.Load", "directory": instance.directory}, nil)
+    }
+
+    if contextErr := instance.refuseDoneContext(ctx); nil != contextErr {
+        return nil, contextErr
+    }
+
     entries, readErr := os.ReadDir(instance.directory)
     if nil != readErr {
         return nil, exception.NewError(
@@ -46,12 +56,16 @@ func (instance *JsonDirectoryLoader) Load() ([]translationcontract.Catalog, erro
 
         domain, locale, ok := parseCatalogFileName(name)
         if false == ok {
-            /* a hard error, not a skip: a file not named <domain>.<locale>.json is almost always a typo, and skipping it would leave Trans answering raw message ids with nothing pointing at the file */
+            /* a hard error, not a skip: a file not named <domain>.<locale>.json is almost always a typo, and skipping it would leave Translate answering raw message ids with nothing pointing at the file */
             return nil, exception.NewError(
                 "translation file name does not match <domain>.<locale>.json",
                 map[string]any{"file": name, "directory": instance.directory},
                 nil,
             )
+        }
+
+        if contextErr := instance.refuseDoneContext(ctx); nil != contextErr {
+            return nil, contextErr
         }
 
         payload, fileErr := os.ReadFile(filepath.Join(instance.directory, name))
@@ -142,3 +156,15 @@ func parseCatalogFileName(name string) (string, string, bool) {
 }
 
 var _ translationcontract.Loader = (*JsonDirectoryLoader)(nil)
+
+func (instance *JsonDirectoryLoader) refuseDoneContext(ctx context.Context) error {
+    if contextErr := ctx.Err(); nil != contextErr {
+        return exception.NewError(
+            "the translations load was cancelled",
+            map[string]any{"directory": instance.directory},
+            contextErr,
+        )
+    }
+
+    return nil
+}

@@ -229,7 +229,7 @@ func parseSelectors(style []rune) map[string][]rune {
     return selectors
 }
 
-/* ValidatePattern reports the first select or plural of a message pattern whose style is not keyword-and-block pairs ending with an other block, with its rune offset and the reason; nil when every select and plural is keyword-and-block pairs with an other block and every apostrophe before # in a plural block is '#' or ''#. A select or plural nested deeper than the 32 levels Trans renders, the level whose blocks it would write as raw text, is reported at its own offset. Inside a plural block an apostrophe followed by # that no apostrophe closes is reported at its offset, since '#' is the quoted literal there. A lone brace in plain text and an unknown argument type are not refused: they render visibly. */
+/* ValidatePattern reports the first select or plural of a message pattern whose style is not keyword-and-block pairs ending with an other block, with its rune offset and the reason; nil when every select and plural is keyword-and-block pairs with an other block and every apostrophe before # in a plural block is '#' or ''#. A select or plural nested deeper than the 32 levels Translate renders, the level whose blocks it would write as raw text, is reported at its own offset. Inside a plural block an apostrophe followed by # that no apostrophe closes is reported at its offset, since '#' is the quoted literal there. A lone brace in plain text and an unknown argument type are not refused: they render visibly. */
 func ValidatePattern(pattern string) error {
     defect := findPatternDefect([]rune(pattern), 0)
     if nil == defect {

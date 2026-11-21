@@ -157,7 +157,7 @@ func TestValidatePattern_RefusesASelectOrPluralThatIsNotKeywordAndBlockPairs(t *
     }
 }
 
-func TestValidatePattern_AdmitsWhatTransRendersWhole(t *testing.T) {
+func TestValidatePattern_AdmitsWhatTranslateRendersWhole(t *testing.T) {
     patterns := []string{
         "plain text",
         "Hello, {name}!",
@@ -180,7 +180,7 @@ func TestValidatePattern_AdmitsWhatTransRendersWhole(t *testing.T) {
 }
 
 /* the bound is the renderer's: 32 nested selects render whole, the 33rd's blocks render as raw text, so the validator refuses that one at its own offset */
-func TestValidatePattern_RefusesTheSelectNestedPastTheLevelsTransRenders(t *testing.T) {
+func TestValidatePattern_RefusesTheSelectNestedPastTheLevelsTranslateRenders(t *testing.T) {
     nested := func(levels int) string {
         return strings.Repeat("{g, select, other {", levels) + "{g}" + strings.Repeat("}}", levels)
     }
@@ -214,16 +214,19 @@ func TestValidatePattern_RefusesTheSelectNestedPastTheLevelsTransRenders(t *test
     }
 }
 
-/* a catalog of its own is not validated by Trans, which has no error to return: its malformed select renders leniently */
-func TestTrans_ACustomCatalogsMalformedPatternStillRenders(t *testing.T) {
-    manager := NewManager([]translationcontract.Catalog{unvalidatedCatalog{locale: "en", message: "{g, select, male {he} female other {they}}"}}, "en", nil)
+func TestTranslate_ACustomCatalogsMalformedPatternIsAnError(t *testing.T) {
+    manager := NewManager([]translationcontract.Catalog{unvalidatedCatalog{locale: "en", message: "{g, select, male {he} female other {they}}"}}, ManagerConfig{DefaultLocale: "en"})
 
-    if rendered := manager.Trans("pronoun", map[string]any{"g": "male"}, "messages", "en"); "he" != rendered {
-        t.Fatalf("expected the selector before the defect rendered, got %q", rendered)
-    }
+    for _, gender := range []string{"male", "female"} {
+        rendered, translateErr := manager.Translate("pronoun", translationcontract.TranslateConfig{Parameters: map[string]any{"g": gender}, Locale: "en"})
+        if "" != rendered || nil == translateErr {
+            t.Fatalf("expected an empty message and an error for %q, got %q, %v", gender, rendered, translateErr)
+        }
 
-    if rendered := manager.Trans("pronoun", map[string]any{"g": "female"}, "messages", "en"); "" != rendered {
-        t.Fatalf("expected the lenient rendering kept, got %q", rendered)
+        context := exception.FromError(translateErr).Context()
+        if "pronoun" != context["messageId"] || "en" != context["locale"] || DefaultDomain != context["domain"] || nil == context["offset"] || nil == context["reason"] {
+            t.Fatalf("expected the error to name the message, the locale, the domain, the offset and the reason, got %v", context)
+        }
     }
 }
 

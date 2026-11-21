@@ -1,6 +1,10 @@
 package contract
 
-/* Catalog serves the patterns Trans renders; a catalog of its own validates what it holds with translation.ValidatePattern, as MapCatalog and the json loader do, since Trans renders a malformed select or plural without an error, often as an empty string. */
+import (
+    "context"
+)
+
+/* Catalog serves the patterns Translate renders; a catalog of its own validates what it holds with translation.ValidatePattern, as MapCatalog and the json loader do, so a malformed select or plural is refused where it is added rather than answered as Translate's error at each call. */
 type Catalog interface {
     Locale() string
 
@@ -8,5 +12,5 @@ type Catalog interface {
 }
 
 type Loader interface {
-    Load() ([]Catalog, error)
+    Load(ctx context.Context) ([]Catalog, error)
 }

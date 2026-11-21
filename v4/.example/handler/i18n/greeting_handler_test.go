@@ -3,6 +3,7 @@ package i18n
 import (
     "context"
     "encoding/json"
+    "errors"
     "io"
     nethttp "net/http"
     "net/http/httptest"
@@ -13,24 +14,32 @@ import (
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
+    melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodytranslation "github.com/precision-soft/melody/v4/translation"
     melodytranslationcontract "github.com/precision-soft/melody/v4/translation/contract"
 )
 
-func greetingFor(t *testing.T, routeLocale string, query string) GreetingResponse {
-    t.Helper()
+type failingTranslator struct {
+    err error
+}
 
-    english := melodytranslation.NewMapCatalog("en")
-    english.Add("messages", "greeting", "Hello, {name}!")
-    romanian := melodytranslation.NewMapCatalog("ro")
-    romanian.Add("messages", "greeting", "Salut, {name}!")
+func (instance failingTranslator) Translate(messageId string, config melodytranslationcontract.TranslateConfig) (string, error) {
+    return "", instance.err
+}
+
+func (instance failingTranslator) HasMessage(messageId string, config melodytranslationcontract.TranslateConfig) bool {
+    return true
+}
+
+func serveGreeting(t *testing.T, translator melodytranslationcontract.Translator, routeLocale string, query string) (melodyhttpcontract.Response, error) {
+    t.Helper()
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     melodycontainer.MustRegister(
         containerInstance,
         melodytranslation.ServiceTranslator,
         func(resolver melodycontainercontract.Resolver) (melodytranslationcontract.Translator, error) {
-            return melodytranslation.NewManager([]melodytranslationcontract.Catalog{english, romanian}, "en", []string{"en"}), nil
+            return translator, nil
         },
         melodycontainer.RegisterOptions{},
     )
@@ -41,7 +50,20 @@ func greetingFor(t *testing.T, routeLocale string, query string) GreetingRespons
     request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("greeting-test", time.Now()))
     request.Attributes().Set(melodyhttp.RouteAttributeLocale, routeLocale)
 
-    response, handlerErr := GreetingHandler()(runtimeInstance, httptest.NewRecorder(), request)
+    return GreetingHandler()(runtimeInstance, httptest.NewRecorder(), request)
+}
+
+func greetingFor(t *testing.T, routeLocale string, query string) GreetingResponse {
+    t.Helper()
+
+    english := melodytranslation.NewMapCatalog("en")
+    english.Add("messages", "greeting", "Hello, {name}!")
+    romanian := melodytranslation.NewMapCatalog("ro")
+    romanian.Add("messages", "greeting", "Salut, {name}!")
+
+    translator := melodytranslation.NewManager([]melodytranslationcontract.Catalog{english, romanian}, melodytranslation.ManagerConfig{DefaultLocale: "en", FallbackLocales: []string{"en"}})
+
+    response, handlerErr := serveGreeting(t, translator, routeLocale, query)
     if nil != handlerErr {
         t.Fatalf("expected the greeting, got %v", handlerErr)
     }
@@ -66,5 +88,22 @@ func TestGreetingHandler_ServesTheLocaleTheRouteMatched(t *testing.T) {
 
     if "ro" != greeting.Locale || "Salut, Ana!" != greeting.Greeting {
         t.Fatalf("expected the route's ro locale served whatever the query says, got %+v", greeting)
+    }
+}
+
+func TestGreetingHandler_ShowsTheIdOfAMessageNoCatalogCarries(t *testing.T) {
+    greeting := greetingFor(t, "en", "count=2")
+
+    if "cart.items" != greeting.Cart {
+        t.Fatalf("expected the id of the missing cart message shown, got %+v", greeting)
+    }
+}
+
+func TestGreetingHandler_AnswersTheTranslatorsErrorAs500(t *testing.T) {
+    renderErr := errors.New("translation message pattern is malformed")
+
+    response, handlerErr := serveGreeting(t, failingTranslator{err: renderErr}, "en", "name=Ana")
+    if false == errors.Is(handlerErr, renderErr) || nil != response {
+        t.Fatalf("expected the translator's error returned and no payload, got %v, %v", response, handlerErr)
     }
 }
