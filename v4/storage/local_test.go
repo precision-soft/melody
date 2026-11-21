@@ -10,6 +10,7 @@ import (
     "net/http"
     "os"
     "path/filepath"
+    goruntime "runtime"
     "strings"
     "testing"
 
@@ -1259,5 +1260,220 @@ func TestLocalStorage_GetReadsTheRangeAsked(t *testing.T) {
 
     if putErr := local.Put(runtimeInstance, "digits.txt", strings.NewReader("again"), 5, storagecontract.PutOptions{}); nil != putErr {
         t.Fatalf("expected the object stored again after its ranged reads, got %v", putErr)
+    }
+}
+
+/* the metadata name is spelled here from the digest rather than read from the helper, so a change to the namespace fails this file instead of moving with it */
+func reservedMetadataName(leaf string) string {
+    digest := sha256.Sum256([]byte(leaf))
+
+    return ".melody-storage-" + hex.EncodeToString(digest[:]) + ".metadata"
+}
+
+func TestLocalStorage_TheContentTypeDeclaredAtPutIsReadBack(t *testing.T) {
+    local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    if putErr := local.Put(runtimeInstance, "labels/awb-1.pdf", strings.NewReader("%PDF"), 4, storagecontract.PutOptions{ContentType: "application/pdf"}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    object, getErr := local.Get(runtimeInstance, "labels/awb-1.pdf", storagecontract.GetOptions{})
+    if nil != getErr {
+        t.Fatalf("get: %v", getErr)
+    }
+    _ = object.Body.Close()
+
+    objectInfo, statErr := local.Stat(runtimeInstance, "labels/awb-1.pdf")
+    if nil != statErr || "application/pdf" != object.Info.ContentType || "application/pdf" != objectInfo.ContentType {
+        t.Fatalf("expected the declared content type at Get and Stat, got %q and %q (%v)", object.Info.ContentType, objectInfo.ContentType, statErr)
+    }
+
+    if putErr := local.Put(runtimeInstance, "labels/awb-1.pdf", strings.NewReader("%PDF-2"), 6, storagecontract.PutOptions{ContentType: "application/x-pdf"}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    if replacedInfo, replacedErr := local.Stat(runtimeInstance, "labels/awb-1.pdf"); nil != replacedErr || "application/x-pdf" != replacedInfo.ContentType {
+        t.Fatalf("expected the content type of the second put, got %q (%v)", replacedInfo.ContentType, replacedErr)
+    }
+}
+
+func TestLocalStorage_APutWithoutAContentTypeClearsThePreviousOne(t *testing.T) {
+    base := t.TempDir()
+    local := NewLocalStorage(base, LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    if putErr := local.Put(runtimeInstance, "labels/awb-1.pdf", strings.NewReader("%PDF"), 4, storagecontract.PutOptions{ContentType: "application/pdf"}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    if entries, _ := os.ReadDir(filepath.Join(base, "labels")); 2 != len(entries) {
+        t.Fatalf("expected the object and its metadata in the directory, got %d entries", len(entries))
+    }
+
+    if putErr := local.Put(runtimeInstance, "labels/awb-1.pdf", strings.NewReader("%PDF"), 4, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    if objectInfo, statErr := local.Stat(runtimeInstance, "labels/awb-1.pdf"); nil != statErr || "" != objectInfo.ContentType {
+        t.Fatalf("expected no content type after a put that declared none, got %q (%v)", objectInfo.ContentType, statErr)
+    }
+
+    if entries, _ := os.ReadDir(filepath.Join(base, "labels")); 1 != len(entries) {
+        t.Fatalf("expected only the object in the directory, got %d entries", len(entries))
+    }
+}
+
+func TestLocalStorage_MetadataOfAnotherWriteIsNotHonoured(t *testing.T) {
+    base := t.TempDir()
+    local := NewLocalStorage(base, LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    put := func() {
+        if putErr := local.Put(runtimeInstance, "report.pdf", strings.NewReader("%PDF"), 4, storagecontract.PutOptions{ContentType: "application/pdf"}); nil != putErr {
+            t.Fatalf("put: %v", putErr)
+        }
+    }
+
+    assertNoContentType := func(name string, expectedBody string) {
+        object, getErr := local.Get(runtimeInstance, "report.pdf", storagecontract.GetOptions{})
+        if nil != getErr {
+            t.Fatalf("%s: get: %v", name, getErr)
+        }
+        content, _ := io.ReadAll(object.Body)
+        _ = object.Body.Close()
+
+        if "" != object.Info.ContentType || expectedBody != string(content) {
+            t.Fatalf("%s: expected the body served with no content type, got %q and %q", name, object.Info.ContentType, string(content))
+        }
+    }
+
+    put()
+    earlier := time.Now().Add(-time.Hour)
+    if touchErr := os.Chtimes(filepath.Join(base, "report.pdf"), earlier, earlier); nil != touchErr {
+        t.Fatalf("chtimes: %v", touchErr)
+    }
+    assertNoContentType("another modification time", "%PDF")
+
+    put()
+    objectPath := filepath.Join(base, "report.pdf")
+    info, _ := os.Stat(objectPath)
+    if writeErr := os.WriteFile(objectPath, []byte("replaced by hand"), 0o640); nil != writeErr {
+        t.Fatalf("write: %v", writeErr)
+    }
+    if touchErr := os.Chtimes(objectPath, info.ModTime(), info.ModTime()); nil != touchErr {
+        t.Fatalf("chtimes: %v", touchErr)
+    }
+    assertNoContentType("another size", "replaced by hand")
+}
+
+func TestLocalStorage_DeleteRemovesTheMetadata(t *testing.T) {
+    base := t.TempDir()
+    local := NewLocalStorage(base, LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    if putErr := local.Put(runtimeInstance, "labels/awb-1.pdf", strings.NewReader("%PDF"), 4, storagecontract.PutOptions{ContentType: "application/pdf"}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    if deleteErr := local.Delete(runtimeInstance, "labels/awb-1.pdf"); nil != deleteErr {
+        t.Fatalf("delete: %v", deleteErr)
+    }
+
+    if entries, _ := os.ReadDir(filepath.Join(base, "labels")); 0 != len(entries) {
+        t.Fatalf("expected the directory empty after the delete, got %d entries", len(entries))
+    }
+}
+
+func TestLocalStorage_RefusesAKeySpelledLikeAMetadataObject(t *testing.T) {
+    local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    for _, key := range []string{reservedMetadataName("report.pdf"), "sub/" + reservedMetadataName("any leaf at all")} {
+        putErr := local.Put(runtimeInstance, key, strings.NewReader("x"), 1, storagecontract.PutOptions{})
+        _, getErr := local.Get(runtimeInstance, key, storagecontract.GetOptions{})
+        _, statErr := local.Stat(runtimeInstance, key)
+        deleteErr := local.Delete(runtimeInstance, key)
+
+        for door, doorErr := range map[string]error{"Put": putErr, "Get": getErr, "Stat": statErr, "Delete": deleteErr} {
+            if nil == doorErr || false == strings.Contains(doorErr.Error(), "metadata object of the reserved .melody-storage- namespace") {
+                t.Fatalf("%s of %q: expected the metadata spelling refused, got %v", door, key, doorErr)
+            }
+        }
+    }
+
+    for _, ordinaryKey := range []string{".melody-storage-notes.metadata", ".melody-storage-" + strings.Repeat("A", 64) + ".metadata", reservedMetadataName("x") + ".txt"} {
+        if putErr := local.Put(runtimeInstance, ordinaryKey, strings.NewReader("user data"), -1, storagecontract.PutOptions{}); nil != putErr {
+            t.Fatalf("expected the ordinary key %q to be stored, got %v", ordinaryKey, putErr)
+        }
+    }
+}
+
+func TestLocalStorage_UnreadableMetadataIsNoContentType(t *testing.T) {
+    base := t.TempDir()
+    local := NewLocalStorage(base, LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    if putErr := local.Put(runtimeInstance, "report.pdf", strings.NewReader("%PDF"), 4, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    info, _ := os.Stat(filepath.Join(base, "report.pdf"))
+    boundMetadata := fmt.Sprintf(`{"contentType":"application/pdf","size":%d,"modifiedAtUnixNano":%d}`, info.Size(), info.ModTime().UnixNano())
+
+    for name, content := range map[string]string{
+        "not json":              "{not json",
+        "a mebibyte":            boundMetadata + strings.Repeat(" ", 1<<20),
+        "past the bound by one": boundMetadata + strings.Repeat(" ", 4096-len(boundMetadata)+1),
+    } {
+        if writeErr := os.WriteFile(filepath.Join(base, reservedMetadataName("report.pdf")), []byte(content), 0o640); nil != writeErr {
+            t.Fatalf("write: %v", writeErr)
+        }
+
+        objectInfo, statErr := local.Stat(runtimeInstance, "report.pdf")
+        if nil != statErr || "" != objectInfo.ContentType {
+            t.Fatalf("%s: expected no content type and no error, got %q (%v)", name, objectInfo.ContentType, statErr)
+        }
+    }
+
+    if writeErr := os.WriteFile(filepath.Join(base, reservedMetadataName("report.pdf")), []byte(boundMetadata+strings.Repeat(" ", 4096-len(boundMetadata))), 0o640); nil != writeErr {
+        t.Fatalf("write: %v", writeErr)
+    }
+
+    if objectInfo, statErr := local.Stat(runtimeInstance, "report.pdf"); nil != statErr || "application/pdf" != objectInfo.ContentType {
+        t.Fatalf("expected metadata of exactly the bound honoured, got %q (%v)", objectInfo.ContentType, statErr)
+    }
+}
+
+/* a metadata object far past the bound, sparse so it costs no disk, is read no further than the bound: the read allocates a fraction of its size */
+func TestLocalStorage_AMetadataObjectIsReadNoFurtherThanItsBound(t *testing.T) {
+    base := t.TempDir()
+    local := NewLocalStorage(base, LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    if putErr := local.Put(runtimeInstance, "report.pdf", strings.NewReader("%PDF"), 4, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    metadataFile, createErr := os.Create(filepath.Join(base, reservedMetadataName("report.pdf")))
+    if nil != createErr {
+        t.Fatalf("create: %v", createErr)
+    }
+    if truncateErr := metadataFile.Truncate(64 << 20); nil != truncateErr {
+        t.Fatalf("truncate: %v", truncateErr)
+    }
+    _ = metadataFile.Close()
+
+    var before, after goruntime.MemStats
+    goruntime.ReadMemStats(&before)
+    objectInfo, statErr := local.Stat(runtimeInstance, "report.pdf")
+    goruntime.ReadMemStats(&after)
+
+    if nil != statErr || "" != objectInfo.ContentType {
+        t.Fatalf("expected no content type and no error, got %q (%v)", objectInfo.ContentType, statErr)
+    }
+
+    if allocated := after.TotalAlloc - before.TotalAlloc; 1<<20 < allocated {
+        t.Fatalf("expected the read bounded, it allocated %d bytes", allocated)
     }
 }

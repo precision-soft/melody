@@ -46,6 +46,14 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** `exception.ChainIs(getErr, storagecontract.ErrObjectNotFound)`; the `Exists`-then-`Get` pair becomes one `Get`.
 
+### Storage: the local backend keeps the content type
+
+**What changed.** [`LocalStorage`](../storage/local.go) keeps the content type a `Put` declares in a metadata object beside the object, `.melody-storage-<sha256 of the key's leaf>.metadata`, and answers it in `ObjectInfo.ContentType` at `Get` and `Stat`, honoured only while the object keeps the size and the modification time of the write it describes. A `Put` that declares none removes it, `Delete` removes it, and a key spelled like a metadata object is refused at every door.
+
+**Symptom.** A `.melody-storage-….metadata` file beside an object stored with a content type; a tool that lists the base directory sees it. An object stored before the upgrade answers an empty content type.
+
+**Remedy.** None, or skip the reserved `.melody-storage-` prefix in a tool that lists the directory; an object answers its content type once stored again.
+
 ### Storage: `PresignedUrl` takes a config
 
 **What changed.** [`Storage.PresignedUrl(runtime, key, storagecontract.PresignConfig)`](../storage/contract/storage.go) takes `PresignConfig{Expiry bound.Duration, Method string}`. `Expiry` is read against [`storagecontract.PresignExpiryRule`](../storage/contract/presign.go): 15 minutes when left out, at least 1s, at most 7 days, unlimited refused, each refusal naming `PresignConfig.Expiry` before the backend signs. `Method` is `http.MethodGet` when left out; `http.MethodPut` signs an upload of the key, which binds neither a content type nor a size; any other method is refused with [`storagecontract.ErrPresignUnsupported`](../storage/contract/error.go). `LocalStorage` refuses every presign with the same cause, its message kept.

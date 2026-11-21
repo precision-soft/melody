@@ -4,6 +4,7 @@ import (
     "crypto/rand"
     "crypto/sha256"
     "encoding/hex"
+    "encoding/json"
     "errors"
     "io"
     "math"
@@ -179,6 +180,14 @@ func (instance *LocalStorage) Put(
         return exception.NewError("could not close the storage object", map[string]any{"key": key}, closeErr)
     }
 
+    /* the content type is stored before the object it describes, bound to the temporary's size and modification time, which the rename keeps; between the two renames it describes no stored object, so it reads as none */
+    if "" != options.ContentType {
+        if metadataErr := writeStorageMetadata(root, relativeKey, temporaryKey, options.ContentType); nil != metadataErr {
+            _ = root.Remove(temporaryKey)
+            return exception.NewError("could not store the storage object's content type", map[string]any{"key": key}, metadataErr)
+        }
+    }
+
     if renameErr := root.Rename(temporaryKey, relativeKey); nil != renameErr {
         _ = root.Remove(temporaryKey)
 
@@ -188,6 +197,10 @@ func (instance *LocalStorage) Put(
         }
 
         return exception.NewError("could not store the storage object", map[string]any{"key": key}, renameErr)
+    }
+
+    if "" == options.ContentType {
+        _ = root.Remove(storageMetadataKey(relativeKey))
     }
 
     if false == instance.temporaryStaleAge.Unlimited {
@@ -326,7 +339,7 @@ func (instance *LocalStorage) Get(
         return storagecontract.Object{}, exception.NewError("could not open the storage object", map[string]any{"key": key}, statErr)
     }
 
-    objectInfo, objectErr := localObjectInfo(key, fileInfo)
+    objectInfo, objectErr := localObjectInfo(root, relativeKey, key, fileInfo)
     if nil != objectErr {
         _ = file.Close()
         return storagecontract.Object{}, objectErr
@@ -377,11 +390,11 @@ func (instance *LocalStorage) Stat(
         return storagecontract.ObjectInfo{}, exception.NewError("could not stat the storage object", map[string]any{"key": key}, storageAbsenceCause(statErr))
     }
 
-    return localObjectInfo(key, fileInfo)
+    return localObjectInfo(root, relativeKey, key, fileInfo)
 }
 
 /* localObjectInfo judges what Get and Stat found under the key, so the two doors cannot disagree on what an object is */
-func localObjectInfo(key string, fileInfo os.FileInfo) (storagecontract.ObjectInfo, error) {
+func localObjectInfo(root *os.Root, relativeKey string, key string, fileInfo os.FileInfo) (storagecontract.ObjectInfo, error) {
     if true == fileInfo.IsDir() {
         return storagecontract.ObjectInfo{}, exception.NewError("storage key resolves to a directory", map[string]any{"key": key}, storagecontract.ErrKeyIsDirectory)
     }
@@ -391,11 +404,100 @@ func localObjectInfo(key string, fileInfo os.FileInfo) (storagecontract.ObjectIn
     }
 
     return storagecontract.ObjectInfo{
-        Size:       fileInfo.Size(),
-        ModifiedAt: fileInfo.ModTime(),
-        EntityTag:  localEntityTag(fileInfo),
-        Key:        key,
+        Size:        fileInfo.Size(),
+        ContentType: readStorageContentType(root, relativeKey, fileInfo),
+        ModifiedAt:  fileInfo.ModTime(),
+        EntityTag:   localEntityTag(fileInfo),
+        Key:         key,
     }, nil
+}
+
+/* storageMetadataObjectSuffix closes the name of the metadata object that keeps a key's content type, in the reserved namespace of its temporary objects */
+const storageMetadataObjectSuffix = "metadata"
+
+/* storageMetadataMaximumBytes bounds what is read of a metadata object; one larger describes no write of this storage and reads as none */
+const storageMetadataMaximumBytes = 4096
+
+type storageMetadata struct {
+    ContentType        string `json:"contentType"`
+    Size               int64  `json:"size"`
+    ModifiedAtUnixNano int64  `json:"modifiedAtUnixNano"`
+}
+
+func storageMetadataKey(relativeKey string) string {
+    return filepath.Join(filepath.Dir(relativeKey), storageTemporaryPrefix(relativeKey)+storageMetadataObjectSuffix)
+}
+
+/* writeStorageMetadata stores the content type bound to the size and the modification time of the temporary object, through a temporary of its own renamed over the metadata name */
+func writeStorageMetadata(root *os.Root, relativeKey string, temporaryKey string, contentType string) error {
+    temporaryInfo, statErr := root.Lstat(temporaryKey)
+    if nil != statErr {
+        return statErr
+    }
+
+    encoded, encodeErr := json.Marshal(storageMetadata{ContentType: contentType, Size: temporaryInfo.Size(), ModifiedAtUnixNano: temporaryInfo.ModTime().UnixNano()})
+    if nil != encodeErr {
+        return encodeErr
+    }
+
+    metadataTemporaryKey, file, createErr := createStorageTemporaryFile(root, relativeKey)
+    if nil != createErr {
+        return createErr
+    }
+
+    if _, writeErr := file.Write(encoded); nil != writeErr {
+        _ = file.Close()
+        _ = root.Remove(metadataTemporaryKey)
+        return writeErr
+    }
+
+    if syncErr := file.Sync(); nil != syncErr {
+        _ = file.Close()
+        _ = root.Remove(metadataTemporaryKey)
+        return syncErr
+    }
+
+    if closeErr := file.Close(); nil != closeErr {
+        _ = root.Remove(metadataTemporaryKey)
+        return closeErr
+    }
+
+    if renameErr := root.Rename(metadataTemporaryKey, storageMetadataKey(relativeKey)); nil != renameErr {
+        _ = root.Remove(metadataTemporaryKey)
+        return renameErr
+    }
+
+    return nil
+}
+
+/* readStorageContentType answers the content type the metadata object keeps for the object, honoured only when it was written for this object's size and modification time; a metadata object that is absent, unreadable, too large or of another write answers none, never an error */
+func readStorageContentType(root *os.Root, relativeKey string, fileInfo os.FileInfo) string {
+    file, openErr := root.OpenFile(storageMetadataKey(relativeKey), os.O_RDONLY|syscall.O_NONBLOCK, 0)
+    if nil != openErr {
+        return ""
+    }
+    defer file.Close()
+
+    metadataInfo, statErr := file.Stat()
+    if nil != statErr || false == metadataInfo.Mode().IsRegular() {
+        return ""
+    }
+
+    content, readErr := io.ReadAll(io.LimitReader(file, storageMetadataMaximumBytes+1))
+    if nil != readErr || storageMetadataMaximumBytes < len(content) {
+        return ""
+    }
+
+    var metadata storageMetadata
+    if decodeErr := json.Unmarshal(content, &metadata); nil != decodeErr {
+        return ""
+    }
+
+    if fileInfo.Size() != metadata.Size || fileInfo.ModTime().UnixNano() != metadata.ModifiedAtUnixNano {
+        return ""
+    }
+
+    return metadata.ContentType
 }
 
 /* localEntityTag is the tag the static file server gives a file of this size and modification time, without its quotes */
@@ -443,6 +545,8 @@ func (instance *LocalStorage) Delete(
         return exception.NewError("could not delete the storage object", map[string]any{"key": key}, removeErr)
     }
 
+    _ = root.Remove(storageMetadataKey(relativeKey))
+
     return nil
 }
 
@@ -476,6 +580,11 @@ func storageRelativeKey(key string) (string, error) {
     /* a key spelled exactly like a temporary object would be swept by a later Put of the key whose digest it carries, so the reserved namespace is refused at every door */
     if true == isStorageTemporaryObjectName(filepath.Base(cleaned)) {
         return "", exception.NewError("storage key names a temp object of the reserved .melody-storage- namespace", map[string]any{"key": key}, nil)
+    }
+
+    /* a key spelled like a metadata object would be read as the content type of another key, and replaced or removed by its writes */
+    if true == isStorageMetadataObjectName(filepath.Base(cleaned)) {
+        return "", exception.NewError("storage key names a metadata object of the reserved .melody-storage- namespace", map[string]any{"key": key}, nil)
     }
 
     return cleaned, nil
@@ -512,6 +621,28 @@ func isStorageTemporaryObjectName(name string) bool {
     }
 
     return isStorageTemporaryRandomPart(body[65:])
+}
+
+/* isStorageMetadataObjectName matches exactly the names storageMetadataKey gives: the reserved prefix, a sha256 in lowercase hex, a dot and the metadata suffix. */
+func isStorageMetadataObjectName(name string) bool {
+    const reservedPrefix = ".melody-storage-"
+
+    if false == strings.HasPrefix(name, reservedPrefix) || false == strings.HasSuffix(name, "."+storageMetadataObjectSuffix) {
+        return false
+    }
+
+    digest := strings.TrimSuffix(strings.TrimPrefix(name, reservedPrefix), "."+storageMetadataObjectSuffix)
+    if 64 != len(digest) {
+        return false
+    }
+
+    for _, character := range digest {
+        if ('0' > character || '9' < character) && ('a' > character || 'f' < character) {
+            return false
+        }
+    }
+
+    return true
 }
 
 var _ storagecontract.Storage = (*LocalStorage)(nil)
