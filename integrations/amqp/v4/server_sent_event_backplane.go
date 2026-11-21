@@ -363,7 +363,7 @@ func (instance *ServerSentEventBackplane) abandonWedgedPublish(channelConnection
 func (instance *ServerSentEventBackplane) listen() {
     defer instance.wait.Done()
 
-    attempt := 1
+    attempts := newReconnectAttempts(instance.reconnect)
 
     for {
         if nil != instance.ctx.Err() || true == instance.isClosing() {
@@ -381,11 +381,9 @@ func (instance *ServerSentEventBackplane) listen() {
 
             instance.logError("amqp sse backplane subscribe failed, backing off", subscribeErr)
 
-            if false == instance.sleep(instance.reconnect.Delay(attempt)) {
+            if false == instance.sleep(attempts.afterFailure()) {
                 return
             }
-
-            attempt++
 
             continue
         }
@@ -393,17 +391,10 @@ func (instance *ServerSentEventBackplane) listen() {
         startedAt := time.Now()
         instance.forward(deliveries)
 
-        if true == reconnectBackoffShouldReset(instance.reconnect, time.Since(startedAt)) {
-            attempt = 1
-
-            continue
-        }
-
-        if false == instance.sleep(instance.reconnect.Delay(attempt)) {
+        wait, waits := attempts.afterSubscription(time.Since(startedAt))
+        if true == waits && false == instance.sleep(wait) {
             return
         }
-
-        attempt++
     }
 }
 

@@ -44,7 +44,7 @@ type StreamHandlerConfig struct {
     /* IdleTimeout is the interval at which the handler pings a silent peer and the window it allows for the pong; a timed-out ping closes the connection when nothing excuses it — a synchronous OnMessage callback within its grace, a data frame still being flushed — and the peer was silent for two intervals, so a first miss can be excused and an idle or half-open client cannot hold a descriptor, a hub subscription and three goroutines. 30s by default, which suits a browser client, at least 1s, since a sub-second ping against every connected peer is a storm and one slow pong would reap a healthy one, and unlimited refused, since the ping is the only thing that reaps a peer that vanished without a fin: coderwebsocket.Accept hijacks the connection so http.Server's timeouts stop applying, the read loop blocks in Read with no deadline, and a write into a half-open socket succeeds while the send buffer has room. A subscribed client that only receives stays connected, since RFC 6455 obliges it to answer the ping and browsers answer inside the protocol stack. */
     IdleTimeout bound.Duration
 
-    /* CloseHandshakeGrace bounds the closing handshake on the teardown path: 1s by default, at least 1ms, unlimited refused. */
+    /* CloseHandshakeGrace bounds the closing handshake on the teardown path: 1s by default, at least 1ms, unlimited refused. The handler returns within it even when the peer never echoes a 1011 close; the library then closes the transport itself within its own five seconds. */
     CloseHandshakeGrace bound.Duration
 }
 
@@ -65,7 +65,7 @@ var ErrStreamConnectionClosed = errors.New("websocket stream connection is close
 
 /* StreamConnection is the connection a frame arrived on; it may be kept and used from any goroutine while the connection lives. */
 type StreamConnection interface {
-    /* Send writes one frame, serialised with the broadcast writes and every other Send, bounded by StreamHandlerConfig.WriteTimeout and by the runtime's context; a nil runtime is refused, a closed connection answers ErrStreamConnectionClosed. */
+    /* Send writes one frame, serialised with the broadcast writes and every other Send, bounded by StreamHandlerConfig.WriteTimeout and by the runtime's context; a nil runtime is refused, a closing or closed connection answers ErrStreamConnectionClosed, joined with the library's error when the close meets the write. A runtime context that ends while the frame is being written makes the library close the whole connection; one that ends while Send waits for the writer lock costs nothing. */
     Send(runtimeInstance containercontract.Runtime, message OutboundMessage) error
 }
 
@@ -190,7 +190,13 @@ func newStreamHandler(hub *melodyhttp.ServerSentEventHub, resolved resolvedStrea
             logger.error("websocket upgrade failed", acceptErr, nil)
             return nil, nil
         }
-        defer connection.CloseNow()
+        handshakePending := false
+        defer func() {
+            /* a failure close handshake still waiting for the peer's echo closes the transport itself within the library's own timers; a CloseNow here would wait for it on the handler goroutine */
+            if false == handshakePending {
+                _ = connection.CloseNow()
+            }
+        }()
 
         connection.SetReadLimit(resolved.readLimit)
 
@@ -227,21 +233,21 @@ func newStreamHandler(hub *melodyhttp.ServerSentEventHub, resolved resolvedStrea
         for {
             select {
             case <-connectionContext.Done():
-                closeConnection(stream, liveness, readLoopDone, resolved.closeHandshakeGrace)
-                return nil, nil
+            case <-readLoopDone:
             case event, open := <-subscriber.Events():
-                if false == open {
-                    closeConnection(stream, liveness, readLoopDone, resolved.closeHandshakeGrace)
-                    return nil, nil
-                }
+                if true == open {
+                    writeErr := stream.write(connectionContext, writeMessageType(config.BinaryWrites), []byte(event.Data))
+                    if nil == writeErr {
+                        continue
+                    }
 
-                writeErr := stream.write(connectionContext, writeMessageType(config.BinaryWrites), []byte(event.Data))
-                if nil != writeErr {
                     logger.debug("websocket write failed, closing connection", writeErr)
-                    closeConnection(stream, liveness, readLoopDone, resolved.closeHandshakeGrace)
-                    return nil, nil
                 }
             }
+
+            handshakePending = closeConnection(stream, liveness, readLoopDone, resolved.closeHandshakeGrace)
+
+            return nil, nil
         }
     }
 }
@@ -274,9 +280,10 @@ func readLoop(
             failed := dispatchOnMessage(runtimeInstance, config, stream, message, logger)
             liveness.leaveCallback()
 
+            /* the connection context is left alive: cancelling it would make the library drop the transport under a broadcast frame still being written, so the peer would read 1006 where the handler loop, once that frame has left, sends 1011 */
             if true == failed {
                 stream.closeStatus.Store(int32(coderwebsocket.StatusInternalError))
-                cancel()
+                stream.closed.Store(true)
                 return
             }
         }
@@ -434,8 +441,8 @@ func dispatchOnMessage(
     return false
 }
 
-/* closeConnection marks the stream closed for Send, tears the socket down with the stream's close status and holds, bounded by StreamHandlerConfig.CloseHandshakeGrace, until the read loop has exited before the handler returns to the kernel, which keeps the request scope alive for a synchronous OnMessage callback resolving services against it. The bound is deliberately much shorter than the reaper's callback grace, because this wait is on the teardown path, where a long wait per wedged callback would stall hub shutdown and process exit; a callback that outruns it is abandoned, its next scope resolution panics, dispatchOnMessage recovers and logs it, and the message is lost by design. With a callback in flight the read loop is outside connection.Read, so a graceful Close cannot complete and would hold the transport for the library's five seconds while the deferred CloseNow loses the close CAS; CloseNow taken here wins it and frees the transport at once. With none in flight a graceful Close exchanges a close frame and the read loop's cancel frees the transport promptly. The grace is needed because connection.Close writes the close frame and waits for the peer's, which only the read loop reads; when that loop is wedged in a callback the handshake cannot complete, and coder/websocket would hold the handler goroutine and the hub subscription for five seconds. */
-func closeConnection(stream *streamConnection, liveness *connectionLiveness, readLoopDone <-chan struct{}, closeHandshakeGrace time.Duration) {
+/* closeConnection marks the stream closed for Send, tears the socket down with the stream's close status and holds, bounded by StreamHandlerConfig.CloseHandshakeGrace, until the read loop has exited before the handler returns to the kernel, which keeps the request scope alive for a synchronous OnMessage callback resolving services against it. The bound is deliberately much shorter than the reaper's callback grace, because this wait is on the teardown path, where a long wait per wedged callback would stall hub shutdown and process exit; a callback that outruns it is abandoned, its next scope resolution panics, dispatchOnMessage recovers and logs it, and the message is lost by design. With a callback in flight the read loop is outside connection.Read, so a graceful Close cannot complete and would hold the transport for the library's five seconds while the deferred CloseNow loses the close CAS; CloseNow taken here wins it and frees the transport at once. With none in flight a graceful Close exchanges a close frame and the read loop's cancel frees the transport promptly. The grace is needed because connection.Close writes the close frame and waits for the peer's, which only the read loop reads; when that loop is wedged in a callback the handshake cannot complete, and coder/websocket would hold the handler goroutine and the hub subscription for five seconds. It reports whether a failure close handshake is still waiting for the peer's echo when the grace runs out, the handshake then owning the transport. */
+func closeConnection(stream *streamConnection, liveness *connectionLiveness, readLoopDone <-chan struct{}, closeHandshakeGrace time.Duration) (handshakePending bool) {
     stream.closed.Store(true)
 
     closeStatus := coderwebsocket.StatusCode(stream.closeStatus.Load())
@@ -458,7 +465,7 @@ func closeConnection(stream *streamConnection, liveness *connectionLiveness, rea
     select {
     case <-readLoopDone:
     case <-timer.C:
-        return
+        return false
     }
 
     /* a failure status reaches the peer only if the deferred CloseNow does not cut the handshake that carries it */
@@ -466,8 +473,11 @@ func closeConnection(stream *streamConnection, liveness *connectionLiveness, rea
         select {
         case <-closeHandshakeDone:
         case <-timer.C:
+            return true
         }
     }
+
+    return false
 }
 
 func writeMessageType(binary bool) coderwebsocket.MessageType {
@@ -546,6 +556,10 @@ func (instance *streamConnection) write(ctx context.Context, messageType coderwe
     instance.liveness.enterWrite()
     writeErr := instance.connection.Write(writeContext, messageType, payload)
     instance.liveness.leaveWrite()
+
+    if nil != writeErr && true == instance.isClosed() {
+        return errors.Join(ErrStreamConnectionClosed, writeErr)
+    }
 
     return writeErr
 }

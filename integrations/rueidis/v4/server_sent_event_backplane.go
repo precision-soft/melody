@@ -157,7 +157,7 @@ func (instance *ServerSentEventBackplane) CloseWithContext(closeContext context.
 func (instance *ServerSentEventBackplane) listen() {
     defer close(instance.listenerDone)
 
-    attempt := 1
+    attempts := newReconnectAttempts(instance.reconnect)
 
     for {
         if nil != instance.ctx.Err() {
@@ -179,24 +179,17 @@ func (instance *ServerSentEventBackplane) listen() {
             instance.logError("redis sse backplane subscription lost, resubscribing", receiveErr)
         }
 
-        if true == instance.shouldResetBackplaneBackoff(time.Since(startedAt)) {
-            attempt = 1
-
+        wait, waits := attempts.afterSubscription(time.Since(startedAt))
+        if false == waits {
             continue
         }
 
         select {
-        case <-time.After(instance.reconnect.Delay(attempt)):
+        case <-time.After(wait):
         case <-instance.ctx.Done():
             return
         }
-
-        attempt++
     }
-}
-
-func (instance *ServerSentEventBackplane) shouldResetBackplaneBackoff(subscriptionDuration time.Duration) bool {
-    return instance.reconnect.Initial <= subscriptionDuration
 }
 
 func (instance *ServerSentEventBackplane) handle(message rueidis.PubSubMessage) {

@@ -12,6 +12,7 @@ import (
     goruntime "runtime"
     "strings"
     "sync"
+    "sync/atomic"
     "testing"
     "time"
 
@@ -1823,17 +1824,45 @@ func TestStreamConnection_ASendWaitingBehindAWriteIsBoundedByTheWriteTimeout(t *
 func TestStreamHandlerConfig_ItsCallbacksCarryNoThirdPartyType(t *testing.T) {
     var thirdParty []string
 
-    judge := func(owner string, typeInstance reflect.Type) {
-        for typeInstance.Kind() == reflect.Pointer || typeInstance.Kind() == reflect.Slice {
-            typeInstance = typeInstance.Elem()
-        }
+    visited := map[reflect.Type]bool{}
 
-        packagePath := typeInstance.PkgPath()
-        if "" == packagePath || false == strings.Contains(packagePath, ".") || true == strings.HasPrefix(packagePath, "github.com/precision-soft/melody/") {
+    var judge func(owner string, typeInstance reflect.Type)
+    judge = func(owner string, typeInstance reflect.Type) {
+        if true == visited[typeInstance] {
+            return
+        }
+        visited[typeInstance] = true
+
+        switch typeInstance.Kind() {
+        case reflect.Pointer, reflect.Slice, reflect.Array, reflect.Chan:
+            judge(owner, typeInstance.Elem())
+            return
+        case reflect.Map:
+            judge(owner, typeInstance.Key())
+            judge(owner, typeInstance.Elem())
+            return
+        case reflect.Func:
+            for index := 0; index < typeInstance.NumIn(); index++ {
+                judge(owner, typeInstance.In(index))
+            }
+            for index := 0; index < typeInstance.NumOut(); index++ {
+                judge(owner, typeInstance.Out(index))
+            }
             return
         }
 
-        thirdParty = append(thirdParty, owner+": "+packagePath)
+        packagePath := typeInstance.PkgPath()
+        if "" != packagePath && true == strings.Contains(packagePath, ".") && false == strings.HasPrefix(packagePath, "github.com/precision-soft/melody/") {
+            thirdParty = append(thirdParty, owner+": "+packagePath)
+            return
+        }
+
+        if reflect.Struct == typeInstance.Kind() && "" != packagePath && true == strings.HasPrefix(packagePath, "github.com/precision-soft/melody/") {
+            for index := 0; index < typeInstance.NumField(); index++ {
+                field := typeInstance.Field(index)
+                judge(owner+"."+typeInstance.Name()+"."+field.Name, field.Type)
+            }
+        }
     }
 
     judgeFunction := func(owner string, functionType reflect.Type) {
@@ -1909,5 +1938,274 @@ func TestCloseConnection_MarksTheStreamClosedBeforeTheConnectionContextEnds(t *t
     senderRuntime := runtime.NewRequest(context.Background(), container.NewContainer(container.ContainerConfig{}).NewScope())
     if sendErr := stream.Send(senderRuntime, OutboundMessage{Payload: []byte("frame")}); false == errors.Is(sendErr, ErrStreamConnectionClosed) {
         t.Fatalf("expected ErrStreamConnectionClosed once the teardown began, got %v", sendErr)
+    }
+}
+
+func TestStreamHandler_AFailureCloseThePeerNeverEchoesReturnsTheHandlerWithinTheGrace(t *testing.T) {
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+    config := demoStreamHandlerConfig(func(_ containercontract.Runtime, _ StreamConnection, _ InboundMessage) error {
+        return errors.New("callback refused the frame")
+    })
+    config.CloseHandshakeGrace = bound.Of(50 * time.Millisecond)
+    handler := NewStreamHandler(hub, config)
+
+    handlerReturned := make(chan time.Time, 1)
+    server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        runtimeInstance := runtimeWithLogger(request.Context(), &messageCapturingLogger{})
+        handler(runtimeInstance, writer, melodyhttp.NewRequest(request, nil, runtimeInstance, nil))
+        handlerReturned <- time.Now()
+    }))
+    t.Cleanup(server.Close)
+
+    connection, ctx := dialStream(t, "ws"+strings.TrimPrefix(server.URL, "http"))
+    awaitSubscriberCount(t, hub, 1)
+
+    sentAt := time.Now()
+    if writeErr := connection.Write(ctx, coderwebsocket.MessageText, []byte("frame")); nil != writeErr {
+        t.Fatalf("write: %v", writeErr)
+    }
+
+    select {
+    case returnedAt := <-handlerReturned:
+        if 2*time.Second < returnedAt.Sub(sentAt) {
+            t.Fatalf("expected the handler back within the close grace, it took %s", returnedAt.Sub(sentAt))
+        }
+    case <-time.After(10 * time.Second):
+        t.Fatal("the handler never returned")
+    }
+}
+
+func TestStreamHandler_AFailureDuringABroadcastFrameStillClosesWithStatus1011(t *testing.T) {
+    testCases := map[string]func() error{
+        "error": func() error {
+            return errors.New("callback refused the frame")
+        },
+        "panic": func() error {
+            panic("callback boom")
+        },
+    }
+
+    for name, fail := range testCases {
+        t.Run(name, func(t *testing.T) {
+            hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+            kept := make(chan *streamConnection, 1)
+
+            wsUrl := serveStreamHandlerWithLogger(t, hub, demoStreamHandlerConfig(func(_ containercontract.Runtime, connection StreamConnection, _ InboundMessage) error {
+                stream := connection.(*streamConnection)
+                kept <- stream
+
+                deadline := time.Now().Add(5 * time.Second)
+                for false == stream.liveness.writeInFlight() {
+                    if true == time.Now().After(deadline) {
+                        return nil
+                    }
+
+                    goruntime.Gosched()
+                }
+
+                return fail()
+            }), &messageCapturingLogger{})
+
+            connection, ctx := dialStream(t, wsUrl)
+            connection.SetReadLimit(-1)
+            awaitSubscriberCount(t, hub, 1)
+
+            if writeErr := connection.Write(ctx, coderwebsocket.MessageText, []byte("frame")); nil != writeErr {
+                t.Fatalf("write: %v", writeErr)
+            }
+
+            stream := <-kept
+            largePayload := strings.Repeat("a", 32<<20)
+            hub.Broadcast("demo", melodyhttp.ServerSentEvent{Data: largePayload})
+
+            deadline := time.Now().Add(5 * time.Second)
+            for false == stream.isClosed() {
+                if true == time.Now().After(deadline) {
+                    t.Fatal("the callback never failed under the in-flight broadcast frame")
+                }
+
+                goruntime.Gosched()
+            }
+
+            _, payload, readErr := connection.Read(ctx)
+            if nil != readErr || len(largePayload) != len(payload) {
+                t.Fatalf("expected the broadcast frame whole, got %d bytes and %v", len(payload), readErr)
+            }
+
+            _, _, readErr = connection.Read(ctx)
+            if coderwebsocket.StatusInternalError != coderwebsocket.CloseStatus(readErr) {
+                t.Fatalf("expected the peer to read close status 1011 after the frame, got %v", readErr)
+            }
+        })
+    }
+}
+
+func TestStreamConnection_ASendTheCloseMeetsMidWriteAnswersTheClosedSentinel(t *testing.T) {
+    serverConnections := make(chan *coderwebsocket.Conn, 1)
+    handlerRelease := make(chan struct{})
+    defer close(handlerRelease)
+
+    server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        connection, acceptErr := coderwebsocket.Accept(writer, request, &coderwebsocket.AcceptOptions{
+            OriginPatterns: []string{"*"},
+        })
+        if nil != acceptErr {
+            return
+        }
+        defer connection.CloseNow()
+
+        serverConnections <- connection
+
+        <-handlerRelease
+    }))
+    defer server.Close()
+
+    dialStream(t, "ws"+strings.TrimPrefix(server.URL, "http"))
+
+    liveness := newConnectionLiveness()
+    serverConnection := <-serverConnections
+    stream := newStreamConnection(serverConnection, context.Background(), 10*time.Second, liveness)
+
+    senderRuntime := runtime.NewRequest(context.Background(), container.NewContainer(container.ContainerConfig{}).NewScope())
+    sendDone := make(chan error, 1)
+    go func() {
+        sendDone <- stream.Send(senderRuntime, OutboundMessage{Payload: []byte(strings.Repeat("a", 32<<20))})
+    }()
+
+    deadline := time.Now().Add(5 * time.Second)
+    for false == liveness.writeInFlight() {
+        if true == time.Now().After(deadline) {
+            t.Fatal("the send never reached the write")
+        }
+
+        goruntime.Gosched()
+    }
+
+    stream.closed.Store(true)
+    _ = serverConnection.CloseNow()
+
+    select {
+    case sendErr := <-sendDone:
+        if false == errors.Is(sendErr, ErrStreamConnectionClosed) {
+            t.Fatalf("expected ErrStreamConnectionClosed for a send the close met mid-write, got %v", sendErr)
+        }
+    case <-time.After(5 * time.Second):
+        t.Fatal("the send never returned")
+    }
+}
+
+type doneSignalContext struct {
+    context.Context
+    armed  atomic.Bool
+    once   sync.Once
+    called chan struct{}
+}
+
+func (instance *doneSignalContext) Done() <-chan struct{} {
+    if true == instance.armed.Load() {
+        instance.once.Do(func() {
+            close(instance.called)
+        })
+    }
+
+    return instance.Context.Done()
+}
+
+func newDoneSignalContext(parent context.Context) *doneSignalContext {
+    return &doneSignalContext{Context: parent, called: make(chan struct{})}
+}
+
+func awaitSend(t *testing.T, sendDone <-chan error) error {
+    t.Helper()
+
+    select {
+    case sendErr := <-sendDone:
+        return sendErr
+    case <-time.After(2 * time.Second):
+        t.Fatal("the send did not return within 2s")
+    }
+
+    return nil
+}
+
+func TestStreamConnection_TheRuntimeContextBoundsTheWaitForTheWriteLock(t *testing.T) {
+    stream := newStreamConnection(nil, context.Background(), 10*time.Second, newConnectionLiveness())
+    stream.writeLock <- struct{}{}
+
+    runtimeContext, runtimeCancel := context.WithCancel(context.Background())
+    runtimeCancel()
+    senderRuntime := runtime.NewRequest(runtimeContext, container.NewContainer(container.ContainerConfig{}).NewScope())
+
+    sendDone := make(chan error, 1)
+    go func() {
+        sendDone <- stream.Send(senderRuntime, OutboundMessage{Payload: []byte("frame")})
+    }()
+
+    if sendErr := awaitSend(t, sendDone); false == errors.Is(sendErr, context.Canceled) {
+        t.Fatalf("expected the runtime's cancellation, got %v", sendErr)
+    }
+}
+
+func TestStreamConnection_AClosingConnectionReleasesASendWaitingForTheWriteLock(t *testing.T) {
+    connectionContext, connectionCancel := context.WithCancel(context.Background())
+    defer connectionCancel()
+
+    stream := newStreamConnection(nil, connectionContext, 10*time.Second, newConnectionLiveness())
+    stream.writeLock <- struct{}{}
+
+    runtimeContext := newDoneSignalContext(context.Background())
+    senderRuntime := runtime.NewRequest(runtimeContext, container.NewContainer(container.ContainerConfig{}).NewScope())
+    runtimeContext.armed.Store(true)
+
+    sendDone := make(chan error, 1)
+    go func() {
+        sendDone <- stream.Send(senderRuntime, OutboundMessage{Payload: []byte("frame")})
+    }()
+
+    <-runtimeContext.called
+    connectionCancel()
+
+    if sendErr := awaitSend(t, sendDone); false == errors.Is(sendErr, ErrStreamConnectionClosed) {
+        t.Fatalf("expected ErrStreamConnectionClosed once the connection closed under the wait, got %v", sendErr)
+    }
+}
+
+func TestStreamConnection_AStreamMarkedClosedRefusesASendBeforeItWaitsForTheWriteLock(t *testing.T) {
+    stream := newStreamConnection(nil, context.Background(), 50*time.Millisecond, newConnectionLiveness())
+    stream.writeLock <- struct{}{}
+    stream.closed.Store(true)
+
+    senderRuntime := runtime.NewRequest(context.Background(), container.NewContainer(container.ContainerConfig{}).NewScope())
+    if sendErr := stream.Send(senderRuntime, OutboundMessage{Payload: []byte("frame")}); false == errors.Is(sendErr, ErrStreamConnectionClosed) {
+        t.Fatalf("expected ErrStreamConnectionClosed before the wait for the lock, got %v", sendErr)
+    }
+}
+
+func TestStreamConnection_AStreamClosedWhileASendWaitedForTheLockRefusesItBeforeTheWrite(t *testing.T) {
+    stream := newStreamConnection(nil, context.Background(), 10*time.Second, newConnectionLiveness())
+    stream.writeLock <- struct{}{}
+
+    runtimeContext := newDoneSignalContext(context.Background())
+    senderRuntime := runtime.NewRequest(runtimeContext, container.NewContainer(container.ContainerConfig{}).NewScope())
+    runtimeContext.armed.Store(true)
+
+    sendDone := make(chan error, 1)
+    go func() {
+        defer func() {
+            recovered := recover()
+            if nil != recovered {
+                sendDone <- fmt.Errorf("the send reached the write: %v", recovered)
+            }
+        }()
+
+        sendDone <- stream.Send(senderRuntime, OutboundMessage{Payload: []byte("frame")})
+    }()
+
+    <-runtimeContext.called
+    stream.closed.Store(true)
+    <-stream.writeLock
+
+    if sendErr := awaitSend(t, sendDone); false == errors.Is(sendErr, ErrStreamConnectionClosed) {
+        t.Fatalf("expected ErrStreamConnectionClosed after the lock, before the write, got %v", sendErr)
     }
 }

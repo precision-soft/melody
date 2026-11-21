@@ -1198,11 +1198,11 @@ func TestReopenConsume_CloseUnblocksGoroutineParkedOnBackoff(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
 
-    attempt := 5
+    attempts := &reconnectAttempts{backoff: transport.reconnect, attempt: 5}
     done := make(chan error, 1)
 
     go func() {
-        _, _, _, reopenErr := transport.reopenConsume(runtimeInstance, &attempt)
+        _, _, _, reopenErr := transport.reopenConsume(runtimeInstance, attempts)
         done <- reopenErr
     }()
 
@@ -3930,5 +3930,115 @@ func TestSubscribeWithRetry_TheWaitGrowsByTheFactorOverConsecutiveFailures(t *te
 
     if gap := dialedAt[3].Sub(dialedAt[2]); 180*time.Millisecond > gap {
         t.Fatalf("expected the third wait to have grown to 180ms, waited %s", gap)
+    }
+}
+
+func TestConsumeLoop_TheReopenWaitGrowsFromTheWaitAfterTheLostChannel(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    var mutex sync.Mutex
+    dialedAt := make([]time.Time, 0, 3)
+    instance := &Transport{
+        queue:       "orders",
+        closeSignal: make(chan struct{}),
+        reconnect:   bound.ResolvedBackoff{Initial: 20 * time.Millisecond, Max: 10 * time.Second, Factor: 3},
+        dialer: func() (*amqp091.Connection, error) {
+            mutex.Lock()
+            dialedAt = append(dialedAt, time.Now())
+            if 3 <= len(dialedAt) {
+                cancel()
+            }
+            mutex.Unlock()
+
+            return nil, exception.NewError("dial refused", nil, nil)
+        },
+    }
+
+    deliveries := make(chan amqp091.Delivery)
+    close(deliveries)
+
+    done := make(chan struct{})
+    go func() {
+        instance.consumeLoop(newReconnectRuntime(ctx), nil, 0, deliveries, &subscription{envelopes: make(chan messagebuscontract.Envelope)})
+        close(done)
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        cancel()
+        t.Fatal("consumeLoop did not return after the third dial")
+    }
+
+    mutex.Lock()
+    defer mutex.Unlock()
+
+    if 3 > len(dialedAt) {
+        t.Fatalf("expected three dials, got %d", len(dialedAt))
+    }
+
+    if gap := dialedAt[1].Sub(dialedAt[0]); 60*time.Millisecond > gap {
+        t.Fatalf("expected the first reopen failure to wait the second attempt's 60ms, waited %s", gap)
+    }
+
+    if gap := dialedAt[2].Sub(dialedAt[1]); 180*time.Millisecond > gap {
+        t.Fatalf("expected the second reopen failure to wait the third attempt's 180ms, waited %s", gap)
+    }
+}
+
+func TestConsumeLoop_AChannelLostAfterLivingTheInitialBackoffReopensAtOnce(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    provider := NewProvider(ProviderConfig{})
+    connection, openErr := provider.Open(dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+
+    providerDialer := provider.Dialer(dsn)
+    dialedAt := make(chan time.Time, 8)
+
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.reconnect.reset")
+
+    transport := NewTransport(TransportConfig{
+        Connection: connection,
+        Dialer: func() (*amqp091.Connection, error) {
+            dialedAt <- time.Now()
+
+            return providerDialer()
+        },
+        Queue:     "melody.amqp.reconnect.reset",
+        Prefetch:  bound.Of(1),
+        Registry:  registry,
+        Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(400 * time.Millisecond), Max: bound.Of(10 * time.Second)}},
+    })
+    defer transport.CloseWithContext(context.Background())
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    if _, receiveErr := transport.Receive(runtime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())); nil != receiveErr {
+        t.Fatalf("receive: %v", receiveErr)
+    }
+
+    time.Sleep(600 * time.Millisecond)
+
+    droppedAt := time.Now()
+    if dropErr := connection.Close(); nil != dropErr {
+        t.Fatalf("drop connection: %v", dropErr)
+    }
+
+    select {
+    case redialedAt := <-dialedAt:
+        if gap := redialedAt.Sub(droppedAt); 250*time.Millisecond <= gap {
+            t.Fatalf("expected a channel that lived the initial backoff to reopen at once, waited %s", gap)
+        }
+    case <-time.After(10 * time.Second):
+        t.Fatal("the consumer never redialed")
     }
 }

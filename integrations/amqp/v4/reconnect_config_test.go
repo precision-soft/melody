@@ -144,3 +144,58 @@ func TestReconnectBackoffShouldReset_ComparesAgainstTheInitialBackoff(t *testing
         t.Fatalf("expected a subscription that lived the initial backoff to reset")
     }
 }
+
+type reconnectAttemptStep struct {
+    subscriptionDuration time.Duration
+    subscribed           bool
+    expectedWait         time.Duration
+    expectedWaits        bool
+}
+
+func TestReconnectAttempts_TheWaitGrowsOverFailuresAndALongSubscriptionStartsItOver(t *testing.T) {
+    testCases := map[string][]reconnectAttemptStep{
+        "consecutive failures grow the wait by the factor up to the cap": {
+            {expectedWait: time.Second, expectedWaits: true},
+            {expectedWait: 2 * time.Second, expectedWaits: true},
+            {expectedWait: 4 * time.Second, expectedWaits: true},
+            {expectedWait: 8 * time.Second, expectedWaits: true},
+            {expectedWait: 16 * time.Second, expectedWaits: true},
+            {expectedWait: 30 * time.Second, expectedWaits: true},
+            {expectedWait: 30 * time.Second, expectedWaits: true},
+        },
+        "a subscription shorter than the initial backoff counts as a failure": {
+            {expectedWait: time.Second, expectedWaits: true},
+            {subscribed: true, subscriptionDuration: time.Second - time.Nanosecond, expectedWait: 2 * time.Second, expectedWaits: true},
+            {subscribed: true, subscriptionDuration: 0, expectedWait: 4 * time.Second, expectedWaits: true},
+        },
+        "a subscription that lived the initial backoff resubscribes at once and starts the count over": {
+            {expectedWait: time.Second, expectedWaits: true},
+            {expectedWait: 2 * time.Second, expectedWaits: true},
+            {expectedWait: 4 * time.Second, expectedWaits: true},
+            {subscribed: true, subscriptionDuration: time.Second, expectedWait: 0, expectedWaits: false},
+            {expectedWait: time.Second, expectedWaits: true},
+            {subscribed: true, subscriptionDuration: 0, expectedWait: 2 * time.Second, expectedWaits: true},
+            {subscribed: true, subscriptionDuration: time.Minute, expectedWait: 0, expectedWaits: false},
+            {subscribed: true, subscriptionDuration: 0, expectedWait: time.Second, expectedWaits: true},
+        },
+    }
+
+    for name, steps := range testCases {
+        t.Run(name, func(t *testing.T) {
+            attempts := newReconnectAttempts(defaultReconnect)
+
+            for index, step := range steps {
+                wait, waits := step.expectedWait, true
+                if true == step.subscribed {
+                    wait, waits = attempts.afterSubscription(step.subscriptionDuration)
+                } else {
+                    wait = attempts.afterFailure()
+                }
+
+                if step.expectedWait != wait || step.expectedWaits != waits {
+                    t.Fatalf("step %d: expected wait %s (waits %t), got %s (waits %t)", index, step.expectedWait, step.expectedWaits, wait, waits)
+                }
+            }
+        })
+    }
+}

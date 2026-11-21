@@ -22,3 +22,27 @@ var reconnectBackoffRule = bound.BackoffRule{
 func resolveReconnect(config ReconnectConfig) (bound.ResolvedBackoff, error) {
     return bound.ResolveBackoff(config.Backoff, reconnectBackoffRule)
 }
+
+/* reconnectAttempts is the attempt count of the backplane's reconnect loop: each lost subscription waits the backoff of its attempt and grows the next one, and a subscription that lived at least the initial backoff starts the count over with no wait. */
+type reconnectAttempts struct {
+    backoff bound.ResolvedBackoff
+    attempt int
+}
+
+func newReconnectAttempts(backoff bound.ResolvedBackoff) *reconnectAttempts {
+    return &reconnectAttempts{backoff: backoff, attempt: 1}
+}
+
+/* afterSubscription answers the wait before resubscribing once a subscription ended, and false when there is none: a subscription that lived the initial backoff starts the count over and resubscribes at once, a shorter one waits the backoff of its attempt and grows the next. */
+func (instance *reconnectAttempts) afterSubscription(subscriptionDuration time.Duration) (time.Duration, bool) {
+    if instance.backoff.Initial <= subscriptionDuration {
+        instance.attempt = 1
+
+        return 0, false
+    }
+
+    wait := instance.backoff.Delay(instance.attempt)
+    instance.attempt++
+
+    return wait, true
+}

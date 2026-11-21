@@ -11,6 +11,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     amqp091 "github.com/rabbitmq/amqp091-go"
@@ -1608,4 +1609,108 @@ func TestServerSentEventBackplane_ListenReturnsOnACyclicChainFromTheDialer(t *te
 
         instance.listen()
     })
+}
+
+func TestServerSentEventBackplane_ListenGrowsTheWaitOverConsecutiveSubscribeFailures(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    var mutex sync.Mutex
+    dialedAt := make([]time.Time, 0, 4)
+    instance := &ServerSentEventBackplane{
+        exchange:    "melody.sse.test.growth",
+        callTimeout: time.Second,
+        reconnect:   bound.ResolvedBackoff{Initial: 20 * time.Millisecond, Max: 10 * time.Second, Factor: 2},
+        ctx:         ctx,
+        cancel:      cancel,
+        dialer: func() (*amqp091.Connection, error) {
+            mutex.Lock()
+            dialedAt = append(dialedAt, time.Now())
+            if 4 <= len(dialedAt) {
+                cancel()
+            }
+            mutex.Unlock()
+
+            return nil, exception.NewError("dial refused", nil, nil)
+        },
+    }
+
+    instance.wait.Add(1)
+
+    done := make(chan struct{})
+    go func() {
+        instance.listen()
+        close(done)
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        cancel()
+        t.Fatal("listen did not return after the fourth dial")
+    }
+
+    mutex.Lock()
+    defer mutex.Unlock()
+
+    if 4 > len(dialedAt) {
+        t.Fatalf("expected four dials, got %d", len(dialedAt))
+    }
+
+    for index, minimum := range []time.Duration{20 * time.Millisecond, 40 * time.Millisecond, 80 * time.Millisecond} {
+        if gap := dialedAt[index+1].Sub(dialedAt[index]); gap < minimum {
+            t.Fatalf("expected wait %d to have grown to %s, waited %s", index+1, minimum, gap)
+        }
+    }
+}
+
+func TestServerSentEventBackplane_ASubscriptionThatLivedTheInitialBackoffResubscribesAtOnce(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    connections := make(chan *amqp091.Connection, 8)
+    dialedAt := make(chan time.Time, 8)
+
+    backplane := NewServerSentEventBackplane(ServerSentEventBackplaneConfig{
+        Hub:      melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}),
+        Exchange: "melody.sse.test.reset",
+        Dialer: func() (*amqp091.Connection, error) {
+            dialedAt <- time.Now()
+
+            connection, dialErr := amqp091.Dial(dsn)
+            if nil == dialErr {
+                connections <- connection
+            }
+
+            return connection, dialErr
+        },
+        Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(400 * time.Millisecond), Max: bound.Of(10 * time.Second)}},
+    })
+    defer backplane.CloseWithContext(context.Background())
+
+    var connection *amqp091.Connection
+    select {
+    case <-dialedAt:
+        connection = <-connections
+    case <-time.After(10 * time.Second):
+        t.Fatal("the backplane never dialed")
+    }
+
+    time.Sleep(600 * time.Millisecond)
+
+    droppedAt := time.Now()
+    if dropErr := connection.Close(); nil != dropErr {
+        t.Fatalf("drop connection: %v", dropErr)
+    }
+
+    select {
+    case redialedAt := <-dialedAt:
+        if gap := redialedAt.Sub(droppedAt); 250*time.Millisecond <= gap {
+            t.Fatalf("expected a subscription that lived the initial backoff to resubscribe at once, waited %s", gap)
+        }
+    case <-time.After(10 * time.Second):
+        t.Fatal("the backplane never redialed")
+    }
 }

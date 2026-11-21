@@ -272,9 +272,7 @@ var _ messagebuscontract.Subscription = (*subscription)(nil)
 func (instance *Transport) subscribeWithRetry(
     runtimeInstance containercontract.Runtime,
 ) (*amqp091.Channel, uint64, <-chan amqp091.Delivery, error) {
-    attempt := 1
-
-    return instance.retrySubscribe(runtimeInstance, &attempt, true, "amqp initial subscribe failed, retrying")
+    return instance.retrySubscribe(runtimeInstance, newReconnectAttempts(instance.reconnect), true, "amqp initial subscribe failed, retrying")
 }
 
 func (instance *Transport) Ack(
@@ -1026,7 +1024,7 @@ func (instance *Transport) consumeLoop(
 
     out := subscriptionInstance.envelopes
 
-    attempt := 1
+    attempts := newReconnectAttempts(instance.reconnect)
 
     for {
         startedAt := time.Now()
@@ -1060,17 +1058,12 @@ func (instance *Transport) consumeLoop(
 
         instance.resetConsumeChannel(channel)
 
-        if true == reconnectBackoffShouldReset(instance.reconnect, time.Since(startedAt)) {
-            attempt = 1
-        } else {
-            if false == instance.waitForRetry(runtimeInstance, instance.reconnect.Delay(attempt)) {
-                return
-            }
-
-            attempt++
+        wait, waits := attempts.afterSubscription(time.Since(startedAt))
+        if true == waits && false == instance.waitForRetry(runtimeInstance, wait) {
+            return
         }
 
-        reopenedChannel, reopenedGeneration, reopenedDeliveries, reopenErr := instance.reopenConsume(runtimeInstance, &attempt)
+        reopenedChannel, reopenedGeneration, reopenedDeliveries, reopenErr := instance.reopenConsume(runtimeInstance, attempts)
         if nil != reopenErr {
             if nil == runtimeInstance.Context().Err() && false == instance.isClosing() {
                 endErr = reopenErr
@@ -1201,7 +1194,7 @@ func (instance *Transport) waitForRetry(
 
 func (instance *Transport) retrySubscribe(
     runtimeInstance containercontract.Runtime,
-    attempt *int,
+    attempts *reconnectAttempts,
     resetEachAttempt bool,
     logMessage string,
 ) (*amqp091.Channel, uint64, <-chan amqp091.Delivery, error) {
@@ -1225,19 +1218,17 @@ func (instance *Transport) retrySubscribe(
             instance.resetConsumeChannel(channel)
         }
 
-        if false == instance.waitForRetry(runtimeInstance, instance.reconnect.Delay(*attempt)) {
+        if false == instance.waitForRetry(runtimeInstance, attempts.afterFailure()) {
             return nil, 0, nil, subscribeErr
         }
-
-        *attempt = *attempt + 1
     }
 }
 
 func (instance *Transport) reopenConsume(
     runtimeInstance containercontract.Runtime,
-    attempt *int,
+    attempts *reconnectAttempts,
 ) (*amqp091.Channel, uint64, <-chan amqp091.Delivery, error) {
-    return instance.retrySubscribe(runtimeInstance, attempt, true, "amqp reconnect attempt failed, backing off")
+    return instance.retrySubscribe(runtimeInstance, attempts, true, "amqp reconnect attempt failed, backing off")
 }
 
 func (instance *Transport) republish(

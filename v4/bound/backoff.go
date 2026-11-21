@@ -31,7 +31,7 @@ type ResolvedBackoff struct {
     Factor  float64
 }
 
-/* ResolveBackoff decides the backoff against the rule: a left-out field takes the rule's default, and a duration below TimeoutMinimum or unlimited, a Max below Initial and a Factor below 1 or NaN are refused, each naming the field under the rule's name. */
+/* ResolveBackoff decides the backoff against the rule: a left-out field takes the rule's default, and a duration below TimeoutMinimum or unlimited, a Max below Initial and a Factor below 1, NaN or infinite are refused, each naming the field under the rule's name. */
 func ResolveBackoff(value Backoff, rule BackoffRule) (ResolvedBackoff, error) {
     initial, initialErr := Resolve(value.Initial, Rule[time.Duration]{
         Name:    rule.Name + ".Initial",
@@ -69,10 +69,10 @@ func ResolveBackoff(value Backoff, rule BackoffRule) (ResolvedBackoff, error) {
         factor = rule.FactorDefault
     }
 
-    /* NaN fails every comparison, so only the not-at-least-1 form refuses it */
-    if false == (factor >= 1) {
+    /* NaN fails every comparison, so only the not-at-least-1 form refuses it; an infinite factor jumps from Initial straight to Max */
+    if false == (factor >= 1) || true == math.IsInf(factor, 1) {
         return ResolvedBackoff{}, exception.NewError(
-            "the backoff factor is below 1",
+            "the backoff factor is below 1 or infinite",
             exceptioncontract.Context{
                 "field": rule.Name + ".Factor",
                 "value": strconv.FormatFloat(value.Factor, 'g', -1, 64),

@@ -34,3 +34,32 @@ func resolveReconnectOver(parent bound.ResolvedBackoff, override ReconnectConfig
 func reconnectBackoffShouldReset(reconnect bound.ResolvedBackoff, subscriptionDuration time.Duration) bool {
     return reconnect.Initial <= subscriptionDuration
 }
+
+/* reconnectAttempts is the attempt count of one reconnect loop: each failure waits the backoff of its attempt and grows the next one, and a subscription that lived at least the initial backoff starts the count over with no wait. */
+type reconnectAttempts struct {
+    backoff bound.ResolvedBackoff
+    attempt int
+}
+
+func newReconnectAttempts(backoff bound.ResolvedBackoff) *reconnectAttempts {
+    return &reconnectAttempts{backoff: backoff, attempt: 1}
+}
+
+/* afterFailure answers the wait before the next try and counts the failure. */
+func (instance *reconnectAttempts) afterFailure() time.Duration {
+    wait := instance.backoff.Delay(instance.attempt)
+    instance.attempt++
+
+    return wait
+}
+
+/* afterSubscription answers the wait before resubscribing once a subscription ended, and false when there is none: a subscription that lived the initial backoff starts the count over and resubscribes at once, a shorter one counts as a failure. */
+func (instance *reconnectAttempts) afterSubscription(subscriptionDuration time.Duration) (time.Duration, bool) {
+    if true == reconnectBackoffShouldReset(instance.backoff, subscriptionDuration) {
+        instance.attempt = 1
+
+        return 0, false
+    }
+
+    return instance.afterFailure(), true
+}

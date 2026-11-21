@@ -78,3 +78,42 @@ func TestResolveReconnect_TheCapRefusalNamesTheCappingField(t *testing.T) {
         t.Fatalf("expected the refusal to name the cap and its 30s value, got %v", context)
     }
 }
+
+func TestReconnectAttempts_ShortSubscriptionsGrowTheWaitAndALongOneStartsItOver(t *testing.T) {
+    testCases := map[string][]struct {
+        subscriptionDuration time.Duration
+        expectedWait         time.Duration
+        expectedWaits        bool
+    }{
+        "subscriptions shorter than the initial backoff grow the wait by the factor up to the cap": {
+            {subscriptionDuration: 0, expectedWait: time.Second, expectedWaits: true},
+            {subscriptionDuration: 10 * time.Microsecond, expectedWait: 2 * time.Second, expectedWaits: true},
+            {subscriptionDuration: time.Second - time.Millisecond, expectedWait: 4 * time.Second, expectedWaits: true},
+            {subscriptionDuration: 0, expectedWait: 8 * time.Second, expectedWaits: true},
+            {subscriptionDuration: 0, expectedWait: 16 * time.Second, expectedWaits: true},
+            {subscriptionDuration: 0, expectedWait: 30 * time.Second, expectedWaits: true},
+            {subscriptionDuration: 0, expectedWait: 30 * time.Second, expectedWaits: true},
+        },
+        "a subscription that lived the initial backoff resubscribes at once and starts the count over": {
+            {subscriptionDuration: 0, expectedWait: time.Second, expectedWaits: true},
+            {subscriptionDuration: 0, expectedWait: 2 * time.Second, expectedWaits: true},
+            {subscriptionDuration: time.Second, expectedWait: 0, expectedWaits: false},
+            {subscriptionDuration: 0, expectedWait: time.Second, expectedWaits: true},
+            {subscriptionDuration: 5 * time.Second, expectedWait: 0, expectedWaits: false},
+            {subscriptionDuration: 0, expectedWait: time.Second, expectedWaits: true},
+        },
+    }
+
+    for name, steps := range testCases {
+        t.Run(name, func(t *testing.T) {
+            attempts := newReconnectAttempts(bound.ResolvedBackoff{Initial: time.Second, Max: 30 * time.Second, Factor: 2})
+
+            for index, step := range steps {
+                wait, waits := attempts.afterSubscription(step.subscriptionDuration)
+                if step.expectedWait != wait || step.expectedWaits != waits {
+                    t.Fatalf("step %d: expected wait %s (waits %t), got %s (waits %t)", index, step.expectedWait, step.expectedWaits, wait, waits)
+                }
+            }
+        })
+    }
+}

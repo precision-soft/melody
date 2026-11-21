@@ -222,22 +222,6 @@ func TestServerSentEventBackplane_PublishAppliesCallTimeout(t *testing.T) {
     }
 }
 
-func TestShouldResetBackplaneBackoff(t *testing.T) {
-    instance := &ServerSentEventBackplane{reconnect: bound.ResolvedBackoff{Initial: time.Second}}
-
-    if true == instance.shouldResetBackplaneBackoff(10*time.Microsecond) {
-        t.Fatalf("a sub-second subscription (such as an immediate nil Receive return) must NOT reset backoff, otherwise listen() busy-loops re-subscribing with zero delay")
-    }
-
-    if true == instance.shouldResetBackplaneBackoff(instance.reconnect.Initial-time.Millisecond) {
-        t.Fatalf("a subscription shorter than the healthy threshold must not reset backoff")
-    }
-
-    if false == instance.shouldResetBackplaneBackoff(5*time.Second) {
-        t.Fatalf("a healthy long-lived subscription must reset backoff for a fast reconnect")
-    }
-}
-
 func TestServerSentEventBackplane_AListenerOutlivingTheDeadlineAnswersTheDeadline(t *testing.T) {
     backplane := &ServerSentEventBackplane{hub: melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), cancel: func() {}, listenerDone: make(chan struct{})}
 
@@ -307,13 +291,13 @@ func (instance *scriptedReceiveClient) calls() ([]time.Time, []time.Time) {
 func TestServerSentEventBackplane_ASubscriptionThatLivedTheInitialBackoffResetsTheGrowth(t *testing.T) {
     client := &scriptedReceiveClient{
         Client:    newTokenStoreClient(t),
-        lifetimes: []time.Duration{0, 0, 0, 60 * time.Millisecond, 0},
+        lifetimes: []time.Duration{0, 0, 0, 150 * time.Millisecond, 0},
     }
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     backplane := NewServerSentEventBackplane(client, hub, ServerSentEventBackplaneConfig{
         Channel:   "melody:sse:test:reset",
-        Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(50 * time.Millisecond), Max: bound.Of(10 * time.Second)}},
+        Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(100 * time.Millisecond), Max: bound.Of(10 * time.Second)}},
     })
     defer backplane.CloseWithContext(context.Background())
 
@@ -321,12 +305,18 @@ func TestServerSentEventBackplane_ASubscriptionThatLivedTheInitialBackoffResetsT
     for {
         startedAt, returnedAt := client.calls()
         if 6 <= len(startedAt) && 5 <= len(returnedAt) {
+            for index, minimum := range []time.Duration{100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond} {
+                if gap := startedAt[index+1].Sub(returnedAt[index]); gap < minimum {
+                    t.Fatalf("expected the wait after short subscription %d to have grown to %s, waited %s", index, minimum, gap)
+                }
+            }
+
             if gap := startedAt[4].Sub(returnedAt[3]); 40*time.Millisecond < gap {
                 t.Fatalf("expected the re-subscription after a subscription that lived the initial backoff to be immediate, waited %s", gap)
             }
 
-            if gap := startedAt[5].Sub(returnedAt[4]); 300*time.Millisecond <= gap {
-                t.Fatalf("expected the growth reset to the initial 50ms after the long-lived subscription, waited %s", gap)
+            if gap := startedAt[5].Sub(returnedAt[4]); gap < 100*time.Millisecond || 200*time.Millisecond <= gap {
+                t.Fatalf("expected the growth reset to the first attempt's 100ms after the long-lived subscription, waited %s", gap)
             }
 
             return

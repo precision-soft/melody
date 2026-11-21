@@ -51,6 +51,7 @@ func TestResolveBackoff_RefusesWhatItsRuleRefusesNamingTheField(t *testing.T) {
         {"factor below 1", Backoff{Factor: 0.5}, "TestConfig.Backoff.Factor"},
         {"factor negative", Backoff{Factor: -2}, "TestConfig.Backoff.Factor"},
         {"factor NaN", Backoff{Factor: math.NaN()}, "TestConfig.Backoff.Factor"},
+        {"factor infinite", Backoff{Factor: math.Inf(1)}, "TestConfig.Backoff.Factor"},
     }
 
     for _, testCase := range testCases {
