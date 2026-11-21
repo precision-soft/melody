@@ -58,7 +58,7 @@ func runnerOptionFromContext(ctx context.Context) (RunnerOption, bool) {
     return option, present
 }
 
-/* RunQueries executes the queries in order, printing each under the direction and the migration's name, and stops at the first failure naming the step. The posture is the option's where set, the command's otherwise: a migration passes on the context it is given, which carries the command's writer and colour, and one that drops it prints to standard output. */
+/* RunQueries executes the queries in order, printing each under the direction and the migration's name, and stops at the first failure naming the step. The posture is the option's where set, the command's otherwise: a migration passes on the context it is given, which carries the command's writer and colour, and one that drops it prints to standard output. It takes that context, never a runtime, since its caller is a bun migration function, whose signature is bun's. */
 func RunQueries(ctx context.Context, db *bun.DB, direction string, migrationName string, queries []Query, option RunnerOption) error {
     commandOption, _ := runnerOptionFromContext(ctx)
 

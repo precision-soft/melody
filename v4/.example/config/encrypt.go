@@ -1,12 +1,11 @@
 package config
 
 import (
-    "context"
     "strings"
 
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v4/encrypt"
-    melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyexceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     bun "github.com/uptrace/bun"
@@ -83,6 +82,6 @@ func encryptKeys(rawKeyList string, currentKeyId string, development bool) (stri
 }
 
 /* encryptDatabaseFactory resolves the shared *bun.DB for the melody:encrypt:database bulk command at its first run, after Boot, so http and worker processes never open the database for it and a boot without a database still registers the command. */
-func (instance *Module) encryptDatabaseFactory(ctx context.Context, resolver melodycontainercontract.Resolver) (*bun.DB, error) {
-    return melodycontainer.FromResolver[*bun.DB](ctx, resolver, serviceDatabase)
+func (instance *Module) encryptDatabaseFactory(runtimeInstance melodycontainercontract.Runtime) (*bun.DB, error) {
+    return melodyruntime.FromRuntime[*bun.DB](runtimeInstance, serviceDatabase)
 }

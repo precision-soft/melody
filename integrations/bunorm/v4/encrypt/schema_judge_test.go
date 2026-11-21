@@ -71,7 +71,7 @@ func TestMigrate_ResolvesAColumnToTheSpellingTheTableStores(t *testing.T) {
     migrator, stub := newScriptedMigrator(t, judgeTable([][]driver.Value{{"id", "NO"}, {"email", "YES"}}, accountsPrimary, [][]driver.Value{{"email", "latin1"}}, ""))
     stub.responses[len(stub.responses)-1] = scriptedSqlResponse{fragment: "ORDER BY", columns: []string{"id", "email"}, rows: [][]driver.Value{}}
 
-    if _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "ID", Columns: []string{"Email"}}); nil != runErr {
+    if _, runErr := migrator.MigrateEncrypt(testRuntime(), TableSpecification{Table: "accounts", PrimaryKey: "ID", Columns: []string{"Email"}}); nil != runErr {
         t.Fatalf("expected the run to complete over the stored spelling, got %v", runErr)
     }
 
@@ -97,7 +97,7 @@ func TestMigrate_ResolvesAColumnToTheSpellingTheTableStores(t *testing.T) {
 func TestMigrate_RefusesAColumnBoundTwiceBeforeReadingTheTable(t *testing.T) {
     migrator, stub := newScriptedMigrator(t, judgeTable(accountsColumns, accountsPrimary, nil, "STRICT_TRANS_TABLES"))
 
-    _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpecification{
+    _, runErr := migrator.MigrateEncrypt(testRuntime(), TableSpecification{
         Table:        "accounts",
         PrimaryKey:   "id",
         Columns:      []string{"notes"},
@@ -116,7 +116,7 @@ func TestMigrate_RefusesAnUnknownColumnAndOneNamedTwiceBeforeReadingTheTable(t *
     for name, columns := range map[string][]string{"unknown": {"missing"}, "named twice": {"notes", "NOTES"}} {
         migrator, stub := newScriptedMigrator(t, judgeTable(accountsColumns, accountsPrimary, nil, "STRICT_TRANS_TABLES"))
 
-        _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: columns})
+        _, runErr := migrator.MigrateEncrypt(testRuntime(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: columns})
         if nil == runErr || true == readTheTable(stub) {
             t.Fatalf("%s: expected a refusal before the table is read, got %v", name, runErr)
         }
@@ -143,7 +143,7 @@ func TestMigrate_JudgesThePagingKey(t *testing.T) {
     } {
         migrator, stub := newScriptedMigrator(t, judgeTable(testCase.columns, testCase.indexes, nil, "STRICT_TRANS_TABLES"))
 
-        _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
+        _, runErr := migrator.MigrateEncrypt(testRuntime(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
         if testCase.refused != (nil != runErr && true == strings.Contains(runErr.Error(), "the paging key is not unique")) {
             t.Fatalf("%s: expected refused %v, got %v", name, testCase.refused, runErr)
         }
@@ -168,7 +168,7 @@ func TestMigrateDecrypt_RefusesANarrowCharsetUnderANonStrictSession(t *testing.T
     } {
         migrator, stub := newScriptedMigrator(t, judgeTable(accountsColumns, accountsPrimary, [][]driver.Value{{"notes", testCase.charset}}, testCase.sqlMode))
 
-        _, runErr := migrator.MigrateDecrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
+        _, runErr := migrator.MigrateDecrypt(testRuntime(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
         refused := nil != runErr && true == strings.Contains(runErr.Error(), "non-strict sql_mode")
         if testCase.refused != refused {
             t.Fatalf("%s: expected refused %v, got %v", name, testCase.refused, runErr)
@@ -186,7 +186,7 @@ func TestMigrateDecrypt_RefusesANarrowCharsetUnderANonStrictSession(t *testing.T
 func TestMigrateEncrypt_IsNotRefusedByTheDecryptSessionCheck(t *testing.T) {
     migrator, stub := newScriptedMigrator(t, judgeTable(accountsColumns, accountsPrimary, [][]driver.Value{{"notes", "latin1"}}, ""))
 
-    if _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}}); nil != runErr {
+    if _, runErr := migrator.MigrateEncrypt(testRuntime(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}}); nil != runErr {
         t.Fatalf("expected an encrypt not judged on the session's mode, got %v", runErr)
     }
 
@@ -204,7 +204,7 @@ func TestMigrate_WithholdsTheServerMessageOfADuplicateOrAnIncorrectString(t *tes
         migrator, stub := newScriptedMigrator(t, responses)
         stub.execErr = &mysql.MySQLError{Number: number, Message: "Duplicate entry 'the secret plaintext' for key 'notes'"}
 
-        _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
+        _, runErr := migrator.MigrateEncrypt(testRuntime(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
         if nil == runErr {
             t.Fatalf("%d: expected the refused write reported", number)
         }
@@ -270,7 +270,7 @@ func storedNotes(t *testing.T, sqlDb *sql.DB) string {
 func TestMigrateDecrypt_LiveANonStrictSessionIsRefusedAndTheSealKept(t *testing.T) {
     migrator, sqlDb, sealed := liveDecryptCharsetTable(t, "NO_ENGINE_SUBSTITUTION")
 
-    _, runErr := migrator.MigrateDecrypt(context.Background(), TableSpecification{Table: "migrate_decrypt_charset_record", PrimaryKey: "id", Columns: []string{"Notes"}})
+    _, runErr := migrator.MigrateDecrypt(testRuntime(), TableSpecification{Table: "migrate_decrypt_charset_record", PrimaryKey: "id", Columns: []string{"Notes"}})
     if nil == runErr || false == strings.Contains(runErr.Error(), "non-strict sql_mode") {
         t.Fatalf("expected the non-strict session refused, got %v", runErr)
     }
@@ -283,7 +283,7 @@ func TestMigrateDecrypt_LiveANonStrictSessionIsRefusedAndTheSealKept(t *testing.
 func TestMigrateDecrypt_LiveAStrictSessionRefusesTheLossyWriteAndKeepsTheSeal(t *testing.T) {
     migrator, sqlDb, sealed := liveDecryptCharsetTable(t, "STRICT_TRANS_TABLES")
 
-    _, runErr := migrator.MigrateDecrypt(context.Background(), TableSpecification{Table: "migrate_decrypt_charset_record", PrimaryKey: "id", Columns: []string{"notes"}})
+    _, runErr := migrator.MigrateDecrypt(testRuntime(), TableSpecification{Table: "migrate_decrypt_charset_record", PrimaryKey: "id", Columns: []string{"notes"}})
     var serverErr *mysql.MySQLError
     if nil == runErr || false == strings.Contains(runErr.Error(), "migrate update failed") || true == strings.Contains(runErr.Error(), "non-strict") || false == errors.As(runErr, &serverErr) {
         t.Fatalf("expected the write refused by the server, the judge passing, got %v", runErr)
@@ -306,7 +306,7 @@ func TestMigrate_TheJudgeAndTheWholeRunShareOneConnection(t *testing.T) {
     migrator, stub := newScriptedMigrator(t, responses)
     migrator.db.DB.SetMaxIdleConns(0)
 
-    if _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}}); nil != runErr {
+    if _, runErr := migrator.MigrateEncrypt(testRuntime(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}}); nil != runErr {
         t.Fatalf("run: %v", runErr)
     }
 
@@ -332,7 +332,7 @@ func TestMigrate_AFunctionalIndexIsAPartThatIsNotTheKey(t *testing.T) {
     } {
         migrator, _ := newScriptedMigrator(t, judgeTable(accountsColumns, testCase.indexes, nil, "STRICT_TRANS_TABLES"))
 
-        _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
+        _, runErr := migrator.MigrateEncrypt(testRuntime(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
         if testCase.refused != (nil != runErr && true == strings.Contains(runErr.Error(), "the paging key is not unique")) {
             t.Fatalf("%s: expected refused %v, got %v", name, testCase.refused, runErr)
         }
@@ -342,12 +342,12 @@ func TestMigrate_AFunctionalIndexIsAPartThatIsNotTheKey(t *testing.T) {
 func TestMigrate_ReencryptAndDecryptUseTheStoredSpellingToo(t *testing.T) {
     for door, run := range map[string]func(*Migrator, TableSpecification) error{
         "reencrypt": func(migrator *Migrator, specification TableSpecification) error {
-            _, runErr := migrator.MigrateReencrypt(context.Background(), specification, "v1")
+            _, runErr := migrator.MigrateReencrypt(testRuntime(), specification, "v1")
 
             return runErr
         },
         "decrypt": func(migrator *Migrator, specification TableSpecification) error {
-            _, runErr := migrator.MigrateDecrypt(context.Background(), specification)
+            _, runErr := migrator.MigrateDecrypt(testRuntime(), specification)
 
             return runErr
         },
@@ -369,7 +369,7 @@ func TestMigrate_ReencryptAndDecryptUseTheStoredSpellingToo(t *testing.T) {
 func TestEnsureColumnCapacity_ReadsTheColumnInTheStoredSpelling(t *testing.T) {
     migrator, stub := newScriptedMigrator(t, judgeTable([][]driver.Value{{"id", "NO"}, {"email", "YES"}}, accountsPrimary, [][]driver.Value{{"email", "latin1"}}, ""))
 
-    if capacityErr := migrator.EnsureColumnCapacity(context.Background(), TableSpecification{Table: "accounts", Columns: []string{"Email"}}); nil != capacityErr {
+    if capacityErr := migrator.EnsureColumnCapacity(testRuntime(), TableSpecification{Table: "accounts", Columns: []string{"Email"}}); nil != capacityErr {
         t.Fatalf("capacity: %v", capacityErr)
     }
 
@@ -391,7 +391,7 @@ func TestMigrate_ABindingSpelledUnlikeItsColumnBindsTheStoredColumn(t *testing.T
     responses[len(responses)-1] = scriptedSqlResponse{fragment: "ORDER BY", columns: []string{"id", "email"}, rows: [][]driver.Value{}}
     migrator, _ := newScriptedMigrator(t, responses)
 
-    if _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"Email"}, SealBindings: map[string]ColumnSealBinding{"email": {Label: "accounts.email"}}}); nil != runErr {
+    if _, runErr := migrator.MigrateEncrypt(testRuntime(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"Email"}, SealBindings: map[string]ColumnSealBinding{"email": {Label: "accounts.email"}}}); nil != runErr {
         t.Fatalf("expected the binding resolved to the stored column, got %v", runErr)
     }
 }
@@ -402,7 +402,7 @@ func TestMigrate_AWithheldRefusalKeepsItsTypedNumber(t *testing.T) {
     migrator, stub := newScriptedMigrator(t, responses)
     stub.execErr = &mysql.MySQLError{Number: 1644, SQLState: [5]byte{'4', '5', '0', '0', '0'}, Message: "trigger refused plain"}
 
-    _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
+    _, runErr := migrator.MigrateEncrypt(testRuntime(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
 
     var serverErr *mysql.MySQLError
     chain := strings.Join(exception.BuildCauseChain(runErr, 8), ": ")
@@ -415,7 +415,7 @@ func TestMigrate_AStalePinnedConnectionIsTradedOnceBeforeTheJudge(t *testing.T) 
     migrator, stub := newScriptedMigrator(t, judgeTable(accountsColumns, accountsPrimary, nil, "STRICT_TRANS_TABLES"))
     stub.failFirstPing = true
 
-    if _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}}); nil != runErr {
+    if _, runErr := migrator.MigrateEncrypt(testRuntime(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}}); nil != runErr {
         t.Fatalf("expected the run on a fresh connection, got %v", runErr)
     }
 
@@ -430,7 +430,7 @@ func TestMigrate_ARefusedJudgeHandsItsConnectionBack(t *testing.T) {
 
     for attempt := 0; attempt < 2; attempt++ {
         bounded, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-        _, runErr := migrator.MigrateEncrypt(bounded, TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
+        _, runErr := migrator.MigrateEncrypt(testRuntimeUnder(bounded), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
         cancel()
 
         if nil == runErr || false == strings.Contains(runErr.Error(), "the paging key is not unique") {

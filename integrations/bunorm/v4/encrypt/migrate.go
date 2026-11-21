@@ -9,6 +9,7 @@ import (
     "strings"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect"
@@ -149,7 +150,12 @@ func (instance *Migrator) judged(ctx context.Context, specification TableSpecifi
 }
 
 /* MigrateEncrypt runs EnsureColumnCapacity before the first write, so a programmatic caller gets the width check the command runs. Over a column TableSpecification.SealBindings binds, a value without the marker is sealed under the binding and a seal without one is re-sealed under it, its key and mode kept, so the run brings the column to the form its bound type writes. */
-func (instance *Migrator) MigrateEncrypt(ctx context.Context, specification TableSpecification) (int, error) {
+func (instance *Migrator) MigrateEncrypt(runtimeInstance containercontract.Runtime, specification TableSpecification) (int, error) {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+        return 0, nilErr
+    }
+
+    ctx := runtimeInstance.Context()
     stats, runErr := instance.migrateEncrypt(ctx, specification)
 
     return stats.rows, runErr
@@ -188,7 +194,12 @@ func (instance *Migrator) migrateEncrypt(ctx context.Context, specification Tabl
 }
 
 /* MigrateReencrypt runs its own EnsureColumnCapacityForReencrypt first, for the reason on MigrateEncrypt. Over a bound column every value it writes is sealed under the binding, and a stored seal is already the target only when it is bound and under the target key. */
-func (instance *Migrator) MigrateReencrypt(ctx context.Context, specification TableSpecification, targetKeyId string) (int, error) {
+func (instance *Migrator) MigrateReencrypt(runtimeInstance containercontract.Runtime, specification TableSpecification, targetKeyId string) (int, error) {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+        return 0, nilErr
+    }
+
+    ctx := runtimeInstance.Context()
     stats, runErr := instance.migrateReencrypt(ctx, specification, targetKeyId)
 
     return stats.rows, runErr
@@ -230,7 +241,12 @@ func (instance *Migrator) migrateReencrypt(ctx context.Context, specification Ta
 }
 
 /* MigrateDecrypt stops the run on a row whose stored value is of a seal format this build does not read, whatever the cipher's Decrypt answers for it, and on a row whose decrypted value is itself marker-shaped: written bare, such a value would be read as a seal by a column type that still decrypts. A bound column is opened under its binding. */
-func (instance *Migrator) MigrateDecrypt(ctx context.Context, specification TableSpecification) (int, error) {
+func (instance *Migrator) MigrateDecrypt(runtimeInstance containercontract.Runtime, specification TableSpecification) (int, error) {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+        return 0, nilErr
+    }
+
+    ctx := runtimeInstance.Context()
     stats, runErr := instance.migrateDecrypt(ctx, specification)
 
     return stats.rows, runErr
@@ -551,7 +567,12 @@ func (instance *Migrator) reencryptTransform(specification TableSpecification, t
 }
 
 /* EnsureColumnCapacity refuses a migration whose ciphertext could not fit back into the column it is read from. Under a non-strict sql_mode an overflowing UPDATE succeeds with a truncated ciphertext that never authenticates again, so the requirement is set before the first row by sealing a probe as long as the longest value not yet sealed, with the cipher the run uses. It cannot bound a longer value written concurrently, and a key rotation is covered by EnsureColumnCapacityForReencrypt. */
-func (instance *Migrator) EnsureColumnCapacity(ctx context.Context, specification TableSpecification) error {
+func (instance *Migrator) EnsureColumnCapacity(runtimeInstance containercontract.Runtime, specification TableSpecification) error {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+        return nilErr
+    }
+
+    ctx := runtimeInstance.Context()
     resolved, resolveErr := instance.resolveColumnSpelling(ctx, specification)
     if nil != resolveErr {
         return resolveErr
@@ -561,7 +582,12 @@ func (instance *Migrator) EnsureColumnCapacity(ctx context.Context, specificatio
 }
 
 /* EnsureColumnCapacityForReencrypt is EnsureColumnCapacity for a key rotation, which rewrites values already sealed: re-sealing under another key id changes each stored length by the difference between the two ids. The widest result comes from one aggregate over the column, and the plaintext still in it is sized under the target key id. */
-func (instance *Migrator) EnsureColumnCapacityForReencrypt(ctx context.Context, specification TableSpecification, targetKeyId string) error {
+func (instance *Migrator) EnsureColumnCapacityForReencrypt(runtimeInstance containercontract.Runtime, specification TableSpecification, targetKeyId string) error {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+        return nilErr
+    }
+
+    ctx := runtimeInstance.Context()
     if "" == targetKeyId {
         return exception.NewError("migrate reencrypt needs the key id it will rotate to", map[string]any{"table": specification.Table}, nil)
     }

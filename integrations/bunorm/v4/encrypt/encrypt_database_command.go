@@ -1,7 +1,6 @@
 package encrypt
 
 import (
-    "context"
     "fmt"
     "io"
     "os"
@@ -24,10 +23,10 @@ const (
     migrateModeDecrypt   = "decrypt"
 )
 
-/* EncryptDatabaseCommandConfig declares what the bulk command runs against beside its cipher: exactly one of Database, a prebuilt handle, and DatabaseResolver, run at the first command run and memoized on success, a failure returned from the run and retried on the next one, so a registry-backed database is opened once the container is booted; both or neither is refused naming the two fields. CommandName names the command, melody:encrypt:database when left out, so a multi-context binary exposes one per compartment. */
+/* EncryptDatabaseCommandConfig declares what the bulk command runs against beside its cipher: exactly one of Database, a prebuilt handle, and DatabaseResolver, run at the first command run under the run's runtime and memoized on success, a failure returned from the run and retried on the next one, so a registry-backed database is opened once the container is booted; both or neither is refused naming the two fields. CommandName names the command, melody:encrypt:database when left out, so a multi-context binary exposes one per compartment. */
 type EncryptDatabaseCommandConfig struct {
     Database         *bun.DB
-    DatabaseResolver func(ctx context.Context) (*bun.DB, error)
+    DatabaseResolver func(runtimeInstance containercontract.Runtime) (*bun.DB, error)
     CommandName      string
 
     /* SealBindings are the bound columns of the command's compartment, the module handing each command its own: a --column whose <table>.<column> is a declared label runs bound, and --seal-binding column=label binds a column of a table spelled otherwise to a declared label. A nil Reference and a label declared twice are refused at construction, naming the field and the index. */
@@ -88,7 +87,7 @@ func NewEncryptDatabaseCommand(cipher Cipher, config EncryptDatabaseCommandConfi
 
 type EncryptDatabaseCommand struct {
     migrator            *Migrator
-    databaseResolver    func(ctx context.Context) (*bun.DB, error)
+    databaseResolver    func(runtimeInstance containercontract.Runtime) (*bun.DB, error)
     cipher              Cipher
     commandName         string
     sealBindingsByLabel map[string]SealBindingConfig
@@ -96,7 +95,7 @@ type EncryptDatabaseCommand struct {
 }
 
 /* resolveMigrator runs the resolver under the lock, so racing runs cannot each open a database and leak the loser's pool; a success is memoized and a failure is retried on the next run. */
-func (instance *EncryptDatabaseCommand) resolveMigrator(ctx context.Context) (*Migrator, error) {
+func (instance *EncryptDatabaseCommand) resolveMigrator(runtimeInstance containercontract.Runtime) (*Migrator, error) {
     instance.resolveMutex.Lock()
     defer instance.resolveMutex.Unlock()
 
@@ -104,7 +103,7 @@ func (instance *EncryptDatabaseCommand) resolveMigrator(ctx context.Context) (*M
         return instance.migrator, nil
     }
 
-    database, resolveErr := instance.databaseResolver(ctx)
+    database, resolveErr := instance.databaseResolver(runtimeInstance)
     if nil != resolveErr {
         return nil, resolveErr
     }
@@ -164,7 +163,7 @@ func (instance *EncryptDatabaseCommand) Run(
     targetKey := commandContext.String("target-key")
     ctx := runtimeInstance.Context()
 
-    migrator, migratorErr := instance.resolveMigrator(ctx)
+    migrator, migratorErr := instance.resolveMigrator(runtimeInstance)
     if nil != migratorErr {
         return migratorErr
     }

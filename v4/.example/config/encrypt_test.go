@@ -1,11 +1,16 @@
 package config
 
 import (
+    "context"
     "fmt"
     "strings"
     "testing"
 
+    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyexception "github.com/precision-soft/melody/v4/exception"
+    bun "github.com/uptrace/bun"
 )
 
 func TestEncryptKeys_ReadsEveryListedKeyAndTheCurrentOne(t *testing.T) {
@@ -105,5 +110,20 @@ func TestEncryptKeys_RefusesAMalformedListNamingTheEntryAndNeverTheKey(t *testin
 
             encryptKeys(rawKeyList, "example-2026", true)
         }()
+    }
+}
+
+func TestEncryptDatabaseFactory_ResolvesTheSharedDatabaseThroughTheRunsScope(t *testing.T) {
+    database := &bun.DB{}
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    melodycontainer.MustRegister(containerInstance, serviceDatabase, func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {
+        return database, nil
+    }, melodycontainer.RegisterOptions{TypeRegistrationDisabled: true, Closer: melodycontainer.NewCloser(func(closeContext context.Context, value *bun.DB) error {
+        return nil
+    })})
+
+    resolved, resolveErr := (&Module{}).encryptDatabaseFactory(melodyruntime.NewRun(context.Background(), containerInstance.NewScope()))
+    if nil != resolveErr || database != resolved {
+        t.Fatalf("expected the shared database, got %v and %v", resolved, resolveErr)
     }
 }

@@ -1,9 +1,9 @@
 package encrypt
 
 import (
-    "context"
     "testing"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/uptrace/bun"
 )
 
@@ -27,7 +27,7 @@ func TestCommands_DoesNotResolveTheDatabaseWhileBuildingTheList(t *testing.T) {
     resolved := false
 
     commands := Commands(commandProbeCipher(), EncryptDatabaseCommandConfig{
-        DatabaseResolver: func(ctx context.Context) (*bun.DB, error) {
+        DatabaseResolver: func(runtimeInstance containercontract.Runtime) (*bun.DB, error) {
             resolved = true
 
             return newMysqlDatabase(), nil

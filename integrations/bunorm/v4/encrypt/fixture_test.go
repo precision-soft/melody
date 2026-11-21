@@ -502,6 +502,14 @@ func withSchemaJudgeDefaults(responses []scriptedSqlResponse) []scriptedSqlRespo
     return append(defaults, responses...)
 }
 
+func testRuntime() containercontract.Runtime {
+    return testRuntimeUnder(context.Background())
+}
+
+func testRuntimeUnder(ctx context.Context) containercontract.Runtime {
+    return runtime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
+}
+
 type fakeRuntime struct{}
 
 func (instance fakeRuntime) Context() context.Context {
@@ -611,13 +619,13 @@ func boundNotesSpec(refuseUnbound bool, deterministic bool) TableSpecification {
 /* migrateModeRuns are the three modes of a run, the rotation onto v2 */
 var migrateModeRuns = map[string]func(migrator *Migrator, specification TableSpecification) (int, error){
     "encrypt": func(migrator *Migrator, specification TableSpecification) (int, error) {
-        return migrator.MigrateEncrypt(context.Background(), specification)
+        return migrator.MigrateEncrypt(testRuntime(), specification)
     },
     "reencrypt": func(migrator *Migrator, specification TableSpecification) (int, error) {
-        return migrator.MigrateReencrypt(context.Background(), specification, "v2")
+        return migrator.MigrateReencrypt(testRuntime(), specification, "v2")
     },
     "decrypt": func(migrator *Migrator, specification TableSpecification) (int, error) {
-        return migrator.MigrateDecrypt(context.Background(), specification)
+        return migrator.MigrateDecrypt(testRuntime(), specification)
     },
 }
 

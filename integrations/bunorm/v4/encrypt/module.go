@@ -1,7 +1,6 @@
 package encrypt
 
 import (
-    "context"
     "reflect"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
@@ -22,8 +21,8 @@ type ModuleConfig struct {
 
     Database *bun.DB
 
-    /* DatabaseFactory resolves the database for the unsuffixed command at the first command run, after Boot, and a success is memoized. A database it opens is not closed by the container, and a non-MySQL dialect panics at that first run. */
-    DatabaseFactory func(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error)
+    /* DatabaseFactory resolves the database for the unsuffixed command at the first command run, after Boot, under the run's runtime, and a success is memoized. A database it opens is not closed by the container, and a non-MySQL dialect panics at that first run. */
+    DatabaseFactory func(runtimeInstance containercontract.Runtime) (*bun.DB, error)
 
     Contexts []CommandContextConfig
 
@@ -42,7 +41,7 @@ type CommandContextConfig struct {
     Name            string
     Database        *bun.DB
     Cipher          Cipher
-    DatabaseFactory func(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error)
+    DatabaseFactory func(runtimeInstance containercontract.Runtime) (*bun.DB, error)
 }
 
 func NewModule(config ModuleConfig) *Module {
@@ -106,7 +105,6 @@ func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel
                 instance.config.Database,
                 instance.config.DatabaseFactory,
                 instance.config.Cipher,
-                kernelInstance,
                 "",
                 "",
                 instance.sealBindingsOf(defaultCipherName),
@@ -125,7 +123,6 @@ func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel
                 contextConfig.Database,
                 contextConfig.DatabaseFactory,
                 contextConfig.Cipher,
-                kernelInstance,
                 contextConfig.Name,
                 "melody:encrypt:database:"+contextConfig.Name,
                 instance.sealBindingsOf(contextConfig.Name),
@@ -302,12 +299,11 @@ func refuseForeignDialect(database *bun.DB, refusalContext map[string]any) {
     exception.Panic(exception.NewError("encrypt module database requires a mysql dialect", refusalContext, nil))
 }
 
-/* buildCommand assembles one bulk command from exactly one of a prebuilt database and a factory; a factory runs at the first command run against the container captured here. */
+/* buildCommand assembles one bulk command from exactly one of a prebuilt database and a factory; a factory runs at the first command run under the run's runtime. */
 func (instance *Module) buildCommand(
     database *bun.DB,
-    factory func(ctx context.Context, resolver containercontract.Resolver) (*bun.DB, error),
+    factory func(runtimeInstance containercontract.Runtime) (*bun.DB, error),
     cipher Cipher,
-    kernelInstance kernelcontract.Kernel,
     contextName string,
     commandName string,
     sealBindings []SealBindingConfig,
@@ -316,33 +312,8 @@ func (instance *Module) buildCommand(
         return NewEncryptDatabaseCommand(cipher, EncryptDatabaseCommandConfig{Database: database, CommandName: commandName, SealBindings: sealBindings})
     }
 
-    if nil == kernelInstance {
-        exception.Panic(
-            exception.NewError(
-                "encrypt module database factory needs a kernel to reach the service container",
-                map[string]any{
-                    "context": contextName,
-                },
-                nil,
-            ),
-        )
-    }
-
-    resolver := kernelInstance.ServiceContainer()
-    if nil == resolver {
-        exception.Panic(
-            exception.NewError(
-                "encrypt module kernel answered no service container",
-                map[string]any{
-                    "context": contextName,
-                },
-                nil,
-            ),
-        )
-    }
-
-    databaseResolver := func(ctx context.Context) (*bun.DB, error) {
-        resolved, resolveErr := factory(ctx, resolver)
+    databaseResolver := func(runtimeInstance containercontract.Runtime) (*bun.DB, error) {
+        resolved, resolveErr := factory(runtimeInstance)
         if nil != resolveErr {
             return nil, exception.NewError(
                 "encrypt module database factory failed",

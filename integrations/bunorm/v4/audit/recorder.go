@@ -73,6 +73,7 @@ func storageCarriesOnlyPlainClose(storage Storage) bool {
     return true == carriesPlainClose && false == carriesContextClose
 }
 
+/* Recorder writes an audit entry inside the caller's bun transaction, whose handle is the context it is given (WithDatabase, WithActor), so its doors take that context rather than a runtime: a runtime captured outside the transaction would record outside it. */
 type Recorder struct {
     storage     Storage
     registry    *Registry
