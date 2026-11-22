@@ -1,7 +1,9 @@
 package config
 
 import (
+    "bytes"
     "context"
+    "strings"
     "testing"
     "time"
 
@@ -9,6 +11,8 @@ import (
     "github.com/precision-soft/melody/v4/.example/migration"
     "github.com/precision-soft/melody/v4/bound"
     melodyhttp "github.com/precision-soft/melody/v4/http"
+    melodylogging "github.com/precision-soft/melody/v4/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
 type countingBackplane struct {
@@ -67,6 +71,82 @@ func TestRegisterHubShutdown_RegistersTheHubsShutdownAloneAndItClosesTheBackplan
 
     if 1 != backplane.closes {
         t.Fatalf("expected the teardown's close of the hub not to reach the backplane again, got %d closes", backplane.closes)
+    }
+}
+
+/* blockingBackplane holds a publish inside until released, the shape of a backplane whose network round trip outlives the shutdown */
+type blockingBackplane struct {
+    entered  chan struct{}
+    released chan struct{}
+    closed   chan struct{}
+}
+
+func (instance *blockingBackplane) Publish(topic string, event melodyhttp.ServerSentEvent) error {
+    close(instance.entered)
+    <-instance.released
+
+    return nil
+}
+
+func (instance *blockingBackplane) CloseWithContext(closeContext context.Context) error {
+    close(instance.closed)
+
+    return nil
+}
+
+/* the hook closes the hub under the shutdown's context: a publish still inside the backplane when the budget is gone does not hold the hook, the hub hands the backplane to its own closer and answers the error, which the hook journals at warning */
+func TestRegisterHubShutdown_ReturnsWithinTheShutdownsBudgetWhileAPublishIsInside(t *testing.T) {
+    journal := &bytes.Buffer{}
+    previous := hubShutdownWarningLogger
+    hubShutdownWarningLogger = func() melodyloggingcontract.Logger {
+        return melodylogging.NewJsonLogger(journal, melodylogging.JsonLoggerConfig{MinLevel: melodyloggingcontract.LevelDebug})
+    }
+    t.Cleanup(func() {
+        hubShutdownWarningLogger = previous
+    })
+
+    moduleInstance := &Module{}
+    moduleInstance.buildServerSentEvent()
+
+    backplane := &blockingBackplane{entered: make(chan struct{}), released: make(chan struct{}), closed: make(chan struct{})}
+    moduleInstance.serverSentEventHub.SetBackplane(backplane)
+
+    go moduleInstance.serverSentEventHub.Broadcast("catalog", melodyhttp.ServerSentEvent{Data: "changed"})
+    <-backplane.entered
+
+    registrar := &recordingShutdownRegistrar{}
+    moduleInstance.registerHubShutdown(registrar)
+
+    doneContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    hookReturned := make(chan struct{})
+    go func() {
+        registrar.hookList[0](doneContext)
+        close(hookReturned)
+    }()
+
+    select {
+    case <-hookReturned:
+    case <-time.After(5 * time.Second):
+        close(backplane.released)
+        t.Fatal("expected the hook to return within the shutdown's budget while a publish is inside the backplane")
+    }
+
+    if false == moduleInstance.serverSentEventHub.IsClosed() {
+        t.Fatal("expected the hook to close the hub")
+    }
+
+    if false == strings.Contains(journal.String(), "the server sent event hub did not close within the http shutdown budget") {
+        t.Fatalf("expected the hub's close error journaled at warning, got %q", journal.String())
+    }
+
+    close(backplane.released)
+
+    select {
+    case <-backplane.closed:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the hub's own closer to close the backplane once the publish ended")
     }
 }
 

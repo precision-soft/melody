@@ -17,7 +17,9 @@ import (
     melodyapplication "github.com/precision-soft/melody/v4/application"
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/bound"
+    melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodylogging "github.com/precision-soft/melody/v4/logging"
 )
 
 func (instance *Module) otlpModuleConfig(endpoint string) melodyotlp.ModuleConfig {
@@ -114,10 +116,19 @@ type httpShutdownRegistrar interface {
     OnHttpShutdown(hook func(shutdownContext context.Context))
 }
 
-/* registerHubShutdown closes the hub when the http server begins to shut down: http.Server.Shutdown neither cancels an in-flight request's context nor tracks a hijacked connection, so a connected SSE or websocket client would otherwise hold the whole shutdown timeout. It is also the backplane's only close, since the hub's Shutdown drains and closes the backplane it holds; the container's teardown closes the hub again through its idempotent Close, the only close a process without an http server reaches. */
+/* hubShutdownWarningLogger journals a hub close that outlived the http shutdown's budget, the hook carrying no runtime of its own; a variable so a test can capture it. */
+var hubShutdownWarningLogger = melodylogging.EmergencyLogger
+
+/* registerHubShutdown closes the hub when the http server begins to shut down: http.Server.Shutdown neither cancels an in-flight request's context nor tracks a hijacked connection, so a connected SSE or websocket client would otherwise hold the whole shutdown timeout. It is also the backplane's only close, through the hub's CloseWithContext, bounded by the shutdown's context: the hub drains and closes the backplane it holds, and hands it to a closer of its own when a publish outlives the budget, which the hook journals. The container's teardown closes the hub again through the same idempotent door, the only close a process without an http server reaches. */
 func (instance *Module) registerHubShutdown(registrar httpShutdownRegistrar) {
     registrar.OnHttpShutdown(func(shutdownContext context.Context) {
-        instance.serverSentEventHub.Shutdown()
+        closeErr := instance.serverSentEventHub.CloseWithContext(shutdownContext)
+        if nil != closeErr {
+            hubShutdownWarningLogger().Warning(
+                "the server sent event hub did not close within the http shutdown budget",
+                melodyexception.LogContext(closeErr, melodyexception.LogContextConfig{}),
+            )
+        }
     })
 }
 
