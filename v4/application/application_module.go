@@ -183,7 +183,7 @@ func (instance *Application) bootModulesPostConfigurationResolve() {
 
     for _, moduleInstance := range instance.modules {
         if httpMiddlewareModule, ok := moduleInstance.(applicationcontract.HttpMiddlewareModule); true == ok {
-            httpMiddlewareModule.RegisterHttpMiddlewares(instance.kernel, instance.httpMiddlewares)
+            httpMiddlewareModule.RegisterHttpMiddlewares(instance.kernel, instance.httpMiddlewares.forModule(moduleInstance.Name()))
         }
     }
 

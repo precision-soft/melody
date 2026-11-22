@@ -56,17 +56,52 @@ func NewHttpMiddleware(
     }
 }
 
+/* Use registers under no module: a refusal of what it registers names no module. The application hands each module, and its own registrations, a registrar bound to the owner's name through forModule. */
 func (instance *HttpMiddleware) Use(registration applicationcontract.MiddlewareRegistration) {
-    instance.useMiddlewares(registration.Priority, registration.Middlewares)
-    instance.useFactories(registration.Priority, registration.Factories)
+    instance.useFor("", registration)
 }
 
-func (instance *HttpMiddleware) useMiddlewares(priority int, middlewares []httpcontract.Middleware) {
+/* forModule answers a registrar whose registrations carry the owner's name, so a module declares nothing to be named in a refusal */
+func (instance *HttpMiddleware) forModule(moduleName string) applicationcontract.HttpMiddlewareRegistrar {
+    return &moduleMiddlewareRegistrar{
+        target:     instance,
+        moduleName: moduleName,
+    }
+}
+
+func (instance *HttpMiddleware) useFor(moduleName string, registration applicationcontract.MiddlewareRegistration) {
+    instance.useMiddlewares(moduleName, registration.Priority, registration.Middlewares)
+    instance.useFactories(moduleName, registration.Priority, registration.Factories)
+}
+
+/* registrationContext answers the context of a refusal made at registration, naming the module when one registers */
+func registrationContext(moduleName string, field string, index int) exceptioncontract.Context {
+    context := exceptioncontract.Context{"field": field, "index": index}
+
+    if "" != moduleName {
+        context["moduleName"] = moduleName
+    }
+
+    return context
+}
+
+type moduleMiddlewareRegistrar struct {
+    target     *HttpMiddleware
+    moduleName string
+}
+
+func (instance *moduleMiddlewareRegistrar) Use(registration applicationcontract.MiddlewareRegistration) {
+    instance.target.useFor(instance.moduleName, registration)
+}
+
+var _ applicationcontract.HttpMiddlewareRegistrar = (*moduleMiddlewareRegistrar)(nil)
+
+func (instance *HttpMiddleware) useMiddlewares(moduleName string, priority int, middlewares []httpcontract.Middleware) {
     for middlewareIndex, currentMiddleware := range middlewares {
         middlewareInstance := currentMiddleware
 
         if true == internal.IsNilInterface(middlewareInstance) {
-            exception.Panic(exception.NewError("middleware is nil in a middleware registration", exceptioncontract.Context{"field": "MiddlewareRegistration.Middlewares", "index": middlewareIndex}, nil))
+            exception.Panic(exception.NewError("middleware is nil in a middleware registration", registrationContext(moduleName, "MiddlewareRegistration.Middlewares", middlewareIndex), nil))
         }
 
         instance.customIndex = instance.customIndex + 1
@@ -81,18 +116,19 @@ func (instance *HttpMiddleware) useMiddlewares(priority int, middlewares []httpc
             },
             AllowDuplicates: true,
             FunctionName:    registeredFunctionName(middlewareInstance),
+            Module:          moduleName,
         }
 
         instance.definitions = append(instance.definitions, definition)
     }
 }
 
-func (instance *HttpMiddleware) useFactories(priority int, factories []middlewarepipeline.MiddlewareFactory) {
+func (instance *HttpMiddleware) useFactories(moduleName string, priority int, factories []middlewarepipeline.MiddlewareFactory) {
     for factoryIndex, currentFactory := range factories {
         factoryInstance := currentFactory
 
         if nil == factoryInstance {
-            exception.Panic(exception.NewError("middleware factory is nil in a middleware registration", exceptioncontract.Context{"field": "MiddlewareRegistration.Factories", "index": factoryIndex}, nil))
+            exception.Panic(exception.NewError("middleware factory is nil in a middleware registration", registrationContext(moduleName, "MiddlewareRegistration.Factories", factoryIndex), nil))
         }
 
         instance.customIndex = instance.customIndex + 1
@@ -111,11 +147,17 @@ func (instance *HttpMiddleware) useFactories(priority int, factories []middlewar
                 }
 
                 if true == internal.IsNilInterface(middlewareInstance) {
+                    nilContext := exceptioncontract.Context{
+                        "middlewareName": name,
+                    }
+
+                    if "" != moduleName {
+                        nilContext["moduleName"] = moduleName
+                    }
+
                     return nil, exception.NewError(
                         "middleware factory returned nil",
-                        exceptioncontract.Context{
-                            "middlewareName": name,
-                        },
+                        nilContext,
                         nil,
                     )
                 }
@@ -124,6 +166,7 @@ func (instance *HttpMiddleware) useFactories(priority int, factories []middlewar
             },
             AllowDuplicates: true,
             FunctionName:    registeredFunctionName(factoryInstance),
+            Module:          moduleName,
         }
 
         instance.definitions = append(instance.definitions, definition)

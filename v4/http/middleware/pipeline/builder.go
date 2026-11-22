@@ -55,9 +55,7 @@ func (instance *Builder) Build(
         if nil == definition.Factory {
             return nil, report, exception.NewError(
                 "middleware factory is nil",
-                exceptioncontract.Context{
-                    "middlewareName": definition.Name,
-                },
+                definitionContext(definition),
                 nil,
             )
         }
@@ -66,9 +64,7 @@ func (instance *Builder) Build(
         if nil != factoryErr {
             return nil, report, exception.NewError(
                 "could not build middleware",
-                exceptioncontract.Context{
-                    "middlewareName": definition.Name,
-                },
+                definitionContext(definition),
                 factoryErr,
             )
         }
@@ -121,9 +117,7 @@ func (instance *Builder) Describe(
         if nil == definition.Factory {
             return nil, report, exception.NewError(
                 "middleware factory is nil",
-                exceptioncontract.Context{
-                    "middlewareName": definition.Name,
-                },
+                definitionContext(definition),
                 nil,
             )
         }

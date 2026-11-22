@@ -102,6 +102,7 @@ the session apart, `session.NewUnavailableSession` builds one.
 
 ### Changed
 
+- application, http: a middleware factory's refusal names its module: the registrar a module's `RegisterHttpMiddlewares` hook receives is bound to the module's `Name()`, the application's `RegisterHttpMiddlewares` and `RegisterHttpMiddlewareFactories` register as `the application`, and a factory that fails or yields nil, a nil factory and a nil entry of a registration are refused with `moduleName` beside `middlewareName`; `pipeline.HttpMiddlewareDefinition` gains `Module`, a definition with none carrying no `moduleName` key.
 - storage: **Breaking**: every door of `LocalStorage` refuses a nil runtime, and one carrying no context, first, answering `the runtime is nil or carries no context` before the base directory is touched, see `UPGRADE.md`; the local storage and the static file server derive an entity tag through one internal formula, the tag unchanged.
 
 - storage: **Breaking**: `Storage.Get(runtime, key, GetOptions)` answers an `Object{Body, Info}`, the info from the stat both backends already take, and `Storage.PresignedUrl(runtime, key, PresignConfig)` takes the expiry as a `bound.Duration` and signs an upload under `Method: http.MethodPut`; `LocalStorage.PresignedUrl` carries `ErrPresignUnsupported`. See `UPGRADE.md`.

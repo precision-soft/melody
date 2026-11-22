@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+    "errors"
     "fmt"
     "strings"
     "testing"
@@ -708,4 +709,37 @@ func TestBuilder_RefusesADefinitionThatBothReplacesAndAllowsDuplicates(t *testin
     contradictory.EnabledEnvironments = []string{"prod"}
     _, _, describeErr := NewBuilder([]HttpMiddlewareDefinition{contradictory}).Describe("dev", "http")
     assertSelectionRefused(t, describeErr, "middleware definition both replaces an existing one and allows duplicates", map[string]any{"middlewareName": "audit"})
+}
+
+func TestBuilder_AFactoryRefusalNamesTheModuleOnlyWhenTheDefinitionCarriesOne(t *testing.T) {
+    factoryErr := errors.New("the factory failed")
+    failingFactory := func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
+        return nil, factoryErr
+    }
+
+    for _, testCase := range []struct {
+        definition         HttpMiddlewareDefinition
+        expectedModuleName any
+        expectedPresent    bool
+    }{
+        {definition: HttpMiddlewareDefinition{Name: "audit", Factory: failingFactory, Module: "billing"}, expectedModuleName: "billing", expectedPresent: true},
+        {definition: HttpMiddlewareDefinition{Name: "audit", Factory: failingFactory}, expectedPresent: false},
+        {definition: HttpMiddlewareDefinition{Name: "audit", Module: "billing"}, expectedModuleName: "billing", expectedPresent: true},
+    } {
+        _, _, buildErr := NewBuilder([]HttpMiddlewareDefinition{testCase.definition}).Build(&gatingTestKernel{environment: "dev"}, "http")
+
+        var exceptionErr *exception.Error
+        if false == errors.As(buildErr, &exceptionErr) || "audit" != exceptionErr.Context()["middlewareName"] {
+            t.Fatalf("expected the refusal to name the middleware, got %v", buildErr)
+        }
+
+        moduleName, present := exceptionErr.Context()["moduleName"]
+        if testCase.expectedPresent != present || (true == present && testCase.expectedModuleName != moduleName) {
+            t.Fatalf("expected moduleName %v present %v, got %v present %v", testCase.expectedModuleName, testCase.expectedPresent, moduleName, present)
+        }
+
+        if nil != testCase.definition.Factory && false == errors.Is(buildErr, factoryErr) {
+            t.Fatalf("expected the factory's error reachable, got %v", buildErr)
+        }
+    }
 }
