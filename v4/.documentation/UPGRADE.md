@@ -630,7 +630,7 @@ The six `service.<module>` names of a module's principal service, `service.cache
 
 **Symptom.** `too many arguments in call to messagebus.NewConsumeCommand`, `undefined: messagebus.NewConsumeCommandFromContainer`, `messagebus.ServiceRetryPolicy`, `messagebus.RetryPolicyFromResolver`, `openapi.NewGenerateCommandFromContainer`; at run time a retry policy registered in the container changes nothing.
 
-**Remedy.** Register the bus and the transports in the container (`messagebus.RegisterTransports`) and build `messagebus.NewConsumeCommand(messagebus.ConsumeCommandConfig{…})`, or let the framework register it; move a registered retry policy to `application.ApplicationConfig{MessageBus: application.MessageBusConfig{Retry: policy}}`; write `openapi.NewGenerateCommand()`. `RetryPolicy.FailureTransport` is a transport instance and the policy is built before `NewApplication`, before the container exists: build the failure transport there and register that SAME instance in `RegisterTransports`, since a consumer reading the failure transport tells it from the policy's by identity, and a second instance over the same queue sends a message exhausted on the failure queue back to it without end. A policy the container still carries under `service.messagebus.retry_policy` is ignored, with no warning at boot.
+**Remedy.** Register the bus and the transports in the container (`messagebus.RegisterTransports`) and build `messagebus.NewConsumeCommand(messagebus.ConsumeCommandConfig{…})`, or let the framework register it; move a registered retry policy to `application.ApplicationConfig{MessageBus: application.MessageBusConfig{Retry: policy}}`; write `openapi.NewGenerateCommand()`. Name the failure transport with `RetryPolicy.FailureTransportName`, the name it is registered under in `RegisterTransports`. A policy the container still carries under `service.messagebus.retry_policy` is read by nothing and named in the `messagebus.retryPolicyServiceIgnored` boot warning.
 
 ### Messagebus: `Receive` answers a subscription, `Nack` takes a config
 
@@ -1825,6 +1825,14 @@ A waiter is released by what it waits in. The container's `Close` releases every
 **Symptom.** `translator.Trans(…)`, `NewManager(catalogs, "en", fallbacks)` and `loader.Load()` no longer compile.
 
 **Remedy.** `message, translateErr := translator.Translate("greeting", translationcontract.TranslateConfig{Parameters: map[string]any{"name": name}, Locale: locale})`; where the third major printed the id of a missing message, keep `message` when `errors.Is(translateErr, translation.ErrMessageNotFound)` and treat any other error as a failure. `NewManager([]translationcontract.Catalog{english, romanian}, translation.ManagerConfig{DefaultLocale: "en", FallbackLocales: fallbacks})`, and `loader.Load(ctx)`.
+
+### Messagebus: the failure transport is named, not handed over
+
+**What changed.** [`RetryPolicy.FailureTransportName`](../messagebus/consume_command.go) names the registered transport an exhausted message is sent to, resolved from the transports when the consume command runs; `RetryPolicy.FailureTransport`, an instance built before the container, is removed. An empty name is none, a name with surrounding whitespace is refused by `NewConsumeCommand`, and a name no registered transport carries refuses the run, both naming `RetryPolicy.FailureTransportName`.
+
+**Symptom.** `unknown field FailureTransport in struct literal of type messagebus.RetryPolicy`.
+
+**Remedy.** Register the failure transport in `RegisterTransports` beside the others and write `RetryPolicy{FailureTransportName: "failed"}` with its name; the failure transport is then a container service, closed by the container's teardown.
 
 ### Openapi: a route is described through `Describe` alone, and a response is a value
 

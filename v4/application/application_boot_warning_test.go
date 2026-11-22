@@ -165,7 +165,7 @@ func TestBootModuleBootWarnings_AdmitsTheSameModuleRegisteredTwice(t *testing.T)
         t.Fatalf("expected a second instance of one module admitted, got %v", refusal)
     }
 
-    if cliNames := applicationInstance.bootWarningRegistryOf().CliNames(); 5 != len(cliNames) || "test.module.hazard" != cliNames[4] {
+    if cliNames := applicationInstance.bootWarningRegistryOf().CliNames(); 6 != len(cliNames) || "test.module.hazard" != cliNames[5] {
         t.Fatalf("expected the code declared once, got %v", cliNames)
     }
 }

@@ -191,6 +191,8 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     instance.collectUnappliedSecretMarks()
 
+    instance.collectIgnoredRetryPolicyService()
+
     instance.verifyDeclaredTeardownDependencies()
 
     instance.registrationsSealed = true

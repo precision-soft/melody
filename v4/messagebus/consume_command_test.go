@@ -134,7 +134,7 @@ func TestConsume_ExhaustsRetriesAndRoutesToFailureTransport(t *testing.T) {
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := newConsumeCommandOver(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), FailureTransport: failure, Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond)}, MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+    command := newConsumeCommandOverTransports(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), FailureTransportName: "failed", Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond)}, MaxDeadLetterAttempts: bound.UnlimitedCount()}}, map[string]messagebuscontract.Transport{"failed": failure})
 
     if consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, source, 3, 1); nil != consumeErr {
         t.Fatalf("unexpected consume error: %v", consumeErr)
@@ -176,7 +176,7 @@ func TestConsume_AMessageExhaustedOnTheFailureTransportItselfIsNotSentBackToIt(t
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := newConsumeCommandOver(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), FailureTransport: failure, Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond)}, MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+    command := newConsumeCommandOverTransports(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), FailureTransportName: "failed", Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond)}, MaxDeadLetterAttempts: bound.UnlimitedCount()}}, map[string]messagebuscontract.Transport{"failed": failure})
 
     if consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, failure, 1, 1); nil != consumeErr {
         t.Fatalf("unexpected consume error: %v", consumeErr)
@@ -298,13 +298,13 @@ func newAlwaysFailingConsumeCommand(t *testing.T, policy RetryPolicy) (*consumeC
         return exception.NewError("handler always fails", nil, nil)
     })
 
-    return newConsumeCommandOver(NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})}), ConsumeCommandConfig{Retry: policy}), runtimeInstance
+    return newConsumeCommandOverTransports(NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})}), ConsumeCommandConfig{Retry: policy}, map[string]messagebuscontract.Transport{"failed": &alwaysFailingTransport{}}), runtimeInstance
 }
 
 func TestConsume_BoundedDeadLetterStopsRequeueAfterMax(t *testing.T) {
     command, runtimeInstance := newAlwaysFailingConsumeCommand(t, RetryPolicy{
         MaxRetries:            bound.Of(0),
-        FailureTransport:      &alwaysFailingTransport{},
+        FailureTransportName:  "failed",
         MaxDeadLetterAttempts: bound.Of(2),
         Backoff:               bound.Backoff{Initial: bound.Of(time.Millisecond)},
     })
@@ -331,7 +331,7 @@ func TestConsume_BoundedDeadLetterStopsRequeueAfterMax(t *testing.T) {
 func TestConsume_UnlimitedDeadLetterAttemptsKeepRequeueing(t *testing.T) {
     command, runtimeInstance := newAlwaysFailingConsumeCommand(t, RetryPolicy{
         MaxRetries:            bound.Of(0),
-        FailureTransport:      &alwaysFailingTransport{},
+        FailureTransportName:  "failed",
         Backoff:               bound.Backoff{Initial: bound.Of(time.Millisecond)},
         MaxDeadLetterAttempts: bound.UnlimitedCount(),
     })
@@ -390,7 +390,7 @@ func TestNewConsumeCommand_RefusesAFieldOutsideItsRuleByName(t *testing.T) {
         "dead letter attempts zero":       {ConsumeCommandConfig{Retry: RetryPolicy{MaxDeadLetterAttempts: bound.Of(0)}}, "the limit is below its minimum", "RetryPolicy.MaxDeadLetterAttempts"},
         "shutdown timeout below 1ms":      {ConsumeCommandConfig{ShutdownTimeout: bound.Of(time.Microsecond)}, "the limit is below its minimum", "ConsumeCommandConfig.ShutdownTimeout"},
         "shutdown timeout unlimited":      {ConsumeCommandConfig{ShutdownTimeout: bound.UnlimitedDuration()}, "the limit does not admit unlimited", "ConsumeCommandConfig.ShutdownTimeout"},
-        "typed nil failure transport":     {ConsumeCommandConfig{Retry: RetryPolicy{FailureTransport: (*InMemoryTransport)(nil)}}, "retry policy failure transport is a typed nil", "RetryPolicy.FailureTransport"},
+        "padded failure transport name":   {ConsumeCommandConfig{Retry: RetryPolicy{FailureTransportName: " failed"}}, "retry policy failure transport name has surrounding whitespace", "RetryPolicy.FailureTransportName"},
     }
 
     for name, testCase := range cases {
@@ -411,9 +411,9 @@ func TestNewConsumeCommand_RefusesAFieldOutsideItsRuleByName(t *testing.T) {
 
 func TestConsume_AbsentDeadLetterAttemptsStopRequeueAtFive(t *testing.T) {
     command, runtimeInstance := newAlwaysFailingConsumeCommand(t, RetryPolicy{
-        MaxRetries:       bound.Of(0),
-        Backoff:          bound.Backoff{Initial: bound.Of(time.Millisecond)},
-        FailureTransport: &alwaysFailingTransport{},
+        MaxRetries:           bound.Of(0),
+        Backoff:              bound.Backoff{Initial: bound.Of(time.Millisecond)},
+        FailureTransportName: "failed",
     })
 
     source := &recordingNackTransport{}
@@ -804,7 +804,7 @@ func TestConsume_PanickingHandlerFlowsIntoRetryPipeline(t *testing.T) {
     })
 
     bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    command := newConsumeCommandOver(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), FailureTransport: failure, Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond)}, MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+    command := newConsumeCommandOverTransports(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), FailureTransportName: "failed", Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond)}, MaxDeadLetterAttempts: bound.UnlimitedCount()}}, map[string]messagebuscontract.Transport{"failed": failure})
 
     if consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, source, 3, 1); nil != consumeErr {
         t.Fatalf("unexpected consume error: %v", consumeErr)
@@ -1120,7 +1120,7 @@ func countStampsNamed(envelopeInstance messagebuscontract.Envelope, stampName st
 func TestConsume_AMessageRequeuedForEverCarriesOneStampPerCounter(t *testing.T) {
     command, runtimeInstance := newAlwaysFailingConsumeCommand(t, RetryPolicy{
         MaxRetries:            bound.Of(0),
-        FailureTransport:      &alwaysFailingTransport{},
+        FailureTransportName:  "failed",
         Backoff:               bound.Backoff{Initial: bound.Of(time.Millisecond)},
         MaxDeadLetterAttempts: bound.UnlimitedCount(),
     })
@@ -1274,5 +1274,43 @@ func TestConsume_MessageRuntimeOpensAChildScopeAndKeepsTheRunsWhenItsScopeClosed
 
     if runtimeInstance != closedRuntime {
         t.Fatalf("expected the run's runtime kept once its scope closed")
+    }
+}
+
+/* the failure transport is resolved by name from the transports the run reads, so a failure transport the container builds reaches the framework's command; a name no transport carries refuses the run before any message is pulled */
+func TestConsume_AFailureTransportNameNoTransportCarriesRefusesTheRun(t *testing.T) {
+    command := newConsumeCommandOverTransports(
+        NewManager("default", nil),
+        ConsumeCommandConfig{Retry: RetryPolicy{FailureTransportName: "failed"}},
+        map[string]messagebuscontract.Transport{"orders": NewInMemoryTransport(InMemoryTransportConfig{})},
+    )
+
+    session, sessionErr := command.newConsumeSession(nil)
+    if nil != session || nil == sessionErr {
+        t.Fatalf("expected the run refused, got session %v and error %v", session, sessionErr)
+    }
+
+    refusal, _ := sessionErr.(*exception.Error)
+    if nil == refusal || "the retry policy's failure transport names no registered transport" != refusal.Message() || "RetryPolicy.FailureTransportName" != refusal.Context()["field"] || "failed" != refusal.Context()["transport"] {
+        t.Fatalf("expected the refusal to name the field and the transport, got %v", sessionErr)
+    }
+}
+
+func TestConsume_TheFailureTransportIsTheRegisteredTransportItsNameNames(t *testing.T) {
+    failure := NewInMemoryTransport(InMemoryTransportConfig{})
+    command := newConsumeCommandOverTransports(
+        NewManager("default", nil),
+        ConsumeCommandConfig{Retry: RetryPolicy{FailureTransportName: "failed"}},
+        map[string]messagebuscontract.Transport{"orders": NewInMemoryTransport(InMemoryTransportConfig{}), "failed": failure},
+    )
+
+    session, sessionErr := command.newConsumeSession(nil)
+    if nil != sessionErr || true != isSameTransport(failure, session.failureTransport) {
+        t.Fatalf("expected the session to hold the named transport, got %v %v", session, sessionErr)
+    }
+
+    none, noneErr := newConsumeCommandOver(NewManager("default", nil), ConsumeCommandConfig{}).newConsumeSession(nil)
+    if nil != noneErr || nil != none.failureTransport {
+        t.Fatalf("expected no failure transport without a name, got %v %v", none, noneErr)
     }
 }

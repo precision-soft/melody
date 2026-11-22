@@ -7,6 +7,7 @@ import (
     "os/signal"
     "reflect"
     "runtime/debug"
+    "strings"
     "sync"
     "sync/atomic"
     "syscall"
@@ -33,8 +34,8 @@ type RetryPolicy struct {
     /* Backoff is the delay before each retry: 1s before the first, doubled for every retry after it, capped at 1h, each field taking that default when left out. */
     Backoff bound.Backoff
 
-    /* FailureTransport receives an exhausted message; nil for none, a typed nil refused. */
-    FailureTransport messagebuscontract.Transport
+    /* FailureTransportName names the registered transport an exhausted message is sent to, resolved from the transports when the command runs, so a failure transport the container builds is reachable; empty for none, a name with surrounding whitespace refused, a name no registered transport carries refused at the run. */
+    FailureTransportName string
 
     /* FailureRequeueDelay is the delay before an exhausted message the failure transport rejected is requeued; 5s when left out, at least 1ms, unlimited refused. */
     FailureRequeueDelay bound.Duration
@@ -105,18 +106,19 @@ func NewConsumeCommand(config ConsumeCommandConfig) *ConsumeCommand {
 type resolvedRetryPolicy struct {
     MaxRetries                     int
     Backoff                        bound.ResolvedBackoff
-    FailureTransport               messagebuscontract.Transport
+    FailureTransportName           string
     FailureRequeueDelay            time.Duration
     MaxDeadLetterAttempts          int
     MaxDeadLetterAttemptsUnlimited bool
 }
 
 func resolveRetryPolicy(retryPolicy RetryPolicy) (resolvedRetryPolicy, error) {
-    if nil != retryPolicy.FailureTransport && true == internal.IsNilInterface(retryPolicy.FailureTransport) {
+    if strings.TrimSpace(retryPolicy.FailureTransportName) != retryPolicy.FailureTransportName {
         return resolvedRetryPolicy{}, exception.NewError(
-            "retry policy failure transport is a typed nil",
+            "retry policy failure transport name has surrounding whitespace",
             exceptioncontract.Context{
-                "field": "RetryPolicy.FailureTransport",
+                "field":     "RetryPolicy.FailureTransportName",
+                "transport": retryPolicy.FailureTransportName,
             },
             nil,
         )
@@ -145,7 +147,7 @@ func resolveRetryPolicy(retryPolicy RetryPolicy) (resolvedRetryPolicy, error) {
     return resolvedRetryPolicy{
         MaxRetries:                     maxRetries.Value,
         Backoff:                        backoff,
-        FailureTransport:               retryPolicy.FailureTransport,
+        FailureTransportName:           retryPolicy.FailureTransportName,
         FailureRequeueDelay:            failureRequeueDelay.Value,
         MaxDeadLetterAttempts:          maxDeadLetterAttempts.Value,
         MaxDeadLetterAttemptsUnlimited: maxDeadLetterAttempts.Unlimited,
@@ -218,10 +220,11 @@ func (instance *ConsumeCommand) Run(
 
 /* consumeSession is the run-local view of one Run's collaborators, so a second overlapping Run of the same command instance shares nothing mutable with the first. */
 type consumeSession struct {
-    bus             messagebuscontract.Bus
-    transports      map[string]messagebuscontract.Transport
-    retryPolicy     resolvedRetryPolicy
-    shutdownTimeout time.Duration
+    bus              messagebuscontract.Bus
+    transports       map[string]messagebuscontract.Transport
+    failureTransport messagebuscontract.Transport
+    retryPolicy      resolvedRetryPolicy
+    shutdownTimeout  time.Duration
 }
 
 func (instance *ConsumeCommand) newConsumeSession(runtimeInstance containercontract.Runtime) (*consumeSession, error) {
@@ -230,19 +233,46 @@ func (instance *ConsumeCommand) newConsumeSession(runtimeInstance containercontr
     return instance.sessionOver(
         ConsumeBusFromResolver(runtimeInstance.Context(), scope),
         TransportsMustFromResolver(runtimeInstance.Context(), scope),
-    ), nil
+    )
 }
 
 func (instance *ConsumeCommand) sessionOver(
     bus messagebuscontract.Bus,
     transports map[string]messagebuscontract.Transport,
-) *consumeSession {
-    return &consumeSession{
-        bus:             bus,
-        transports:      transports,
-        retryPolicy:     instance.retryPolicy,
-        shutdownTimeout: instance.shutdownTimeout,
+) (*consumeSession, error) {
+    failureTransport, failureTransportErr := failureTransportOf(instance.retryPolicy.FailureTransportName, transports)
+    if nil != failureTransportErr {
+        return nil, failureTransportErr
     }
+
+    return &consumeSession{
+        bus:              bus,
+        transports:       transports,
+        failureTransport: failureTransport,
+        retryPolicy:      instance.retryPolicy,
+        shutdownTimeout:  instance.shutdownTimeout,
+    }, nil
+}
+
+/* failureTransportOf answers the transport the policy names, nil for none: one map entry, so the transport a run consumes from is the same instance when it is the failure transport itself */
+func failureTransportOf(transportName string, transports map[string]messagebuscontract.Transport) (messagebuscontract.Transport, error) {
+    if "" == transportName {
+        return nil, nil
+    }
+
+    transport, exists := transports[transportName]
+    if false == exists || true == internal.IsNilInterface(transport) {
+        return nil, exception.NewError(
+            "the retry policy's failure transport names no registered transport",
+            exceptioncontract.Context{
+                "field":     "RetryPolicy.FailureTransportName",
+                "transport": transportName,
+            },
+            nil,
+        )
+    }
+
+    return transport, nil
 }
 
 func (instance *consumeSession) consumeFrom(
@@ -424,7 +454,7 @@ func (instance *consumeSession) consume(
     instance.logError(runtimeInstance, "message handling exhausted retries", dispatchErr)
 
     /* a message exhausted on the failure transport itself is not sent back to it: it would be received exhausted again, without end */
-    if true == isSameTransport(instance.retryPolicy.FailureTransport, transport) {
+    if true == isSameTransport(instance.failureTransport, transport) {
         if logger := logging.LoggerFromRuntime(runtimeInstance); false == internal.IsNilInterface(logger) {
             logger.Warning(
                 "the message is exhausted on the failure transport itself; it is discarded unless the transport dead-letters it",
@@ -439,8 +469,8 @@ func (instance *consumeSession) consume(
         return
     }
 
-    if false == internal.IsNilInterface(instance.retryPolicy.FailureTransport) {
-        if sendErr := instance.retryPolicy.FailureTransport.Send(runtimeInstance, envelopeInstance); nil != sendErr {
+    if false == internal.IsNilInterface(instance.failureTransport) {
+        if sendErr := instance.failureTransport.Send(runtimeInstance, envelopeInstance); nil != sendErr {
             instance.logError(runtimeInstance, "could not route the exhausted message to the failure transport", sendErr)
 
             deadLetterAttempts := DeadLetterAttemptCount(envelopeInstance)

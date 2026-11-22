@@ -101,15 +101,21 @@ type consumeSessionSource interface {
 /* consumeCommandOverBus is a consume command whose sessions dispatch to a bus the test holds, so the test needs no container */
 type consumeCommandOverBus struct {
     *ConsumeCommand
-    bus messagebuscontract.Bus
+    bus        messagebuscontract.Bus
+    transports map[string]messagebuscontract.Transport
 }
 
 func newConsumeCommandOver(bus messagebuscontract.Bus, config ConsumeCommandConfig) *consumeCommandOverBus {
     return &consumeCommandOverBus{ConsumeCommand: NewConsumeCommand(config), bus: bus}
 }
 
+/* newConsumeCommandOverTransports is a command whose sessions also read the transports the test holds, the failure transport the policy names among them */
+func newConsumeCommandOverTransports(bus messagebuscontract.Bus, config ConsumeCommandConfig, transports map[string]messagebuscontract.Transport) *consumeCommandOverBus {
+    return &consumeCommandOverBus{ConsumeCommand: NewConsumeCommand(config), bus: bus, transports: transports}
+}
+
 func (instance *consumeCommandOverBus) newConsumeSession(runtimeInstance containercontract.Runtime) (*consumeSession, error) {
-    return instance.sessionOver(instance.bus, nil), nil
+    return instance.sessionOver(instance.bus, instance.transports)
 }
 
 func mustConsumeSession(command consumeSessionSource, runtimeInstance containercontract.Runtime) *consumeSession {

@@ -73,7 +73,7 @@ func TestBootWarningRegistry_NamesEachCodeOnceAndMarksWhatACliProcessWrites(t *t
         }
     }
 
-    expectedCliNames := []string{BootWarningNameFirewallDoorReachUnknown, BootWarningNameProcessEnvironmentVariableIgnored, BootWarningNameSecretMarkUnmatched, BootWarningNameEnvironmentUndeclaredKey}
+    expectedCliNames := []string{BootWarningNameFirewallDoorReachUnknown, BootWarningNameProcessEnvironmentVariableIgnored, BootWarningNameSecretMarkUnmatched, BootWarningNameEnvironmentUndeclaredKey, BootWarningNameRetryPolicyServiceIgnored}
     if cliNames := registry.CliNames(); false == slices.Equal(expectedCliNames, cliNames) {
         t.Fatalf("expected %v written by a cli process, got %v", expectedCliNames, cliNames)
     }
@@ -84,6 +84,8 @@ func TestBootWarningRegistry_NamesEachCodeOnceAndMarksWhatACliProcessWrites(t *t
         BootWarningNameProcessEnvironmentVariableIgnored:          true,
         BootWarningNameSecretMarkUnmatched:                        true,
         BootWarningNameEnvironmentUndeclaredKey:                   true,
+        BootWarningNameStaticCacheMaxAgeIgnored:                   false,
+        BootWarningNameRetryPolicyServiceIgnored:                  true,
         "security.firewallShadowed":                               false,
     } {
         if expected != registry.WrittenInCli(name) {
@@ -113,7 +115,7 @@ func TestBootWarningRegistry_DeclareAddsACodeOnceAndKeepsEachRegistryApart(t *te
         t.Fatalf("expected the http code known and not written in cli")
     }
 
-    if cliNames := registry.CliNames(); 5 != len(cliNames) || "module.cliHazard" != cliNames[4] {
+    if cliNames := registry.CliNames(); 6 != len(cliNames) || "module.cliHazard" != cliNames[5] {
         t.Fatalf("expected the declared cli code after the framework's, got %v", cliNames)
     }
 
