@@ -41,8 +41,8 @@ func markSessionUnavailable(err error) error {
 }
 
 /* the request's runtime bounded by StorageTimeout, on the request's own context, so a client that left still stops the call */
-func storageCallRuntime(requestRuntime containercontract.Runtime, manager sessioncontract.Manager) (containercontract.Runtime, context.CancelFunc, error) {
-    if nilErr := containercontract.RefuseNilRuntime(requestRuntime); nil != nilErr {
+func storageCallRuntime(requestRuntime containercontract.Runtime, manager sessioncontract.Manager, door string) (containercontract.Runtime, context.CancelFunc, error) {
+    if nilErr := containercontract.RefuseNilRuntime(requestRuntime, door); nil != nilErr {
         return requestRuntime, func() {}, nilErr
     }
 
@@ -127,7 +127,7 @@ func (instance *requestSession) load() (sessioncontract.Session, error) {
 
     var sessionInstance sessioncontract.Session
 
-    loadRuntime, releaseLoadRuntime, loadErr := storageCallRuntime(instance.requestRuntime, instance.manager)
+    loadRuntime, releaseLoadRuntime, loadErr := storageCallRuntime(instance.requestRuntime, instance.manager, "http.requestSession.load")
     defer releaseLoadRuntime()
 
     if nil == loadErr && true == instance.cookiePresent {

@@ -100,7 +100,7 @@ func (instance *InMemoryTransport) Send(
 func (instance *InMemoryTransport) Receive(
     runtimeInstance containercontract.Runtime,
 ) (messagebuscontract.Subscription, error) {
-    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "messagebus.InMemoryTransport.Receive"); nil != refuseErr {
         return nil, refuseErr
     }
 

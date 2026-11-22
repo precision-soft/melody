@@ -24,19 +24,20 @@ func (instance *contextOnlyRuntime) Kind() Kind {
     return KindRun
 }
 
-func TestRefuseNilRuntime_RefusesNilATypedNilAndANilContextNamingTheArgument(t *testing.T) {
+func TestRefuseNilRuntime_RefusesNilATypedNilAndANilContextNamingTheArgumentAndTheDoor(t *testing.T) {
     var typedNil *contextOnlyRuntime
 
     for name, runtimeInstance := range map[string]Runtime{"nil": nil, "typed nil": typedNil, "nil context": &contextOnlyRuntime{}} {
-        refusal := RefuseNilRuntime(runtimeInstance)
-        if "runtimeInstance" != exception.LogContext(refusal, exception.LogContextConfig{})["argument"] || true == exception.IsInfrastructureFailure(refusal) {
+        refusal := RefuseNilRuntime(runtimeInstance, "probe.Door")
+        refusalContext := exception.LogContext(refusal, exception.LogContextConfig{})
+        if "runtimeInstance" != refusalContext["argument"] || "probe.Door" != refusalContext["door"] || true == exception.IsInfrastructureFailure(refusal) {
             t.Fatalf("expected the %s runtime refused unmarked naming the argument, got %v", name, refusal)
         }
     }
 }
 
 func TestRefuseNilRuntime_AdmitsARuntimeWithAContext(t *testing.T) {
-    if refusal := RefuseNilRuntime(&contextOnlyRuntime{ctx: context.Background()}); nil != refusal {
+    if refusal := RefuseNilRuntime(&contextOnlyRuntime{ctx: context.Background()}, "probe.Door"); nil != refusal {
         t.Fatalf("expected a runtime with a context admitted, got %v", refusal)
     }
 }

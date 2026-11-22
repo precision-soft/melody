@@ -30,7 +30,7 @@ func AdmitSession(
     previousSessionId string,
     rotatedSession melodysessioncontract.Session,
 ) error {
-    admitErr := admitSession(runtimeInstance, sessionIndex, userId, previousSessionId, rotatedSession)
+    admitErr := admitSession(runtimeInstance, sessionIndex, userId, previousSessionId, rotatedSession, "security.AdmitSession")
     if nil != admitErr {
         rotatedSession.Clear()
     }
@@ -44,12 +44,13 @@ func admitSession(
     userId string,
     previousSessionId string,
     rotatedSession melodysessioncontract.Session,
+    door string,
 ) error {
     if nil == sessionIndex {
         return errors.New("the session index is not configured")
     }
 
-    if refuseErr := melodycontainercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+    if refuseErr := melodycontainercontract.RefuseNilRuntime(runtimeInstance, door); nil != refuseErr {
         return refuseErr
     }
 
@@ -104,7 +105,7 @@ func ReleaseSession(runtimeInstance melodycontainercontract.Runtime, sessionInde
         return errors.New("the session index is not configured")
     }
 
-    if refuseErr := melodycontainercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+    if refuseErr := melodycontainercontract.RefuseNilRuntime(runtimeInstance, "security.ReleaseSession"); nil != refuseErr {
         return refuseErr
     }
 

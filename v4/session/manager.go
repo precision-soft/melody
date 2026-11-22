@@ -157,7 +157,7 @@ func ResolveStorageTimeout(manager sessioncontract.Manager) (bound.Resolved[time
 
 /* Session answers the stored session, nil when the id names none; a storage outage carries exception.MarkInfrastructureFailure. */
 func (instance *Manager) Session(runtimeInstance containercontract.Runtime, sessionId string) (sessioncontract.Session, error) {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "session.Manager.Session"); nil != nilErr {
         return nil, nilErr
     }
 
@@ -204,7 +204,7 @@ func (instance *Manager) Session(runtimeInstance containercontract.Runtime, sess
 
 /* NewSession answers a session under an id the storage does not hold; a probe outage is marked as an infrastructure failure, and 128 held ids in a row is an unmarked error. */
 func (instance *Manager) NewSession(runtimeInstance containercontract.Runtime) (sessioncontract.Session, error) {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "session.Manager.NewSession"); nil != nilErr {
         return nil, nilErr
     }
 
@@ -228,7 +228,7 @@ func (instance *Manager) NewSession(runtimeInstance containercontract.Runtime) (
 
 /* RegenerateSession answers the values under a fresh id, marked modified, removes the previous entry and latches the session passed in cleared; a buried id is refused before anything is stored. */
 func (instance *Manager) RegenerateSession(runtimeInstance containercontract.Runtime, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "session.Manager.RegenerateSession"); nil != nilErr {
         return nil, nilErr
     }
 
@@ -294,7 +294,7 @@ func (instance *Manager) RegenerateSession(runtimeInstance containercontract.Run
 
 /* SaveSession stores the session under its id, holding the id's stripe across the storage's Save; a context that ends during the wait answers an infrastructure failure. */
 func (instance *Manager) SaveSession(runtimeInstance containercontract.Runtime, sessionInstance sessioncontract.Session) error {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "session.Manager.SaveSession"); nil != nilErr {
         return nilErr
     }
 
@@ -373,7 +373,7 @@ func (instance *Manager) SaveSession(runtimeInstance containercontract.Runtime, 
 
 /* DeleteSession removes the session and buries its id under the id's stripe; after a failed removal one bounded read, past the caller's cancellation, decides the burial. */
 func (instance *Manager) DeleteSession(runtimeInstance containercontract.Runtime, sessionId string) error {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "session.Manager.DeleteSession"); nil != nilErr {
         return nilErr
     }
 

@@ -8,12 +8,12 @@ import (
     "github.com/precision-soft/melody/v4/internal"
 )
 
-/* RefuseNilRuntime answers the refusal of a door handed no runtime: nil, a typed nil, or one whose Context is nil; nil otherwise. */
-func RefuseNilRuntime(runtimeInstance Runtime) error {
+/* RefuseNilRuntime answers the refusal of a door handed no runtime: nil, a typed nil, or one whose Context is nil, naming the door under "door"; nil otherwise. */
+func RefuseNilRuntime(runtimeInstance Runtime, door string) error {
     if true == internal.IsNilInterface(runtimeInstance) || true == internal.IsNilInterface(runtimeInstance.Context()) {
         return exception.NewError(
             "the runtime is nil or carries no context",
-            exceptioncontract.Context{"argument": "runtimeInstance"},
+            exceptioncontract.Context{"argument": "runtimeInstance", "door": door},
             nil,
         )
     }
@@ -23,7 +23,7 @@ func RefuseNilRuntime(runtimeInstance Runtime) error {
 
 /* RefuseRuntimeKind answers nil for a runtime of one of the kinds required and otherwise a refusal under ErrRuntimeKindRefused naming the lookup, the kinds required and the runtime's kind; a nil runtime is refused as RefuseNilRuntime refuses it. */
 func RefuseRuntimeKind(runtimeInstance Runtime, lookup string, required []Kind) error {
-    if nilErr := RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := RefuseNilRuntime(runtimeInstance, lookup); nil != nilErr {
         return nilErr
     }
 

@@ -36,7 +36,7 @@ type Firewall struct {
 
 /* Check refuses a nil runtime before the first rule. */
 func (instance *Firewall) Check(runtimeInstance containercontract.Runtime, request httpcontract.Request) error {
-    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "security.Firewall.Check"); nil != refuseErr {
         return refuseErr
     }
 

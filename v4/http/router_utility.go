@@ -387,7 +387,7 @@ func writeResponse(
         defer func() { releasePersistenceRuntime() }()
 
         openPersistenceRuntime := func() (containercontract.Runtime, error) {
-            persistenceRuntime, release, persistenceRuntimeErr := sessionPersistenceRuntime(runtimeInstance, sessionManager)
+            persistenceRuntime, release, persistenceRuntimeErr := sessionPersistenceRuntime(runtimeInstance, sessionManager, "http.writeResponse")
             releasePersistenceRuntime = release
 
             return persistenceRuntime, persistenceRuntimeErr
@@ -619,8 +619,9 @@ func storageBoundExpired(ctx context.Context) bool {
 func sessionPersistenceRuntime(
     runtimeInstance containercontract.Runtime,
     sessionManager sessioncontract.Manager,
+    door string,
 ) (containercontract.Runtime, context.CancelFunc, error) {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, door); nil != nilErr {
         return nil, func() {}, nilErr
     }
 

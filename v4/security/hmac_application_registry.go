@@ -32,7 +32,7 @@ type StaticHmacApplicationRegistry struct {
 }
 
 func (instance *StaticHmacApplicationRegistry) RolesForApplication(runtimeInstance containercontract.Runtime, application string) ([]string, bool, error) {
-    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance, "security.StaticHmacApplicationRegistry.RolesForApplication"); nil != runtimeErr {
         return nil, false, runtimeErr
     }
 

@@ -168,7 +168,7 @@ func (instance *RateLimiter) Name() string {
 
 /* Allow charges one call to the key under the runtime's context, capped by CallTimeout. On a store failure the decision is the failure mode's, answered beside the error. */
 func (instance *RateLimiter) Allow(runtimeInstance containercontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
-    if refusalErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refusalErr {
+    if refusalErr := containercontract.RefuseNilRuntime(runtimeInstance, "rueidis.RateLimiter.Allow"); nil != refusalErr {
         return httpcontract.RateLimitDecision{Limit: instance.limit}, refusalErr
     }
 
@@ -207,7 +207,7 @@ func (instance *RateLimiter) Allow(runtimeInstance containercontract.Runtime, ke
 
 /* Reset drops the key's counter under the runtime's context, capped by CallTimeout, and answers a failure to do so: a failed reset leaves an account locked after a successful login. */
 func (instance *RateLimiter) Reset(runtimeInstance containercontract.Runtime, key string) error {
-    if refusalErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refusalErr {
+    if refusalErr := containercontract.RefuseNilRuntime(runtimeInstance, "rueidis.RateLimiter.Reset"); nil != refusalErr {
         return refusalErr
     }
 

@@ -102,6 +102,8 @@ the session apart, `session.NewUnavailableSession` builds one.
 
 ### Changed
 
+- container: **Breaking**: `containercontract.RefuseNilRuntime(runtimeInstance, door)` takes the name of the door that refuses, written under `door` in the refusal's context beside `argument`, the message unchanged; every door of the framework and of the fourth major's integrations names itself as `<package>.<Type>.<Method>`, a helper refusing for its callers passing the caller's door. See `UPGRADE.md`.
+
 - application, http: a middleware factory's refusal names its module: the registrar a module's `RegisterHttpMiddlewares` hook receives is bound to the module's `Name()`, the application's `RegisterHttpMiddlewares` and `RegisterHttpMiddlewareFactories` register as `the application`, and a factory that fails or yields nil, a nil factory and a nil entry of a registration are refused with `moduleName` beside `middlewareName`; `pipeline.HttpMiddlewareDefinition` gains `Module`, a definition with none carrying no `moduleName` key.
 - storage: **Breaking**: every door of `LocalStorage` refuses a nil runtime, and one carrying no context, first, answering `the runtime is nil or carries no context` before the base directory is touched, see `UPGRADE.md`; the local storage and the static file server derive an entity tag through one internal formula, the tag unchanged.
 

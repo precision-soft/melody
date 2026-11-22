@@ -125,7 +125,7 @@ func (instance *Storage) Put(
     size int64,
     options storagecontract.PutOptions,
 ) error {
-    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "awss3.Storage.Put"); nil != refuseErr {
         return refuseErr
     }
 
@@ -393,7 +393,7 @@ func (instance *Storage) Get(
     key string,
     options storagecontract.GetOptions,
 ) (storagecontract.Object, error) {
-    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "awss3.Storage.Get"); nil != refuseErr {
         return storagecontract.Object{}, refuseErr
     }
 
@@ -454,7 +454,7 @@ func (instance *Storage) Stat(
     runtimeInstance containercontract.Runtime,
     key string,
 ) (storagecontract.ObjectInfo, error) {
-    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "awss3.Storage.Stat"); nil != refuseErr {
         return storagecontract.ObjectInfo{}, refuseErr
     }
 
@@ -506,7 +506,7 @@ func (instance *Storage) Delete(
     runtimeInstance containercontract.Runtime,
     key string,
 ) error {
-    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "awss3.Storage.Delete"); nil != refuseErr {
         return refuseErr
     }
 
@@ -530,7 +530,7 @@ func (instance *Storage) PresignedUrl(
     key string,
     config storagecontract.PresignConfig,
 ) (string, error) {
-    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "awss3.Storage.PresignedUrl"); nil != refuseErr {
         return "", refuseErr
     }
 

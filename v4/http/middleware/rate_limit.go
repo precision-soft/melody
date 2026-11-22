@@ -200,7 +200,7 @@ func (instance *FixedWindowLimiter) Name() string {
 }
 
 func (instance *FixedWindowLimiter) Allow(runtimeInstance containercontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
-    if refusalErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refusalErr {
+    if refusalErr := containercontract.RefuseNilRuntime(runtimeInstance, "middleware.FixedWindowLimiter.Allow"); nil != refusalErr {
         return httpcontract.RateLimitDecision{Limit: instance.capacity}, refusalErr
     }
 
@@ -255,7 +255,7 @@ func (instance *FixedWindowLimiter) Allow(runtimeInstance containercontract.Runt
 }
 
 func (instance *FixedWindowLimiter) Reset(runtimeInstance containercontract.Runtime, key string) error {
-    if refusalErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refusalErr {
+    if refusalErr := containercontract.RefuseNilRuntime(runtimeInstance, "middleware.FixedWindowLimiter.Reset"); nil != refusalErr {
         return refusalErr
     }
 
@@ -347,7 +347,7 @@ func (instance *SlidingWindowLimiter) Name() string {
 }
 
 func (instance *SlidingWindowLimiter) Allow(runtimeInstance containercontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
-    if refusalErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refusalErr {
+    if refusalErr := containercontract.RefuseNilRuntime(runtimeInstance, "middleware.SlidingWindowLimiter.Allow"); nil != refusalErr {
         return httpcontract.RateLimitDecision{Limit: instance.limit}, refusalErr
     }
 
@@ -410,7 +410,7 @@ func (instance *SlidingWindowLimiter) Allow(runtimeInstance containercontract.Ru
 }
 
 func (instance *SlidingWindowLimiter) Reset(runtimeInstance containercontract.Runtime, key string) error {
-    if refusalErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refusalErr {
+    if refusalErr := containercontract.RefuseNilRuntime(runtimeInstance, "middleware.SlidingWindowLimiter.Reset"); nil != refusalErr {
         return refusalErr
     }
 

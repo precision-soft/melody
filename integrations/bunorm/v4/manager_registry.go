@@ -137,7 +137,7 @@ func isNilInterface(value any) bool {
 
 /* MigrationDatabase answers the connection the migration commands run on, the provider's OpenForMigration, opened under the caller's runtime once per name and shared: every call answering it takes a hold, CloseMigrationDatabase releases one and closes the connection with the last, and the registry's CloseWithContext is the net for whatever was not released. An answer that is the very pool the registry holds for the name is shared with that pool and takes no hold, whichever of the two doors opened it first: a migration connection the name's pool opens as later belongs to the pool and its release closes nothing. A caller whose context is already done is refused before anything is opened or held, a kept connection included; an empty name selects the default definition. A nil runtime, or one carrying no context or no scope, is refused before the lock is taken. */
 func (instance *ManagerRegistry) MigrationDatabase(runtimeInstance containercontract.Runtime, name string) (*bun.DB, error) {
-    if runtimeErr := refuseOpenRuntime(runtimeInstance); nil != runtimeErr {
+    if runtimeErr := refuseOpenRuntime(runtimeInstance, "bunorm.ManagerRegistry.MigrationDatabase"); nil != runtimeErr {
         return nil, runtimeErr
     }
 
@@ -402,7 +402,7 @@ func runeBoundaryAtOrBefore(value string, limit int) int {
 
 /* Manager answers the manager of one definition, opening its pool at the first call under the caller's runtime: the provider is handed that runtime over a context the caller's and the registry's Close both end. Concurrent callers of one name coalesce onto one open, the opener's; a waiter leaves when its own context ends, the open going on for its opener, and a waiter whose context is live opens again when the open it waited on ended by its opener's context, so no caller receives another's cancellation. A failed open is never memoized. A caller whose context is already done is refused before an open starts; a memoized manager is answered whatever the context. A nil runtime, or one carrying no context or no scope, is refused before the lock is taken. */
 func (instance *ManagerRegistry) Manager(runtimeInstance containercontract.Runtime, name string) (*Manager, error) {
-    if runtimeErr := refuseOpenRuntime(runtimeInstance); nil != runtimeErr {
+    if runtimeErr := refuseOpenRuntime(runtimeInstance, "bunorm.ManagerRegistry.Manager"); nil != runtimeErr {
         return nil, runtimeErr
     }
 
@@ -628,8 +628,8 @@ func (instance *ManagerRegistry) openManager(runtimeInstance containercontract.R
 }
 
 /* refuseOpenRuntime refuses a runtime an open cannot run under: nil, a typed nil, one carrying no context, and one carrying no scope, since the provider is handed the runtime re-based on the open's context over the caller's scope */
-func refuseOpenRuntime(runtimeInstance containercontract.Runtime) error {
-    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+func refuseOpenRuntime(runtimeInstance containercontract.Runtime, door string) error {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance, door); nil != runtimeErr {
         return runtimeErr
     }
 

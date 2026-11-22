@@ -151,7 +151,7 @@ func (instance *Migrator) judged(ctx context.Context, specification TableSpecifi
 
 /* MigrateEncrypt runs EnsureColumnCapacity before the first write, so a programmatic caller gets the width check the command runs. Over a column TableSpecification.SealBindings binds, a value without the marker is sealed under the binding and a seal without one is re-sealed under it, its key and mode kept, so the run brings the column to the form its bound type writes. */
 func (instance *Migrator) MigrateEncrypt(runtimeInstance containercontract.Runtime, specification TableSpecification) (int, error) {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "encrypt.Migrator.MigrateEncrypt"); nil != nilErr {
         return 0, nilErr
     }
 
@@ -195,7 +195,7 @@ func (instance *Migrator) migrateEncrypt(ctx context.Context, specification Tabl
 
 /* MigrateReencrypt runs its own EnsureColumnCapacityForReencrypt first, for the reason on MigrateEncrypt. Over a bound column every value it writes is sealed under the binding, and a stored seal is already the target only when it is bound and under the target key. */
 func (instance *Migrator) MigrateReencrypt(runtimeInstance containercontract.Runtime, specification TableSpecification, targetKeyId string) (int, error) {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "encrypt.Migrator.MigrateReencrypt"); nil != nilErr {
         return 0, nilErr
     }
 
@@ -242,7 +242,7 @@ func (instance *Migrator) migrateReencrypt(ctx context.Context, specification Ta
 
 /* MigrateDecrypt stops the run on a row whose stored value is of a seal format this build does not read, whatever the cipher's Decrypt answers for it, and on a row whose decrypted value is itself marker-shaped: written bare, such a value would be read as a seal by a column type that still decrypts. A bound column is opened under its binding. */
 func (instance *Migrator) MigrateDecrypt(runtimeInstance containercontract.Runtime, specification TableSpecification) (int, error) {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "encrypt.Migrator.MigrateDecrypt"); nil != nilErr {
         return 0, nilErr
     }
 
@@ -568,7 +568,7 @@ func (instance *Migrator) reencryptTransform(specification TableSpecification, t
 
 /* EnsureColumnCapacity refuses a migration whose ciphertext could not fit back into the column it is read from. Under a non-strict sql_mode an overflowing UPDATE succeeds with a truncated ciphertext that never authenticates again, so the requirement is set before the first row by sealing a probe as long as the longest value not yet sealed, with the cipher the run uses. It cannot bound a longer value written concurrently, and a key rotation is covered by EnsureColumnCapacityForReencrypt. */
 func (instance *Migrator) EnsureColumnCapacity(runtimeInstance containercontract.Runtime, specification TableSpecification) error {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "encrypt.Migrator.EnsureColumnCapacity"); nil != nilErr {
         return nilErr
     }
 
@@ -583,7 +583,7 @@ func (instance *Migrator) EnsureColumnCapacity(runtimeInstance containercontract
 
 /* EnsureColumnCapacityForReencrypt is EnsureColumnCapacity for a key rotation, which rewrites values already sealed: re-sealing under another key id changes each stored length by the difference between the two ids. The widest result comes from one aggregate over the column, and the plaintext still in it is sized under the target key id. */
 func (instance *Migrator) EnsureColumnCapacityForReencrypt(runtimeInstance containercontract.Runtime, specification TableSpecification, targetKeyId string) error {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "encrypt.Migrator.EnsureColumnCapacityForReencrypt"); nil != nilErr {
         return nilErr
     }
 

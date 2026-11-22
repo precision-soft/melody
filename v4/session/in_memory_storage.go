@@ -98,7 +98,7 @@ type inMemorySessionEntry struct {
 }
 
 func (instance *InMemoryStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "session.InMemoryStorage.Load"); nil != nilErr {
         return nil, false, nilErr
     }
 
@@ -152,7 +152,7 @@ func (instance *InMemoryStorage) Load(runtimeInstance containercontract.Runtime,
 }
 
 func (instance *InMemoryStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "session.InMemoryStorage.Save"); nil != nilErr {
         return nilErr
     }
 
@@ -205,7 +205,7 @@ func (instance *InMemoryStorage) Save(runtimeInstance containercontract.Runtime,
 }
 
 func (instance *InMemoryStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "session.InMemoryStorage.Delete"); nil != nilErr {
         return nilErr
     }
 
@@ -233,7 +233,7 @@ func (instance *InMemoryStorage) Delete(runtimeInstance containercontract.Runtim
 
 /* Clear removes every session, judging the context as the contract doors do. */
 func (instance *InMemoryStorage) Clear(runtimeInstance containercontract.Runtime) error {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "session.InMemoryStorage.Clear"); nil != nilErr {
         return nilErr
     }
 

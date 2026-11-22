@@ -49,7 +49,7 @@ func NewHmacEnvelopeSigner(
     secrets HmacSecretProvider,
     config HmacEnvelopeSignerConfig,
 ) *HmacEnvelopeSigner {
-    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance, "security.NewHmacEnvelopeSigner"); nil != runtimeErr {
         exception.Panic(exception.FromError(runtimeErr))
     }
 
@@ -130,7 +130,7 @@ func (instance *HmacEnvelopeSigner) Sign(
     body []byte,
     actor securitycontract.Actor,
 ) (string, error) {
-    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance, "security.HmacEnvelopeSigner.Sign"); nil != runtimeErr {
         return "", runtimeErr
     }
 

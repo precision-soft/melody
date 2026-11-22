@@ -115,7 +115,7 @@ func (instance *Manager) RoundTrip(value any, target any) error {
 }
 
 func (instance *Manager) Get(runtimeInstance containercontract.Runtime, key string, target any) (bool, error) {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.Manager.Get"); nil != nilErr {
         return false, nilErr
     }
 
@@ -148,7 +148,7 @@ func (instance *Manager) Get(runtimeInstance containercontract.Runtime, key stri
 }
 
 func (instance *Manager) Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration) error {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.Manager.Set"); nil != nilErr {
         return nilErr
     }
 
@@ -166,7 +166,7 @@ func (instance *Manager) Set(runtimeInstance containercontract.Runtime, key stri
 }
 
 func (instance *Manager) Delete(runtimeInstance containercontract.Runtime, key string) error {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.Manager.Delete"); nil != nilErr {
         return nilErr
     }
 
@@ -174,7 +174,7 @@ func (instance *Manager) Delete(runtimeInstance containercontract.Runtime, key s
 }
 
 func (instance *Manager) Has(runtimeInstance containercontract.Runtime, key string) (bool, error) {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.Manager.Has"); nil != nilErr {
         return false, nilErr
     }
 
@@ -184,7 +184,7 @@ func (instance *Manager) Has(runtimeInstance containercontract.Runtime, key stri
 }
 
 func (instance *Manager) Clear(runtimeInstance containercontract.Runtime) error {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.Manager.Clear"); nil != nilErr {
         return nilErr
     }
 
@@ -193,7 +193,7 @@ func (instance *Manager) Clear(runtimeInstance containercontract.Runtime) error 
 
 /* Many replaces the target's map with the entries of the keys that are present and decode. An entry whose payload does not decode is left out as an absent key is, and its keys come back in a DeserializationError beside the entries that decoded; a backend failure leaves the target untouched. */
 func (instance *Manager) Many(runtimeInstance containercontract.Runtime, keys []string, target any) error {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.Manager.Many"); nil != nilErr {
         return nilErr
     }
 
@@ -263,7 +263,7 @@ func serializationErrorText(err error) (text string) {
 
 /* SetMultiple serializes every entry before the backend sees any, so a refusal writes nothing. The refusal names every refused key under "keys", sorted, with "key" the first of them, and each key's own reason under "causeByKey"; every entry is serialized even after the first refusal, so the list is whole. */
 func (instance *Manager) SetMultiple(runtimeInstance containercontract.Runtime, items map[string]any, ttl bound.Duration) error {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.Manager.SetMultiple"); nil != nilErr {
         return nilErr
     }
 
@@ -304,7 +304,7 @@ func (instance *Manager) SetMultiple(runtimeInstance containercontract.Runtime, 
 }
 
 func (instance *Manager) DeleteMultiple(runtimeInstance containercontract.Runtime, keys []string) error {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.Manager.DeleteMultiple"); nil != nilErr {
         return nilErr
     }
 
@@ -313,7 +313,7 @@ func (instance *Manager) DeleteMultiple(runtimeInstance containercontract.Runtim
 
 /* Increment adds delta to a counter through the backend's native operation, so a distributed backend keeps it atomic, the counter's ttl written in the same operation as options says. The count bypasses the serializer and is stored as decimal text, so a counter key is read with GetCounter and never mixed with Set. */
 func (instance *Manager) Increment(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.Manager.Increment"); nil != nilErr {
         return 0, nilErr
     }
 
@@ -324,7 +324,7 @@ func (instance *Manager) Increment(runtimeInstance containercontract.Runtime, ke
 
 /* GetCounter reads a key written by Increment or Decrement. Those operations are backend-native and store the count as decimal text rather than through the serializer, so Get would hand the raw payload to a deserializer that does not expect it. */
 func (instance *Manager) GetCounter(runtimeInstance containercontract.Runtime, key string) (int64, bool, error) {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.Manager.GetCounter"); nil != nilErr {
         return 0, false, nilErr
     }
 
@@ -354,7 +354,7 @@ func (instance *Manager) GetCounter(runtimeInstance containercontract.Runtime, k
 }
 
 func (instance *Manager) Decrement(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.Manager.Decrement"); nil != nilErr {
         return 0, nilErr
     }
 

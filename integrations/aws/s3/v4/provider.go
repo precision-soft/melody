@@ -83,7 +83,7 @@ type EnsureBucketConfig struct {
 
 /* EnsureBucket creates the bucket when it does not exist, its calls bounded by the runtime's context; one that exists, or that a concurrent replica created first, is answered as success. A nil runtime is refused. */
 func EnsureBucket(runtimeInstance containercontract.Runtime, client *minio.Client, bucket string, config EnsureBucketConfig) error {
-    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance, "awss3.EnsureBucket"); nil != runtimeErr {
         return runtimeErr
     }
 

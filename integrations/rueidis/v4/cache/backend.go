@@ -218,8 +218,8 @@ func (instance *Backend) walkRoundTrip(ctx context.Context, operation string) ro
     }
 }
 
-func (instance *Backend) refuseBeforeArguments(runtimeInstance containercontract.Runtime) error {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+func (instance *Backend) refuseBeforeArguments(runtimeInstance containercontract.Runtime, door string) error {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, door); nil != nilErr {
         return nilErr
     }
 
@@ -239,7 +239,7 @@ func (instance *Backend) refuseWhenClosed() error {
 }
 
 func (instance *Backend) Get(runtimeInstance containercontract.Runtime, key string) ([]byte, bool, error) {
-    if refusalErr := instance.refuseBeforeArguments(runtimeInstance); nil != refusalErr {
+    if refusalErr := instance.refuseBeforeArguments(runtimeInstance, "cache.Backend.Get"); nil != refusalErr {
         return nil, false, refusalErr
     }
 
@@ -278,7 +278,7 @@ func (instance *Backend) Get(runtimeInstance containercontract.Runtime, key stri
 }
 
 func (instance *Backend) Set(runtimeInstance containercontract.Runtime, key string, payload []byte, ttl bound.Duration) error {
-    if refusalErr := instance.refuseBeforeArguments(runtimeInstance); nil != refusalErr {
+    if refusalErr := instance.refuseBeforeArguments(runtimeInstance, "cache.Backend.Set"); nil != refusalErr {
         return refusalErr
     }
 
@@ -315,7 +315,7 @@ func (instance *Backend) Set(runtimeInstance containercontract.Runtime, key stri
 }
 
 func (instance *Backend) Delete(runtimeInstance containercontract.Runtime, key string) error {
-    if refusalErr := instance.refuseBeforeArguments(runtimeInstance); nil != refusalErr {
+    if refusalErr := instance.refuseBeforeArguments(runtimeInstance, "cache.Backend.Delete"); nil != refusalErr {
         return refusalErr
     }
 
@@ -340,7 +340,7 @@ func (instance *Backend) Delete(runtimeInstance containercontract.Runtime, key s
 }
 
 func (instance *Backend) Has(runtimeInstance containercontract.Runtime, key string) (bool, error) {
-    if refusalErr := instance.refuseBeforeArguments(runtimeInstance); nil != refusalErr {
+    if refusalErr := instance.refuseBeforeArguments(runtimeInstance, "cache.Backend.Has"); nil != refusalErr {
         return false, refusalErr
     }
 
@@ -375,7 +375,7 @@ func (instance *Backend) Has(runtimeInstance containercontract.Runtime, key stri
 }
 
 func (instance *Backend) Clear(runtimeInstance containercontract.Runtime) error {
-    if refusalErr := instance.refuseBeforeArguments(runtimeInstance); nil != refusalErr {
+    if refusalErr := instance.refuseBeforeArguments(runtimeInstance, "cache.Backend.Clear"); nil != refusalErr {
         return refusalErr
     }
 
@@ -403,7 +403,7 @@ func (instance *Backend) deleteMatching(roundTrip roundTripContext, pattern stri
 
 /* ClearByPrefix refuses the empty prefix; Clear is the door for the whole namespace. */
 func (instance *Backend) ClearByPrefix(runtimeInstance containercontract.Runtime, prefix string) error {
-    if refusalErr := instance.refuseBeforeArguments(runtimeInstance); nil != refusalErr {
+    if refusalErr := instance.refuseBeforeArguments(runtimeInstance, "cache.Backend.ClearByPrefix"); nil != refusalErr {
         return refusalErr
     }
 
@@ -422,7 +422,7 @@ func (instance *Backend) ClearByPrefix(runtimeInstance containercontract.Runtime
 }
 
 func (instance *Backend) Many(runtimeInstance containercontract.Runtime, keys []string) (map[string][]byte, error) {
-    if refusalErr := instance.refuseBeforeArguments(runtimeInstance); nil != refusalErr {
+    if refusalErr := instance.refuseBeforeArguments(runtimeInstance, "cache.Backend.Many"); nil != refusalErr {
         return nil, refusalErr
     }
 
@@ -485,7 +485,7 @@ func (instance *Backend) Many(runtimeInstance containercontract.Runtime, keys []
 }
 
 func (instance *Backend) SetMultiple(runtimeInstance containercontract.Runtime, items map[string][]byte, ttl bound.Duration) error {
-    if refusalErr := instance.refuseBeforeArguments(runtimeInstance); nil != refusalErr {
+    if refusalErr := instance.refuseBeforeArguments(runtimeInstance, "cache.Backend.SetMultiple"); nil != refusalErr {
         return refusalErr
     }
 
@@ -571,7 +571,7 @@ func (instance *Backend) firstSetFailure(setErrors map[string]error, requestedCo
 }
 
 func (instance *Backend) DeleteMultiple(runtimeInstance containercontract.Runtime, keys []string) error {
-    if refusalErr := instance.refuseBeforeArguments(runtimeInstance); nil != refusalErr {
+    if refusalErr := instance.refuseBeforeArguments(runtimeInstance, "cache.Backend.DeleteMultiple"); nil != refusalErr {
         return refusalErr
     }
 
@@ -616,7 +616,7 @@ end
 return redis.call("get", KEYS[1])`)
 
 func (instance *Backend) Increment(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
-    if refusalErr := instance.refuseBeforeArguments(runtimeInstance); nil != refusalErr {
+    if refusalErr := instance.refuseBeforeArguments(runtimeInstance, "cache.Backend.Increment"); nil != refusalErr {
         return 0, refusalErr
     }
 
@@ -667,7 +667,7 @@ func (instance *Backend) addToCounter(ctx context.Context, operation string, key
 }
 
 func (instance *Backend) Decrement(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
-    if refusalErr := instance.refuseBeforeArguments(runtimeInstance); nil != refusalErr {
+    if refusalErr := instance.refuseBeforeArguments(runtimeInstance, "cache.Backend.Decrement"); nil != refusalErr {
         return 0, refusalErr
     }
 

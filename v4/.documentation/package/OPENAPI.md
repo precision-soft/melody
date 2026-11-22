@@ -124,7 +124,7 @@ Register the registry as `ServiceOpenApiRegistry` and the `Info` as `ServiceOpen
 
 `Describe` stores a copy of the descriptor's `Tags` and `Responses` and `Get` answers a copy, an entry of `Responses` repeating a status replacing the earlier one in its place, so a tag list built once and appended to between routes describes each route with the tags it had at that moment, and a reader of `Get` cannot write into the registry from the request path.
 
-A response with no body is `openapi.ResponseDescription{Status: 204}`; a route with no response at all is documented with a single `default` response.
+A response with no body is `openapi.ResponseDescription{Status: 204}`, documented with an `application/json` media type and an empty schema; a route with no response at all is documented with a single `default` response.
 
 Run it to emit the document:
 

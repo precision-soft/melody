@@ -518,7 +518,7 @@ func newStreamConnection(
 }
 
 func (instance *streamConnection) Send(runtimeInstance containercontract.Runtime, message OutboundMessage) error {
-    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "websocket.streamConnection.Send"); nil != refuseErr {
         return refuseErr
     }
 

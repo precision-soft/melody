@@ -184,7 +184,7 @@ func refuseInvalidKeyList(keys []string) error {
 }
 
 func (instance *InMemoryBackend) Get(runtimeInstance containercontract.Runtime, key string) ([]byte, bool, error) {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.InMemoryBackend.Get"); nil != nilErr {
         return nil, false, nilErr
     }
 
@@ -245,7 +245,7 @@ func (instance *InMemoryBackend) Get(runtimeInstance containercontract.Runtime, 
 }
 
 func (instance *InMemoryBackend) Has(runtimeInstance containercontract.Runtime, key string) (bool, error) {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.InMemoryBackend.Has"); nil != nilErr {
         return false, nilErr
     }
 
@@ -288,7 +288,7 @@ func (instance *InMemoryBackend) Set(
     payload []byte,
     ttl bound.Duration,
 ) error {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.InMemoryBackend.Set"); nil != nilErr {
         return nilErr
     }
 
@@ -325,7 +325,7 @@ func (instance *InMemoryBackend) Set(
 }
 
 func (instance *InMemoryBackend) Delete(runtimeInstance containercontract.Runtime, key string) error {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.InMemoryBackend.Delete"); nil != nilErr {
         return nilErr
     }
 
@@ -350,7 +350,7 @@ func (instance *InMemoryBackend) Delete(runtimeInstance containercontract.Runtim
 }
 
 func (instance *InMemoryBackend) Clear(runtimeInstance containercontract.Runtime) error {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.InMemoryBackend.Clear"); nil != nilErr {
         return nilErr
     }
 
@@ -372,7 +372,7 @@ func (instance *InMemoryBackend) Clear(runtimeInstance containercontract.Runtime
 }
 
 func (instance *InMemoryBackend) Many(runtimeInstance containercontract.Runtime, keys []string) (map[string][]byte, error) {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.InMemoryBackend.Many"); nil != nilErr {
         return nil, nilErr
     }
 
@@ -453,7 +453,7 @@ func (instance *InMemoryBackend) Many(runtimeInstance containercontract.Runtime,
 }
 
 func (instance *InMemoryBackend) SetMultiple(runtimeInstance containercontract.Runtime, items map[string][]byte, ttl bound.Duration) error {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.InMemoryBackend.SetMultiple"); nil != nilErr {
         return nilErr
     }
 
@@ -502,7 +502,7 @@ func (instance *InMemoryBackend) SetMultiple(runtimeInstance containercontract.R
 }
 
 func (instance *InMemoryBackend) DeleteMultiple(runtimeInstance containercontract.Runtime, keys []string) error {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.InMemoryBackend.DeleteMultiple"); nil != nilErr {
         return nilErr
     }
 
@@ -529,7 +529,7 @@ func (instance *InMemoryBackend) DeleteMultiple(runtimeInstance containercontrac
 }
 
 func (instance *InMemoryBackend) Increment(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.InMemoryBackend.Increment"); nil != nilErr {
         return 0, nilErr
     }
 
@@ -537,7 +537,7 @@ func (instance *InMemoryBackend) Increment(runtimeInstance containercontract.Run
 }
 
 func (instance *InMemoryBackend) Decrement(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.InMemoryBackend.Decrement"); nil != nilErr {
         return 0, nilErr
     }
 

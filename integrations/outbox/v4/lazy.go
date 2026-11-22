@@ -29,8 +29,8 @@ func NewLazyRepository(resolver containercontract.Resolver) Repository {
 }
 
 /* resolveStore resolves the registered store, reporting a resolution failure — or a nil yield — as an error the caller returns from its own call, so the relay's retry loop owns the failure instead of a panic owning the process. */
-func (instance *lazyRepository) resolveStore(runtimeInstance containercontract.Runtime) (*Store, error) {
-    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+func (instance *lazyRepository) resolveStore(runtimeInstance containercontract.Runtime, door string) (*Store, error) {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, door); nil != refuseErr {
         return nil, refuseErr
     }
 
@@ -47,7 +47,7 @@ func (instance *lazyRepository) resolveStore(runtimeInstance containercontract.R
 }
 
 func (instance *lazyRepository) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration) ([]Pending, error) {
-    store, resolveErr := instance.resolveStore(runtimeInstance)
+    store, resolveErr := instance.resolveStore(runtimeInstance, "outbox.lazyRepository.ClaimDueMessages")
     if nil != resolveErr {
         return nil, resolveErr
     }
@@ -56,7 +56,7 @@ func (instance *lazyRepository) ClaimDueMessages(runtimeInstance containercontra
 }
 
 func (instance *lazyRepository) RecordDeliveryAttempt(runtimeInstance containercontract.Runtime, id int64, claimToken string) (int, bool, error) {
-    store, resolveErr := instance.resolveStore(runtimeInstance)
+    store, resolveErr := instance.resolveStore(runtimeInstance, "outbox.lazyRepository.RecordDeliveryAttempt")
     if nil != resolveErr {
         return 0, false, resolveErr
     }
@@ -65,7 +65,7 @@ func (instance *lazyRepository) RecordDeliveryAttempt(runtimeInstance containerc
 }
 
 func (instance *lazyRepository) MarkSent(runtimeInstance containercontract.Runtime, id int64, claimToken string) error {
-    store, resolveErr := instance.resolveStore(runtimeInstance)
+    store, resolveErr := instance.resolveStore(runtimeInstance, "outbox.lazyRepository.MarkSent")
     if nil != resolveErr {
         return resolveErr
     }
@@ -74,7 +74,7 @@ func (instance *lazyRepository) MarkSent(runtimeInstance containercontract.Runti
 }
 
 func (instance *lazyRepository) Reschedule(runtimeInstance containercontract.Runtime, id int64, attempts int, availableAt time.Time, lastError string, claimToken string) error {
-    store, resolveErr := instance.resolveStore(runtimeInstance)
+    store, resolveErr := instance.resolveStore(runtimeInstance, "outbox.lazyRepository.Reschedule")
     if nil != resolveErr {
         return resolveErr
     }
@@ -83,7 +83,7 @@ func (instance *lazyRepository) Reschedule(runtimeInstance containercontract.Run
 }
 
 func (instance *lazyRepository) RescheduleUncharged(runtimeInstance containercontract.Runtime, id int64, availableAt time.Time, lastError string, claimToken string) error {
-    store, resolveErr := instance.resolveStore(runtimeInstance)
+    store, resolveErr := instance.resolveStore(runtimeInstance, "outbox.lazyRepository.RescheduleUncharged")
     if nil != resolveErr {
         return resolveErr
     }
@@ -92,7 +92,7 @@ func (instance *lazyRepository) RescheduleUncharged(runtimeInstance containercon
 }
 
 func (instance *lazyRepository) MarkDead(runtimeInstance containercontract.Runtime, id int64, attempts int, lastError string, claimToken string) error {
-    store, resolveErr := instance.resolveStore(runtimeInstance)
+    store, resolveErr := instance.resolveStore(runtimeInstance, "outbox.lazyRepository.MarkDead")
     if nil != resolveErr {
         return resolveErr
     }
@@ -101,7 +101,7 @@ func (instance *lazyRepository) MarkDead(runtimeInstance containercontract.Runti
 }
 
 func (instance *lazyRepository) ReleaseClaims(runtimeInstance containercontract.Runtime, ids []int64, claimToken string) (int, error) {
-    store, resolveErr := instance.resolveStore(runtimeInstance)
+    store, resolveErr := instance.resolveStore(runtimeInstance, "outbox.lazyRepository.ReleaseClaims")
     if nil != resolveErr {
         return 0, resolveErr
     }
@@ -110,7 +110,7 @@ func (instance *lazyRepository) ReleaseClaims(runtimeInstance containercontract.
 }
 
 func (instance *lazyRepository) RequeueDead(runtimeInstance containercontract.Runtime, options RequeueDeadOptions) (int, error) {
-    store, resolveErr := instance.resolveStore(runtimeInstance)
+    store, resolveErr := instance.resolveStore(runtimeInstance, "outbox.lazyRepository.RequeueDead")
     if nil != resolveErr {
         return 0, resolveErr
     }
@@ -119,7 +119,7 @@ func (instance *lazyRepository) RequeueDead(runtimeInstance containercontract.Ru
 }
 
 func (instance *lazyRepository) PruneSent(runtimeInstance containercontract.Runtime, options PruneSentOptions) (int, error) {
-    store, resolveErr := instance.resolveStore(runtimeInstance)
+    store, resolveErr := instance.resolveStore(runtimeInstance, "outbox.lazyRepository.PruneSent")
     if nil != resolveErr {
         return 0, resolveErr
     }

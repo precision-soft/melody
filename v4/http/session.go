@@ -44,7 +44,7 @@ func RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Ses
         return nil, sessionManagerErr
     }
 
-    rotationRuntime, releaseRotationRuntime, regenerateErr := storageCallRuntime(runtimeInstance, sessionManager)
+    rotationRuntime, releaseRotationRuntime, regenerateErr := storageCallRuntime(runtimeInstance, sessionManager, "http.RegenerateRequestSession")
     defer releaseRotationRuntime()
 
     if nil != regenerateErr {

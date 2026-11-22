@@ -1832,13 +1832,21 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **Remedy.** `NewValidator(validation.ValidatorConfig{})`, or `ValidatorConfig{MaxErrors: bound.Of(50)}` for a limit of the application's choosing.
 
-### Translation: `Translate` answers an error, and the manager takes its catalogs and a `ManagerConfig`
+### Translation: `Translate` answers an error, and the manager takes one `ManagerConfig`
 
-**What changed.** [`translationcontract.Translator`](../translation/contract/translator.go)'s `Trans(messageId, parameters, domain, locale) string` is `Translate(messageId string, config TranslateConfig) (string, error)`, the three optional values in `TranslateConfig{Parameters, Domain, Locale}`, and `HasMessage(messageId, config)` reads the same config's domain and locale. `Translate` tells three outcomes apart: the rendered message and nil; a message no catalog carries, the message id and an error matching [`translation.ErrMessageNotFound`](../translation/manager.go); a pattern that cannot be rendered whole, the empty string and its error naming the message id, the domain, the locale, the offset and the reason. [`translation.NewManager`](../translation/manager.go) takes the catalogs as a slice, then a `ManagerConfig{DefaultLocale, FallbackLocales}`, its refusals naming the `field`; nil is a manager with no catalog, which answers every id with `ErrMessageNotFound`. `Loader.Load(ctx)` takes a context, and `JsonDirectoryLoader.Load` answers its error, wrapped with the directory, when it is done before the directory or before a file is read.
+**What changed.** [`translationcontract.Translator`](../translation/contract/translator.go)'s `Trans(messageId, parameters, domain, locale) string` is `Translate(messageId string, config TranslateConfig) (string, error)`, the three optional values in `TranslateConfig{Parameters, Domain, Locale}`, and `HasMessage(messageId, config)` reads the same config's domain and locale. `Translate` tells three outcomes apart: the rendered message and nil; a message no catalog carries, the message id and an error matching [`translation.ErrMessageNotFound`](../translation/manager.go); a pattern that cannot be rendered whole, the empty string and its error naming the message id, the domain, the locale, the offset and the reason. [`translation.NewManager`](../translation/manager.go) takes one `ManagerConfig{Catalogs, FallbackLocales}`, its refusals naming the `field`; nil catalogs are a manager with no catalog, which answers every id with `ErrMessageNotFound`, and catalogs handed with an empty `FallbackLocales` are refused. `Loader.Load(ctx)` takes a context, and `JsonDirectoryLoader.Load` answers its error, wrapped with the directory, when it is done before the directory or before a file is read.
 
 **Symptom.** `translator.Trans(…)`, `NewManager(catalogs, "en", fallbacks)` and `loader.Load()` no longer compile. A manager handed catalogs and no fallback locale panics at construction naming `ManagerConfig.FallbackLocales`.
 
 **Remedy.** `message, translateErr := translator.Translate("greeting", translationcontract.TranslateConfig{Parameters: map[string]any{"name": name}, Locale: locale})`; where the third major printed the id of a missing message, keep `message` when `errors.Is(translateErr, translation.ErrMessageNotFound)` and treat any other error as a failure. `translation.NewManager(translation.ManagerConfig{Catalogs: []translationcontract.Catalog{english, romanian}, FallbackLocales: []string{configuration.Http().DefaultLocale()}})`, the list ending on the default locale, and `loader.Load(ctx)`.
+
+### Container: the nil-runtime refusal names its door
+
+**What changed.** [`containercontract.RefuseNilRuntime`](../container/contract/runtime_refuse.go) takes the door's name after the runtime and writes it under `door` in the refusal's context, so a journal line says which door was handed no runtime; the message `the runtime is nil or carries no context` is unchanged. Every framework and integration door names itself as `<package>.<Type>.<Method>`.
+
+**Symptom.** A door of the application's own calling `containercontract.RefuseNilRuntime(runtimeInstance)` no longer compiles.
+
+**Remedy.** `containercontract.RefuseNilRuntime(runtimeInstance, "catalog.Repository.Find")`, the door's own name.
 
 ### Container: a waiter builds again when the first caller left
 
@@ -1870,7 +1878,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **Symptom.** `DescribeTyped[RequestBody, ResponseBody](registry, name, 201, openapi.WithSummary(...), openapi.WithTags(...))` and a `Responses: map[int]reflect.Type{…}` literal no longer compile.
 
-**Remedy.** `registry.Describe(name, openapi.Descriptor{Summary: "...", Tags: []string{"..."}, RequestType: openapi.TypeOf[RequestBody](), Responses: []openapi.ResponseDescription{openapi.Response[ResponseBody](201), openapi.Response[NotFound](404)}})`; a response with no body is `openapi.ResponseDescription{Status: 204}`.
+**Remedy.** `registry.Describe(name, openapi.Descriptor{Summary: "...", Tags: []string{"..."}, RequestType: openapi.TypeOf[RequestBody](), Responses: []openapi.ResponseDescription{openapi.Response[ResponseBody](201), openapi.Response[NotFound](404)}})`; a response with no body is `openapi.ResponseDescription{Status: 204}`, documented with an `application/json` media type and an empty schema.
 
 ### Openapi: `SpecificationHandler` resolves the registry and the info from the container
 

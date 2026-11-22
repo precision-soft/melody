@@ -266,7 +266,7 @@ type fileSessionEntry struct {
 }
 
 func (instance *FileStorage) Load(runtimeInstance containercontract.Runtime, sessionId string) (map[string]any, bool, error) {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "session.FileStorage.Load"); nil != nilErr {
         return nil, false, nilErr
     }
 
@@ -310,7 +310,7 @@ func (instance *FileStorage) Load(runtimeInstance containercontract.Runtime, ses
 }
 
 func (instance *FileStorage) Save(runtimeInstance containercontract.Runtime, sessionId string, data map[string]any, ttl bound.Duration) error {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "session.FileStorage.Save"); nil != nilErr {
         return nilErr
     }
 
@@ -452,7 +452,7 @@ func (instance *FileStorage) earliestExpiryLocked() int64 {
 }
 
 func (instance *FileStorage) Delete(runtimeInstance containercontract.Runtime, sessionId string) error {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "session.FileStorage.Delete"); nil != nilErr {
         return nilErr
     }
 

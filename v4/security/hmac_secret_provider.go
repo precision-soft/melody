@@ -113,7 +113,7 @@ type StaticHmacSecretProvider struct {
 }
 
 func (instance *StaticHmacSecretProvider) CurrentKeyId(runtimeInstance containercontract.Runtime) (string, error) {
-    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance, "security.StaticHmacSecretProvider.CurrentKeyId"); nil != runtimeErr {
         return "", runtimeErr
     }
 
@@ -121,7 +121,7 @@ func (instance *StaticHmacSecretProvider) CurrentKeyId(runtimeInstance container
 }
 
 func (instance *StaticHmacSecretProvider) Secret(runtimeInstance containercontract.Runtime, keyId string) ([]byte, bool, error) {
-    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance, "security.StaticHmacSecretProvider.Secret"); nil != runtimeErr {
         return nil, false, runtimeErr
     }
 
@@ -134,7 +134,7 @@ func (instance *StaticHmacSecretProvider) Secret(runtimeInstance containercontra
 }
 
 func (instance *StaticHmacSecretProvider) ApplicationForKeyId(runtimeInstance containercontract.Runtime, keyId string) (string, bool, error) {
-    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance, "security.StaticHmacSecretProvider.ApplicationForKeyId"); nil != runtimeErr {
         return "", false, runtimeErr
     }
 

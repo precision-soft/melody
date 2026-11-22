@@ -58,7 +58,7 @@ func Remember[T any](
         return zero, exception.NewError("cache instance is nil", nil, nil)
     }
 
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "cache.Remember"); nil != nilErr {
         return zero, nilErr
     }
 

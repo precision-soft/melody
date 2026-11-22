@@ -74,7 +74,7 @@ func (instance *Registry) Register(entity string, options EntityOptions) *Regist
 
 /* EnsureSchema creates the transaction table and every entity's audit table when they are absent, under the runtime's context. It is a schema door, called once at boot under the boot runtime, a failure failing the boot, or from a command under its run; an absent runtime is refused before any statement. */
 func (instance *Registry) EnsureSchema(runtimeInstance containercontract.Runtime, database *bun.DB) error {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "audit.Registry.EnsureSchema"); nil != nilErr {
         return nilErr
     }
 

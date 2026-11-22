@@ -128,7 +128,7 @@ func (instance *Store) Enqueue(ctx context.Context, executor bun.IDB, message an
 
 /* ClaimDueMessages atomically claims a batch of due rows so that concurrent relay instances — even without a shared Locker — never grab the same row. It requires a backend that supports SELECT … FOR UPDATE SKIP LOCKED (PostgreSQL, or MySQL 8+). It selects due rows FOR UPDATE SKIP LOCKED inside a transaction (so a row another instance is claiming is skipped, not blocked on) and flips them to the in-flight state with available_at pushed out by the visibility timeout. A claimed row is therefore invisible to every other claimer until either the relay resolves it (sent/rescheduled/dead) or the visibility timeout lapses — which re-surfaces rows an instance claimed but crashed before resolving. A due row is one that is pending, or already in-flight but past its visibility deadline. Claiming does NOT touch delivery_attempts — that counter is advanced per row when the relay actually attempts delivery (RecordDeliveryAttempt), so a row the relay never reaches (a batch-mate behind a crashing row) is not charged a delivery attempt it never received. */
 func (instance *Store) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration) ([]Pending, error) {
-    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "outbox.Store.ClaimDueMessages"); nil != refuseErr {
         return nil, refuseErr
     }
 
@@ -226,7 +226,7 @@ func newClaimToken() (string, error) {
 
 /* RecordDeliveryAttempt increments a single in-flight row's delivery_attempts and returns the post-increment count, charging only a row the relay actually reached. The read and write run in one transaction under FOR UPDATE, so a concurrent claimer cannot lose an increment. A row whose claim_token does not match this claim, re-claimed by another instance or already resolved, returns claimed=false so the relay skips it; the token, not the status, tells "still mine" from "re-claimed", since a re-claim returns the row to the same in-flight state. */
 func (instance *Store) RecordDeliveryAttempt(runtimeInstance containercontract.Runtime, id int64, claimToken string) (int, bool, error) {
-    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "outbox.Store.RecordDeliveryAttempt"); nil != refuseErr {
         return 0, false, refuseErr
     }
 
@@ -277,7 +277,7 @@ func (instance *Store) RecordDeliveryAttempt(runtimeInstance containercontract.R
 
 /* MarkSent resolves the row as sent and records the send time PruneSent judges. Every resolution write is guarded on status in-flight and on the claim's fencing token, since a lapsed claim can be re-claimed back to in-flight by another instance and a status-only write would clobber that owner; with the token a stale run's write matches no row. */
 func (instance *Store) MarkSent(runtimeInstance containercontract.Runtime, id int64, claimToken string) error {
-    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "outbox.Store.MarkSent"); nil != refuseErr {
         return refuseErr
     }
 
@@ -306,7 +306,7 @@ func (instance *Store) Reschedule(
     lastError string,
     claimToken string,
 ) error {
-    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "outbox.Store.Reschedule"); nil != refuseErr {
         return refuseErr
     }
 
@@ -331,7 +331,7 @@ func (instance *Store) Reschedule(
 }
 
 func (instance *Store) RescheduleUncharged(runtimeInstance containercontract.Runtime, id int64, availableAt time.Time, lastError string, claimToken string) error {
-    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "outbox.Store.RescheduleUncharged"); nil != refuseErr {
         return refuseErr
     }
 
@@ -355,7 +355,7 @@ func (instance *Store) RescheduleUncharged(runtimeInstance containercontract.Run
 }
 
 func (instance *Store) MarkDead(runtimeInstance containercontract.Runtime, id int64, attempts int, lastError string, claimToken string) error {
-    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "outbox.Store.MarkDead"); nil != refuseErr {
         return refuseErr
     }
 
@@ -378,7 +378,7 @@ func (instance *Store) MarkDead(runtimeInstance containercontract.Runtime, id in
 }
 
 func (instance *Store) ReleaseClaims(runtimeInstance containercontract.Runtime, ids []int64, claimToken string) (int, error) {
-    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "outbox.Store.ReleaseClaims"); nil != refuseErr {
         return 0, refuseErr
     }
 
@@ -410,7 +410,7 @@ func (instance *Store) ReleaseClaims(runtimeInstance containercontract.Runtime, 
 }
 
 func (instance *Store) RequeueDead(runtimeInstance containercontract.Runtime, options RequeueDeadOptions) (int, error) {
-    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "outbox.Store.RequeueDead"); nil != refuseErr {
         return 0, refuseErr
     }
 
@@ -461,7 +461,7 @@ func (instance *Store) RequeueDead(runtimeInstance containercontract.Runtime, op
 }
 
 func (instance *Store) PruneSent(runtimeInstance containercontract.Runtime, options PruneSentOptions) (int, error) {
-    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "outbox.Store.PruneSent"); nil != refuseErr {
         return 0, refuseErr
     }
 

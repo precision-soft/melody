@@ -58,7 +58,7 @@ type Provider struct {
 
 /* Open opens under the runtime's context: a nil runtime, or one carrying no context, is refused before anything is routed; an already-cancelled context is refused before the attempt, the retry sleeps watch it beside the clock, and the configuration hook and the boot ping derive their budgets from it; pgdialect makes no server round trip at construction, so the first packet is the boot ping's dial. A nil logger reads as the emergency logger for the open's own records, since the terminal branches mark the returned error as logged; the diagnostics routing takes the logger as handed, so a nil, like an already-cancelled context, routes nothing and leaves bun's channel where the last routing put it. */
 func (instance *Provider) Open(runtimeInstance containercontract.Runtime, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance, "pgsql.Provider.Open"); nil != runtimeErr {
         return nil, runtimeErr
     }
 

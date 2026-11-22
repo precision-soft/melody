@@ -380,17 +380,17 @@ func (instance *HttpClient) Get(runtimeInstance containercontract.Runtime, urlSt
 
 /* Post sends the body as json; a Body or a Json in the options beside it is refused. */
 func (instance *HttpClient) Post(runtimeInstance containercontract.Runtime, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
-    return instance.requestWithJson(runtimeInstance, nethttp.MethodPost, urlString, body, options)
+    return instance.requestWithJson(runtimeInstance, nethttp.MethodPost, urlString, body, options, "httpclient.HttpClient.Post")
 }
 
 /* Put sends the body as json; a Body or a Json in the options beside it is refused. */
 func (instance *HttpClient) Put(runtimeInstance containercontract.Runtime, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
-    return instance.requestWithJson(runtimeInstance, nethttp.MethodPut, urlString, body, options)
+    return instance.requestWithJson(runtimeInstance, nethttp.MethodPut, urlString, body, options, "httpclient.HttpClient.Put")
 }
 
 /* Patch sends the body as json; a Body or a Json in the options beside it is refused. */
 func (instance *HttpClient) Patch(runtimeInstance containercontract.Runtime, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
-    return instance.requestWithJson(runtimeInstance, nethttp.MethodPatch, urlString, body, options)
+    return instance.requestWithJson(runtimeInstance, nethttp.MethodPatch, urlString, body, options, "httpclient.HttpClient.Patch")
 }
 
 func (instance *HttpClient) Delete(runtimeInstance containercontract.Runtime, urlString string, options RequestOptions) (httpclientcontract.Response, error) {
@@ -398,7 +398,7 @@ func (instance *HttpClient) Delete(runtimeInstance containercontract.Runtime, ur
 }
 
 func (instance *HttpClient) Request(runtimeInstance containercontract.Runtime, method string, urlString string, options RequestOptions) (httpclientcontract.Response, error) {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "httpclient.HttpClient.Request"); nil != nilErr {
         return nil, nilErr
     }
 
@@ -410,8 +410,8 @@ func (instance *HttpClient) Request(runtimeInstance containercontract.Runtime, m
     return instance.exchange(runtimeInstance.Context(), method, urlString, requestOptions)
 }
 
-func (instance *HttpClient) requestWithJson(runtimeInstance containercontract.Runtime, method string, urlString string, body any, options RequestOptions) (httpclientcontract.Response, error) {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+func (instance *HttpClient) requestWithJson(runtimeInstance containercontract.Runtime, method string, urlString string, body any, options RequestOptions, door string) (httpclientcontract.Response, error) {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, door); nil != nilErr {
         return nil, nilErr
     }
 
@@ -489,7 +489,7 @@ func (instance *HttpClient) RequestStream(
     urlString string,
     options RequestOptions,
 ) (httpclientcontract.StreamResponse, error) {
-    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "httpclient.HttpClient.RequestStream"); nil != nilErr {
         return nil, nilErr
     }
 

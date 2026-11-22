@@ -58,7 +58,7 @@ type Provider struct {
 
 /* Open opens under the runtime's context: a nil runtime, or one carrying no context, is refused before anything is routed; an already-cancelled context is refused before the attempt, the retry sleeps watch it beside the clock, and the configuration hook and the boot ping derive their budgets from it; the dial and the handshake are bounded by the connect timeout under the caller's context, and the dialect query bun runs at construction goes over the connection the ping established. A nil logger reads as the emergency logger for the open's own records, since the terminal branches mark the returned error as logged; the diagnostics routing takes the logger as handed, so a nil, like an already-cancelled context, routes nothing and leaves bun's channel where the last routing put it. */
 func (instance *Provider) Open(runtimeInstance containercontract.Runtime, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance, "mysql.Provider.Open"); nil != runtimeErr {
         return nil, runtimeErr
     }
 

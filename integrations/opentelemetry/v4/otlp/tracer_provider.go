@@ -64,7 +64,7 @@ func (instance Config) Format(state fmt.State, verb rune) {
 
 /* NewTracerProvider builds a batching TracerProvider wired to an OTLP exporter under the runtime's context; a nil runtime, a runtime whose context is already done, an empty endpoint, a sampling or a batch timeout outside its rule is answered as the error, naming the field. The caller owns its lifecycle and runs Shutdown on exit to flush pending spans; the Module in this package does so by registering it as a container-managed service. */
 func NewTracerProvider(runtimeInstance containercontract.Runtime, config Config) (*sdktrace.TracerProvider, error) {
-    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance, "otlp.NewTracerProvider"); nil != runtimeErr {
         return nil, runtimeErr
     }
 

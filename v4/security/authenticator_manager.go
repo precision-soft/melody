@@ -39,7 +39,7 @@ type AuthenticatorManager struct {
 
 /* Authenticate refuses a nil runtime before the first authenticator, answering no authenticator used. */
 func (instance *AuthenticatorManager) Authenticate(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, bool, error) {
-    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "security.AuthenticatorManager.Authenticate"); nil != refuseErr {
         return nil, false, refuseErr
     }
 
