@@ -148,7 +148,8 @@ func publishBoundary(
     userIdentifier string,
     deviceIdentifier string,
 ) (melodyhttpcontract.Response, error) {
-    store := examplesecurity.TokenStoreFromRuntime(runtimeInstance)
+    /* the boundary is published over a runtime detached from the request's cancellation, as the withdraw and the release are: a client that hangs up cannot leave the revocation it asked for undone, and the store's CallTimeout still bounds the round trip */
+    store := examplesecurity.TokenStoreFromRuntime(examplesecurity.DetachedRuntime(runtimeInstance))
     instant := melodyclock.ClockMustFromRuntime(runtimeInstance).Now()
 
     if revokeErr := store.RevokeBefore(userIdentifier, deviceIdentifier, instant); nil != revokeErr {

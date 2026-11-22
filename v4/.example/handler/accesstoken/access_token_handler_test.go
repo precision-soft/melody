@@ -387,3 +387,41 @@ func TestWithdrawMintedToken_ACancelledRequestStillWithdrawsTheToken(t *testing.
         t.Fatalf("expected the minted token withdrawn although the request was cancelled")
     }
 }
+
+/* contextRefusingTokenStore refuses a revocation whose runtime's context is done, as a store over the network does */
+type contextRefusingTokenStore struct {
+    *melodysecurity.InMemoryTokenStore
+}
+
+func (instance *contextRefusingTokenStore) RevokeBefore(runtimeInstance melodycontainercontract.Runtime, userIdentifier string, deviceIdentifier string, instant time.Time) error {
+    if contextErr := runtimeInstance.Context().Err(); nil != contextErr {
+        return contextErr
+    }
+
+    return instance.InMemoryTokenStore.RevokeBefore(runtimeInstance, userIdentifier, deviceIdentifier, instant)
+}
+
+func TestPublishBoundary_ACancelledRequestStillPublishesTheRevocation(t *testing.T) {
+    store := &contextRefusingTokenStore{InMemoryTokenStore: melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{})}
+
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
+    melodycontainer.MustRegister(containerInstance, melodyrueidis.ServiceTokenStore, func(resolver melodycontainercontract.Resolver) (melodysecuritycontract.EpochRevocableTokenStore, error) {
+        return store, nil
+    }, melodycontainer.RegisterOptions{})
+    melodycontainer.MustRegister(containerInstance, melodyclock.ServiceClock, func(resolver melodycontainercontract.Resolver) (melodyclockcontract.Clock, error) {
+        return melodyclock.NewSystemClock(), nil
+    }, melodycontainer.RegisterOptions{})
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if _, publishErr := publishBoundary(melodyruntime.NewRequest(cancelledContext, containerInstance.NewScope()), "user-9", ""); nil != publishErr {
+        t.Fatalf("expected the boundary published although the request was cancelled, got %v", publishErr)
+    }
+
+    epoch, epochErr := store.RevocationEpoch(accessTokenTestRuntime(), "user-9", "")
+    if nil != epochErr || true == epoch.IsZero() {
+        t.Fatalf("expected the revocation epoch published, got %v %v", epoch, epochErr)
+    }
+}
