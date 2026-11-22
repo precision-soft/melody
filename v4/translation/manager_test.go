@@ -527,3 +527,33 @@ func TestNewManager_TheRefusalsNameTheConfigField(t *testing.T) {
         NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{NewMapCatalog("en")}, FallbackLocales: []string{"de", "en"}})
     })
 }
+
+/* a chain with catalogs and no fallback asks only the locale and its base, so a request in a locale no catalog carries would answer raw ids; the manager refuses it and the application ends the chain on its default locale */
+func TestNewManager_RefusesCatalogsWithNoFallbackLocale(t *testing.T) {
+    english := NewMapCatalog("en")
+
+    for _, fallbackLocales := range [][]string{nil, {}} {
+        refusal := recoveredManagerRefusal(func() {
+            NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{english}, FallbackLocales: fallbackLocales})
+        })
+        if nil == refusal || "translation fallback locales are empty while catalogs are handed" != refusal.Message() || "ManagerConfig.FallbackLocales" != refusal.Context()["field"] {
+            t.Fatalf("%v: expected the empty fallback list refused naming the field, got %v", fallbackLocales, refusal)
+        }
+    }
+
+    if refusal := recoveredManagerRefusal(func() { NewManager(ManagerConfig{}) }); nil != refusal {
+        t.Fatalf("expected a manager with no catalog admitted without fallbacks, got %v", refusal)
+    }
+}
+
+func recoveredManagerRefusal(callback func()) (refusal *exception.Error) {
+    defer func() {
+        if recovered, isError := recover().(*exception.Error); true == isError {
+            refusal = recovered
+        }
+    }()
+
+    callback()
+
+    return nil
+}

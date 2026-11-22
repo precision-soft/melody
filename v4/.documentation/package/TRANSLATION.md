@@ -138,7 +138,7 @@ The example application wires a translator (`config/translation.go`) and exposes
 
 ### Constructors (`translation`)
 
-- [`NewManager(config ManagerConfig) *Manager`](../../translation/manager.go) — `ManagerConfig{Catalogs, FallbackLocales}`, a refusal naming its `field`; nil catalogs is a manager with no catalog, which answers raw ids; a lookup asks the locale, its base, then the fallbacks in order and nothing after the last, so an application ends the list on its default locale, `kernel.default_locale`; once a catalog is handed, a fallback locale that is empty or that no catalog carries is refused, since the lookup asks them by that name in BCP 47 case and a region form like `en-US` does not reach an `en` catalog
+- [`NewManager(config ManagerConfig) *Manager`](../../translation/manager.go) — `ManagerConfig{Catalogs, FallbackLocales}`, a refusal naming its `field`; nil catalogs is a manager with no catalog, which answers raw ids; a lookup asks the locale, its base, then the fallbacks in order and nothing after the last, so an application ends the list on its default locale, `kernel.default_locale`; once a catalog is handed, an empty `FallbackLocales` is refused, as a fallback locale that is empty or that no catalog carries is, since the lookup asks them by that name in BCP 47 case and a region form like `en-US` does not reach an `en` catalog
 - [`NewMapCatalog(locale string) *MapCatalog`](../../translation/catalog.go)
 - [`NewJsonDirectoryLoader(directory string) *JsonDirectoryLoader`](../../translation/json_loader.go)
 

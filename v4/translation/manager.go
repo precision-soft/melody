@@ -19,7 +19,7 @@ type ManagerConfig struct {
     FallbackLocales []string
 }
 
-/* NewManager keeps every catalog of a locale, in the order given, and a lookup asks them in that order until one answers, since a locale is assembled from several sources. Every locale, a catalog's, a fallback and the one a lookup asks, is matched in BCP 47 case, so ro-ro finds the catalog of ro-RO; two catalogs spelling one locale differently are refused, naming both spellings. A nil catalog, or one whose Locale is empty and so could never be found, is refused; once a catalog is handed, so is a fallback locale that is empty or that no catalog carries. */
+/* NewManager keeps every catalog of a locale, in the order given, and a lookup asks them in that order until one answers, since a locale is assembled from several sources. Every locale, a catalog's, a fallback and the one a lookup asks, is matched in BCP 47 case, so ro-ro finds the catalog of ro-RO; two catalogs spelling one locale differently are refused, naming both spellings. A nil catalog, or one whose Locale is empty and so could never be found, is refused; once a catalog is handed, so are an empty FallbackLocales and a fallback locale that is empty or that no catalog carries. */
 func NewManager(config ManagerConfig) *Manager {
     catalogs := config.Catalogs
     fallbackLocales := config.FallbackLocales
@@ -58,6 +58,11 @@ func NewManager(config ManagerConfig) *Manager {
     }
 
     if 0 < len(catalogsByLocale) {
+        /* a chain with no fallback asks only the locale and its base, so a request in a locale no catalog carries would answer raw ids; ending the chain on the default locale is the application's to write */
+        if 0 == len(fallbackLocales) {
+            exception.Panic(exception.NewError("translation fallback locales are empty while catalogs are handed", exceptioncontract.Context{"field": "ManagerConfig.FallbackLocales"}, nil))
+        }
+
         for index, fallbackLocale := range fallbackLocales {
             if "" == fallbackLocale {
                 exception.Panic(exception.NewError("translation fallback locale is empty", exceptioncontract.Context{"index": index, "field": "ManagerConfig.FallbackLocales"}, nil))
