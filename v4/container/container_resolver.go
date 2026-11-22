@@ -20,6 +20,8 @@ type creationState struct {
     lastCreationErr error
     /* the contexts blocked on waitChannel, so the owner drops their wait-graph edges under the lock that closes the channel; a stale edge would read as a cycle. A waiter that leaves early removes itself, so the count is the live waiters */
     waiterContextIds map[uint64]struct{}
+    /* endedByOwnerContext marks a failed creation whose owner's own context had ended, read off the context and not the failure's class: a live waiter builds again rather than answer another caller's departure */
+    endedByOwnerContext bool
 }
 
 type createWithGuardLookupFunc func() (any, bool)
@@ -158,6 +160,25 @@ func (instance *container) serviceWithCreationGuardLocked(
             delete(currentState.waiterContextIds, resolver.contextId)
 
             return nil, releaseErr
+        }
+
+        /* the owner left with its own context, so its failure is not this waiter's: a done waiter answers its own refusal, a closed scope refuses, and a live waiter runs the guard again, becoming the creator or waiting behind the waiter that did */
+        if true == currentState.endedByOwnerContext {
+            if nil != creation.waitContext.Err() {
+                return nil, newCreationWaitCancelledError(creation.waitContext, creatingKey, currentState.ownerContextId, resolver)
+            }
+
+            if false == creation.suspendsScope && true == resolver.isScopeClosed() {
+                return nil, exception.NewError(
+                    "scope is closed",
+                    map[string]any{
+                        "creatingKey": creatingKey,
+                    },
+                    ErrScopeClosed,
+                )
+            }
+
+            return instance.serviceWithCreationGuardLocked(creation, resolver)
         }
 
         if nil != currentState.lastCreationErr {
@@ -384,6 +405,8 @@ func (instance *container) serviceWithCreationGuardLocked(
     }
 
     newState.lastCreationErr = err
+    /* written under the mutex a released waiter re-takes before it reads the flag */
+    newState.endedByOwnerContext = nil != err && nil != creation.waitContext.Err()
 
     /* the waiters' edges are dropped under the lock that closes the channel */
     for waiterContextId := range newState.waiterContextIds {

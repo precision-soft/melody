@@ -1834,6 +1834,14 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **Remedy.** `message, translateErr := translator.Translate("greeting", translationcontract.TranslateConfig{Parameters: map[string]any{"name": name}, Locale: locale})`; where the third major printed the id of a missing message, keep `message` when `errors.Is(translateErr, translation.ErrMessageNotFound)` and treat any other error as a failure. `NewManager([]translationcontract.Catalog{english, romanian}, translation.ManagerConfig{DefaultLocale: "en", FallbackLocales: fallbacks})`, and `loader.Load(ctx)`.
 
+### Container: a waiter builds again when the first caller left
+
+**What changed.** A creation that fails while the context of the call that started it has ended is built again by a coalesced waiter whose own context is live, under the waiter's context and kind, where every waiter answered the first caller's failure (see [CONTAINER](package/CONTAINER.md)). A waiter whose own context ended, a waiter of a closed scope and a closed container answer their own refusal and run nothing.
+
+**Symptom.** A provider runs a second time after its first caller hung up during its first run; a request that waited behind a cancelled one now answers the service where it answered "service creation failed".
+
+**Remedy.** None for a provider that is safe to run again. A provider with a side effect that must not repeat after a failed run (a non-idempotent remote call) makes it idempotent or records it before failing.
+
 ### Messagebus: the failure transport is named, not handed over
 
 **What changed.** [`RetryPolicy.FailureTransportName`](../messagebus/consume_command.go) names the registered transport an exhausted message is sent to, resolved from the transports when the consume command runs; `RetryPolicy.FailureTransport`, an instance built before the container, is removed. An empty name is none, a name with surrounding whitespace is refused by `NewConsumeCommand`, and a name no registered transport carries refuses the run, both naming `RetryPolicy.FailureTransportName`.
