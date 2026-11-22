@@ -50,7 +50,7 @@ func (instance *Module) registerInternalAuthSignerService(registrar melodyapplic
         func(resolver melodycontainercontract.Resolver) (*melodysecurity.HmacEnvelopeSigner, error) {
             return instance.internalAuthSigner(resolver.Runtime(), bound.Duration{}), nil
         },
-        melodycontainer.RegisterOptions{BuiltAtBoot: true},
+        melodycontainer.RegisterOptions{BuiltAtBoot: true, BootFailure: melodycontainer.BootFailureFailsBoot},
     )
 }
 

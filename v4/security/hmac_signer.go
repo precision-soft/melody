@@ -43,7 +43,7 @@ var hmacEnvelopeSignerTtlRule = bound.Rule[time.Duration]{
     Minimum: bound.TtlMinimum,
 }
 
-/* NewHmacEnvelopeSigner judges the provider's current key under the runtime given, whatever the provider: it must exist, be bound to the signer's application and hold at least MinimumSecretLength bytes. The signer is built at boot, inside a container provider registered BuiltAtBoot, under the runtime resolver.Runtime() answers; a nil runtime, a refusal and a provider that could not answer panic. Sign judges the key again whenever the current key id changes. */
+/* NewHmacEnvelopeSigner judges the provider's current key under the runtime given, whatever the provider: it must exist, be bound to the signer's application and hold at least MinimumSecretLength bytes. The signer is built at boot, inside a container provider registered BuiltAtBoot, under the runtime resolver.Runtime() answers, with BootFailureFailsBoot over a static provider; a nil runtime, a refusal and a provider that could not answer panic. Sign judges the key again whenever the current key id changes. */
 func NewHmacEnvelopeSigner(
     runtimeInstance containercontract.Runtime,
     secrets HmacSecretProvider,

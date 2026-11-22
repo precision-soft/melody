@@ -60,6 +60,6 @@ func (instance *Module) registerStorageBucketService(registrar melodyapplication
 
             return &storageBucketReady{}, nil
         },
-        melodycontainer.RegisterOptions{BuiltAtBoot: true},
+        melodycontainer.RegisterOptions{BuiltAtBoot: true, BootFailure: melodycontainer.BootFailureFailsBoot},
     )
 }

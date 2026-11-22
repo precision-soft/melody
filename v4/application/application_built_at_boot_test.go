@@ -1,7 +1,6 @@
 package application
 
 import (
-    middlewarepipeline "github.com/precision-soft/melody/v4/http/middleware/pipeline"
     "context"
     "errors"
     "os"
@@ -15,6 +14,7 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    middlewarepipeline "github.com/precision-soft/melody/v4/http/middleware/pipeline"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
 )
@@ -44,12 +44,12 @@ func TestBoot_BuildsTheServicesRegisteredBuiltAtBootUnderTheBootRuntimeInRegistr
         record.record("app.built.second", resolver)
 
         return &secondBuiltAtBootProbe{}, nil
-    }, containercontract.RegisterOptions{BuiltAtBoot: true})
+    }, containercontract.RegisterOptions{BuiltAtBoot: true, BootFailure: containercontract.BootFailureFailsBoot})
     applicationInstance.RegisterService("app.built.first", func(resolver containercontract.Resolver) (*firstBuiltAtBootProbe, error) {
         record.record("app.built.first", resolver)
 
         return &firstBuiltAtBootProbe{}, nil
-    }, containercontract.RegisterOptions{BuiltAtBoot: true})
+    }, containercontract.RegisterOptions{BuiltAtBoot: true, BootFailure: containercontract.BootFailureFailsBoot})
 
     applicationInstance.Boot()
 
@@ -82,7 +82,7 @@ func TestBoot_AFailingServiceBuiltAtBootFailsTheBootNamingIt(t *testing.T) {
         applicationInstance := newEnvironmentKeyBootApplication(t, nil)
         applicationInstance.RegisterService("app.built.failing", func(resolver containercontract.Resolver) (*firstBuiltAtBootProbe, error) {
             return nil, errors.New("the provider refused")
-        }, containercontract.RegisterOptions{BuiltAtBoot: true})
+        }, containercontract.RegisterOptions{BuiltAtBoot: true, BootFailure: containercontract.BootFailureFailsBoot})
 
         applicationInstance.Boot()
 
@@ -108,7 +108,7 @@ func TestBuildServicesBuiltAtBoot_TheRefusalNamesTheService(t *testing.T) {
     applicationInstance := newEnvironmentKeyBootApplication(t, nil)
     applicationInstance.RegisterService("app.built.failing", func(resolver containercontract.Resolver) (*firstBuiltAtBootProbe, error) {
         return nil, errors.New("the provider refused")
-    }, containercontract.RegisterOptions{BuiltAtBoot: true})
+    }, containercontract.RegisterOptions{BuiltAtBoot: true, BootFailure: containercontract.BootFailureFailsBoot})
 
     openBootRuntime(t, applicationInstance)
 
@@ -188,7 +188,7 @@ func TestBoot_TheRegistrationDoorsAreSealedBeforeTheBootBuildsAndTheFactoriesRun
     testhelper.AssertPanicsWithError(t, func() {
         applicationInstance.RegisterService("app.late", func(resolver containercontract.Resolver) (*firstBuiltAtBootProbe, error) {
             return &firstBuiltAtBootProbe{}, nil
-        }, containercontract.RegisterOptions{BuiltAtBoot: true})
+        }, containercontract.RegisterOptions{BuiltAtBoot: true, BootFailure: containercontract.BootFailureFailsBoot})
     }, "may not register services after boot")
 
     testhelper.AssertPanicsWithError(t, func() {
@@ -207,7 +207,7 @@ func TestBoot_ALazyHandleABootBuiltServiceCreatesIsVerified(t *testing.T) {
         applicationInstance := newEnvironmentKeyBootApplication(t, nil)
         applicationInstance.RegisterService("app.built.lazy", func(resolver containercontract.Resolver) (*lazyHoldingProbe, error) {
             return &lazyHoldingProbe{missing: container.Lazy[*firstBuiltAtBootProbe](resolver, "app.never.registered")}, nil
-        }, containercontract.RegisterOptions{BuiltAtBoot: true})
+        }, containercontract.RegisterOptions{BuiltAtBoot: true, BootFailure: containercontract.BootFailureFailsBoot})
 
         applicationInstance.Boot()
 
@@ -229,7 +229,7 @@ func TestBuildServicesBuiltAtBoot_AServiceAScopedOneReplacesIsRefused(t *testing
     applicationInstance := newEnvironmentKeyBootApplication(t, nil)
     applicationInstance.RegisterService("app.built.replaced", func(resolver containercontract.Resolver) (*firstBuiltAtBootProbe, error) {
         return &firstBuiltAtBootProbe{}, nil
-    }, containercontract.RegisterOptions{BuiltAtBoot: true})
+    }, containercontract.RegisterOptions{BuiltAtBoot: true, BootFailure: containercontract.BootFailureFailsBoot})
     applicationInstance.kernel.ServiceContainer().MustRegisterScoped("app.built.replaced", func(resolver containercontract.Resolver) (*firstBuiltAtBootProbe, error) {
         return &firstBuiltAtBootProbe{}, nil
     }, containercontract.RegisterOptions{ReplacesContainerService: true})
@@ -249,10 +249,10 @@ func TestBoot_AServiceBuiltAtBootThatRegistersAnotherFailsTheBoot(t *testing.T) 
         applicationInstance.RegisterService("app.built.registering", func(resolver containercontract.Resolver) (*firstBuiltAtBootProbe, error) {
             applicationInstance.RegisterService("app.built.late", func(resolver containercontract.Resolver) (*secondBuiltAtBootProbe, error) {
                 return &secondBuiltAtBootProbe{}, nil
-            }, containercontract.RegisterOptions{BuiltAtBoot: true})
+            }, containercontract.RegisterOptions{BuiltAtBoot: true, BootFailure: containercontract.BootFailureFailsBoot})
 
             return &firstBuiltAtBootProbe{}, nil
-        }, containercontract.RegisterOptions{BuiltAtBoot: true})
+        }, containercontract.RegisterOptions{BuiltAtBoot: true, BootFailure: containercontract.BootFailureFailsBoot})
 
         applicationInstance.Boot()
 

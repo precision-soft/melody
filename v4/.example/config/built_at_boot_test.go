@@ -103,7 +103,7 @@ func TestBuiltAtBoot_ACurrentKeyNotBoundToTheSignerApplicationFailsTheBoot(t *te
 func buildServicesBuiltAtBoot(t *testing.T, containerInstance melodycontainercontract.Container) error {
     t.Helper()
 
-    names := containerInstance.(interface{ BuiltAtBootServiceNames() []string }).BuiltAtBootServiceNames()
+    names, _ := builtAtBootNames(containerInstance)
     if 2 != len(names) || subscriber.ServiceCatalogNotificationHub != names[0] || ServiceInternalAuthSigner != names[1] {
         t.Fatalf("expected the hub and the signer registered to be built at boot, got %v", names)
     }

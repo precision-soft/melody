@@ -525,7 +525,7 @@ func (instance *resolverContext) Get(ctx context.Context, serviceName string) (a
                         exceptioncontract.Context{
                             "serviceName": serviceName,
                         },
-                        nil,
+                        ErrServiceNotRegistered,
                     ), nil
                 }
 
@@ -729,7 +729,7 @@ func (instance *resolverContext) GetByType(ctx context.Context, targetType refle
                         "type":        canonicalTargetType.String(),
                         "serviceName": serviceName,
                     },
-                    nil,
+                    ErrServiceNotRegistered,
                 )
             }
 
@@ -849,7 +849,7 @@ func (instance *resolverContext) GetByType(ctx context.Context, targetType refle
                             exceptioncontract.Context{
                                 "serviceName": serviceName,
                             },
-                            nil,
+                            ErrServiceNotRegistered,
                         ), nil
                     }
 
@@ -909,7 +909,7 @@ func (instance *resolverContext) GetByType(ctx context.Context, targetType refle
                         exceptioncontract.Context{
                             "type": canonicalTargetType.String(),
                         },
-                        nil,
+                        ErrServiceNotRegistered,
                     ), nil
                 }
 

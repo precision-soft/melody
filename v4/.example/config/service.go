@@ -158,7 +158,7 @@ func (instance *Module) registerServerSentEventHubService(registrar melodyapplic
 
     /* the redis backplane was installed on the hub before any container existed, a capture no resolution records: without the edge the teardown could close the connection before the hub drains the backplane's subscription. It is declared only when redis is wired, since the boot refuses an edge to a service never registered */
     /* built at boot: only the nomenclature listener resolves it, on a write, so a process serving only readers would run the hub without a journal */
-    registerOptions := melodycontainer.RegisterOptions{BuiltAtBoot: true}
+    registerOptions := melodycontainer.RegisterOptions{BuiltAtBoot: true, BootFailure: melodycontainer.BootFailureFailsBoot}
     if nil != instance.redisClient {
         registerOptions.TeardownDependencyNames = []string{melodyrueidis.ServiceConnection}
     }
@@ -273,7 +273,7 @@ func (instance *Module) registerAuditSchemaService(registrar melodyapplicationco
 
             return &persistence.AuditSchema{}, nil
         },
-        melodycontainer.RegisterOptions{BuiltAtBoot: true},
+        melodycontainer.RegisterOptions{BuiltAtBoot: true, BootFailure: melodycontainer.BootFailureFailsBoot},
     )
 }
 

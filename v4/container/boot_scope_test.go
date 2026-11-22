@@ -4,6 +4,7 @@ import (
     "context"
     "errors"
     "reflect"
+    "slices"
     "testing"
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -232,7 +233,7 @@ func TestBuiltAtBoot_IsRecordedInRegistrationOrderOnlyWhenTheRegistrationSucceed
     }, RegisterOptions{BuiltAtBoot: true})
     MustRegister[*builtAtBootSecondRecordProbe](serviceContainer, "app.built.a", func(resolver containercontract.Resolver) (*builtAtBootSecondRecordProbe, error) {
         return &builtAtBootSecondRecordProbe{}, nil
-    }, RegisterOptions{BuiltAtBoot: true})
+    }, RegisterOptions{BuiltAtBoot: true, BootFailure: BootFailureFailsBoot})
 
     if duplicateErr := serviceContainer.Register("app.built.b", func(resolver containercontract.Resolver) (*builtAtBootRecordProbe, error) {
         return &builtAtBootRecordProbe{}, nil
@@ -240,14 +241,18 @@ func TestBuiltAtBoot_IsRecordedInRegistrationOrderOnlyWhenTheRegistrationSucceed
         t.Fatalf("expected a duplicate registration to be refused")
     }
 
-    names := lister.BuiltAtBootServiceNames()
-    if 2 != len(names) || "app.built.b" != names[0] || "app.built.a" != names[1] {
-        t.Fatalf("expected the two accepted names in registration order, got %v", names)
+    registrations := lister.BuiltAtBootRegistrations()
+    expected := []containercontract.BuiltAtBootRegistration{
+        {ServiceName: "app.built.b", BootFailure: BootFailureWarns},
+        {ServiceName: "app.built.a", BootFailure: BootFailureFailsBoot},
+    }
+    if false == slices.Equal(expected, registrations) {
+        t.Fatalf("expected the two accepted registrations with their modes in registration order, got %v", registrations)
     }
 
-    names[0] = "changed"
-    if "app.built.b" != lister.BuiltAtBootServiceNames()[0] {
-        t.Fatalf("expected the names answered as a copy")
+    registrations[0].ServiceName = "changed"
+    if "app.built.b" != lister.BuiltAtBootRegistrations()[0].ServiceName {
+        t.Fatalf("expected the registrations answered as a copy")
     }
 
     if scopedErr := serviceContainer.RegisterScoped("app.built.scoped", func(resolver containercontract.Resolver) (*builtAtBootRecordProbe, error) {

@@ -34,7 +34,7 @@ func TestStorageBucket_IsCheckedAtBootUnderTheBootRuntimeAndEndsWithItsContext(t
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     moduleInstance.registerStorageBucketService(containerRegistrar{Container: containerInstance})
 
-    names := containerInstance.(interface{ BuiltAtBootServiceNames() []string }).BuiltAtBootServiceNames()
+    names, _ := builtAtBootNames(containerInstance)
     if 1 != len(names) || ServiceStorageBucket != names[0] {
         t.Fatalf("expected the bucket check registered to be built at boot, got %v", names)
     }
@@ -101,7 +101,7 @@ func TestRegisterStorageServices_RegistersTheBucketCheckBuiltAtBootOnlyWithS3Con
         containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
         moduleInstance.registerStorageServices(containerRegistrar{Container: containerInstance})
 
-        names := containerInstance.(interface{ BuiltAtBootServiceNames() []string }).BuiltAtBootServiceNames()
+        names, _ := builtAtBootNames(containerInstance)
         found := false
         for _, name := range names {
             found = found || ServiceStorageBucket == name

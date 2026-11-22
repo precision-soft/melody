@@ -41,19 +41,19 @@ func (instance *container) Register(
     )
     if nil == registerErr && true == options.BuiltAtBoot {
         instance.builtAtBootMutex.Lock()
-        instance.builtAtBootNames = append(instance.builtAtBootNames, serviceName)
+        instance.builtAtBootRegistrations = append(instance.builtAtBootRegistrations, containercontract.BuiltAtBootRegistration{ServiceName: serviceName, BootFailure: options.BootFailure})
         instance.builtAtBootMutex.Unlock()
     }
 
     return registerErr
 }
 
-/* BuiltAtBootServiceNames answers the names registered with BuiltAtBoot, in registration order. */
-func (instance *container) BuiltAtBootServiceNames() []string {
+/* BuiltAtBootRegistrations answers the registrations made with BuiltAtBoot, with their mode, in registration order. */
+func (instance *container) BuiltAtBootRegistrations() []containercontract.BuiltAtBootRegistration {
     instance.builtAtBootMutex.Lock()
     defer instance.builtAtBootMutex.Unlock()
 
-    return append([]string(nil), instance.builtAtBootNames...)
+    return append([]containercontract.BuiltAtBootRegistration(nil), instance.builtAtBootRegistrations...)
 }
 
 func (instance *container) MustRegister(

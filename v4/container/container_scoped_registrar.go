@@ -99,6 +99,10 @@ func (instance *container) registerScoped(
         )
     }
 
+    if modeErr := bootFailureModeRefusal(serviceName, options); nil != modeErr {
+        return modeErr
+    }
+
     /* a scope keeps its own teardown graph from the resolutions it made, so a declaration at registration is refused in both forms */
     if 0 < len(options.TeardownDependencyNames) || 0 < len(options.TeardownDependencyTypes) || 0 < len(options.OptionalTeardownDependencyNames) || 0 < len(options.OptionalTeardownDependencyTypes) {
         return exception.NewError(

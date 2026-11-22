@@ -128,8 +128,8 @@ func TestRegisterAuditSchemaService_IsBuiltAtBootAndAnswersASchemaItCannotCreate
     moduleInstance.registerCatalogStorageService(containerRegistrar{Container: containerInstance})
     moduleInstance.registerAuditSchemaService(containerRegistrar{Container: containerInstance})
 
-    builtAtBoot, isBootContainer := any(containerInstance).(interface{ BuiltAtBootServiceNames() []string })
-    if false == isBootContainer || false == slices.Contains(builtAtBoot.BuiltAtBootServiceNames(), persistence.ServiceAuditSchema) {
+    builtAtBoot, _ := builtAtBootNames(containerInstance)
+    if false == slices.Contains(builtAtBoot, persistence.ServiceAuditSchema) {
         t.Fatalf("expected the audit schema built at boot")
     }
 
@@ -146,7 +146,7 @@ func TestModuleRegisterServices_BuildsTheAuditSchemaFirstAtBoot(t *testing.T) {
     moduleInstance.messageBusTransport = melodymessagebus.NewInMemoryTransport(melodymessagebus.InMemoryTransportConfig{})
     moduleInstance.RegisterServices(containerRegistrar{Container: containerInstance})
 
-    builtAtBoot := any(containerInstance).(interface{ BuiltAtBootServiceNames() []string }).BuiltAtBootServiceNames()
+    builtAtBoot, _ := builtAtBootNames(containerInstance)
     if 0 == len(builtAtBoot) || persistence.ServiceAuditSchema != builtAtBoot[0] {
         t.Fatalf("expected the audit schema the first service built at boot, got %v", builtAtBoot)
     }

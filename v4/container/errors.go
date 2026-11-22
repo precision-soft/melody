@@ -64,6 +64,15 @@ func (instance bootScopeClosedError) Is(target error) bool {
 /* ErrScopedServiceAtBoot is the cause of the boot scope's refusal of a scoped service, by name or type, and of a scoped registration on it: a scoped service is built inside a request, a delivery or a run. */
 var ErrScopedServiceAtBoot = errors.New("a scoped service is not built at boot")
 
+/* ErrBootFailureWithoutBuiltAtBoot is the cause of a registration's refusal for a BootFailure mode other than the zero value on a service not built at boot. */
+var ErrBootFailureWithoutBuiltAtBoot = errors.New("a boot failure mode needs a service built at boot")
+
+/* ErrBootFailureModeUnknown is the cause of a registration's refusal for a BootFailure that is neither BootFailureWarns nor BootFailureFailsBoot. */
+var ErrBootFailureModeUnknown = errors.New("the boot failure mode is not known")
+
+/* ErrServiceNotRegistered is the cause of a resolution's refusal for a name or a type nothing registered, the container's and a scope's alike. */
+var ErrServiceNotRegistered = errors.New("service is not registered")
+
 /* ErrContainerClosed is the cause of every refusal the container answers after Close, distinct from ErrScopeClosed. */
 var ErrContainerClosed = errors.New("container is closed")
 

@@ -161,21 +161,6 @@ func (instance *Application) MustRegisterScoped(
     }
 }
 
-func (instance *Application) buildServicesBuiltAtBoot(bootRuntime containercontract.Runtime) {
-    lister, lists := instance.kernel.ServiceContainer().(interface{ BuiltAtBootServiceNames() []string })
-    if false == lists {
-        return
-    }
-
-    for _, serviceName := range lister.BuiltAtBootServiceNames() {
-        if _, buildErr := runtime.FromRuntime[any](bootRuntime, serviceName); nil != buildErr {
-            exception.Panic(
-                exception.NewError("a service built at boot cannot be built", exceptioncontract.Context{"serviceName": serviceName}, buildErr),
-            )
-        }
-    }
-}
-
 /* the names a phase installs into its scopes: a scope of another kind, the boot's among them, refuses them by name */
 func (instance *Application) reservePhaseServices() {
     serviceContainer := instance.kernel.ServiceContainer()

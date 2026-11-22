@@ -7,8 +7,10 @@ import (
 
 /* RegisterOptions is what a registration declares beyond its name and provider. The zero value is the default: the service is registered under its name and, strictly, under the type its provider declares, collected at priority zero, substituting nothing, walked by the teardown, and closed through the CloseWithContext door its value carries. */
 type RegisterOptions struct {
-    /* BuiltAtBoot has the application build the service inside Boot, under the boot runtime, after every registration is in, in registration order: a failing provider fails the boot. A scoped registration refuses it, and a scoped service replacing it fails the boot. The application reads it from the framework's container; a container of another implementation builds nothing at boot. */
+    /* BuiltAtBoot has the application build the service inside Boot, under the boot runtime, after every registration is in, in registration order; BootFailure says what a provider that fails does to the boot. A scoped registration refuses it, and a scoped service replacing it fails the boot. The application reads it from the framework's container; a container of another implementation builds nothing at boot. */
     BuiltAtBoot bool
+    /* BootFailure is read only with BuiltAtBoot. The zero value, BootFailureWarns, keeps the boot going on the boot warning application.service.builtAtBootFailed, and the first resolution builds the service again under its own runtime; a cli process builds such a service at its first use, not at boot. BootFailureFailsBoot fails the boot, in every process. A refusal of the container's wiring fails the boot whatever the mode. A service that warns heals only where something resolves it, so one built for its effect alone sits on the resolution path of what uses that effect, and its provider is safe to run more than once. A mode without BuiltAtBoot and a mode that is none of the two are refused at the registration. */
+    BootFailure BootFailureMode
     /* TypeRegistrationDisabled keeps the service off the by-type index, so it is resolved by name alone. */
     TypeRegistrationDisabled bool
     /* TypeRegistrationRelaxed admits a second registration under the same type instead of refusing it; by-type resolution then refuses every one of them as ambiguous, while a collection gathers them all. It is read only while the type is registered. */
@@ -29,6 +31,33 @@ type RegisterOptions struct {
     TeardownReflectionDisabled bool
     /* Closer closes the service in place of the CloseWithContext door its value carries, and admits a value whose type carries Close alone; the zero Closer is none. A scoped registration refuses one. */
     Closer Closer
+}
+
+/* BootFailureMode says what a service built at boot that cannot be built does to the boot. */
+type BootFailureMode uint8
+
+const (
+    /* BootFailureWarns is the zero value: the boot goes on and the first resolution builds the service again. */
+    BootFailureWarns BootFailureMode = iota
+    /* BootFailureFailsBoot has the failure fail the boot, naming the service. */
+    BootFailureFailsBoot
+)
+
+func (instance BootFailureMode) String() string {
+    switch instance {
+    case BootFailureWarns:
+        return "warns"
+    case BootFailureFailsBoot:
+        return "failsBoot"
+    default:
+        return "unknown"
+    }
+}
+
+/* BuiltAtBootRegistration is one registration the application builds at boot, with the mode it declared. */
+type BuiltAtBootRegistration struct {
+    ServiceName string
+    BootFailure BootFailureMode
 }
 
 /* Closer is the door a registration closes its value through, handed the teardown's remaining budget: the door for a value of a type the application does not own, whose own close cannot be bounded. ValueType is the type Close takes, which the provider's declared type must be assignable to. It is built with container.NewCloser; a Closer with only one of its two fields set is refused at registration. */

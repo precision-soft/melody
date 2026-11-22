@@ -162,7 +162,7 @@ func (instance *Module) registerDatabaseServices(registrar melodyapplicationcont
             return melodybunorm.NewManagerRegistry(logger, definitionList)
         },
         /* built at boot: the construction judges the definitions and opens nothing, so a definition left without its database fails the boot rather than the first request that reads it */
-        melodycontainer.RegisterOptions{BuiltAtBoot: true},
+        melodycontainer.RegisterOptions{BuiltAtBoot: true, BootFailure: melodycontainer.BootFailureFailsBoot},
     )
 
     if true == instance.archiveWired {

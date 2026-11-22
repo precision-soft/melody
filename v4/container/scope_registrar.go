@@ -31,6 +31,10 @@ func (instance *scope) RegisterScoped(
         )
     }
 
+    if modeErr := bootFailureModeRefusal(serviceName, options); nil != modeErr {
+        return modeErr
+    }
+
     if "" == serviceName {
         return exception.NewError(
             "service name is required to register a scoped service",

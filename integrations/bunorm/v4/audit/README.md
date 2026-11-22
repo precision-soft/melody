@@ -96,7 +96,7 @@ registry := audit.NewRegistry(audit.RegistryConfig{
 }).
     Register("user", audit.EntityOptions{Table: "user_audit", IgnoredFields: []string{"last_login"}})
 
-registry.EnsureSchema(runtimeInstance, auditDb) // create audit + transaction tables if absent, at boot
+registry.EnsureSchema(runtimeInstance, auditDb) // create audit + transaction tables if absent, from a service built at boot that what writes the trail resolves
 ```
 
 Group one unit of work's entries under a shared `melody_audit_transaction` row:

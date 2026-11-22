@@ -103,7 +103,7 @@ type container struct {
     phaseReservationMutex sync.RWMutex
     phaseReservations     map[string]containercontract.Kind
     builtAtBootMutex      sync.Mutex
-    builtAtBootNames      []string
+    builtAtBootRegistrations []containercontract.BuiltAtBootRegistration
     providers                   map[string]providerAny
     instances                   map[string]any
     typeProviders               map[reflect.Type]providerAny
@@ -854,6 +854,10 @@ func (instance *container) register(
             },
             nil,
         )
+    }
+
+    if modeErr := bootFailureModeRefusal(serviceName, options); nil != modeErr {
+        return modeErr
     }
 
     instance.mutex.Lock()
