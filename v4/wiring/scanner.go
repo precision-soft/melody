@@ -23,6 +23,8 @@ const (
     ignoreDirective   = "//melody:ignore"
     serviceDirective  = "//melody:service"
     scopedDirective   = "//melody:scoped"
+
+    keepsContextDirective = "//melody:keeps-context"
 )
 
 /* Constructor is one discovered provider function, described in the terms the generator emits: where it lives, what it returns and what it needs. */
@@ -36,17 +38,29 @@ type Constructor struct {
     /* ServiceNameIdentifier is the exported constant a //melody:service directive names. The generated file references the constant rather than copying its value, so the service name keeps a single definition. Empty registers the service by type alone. */
     ServiceNameIdentifier string
     /* IsScoped marks a constructor a //melody:scoped directive declares as request-lifetime. It is emitted into the scoped registration function instead of the container one, so the service is built once per scope and closed with it. */
-    IsScoped       bool
+    IsScoped bool
+    /* KeepsContext marks a constructor a //melody:keeps-context directive admits to keep the context or the runtime of the resolution that built it in a field of the struct it returns. */
+    KeepsContext   bool
     ReturnsError   bool
     Arguments      []*Argument
     DirectiveBinds map[string]string
+    /* ReturnFields are the fields of the returned struct when the scanned packages declare it, one level, embedded ones under their type's name; nil for an interface or a struct of another package. */
+    ReturnFields []*FieldReference
 }
 
-/* Argument is one constructor parameter. A scalar is filled from a configuration parameter through a bind; anything else is resolved from the container by type. */
+/* FieldReference is one field of a struct the scanned packages declare. */
+type FieldReference struct {
+    Name string
+    Type *TypeReference
+}
+
+/* Argument is one constructor parameter. A scalar is filled from a configuration parameter through a bind, a context is the context of the resolution that builds the service, a runtime is that resolution's runtime, and anything else is resolved from the container by type. */
 type Argument struct {
-    Name     string
-    Type     *TypeReference
-    IsScalar bool
+    Name      string
+    Type      *TypeReference
+    IsScalar  bool
+    IsContext bool
+    IsRuntime bool
 }
 
 /* TypeReference is a type as written at the constructor, together with the import path its qualifier resolves to, so the generated file can render it from a different package. */
@@ -84,6 +98,8 @@ type ScanResult struct {
     SkippedVendorDirectories []string
     /* ExcludedFiles names the source files a build constraint kept out of the scan although they hold constructor candidates. They are reported on request rather than failing strict, which cannot know which tags the binary was built with; GenerateConfig.BuildTags brings a file back in. */
     ExcludedFiles []string
+
+    structFields map[string][]*FieldReference
 }
 
 type SkippedConstructor struct {
@@ -128,6 +144,7 @@ func Scan(request ScanRequest) (*ScanResult, error) {
     result := &ScanResult{
         Constructors: make([]*Constructor, 0),
         Skipped:      make([]*SkippedConstructor, 0),
+        structFields: make(map[string][]*FieldReference),
     }
 
 
@@ -178,6 +195,11 @@ func Scan(request ScanRequest) (*ScanResult, error) {
             },
             walkErr,
         )
+    }
+
+    /* a returned struct may be declared in another file of its package, so the fields are attached once every file is read */
+    for _, constructor := range result.Constructors {
+        constructor.ReturnFields = result.structFields[structKey(constructor.ReturnType)]
     }
 
     sort.SliceStable(result.Constructors, func(first int, second int) bool {
@@ -273,6 +295,8 @@ func scanFile(
     }
 
     fileImports := collectImports(fileNode)
+
+    collectStructFields(fileNode, importPath, fileImports, result.structFields)
 
     for _, declaration := range fileNode.Decls {
         functionDeclaration, isFunction := declaration.(*ast.FuncDecl)
@@ -405,6 +429,7 @@ type constructorDirectives struct {
     serviceNameIdentifier string
     isIgnored             bool
     isScoped              bool
+    keepsContext          bool
 }
 
 func parseDirectives(
@@ -432,6 +457,12 @@ func parseDirectives(
 
         if _, isScoped := directiveRemainder(text, scopedDirective); true == isScoped {
             directives.isScoped = true
+
+            continue
+        }
+
+        if _, keepsContext := directiveRemainder(text, keepsContextDirective); true == keepsContext {
+            directives.keepsContext = true
 
             continue
         }
@@ -511,10 +542,10 @@ func parseDirectives(
             )
         }
 
-        /* any other spelling under the directive prefix is a typo of one of the four directives, and each fails open when dropped: a mistyped scoped makes a singleton, a mistyped ignore registers the constructor */
+        /* any other spelling under the directive prefix is a typo of one of the five directives, and each fails open when dropped: a mistyped scoped makes a singleton, a mistyped ignore registers the constructor */
         if true == strings.HasPrefix(text, directivePrefix) {
             return nil, exception.NewError(
-                "an unknown melody directive is not one of bind, ignore, service or scoped",
+                "an unknown melody directive is not one of bind, ignore, keeps-context, service or scoped",
                 map[string]any{
                     "directive":   text,
                     "constructor": functionDeclaration.Name.Name,
@@ -540,7 +571,7 @@ func spacedDirective(text string) (string, bool) {
         return "", false
     }
 
-    for _, directive := range []string{bindDirective, ignoreDirective, serviceDirective, scopedDirective} {
+    for _, directive := range []string{bindDirective, ignoreDirective, keepsContextDirective, serviceDirective, scopedDirective} {
         if _, matches := directiveRemainder(unspaced, directive); true == matches {
             return directive, true
         }
@@ -641,9 +672,11 @@ func describeConstructor(
                 }
 
                 arguments = append(arguments, &Argument{
-                    Name:     name.Name,
-                    Type:     argumentType,
-                    IsScalar: isScalarType(argumentType),
+                    Name:      name.Name,
+                    Type:      argumentType,
+                    IsScalar:  isScalarType(argumentType),
+                    IsContext: false == argumentType.IsPointer && true == isNamedType(argumentType, "context", "Context"),
+                    IsRuntime: false == argumentType.IsPointer && true == isNamedType(argumentType, containerContractImportPath, "Runtime"),
                 })
             }
         }
@@ -660,6 +693,7 @@ func describeConstructor(
         ReturnType:            returnType,
         ServiceNameIdentifier: directives.serviceNameIdentifier,
         IsScoped:              directives.isScoped,
+        KeepsContext:          directives.keepsContext,
         ReturnsError:          returnsError,
         Arguments:             arguments,
         DirectiveBinds:        directives.binds,
@@ -742,13 +776,72 @@ func isScalarType(typeReference *TypeReference) bool {
 
 /* isStandardDuration matches time.Duration by the resolved import path, so the spelled qualifier — an aliased stdlib import, a foreign package that happens to be called time — cannot mislead the classification. */
 func isStandardDuration(typeReference *TypeReference) bool {
-    if "time" != typeReference.ImportPath {
+    return false == typeReference.IsPointer && true == isNamedType(typeReference, "time", "Duration")
+}
+
+/* isNamedType matches a type by its resolved import path and its name, a pointer to it included, never by the spelled qualifier */
+func isNamedType(typeReference *TypeReference, importPath string, name string) bool {
+    if nil == typeReference || importPath != typeReference.ImportPath {
         return false
     }
 
     separatorIndex := strings.LastIndex(typeReference.Expression, ".")
 
-    return 0 <= separatorIndex && "Duration" == typeReference.Expression[separatorIndex+1:]
+    return 0 <= separatorIndex && name == typeReference.Expression[separatorIndex+1:]
+}
+
+/* structKey identifies a named type by import path and bare name, a pointer to it included */
+func structKey(typeReference *TypeReference) string {
+    if nil == typeReference {
+        return ""
+    }
+
+    expression := typeReference.Expression
+
+    return typeReference.ImportPath + "." + expression[strings.LastIndex(expression, ".")+1:]
+}
+
+/* collectStructFields records the fields of every struct a file declares, an embedded field under its type's name and a field of a type the generated file could not render left out */
+func collectStructFields(fileNode *ast.File, importPath string, fileImports map[string]string, structFields map[string][]*FieldReference) {
+    for _, declaration := range fileNode.Decls {
+        generalDeclaration, isGeneral := declaration.(*ast.GenDecl)
+        if false == isGeneral || token.TYPE != generalDeclaration.Tok {
+            continue
+        }
+
+        for _, specification := range generalDeclaration.Specs {
+            typeSpecification, isType := specification.(*ast.TypeSpec)
+            if false == isType {
+                continue
+            }
+
+            structType, isStruct := typeSpecification.Type.(*ast.StructType)
+            if false == isStruct || nil == structType.Fields {
+                continue
+            }
+
+            fields := make([]*FieldReference, 0, len(structType.Fields.List))
+            for _, field := range structType.Fields.List {
+                fieldType := describeType(field.Type, importPath, fileNode.Name.Name, fileImports)
+                if nil == fieldType {
+                    continue
+                }
+
+                if 0 == len(field.Names) {
+                    expression := strings.TrimPrefix(fieldType.Expression, "*")
+                    fields = append(fields, &FieldReference{Name: expression[strings.LastIndex(expression, ".")+1:], Type: fieldType})
+
+                    continue
+                }
+
+                for _, name := range field.Names {
+                    fields = append(fields, &FieldReference{Name: name.Name, Type: fieldType})
+                }
+            }
+
+            structFields[importPath+"."+typeSpecification.Name.Name] = fields
+        }
+    }
 }
 
 func collectImports(fileNode *ast.File) map[string]string {

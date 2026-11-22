@@ -177,8 +177,8 @@ func assignVariableNames(
     }
 
     for _, resolved := range resolvedArguments {
-        /* a scalar never renders its type, so asking for its alias would drag an unused import into the file */
-        if true == resolved.argument.IsScalar {
+        /* a scalar, a context and a runtime never render their type, so asking for its alias would drag an unused import into the file */
+        if true == resolved.argument.IsScalar || true == resolved.argument.IsContext || true == resolved.argument.IsRuntime {
             continue
         }
 
@@ -322,6 +322,18 @@ func renderArgument(
     var builder strings.Builder
 
     errorVariable := resolved.variableName + "Err"
+
+    if true == resolved.argument.IsContext {
+        builder.WriteString(body + resolved.variableName + " := resolver.Runtime().Context()\n\n")
+
+        return builder.String()
+    }
+
+    if true == resolved.argument.IsRuntime {
+        builder.WriteString(body + resolved.variableName + " := resolver.Runtime()\n\n")
+
+        return builder.String()
+    }
 
     if false == resolved.argument.IsScalar {
         builder.WriteString(

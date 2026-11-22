@@ -461,7 +461,7 @@ type NearlyScoped struct {
 
     /* the refusal travels as the cause of the walk wrapper, and Error() renders only its own message */
     directiveErr := errors.Unwrap(scanErr)
-    if nil == directiveErr || false == strings.Contains(directiveErr.Error(), "an unknown melody directive is not one of bind, ignore, service or scoped") {
+    if nil == directiveErr || false == strings.Contains(directiveErr.Error(), "an unknown melody directive is not one of bind, ignore, keeps-context, service or scoped") {
         t.Fatalf("unexpected error: %v (cause %v)", scanErr, directiveErr)
     }
 }

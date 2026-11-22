@@ -380,6 +380,97 @@ func isViewType(typeReference *TypeReference) bool {
     return viewTypes[typeReference.ImportPath+"."+expression[strings.LastIndex(expression, ".")+1:]]
 }
 
+/* requestLifetimeTypes are the values of one request a process service built once would keep past it, so a constructor not declared scoped is refused one at generation */
+var requestLifetimeTypes = map[string]bool{
+    "github.com/precision-soft/melody/v4/container/contract.Scope":        true,
+    "github.com/precision-soft/melody/v4/http/contract.Request":           true,
+    "github.com/precision-soft/melody/v4/http/contract.RequestContext":    true,
+    "github.com/precision-soft/melody/v4/http/contract.Response":          true,
+    "github.com/precision-soft/melody/v4/security/contract.Token":         true,
+    "github.com/precision-soft/melody/v4/session/contract.Session":        true,
+}
+
+/* keptResolutionTypes are the field types through which a service keeps the resolution that built it */
+var keptResolutionTypes = map[string]bool{
+    "context.CancelFunc":                    true,
+    "context.Context":                       true,
+    containerContractImportPath + ".Runtime": true,
+}
+
+/* refuseLifetime refuses what a constructor not declared scoped would keep of the resolution that built it, and a keeps-context directive that admits nothing */
+func refuseLifetime(constructor *Constructor) error {
+    for _, argument := range constructor.Arguments {
+        if true == argument.Type.IsPointer && true == isNamedType(argument.Type, "context", "Context") {
+            return lifetimeRefusal("a pointer to a context cannot be resolved: take context.Context", constructor, argument, nil)
+        }
+    }
+
+    if true == constructor.IsScoped {
+        if true == constructor.KeepsContext {
+            return lifetimeRefusal("a keeps-context directive on a scoped constructor admits nothing: remove it", constructor, nil, nil)
+        }
+
+        return nil
+    }
+
+    takesResolution := false
+    for _, argument := range constructor.Arguments {
+        if true == requestLifetimeTypes[structKey(argument.Type)] {
+            return lifetimeRefusal("a process service cannot be built from a value of one request: mark the constructor //melody:scoped, or take the value at each call", constructor, argument, nil)
+        }
+
+        if true == argument.IsContext || true == argument.IsRuntime {
+            takesResolution = true
+        }
+    }
+
+    var keptField *FieldReference
+    if true == takesResolution {
+        for _, field := range constructor.ReturnFields {
+            if true == keptResolutionTypes[structKey(field.Type)] {
+                keptField = field
+
+                break
+            }
+        }
+    }
+
+    if nil == keptField {
+        if true == constructor.KeepsContext {
+            return lifetimeRefusal("a keeps-context directive on a constructor that keeps no context of its resolution admits nothing: remove it", constructor, nil, nil)
+        }
+
+        return nil
+    }
+
+    if true == constructor.KeepsContext {
+        return nil
+    }
+
+    return lifetimeRefusal("a process service cannot keep the context of the resolution that built it: mark the constructor //melody:scoped, or take the context at each call", constructor, nil, keptField)
+}
+
+func lifetimeRefusal(message string, constructor *Constructor, argument *Argument, field *FieldReference) error {
+    context := map[string]any{
+        "constructor": constructor.Name,
+        "file":        constructor.File,
+        "line":        constructor.Line,
+        "door":        keepsContextDirective,
+    }
+
+    if nil != argument {
+        context["argument"] = argument.Name
+        context["type"] = argument.Type.Expression
+    }
+
+    if nil != field {
+        context["field"] = field.Name
+        context["type"] = field.Type.Expression
+    }
+
+    return exception.NewError(message, context, nil)
+}
+
 func resolveArguments(
     constructor *Constructor,
     packageBinding *PackageBinding,
@@ -387,6 +478,10 @@ func resolveArguments(
     usedBinds map[string]bool,
     report *GenerateReport,
 ) ([]*resolvedArgument, []string, error) {
+    if lifetimeErr := refuseLifetime(constructor); nil != lifetimeErr {
+        return nil, nil, lifetimeErr
+    }
+
     resolvedArguments := make([]*resolvedArgument, 0, len(constructor.Arguments))
     matchedDirectiveBinds := make(map[string]bool)
 

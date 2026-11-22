@@ -1,9 +1,11 @@
 package domain
 
 import (
+    "context"
     "time"
 
     "github.com/precision-soft/melody/v4/config"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/wiring/internal/fixture/domain/contract"
 )
 
@@ -153,4 +155,30 @@ type CollisionProbe struct {
 
 func NewToken() string {
     return "token"
+}
+
+/* the two below take the resolution itself: one only reads it while it builds, the other derives a context of its own it keeps, which the directive admits */
+
+func NewWarmCache(ctx context.Context, runtimeInstance containercontract.Runtime, repository *UserRepository) (*WarmCache, error) {
+    if nil != ctx.Err() || nil == runtimeInstance {
+        return nil, ctx.Err()
+    }
+
+    return &WarmCache{repository: repository}, nil
+}
+
+type WarmCache struct {
+    repository *UserRepository
+}
+
+//melody:keeps-context
+func NewBackgroundWorker(ctx context.Context) *BackgroundWorker {
+    workerContext, cancel := context.WithCancel(context.WithoutCancel(ctx))
+
+    return &BackgroundWorker{ctx: workerContext, cancel: cancel}
+}
+
+type BackgroundWorker struct {
+    ctx    context.Context
+    cancel context.CancelFunc
 }

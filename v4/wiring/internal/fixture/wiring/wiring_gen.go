@@ -31,6 +31,18 @@ func RegisterFixtureServices(registrar containercontract.Registrar) {
 		melodycontainer.RegisterOptions{},
 	)
 
+	melodycontainer.MustRegisterType(
+		registrar,
+		func(resolver containercontract.Resolver) (*domain.BackgroundWorker, error) {
+			ctx := resolver.Runtime().Context()
+
+			return domain.NewBackgroundWorker(
+				ctx,
+			), nil
+		},
+		melodycontainer.RegisterOptions{},
+	)
+
 	melodycontainer.MustRegister(
 		registrar,
 		domain.ServiceCollisionProbe,
@@ -217,6 +229,27 @@ func RegisterFixtureServices(registrar containercontract.Registrar) {
 				logger,
 				sessionTtl,
 				stageEnv,
+			)
+		},
+		melodycontainer.RegisterOptions{},
+	)
+
+	melodycontainer.MustRegisterType(
+		registrar,
+		func(resolver containercontract.Resolver) (*domain.WarmCache, error) {
+			ctx := resolver.Runtime().Context()
+
+			runtimeInstance := resolver.Runtime()
+
+			repository, repositoryErr := melodycontainer.FromResolverByType[*domain.UserRepository](resolver.Runtime().Context(), resolver)
+			if nil != repositoryErr {
+				return nil, repositoryErr
+			}
+
+			return domain.NewWarmCache(
+				ctx,
+				runtimeInstance,
+				repository,
 			)
 		},
 		melodycontainer.RegisterOptions{},
