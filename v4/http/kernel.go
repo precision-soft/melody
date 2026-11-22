@@ -610,7 +610,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         _, eventKernelRequestErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, kernelRequestEvent)
         instance.logEventDispatchError(requestLogger, "kernel request error", eventKernelRequestErr)
 
-        /* fails closed: a response set beside a failure is half made, and the listeners behind it, access control among them, skip a request that already carries one */
+        /* fails closed: a response set beside a failure is half made, and the listeners behind the failure, access control among them, did not run */
         _, requiredListenerSkipped := eventKernelRequestErr.(*event.RequiredListenerSkippedError)
 
         /* read on its own, since a listener that recovers its own panic leaves the dispatch clean */
@@ -873,13 +873,13 @@ func (instance *Kernel) raiseException(
 
     answered := exceptionEvent.Response()
 
-    if nil != answered && (nil == dispatchErr || true == exceptionEvent.builtInAnswered) {
+    if nil != answered && nil == dispatchErr {
         return answered
     }
 
     if nil != answered {
         requestLogger.Error(
-            "the kernel.exception dispatch failed after a listener set a response, which is dropped",
+            "a kernel.exception listener failed after setting a response, which is dropped",
             loggingcontract.Context{
                 "droppedResponseStatus":      answered.StatusCode(),
                 "droppedResponseContentType": internal.BoundDiagnosticText(answered.Headers().Get("Content-Type")),

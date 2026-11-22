@@ -12,10 +12,9 @@ type RegisteredListener struct {
     ListenerId   string `json:"listenerId"`
     ListenerName string `json:"listenerName"`
 
-    /* Required, MaySkipRequiredListeners and FailureEndsDispatch report what the listener's ListenerConfig declared, so an armed fail-closed guarantee is visible to inspection. */
+    /* Required and MaySkipRequiredListeners report what the listener's ListenerConfig declared, so an armed fail-closed guarantee is visible to inspection. */
     Required                 bool `json:"required"`
     MaySkipRequiredListeners bool `json:"maySkipRequiredListeners"`
-    FailureEndsDispatch      bool `json:"failureEndsDispatch"`
 }
 
 const (

@@ -123,7 +123,6 @@ func (instance *EventDispatcher) appendListenerLocked(
             name:                     config.Name,
             required:                 config.Required,
             maySkipRequiredListeners: config.MaySkipRequiredListeners,
-            failureEndsDispatch:      config.FailureEndsDispatch,
         },
     )
 
@@ -248,7 +247,7 @@ func (instance *EventDispatcher) removeSubscriberListener(entry subscriberRegist
     return instance.removeListenerById(entry.eventName, entry.listenerId)
 }
 
-/* Dispatch runs the listeners of the event's name in priority order, every one of them unless propagation is stopped or a listener declared FailureEndsDispatch fails: a failure of one listener is collected and the next runs. The answer is the one failure, the failures joined in priority order when several failed, the join reading already logged only when every failure does, or the refusal of a required listener the dispatch ended before, with the failures as its cause. */
+/* Dispatch runs the listeners of the event's name in priority order until propagation is stopped or a listener fails, a returned error and a recovered panic alike: the first failure ends the dispatch. The answer is that failure itself, or the refusal of a required listener the dispatch ended before, with the failure as its cause. */
 func (instance *EventDispatcher) Dispatch(runtimeInstance containercontract.Runtime, event eventcontract.Event) (eventcontract.Event, error) {
     return instance.dispatchSafely(
         runtimeInstance,
@@ -327,7 +326,6 @@ func (instance *EventDispatcher) RegisteredEvents() []eventcontract.RegisteredEv
                     ListenerName:             listenerName,
                     Required:                 entry.required,
                     MaySkipRequiredListeners: entry.maySkipRequiredListeners,
-                    FailureEndsDispatch:      entry.failureEndsDispatch,
                 },
             )
         }
@@ -437,7 +435,9 @@ func (instance *EventDispatcher) dispatch(runtimeInstance containercontract.Runt
     /* the entry travels rather than its name, which only a refusal reads */
     lastRanEntry := listenerWithPriority{}
     stoppedByListenerMaySkip := false
-    listenerErrs := make([]error, 0)
+    failedIndex := -1
+    failedEntry := listenerWithPriority{}
+    failureErrs := make([]error, 0)
 
     for listenerIndex = 0; listenerIndex < len(listenerList); listenerIndex++ {
         /* propagation is tested before each listener runs, so an event that arrives already stopped runs none of them */
@@ -477,22 +477,37 @@ func (instance *EventDispatcher) dispatch(runtimeInstance containercontract.Runt
             continue
         }
 
-        listenerErrs = append(listenerErrs, err)
+        /* the first failure ends the dispatch */
+        failureErrs = append(failureErrs, err)
+        failedIndex = listenerIndex
+        failedEntry = entry
 
-        if true == entry.failureEndsDispatch {
-            requiredErr := refuseSkippedRequiredListeners(
-                eventName,
-                listenerList[listenerIndex+1:],
-                entryNameOf(lastRanEntry),
-                false,
-                joinListenerErrors(listenerErrs),
+        break
+    }
+
+    if -1 != failedIndex {
+        skippedListenerList := listenerList[failedIndex+1:]
+
+        failureErr := joinListenerErrors(failureErrs)
+
+        if true == debugEnabled {
+            logger.Debug(
+                "event dispatch ended by a listener failure",
+                loggingcontract.Context{
+                    "eventName":          eventName,
+                    "failedListenerName": entryNameOf(failedEntry),
+                    "skippedCount":       len(skippedListenerList),
+                },
             )
-            if nil != requiredErr {
-                return eventValue, requiredErr
-            }
-
-            return eventValue, joinListenerErrors(listenerErrs)
         }
+
+        /* a failure ends the dispatch as a stop does, and the opt-out is never read for it */
+        requiredErr := refuseSkippedRequiredListeners(eventName, skippedListenerList, entryNameOf(failedEntry), false, failureErr)
+        if nil != requiredErr {
+            return eventValue, requiredErr
+        }
+
+        return eventValue, failureErr
     }
 
     if true == isEventPropagationStopped(eventValue) {
@@ -501,7 +516,7 @@ func (instance *EventDispatcher) dispatch(runtimeInstance containercontract.Runt
             listenerList[listenerIndex:],
             entryNameOf(lastRanEntry),
             stoppedByListenerMaySkip,
-            joinListenerErrors(listenerErrs),
+            nil,
         )
         if nil != requiredErr {
             return eventValue, requiredErr
@@ -527,10 +542,10 @@ func (instance *EventDispatcher) dispatch(runtimeInstance containercontract.Runt
         )
     }
 
-    return eventValue, joinListenerErrors(listenerErrs)
+    return eventValue, nil
 }
 
-/* joinListenerErrors answers nil for no failure, the failure itself for one, so its type reaches the caller unchanged, and a listenerFailures joining every failure in priority order for several. */
+/* joinListenerErrors answers nil for no failure, the failure itself for one, so its type reaches the caller unchanged, and a listenerFailures joining every failure in run order for several. */
 func joinListenerErrors(listenerErrs []error) error {
     if 0 == len(listenerErrs) {
         return nil
@@ -605,7 +620,7 @@ func entryNameOf(entry listenerWithPriority) string {
     return listenerNameOf(entry.listener)
 }
 
-/* refuseSkippedRequiredListeners answers the error an early end of the dispatch owes, by a stop or a failure that ends it alike, when a required listener sits among those it skipped, so the dispatch fails closed; the listener that ended it may be explicitly allowed to skip them. The cause is the dispatch's failures, nil when none failed. */
+/* refuseSkippedRequiredListeners answers the error an early end of the dispatch owes, by a stop or a failure alike, when a required listener sits among those it skipped, so the dispatch fails closed; the listener that ended it may be explicitly allowed to skip them. The cause is the dispatch's failure, nil when it was a stop. */
 func refuseSkippedRequiredListeners(
     eventName string,
     skippedListenerList []listenerWithPriority,
@@ -779,7 +794,6 @@ type listenerWithPriority struct {
     name                     string
     required                 bool
     maySkipRequiredListeners bool
-    failureEndsDispatch      bool
 }
 
 type subscriberRegistration struct {

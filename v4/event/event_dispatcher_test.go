@@ -1685,50 +1685,10 @@ func TestEventDispatcher_AddSubscriber_ASubscriberThatIsNotAPointerInstalls(t *t
     }
 }
 
-func TestEventDispatcher_AFailingListenerBeforeARequiredListenerLetsItRun(t *testing.T) {
+func TestEventDispatcher_AFailingListenerAheadOfARequiredListenerIsRefused(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
 
     listenerFailure := errors.New("the listener's own failure")
-    requiredRan := false
-
-    _ = dispatcher.AddListener(
-        "e",
-        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
-            return listenerFailure
-        },
-        eventcontract.ListenerConfig{Priority: 100},
-    )
-    dispatcher.AddListener(
-        "e",
-        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
-            requiredRan = true
-
-            return nil
-        },
-        eventcontract.ListenerConfig{Required: true},
-    )
-
-    runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
-
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
-
-    if false == requiredRan {
-        t.Fatalf("expected the required listener to run behind the failing one")
-    }
-
-    if _, ok := err.(*RequiredListenerSkippedError); true == ok {
-        t.Fatalf("expected the failure itself, no skipped-listener refusal, got: %v", err)
-    }
-
-    if false == errors.Is(err, listenerFailure) {
-        t.Fatalf("expected the listener's failure as the answer, got: %v", err)
-    }
-}
-
-func TestEventDispatcher_AFailureEndsDispatchListenerThatFailsRefusesTheRequiredListenerBehindIt(t *testing.T) {
-    dispatcher, clockInstance := testNewEventDispatcher()
-
-    listenerFailure := errors.New("the gate's own failure")
     requiredRan := false
     behindRan := false
 
@@ -1737,7 +1697,7 @@ func TestEventDispatcher_AFailureEndsDispatchListenerThatFailsRefusesTheRequired
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return listenerFailure
         },
-        eventcontract.ListenerConfig{Priority: 100, FailureEndsDispatch: true, MaySkipRequiredListeners: true},
+        eventcontract.ListenerConfig{Priority: 100},
     )
     dispatcher.AddListener(
         "e",
@@ -1761,7 +1721,7 @@ func TestEventDispatcher_AFailureEndsDispatchListenerThatFailsRefusesTheRequired
     _, err := dispatcher.Dispatch(newEventDispatcherAdapterTestRuntime(t), NewEvent("e", nil, clockInstance.Now()))
 
     if true == behindRan || true == requiredRan {
-        t.Fatalf("expected no listener behind the failing gate to run")
+        t.Fatalf("expected no listener behind the failing one to run")
     }
 
     if _, ok := err.(*RequiredListenerSkippedError); false == ok {
@@ -1769,7 +1729,7 @@ func TestEventDispatcher_AFailureEndsDispatchListenerThatFailsRefusesTheRequired
     }
 
     if false == errors.Is(err, listenerFailure) {
-        t.Fatalf("expected the gate's failure to travel as the cause, got: %v", err)
+        t.Fatalf("expected the listener's failure to travel as the cause, got: %v", err)
     }
 
     var exceptionErr *exception.Error
@@ -1778,42 +1738,8 @@ func TestEventDispatcher_AFailureEndsDispatchListenerThatFailsRefusesTheRequired
     }
 
     stoppedByListener, _ := exceptionErr.Context()["stoppedByListener"].(string)
-    if false == strings.Contains(stoppedByListener, "AFailureEndsDispatchListenerThatFails") {
-        t.Fatalf("expected the refusal to name the failing gate, got %q", stoppedByListener)
-    }
-}
-
-func TestEventDispatcher_AFailureEndsDispatchListenerThatFailsWithNothingRequiredBehindAnswersItsFailure(t *testing.T) {
-    dispatcher, clockInstance := testNewEventDispatcher()
-
-    listenerFailure := errors.New("the gate's own failure")
-    behindRan := false
-
-    dispatcher.AddListener(
-        "e",
-        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
-            return listenerFailure
-        },
-        eventcontract.ListenerConfig{Priority: 100, FailureEndsDispatch: true},
-    )
-    dispatcher.AddListener(
-        "e",
-        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
-            behindRan = true
-
-            return nil
-        },
-        eventcontract.ListenerConfig{},
-    )
-
-    _, err := dispatcher.Dispatch(newEventDispatcherAdapterTestRuntime(t), NewEvent("e", nil, clockInstance.Now()))
-
-    if true == behindRan {
-        t.Fatalf("expected the listener behind the failing gate not to run")
-    }
-
-    if false == errors.Is(err, listenerFailure) {
-        t.Fatalf("expected the gate's failure, got: %v", err)
+    if false == strings.Contains(stoppedByListener, "AFailingListenerAheadOfARequiredListenerIsRefused") {
+        t.Fatalf("expected the refusal to name the failing listener, got %q", stoppedByListener)
     }
 }
 
@@ -2656,13 +2582,22 @@ func TestNewEvent_KeepsTheTimestampItWasHanded(t *testing.T) {
     }
 }
 
-func TestEventDispatcher_AFailingListenerLetsTheListenersBehindItRun(t *testing.T) {
+func TestEventDispatcher_AFailingListenerEndsTheDispatch(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
 
     secondFailure := errors.New("the second listener's failure")
+    firstRan := false
     thirdRan := false
 
-    dispatcher.AddListener("e", func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error { return nil }, eventcontract.ListenerConfig{Priority: 30})
+    dispatcher.AddListener(
+        "e",
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+            firstRan = true
+
+            return nil
+        },
+        eventcontract.ListenerConfig{Priority: 30},
+    )
     dispatcher.AddListener("e", func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error { return secondFailure }, eventcontract.ListenerConfig{Priority: 20})
     dispatcher.AddListener(
         "e",
@@ -2676,41 +2611,25 @@ func TestEventDispatcher_AFailingListenerLetsTheListenersBehindItRun(t *testing.
 
     _, err := dispatcher.Dispatch(newEventDispatcherAdapterTestRuntime(t), NewEvent("e", nil, clockInstance.Now()))
 
-    if false == thirdRan {
-        t.Fatalf("expected the listener behind the failing one to run")
+    if false == firstRan {
+        t.Fatalf("expected the listener ahead of the failing one to run")
+    }
+
+    if true == thirdRan {
+        t.Fatalf("expected the listener behind the failing one not to run")
     }
 
     if false == errors.Is(err, secondFailure) {
         t.Fatalf("expected the answer to carry the second listener's failure, got %v", err)
     }
-}
 
-func TestEventDispatcher_EveryFailureIsJoinedInPriorityOrder(t *testing.T) {
-    dispatcher, clockInstance := testNewEventDispatcher()
-
-    firstFailure := errors.New("first failure")
-    secondFailure := errors.New("second failure")
-
-    dispatcher.AddListener("e", func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error { return secondFailure }, eventcontract.ListenerConfig{Priority: 10})
-    dispatcher.AddListener("e", func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error { return firstFailure }, eventcontract.ListenerConfig{Priority: 20})
-
-    _, err := dispatcher.Dispatch(newEventDispatcherAdapterTestRuntime(t), NewEvent("e", nil, clockInstance.Now()))
-
-    if false == errors.Is(err, firstFailure) || false == errors.Is(err, secondFailure) {
-        t.Fatalf("expected both failures reachable, got %v", err)
-    }
-
-    joined, isJoined := err.(interface{ Unwrap() []error })
-    if false == isJoined || 2 != len(joined.Unwrap()) {
-        t.Fatalf("expected the two failures joined, got %T", err)
-    }
-
-    if false == errors.Is(joined.Unwrap()[0], firstFailure) || false == errors.Is(joined.Unwrap()[1], secondFailure) {
-        t.Fatalf("expected the higher priority's failure first, got %v", joined.Unwrap())
+    exceptionErr, isException := err.(*exception.Error)
+    if false == isException || "event listener returned error" != exceptionErr.Message() {
+        t.Fatalf("expected the failure itself as the answer, got %T (%v)", err, err)
     }
 }
 
-func TestEventDispatcher_APanickingListenerIsOneFailureAndTheListenersBehindItRun(t *testing.T) {
+func TestEventDispatcher_APanickingListenerEndsTheDispatchAsOneFailure(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
 
     behindRan := false
@@ -2728,13 +2647,65 @@ func TestEventDispatcher_APanickingListenerIsOneFailureAndTheListenersBehindItRu
 
     _, err := dispatcher.Dispatch(newEventDispatcherAdapterTestRuntime(t), NewEvent("e", nil, clockInstance.Now()))
 
-    if false == behindRan {
-        t.Fatalf("expected the listener behind the panicking one to run")
+    if true == behindRan {
+        t.Fatalf("expected the listener behind the panicking one not to run")
     }
 
-    var exceptionErr *exception.Error
-    if false == errors.As(err, &exceptionErr) || "event listener panicked" != exceptionErr.Message() {
-        t.Fatalf("expected the panic folded into one failure, got %v", err)
+    exceptionErr, isException := err.(*exception.Error)
+    if false == isException || "event listener panicked" != exceptionErr.Message() {
+        t.Fatalf("expected the panic folded into one failure as the answer, got %T (%v)", err, err)
+    }
+}
+
+func TestJoinListenerErrors_AnswersNothingTheOneFailureOrTheJoinInRunOrder(t *testing.T) {
+    if nil != joinListenerErrors(nil) || nil != joinListenerErrors([]error{}) {
+        t.Fatalf("expected no failure to answer nil")
+    }
+
+    firstFailure := exception.NewError("first failure", nil, nil)
+    secondFailure := exception.NewError("second failure", nil, nil)
+
+    if error(firstFailure) != joinListenerErrors([]error{firstFailure}) {
+        t.Fatalf("expected one failure to answer itself")
+    }
+
+    failureList := []error{firstFailure, secondFailure}
+    joinedErr := joinListenerErrors(failureList)
+
+    joined, isJoined := joinedErr.(interface{ Unwrap() []error })
+    if false == isJoined || 2 != len(joined.Unwrap()) {
+        t.Fatalf("expected the two failures joined, got %T", joinedErr)
+    }
+
+    if error(firstFailure) != joined.Unwrap()[0] || error(secondFailure) != joined.Unwrap()[1] {
+        t.Fatalf("expected the failures in run order, got %v", joined.Unwrap())
+    }
+
+    failureList[0] = nil
+    if error(firstFailure) != joined.Unwrap()[0] {
+        t.Fatalf("expected the join to hold its own copy of the failures")
+    }
+
+    if false == errors.Is(joinedErr, firstFailure) || false == errors.Is(joinedErr, secondFailure) {
+        t.Fatalf("expected both failures reachable, got %v", joinedErr)
+    }
+}
+
+func TestJoinListenerErrors_TheJoinReadsLoggedOnlyWhenEveryFailureDoes(t *testing.T) {
+    loggedFailure := exception.NewError("logged failure", nil, nil)
+    _ = exception.MarkLogged(loggedFailure)
+    unloggedFailure := exception.NewError("unlogged failure", nil, nil)
+
+    joinedErr := joinListenerErrors([]error{loggedFailure, unloggedFailure})
+
+    if true == exception.IsAlreadyLogged(joinedErr) {
+        t.Fatalf("expected a join holding an unlogged failure not to read logged")
+    }
+
+    _ = exception.MarkLogged(joinedErr)
+
+    if false == exception.IsAlreadyLogged(unloggedFailure) || false == exception.IsAlreadyLogged(joinedErr) {
+        t.Fatalf("expected marking the join to mark each failure")
     }
 }
 
@@ -2742,7 +2713,7 @@ func TestEventDispatcher_RegisteredEventsReportsTheListenerConfig(t *testing.T) 
     dispatcher, _ := testNewEventDispatcher()
     adapter := NewEventDispatcherAdapter(dispatcher)
 
-    adapter.AddListener("e", testNoopEventListener, eventcontract.ListenerConfig{Priority: 5, Name: "x", Required: true, FailureEndsDispatch: true})
+    adapter.AddListener("e", testNoopEventListener, eventcontract.ListenerConfig{Priority: 5, Name: "x", Required: true})
 
     for _, registeredEvents := range [][]eventcontract.RegisteredEvent{dispatcher.RegisteredEvents(), adapter.RegisteredEvents()} {
         if 1 != len(registeredEvents) || 1 != len(registeredEvents[0].Listeners) {
@@ -2750,7 +2721,7 @@ func TestEventDispatcher_RegisteredEventsReportsTheListenerConfig(t *testing.T) 
         }
 
         listener := registeredEvents[0].Listeners[0]
-        if "x" != listener.ListenerName || 5 != listener.Priority || false == listener.Required || false == listener.FailureEndsDispatch || true == listener.MaySkipRequiredListeners {
+        if "x" != listener.ListenerName || 5 != listener.Priority || false == listener.Required || true == listener.MaySkipRequiredListeners {
             t.Fatalf("expected the declared config reported, got %+v", listener)
         }
     }

@@ -14,7 +14,7 @@ type SubscriberRegistration struct {
     SubscriberId uint64
 }
 
-/* ListenerConfig is what a registration declares about its listener; the zero value is priority 0, unnamed, neither required, allowed to skip nor ending the dispatch on its failure. */
+/* ListenerConfig is what a registration declares about its listener; the zero value is priority 0, unnamed, neither required nor allowed to skip. */
 type ListenerConfig struct {
     /* Priority orders the listeners of one event, the highest first; on InstallFloorListener it is the reserved floor. */
     Priority int
@@ -22,14 +22,11 @@ type ListenerConfig struct {
     /* Name is what inspection and the journal call the listener; empty takes the function's qualified name. */
     Name string
 
-    /* Required makes a dispatch that ends before this listener ran, by a stop or by a failure that ends it, answer a RequiredListenerSkippedError, so a caller such as the http kernel fails closed. */
+    /* Required makes a dispatch that ends before this listener ran, by a stop or by a listener's failure, answer a RequiredListenerSkippedError, so a caller such as the http kernel fails closed. */
     Required bool
 
     /* MaySkipRequiredListeners lets this listener stop propagation ahead of required listeners without the refusal; it is not read when the listener failed. */
     MaySkipRequiredListeners bool
-
-    /* FailureEndsDispatch makes a failure of this listener end the dispatch: no listener behind it runs, and a required one behind it is refused as on a stop. The framework sets it on its own gates. */
-    FailureEndsDispatch bool
 }
 
 type EventDispatcher interface {
@@ -46,7 +43,7 @@ type EventDispatcher interface {
     /* RemoveSubscriber removes the listeners installed by one AddSubscriber call and answers how many were removed. An unknown registration removes nothing and answers zero. */
     RemoveSubscriber(registration SubscriberRegistration) int
 
-    /* Dispatch runs the listeners registered for the event's name in descending priority order. Every listener runs unless propagation is stopped or a listener declared FailureEndsDispatch fails; the answer joins every failure in priority order, each reachable through errors.Is and errors.As, and is the cause of a RequiredListenerSkippedError when the dispatch ended before a required listener ran. */
+    /* Dispatch runs the listeners registered for the event's name in descending priority order. The first listener that fails, by a returned error or a recovered panic, ends the dispatch, as a stop does; the answer is that failure, reachable through errors.Is and errors.As, and is the cause of a RequiredListenerSkippedError when the dispatch ended before a required listener ran. */
     Dispatch(runtimeInstance containercontract.Runtime, event Event) (Event, error)
 
     /* DispatchName behaves like Dispatch for an event of the name and payload, stamped with the dispatcher's clock. */

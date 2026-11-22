@@ -62,7 +62,6 @@ func builtInExceptionListener(runtimeInstance containercontract.Runtime, eventVa
             },
         ),
     )
-    exceptionEvent.builtInAnswered = true
 
     return nil
 }

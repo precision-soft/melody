@@ -209,7 +209,6 @@ func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.Regis
                     ListenerName:             listenerName,
                     Required:                 entry.config.Required,
                     MaySkipRequiredListeners: entry.config.MaySkipRequiredListeners,
-                    FailureEndsDispatch:      entry.config.FailureEndsDispatch,
                 },
             )
         }

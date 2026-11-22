@@ -391,7 +391,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
 
             return nil
         },
-        eventcontract.ListenerConfig{Priority: KernelAccessControlListenerPriority, Required: true, FailureEndsDispatch: true},
+        eventcontract.ListenerConfig{Priority: KernelAccessControlListenerPriority, Required: true},
     )
 }
 

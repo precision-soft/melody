@@ -10,6 +10,7 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpPkg "github.com/precision-soft/melody/v4/http"
@@ -933,8 +934,8 @@ func TestRegisterKernelAccessControlListener_RegistersTheListenerRequiredInOneCa
             continue
         }
 
-        if 1 != len(registeredEvent.Listeners) || false == registeredEvent.Listeners[0].Required || false == registeredEvent.Listeners[0].FailureEndsDispatch || KernelAccessControlListenerPriority != registeredEvent.Listeners[0].Priority {
-            t.Fatalf("expected one required listener whose failure ends the dispatch at the access control priority, got %+v", registeredEvent.Listeners)
+        if 1 != len(registeredEvent.Listeners) || false == registeredEvent.Listeners[0].Required || KernelAccessControlListenerPriority != registeredEvent.Listeners[0].Priority {
+            t.Fatalf("expected one required listener at the access control priority, got %+v", registeredEvent.Listeners)
         }
 
         return
@@ -943,18 +944,50 @@ func TestRegisterKernelAccessControlListener_RegistersTheListenerRequiredInOneCa
     t.Fatalf("expected the access control listener on kernel.request")
 }
 
+type accessControlListenerTestPanickingMatcher struct{}
+
+func (instance *accessControlListenerTestPanickingMatcher) Matches(request httpcontract.Request) bool {
+    panic("the matcher broke")
+}
+
 func TestRegisterKernelSecurityResolutionListener_ItsFailureEndsTheDispatch(t *testing.T) {
     kernel := newTestKernel()
+    runtimeInstance := newTestRuntime()
 
-    RegisterKernelSecurityResolutionListener(kernel, NewFirewallRegistry(NewCompiledConfiguration(nil, nil)))
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            &accessControlListenerTestPanickingMatcher{},
+        MatcherDescription: "matcher:panicking",
+        LoginPath:          "/login",
+        LogoutPath:         "/logout",
+    })
+    registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil))
 
-    for _, registeredEvent := range kernel.EventDispatcher().RegisteredEvents() {
-        if kernelcontract.EventKernelRequest == registeredEvent.EventName && 1 == len(registeredEvent.Listeners) && true == registeredEvent.Listeners[0].FailureEndsDispatch {
-            return
-        }
+    RegisterKernelSecurityResolutionListener(kernel, registry)
+    RegisterKernelAccessControlListener(kernel, registry)
+
+    behindRan := false
+    kernel.EventDispatcher().AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+            behindRan = true
+
+            return nil
+        },
+        eventcontract.ListenerConfig{Priority: 30},
+    )
+
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, newSecurityTestRequest("GET", "/admin", nil, runtimeInstance))
+
+    _, err := kernel.EventDispatcher().DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, requestEvent)
+
+    if true == behindRan {
+        t.Fatalf("expected no listener behind the failing security resolution to run")
     }
 
-    t.Fatalf("expected the security resolution listener registered with FailureEndsDispatch")
+    if _, isRefusal := err.(*event.RequiredListenerSkippedError); false == isRefusal {
+        t.Fatalf("expected the access control listener's refusal, got %T (%v)", err, err)
+    }
 }
 
 func TestAccessControlListener_AFailedDeniedHandlerKeepsItsErrorBesideTheDecision(t *testing.T) {

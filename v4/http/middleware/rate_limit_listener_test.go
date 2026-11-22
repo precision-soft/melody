@@ -471,13 +471,52 @@ func TestRateLimitGate_AnUnmarkedDenialBesideAnErrorStays429(t *testing.T) {
     }
 }
 
+type rateLimitListenerTestPanickingLimiter struct{}
+
+func (instance *rateLimitListenerTestPanickingLimiter) Allow(runtimeInstance containercontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
+    panic("the limiter's store broke")
+}
+
+func (instance *rateLimitListenerTestPanickingLimiter) Reset(runtimeInstance containercontract.Runtime, key string) error {
+    return nil
+}
+
 func TestRegisterRateLimitRequestListener_ItsFailureEndsTheDispatch(t *testing.T) {
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{})
 
-    RegisterRateLimitRequestListener(dispatcher, NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{}), RateLimitConfig{})
+    RegisterRateLimitRequestListener(dispatcher, &rateLimitListenerTestPanickingLimiter{}, RateLimitConfig{})
 
-    registeredEvents := dispatcher.RegisteredEvents()
-    if 1 != len(registeredEvents) || 1 != len(registeredEvents[0].Listeners) || false == registeredEvents[0].Listeners[0].FailureEndsDispatch {
-        t.Fatalf("expected the rate limit listener registered with FailureEndsDispatch, got %+v", registeredEvents)
+    behindRan := false
+    requiredRan := false
+
+    dispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+            behindRan = true
+
+            return nil
+        },
+        eventcontract.ListenerConfig{Priority: 50},
+    )
+    dispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+            requiredRan = true
+
+            return nil
+        },
+        eventcontract.ListenerConfig{Priority: 20, Required: true},
+    )
+
+    runtimeInstance := newRateLimitListenerTestRuntime()
+
+    _, err := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, newRateLimitListenerTestRequestEvent(runtimeInstance))
+
+    if true == behindRan || true == requiredRan {
+        t.Fatalf("expected no listener behind the panicking limiter to run")
+    }
+
+    if _, isRefusal := err.(*event.RequiredListenerSkippedError); false == isRefusal {
+        t.Fatalf("expected the required listener's refusal, got %T (%v)", err, err)
     }
 }

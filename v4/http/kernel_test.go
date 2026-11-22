@@ -411,7 +411,7 @@ func TestKernel_ServeHttpClosesScopeWhenRequestLoggerSetupFails(t *testing.T) {
     }
 }
 
-func TestKernel_FailsClosedWhenKernelRequestDispatchErrorsAfterEveryListenerRan(t *testing.T) {
+func TestKernel_FailsClosedWhenAKernelRequestListenerFails(t *testing.T) {
     handlerRan := false
 
     router := NewRouter()
@@ -455,8 +455,8 @@ func TestKernel_FailsClosedWhenKernelRequestDispatchErrorsAfterEveryListenerRan(
 
     handler.ServeHTTP(recorder, request)
 
-    if false == accessControlRan {
-        t.Fatalf("expected the lower-priority listener to run behind the failing one")
+    if true == accessControlRan {
+        t.Fatalf("expected the lower-priority listener behind the failing one not to run")
     }
 
     if true == handlerRan {
@@ -468,7 +468,7 @@ func TestKernel_FailsClosedWhenKernelRequestDispatchErrorsAfterEveryListenerRan(
     }
 }
 
-func TestKernel_FailsClosedWhenKernelControllerDispatchErrorsAfterEveryListenerRan(t *testing.T) {
+func TestKernel_FailsClosedWhenAKernelControllerListenerFails(t *testing.T) {
     handlerRan := false
 
     router := NewRouter()
@@ -512,8 +512,8 @@ func TestKernel_FailsClosedWhenKernelControllerDispatchErrorsAfterEveryListenerR
 
     handler.ServeHTTP(recorder, request)
 
-    if false == lowerPriorityRan {
-        t.Fatalf("expected the lower-priority kernel.controller listener to run behind the failing one")
+    if true == lowerPriorityRan {
+        t.Fatalf("expected the lower-priority kernel.controller listener behind the failing one not to run")
     }
 
     if true == handlerRan {
@@ -623,59 +623,6 @@ func TestKernel_AKernelControllerResponseSetBesideAFailureIsDroppedForTheErrorPa
 
     if 1 != body.closeCount {
         t.Fatalf("expected the dropped response body to be closed exactly once, got %d", body.closeCount)
-    }
-}
-
-func TestKernel_AnUnloggedFailureJoinedBesideALoggedPanicReachesTheJournal(t *testing.T) {
-    router := NewRouter()
-    router.Handle(
-        "/joined",
-        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            return TextResponse(nethttp.StatusOK, "handled"), nil
-        },
-        RouteOptions{Methods: []string{nethttp.MethodGet}},
-    )
-
-    recordingLogger := &errorContextRecordingLogger{}
-
-    serviceContainer := newHttpTestContainer()
-    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
-
-    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
-
-    dispatcher.AddListener(
-        kernelcontract.EventKernelRequest,
-        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
-            panic("first listener panicked")
-        },
-        eventcontract.ListenerConfig{Priority: 50},
-    )
-
-    dispatcher.AddListener(
-        kernelcontract.EventKernelRequest,
-        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
-            return errors.New("second listener failed unlogged")
-        },
-        eventcontract.ListenerConfig{Priority: 20},
-    )
-
-    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
-
-    request := httptest.NewRequest(nethttp.MethodGet, "/joined", nil)
-    recorder := httptest.NewRecorder()
-
-    handler.ServeHTTP(recorder, request)
-
-    if nethttp.StatusInternalServerError != recorder.Code {
-        t.Fatalf("expected the fail-closed 500, got %d", recorder.Code)
-    }
-
-    recordingLogger.mutex.Lock()
-    journal := fmt.Sprintf("%v %v", recordingLogger.errorMessages, recordingLogger.errorContexts)
-    recordingLogger.mutex.Unlock()
-
-    if false == strings.Contains(journal, "second listener failed unlogged") {
-        t.Fatalf("expected the unlogged failure joined beside the logged panic to reach the journal, got %s", journal)
     }
 }
 
@@ -4731,7 +4678,7 @@ func TestKernel_AListenerThatPanicsAfterSettingAResponseDoesNotGetItServed(t *te
 
     found := false
     for _, record := range capture.failureRecords() {
-        if "the kernel.exception dispatch failed after a listener set a response, which is dropped" != record.message {
+        if "a kernel.exception listener failed after setting a response, which is dropped" != record.message {
             continue
         }
 
@@ -4759,13 +4706,29 @@ func TestKernel_APanickingListenerLeavesTheOriginalStatus(t *testing.T) {
     serviceContainer := newHttpTestContainer()
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
 
+    /* the floor's neighbour: had the dispatch gone on past the panicking listener, it would have run before the floor */
+    aboveFloorRan := false
+    event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
+        kernelcontract.EventKernelException,
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+            aboveFloorRan = true
+
+            return nil
+        },
+        eventcontract.ListenerConfig{Priority: BuiltInExceptionListenerPriority + 1},
+    )
+
     recorder := httptest.NewRecorder()
     NewKernel(newFailingKernelTestRouter(exception.NotFound("no such article")), KernelConfig{}).
         ServeHttp(newContainerWithPanickingExceptionListener(t, serviceContainer)).
         ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
 
     if nethttp.StatusNotFound != recorder.Code || false == strings.Contains(recorder.Body.String(), "no such article") {
-        t.Fatalf("expected the renderer's 404, got %d: %s", recorder.Code, recorder.Body.String())
+        t.Fatalf("expected the kernel's own rendering of the 404, got %d: %s", recorder.Code, recorder.Body.String())
+    }
+
+    if true == aboveFloorRan {
+        t.Fatalf("expected the dispatch to end at the panicking listener, before the floor")
     }
 
     for _, record := range capture.failureRecords() {
