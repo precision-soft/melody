@@ -13,6 +13,7 @@ const (
     BootWarningNameProcessEnvironmentVariableIgnored          = "application.environment.processVariableIgnored"
     BootWarningNameSecretMarkUnmatched                        = "application.secretMark.unmatched"
     BootWarningNameEnvironmentUndeclaredKey                   = "application.environment.undeclaredKey"
+    BootWarningNameStaticCacheMaxAgeIgnored                   = "http.static.cacheMaxAgeIgnored"
 )
 
 type bootWarningRegistration struct {
@@ -34,6 +35,7 @@ func NewBootWarningRegistry() *BootWarningRegistry {
             {name: BootWarningNameProcessEnvironmentVariableIgnored, writtenInCli: true},
             {name: BootWarningNameSecretMarkUnmatched, writtenInCli: true},
             {name: BootWarningNameEnvironmentUndeclaredKey, writtenInCli: true},
+            {name: BootWarningNameStaticCacheMaxAgeIgnored, writtenInCli: false},
         },
     }
 }

@@ -157,6 +157,7 @@ func (instance *Application) Boot() kernelcontract.Kernel {
     instance.refuseCliBootWarningKeysInHttp()
     instance.refuseUnknownCliBootWarningCodes()
     instance.collectUndeclaredEnvironmentKeys()
+    instance.collectIgnoredStaticCacheMaxAge()
     instance.refuseModuleEnvironmentKeys()
 
     instance.ensureRuntimeDirectories()

@@ -668,21 +668,6 @@ func (instance *Configuration) buildHttpConfiguration() error {
     /* an empty line is unset and reads false, the cache on */
     staticCacheDisabled := staticCacheDisabledSwitch.Value
 
-    /* the file server writes no max age once the cache is off, so one a deployment set beside the switch would be dropped unread */
-    if staticCacheMaxAgeParameter := instance.MustGet(KernelStaticCacheMaxAge); true == staticCacheDisabled && false == staticCacheMaxAgeParameter.IsDefault() {
-        refusalContext := exceptioncontract.Context{"environmentKeys": []string{StaticCacheDisabledKey, StaticCacheMaxAgeKey}}
-        if true == staticCacheMaxAgeParameter.IsOverridden() {
-            /* an override does not read the key, so the refusal names the parameter the override wrote */
-            refusalContext = exceptioncontract.Context{"environmentKeys": []string{StaticCacheDisabledKey}, "parameterName": KernelStaticCacheMaxAge, "overridden": true}
-        }
-
-        return exception.NewError(
-            "the static cache max age is set beside the disabled static cache",
-            refusalContext,
-            nil,
-        )
-    }
-
     staticExcludedPaths := splitConfigurationList(instance.MustGet(KernelStaticExcludedPaths).MustString())
 
     sessionTtl, sessionTtlErr := resolveParameter(instance.MustGet(KernelHttpSessionTtl), HttpSessionTtlKey, SessionTtlRule())

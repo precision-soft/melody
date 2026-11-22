@@ -1295,48 +1295,29 @@ func TestMarkSecret_ReachesAKeyWhoseLineReadsTheMarkedParameter(t *testing.T) {
     }
 }
 
-func TestConfiguration_StaticCacheDisabledBesideAMaxAgeIsRefused(t *testing.T) {
-    _, configurationErr := newConfigurationFromValues(map[string]string{StaticCacheDisabledKey: "true", StaticCacheMaxAgeKey: "60"})
-    if nil == configurationErr {
-        t.Fatal("expected the max age beside the disabled cache refused")
-    }
-
-    environmentKeys, _ := exception.LogContext(configurationErr, exception.LogContextConfig{})["environmentKeys"].([]string)
-    if 2 != len(environmentKeys) || StaticCacheDisabledKey != environmentKeys[0] || StaticCacheMaxAgeKey != environmentKeys[1] {
-        t.Fatalf("expected the refusal to name both keys, got %v", configurationErr)
-    }
-
-    configuration := mustConfigurationFromValues(t, map[string]string{StaticCacheDisabledKey: "true"})
-    if false == configuration.Http().StaticCacheDisabled() {
-        t.Fatal("expected the switch alone admitted")
-    }
-
-    if _, enabledErr := newConfigurationFromValues(map[string]string{StaticCacheDisabledKey: "false", StaticCacheMaxAgeKey: "60"}); nil != enabledErr {
-        t.Fatalf("expected a max age beside the enabled cache admitted, got %v", enabledErr)
-    }
-
-    for _, maxAge := range []string{"3600", ""} {
-        if _, maxAgeErr := newConfigurationFromValues(map[string]string{StaticCacheDisabledKey: "true", StaticCacheMaxAgeKey: maxAge}); nil == maxAgeErr {
-            t.Fatalf("expected the max age line %q beside the disabled cache refused", maxAge)
+/* the switch wins over a max age set beside it, so a layered .env can switch the cache off over a base that sets one; the application names the ignored max age in a boot warning */
+func TestConfiguration_StaticCacheDisabledBesideAMaxAgeIsAdmitted(t *testing.T) {
+    for _, maxAge := range []string{"60", "3600", ""} {
+        configuration := mustConfigurationFromValues(t, map[string]string{StaticCacheDisabledKey: "true", StaticCacheMaxAgeKey: maxAge})
+        if false == configuration.Http().StaticCacheDisabled() {
+            t.Fatalf("max age %q: expected the cache disabled", maxAge)
         }
+    }
+
+    configuration := mustConfigurationFromValues(t, map[string]string{StaticCacheDisabledKey: "false", StaticCacheMaxAgeKey: "60"})
+    if true == configuration.Http().StaticCacheDisabled() || 60 != configuration.Http().StaticCacheMaxAge().Value {
+        t.Fatalf("expected the max age beside the enabled cache read, got %v", configuration.Http().StaticCacheMaxAge())
     }
 }
 
-func TestConfiguration_StaticCacheDisabledBesideAnOverriddenMaxAgeNamesTheParameter(t *testing.T) {
+func TestConfiguration_StaticCacheDisabledBesideAnOverriddenMaxAgeIsAdmitted(t *testing.T) {
     environment, environmentErr := NewEnvironment(context.Background(), &testEnvironmentSource{values: map[string]string{StaticCacheDisabledKey: "true"}})
     if nil != environmentErr {
         t.Fatalf("new environment error: %v", environmentErr)
     }
 
-    _, configurationErr := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{ParameterOverrides: map[string]string{KernelStaticCacheMaxAge: "120"}})
-    if nil == configurationErr {
-        t.Fatal("expected the overridden max age beside the disabled cache refused")
-    }
-
-    refusalContext := exception.LogContext(configurationErr, exception.LogContextConfig{})
-    environmentKeys, _ := refusalContext["environmentKeys"].([]string)
-    if 1 != len(environmentKeys) || StaticCacheDisabledKey != environmentKeys[0] || KernelStaticCacheMaxAge != refusalContext["parameterName"] || true != refusalContext["overridden"] {
-        t.Fatalf("expected the refusal to name the switch and the overridden parameter, got %v", refusalContext)
+    if _, configurationErr := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{ParameterOverrides: map[string]string{KernelStaticCacheMaxAge: "120"}}); nil != configurationErr {
+        t.Fatalf("expected the overridden max age beside the disabled cache admitted, got %v", configurationErr)
     }
 }
 
