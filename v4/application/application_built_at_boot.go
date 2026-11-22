@@ -19,6 +19,8 @@ const builtAtBootCauseChainDepth = 8
 /* builtAtBootWiringRefusals are the container's own refusals: a provider that reaches one is a wiring mistake, which fails the boot whatever the mode declares */
 var builtAtBootWiringRefusals = []error{
     container.ErrServiceNotRegistered,
+    container.ErrServiceTypeAmbiguous,
+    container.ErrCloseDoorRequired,
     container.ErrCircularDependency,
     container.ErrScopedServiceAtBoot,
     containercontract.ErrRuntimeKindRefused,

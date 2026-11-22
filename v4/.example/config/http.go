@@ -30,6 +30,8 @@ import (
     melodykernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     melodyopenapi "github.com/precision-soft/melody/v4/openapi"
     bun "github.com/uptrace/bun"
+    melodystorage "github.com/precision-soft/melody/v4/storage"
+    melodystoragecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
 func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.Kernel) {
@@ -115,10 +117,13 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
         router.Handle("/outbox/status", handleroutbox.StatusHandler(catalogueDatabase, outboxStore), melodyhttp.RouteOptions{Name: "example.outbox.status", Methods: []string{"GET"}})
     }
 
-    if nil != instance.storage {
-        router.Handle("/storage/object", instance.throttledWrite(handlerstorage.PutHandler(instance.storage)), melodyhttp.RouteOptions{Name: "example.storage.put", Methods: []string{"POST"}})
-        router.Handle("/storage/object", handlerstorage.GetHandler(instance.storage), melodyhttp.RouteOptions{Name: "example.storage.get", Methods: []string{"GET"}})
-        router.Handle("/storage/object/link", handlerstorage.LinkHandler(instance.storage), melodyhttp.RouteOptions{Name: "example.storage.link", Methods: []string{"GET"}})
+    if nil != instance.storageClient {
+        /* the storage the aws.s3 module registers, checking its bucket, resolved at each request rather than captured, so the first upload after an outage checks the bucket again */
+        objectStorage := melodycontainer.Lazy[melodystoragecontract.Storage](kernelInstance.ServiceContainer(), melodystorage.ServiceStorage)
+
+        router.Handle("/storage/object", instance.throttledWrite(handlerstorage.PutHandler(objectStorage)), melodyhttp.RouteOptions{Name: "example.storage.put", Methods: []string{"POST"}})
+        router.Handle("/storage/object", handlerstorage.GetHandler(objectStorage), melodyhttp.RouteOptions{Name: "example.storage.get", Methods: []string{"GET"}})
+        router.Handle("/storage/object/link", handlerstorage.LinkHandler(objectStorage), melodyhttp.RouteOptions{Name: "example.storage.link", Methods: []string{"GET"}})
     }
 
     router.Handle(

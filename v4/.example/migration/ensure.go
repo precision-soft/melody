@@ -60,7 +60,7 @@ type refusedMigrationAttempt struct {
     refusedAt time.Time
 }
 
-/* EnsureMigrated applies the Migrations set to the example's database, once per handle and per process; the repository constructors call it at first resolution and the two-factor store's provider at the first request that needs it, so a freshly recreated volume needs no operator step. A success is recorded for good, a refusal that spent the retry window waiting for another process is recorded for that window, and every other failure is retried at the next resolution. The mutex of the handle and the set serializes the callers of one process, so the archive's wait does not hold the catalogue, and the bun migration lock the processes sharing the database. */
+/* EnsureMigrated applies the Migrations set to the example's database, once per handle and per process; the catalogue schema calls it, at boot in an http process and at the first read otherwise, so a freshly recreated volume needs no operator step. A success is recorded for good, a refusal that spent the retry window waiting for another process is recorded for that window, and every other failure is retried at the next resolution. The mutex of the handle and the set serializes the callers of one process, so the archive's wait does not hold the catalogue, and the bun migration lock the processes sharing the database. */
 func EnsureMigrated(ctx context.Context, database *bun.DB) error {
     return ensureMigratedSet(ctx, database, Migrations, catalogMigrationSetName, migrationUnlockCommand, melodymysql.IsDuplicateKey, expectedSchemaOf(schemaUpStatementList), catalogueSchemaSetRecord)
 }

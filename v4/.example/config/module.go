@@ -4,7 +4,6 @@ import (
     "context"
 
     minio "github.com/minio/minio-go/v7"
-    melodyawss3 "github.com/precision-soft/melody/integrations/aws/s3/v4"
     melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v4"
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v4/encrypt"
     melodyopentelemetry "github.com/precision-soft/melody/integrations/opentelemetry/v4"
@@ -78,7 +77,6 @@ type Module struct {
 
     storageClient *minio.Client
     storageBucket string
-    storage       *melodyawss3.Storage
 
     /* the definitions the registry is built over, by its provider: the registry is the one door onto both connections, and the catalogue handle is its default manager. Both are opened at the first resolution of the service that publishes them, under that resolution's runtime, so a command that never reads the catalogue never dials it, an http process reading it at boot through the catalogue schema, and a pool that was opened is one the container resolved and therefore closes at its teardown; catalogueWired says the environment declared the catalogue. */
     databaseDefinitions []melodybunorm.ProviderDefinition

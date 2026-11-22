@@ -34,7 +34,7 @@ const (
     databaseArchiveManagerName = "archive"
 )
 
-/* buildDatabase declares this example's connections for one bunorm manager registry, so db:migrate and the repositories reach one pool. The catalogue on mysql and the archive on postgres follow their own empty-means-unwired keys, so every combination boots, and with neither no registry is registered and nothing is dialed. The registry itself is built by its provider, where the application's logger resolves, at boot, so a definition it refuses fails the boot; neither connection is opened here: each is opened at the first resolution of its service, so a process that never reads a database never dials it, and the container closes every pool it opened, which a handle opened at boot and never resolved escaped. A declared database that cannot be reached is refused at its first use, by name. */
+/* buildDatabase declares this example's connections for one bunorm manager registry, so db:migrate and the repositories reach one pool. The catalogue on mysql and the archive on postgres follow their own empty-means-unwired keys, so every combination boots, and with neither no registry is registered and nothing is dialed. The registry itself is built by its provider, where the application's logger resolves, at boot, so a definition it refuses fails the boot; neither connection is opened here: each is opened at the first resolution of its service, so a command that never reads a database never dials it, an http process opening the catalogue at boot through the catalogue schema, and the container closes every pool it opened, which a handle opened at boot and never resolved escaped. A declared database that cannot be reached is refused at its first use, by name. */
 func (instance *Module) buildDatabase() {
     definitionList := make([]melodybunorm.ProviderDefinition, 0, 2)
 
@@ -102,7 +102,7 @@ func (instance *Module) catalogProviderDefinition() (melodybunorm.ProviderDefini
     }, true
 }
 
-/* archiveProviderDefinition declares the postgres connection the reading archive is kept on, or answers that this environment did not ask for one. It is never the registry's default, because an unqualified consumer means the catalogue. Its retry budget is request-sized, as the catalogue's, since both are opened lazily by a request or a command and never at boot; only transient failures retry. */
+/* archiveProviderDefinition declares the postgres connection the reading archive is kept on, or answers that this environment did not ask for one. It is never the registry's default, because an unqualified consumer means the catalogue. Its retry budget is request-sized, as the catalogue's, since it is opened lazily by a request or a command and never at boot, and the catalogue is opened at boot only by an http process, under the same budget; only transient failures retry. */
 func (instance *Module) archiveProviderDefinition() (melodybunorm.ProviderDefinition, bool) {
     host := instance.parameterValue(parameterPgsqlHost)
     if "" == host {

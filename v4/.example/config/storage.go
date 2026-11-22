@@ -31,7 +31,6 @@ func (instance *Module) buildStorage() {
 
     instance.storageClient = client
     instance.storageBucket = bucket
-    instance.storage = melodyawss3.NewStorage(client, bucket, melodyawss3.StorageConfig{})
 }
 
 /* registerStorageServices registers the local-disk storage the example serves without S3; with S3 configured the aws.s3 module registers the storage and checks its bucket */

@@ -88,3 +88,22 @@ func TestErrServiceNotRegistered_IsTheCauseOfEveryNotRegisteredRefusal(t *testin
         t.Fatalf("expected the scope's refusal by name to carry the sentinel, got %v", getErr)
     }
 }
+
+type ambiguousTypeProbe interface {
+    probe()
+}
+
+func (instance *bootFailureModeProbe) probe() {}
+
+func TestErrServiceTypeAmbiguous_IsTheCauseOfAnAmbiguousByTypeRefusal(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    for _, serviceName := range []string{"app.first", "app.second"} {
+        MustRegister[ambiguousTypeProbe](serviceContainer, serviceName, func(resolver containercontract.Resolver) (ambiguousTypeProbe, error) {
+            return &bootFailureModeProbe{}, nil
+        }, RegisterOptions{TypeRegistrationRelaxed: true})
+    }
+
+    if _, getErr := FromResolverByType[ambiguousTypeProbe](t.Context(), serviceContainer); false == errors.Is(getErr, ErrServiceTypeAmbiguous) {
+        t.Fatalf("expected the ambiguous type refused with the sentinel, got %v", getErr)
+    }
+}

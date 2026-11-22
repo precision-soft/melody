@@ -73,6 +73,9 @@ var ErrBootFailureModeUnknown = errors.New("the boot failure mode is not known")
 /* ErrServiceNotRegistered is the cause of a resolution's refusal for a name or a type nothing registered, the container's and a scope's alike. */
 var ErrServiceNotRegistered = errors.New("service is not registered")
 
+/* ErrServiceTypeAmbiguous is the cause of a by-type resolution's refusal for a type more than one service is registered under, in the container or in a scope. */
+var ErrServiceTypeAmbiguous = errors.New("service type has multiple registrations")
+
 /* ErrContainerClosed is the cause of every refusal the container answers after Close, distinct from ErrScopeClosed. */
 var ErrContainerClosed = errors.New("container is closed")
 

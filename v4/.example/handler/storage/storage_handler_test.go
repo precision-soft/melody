@@ -23,6 +23,8 @@ import (
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    melodystorage "github.com/precision-soft/melody/v4/storage"
+    storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
 type failingReader struct{}
@@ -241,7 +243,7 @@ func (instance *errorRecordingLogger) recorded() []string {
 func getObject(t *testing.T, storage *melodyawss3.Storage) (int, []string) {
     t.Helper()
 
-    return answerOf(t, GetHandler(storage), "/storage/object?key=probe.txt")
+    return answerOf(t, GetHandler(lazyStorageOf(t, storage)), "/storage/object?key=probe.txt")
 }
 
 func answerOf(t *testing.T, handler melodyhttpcontract.Handler, target string) (int, []string) {
@@ -369,7 +371,7 @@ func TestLinkHandler_SignsTheTtlAskedAndAnswers404ForAnAbsentObject(t *testing.T
         "/storage/object/link?key=probe.txt&ttl=60": "60",
         "/storage/object/link?key=probe.txt":        "300",
     } {
-        status, _ := answerOf(t, LinkHandler(objectServer(t, []int{nethttp.StatusOK}, nethttp.StatusOK)), target)
+        status, _ := answerOf(t, LinkHandler(lazyStorageOf(t, objectServer(t, []int{nethttp.StatusOK}, nethttp.StatusOK))), target)
         if nethttp.StatusOK != status {
             t.Fatalf("%s: expected 200, got %d (%s)", target, status, lastGetBody)
         }
@@ -379,15 +381,55 @@ func TestLinkHandler_SignsTheTtlAskedAndAnswers404ForAnAbsentObject(t *testing.T
         }
     }
 
-    status, records := answerOf(t, LinkHandler(objectServer(t, []int{nethttp.StatusNotFound}, nethttp.StatusOK)), "/storage/object/link?key=probe.txt")
+    status, records := answerOf(t, LinkHandler(lazyStorageOf(t, objectServer(t, []int{nethttp.StatusNotFound}, nethttp.StatusOK))), "/storage/object/link?key=probe.txt")
     if nethttp.StatusNotFound != status || 0 != len(records) {
         t.Fatalf("expected 404 and no record for an absent object, got %d and %v", status, records)
     }
 }
 
 func TestLinkHandler_AnswersAStoreRefusalWith500AndJournalsIt(t *testing.T) {
-    status, records := answerOf(t, LinkHandler(objectServer(t, []int{nethttp.StatusForbidden}, nethttp.StatusOK)), "/storage/object/link?key=probe.txt")
+    status, records := answerOf(t, LinkHandler(lazyStorageOf(t, objectServer(t, []int{nethttp.StatusForbidden}, nethttp.StatusOK))), "/storage/object/link?key=probe.txt")
     if nethttp.StatusInternalServerError != status || 1 != len(records) {
         t.Fatalf("expected 500 and one record for a stat the store refused, got %d and %v", status, records)
+    }
+}
+
+/* lazyStorageOf publishes the storage under the application storage's name and answers the handle the routes are handed */
+func lazyStorageOf(t *testing.T, storage storagecontract.Storage) *melodycontainer.LazyService[storagecontract.Storage] {
+    t.Helper()
+
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
+    containerInstance.MustRegister(melodystorage.ServiceStorage, func(resolver melodycontainercontract.Resolver) (storagecontract.Storage, error) {
+        return storage, nil
+    }, melodycontainer.RegisterOptions{})
+
+    return melodycontainer.Lazy[storagecontract.Storage](containerInstance, melodystorage.ServiceStorage)
+}
+
+/* the storage is resolved at each request: one that cannot be built answers 503, and the next request builds it again, so a bucket check that failed at boot heals at the next use */
+func TestGetHandler_ResolvesTheStorageAtEachRequestAndAnswers503WhileItCannotBeBuilt(t *testing.T) {
+    built := objectServerServing(t, []int{nethttp.StatusOK}, nethttp.StatusOK, []byte("stored"))
+
+    attempts := 0
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
+    containerInstance.MustRegister(melodystorage.ServiceStorage, func(resolver melodycontainercontract.Resolver) (storagecontract.Storage, error) {
+        attempts = attempts + 1
+        if 1 == attempts {
+            return nil, errors.New("the bucket check did not answer")
+        }
+
+        return built, nil
+    }, melodycontainer.RegisterOptions{})
+
+    handler := GetHandler(melodycontainer.Lazy[storagecontract.Storage](containerInstance, melodystorage.ServiceStorage))
+
+    if status, _ := answerOf(t, handler, "/storage/object?key=probe.txt"); nethttp.StatusServiceUnavailable != status {
+        t.Fatalf("expected 503 while the storage cannot be built, got %d", status)
+    }
+
+    if status, _ := answerOf(t, handler, "/storage/object?key=probe.txt"); nethttp.StatusOK != status || 2 != attempts {
+        t.Fatalf("expected the next request to build the storage and answer 200, got %d after %d attempts", status, attempts)
     }
 }

@@ -714,7 +714,7 @@ func (instance *resolverContext) GetByType(ctx context.Context, targetType refle
                         "type":      canonicalTargetType.String(),
                         "conflicts": completeConflicts,
                     },
-                    nil,
+                    ErrServiceTypeAmbiguous,
                 )
             }
 
@@ -795,7 +795,7 @@ func (instance *resolverContext) GetByType(ctx context.Context, targetType refle
                     "type":      canonicalTargetType.String(),
                     "conflicts": completeConflicts,
                 },
-                nil,
+                ErrServiceTypeAmbiguous,
             )
         }
 

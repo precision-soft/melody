@@ -11,10 +11,10 @@ import (
     "time"
     "unicode/utf8"
 
-    melodyawss3 "github.com/precision-soft/melody/integrations/aws/s3/v4"
     "github.com/precision-soft/melody/v4/.example/presenter"
     melodybag "github.com/precision-soft/melody/v4/bag"
     melodybound "github.com/precision-soft/melody/v4/bound"
+    melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
@@ -22,8 +22,8 @@ import (
     storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
-/* PutHandler stores the request body under the given key in the object store. */
-func PutHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
+/* PutHandler stores the request body under the given key in the object store. The store is a container.Lazy handle on the application storage, resolved at each request, so a storage whose bucket check failed at boot is checked again by the next upload, and one that still cannot be built answers 503. */
+func PutHandler(storage *melodycontainer.LazyService[storagecontract.Storage]) melodyhttpcontract.Handler {
     return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         key := melodybag.StringOrDefault(request.Query(), "key", "")
         if "" == key {
@@ -50,7 +50,12 @@ func PutHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
             body = readBytes
         }
 
-        putErr := melodystorage.For(runtimeInstance, storage).Put(key, bytes.NewReader(body), int64(len(body)), storagecontract.PutOptions{ContentType: "application/octet-stream"})
+        storageInstance, resolveErr := storage.Resolve(runtimeInstance)
+        if nil != resolveErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusServiceUnavailable, "the object storage is unavailable", resolveErr), nil
+        }
+
+        putErr := melodystorage.For(runtimeInstance, storageInstance).Put(key, bytes.NewReader(body), int64(len(body)), storagecontract.PutOptions{ContentType: "application/octet-stream"})
         if nil != putErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not store the object", putErr), nil
         }
@@ -60,7 +65,7 @@ func PutHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
 }
 
 /* GetHandler answers the object stored under the given key: 404 when the store has no such object, 500 with the cause journaled when the store cannot be read. */
-func GetHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
+func GetHandler(storage *melodycontainer.LazyService[storagecontract.Storage]) melodyhttpcontract.Handler {
     return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         key := melodybag.StringOrDefault(request.Query(), "key", "")
         if "" == key {
@@ -71,7 +76,12 @@ func GetHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, objectKeyParentSegmentRefusal), nil
         }
 
-        object, getErr := melodystorage.For(runtimeInstance, storage).Get(key, storagecontract.GetOptions{})
+        storageInstance, resolveErr := storage.Resolve(runtimeInstance)
+        if nil != resolveErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusServiceUnavailable, "the object storage is unavailable", resolveErr), nil
+        }
+
+        object, getErr := melodystorage.For(runtimeInstance, storageInstance).Get(key, storagecontract.GetOptions{})
         if nil != getErr {
             if true == melodyexception.ChainIs(getErr, storagecontract.ErrObjectNotFound) {
                 return presenter.ApiError(runtimeInstance, request, nethttp.StatusNotFound, "object not found"), nil
@@ -136,7 +146,7 @@ func objectKeyCarriesParentSegment(key string) bool {
 var errInvalidLinkTtl = errors.New("ttl must be a whole number of seconds between 1 and 3600")
 
 /* LinkHandler answers a presigned download link to the object stored under the given key, so a client reads the bytes straight from the object store instead of through this application. The object must exist, and the link lives for ?ttl= seconds, five minutes when none is asked. */
-func LinkHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
+func LinkHandler(storage *melodycontainer.LazyService[storagecontract.Storage]) melodyhttpcontract.Handler {
     return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         key := melodybag.StringOrDefault(request.Query(), "key", "")
         if "" == key {
@@ -152,7 +162,12 @@ func LinkHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, ttlErr.Error()), nil
         }
 
-        boundStorage := melodystorage.For(runtimeInstance, storage)
+        storageInstance, resolveErr := storage.Resolve(runtimeInstance)
+        if nil != resolveErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusServiceUnavailable, "the object storage is unavailable", resolveErr), nil
+        }
+
+        boundStorage := melodystorage.For(runtimeInstance, storageInstance)
 
         if _, statErr := boundStorage.Stat(key); nil != statErr {
             if true == melodyexception.ChainIs(statErr, storagecontract.ErrObjectNotFound) {

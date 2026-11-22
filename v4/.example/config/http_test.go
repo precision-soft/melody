@@ -190,7 +190,8 @@ func TestRegisterHttpRoutes_PutsTheBackendSpendingDoorsBehindTheWriteBudget(t *t
     if nil != clientErr {
         t.Fatalf("client: %v", clientErr)
     }
-    moduleInstance.storage = melodyawss3.NewStorage(client, "melody-test", melodyawss3.StorageConfig{})
+    moduleInstance.storageClient = client
+    moduleInstance.storageBucket = "melody-test"
 
     router := melodyhttp.NewRouter()
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -261,7 +262,8 @@ func TestRegisterHttpRoutes_RegistersEachNamedDoorUnderItsPatternAndMethod(t *te
     if nil != clientErr {
         t.Fatalf("client: %v", clientErr)
     }
-    moduleInstance.storage = melodyawss3.NewStorage(client, "melody-test", melodyawss3.StorageConfig{})
+    moduleInstance.storageClient = client
+    moduleInstance.storageBucket = "melody-test"
 
     router := melodyhttp.NewRouter()
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -324,7 +326,8 @@ func TestRegisterHttpRoutes_HoldsTheIssueDoorToTheConfiguredBoundAndTheRevokeDoo
     if nil != clientErr {
         t.Fatalf("client: %v", clientErr)
     }
-    moduleInstance.storage = melodyawss3.NewStorage(client, "melody-test", melodyawss3.StorageConfig{})
+    moduleInstance.storageClient = client
+    moduleInstance.storageBucket = "melody-test"
 
     router := melodyhttp.NewRouter()
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})

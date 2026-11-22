@@ -27,6 +27,20 @@ type dependentBootProbe struct{}
 
 type thirdBootProbe struct{}
 
+type bootAmbiguousProbe interface {
+    probe()
+}
+
+func (instance *thirdBootProbe) probe() {}
+
+type plainClosingBootProbe struct{}
+
+func (instance *plainClosingBootProbe) probe() {}
+
+func (instance *plainClosingBootProbe) Close() error {
+    return nil
+}
+
 func newHttpBootFailureApplication(t *testing.T) *Application {
     t.Helper()
 
@@ -243,6 +257,29 @@ func TestBuildServicesBuiltAtBoot_AWiringRefusalFailsTheBootUnderTheDefaultMode(
                     _, resolveErr := runtime.FromRuntime[any](resolver.Runtime(), ServiceProcessContext)
 
                     return nil, resolveErr
+                }, containercontract.RegisterOptions{BuiltAtBoot: true})
+            },
+        },
+        {
+            name: "an ambiguous type",
+            register: func(applicationInstance *Application) {
+                for _, serviceName := range []string{"app.ambiguous.first", "app.ambiguous.second"} {
+                    applicationInstance.RegisterService(serviceName, func(resolver containercontract.Resolver) (bootAmbiguousProbe, error) {
+                        return &thirdBootProbe{}, nil
+                    }, containercontract.RegisterOptions{TypeRegistrationRelaxed: true})
+                }
+                applicationInstance.RegisterService("app.built.wiring", func(resolver containercontract.Resolver) (*warnedBootProbe, error) {
+                    _, resolveErr := runtime.FromRuntimeByType[bootAmbiguousProbe](resolver.Runtime())
+
+                    return nil, resolveErr
+                }, containercontract.RegisterOptions{BuiltAtBoot: true})
+            },
+        },
+        {
+            name: "a value that closes without the teardown's context",
+            register: func(applicationInstance *Application) {
+                applicationInstance.RegisterService("app.built.wiring", func(resolver containercontract.Resolver) (bootAmbiguousProbe, error) {
+                    return &plainClosingBootProbe{}, nil
                 }, containercontract.RegisterOptions{BuiltAtBoot: true})
             },
         },
