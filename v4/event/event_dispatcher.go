@@ -287,6 +287,11 @@ func (instance *EventDispatcher) removeSubscriberListener(entry subscriberRegist
 
 /* Dispatch runs the listeners of the event's name in priority order until propagation is stopped or a listener fails, a returned error and a recovered panic alike: the first failure ends the dispatch, and only the listeners behind it carrying a tag the event declared to run after a failure still run, each reading the failure through PriorFailure. The answer is the first failure itself, the failures joined in run order when a tagged listener failed too, the join reading already logged only when every failure does, or the refusal of a required listener that did not run, with the failures as its cause. */
 func (instance *EventDispatcher) Dispatch(runtimeInstance containercontract.Runtime, event eventcontract.Event) (eventcontract.Event, error) {
+    /* a tagged listener forwarding the view it received dispatches the caller's event: the prior failure belongs to the dispatch that selected it */
+    if view, isView := event.(*afterFailureEvent); true == isView {
+        event = view.event
+    }
+
     return instance.dispatchSafely(
         runtimeInstance,
         event,
@@ -542,21 +547,49 @@ func (instance *EventDispatcher) dispatch(runtimeInstance containercontract.Runt
         skippedListenerList := make([]listenerWithPriority, 0)
         ranAfterFailureCount := 0
 
-        /* only the listeners behind the failure, those ahead having run; the stop flag is not read here, since a failure is no deliberate stop and a tagged listener's stop does not cancel the cleanup behind it */
-        for _, entry := range listenerList[failedIndex+1:] {
-            if false == runsAfterFailure(entry.tags, runAfterFailureTags) {
-                skippedListenerList = append(skippedListenerList, entry)
+        func() {
+            defer func() {
+                recoveredValue := recover()
+                if nil == recoveredValue {
+                    return
+                }
 
-                continue
+                /* an exit leaves the cleanup pass and the dispatch at once, so the failures collected so far reach no caller: they are filed here, their only record */
+                if _, isExit := internal.RecoveredExitError(recoveredValue); true == isExit {
+                    logging.LogError(logger, joinListenerErrors(failureErrs))
+                }
+
+                panic(recoveredValue)
+            }()
+
+            /* only the listeners behind the failure, those ahead having run; the stop flag is not read here, since a failure is no deliberate stop and a tagged listener's stop does not cancel the cleanup behind it */
+            for _, entry := range listenerList[failedIndex+1:] {
+                if false == runsAfterFailure(entry.tags, runAfterFailureTags) {
+                    skippedListenerList = append(skippedListenerList, entry)
+
+                    continue
+                }
+
+                ranAfterFailureCount++
+
+                if true == debugEnabled {
+                    logger.Debug(
+                        "event listener started",
+                        loggingcontract.Context{
+                            "eventName":        eventName,
+                            "listenerName":     entryNameOf(entry),
+                            "listenerPriority": entry.priority,
+                            "afterFailure":     true,
+                        },
+                    )
+                }
+
+                afterFailureErr := instance.callListenerSafely(runtimeInstance, eventName, eventValue, newAfterFailureEvent(eventValue, joinListenerErrors(failureErrs)), entry, time.Now(), logger)
+                if nil != afterFailureErr {
+                    failureErrs = append(failureErrs, afterFailureErr)
+                }
             }
-
-            ranAfterFailureCount++
-
-            afterFailureErr := instance.callListenerSafely(runtimeInstance, eventName, eventValue, newAfterFailureEvent(eventValue, joinListenerErrors(failureErrs)), entry, time.Now(), logger)
-            if nil != afterFailureErr {
-                failureErrs = append(failureErrs, afterFailureErr)
-            }
-        }
+        }()
 
         failureErr := joinListenerErrors(failureErrs)
 

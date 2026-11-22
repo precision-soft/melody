@@ -78,6 +78,10 @@ func (instance *Provider) Open(runtimeInstance containercontract.Runtime, parame
 
 /* OpenForMigration opens the same database with the driver deadlines lifted: ReadTimeout and WriteTimeout are per-connection settings baked into the connector, sized for request traffic, and a DDL statement that legitimately runs past them — an ALTER TABLE adding constraints on a large table — is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back. The connect timeout stays armed (a down database must still fail fast), the pool is kept to the two connections a sequential migration run needs, and no connection is recycled mid-run — a lifetime rotation under a running statement is the same cut by another name. It runs under the runtime as Open does. */
 func (instance *Provider) OpenForMigration(runtimeInstance containercontract.Runtime, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "mysql.Provider.OpenForMigration"); nil != refuseErr {
+        return nil, refuseErr
+    }
+
     return instance.migrationProvider().Open(runtimeInstance, parameters, logger)
 }
 

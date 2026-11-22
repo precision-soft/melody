@@ -789,3 +789,46 @@ func TestEventDispatcherAdapter_InstallFloorListener_ForwardsAndRecordsOneInstal
     }
 }
 
+/* a declaration made directly on the wrapped dispatcher is the one dispatch reads, so the adapter's inspection reports it and the tagged listener it selects */
+func TestEventDispatcherAdapter_RegisteredEventsReportsADeclarationMadeOnTheWrappedDispatcher(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+    adapter := NewEventDispatcherAdapter(dispatcher)
+
+    dispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+    adapter.AddListener("e", testNoopEventListener, eventcontract.ListenerConfig{Name: "tagged", Tags: []string{"cleanup"}})
+
+    registeredEvents := adapter.RegisteredEvents()
+    if 1 != len(registeredEvents) {
+        t.Fatalf("expected the one event registered through the adapter, got %+v", registeredEvents)
+    }
+
+    registeredEvent := registeredEvents[0]
+    if false == registeredEvent.Declared || 1 != len(registeredEvent.RunAfterFailureTags) || "cleanup" != registeredEvent.RunAfterFailureTags[0] {
+        t.Fatalf("expected the wrapped dispatcher's declaration reported, got %+v", registeredEvent)
+    }
+
+    if false == registeredEvent.Listeners[0].RunsAfterFailure {
+        t.Fatalf("expected the tagged listener reported as running after a failure, got %+v", registeredEvent.Listeners[0])
+    }
+}
+
+func TestEventDispatcherAdapter_DeclareEventReachesTheWrappedDispatcher(t *testing.T) {
+    dispatcher, clockInstance := testNewEventDispatcher()
+    adapter := NewEventDispatcherAdapter(dispatcher)
+    recorder := newTagsTestRecorder()
+
+    adapter.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+    adapter.AddListener("e", recorder.listener("failing", errors.New("failure")), eventcontract.ListenerConfig{Priority: 30})
+    adapter.AddListener("e", recorder.listener("cleanup", nil), eventcontract.ListenerConfig{Priority: 10, Tags: []string{"cleanup"}})
+
+    _, _ = adapter.Dispatch(newEventDispatcherAdapterTestRuntime(t), NewEvent("e", nil, clockInstance.Now()))
+
+    if "failing,cleanup" != recorder.ranList() {
+        t.Fatalf("expected the adapter's declaration to reach the dispatch, ran %s", recorder.ranList())
+    }
+
+    refusal := requireTagsTestPanic(t, func() { dispatcher.DeclareEvent("e", eventcontract.EventConfig{}) })
+    if "e" != refusal.Context()["eventName"] {
+        t.Fatalf("expected the wrapped dispatcher to hold the declaration, got %v", refusal.Context())
+    }
+}

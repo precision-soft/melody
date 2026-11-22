@@ -2634,3 +2634,20 @@ func TestHttpClient_BufferedRequestEndsWhenItsContextIsCancelled(t *testing.T) {
         })
     }
 }
+
+/* each request door names itself when handed no runtime, the delegating ones included */
+func TestHttpClient_EveryRequestDoorNamesItselfWhenHandedNoRuntime(t *testing.T) {
+    client, clientErr := NewHttpClient(HttpClientConfig{})
+    if nil != clientErr {
+        t.Fatalf("client: %v", clientErr)
+    }
+
+    _, getErr := client.Get(nil, "http://127.0.0.1:1/", RequestOptions{})
+    _, deleteErr := client.Delete(nil, "http://127.0.0.1:1/", RequestOptions{})
+    _, postErr := client.Post(nil, "http://127.0.0.1:1/", map[string]string{}, RequestOptions{})
+    for door, doorErr := range map[string]error{"httpclient.HttpClient.Get": getErr, "httpclient.HttpClient.Delete": deleteErr, "httpclient.HttpClient.Post": postErr} {
+        if door != exception.LogContext(doorErr, exception.LogContextConfig{})["door"] {
+            t.Fatalf("expected the refusal to name %s, got %v", door, exception.LogContext(doorErr, exception.LogContextConfig{}))
+        }
+    }
+}

@@ -879,7 +879,7 @@ func (instance *Kernel) raiseException(
 
     if nil != answered {
         requestLogger.Error(
-            "a kernel.exception listener failed after setting a response, which is dropped",
+            "the kernel.exception dispatch failed with a response set, which is dropped",
             loggingcontract.Context{
                 "droppedResponseStatus":      answered.StatusCode(),
                 "droppedResponseContentType": internal.BoundDiagnosticText(answered.Headers().Get("Content-Type")),

@@ -17,7 +17,7 @@ const (
     RequestListenerPriority = 100
 )
 
-/* RegisterListeners wires both cors doors: the request listener that answers a preflight before the security chain, and the response listener that decorates every response the kernel publishes through kernel.response, security refusals and error pages included; the 500 the write step substitutes after that publish, for a non-zero status outside [100, 999] or a lost session write, and the 500 the outermost guard writes for a panic past the recovery go out undecorated. The Middleware decorates the handler path inside the chain. */
+/* RegisterListeners wires both cors doors: the request listener that answers a preflight before the security chain, and the response listener that decorates every response the kernel publishes through kernel.response, security refusals and error pages included; the 500 the write step substitutes after that publish, for a non-zero status outside [100, 999] or a lost session write, the 500 the outermost guard writes for a panic past the recovery, and a response published after a kernel.response listener above the response listener failed go out undecorated. The Middleware decorates the handler path inside the chain. */
 func RegisterListeners(eventDispatcher eventcontract.EventDispatcher, service *Service) {
     requireService(service, "cors.RegisterListeners")
 

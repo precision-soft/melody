@@ -167,8 +167,16 @@ func (instance *EventDispatcherAdapter) InstallFloorListener(
     return registration, true
 }
 
-/* RegisteredEvents reports a point-in-time view, which a concurrent registration or removal is observed mid-step in; dispatch never depends on it. It covers what was registered through the adapter: a listener added directly on the wrapped dispatcher is live but absent here. */
+/* RegisteredEvents reports a point-in-time view, which a concurrent registration or removal is observed mid-step in; dispatch never depends on it. It lists what was registered or declared through the adapter, a listener added directly on the wrapped dispatcher being live but absent here; a declaration is read from the wrapped dispatcher, which dispatch reads it from, so one made there directly is reported too. */
 func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.RegisteredEvent {
+    /* read before the adapter's lock, so a wrapped adapter's own lock is never taken under this one */
+    wrappedDeclarations := make(map[string][]string)
+    for _, wrappedEvent := range instance.eventDispatcher.RegisteredEvents() {
+        if true == wrappedEvent.Declared {
+            wrappedDeclarations[wrappedEvent.EventName] = wrappedEvent.RunAfterFailureTags
+        }
+    }
+
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
 
@@ -191,6 +199,10 @@ func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.Regis
         /* a copy is sorted, since the map-owned slice is shared by concurrent readers under RLock */
         registeredSlice := instance.listenerRegistrations[eventName]
         eventConfig, declared := instance.eventConfigs[eventName]
+        if wrappedTags, declaredOnTheWrapped := wrappedDeclarations[eventName]; true == declaredOnTheWrapped {
+            eventConfig = eventConfigEntry{runAfterFailureTags: wrappedTags}
+            declared = true
+        }
         listenerList := make([]adapterListenerRegistration, len(registeredSlice))
         copy(listenerList, registeredSlice)
 

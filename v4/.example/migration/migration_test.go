@@ -76,9 +76,9 @@ func TestUpSchemaTiesASessionRowToItsAccount(t *testing.T) {
     }
 }
 
-/* the enrollment goes with its account by the SCHEMA: a listener releases it on the deletion event too, but a
-   dispatch stops at the first listener that fails, and a row left behind starts the next holder of the recycled
-   identifier enrolled with the previous holder's secret. The key is declared on the DDL the up migration emits,
+/* the enrollment goes with its account by the SCHEMA: a tagged listener releases it on the deletion event too, even
+   after a listener ahead of it failed, but the release's own store can fail, and a row left behind starts the next
+   holder of the recycled identifier enrolled with the previous holder's secret. The key is declared on the DDL the up migration emits,
    and it can only be declared over a user table that already exists, which the order of the statements pins. */
 func TestUpSchemaTiesATwoFactorRowToItsAccount(t *testing.T) {
     if false == strings.Contains(createTwoFactorTableSql, "FOREIGN KEY (`user_identifier`) REFERENCES `melody_example_v4_user` (`id`) ON DELETE CASCADE") {

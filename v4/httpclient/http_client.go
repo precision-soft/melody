@@ -375,6 +375,10 @@ func redactAuthorityUserinfo(value string, authorityStart int) string {
 
 /* Get, like every request door, is bound to the runtime's context and refuses an absent runtime. */
 func (instance *HttpClient) Get(runtimeInstance containercontract.Runtime, urlString string, options RequestOptions) (httpclientcontract.Response, error) {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "httpclient.HttpClient.Get"); nil != refuseErr {
+        return nil, refuseErr
+    }
+
     return instance.Request(runtimeInstance, nethttp.MethodGet, urlString, options)
 }
 
@@ -394,6 +398,10 @@ func (instance *HttpClient) Patch(runtimeInstance containercontract.Runtime, url
 }
 
 func (instance *HttpClient) Delete(runtimeInstance containercontract.Runtime, urlString string, options RequestOptions) (httpclientcontract.Response, error) {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "httpclient.HttpClient.Delete"); nil != refuseErr {
+        return nil, refuseErr
+    }
+
     return instance.Request(runtimeInstance, nethttp.MethodDelete, urlString, options)
 }
 

@@ -682,6 +682,8 @@ func TestKernel_AnUnloggedFailureJoinedBesideALoggedPanicReachesTheJournal(t *te
 }
 
 func TestKernel_AJoinWhoseEveryFailureIsLoggedWritesNoSecondRecord(t *testing.T) {
+    taggedRan := false
+
     router := NewRouter()
     router.Handle(
         "/joined",
@@ -711,6 +713,8 @@ func TestKernel_AJoinWhoseEveryFailureIsLoggedWritesNoSecondRecord(t *testing.T)
     dispatcher.AddListener(
         kernelcontract.EventKernelRequest,
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+            taggedRan = true
+
             return exception.MarkLogged(exception.NewError("second listener failed logged", nil, nil))
         },
         eventcontract.ListenerConfig{Priority: 20, Tags: []string{"audit"}},
@@ -724,6 +728,10 @@ func TestKernel_AJoinWhoseEveryFailureIsLoggedWritesNoSecondRecord(t *testing.T)
 
     if nethttp.StatusInternalServerError != recorder.Code {
         t.Fatalf("expected the fail-closed 500, got %d", recorder.Code)
+    }
+
+    if false == taggedRan {
+        t.Fatalf("expected the tagged listener to run after the panic, so the join is what the kernel read")
     }
 
     recordingLogger.mutex.Lock()
@@ -790,7 +798,8 @@ func TestKernel_KernelRequestStoppingListenerThatAnswersStillFailsClosedBeforeAR
     }
 }
 
-func TestKernel_KernelRequestFailingMaySkipListenerThatAnswersStillFailsClosedBeforeARequiredListener(t *testing.T) {
+/* the refusal decides the status only when no required listener was skipped, so the 500 here proves the opt-out is not read for a listener that failed */
+func TestKernel_KernelRequestFailingMaySkipListenerThatRefusesStillFailsClosedBeforeARequiredListener(t *testing.T) {
     router := NewRouter()
     router.Handle(
         "/admin",
@@ -820,7 +829,7 @@ func TestKernel_KernelRequestFailingMaySkipListenerThatAnswersStillFailsClosedBe
                 return nil
             }
 
-            requestEvent.SetResponse(TextResponse(nethttp.StatusOK, "from the cache"))
+            requestEvent.Refuse(exception.Forbidden("not from the cache"))
 
             return errors.New("the cache listener's own failure")
         },
@@ -835,11 +844,7 @@ func TestKernel_KernelRequestFailingMaySkipListenerThatAnswersStillFailsClosedBe
     handler.ServeHTTP(recorder, request)
 
     if nethttp.StatusInternalServerError != recorder.Code {
-        t.Fatalf("expected the failing listener's response to be dropped for the error page, got %d", recorder.Code)
-    }
-
-    if true == strings.Contains(recorder.Body.String(), "from the cache") {
-        t.Fatalf("expected the cached body never to reach the writer, got %q", recorder.Body.String())
+        t.Fatalf("expected the fail-closed 500 rather than the refusal's 403, got %d", recorder.Code)
     }
 }
 
@@ -4788,7 +4793,7 @@ func TestKernel_AListenerThatPanicsAfterSettingAResponseDoesNotGetItServed(t *te
 
     found := false
     for _, record := range capture.failureRecords() {
-        if "a kernel.exception listener failed after setting a response, which is dropped" != record.message {
+        if "the kernel.exception dispatch failed with a response set, which is dropped" != record.message {
             continue
         }
 
@@ -5154,6 +5159,43 @@ func TestKernel_ARefusalBesideASkippedRequiredListenerFailsClosed(t *testing.T) 
             return nil
         },
         eventcontract.ListenerConfig{Required: true},
+    )
+
+    recorder := httptest.NewRecorder()
+    NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/guarded", nil))
+
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the fail-closed 500, got %d", recorder.Code)
+    }
+}
+
+/* a refusal made above a failing listener stands beside a skipped required listener, so the dispatch's refusal of the skip decides: 500, not the refusal's 403 */
+func TestKernel_ARefusalAboveAFailureAheadOfARequiredListenerFailsClosed(t *testing.T) {
+    serviceContainer := newHttpTestContainer()
+
+    eventDispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
+    eventDispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+            eventValue.Payload().(*KernelRequestEvent).Refuse(exception.Forbidden("not you"))
+
+            return nil
+        },
+        eventcontract.ListenerConfig{Priority: 50},
+    )
+    eventDispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+            return errors.New("the listener below the refusal failed")
+        },
+        eventcontract.ListenerConfig{Priority: 30},
+    )
+    eventDispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+            return nil
+        },
+        eventcontract.ListenerConfig{Priority: 10, Required: true},
     )
 
     recorder := httptest.NewRecorder()

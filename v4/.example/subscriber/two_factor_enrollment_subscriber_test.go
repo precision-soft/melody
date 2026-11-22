@@ -78,7 +78,7 @@ func (instance *refusingCache) Delete(runtimeInstance melodycontainercontract.Ru
     return errors.New("redis: connection refused")
 }
 
-/* the dispatcher ends a dispatch at the first listener that fails, and the composition root registers the cache subscriber before this one, so at the cache listener's own priority a redis outage at the deletion would leave the enrollment for the next holder of the identifier. The release outranks the cache listener on the deletion event, read off the two real subscribers, and with the cache refusing its first delete the enrollment is still released: the dispatch fails on the cache, after the row is gone. */
+/* the order is what runs first when nothing fails: in the application the release carries a tag the deletion declares, so it runs after a failing cache listener too, and this dispatcher, undeclared, pins the order alone. The release outranks the cache listener on the deletion event, read off the two real subscribers, and with the cache refusing its first delete the enrollment is still released: the dispatch fails on the cache, after the row is gone. */
 func TestTwoFactorEnrollmentSubscriber_ReleasesTheEnrollmentBeforeTheCacheListenerRuns(t *testing.T) {
     database, recorder := newRecordingDatabase()
     enrollmentSubscriber := NewTwoFactorEnrollmentSubscriber(fixedTwoFactorStore(twofactor.NewStore(database)))

@@ -1748,3 +1748,11 @@ func TestOpen_TheCancellationRefusalsCarryTheCallersCause(t *testing.T) {
         t.Fatalf("expected the backoff refusal to carry the cause and the cancellation, got %v", backoffErr)
     }
 }
+
+/* the migration door names itself when handed no runtime, not the open it delegates to */
+func TestProvider_OpenForMigrationNamesItselfWhenHandedNoRuntime(t *testing.T) {
+    _, openErr := NewProvider(ProviderConfig{}).OpenForMigration(nil, bunorm.ConnectionParameters{}, nil)
+    if "mysql.Provider.OpenForMigration" != exception.LogContext(openErr, exception.LogContextConfig{})["door"] {
+        t.Fatalf("expected the refusal to name the migration door, got %v", openErr)
+    }
+}
