@@ -25,6 +25,7 @@ type Message struct {
     DeliveryAttempts int       `bun:"delivery_attempts,notnull"`
     AvailableAt      time.Time `bun:"available_at,notnull"`
     CreatedAt        time.Time `bun:"created_at,notnull"`
+    SentAt           time.Time `bun:"sent_at,nullzero"`
     LastError        string    `bun:"last_error,nullzero"`
     ClaimToken       string    `bun:"claim_token,nullzero"`
 }
@@ -49,14 +50,46 @@ type Store struct {
     codec    MessageCodec
 }
 
-/* EnsureSchema creates the outbox table for demos and tests. Production code would express this through the bunorm migrate package. */
+/* EnsureSchema creates the outbox table for demos and tests, and adds sent_at to a table created before the column existed. Production code would express this through the bunorm migrate package. */
 func (instance *Store) EnsureSchema(ctx context.Context) error {
-    _, execErr := instance.database.NewCreateTable().
+    if _, execErr := instance.database.NewCreateTable().
         Model((*Message)(nil)).
         IfNotExists().
-        Exec(ctx)
+        Exec(ctx); nil != execErr {
+        return execErr
+    }
 
-    return execErr
+    return instance.ensureSentAtColumn(ctx)
+}
+
+/* information_schema answers on both supported backends, where ADD COLUMN IF NOT EXISTS is PostgreSQL's alone */
+func (instance *Store) ensureSentAtColumn(ctx context.Context) error {
+    schemaExpression := "current_schema()"
+    if "mysql" == instance.database.Dialect().Name().String() {
+        schemaExpression = "DATABASE()"
+    }
+
+    columns := 0
+    if scanErr := instance.database.NewRaw(
+        "SELECT count(*) FROM information_schema.columns WHERE table_schema = "+schemaExpression+" AND table_name = ? AND column_name = ?",
+        "melody_outbox",
+        "sent_at",
+    ).Scan(ctx, &columns); nil != scanErr {
+        return scanErr
+    }
+
+    if 0 < columns {
+        return nil
+    }
+
+    columnType := "TIMESTAMPTZ"
+    if "mysql" == instance.database.Dialect().Name().String() {
+        columnType = "DATETIME(6)"
+    }
+
+    _, alterErr := instance.database.NewRaw("ALTER TABLE melody_outbox ADD COLUMN sent_at " + columnType + " NULL").Exec(ctx)
+
+    return alterErr
 }
 
 /* Enqueue serializes a message and inserts it as a pending outbox row using the given executor — pass the caller's bun.Tx so the outbox write commits atomically with the business write, which is the whole point of the pattern. */
@@ -234,7 +267,7 @@ func (instance *Store) RecordDeliveryAttempt(runtimeInstance containercontract.R
     return deliveryAttempts, claimed, nil
 }
 
-/* MarkSent resolves the row as sent. Every resolution write is guarded on status in-flight and on the claim's fencing token, since a lapsed claim can be re-claimed back to in-flight by another instance and a status-only write would clobber that owner; with the token a stale run's write matches no row. */
+/* MarkSent resolves the row as sent and records the send time PruneSent judges. Every resolution write is guarded on status in-flight and on the claim's fencing token, since a lapsed claim can be re-claimed back to in-flight by another instance and a status-only write would clobber that owner; with the token a stale run's write matches no row. */
 func (instance *Store) MarkSent(runtimeInstance containercontract.Runtime, id int64, claimToken string) error {
     if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
         return refuseErr
@@ -245,6 +278,7 @@ func (instance *Store) MarkSent(runtimeInstance containercontract.Runtime, id in
     _, updateErr := instance.database.NewUpdate().
         Model((*Message)(nil)).
         Set("status = ?", StatusSent).
+        Set("sent_at = ?", time.Now()).
         Where("id = ?", id).
         Where("status = ?", StatusInFlight).
         Where("claim_token = ?", claimToken).
@@ -439,7 +473,7 @@ func (instance *Store) PruneSent(runtimeInstance containercontract.Runtime, opti
         Model((*Message)(nil)).
         Column("id").
         Where("status = ?", StatusSent).
-        Where("created_at < ?", options.SentBefore).
+        Where("sent_at < ?", options.SentBefore).
         Order("id ASC").
         Limit(limit).
         Scan(ctx, &ids)

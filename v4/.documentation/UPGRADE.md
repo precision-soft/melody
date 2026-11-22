@@ -89,6 +89,14 @@ The consume command's retry grows exponentially: 1s, 2s, 4s… capped at 1h, whe
 
 **Remedy.** Take `runtimeInstance containercontract.Runtime` first and read `runtimeInstance.Context()`; add the three doors, a release fenced by the claim token on the named in-flight rows. A caller holding a context builds its runtime with `runtime.NewRun(ctx, scope)` or derives one with `runtime.WithContext(runtimeInstance, ctx)`.
 
+### Outbox: the table records the send time, and the prune judges it
+
+**What changed.** The outbox table gains `sent_at`, the time [`MarkSent`](../../integrations/outbox/v4/store.go) resolves a row as sent, and `PruneSent` deletes the rows sent before `PruneSentOptions.SentBefore`, where it judged the enqueue time `created_at`. A sent row with no send time is never pruned. `EnsureSchema` adds the column to a table created without it.
+
+**Symptom.** A table managed by migrations and not altered fails `MarkSent` with the database's unknown-column error.
+
+**Remedy.** Add the column and backfill the rows already sent, on PostgreSQL `ALTER TABLE melody_outbox ADD COLUMN sent_at TIMESTAMPTZ NULL;` and on MySQL `ALTER TABLE melody_outbox ADD COLUMN sent_at DATETIME(6) NULL;`, then `UPDATE melody_outbox SET sent_at = created_at WHERE status = 'sent' AND sent_at IS NULL;`.
+
 ### Outbox: the module takes factories; one relay command constructor
 
 **What changed.** [`outbox.ModuleConfig`](../../integrations/outbox/v4/module.go) is `{Store, Relay, RelayCommand}`, where `Store` and `Relay` are the providers of `service.outbox.store` and `service.outbox.relay`, `func(resolver containercontract.Resolver) (*outbox.Store, error)` and `(*outbox.Relay, error)`, run at first resolution; the prebuilt `Store *Store` and `Relay *Relay`, `StoreFactory`, `RelayFactory` and the two "set exactly one" refusals are removed, and a nil `Relay` registers no relay and no command. [`NewRelayCommand(config)`](../../integrations/outbox/v4/relay_command.go) is the one constructor of `melody:outbox:relay`: it resolves `service.outbox.relay` from the run's scope at the first batch and keeps it for the run. `NewRelayCommandFromResolver`, `RegisterStoreService`, `RegisterRelayService` and the `outbox.ServiceRegistrar` interface are removed.

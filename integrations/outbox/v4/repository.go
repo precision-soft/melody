@@ -28,7 +28,7 @@ type Repository interface {
     /* RequeueDead returns dead rows to pending, available now, with attempts and delivery attempts reset to zero and last_error kept; empty Ids selects every dead row, bounded by Limit, and more Ids than Limit are refused. */
     RequeueDead(runtimeInstance containercontract.Runtime, options RequeueDeadOptions) (requeued int, err error)
 
-    /* PruneSent deletes sent rows enqueued before SentBefore, bounded by Limit; a zero SentBefore is refused before the store is touched. */
+    /* PruneSent deletes rows sent before SentBefore, judged on the send time MarkSent records, bounded by Limit; a sent row with no send time is never pruned; a zero SentBefore is refused before the store is touched. */
     PruneSent(runtimeInstance containercontract.Runtime, options PruneSentOptions) (pruned int, err error)
 }
 
@@ -39,7 +39,7 @@ type RequeueDeadOptions struct {
     Limit int
 }
 
-/* PruneSentOptions selects the sent rows PruneSent deletes: those enqueued before SentBefore, which may not be zero; Limit bounds the rows deleted, 0 meaning the store's maximum batch size. */
+/* PruneSentOptions selects the sent rows PruneSent deletes: those sent before SentBefore, which may not be zero; Limit bounds the rows deleted, 0 meaning the store's maximum batch size. */
 type PruneSentOptions struct {
     SentBefore time.Time
 

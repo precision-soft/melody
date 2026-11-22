@@ -563,7 +563,7 @@ func TestStore_RequeueDeadReturnsTheSelectedDeadRowsWithTheirCountersReset(t *te
     }
 }
 
-func TestStore_PruneSentDeletesOnlySentRowsEnqueuedBeforeTheCutOff(t *testing.T) {
+func TestStore_PruneSentDeletesOnlyRowsSentBeforeTheCutOff(t *testing.T) {
     store := outboxTestStore(t)
     runtimeInstance := outboxTestRuntime(context.Background())
 
@@ -585,8 +585,13 @@ func TestStore_PruneSentDeletesOnlySentRowsEnqueuedBeforeTheCutOff(t *testing.T)
         }
     }
 
+    /* the cut-off judges the send time: the first sent row was sent long ago, the second enqueued long ago and sent now, so only the first is pruned */
     old := time.Now().Add(-48 * time.Hour)
-    if _, updateErr := store.database.NewUpdate().Model((*Message)(nil)).Set("created_at = ?", old).Where("id IN (?)", bun.In([]int64{claimed[0].Id, claimed[2].Id})).Exec(context.Background()); nil != updateErr {
+    if _, updateErr := store.database.NewUpdate().Model((*Message)(nil)).Set("sent_at = ?", old).Where("id = ?", claimed[0].Id).Exec(context.Background()); nil != updateErr {
+        t.Fatalf("age the send: %v", updateErr)
+    }
+
+    if _, updateErr := store.database.NewUpdate().Model((*Message)(nil)).Set("created_at = ?", old).Where("id IN (?)", bun.In([]int64{claimed[1].Id, claimed[2].Id})).Exec(context.Background()); nil != updateErr {
         t.Fatalf("age rows: %v", updateErr)
     }
 
@@ -603,7 +608,12 @@ func TestStore_PruneSentDeletesOnlySentRowsEnqueuedBeforeTheCutOff(t *testing.T)
     remaining := 0
     countErr := store.database.NewSelect().Model((*Message)(nil)).ColumnExpr("count(*)").Where("id IN (?)", bun.In([]int64{claimed[0].Id, claimed[1].Id, claimed[2].Id, dead[0]})).Scan(context.Background(), &remaining)
     if nil != countErr || 3 != remaining {
-        t.Fatalf("expected the recent sent row, the old in-flight row and the old dead row kept, got %d: %v", remaining, countErr)
+        t.Fatalf("expected the row enqueued long ago and sent now, the old in-flight row and the old dead row kept, got %d: %v", remaining, countErr)
+    }
+
+    prunedRows := 0
+    if prunedErr := store.database.NewSelect().Model((*Message)(nil)).ColumnExpr("count(*)").Where("id = ?", claimed[0].Id).Scan(context.Background(), &prunedRows); nil != prunedErr || 0 != prunedRows {
+        t.Fatalf("expected the row sent long ago to be the one pruned, got %d: %v", prunedRows, prunedErr)
     }
 
     enqueueOutboxRows(t, store, 2)
@@ -685,5 +695,63 @@ func TestStore_RequeueDeadRefusesMoreIdsThanItsLimit(t *testing.T) {
     logContext := exception.LogContext(requeueErr, exception.LogContextConfig{})
     if "RequeueDeadOptions.Ids" != logContext["field"] {
         t.Fatalf("expected the refusal to name RequeueDeadOptions.Ids, got %v", logContext)
+    }
+}
+
+func TestStore_MarkSentRecordsTheSendTimeAndARowWithNoSendTimeIsNeverPruned(t *testing.T) {
+    store := outboxTestStore(t)
+    runtimeInstance := outboxTestRuntime(context.Background())
+
+    enqueueOutboxRows(t, store, 2)
+    claimed, claimErr := store.ClaimDueMessages(runtimeInstance, 2, time.Hour)
+    if nil != claimErr || 2 != len(claimed) {
+        t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
+    }
+
+    before := time.Now().Add(-time.Second)
+    for _, pending := range claimed {
+        if sentErr := store.MarkSent(runtimeInstance, pending.Id, pending.ClaimToken); nil != sentErr {
+            t.Fatalf("mark sent: %v", sentErr)
+        }
+    }
+
+    row := new(Message)
+    if selectErr := store.database.NewSelect().Model(row).Where("id = ?", claimed[0].Id).Scan(context.Background()); nil != selectErr {
+        t.Fatalf("select: %v", selectErr)
+    }
+
+    if true == row.SentAt.IsZero() || true == row.SentAt.Before(before) || true == row.SentAt.After(time.Now().Add(time.Second)) {
+        t.Fatalf("expected the send time recorded now, got %v", row.SentAt)
+    }
+
+    /* a row sent before the column existed carries no send time: it is kept, the upgrade guide backfilling it from created_at */
+    if _, updateErr := store.database.NewUpdate().Model((*Message)(nil)).Set("sent_at = NULL").Where("id = ?", claimed[1].Id).Exec(context.Background()); nil != updateErr {
+        t.Fatalf("clear the send time: %v", updateErr)
+    }
+
+    pruned, pruneErr := store.PruneSent(runtimeInstance, PruneSentOptions{SentBefore: time.Now().Add(time.Hour)})
+    if nil != pruneErr || 1 != pruned {
+        t.Fatalf("expected only the row with a send time pruned, got %d: %v", pruned, pruneErr)
+    }
+}
+
+func TestStore_EnsureSchemaAddsTheSendTimeToATableCreatedWithoutIt(t *testing.T) {
+    store := outboxTestStore(t)
+
+    if _, dropErr := store.database.NewRaw("ALTER TABLE melody_outbox DROP COLUMN sent_at").Exec(context.Background()); nil != dropErr {
+        t.Fatalf("drop the column: %v", dropErr)
+    }
+
+    if schemaErr := store.EnsureSchema(context.Background()); nil != schemaErr {
+        t.Fatalf("ensure schema: %v", schemaErr)
+    }
+
+    if schemaErr := store.EnsureSchema(context.Background()); nil != schemaErr {
+        t.Fatalf("ensure schema again: %v", schemaErr)
+    }
+
+    columns := 0
+    if scanErr := store.database.NewRaw("SELECT count(*) FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'melody_outbox' AND column_name = 'sent_at'").Scan(context.Background(), &columns); nil != scanErr || 1 != columns {
+        t.Fatalf("expected the column added once, got %d: %v", columns, scanErr)
     }
 }
