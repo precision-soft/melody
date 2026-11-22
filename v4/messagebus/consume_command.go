@@ -210,6 +210,8 @@ func (instance *ConsumeCommand) Run(
         )
     }
 
+    session.consumedTransportName = transportName
+
     concurrency := commandContext.Int("concurrency")
     if 0 >= concurrency {
         concurrency = 1
@@ -223,8 +225,10 @@ type consumeSession struct {
     bus              messagebuscontract.Bus
     transports       map[string]messagebuscontract.Transport
     failureTransport messagebuscontract.Transport
-    retryPolicy      resolvedRetryPolicy
-    shutdownTimeout  time.Duration
+    /* consumedTransportName is the name the run reads from, so the failure transport is told apart by name whatever its kind */
+    consumedTransportName string
+    retryPolicy           resolvedRetryPolicy
+    shutdownTimeout       time.Duration
 }
 
 func (instance *ConsumeCommand) newConsumeSession(runtimeInstance containercontract.Runtime) (*consumeSession, error) {
@@ -454,7 +458,7 @@ func (instance *consumeSession) consume(
     instance.logError(runtimeInstance, "message handling exhausted retries", dispatchErr)
 
     /* a message exhausted on the failure transport itself is not sent back to it: it would be received exhausted again, without end */
-    if true == isSameTransport(instance.failureTransport, transport) {
+    if true == instance.consumesTheFailureTransport(transport) {
         if logger := logging.LoggerFromRuntime(runtimeInstance); false == internal.IsNilInterface(logger) {
             logger.Warning(
                 "the message is exhausted on the failure transport itself; it is discarded unless the transport dead-letters it",
@@ -512,6 +516,15 @@ func (instance *consumeSession) consume(
     if nackErr := transport.Nack(runtimeInstance, envelopeInstance, messagebuscontract.NackConfig{}); nil != nackErr {
         instance.logError(runtimeInstance, "message dead-letter failed", nackErr)
     }
+}
+
+/* consumesTheFailureTransport answers whether the run reads the failure transport: by name for a run of the command, by identity for a session handed a transport directly */
+func (instance *consumeSession) consumesTheFailureTransport(transport messagebuscontract.Transport) bool {
+    if "" != instance.retryPolicy.FailureTransportName && instance.consumedTransportName == instance.retryPolicy.FailureTransportName {
+        return true
+    }
+
+    return isSameTransport(instance.failureTransport, transport)
 }
 
 /* isSameTransport reports two transports that are one pointer; a transport of another kind is never read as the same. */

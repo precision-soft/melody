@@ -62,34 +62,42 @@ func (instance *Store) EnsureSchema(ctx context.Context) error {
     return instance.ensureSentAtColumn(ctx)
 }
 
-/* information_schema answers on both supported backends, where ADD COLUMN IF NOT EXISTS is PostgreSQL's alone */
+/* PostgreSQL adds the column only when it is missing, in one statement; MySQL has no such form, so the column is looked up and, when a replica added it in between, the duplicate is read back as done */
 func (instance *Store) ensureSentAtColumn(ctx context.Context) error {
-    schemaExpression := "current_schema()"
-    if "mysql" == instance.database.Dialect().Name().String() {
-        schemaExpression = "DATABASE()"
+    if "mysql" != instance.database.Dialect().Name().String() {
+        _, alterErr := instance.database.NewRaw("ALTER TABLE melody_outbox ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ NULL").Exec(ctx)
+
+        return alterErr
     }
 
+    present, presentErr := instance.mysqlSentAtColumnPresent(ctx)
+    if nil != presentErr || true == present {
+        return presentErr
+    }
+
+    /* DATETIME, the type bun gives every time column of the table on MySQL, so a created and an upgraded table agree */
+    if _, alterErr := instance.database.NewRaw("ALTER TABLE melody_outbox ADD COLUMN sent_at DATETIME NULL").Exec(ctx); nil != alterErr {
+        if presentAfter, _ := instance.mysqlSentAtColumnPresent(ctx); true == presentAfter {
+            return nil
+        }
+
+        return alterErr
+    }
+
+    return nil
+}
+
+func (instance *Store) mysqlSentAtColumnPresent(ctx context.Context) (bool, error) {
     columns := 0
     if scanErr := instance.database.NewRaw(
-        "SELECT count(*) FROM information_schema.columns WHERE table_schema = "+schemaExpression+" AND table_name = ? AND column_name = ?",
+        "SELECT count(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?",
         "melody_outbox",
         "sent_at",
     ).Scan(ctx, &columns); nil != scanErr {
-        return scanErr
+        return false, scanErr
     }
 
-    if 0 < columns {
-        return nil
-    }
-
-    columnType := "TIMESTAMPTZ"
-    if "mysql" == instance.database.Dialect().Name().String() {
-        columnType = "DATETIME(6)"
-    }
-
-    _, alterErr := instance.database.NewRaw("ALTER TABLE melody_outbox ADD COLUMN sent_at " + columnType + " NULL").Exec(ctx)
-
-    return alterErr
+    return 0 < columns, nil
 }
 
 /* Enqueue serializes a message and inserts it as a pending outbox row using the given executor — pass the caller's bun.Tx so the outbox write commits atomically with the business write, which is the whole point of the pattern. */

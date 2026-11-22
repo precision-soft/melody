@@ -16,7 +16,7 @@ type Bound struct {
     storageInstance storagecontract.Storage
 }
 
-/* For binds the storage to the runtime; it allocates nothing and never panics. A nil storage is refused by the first door called; a nil runtime is handed to the backend, whose to refuse it is, and no shipped backend refuses it yet. */
+/* For binds the storage to the runtime; it allocates nothing and never panics. A nil storage is refused by the first door called; a nil runtime is handed to the backend, and both shipped backends refuse it first at every door. */
 func For(runtimeInstance containercontract.Runtime, storageInstance storagecontract.Storage) Bound {
     return Bound{
         runtimeInstance: runtimeInstance,

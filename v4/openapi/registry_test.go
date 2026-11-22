@@ -138,7 +138,7 @@ func TestRegistry_ALateDescribeNamesTheRouteInItsRefusal(t *testing.T) {
 
 type descriptorCopyBody struct{}
 
-/* Describe stored the caller's Tags and Responses slices by reference and Get handed them back the same way, so a tag list reused across routes rewrote every earlier description and a reader of Get could write into the registry; both doors copy. The double hands over its own slices deliberately — nothing in the package copies on the way in. */
+/* Describe and Get each copy Tags and Responses, so a caller's later write and a reader of Get never reach the stored descriptor; the test hands over its own slices and writes into them after the call. */
 func TestRegistry_DescribeAndGetKeepNoReferenceToTheCallersTagsAndResponses(t *testing.T) {
     registry := NewRegistry()
 

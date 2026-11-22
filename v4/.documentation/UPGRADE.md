@@ -93,9 +93,9 @@ The consume command's retry grows exponentially: 1s, 2s, 4s… capped at 1h, whe
 
 **What changed.** The outbox table gains `sent_at`, the time [`MarkSent`](../../integrations/outbox/v4/store.go) resolves a row as sent, and `PruneSent` deletes the rows sent before `PruneSentOptions.SentBefore`, where it judged the enqueue time `created_at`. A sent row with no send time is never pruned. `EnsureSchema` adds the column to a table created without it.
 
-**Symptom.** A table managed by migrations and not altered fails `MarkSent` with the database's unknown-column error.
+**Symptom.** On a table managed by migrations and not altered, `Enqueue` fails first, inside the business transaction that calls it, then `ClaimDueMessages`, each with the database's unknown-column error, since the row model names `sent_at` in the insert and the claim's select.
 
-**Remedy.** Add the column and backfill the rows already sent, on PostgreSQL `ALTER TABLE melody_outbox ADD COLUMN sent_at TIMESTAMPTZ NULL;` and on MySQL `ALTER TABLE melody_outbox ADD COLUMN sent_at DATETIME(6) NULL;`, then `UPDATE melody_outbox SET sent_at = created_at WHERE status = 'sent' AND sent_at IS NULL;`.
+**Remedy.** Alter the table BEFORE the new binary is deployed, so no business write meets the missing column: on PostgreSQL `ALTER TABLE melody_outbox ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ NULL;` and on MySQL `ALTER TABLE melody_outbox ADD COLUMN sent_at DATETIME NULL;`, the type bun gives the table's other time columns there, then `UPDATE melody_outbox SET sent_at = created_at WHERE status = 'sent' AND sent_at IS NULL;`.
 
 ### Outbox: the module takes factories; one relay command constructor
 
@@ -450,9 +450,9 @@ The six `service.<module>` names of a module's principal service, `service.cache
 
 ### Static files: `MELODY_STATIC_CACHE_DISABLED` replaces `MELODY_STATIC_ENABLE_CACHE`
 
-**What changed.** The built-in file server's cache switch is `MELODY_STATIC_CACHE_DISABLED`, parameter `kernel.static.cache_disabled`, `false` by default, read through [`HttpConfiguration.StaticCacheDisabled()`](../config/contract/http.go), which replaces `StaticEnableCache()`; `StaticEnableCacheKey` and `KernelStaticEnableCache` are `StaticCacheDisabledKey` and `KernelStaticCacheDisabled`. `MELODY_STATIC_ENABLE_CACHE` is retired. The disabled cache wins over a max age set beside it: a `.env` artifact's line, blank or `3600` included, is named with the switch in the `http.static.cacheMaxAgeIgnored` boot warning an http process writes, and one an override of `kernel.static.cache_max_age` sets names the switch and the overridden parameter, where it was dropped without a word.
+**What changed.** The built-in file server's cache switch is `MELODY_STATIC_CACHE_DISABLED`, parameter `kernel.static.cache_disabled`, `false` by default, read through [`HttpConfiguration.StaticCacheDisabled()`](../config/contract/http.go), which replaces `StaticEnableCache()`; `StaticEnableCacheKey` and `KernelStaticEnableCache` are `StaticCacheDisabledKey` and `KernelStaticCacheDisabled`. `MELODY_STATIC_ENABLE_CACHE` is retired. The disabled cache wins over a valid max age set beside it, a `.env` artifact's line, blank or `3600` included: the `http.static.cacheMaxAgeIgnored` boot warning an http process writes names each value where it came from, the key of a `.env` line under `environmentKeys` and the parameter of an override under `parameterNames`, where the max age was dropped without a word.
 
-**Symptom.** A boot whose `.env` still sets `MELODY_STATIC_ENABLE_CACHE` fails with `the environment key MELODY_STATIC_ENABLE_CACHE is retired: rename it to MELODY_STATIC_CACHE_DISABLED, and the value inverts: MELODY_STATIC_ENABLE_CACHE=false is MELODY_STATIC_CACHE_DISABLED=true`. A boot that sets `MELODY_STATIC_CACHE_DISABLED=true` beside `MELODY_STATIC_CACHE_MAX_AGE` fails with `the static cache max age is set beside the disabled static cache`. A call of `StaticEnableCache()` no longer compiles.
+**Symptom.** A boot whose `.env` still sets `MELODY_STATIC_ENABLE_CACHE` fails with `the environment key MELODY_STATIC_ENABLE_CACHE is retired: rename it to MELODY_STATIC_CACHE_DISABLED, and the value inverts: MELODY_STATIC_ENABLE_CACHE=false is MELODY_STATIC_CACHE_DISABLED=true`. A boot that sets `MELODY_STATIC_CACHE_DISABLED=true` beside `MELODY_STATIC_CACHE_MAX_AGE` writes the `http.static.cacheMaxAgeIgnored` boot warning. A call of `StaticEnableCache()` no longer compiles.
 
 **Remedy.** **Invert the value when renaming the key**: `MELODY_STATIC_ENABLE_CACHE=false` is `MELODY_STATIC_CACHE_DISABLED=true`, and `MELODY_STATIC_ENABLE_CACHE=true` is the default, the line dropped or `MELODY_STATIC_CACHE_DISABLED=false`. Drop the max age from a file that disables the cache. Read `StaticCacheDisabled()` where `false == StaticEnableCache()` was read.
 
@@ -1724,7 +1724,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 ### Messagebus: the consume command is built from one struct, and the retry policy is bound limits whose zero value is the default
 
-**What changed.** [`NewConsumeCommand`](../messagebus/consume_command.go) takes a `ConsumeCommandConfig{Retry, ShutdownTimeout}` and resolves the bus and the transports at run time (see the section on one constructor per command). [`RetryPolicy`](../messagebus/consume_command.go) takes `MaxRetries` and `MaxDeadLetterAttempts` as `bound.Count` and `Backoff` as a `bound.Backoff` and `FailureRequeueDelay` as a `bound.Duration`, each left out taking its default: `MaxRetries` 3, `bound.Of(0)` for no retry; `Backoff` 1s doubling to 1h, at least 1ms; `FailureRequeueDelay` 5s, now the delay of every requeue after the failure transport rejected an exhausted message, where the third major used the next backoff step whenever `BaseDelay` was positive; `MaxDeadLetterAttempts` 5, the message nacked without requeue at the fifth failed dead-letter routing, at least 1, `bound.UnlimitedCount()` to requeue until the failure transport recovers; `ShutdownTimeout` 30s. In the third major a zero `RetryPolicy` meant no retry, an immediate requeue and requeues for ever, so a container-registered policy naming only its `FailureTransport` disabled the retries. A value below its minimum or an unlimited one where the field does not admit it is refused naming the field, a typed-nil `FailureTransport` is refused where it was read as none, and a container-registered policy so refused is the run's error. `NewConsumeCommandWithRetry` and `WithShutdownGrace` are removed.
+**What changed.** [`NewConsumeCommand`](../messagebus/consume_command.go) takes a `ConsumeCommandConfig{Retry, ShutdownTimeout}` and resolves the bus and the transports at run time (see the section on one constructor per command). [`RetryPolicy`](../messagebus/consume_command.go) takes `MaxRetries` and `MaxDeadLetterAttempts` as `bound.Count` and `Backoff` as a `bound.Backoff` and `FailureRequeueDelay` as a `bound.Duration`, each left out taking its default: `MaxRetries` 3, `bound.Of(0)` for no retry; `Backoff` 1s doubling to 1h, at least 1ms; `FailureRequeueDelay` 5s, now the delay of every requeue after the failure transport rejected an exhausted message, where the third major used the next backoff step whenever `BaseDelay` was positive; `MaxDeadLetterAttempts` 5, the message nacked without requeue at the fifth failed dead-letter routing, at least 1, `bound.UnlimitedCount()` to requeue until the failure transport recovers; `ShutdownTimeout` 30s. In the third major a zero `RetryPolicy` meant no retry, an immediate requeue and requeues for ever, so a container-registered policy naming only its `FailureTransport` disabled the retries. A value below its minimum or an unlimited one where the field does not admit it is refused naming the field, the failure transport is named by `FailureTransportName`, a padded name refused by name, and a policy the container still carries is read by nothing, named in the `messagebus.retryPolicyServiceIgnored` boot warning. `NewConsumeCommandWithRetry` and `WithShutdownGrace` are removed.
 
 **Symptom.** `NewConsumeCommand(bus, transports)`, `NewConsumeCommandWithRetry(...)`, `NewConsumeCommandFromContainer()`, `.WithShutdownGrace(d)` and `RetryPolicy{MaxRetries: 2}` no longer compile. A `RetryPolicy{}` now retries three times with a 1s backoff and nacks an exhausted message without requeue at its fifth failed dead-letter routing.
 
@@ -1832,7 +1832,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **Symptom.** `translator.Trans(…)`, `NewManager(catalogs, "en", fallbacks)` and `loader.Load()` no longer compile. A manager handed catalogs and no fallback locale panics at construction naming `ManagerConfig.FallbackLocales`.
 
-**Remedy.** `message, translateErr := translator.Translate("greeting", translationcontract.TranslateConfig{Parameters: map[string]any{"name": name}, Locale: locale})`; where the third major printed the id of a missing message, keep `message` when `errors.Is(translateErr, translation.ErrMessageNotFound)` and treat any other error as a failure. `NewManager([]translationcontract.Catalog{english, romanian}, translation.ManagerConfig{DefaultLocale: "en", FallbackLocales: fallbacks})`, and `loader.Load(ctx)`.
+**Remedy.** `message, translateErr := translator.Translate("greeting", translationcontract.TranslateConfig{Parameters: map[string]any{"name": name}, Locale: locale})`; where the third major printed the id of a missing message, keep `message` when `errors.Is(translateErr, translation.ErrMessageNotFound)` and treat any other error as a failure. `translation.NewManager(translation.ManagerConfig{Catalogs: []translationcontract.Catalog{english, romanian}, FallbackLocales: []string{configuration.Http().DefaultLocale()}})`, the list ending on the default locale, and `loader.Load(ctx)`.
 
 ### Container: a waiter builds again when the first caller left
 
@@ -1841,6 +1841,14 @@ A waiter is released by what it waits in. The container's `Close` releases every
 **Symptom.** A provider runs a second time after its first caller hung up during its first run; a request that waited behind a cancelled one now answers the service where it answered "service creation failed".
 
 **Remedy.** None for a provider that is safe to run again. A provider with a side effect that must not repeat after a failed run (a non-idempotent remote call) makes it idempotent or records it before failing.
+
+### Storage: both backends refuse a nil runtime first
+
+**What changed.** Every door of [`LocalStorage`](../storage/local.go) and of the [aws/s3 `Storage`](../../integrations/aws/s3/v4/storage.go) refuses a nil runtime, and one carrying no context, before anything else, answering `the runtime is nil or carries no context`: the local storage touches no file and the S3 backend sends no request. The local doors answered without a runtime before, and the S3 backend dereferenced it.
+
+**Symptom.** A call such as `local.PresignedUrl(nil, key, config)` or `local.Get(nil, key, options)` answers the runtime refusal where it answered the door's own result.
+
+**Remedy.** Hand the door the caller's runtime, or bind the storage once with `storage.FromRuntime(runtimeInstance, name)` and call the bound view.
 
 ### Messagebus: the failure transport is named, not handed over
 

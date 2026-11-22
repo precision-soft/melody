@@ -3,6 +3,7 @@ package openapi
 import (
     "context"
     "encoding/json"
+    "fmt"
     "io"
     nethttp "net/http"
     "strings"
@@ -11,6 +12,7 @@ import (
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
+    "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
 )
@@ -144,4 +146,31 @@ func registerSpecificationServices(serviceContainer containercontract.Container,
 
 func jsonContains(raw json.RawMessage, fragment string) bool {
     return true == strings.Contains(string(raw), "\""+fragment+"\"")
+}
+
+/* the registry is the document's source, so a mount over a container that registers none fails the request naming the service rather than serve an undescribed document */
+func TestSpecificationHandler_AContainerWithNoRegistryFailsTheRequestNamingTheService(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    serviceContainer.MustRegister(
+        melodyhttp.ServiceRouter,
+        func(resolver containercontract.Resolver) (httpcontract.Router, error) {
+            return melodyhttp.NewRouter(), nil
+        },
+        container.RegisterOptions{},
+    )
+
+    recovered := func() (recovered any) {
+        defer func() {
+            recovered = recover()
+        }()
+
+        _, _ = SpecificationHandler()(runtime.NewRequest(context.Background(), serviceContainer.NewScope()), nil, nil)
+
+        return nil
+    }()
+
+    recoveredErr, isError := recovered.(error)
+    if false == isError || false == strings.Contains(fmt.Sprintf("%+v", exception.LogContext(recoveredErr, exception.LogContextConfig{})), ServiceOpenApiRegistry) {
+        t.Fatalf("expected a refusal naming %s, got %v", ServiceOpenApiRegistry, recovered)
+    }
 }

@@ -1793,7 +1793,7 @@ func TestStorage_GetRefusesANegativeRangeBeforeAskingTheBucket(t *testing.T) {
     }
 }
 
-/* every door refuses a nil runtime before any request leaves, where the backend dereferenced it */
+/* every door refuses a nil runtime before any request leaves */
 func TestStorage_EveryDoorRefusesANilRuntimeFirst(t *testing.T) {
     recorder := newRecordingObjectServer(t)
     store := recorder.newStorage(t)

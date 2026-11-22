@@ -3,6 +3,7 @@ package messagebus
 import (
     "errors"
     "context"
+    "io"
     "strings"
     "sync"
     "sync/atomic"
@@ -391,6 +392,9 @@ func TestNewConsumeCommand_RefusesAFieldOutsideItsRuleByName(t *testing.T) {
         "shutdown timeout below 1ms":      {ConsumeCommandConfig{ShutdownTimeout: bound.Of(time.Microsecond)}, "the limit is below its minimum", "ConsumeCommandConfig.ShutdownTimeout"},
         "shutdown timeout unlimited":      {ConsumeCommandConfig{ShutdownTimeout: bound.UnlimitedDuration()}, "the limit does not admit unlimited", "ConsumeCommandConfig.ShutdownTimeout"},
         "padded failure transport name":   {ConsumeCommandConfig{Retry: RetryPolicy{FailureTransportName: " failed"}}, "retry policy failure transport name has surrounding whitespace", "RetryPolicy.FailureTransportName"},
+        "trailing padded failure name":    {ConsumeCommandConfig{Retry: RetryPolicy{FailureTransportName: "failed "}}, "retry policy failure transport name has surrounding whitespace", "RetryPolicy.FailureTransportName"},
+        "tab padded failure name":         {ConsumeCommandConfig{Retry: RetryPolicy{FailureTransportName: "\tfailed"}}, "retry policy failure transport name has surrounding whitespace", "RetryPolicy.FailureTransportName"},
+        "blank failure name":              {ConsumeCommandConfig{Retry: RetryPolicy{FailureTransportName: " "}}, "retry policy failure transport name has surrounding whitespace", "RetryPolicy.FailureTransportName"},
     }
 
     for name, testCase := range cases {
@@ -1312,5 +1316,100 @@ func TestConsume_TheFailureTransportIsTheRegisteredTransportItsNameNames(t *test
     none, noneErr := newConsumeCommandOver(NewManager("default", nil), ConsumeCommandConfig{}).newConsumeSession(nil)
     if nil != noneErr || nil != none.failureTransport {
         t.Fatalf("expected no failure transport without a name, got %v %v", none, noneErr)
+    }
+}
+
+/* the failure transport is told apart by name: a run reading the transport the policy names discards the exhausted message rather than send it back, whatever the transport's kind */
+func TestConsume_ARunReadingTheFailureTransportByNameDoesNotSendItBack(t *testing.T) {
+    command, runtimeInstance := newAlwaysFailingConsumeCommand(t, RetryPolicy{
+        MaxRetries:            bound.Of(0),
+        FailureTransportName:  "failed",
+        MaxDeadLetterAttempts: bound.UnlimitedCount(),
+        Backoff:               bound.Backoff{Initial: bound.Of(time.Millisecond)},
+    })
+
+    session := mustConsumeSession(command, runtimeInstance)
+    session.consumedTransportName = "failed"
+
+    source := &recordingNackTransport{}
+    session.consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}, nil))
+    if 1 != source.nackCount || true == source.nackRequeue {
+        t.Fatalf("expected the message nacked without requeue on the failure transport itself, got nackCount=%d requeue=%v", source.nackCount, source.nackRequeue)
+    }
+}
+
+/* valueTransport is a transport of value kind, which no identity comparison can tell apart, recording what is sent to it */
+type valueTransport struct {
+    inner *InMemoryTransport
+    sent  *atomic.Int64
+}
+
+func (instance valueTransport) Send(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope) error {
+    instance.sent.Add(1)
+
+    return instance.inner.Send(runtimeInstance, envelope)
+}
+
+func (instance valueTransport) Receive(runtimeInstance containercontract.Runtime) (messagebuscontract.Subscription, error) {
+    return instance.inner.Receive(runtimeInstance)
+}
+
+func (instance valueTransport) Ack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope) error {
+    return instance.inner.Ack(runtimeInstance, envelope)
+}
+
+func (instance valueTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, config messagebuscontract.NackConfig) error {
+    return instance.inner.Nack(runtimeInstance, envelope, config)
+}
+
+func (instance valueTransport) CloseWithContext(closeContext context.Context) error {
+    return instance.inner.CloseWithContext(closeContext)
+}
+
+/* a run of the command reading the transport its policy names as the failure transport discards an exhausted message rather than send it back, even for a transport of value kind */
+func TestConsumeCommand_ARunOfTheFailureTransportOfValueKindDoesNotSendItBack(t *testing.T) {
+    failure := valueTransport{inner: NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(8)}), sent: &atomic.Int64{}}
+
+    locator := NewHandlerLocator()
+    RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
+        return exception.NewError("handler always fails", nil, nil)
+    })
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    serviceContainer.MustRegister(ServiceBus, func(resolver containercontract.Resolver) (messagebuscontract.Bus, error) {
+        return NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})}), nil
+    }, container.RegisterOptions{})
+    serviceContainer.MustRegister(ServiceTransports, func(resolver containercontract.Resolver) (map[string]messagebuscontract.Transport, error) {
+        return map[string]messagebuscontract.Transport{"failed": failure}, nil
+    }, container.RegisterOptions{})
+
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
+    if sendErr := failure.inner.Send(runtimeInstance, NewEnvelope(consumeTestMessage{Value: 7}, nil)); nil != sendErr {
+        t.Fatalf("send: %v", sendErr)
+    }
+
+    command := NewConsumeCommand(ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(0), FailureTransportName: "failed"}})
+
+    var runErr error
+    engineCommand := &clicontract.CommandContext{
+        Name:           command.Name(),
+        Flags:          command.Flags(),
+        Writer:         io.Discard,
+        ErrWriter:      io.Discard,
+        ExitErrHandler: func(context.Context, *clicontract.CommandContext, error) {},
+        Action: func(_ context.Context, actionCommand *clicontract.CommandContext) error {
+            runErr = command.Run(runtimeInstance, actionCommand)
+
+            return runErr
+        },
+    }
+    _ = engineCommand.Run(context.Background(), []string{command.Name(), "--transport=failed", "--limit=1"})
+
+    if nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    if 0 != failure.sent.Load() {
+        t.Fatalf("expected nothing sent back to the failure transport, got %d sends", failure.sent.Load())
     }
 }

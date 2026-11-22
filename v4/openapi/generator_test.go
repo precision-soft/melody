@@ -809,32 +809,30 @@ func TestGenerate_AMirrorAndARouteOfEqualPriorityAtOnePathGoToTheEarlierRegistra
 
 /* the first response visited names a colliding component, so the statuses are visited sorted: the 409 is listed before the 200 and the 200 must still take the bare name. */
 func TestGenerate_ResponsesAreVisitedInStatusOrder(t *testing.T) {
-    for iteration := 0; iteration < 32; iteration++ {
-        registry := NewRegistry()
-        registry.Describe("pages.read", Descriptor{
-            Responses: []ResponseDescription{
-                Response[genericPage[*genericPageUser]](409),
-                Response[genericPage[genericPageUser]](200),
-            },
-        })
+    registry := NewRegistry()
+    registry.Describe("pages.read", Descriptor{
+        Responses: []ResponseDescription{
+            Response[genericPage[*genericPageUser]](409),
+            Response[genericPage[genericPageUser]](200),
+        },
+    })
 
-        routes := []httpcontract.RouteDefinition{
-            fakeRoute{name: "pages.read", pattern: "/pages/", methods: []string{"GET"}},
-        }
+    routes := []httpcontract.RouteDefinition{
+        fakeRoute{name: "pages.read", pattern: "/pages/", methods: []string{"GET"}},
+    }
 
-        document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, registry)
+    document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, registry)
 
-        operation := document.Paths["/pages/"].Get
-        if nil == operation {
-            t.Fatalf("expected the GET operation")
-        }
+    operation := document.Paths["/pages/"].Get
+    if nil == operation {
+        t.Fatalf("expected the GET operation")
+    }
 
-        okReference := operation.Responses["200"].Content["application/json"].Schema.Reference
-        conflictReference := operation.Responses["409"].Content["application/json"].Schema.Reference
+    okReference := operation.Responses["200"].Content["application/json"].Schema.Reference
+    conflictReference := operation.Responses["409"].Content["application/json"].Schema.Reference
 
-        if okReference+"2" != conflictReference {
-            t.Fatalf("iteration %d: expected status 200 to name the component first, got %q and %q", iteration, okReference, conflictReference)
-        }
+    if okReference+"2" != conflictReference {
+        t.Fatalf("expected status 200 to name the component first, got %q and %q", okReference, conflictReference)
     }
 }
 

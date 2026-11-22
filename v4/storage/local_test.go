@@ -1620,7 +1620,7 @@ func TestLocalStorage_AMetadataWriteThatFailsAnswersAnErrorOverTheStoredObject(t
     }
 }
 
-/* every door refuses a nil runtime before it touches the base directory, as the cache, the http client and the session do, where a nil one reached a dereference on the S3 backend */
+/* every door refuses a nil runtime before it touches the base directory, as the cache, the http client and the session do */
 func TestLocalStorage_EveryDoorRefusesANilRuntimeFirst(t *testing.T) {
     local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
 

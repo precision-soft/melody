@@ -49,8 +49,22 @@ func TestBoot_TheIgnoredStaticCacheMaxAgeWarningNamesTheOverriddenParameter(t *t
     }
 
     environmentKeys, _ := warnings[0].Context["environmentKeys"].([]string)
-    if false == slices.Equal([]string{config.StaticCacheDisabledKey}, environmentKeys) || config.KernelStaticCacheMaxAge != warnings[0].Context["parameterName"] || true != warnings[0].Context["overridden"] {
-        t.Fatalf("expected the switch and the overridden parameter named, got %v", warnings[0].Context)
+    parameterNames, _ := warnings[0].Context["parameterNames"].([]string)
+    if false == slices.Equal([]string{config.StaticCacheDisabledKey}, environmentKeys) || false == slices.Equal([]string{config.KernelStaticCacheMaxAge}, parameterNames) || true != warnings[0].Context["overridden"] {
+        t.Fatalf("expected the switch's key and the overridden parameter named, got %v", warnings[0].Context)
+    }
+
+    bothOverridden := staticCacheMaxAgeWarningsOf(t, config.ModeHttp, nil, map[string]string{config.KernelStaticCacheDisabled: "true", config.KernelStaticCacheMaxAge: "60"})
+    if 1 != len(bothOverridden) {
+        t.Fatalf("expected one warning with both overridden, got %+v", bothOverridden)
+    }
+
+    if _, namesAKey := bothOverridden[0].Context["environmentKeys"]; true == namesAKey {
+        t.Fatalf("expected no key named when both values come from overrides, got %v", bothOverridden[0].Context)
+    }
+
+    if bothNames, _ := bothOverridden[0].Context["parameterNames"].([]string); false == slices.Equal([]string{config.KernelStaticCacheDisabled, config.KernelStaticCacheMaxAge}, bothNames) {
+        t.Fatalf("expected both parameters named, got %v", bothOverridden[0].Context)
     }
 }
 

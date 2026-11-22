@@ -21,10 +21,34 @@ func (instance *Application) collectIgnoredStaticCacheMaxAge() {
         return
     }
 
-    warningContext := loggingcontract.Context{"environmentKeys": []string{config.StaticCacheDisabledKey, config.StaticCacheMaxAgeKey}}
-    if true == maxAgeParameter.IsOverridden() {
-        /* an override does not read the key, so the warning names the parameter the override wrote */
-        warningContext = loggingcontract.Context{"environmentKeys": []string{config.StaticCacheDisabledKey}, "parameterName": config.KernelStaticCacheMaxAge, "overridden": true}
+    /* each value is named where it came from: the key of a .env line, the parameter of an override, which reads no key */
+    environmentKeys := make([]string, 0, 2)
+    parameterNames := make([]string, 0, 2)
+    for _, source := range []struct {
+        parameterName  string
+        environmentKey string
+    }{
+        {config.KernelStaticCacheDisabled, config.StaticCacheDisabledKey},
+        {config.KernelStaticCacheMaxAge, config.StaticCacheMaxAgeKey},
+    } {
+        parameter := instance.configuration.Get(source.parameterName)
+        if false == internal.IsNilInterface(parameter) && true == parameter.IsOverridden() {
+            parameterNames = append(parameterNames, source.parameterName)
+
+            continue
+        }
+
+        environmentKeys = append(environmentKeys, source.environmentKey)
+    }
+
+    warningContext := loggingcontract.Context{}
+    if 0 < len(environmentKeys) {
+        warningContext["environmentKeys"] = environmentKeys
+    }
+
+    if 0 < len(parameterNames) {
+        warningContext["parameterNames"] = parameterNames
+        warningContext["overridden"] = true
     }
 
     instance.bootWarnings = append(instance.bootWarnings, internal.BootWarning{
