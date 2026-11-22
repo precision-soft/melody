@@ -30,12 +30,12 @@ func TestAccessTokenReleaseSubscriber_DeletesTheDeviceTokensOfTheDeletedAccountO
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 
-    listeners := subscriberInstance.SubscribedEvents()[event.UserDeletedEventName]
+    listeners := subscriberInstance.SubscribedEvents()[event.EventUserDeleted]
     if 1 != len(listeners) {
-        t.Fatalf("expected one listener on %s, got %d", event.UserDeletedEventName, len(listeners))
+        t.Fatalf("expected one listener on %s, got %d", event.EventUserDeleted, len(listeners))
     }
 
-    deleted := melodyevent.NewEvent(event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "deleted"), melodyclock.NewSystemClock().Now())
+    deleted := melodyevent.NewEvent(event.EventUserDeleted, event.NewUserDeletedEvent("user-4", "deleted"), melodyclock.NewSystemClock().Now())
     if listenErr := listeners[0].Listener()(runtimeInstance, deleted); nil != listenErr {
         t.Fatalf("expected the release to answer nil, got %v", listenErr)
     }
@@ -87,8 +87,8 @@ func TestAccessTokenReleaseSubscriber_AFailedRevocationIsReturned(t *testing.T) 
         return store
     })
 
-    deleted := melodyevent.NewEvent(event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "deleted"), melodyclock.NewSystemClock().Now())
-    listenErr := subscriberInstance.SubscribedEvents()[event.UserDeletedEventName][0].Listener()(releaseTestRuntime(), deleted)
+    deleted := melodyevent.NewEvent(event.EventUserDeleted, event.NewUserDeletedEvent("user-4", "deleted"), melodyclock.NewSystemClock().Now())
+    listenErr := subscriberInstance.SubscribedEvents()[event.EventUserDeleted][0].Listener()(releaseTestRuntime(), deleted)
 
     if false == errors.Is(listenErr, revokeErr) || false == errors.Is(listenErr, deleteErr) {
         t.Fatalf("expected both failures returned, got %v", listenErr)
@@ -108,8 +108,8 @@ func TestAccessTokenReleaseSubscriber_ACancelledRequestStillPublishesTheBoundary
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     cancelledRuntime := melodyruntime.NewRun(cancelledContext, containerInstance.NewScope())
 
-    deleted := melodyevent.NewEvent(event.UserDeletedEventName, event.NewUserDeletedEvent("user-6", "deleted"), melodyclock.NewSystemClock().Now())
-    if listenErr := subscriberInstance.SubscribedEvents()[event.UserDeletedEventName][0].Listener()(cancelledRuntime, deleted); nil != listenErr {
+    deleted := melodyevent.NewEvent(event.EventUserDeleted, event.NewUserDeletedEvent("user-6", "deleted"), melodyclock.NewSystemClock().Now())
+    if listenErr := subscriberInstance.SubscribedEvents()[event.EventUserDeleted][0].Listener()(cancelledRuntime, deleted); nil != listenErr {
         t.Fatalf("expected the release to outlive the request's cancellation, got %v", listenErr)
     }
 

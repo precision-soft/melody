@@ -16,9 +16,9 @@ import (
 func TestCategoryEventSubscriber_EveryListenerDropsItsEntriesUnderACanceledEvent(t *testing.T) {
     categoryInstance := entity.NewCategory("category-7", "Books")
     eventList := map[string]any{
-        event.CategoryCreatedEventName: event.NewCategoryCreatedEvent(categoryInstance),
-        event.CategoryUpdatedEventName: event.NewCategoryUpdatedEvent(categoryInstance),
-        event.CategoryDeletedEventName: event.NewCategoryDeletedEvent(categoryInstance.Id),
+        event.EventCategoryCreated: event.NewCategoryCreatedEvent(categoryInstance),
+        event.EventCategoryUpdated: event.NewCategoryUpdatedEvent(categoryInstance),
+        event.EventCategoryDeleted: event.NewCategoryDeletedEvent(categoryInstance.Id),
     }
 
     for eventName, payload := range eventList {

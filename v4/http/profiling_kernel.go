@@ -7,12 +7,11 @@ import (
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
 )
 
 const (
-    EventHttpRequestProfile = "http.request.profile"
-
     KernelHttpProfilerListenerPriority = -900
 )
 
@@ -84,7 +83,7 @@ func RegisterKernelHttpProfilerListener(eventDispatcher eventcontract.EventDispa
                 duration,
             )
 
-            _, err := eventDispatcher.DispatchName(runtimeInstance, EventHttpRequestProfile, profile)
+            _, err := eventDispatcher.DispatchName(runtimeInstance, httpcontract.EventHttpRequestProfile, profile)
 
             return err
         },

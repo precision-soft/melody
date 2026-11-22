@@ -5,19 +5,19 @@ import (
 )
 
 const (
-    UserDeletedEventName = "user.deleted"
+    EventUserDeleted = "user.deleted"
 
-    /* UserDeletedTagRelease marks a listener releasing what the account held, its tokens and its second factor */
-    UserDeletedTagRelease = "release"
+    /* ListenerTagUserDeletedRelease marks a listener releasing what the account held, its tokens and its second factor */
+    ListenerTagUserDeletedRelease = "release"
 
-    /* UserDeletedTagCache marks a listener dropping the account's cache keys */
-    UserDeletedTagCache = "cache"
+    /* ListenerTagUserDeletedCache marks a listener dropping the account's cache keys */
+    ListenerTagUserDeletedCache = "cache"
 )
 
 /* UserDeletedEventConfig is the deletion's declaration, made where its name is defined: the releases and the cache drop still run once a listener ahead of them failed, so an outage of one leaves none of the others undone. */
 func UserDeletedEventConfig() melodyeventcontract.EventConfig {
     return melodyeventcontract.EventConfig{
-        RunAfterFailureTags: []string{UserDeletedTagRelease, UserDeletedTagCache},
+        TagsToRunAfterFailure: []string{ListenerTagUserDeletedRelease, ListenerTagUserDeletedCache},
     }
 }
 

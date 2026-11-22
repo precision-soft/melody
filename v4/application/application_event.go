@@ -1,20 +1,16 @@
 package application
 
 import (
+    "slices"
     "sort"
-    "strings"
 
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
-    "github.com/precision-soft/melody/v4/http"
-    "github.com/precision-soft/melody/v4/internal"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
-
-/* frameworkListenerTagPrefix is the namespace of the tags the framework's own listeners carry */
-const frameworkListenerTagPrefix = "melody."
 
 type frameworkEventDeclaration struct {
     eventName string
@@ -26,8 +22,8 @@ func frameworkEvents() []frameworkEventDeclaration {
     return []frameworkEventDeclaration{
         {eventName: kernelcontract.EventKernelRequest},
         {eventName: kernelcontract.EventKernelController},
-        {eventName: kernelcontract.EventKernelResponse, config: eventcontract.EventConfig{RunAfterFailureTags: []string{kernelcontract.ListenerTagCors}}},
-        {eventName: kernelcontract.EventKernelTerminate, config: eventcontract.EventConfig{RunAfterFailureTags: []string{kernelcontract.ListenerTagAccessLog}}},
+        {eventName: kernelcontract.EventKernelResponse, config: eventcontract.EventConfig{TagsToRunAfterFailure: []string{kernelcontract.ListenerTagKernelCors}}},
+        {eventName: kernelcontract.EventKernelTerminate, config: eventcontract.EventConfig{TagsToRunAfterFailure: []string{kernelcontract.ListenerTagKernelAccessLog}}},
         {eventName: kernelcontract.EventKernelException},
         {eventName: securitycontract.EventSecurityAuthorizationGranted},
         {eventName: securitycontract.EventSecurityAuthorizationDenied},
@@ -35,18 +31,16 @@ func frameworkEvents() []frameworkEventDeclaration {
         {eventName: securitycontract.EventSecurityLoginFailure},
         {eventName: securitycontract.EventSecurityLogoutSuccess},
         {eventName: securitycontract.EventSecurityLogoutFailure},
-        {eventName: http.EventHttpRequestProfile},
+        {eventName: httpcontract.EventHttpRequestProfile},
     }
 }
 
-/* resolveFrameworkEventConfigs answers the twelve declarations, each with the framework's tags followed by the application's; the first refusal in sorted key order is answered */
-func resolveFrameworkEventConfigs(events map[string]eventcontract.EventConfig) ([]frameworkEventDeclaration, error) {
+/* declareFrameworkEvents declares the framework's twelve events on the dispatcher, each with the framework's tags followed by the application's, under the dispatcher's own rules; a key that is none of the twelve is refused before anything is declared, and a tag the dispatcher refuses is answered naming the application's field */
+func declareFrameworkEvents(eventDispatcher eventcontract.EventDispatcher, events map[string]eventcontract.EventConfig) error {
     declarations := frameworkEvents()
 
-    indexByName := make(map[string]int, len(declarations))
     frameworkEventNames := make([]string, 0, len(declarations))
-    for index, declaration := range declarations {
-        indexByName[declaration.eventName] = index
+    for _, declaration := range declarations {
         frameworkEventNames = append(frameworkEventNames, declaration.eventName)
     }
 
@@ -57,9 +51,8 @@ func resolveFrameworkEventConfigs(events map[string]eventcontract.EventConfig) (
     sort.Strings(eventNames)
 
     for _, eventName := range eventNames {
-        index, owned := indexByName[eventName]
-        if false == owned {
-            return nil, exception.NewError(
+        if false == slices.Contains(frameworkEventNames, eventName) {
+            return exception.NewError(
                 "ApplicationConfig.Events names an event the framework does not own; an application event is declared through EventDispatcher.DeclareEvent",
                 exceptioncontract.Context{
                     "eventName":       eventName,
@@ -68,40 +61,48 @@ func resolveFrameworkEventConfigs(events map[string]eventcontract.EventConfig) (
                 nil,
             )
         }
-
-        field := `ApplicationConfig.Events["` + eventName + `"].RunAfterFailureTags`
-        applicationTags := events[eventName].RunAfterFailureTags
-
-        if reason, tagIndex, tag, refused := internal.RefusedListenerTag(applicationTags); true == refused {
-            return nil, exception.NewError(
-                field+" "+reason,
-                exceptioncontract.Context{
-                    "eventName": eventName,
-                    "index":     tagIndex,
-                    "tag":       tag,
-                },
-                nil,
-            )
-        }
-
-        for tagIndex, tag := range applicationTags {
-            if true == strings.HasPrefix(tag, frameworkListenerTagPrefix) {
-                return nil, exception.NewError(
-                    "ApplicationConfig.Events carries a tag in the melody. namespace, which the framework declares itself",
-                    exceptioncontract.Context{
-                        "field":     field,
-                        "eventName": eventName,
-                        "index":     tagIndex,
-                        "tag":       tag,
-                    },
-                    nil,
-                )
-            }
-        }
-
-        mergedTags := append(append(make([]string, 0, len(declarations[index].config.RunAfterFailureTags)+len(applicationTags)), declarations[index].config.RunAfterFailureTags...), applicationTags...)
-        declarations[index].config = eventcontract.EventConfig{RunAfterFailureTags: mergedTags}
     }
 
-    return declarations, nil
+    for _, declaration := range declarations {
+        frameworkTags := declaration.config.TagsToRunAfterFailure
+        applicationTags := events[declaration.eventName].TagsToRunAfterFailure
+
+        mergedTags := append(append(make([]string, 0, len(frameworkTags)+len(applicationTags)), frameworkTags...), applicationTags...)
+
+        declareErr := declareFrameworkEvent(eventDispatcher, declaration.eventName, eventcontract.EventConfig{TagsToRunAfterFailure: mergedTags})
+        if nil != declareErr {
+            return exception.NewError(
+                "ApplicationConfig.Events is refused",
+                exceptioncontract.Context{
+                    "eventName":     declaration.eventName,
+                    "field":         `ApplicationConfig.Events["` + declaration.eventName + `"].TagsToRunAfterFailure`,
+                    "frameworkTags": append(make([]string, 0, len(frameworkTags)), frameworkTags...),
+                },
+                declareErr,
+            )
+        }
+    }
+
+    return nil
+}
+
+/* declareFrameworkEvent answers the dispatcher's refusal of one declaration as an error; any other panic, an exit included, passes */
+func declareFrameworkEvent(eventDispatcher eventcontract.EventDispatcher, eventName string, config eventcontract.EventConfig) (refusal error) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            return
+        }
+
+        refusalErr, isRefusal := recovered.(*exception.Error)
+        if false == isRefusal || nil == refusalErr {
+            panic(recovered)
+        }
+
+        refusal = refusalErr
+    }()
+
+    eventDispatcher.DeclareEvent(eventName, config)
+
+    return nil
 }

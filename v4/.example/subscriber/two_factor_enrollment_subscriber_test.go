@@ -31,9 +31,9 @@ func deleteEnrollmentStatementsAfter(t *testing.T, eventName string, payload any
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 
-    listeners := subscriberInstance.SubscribedEvents()[event.UserDeletedEventName]
+    listeners := subscriberInstance.SubscribedEvents()[event.EventUserDeleted]
     if 1 != len(listeners) {
-        t.Fatalf("expected one listener on %s, got %d", event.UserDeletedEventName, len(listeners))
+        t.Fatalf("expected one listener on %s, got %d", event.EventUserDeleted, len(listeners))
     }
 
     if listenErr := listeners[0].Listener()(runtimeInstance, melodyevent.NewEvent(eventName, payload, melodyclock.NewSystemClock().Now())); nil != listenErr {
@@ -45,7 +45,7 @@ func deleteEnrollmentStatementsAfter(t *testing.T, eventName string, payload any
 
 /* the enrollment is keyed on the account identifier and the example mints identifiers as the highest suffix plus one, so a row that outlives its account would start the next holder of the identifier enrolled with the previous holder's secret and recovery codes: the deletion the account publishes releases the factor, keyed on the identifier the event carries and on nothing wider. */
 func TestTwoFactorEnrollmentSubscriber_ADeletedAccountReleasesItsEnrollment(t *testing.T) {
-    statements := deleteEnrollmentStatementsAfter(t, event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "dave"))
+    statements := deleteEnrollmentStatementsAfter(t, event.EventUserDeleted, event.NewUserDeletedEvent("user-4", "dave"))
 
     if 2 != len(statements) || "DELETE FROM `melody_example_v4_two_factor_pending` WHERE (user_identifier = 'user-4')" != statements[0] {
         t.Fatalf("expected the pending enrollment, then the active one, deleted for the account, got %d: %v", len(statements), statements)
@@ -59,12 +59,12 @@ func TestTwoFactorEnrollmentSubscriber_ADeletedAccountReleasesItsEnrollment(t *t
 
 /* a payload that is not a deletion — or none at all — releases nothing: the listener is registered on the deletion name and still reads the payload it is handed, the way every subscriber of the example does. */
 func TestTwoFactorEnrollmentSubscriber_APayloadThatIsNotADeletionReleasesNothing(t *testing.T) {
-    if statements := deleteEnrollmentStatementsAfter(t, event.UserDeletedEventName, "user-4"); 0 != len(statements) {
+    if statements := deleteEnrollmentStatementsAfter(t, event.EventUserDeleted, "user-4"); 0 != len(statements) {
         t.Fatalf("expected no statement for a payload that is not a deletion, got %v", statements)
     }
 
     var absent *event.UserDeletedEvent
-    if statements := deleteEnrollmentStatementsAfter(t, event.UserDeletedEventName, absent); 0 != len(statements) {
+    if statements := deleteEnrollmentStatementsAfter(t, event.EventUserDeleted, absent); 0 != len(statements) {
         t.Fatalf("expected no statement for a nil deletion, got %v", statements)
     }
 }
@@ -84,10 +84,10 @@ func TestTwoFactorEnrollmentSubscriber_ReleasesTheEnrollmentBeforeTheCacheListen
     enrollmentSubscriber := NewTwoFactorEnrollmentSubscriber(fixedTwoFactorStore(twofactor.NewStore(database)))
     cacheSubscriber := NewUserEventSubscriber()
 
-    releasePriority := enrollmentSubscriber.SubscribedEvents()[event.UserDeletedEventName][0].Config().Priority
-    cachePriority := cacheSubscriber.SubscribedEvents()[event.UserDeletedEventName][0].Config().Priority
+    releasePriority := enrollmentSubscriber.SubscribedEvents()[event.EventUserDeleted][0].Config().Priority
+    cachePriority := cacheSubscriber.SubscribedEvents()[event.EventUserDeleted][0].Config().Priority
     if releasePriority <= cachePriority {
-        t.Fatalf("expected the release to outrank the cache listener on %s, got %d against %d", event.UserDeletedEventName, releasePriority, cachePriority)
+        t.Fatalf("expected the release to outrank the cache listener on %s, got %d against %d", event.EventUserDeleted, releasePriority, cachePriority)
     }
 
     clockInstance := melodyclock.NewSystemClock()
@@ -117,7 +117,7 @@ func TestTwoFactorEnrollmentSubscriber_ReleasesTheEnrollmentBeforeTheCacheListen
     )
     runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 
-    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "dave"))
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, event.EventUserDeleted, event.NewUserDeletedEvent("user-4", "dave"))
     if nil == dispatchErr {
         t.Fatalf("expected the dispatch to fail on the refusing cache")
     }
@@ -147,8 +147,8 @@ func TestTwoFactorEnrollmentSubscriber_AStoreThatCannotBeResolvedIsJournaledAndT
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 
-    listener := subscriberInstance.SubscribedEvents()[event.UserDeletedEventName][0].Listener()
-    listenErr := listener(runtimeInstance, melodyevent.NewEvent(event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "dave"), melodyclock.NewSystemClock().Now()))
+    listener := subscriberInstance.SubscribedEvents()[event.EventUserDeleted][0].Listener()
+    listenErr := listener(runtimeInstance, melodyevent.NewEvent(event.EventUserDeleted, event.NewUserDeletedEvent("user-4", "dave"), melodyclock.NewSystemClock().Now()))
     if nil != listenErr {
         t.Fatalf("expected the deletion to go on past a store that cannot be resolved, got %v", listenErr)
     }

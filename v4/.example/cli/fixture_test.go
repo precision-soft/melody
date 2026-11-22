@@ -86,7 +86,7 @@ func newCommandFixtureOverUsers(t *testing.T, dispatcherOf func(melodyeventcontr
 
     dispatcher := melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: clockInstance})
     dispatcher.AddListener(
-        event.UserUpdatedEventName,
+        event.EventUserUpdated,
         func(runtimeInstance melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
             updatedEvent, isUpdated := eventValue.Payload().(*event.UserUpdatedEvent)
             if false == isUpdated || nil == updatedEvent {

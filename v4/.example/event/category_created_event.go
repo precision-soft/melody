@@ -3,7 +3,7 @@ package event
 import "github.com/precision-soft/melody/v4/.example/entity"
 
 const (
-    CategoryCreatedEventName = "category.created"
+    EventCategoryCreated = "category.created"
 )
 
 func NewCategoryCreatedEvent(category *entity.Category) *CategoryCreatedEvent {

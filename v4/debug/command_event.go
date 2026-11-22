@@ -89,7 +89,7 @@ func (instance *EventCommand) Run(
         subscriberOwnerSet := make(map[string]struct{})
 
         for _, listener := range registeredEvent.Listeners {
-            priorities = append(priorities, fmt.Sprintf("%d", listener.Priority))
+            priorities = append(priorities, fmt.Sprintf("%d", listener.Config.Priority))
 
             if eventcontract.RegisteredListenerSourceSubscriber == listener.Source {
                 fromSubscriberCount = fromSubscriberCount + 1
@@ -189,9 +189,9 @@ func (instance *EventCommand) Run(
                     verboseBlock.AddRow(
                         eventCell,
                         fmt.Sprintf("%d", index+1),
-                        fmt.Sprintf("%d", listener.Priority),
+                        fmt.Sprintf("%d", listener.Config.Priority),
                         renderRequiredListenerMark(listener),
-                        renderListenerTags(listener.Tags),
+                        renderListenerTags(listener.Config.Tags),
                         renderRunsAfterFailureMark(listener),
                         listener.Source,
                         listener.Owner,
@@ -207,13 +207,13 @@ func (instance *EventCommand) Run(
             if 0 < len(declarationItems) {
                 declarationBlock := builder.AddBlock(
                     "DECLARED EVENTS",
-                    []string{"event", "run after failure tags"},
+                    []string{"event", "tags to run after failure"},
                 )
 
                 for _, declarationItem := range declarationItems {
                     declarationBlock.AddRow(
                         declarationItem.EventName,
-                        renderListenerTags(declarationItem.RunAfterFailureTags),
+                        renderListenerTags(declarationItem.Config.TagsToRunAfterFailure),
                     )
                 }
             }
@@ -296,17 +296,13 @@ func collectListenerListItems(
             listenerItems = append(
                 listenerItems,
                 eventListenerListItem{
-                    EventName:                    registeredEvent.EventName,
-                    Order:                        index + 1,
-                    Priority:                     listener.Priority,
-                    Required:                     listener.Required,
-                    MaySkipRequiredListeners:     listener.MaySkipRequiredListeners,
-                    Tags:                         append(make([]string, 0, len(listener.Tags)), listener.Tags...),
-                    RunsAfterFailure:             listener.RunsAfterFailure,
-                    ReplacesResponseAfterFailure: listener.ReplacesResponseAfterFailure,
-                    Source:                       listener.Source,
-                    Owner:                        listener.Owner,
-                    ListenerName:                 listener.ListenerName,
+                    EventName:        registeredEvent.EventName,
+                    Order:            index + 1,
+                    Source:           listener.Source,
+                    Owner:            listener.Owner,
+                    ListenerName:     listener.ListenerName,
+                    RunsAfterFailure: listener.RunsAfterFailure,
+                    Config:           listedListenerConfig(listener.Config),
                 },
             )
         }
@@ -331,8 +327,8 @@ func collectDeclarationListItems(
         declarationItems = append(
             declarationItems,
             eventDeclarationListItem{
-                EventName:           registeredEvent.EventName,
-                RunAfterFailureTags: append(make([]string, 0, len(registeredEvent.RunAfterFailureTags)), registeredEvent.RunAfterFailureTags...),
+                EventName: registeredEvent.EventName,
+                Config:    eventcontract.EventConfig{TagsToRunAfterFailure: append(make([]string, 0, len(registeredEvent.Config.TagsToRunAfterFailure)), registeredEvent.Config.TagsToRunAfterFailure...)},
             },
         )
     }
@@ -350,7 +346,7 @@ func renderListenerTags(tags []string) string {
 
 func renderRunsAfterFailureMark(listener eventcontract.RegisteredListener) string {
     if true == listener.RunsAfterFailure {
-        if true == listener.ReplacesResponseAfterFailure {
+        if true == listener.Config.Failure.ReplacesResponseAfterFailure {
             return "yes (may replace)"
         }
 
@@ -361,15 +357,15 @@ func renderRunsAfterFailureMark(listener eventcontract.RegisteredListener) strin
 }
 
 func renderRequiredListenerMark(listener eventcontract.RegisteredListener) string {
-    if true == listener.Required {
-        if true == listener.MaySkipRequiredListeners {
+    if true == listener.Config.Failure.Required {
+        if true == listener.Config.Failure.MaySkipRequiredListeners {
             return "yes (may skip)"
         }
 
         return "yes"
     }
 
-    if true == listener.MaySkipRequiredListeners {
+    if true == listener.Config.Failure.MaySkipRequiredListeners {
         return "may skip"
     }
 
@@ -385,22 +381,25 @@ type eventListItem struct {
 }
 
 type eventListenerListItem struct {
-    EventName                    string `json:"eventName"`
-    Order                        int    `json:"order"`
-    Priority                     int    `json:"priority"`
-    Required                     bool   `json:"required"`
-    MaySkipRequiredListeners     bool     `json:"maySkipRequiredListeners"`
-    Tags                         []string `json:"tags"`
-    RunsAfterFailure             bool     `json:"runsAfterFailure"`
-    ReplacesResponseAfterFailure bool `json:"replacesResponseAfterFailure"`
-    Source                       string `json:"source"`
-    Owner                        string `json:"owner"`
-    ListenerName                 string `json:"listenerName"`
+    EventName        string                       `json:"eventName"`
+    Order            int                          `json:"order"`
+    Source           string                       `json:"source"`
+    Owner            string                       `json:"owner"`
+    ListenerName     string                       `json:"listenerName"`
+    RunsAfterFailure bool                         `json:"runsAfterFailure"`
+    Config           eventcontract.ListenerConfig `json:"config"`
 }
 
 type eventDeclarationListItem struct {
-    EventName           string   `json:"eventName"`
-    RunAfterFailureTags []string `json:"runAfterFailureTags"`
+    EventName string                    `json:"eventName"`
+    Config    eventcontract.EventConfig `json:"config"`
+}
+
+/* listedListenerConfig answers the config a listing carries, its tags a copy that is never nil, so json reads an empty list */
+func listedListenerConfig(config eventcontract.ListenerConfig) eventcontract.ListenerConfig {
+    config.Tags = append(make([]string, 0, len(config.Tags)), config.Tags...)
+
+    return config
 }
 
 type eventListVerbosePayload struct {

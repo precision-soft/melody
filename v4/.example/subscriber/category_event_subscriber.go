@@ -20,13 +20,13 @@ func NewCategoryEventSubscriber() *CategoryEventSubscriber {
 
 func (instance *CategoryEventSubscriber) SubscribedEvents() map[string][]melodyeventcontract.SubscribedEvent {
     return map[string][]melodyeventcontract.SubscribedEvent{
-        event.CategoryCreatedEventName: {
+        event.EventCategoryCreated: {
             melodyevent.NewSubscribedEvent(instance.onCategoryCreated(), melodyeventcontract.ListenerConfig{}),
         },
-        event.CategoryUpdatedEventName: {
+        event.EventCategoryUpdated: {
             melodyevent.NewSubscribedEvent(instance.onCategoryUpdated(), melodyeventcontract.ListenerConfig{}),
         },
-        event.CategoryDeletedEventName: {
+        event.EventCategoryDeleted: {
             melodyevent.NewSubscribedEvent(instance.onCategoryDeleted(), melodyeventcontract.ListenerConfig{}),
         },
     }

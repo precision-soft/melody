@@ -1,7 +1,6 @@
 package http
 
 import (
-    nethttp "net/http"
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
@@ -37,6 +36,8 @@ func NewKernelRequestEvent(
 
 /* KernelRequestEvent is how a kernel.request listener ends a request before its handler: with a response, its own rendering, or with a refusal, which the kernel renders through kernel.exception so an application's listener decides its body. A listener that does both is a bug, refused by name at the second door, and the kernel answers it fail-closed. */
 type KernelRequestEvent struct {
+    afterFailureDoor
+
     runtimeInstance containercontract.Runtime
     request         httpcontract.Request
     response        httpcontract.Response
@@ -56,7 +57,20 @@ func (instance *KernelRequestEvent) Response() httpcontract.Response {
     return instance.response
 }
 
+/* SetResponse answers the request and ends the dispatch; a listener running after a failure answers only through ListenerConfig.Failure.ReplacesResponseAfterFailure, its answer replacing the decision standing, a refusal included. */
 func (instance *KernelRequestEvent) SetResponse(response httpcontract.Response) {
+    if true == instance.inAfterFailurePass() {
+        response = normalizedEventResponse(response)
+        if false == instance.admitAfterFailureWrite(afterFailureWriteResponse, instance.response, response, nil, response == instance.response && nil == instance.refusal) {
+            return
+        }
+
+        instance.refusal = nil
+        instance.response = response
+
+        return
+    }
+
     if nil != instance.refusal {
         /* kept so the kernel's fail-closed step closes its body, which nothing else holds */
         instance.response = normalizedEventResponse(response)
@@ -76,7 +90,7 @@ func (instance *KernelRequestEvent) SetResponse(response httpcontract.Response) 
     instance.response = normalizedEventResponse(response)
 }
 
-/* Refuse ends the request with the error: the handler never runs and the kernel raises the error through kernel.exception. The first refusal is the decision, so a later one is ignored. A nil or typed-nil error is refused by name, since reading it as no refusal would serve a request the caller meant to refuse. */
+/* Refuse ends the request with the error and the dispatch: the handler never runs and the kernel raises the error through kernel.exception. The first refusal is the decision, so a later one is ignored; a listener running after a failure refuses only through ListenerConfig.Failure.ReplacesResponseAfterFailure, its refusal replacing the decision standing. A nil or typed-nil error is refused by name, since reading it as no refusal would serve a request the caller meant to refuse. */
 func (instance *KernelRequestEvent) Refuse(err error) {
     if true == internal.IsNilInterface(err) {
         instance.decisionRefused = true
@@ -90,6 +104,17 @@ func (instance *KernelRequestEvent) Refuse(err error) {
                 nil,
             ),
         )
+    }
+
+    if true == instance.inAfterFailurePass() {
+        if false == instance.admitAfterFailureWrite(afterFailureWriteRefusal, instance.response, nil, err, false) {
+            return
+        }
+
+        instance.response = nil
+        instance.refusal = err
+
+        return
     }
 
     if nil != instance.response {
@@ -117,6 +142,19 @@ func (instance *KernelRequestEvent) Refusal() error {
     return instance.refusal
 }
 
+/* IsPropagationStopped answers whether a listener answered or refused the request: that is the request's decision, so no kernel.request listener behind it runs */
+func (instance *KernelRequestEvent) IsPropagationStopped() bool {
+    return nil != instance.response || nil != instance.refusal
+}
+
+/* hasDecision answers whether an answer or a refusal stands */
+func (instance *KernelRequestEvent) hasDecision() bool {
+    return nil != instance.response || nil != instance.refusal
+}
+
+var _ eventcontract.PropagationStopper = (*KernelRequestEvent)(nil)
+var _ eventseam.AfterFailureGuard = (*KernelRequestEvent)(nil)
+
 func (instance *KernelRequestEvent) failClosed(response httpcontract.Response) {
     instance.refusal = nil
     instance.response = normalizedEventResponse(response)
@@ -134,6 +172,8 @@ func NewKernelControllerEvent(
 }
 
 type KernelControllerEvent struct {
+    afterFailureDoor
+
     runtime  containercontract.Runtime
     request  httpcontract.Request
     response httpcontract.Response
@@ -151,9 +191,22 @@ func (instance *KernelControllerEvent) Response() httpcontract.Response {
     return instance.response
 }
 
+/* SetResponse answers the request ahead of its handler and ends the dispatch: the first responder wins; a listener running after a failure answers only through ListenerConfig.Failure.ReplacesResponseAfterFailure. */
 func (instance *KernelControllerEvent) SetResponse(response httpcontract.Response) {
-    instance.response = normalizedEventResponse(response)
+    response = normalizedEventResponse(response)
+    if false == instance.admitAfterFailureWrite(afterFailureWriteResponse, instance.response, response, nil, response == instance.response) {
+        return
+    }
+
+    instance.response = response
 }
+
+func (instance *KernelControllerEvent) IsPropagationStopped() bool {
+    return nil != instance.response
+}
+
+var _ eventcontract.PropagationStopper = (*KernelControllerEvent)(nil)
+var _ eventseam.AfterFailureGuard = (*KernelControllerEvent)(nil)
 
 func NewKernelResponseEvent(request httpcontract.Request, response httpcontract.Response) *KernelResponseEvent {
     return &KernelResponseEvent{
@@ -163,44 +216,10 @@ func NewKernelResponseEvent(request httpcontract.Request, response httpcontract.
 }
 
 type KernelResponseEvent struct {
+    afterFailureDoor
+
     request  httpcontract.Request
     response httpcontract.Response
-
-    /* the listener of the after-failure pass running now, nil outside that pass */
-    afterFailureListener     *eventseam.AfterFailureListener
-    afterFailureReplacements []afterFailureReplacement
-}
-
-/* afterFailureReplacement is one SetResponse a listener made after a failure: admitted through its door or refused, with the response that lost, which the kernel closes */
-type afterFailureReplacement struct {
-    listener        eventseam.AfterFailureListener
-    admitted        bool
-    discarded       httpcontract.Response
-    servedStatus    int
-    discardedStatus int
-}
-
-/* EnterAfterFailureListener is the dispatcher's door: the listener named runs after a failure until the function answered is called. */
-func (instance *KernelResponseEvent) EnterAfterFailureListener(token eventseam.Token, listener eventseam.AfterFailureListener) func() {
-    /* a token built outside v4 enters nothing, so no listener opens the door for itself */
-    if nil == instance || false == token.Valid() {
-        return func() {}
-    }
-
-    previous := instance.afterFailureListener
-    instance.afterFailureListener = &listener
-
-    return func() {
-        instance.afterFailureListener = previous
-    }
-}
-
-/* takeAfterFailureReplacements answers the replacements recorded so far and forgets them, so each is warned about once */
-func (instance *KernelResponseEvent) takeAfterFailureReplacements() []afterFailureReplacement {
-    replacements := instance.afterFailureReplacements
-    instance.afterFailureReplacements = nil
-
-    return replacements
 }
 
 func (instance *KernelResponseEvent) Request() httpcontract.Request {
@@ -211,43 +230,14 @@ func (instance *KernelResponseEvent) Response() httpcontract.Response {
     return instance.response
 }
 
-/* SetResponse replaces the response; a listener running after a failure replaces it only through ListenerConfig.ReplacesResponseAfterFailure, its attempt recorded either way for the kernel's warning. */
+/* SetResponse replaces the response; a listener running after a failure replaces it only through ListenerConfig.Failure.ReplacesResponseAfterFailure, its attempt recorded either way for the kernel's warning. */
 func (instance *KernelResponseEvent) SetResponse(response httpcontract.Response) {
     response = normalizedEventResponse(response)
-
-    if nil != instance.afterFailureListener && response != instance.response {
-        admitted := instance.afterFailureListener.ReplacesResponse
-
-        replacement := afterFailureReplacement{
-            listener: *instance.afterFailureListener,
-            admitted: admitted,
-        }
-        if true == admitted {
-            replacement.discarded = instance.response
-            replacement.servedStatus = responseStatusOf(response)
-        } else {
-            replacement.discarded = response
-            replacement.servedStatus = responseStatusOf(instance.response)
-        }
-        replacement.discardedStatus = responseStatusOf(replacement.discarded)
-
-        instance.afterFailureReplacements = append(instance.afterFailureReplacements, replacement)
-
-        if false == admitted {
-            return
-        }
+    if false == instance.admitAfterFailureWrite(afterFailureWriteResponse, instance.response, response, nil, response == instance.response) {
+        return
     }
 
     instance.response = response
-}
-
-/* responseStatusOf answers 204 for no response, the status the kernel writes for one */
-func responseStatusOf(response httpcontract.Response) int {
-    if true == internal.IsNilInterface(response) {
-        return nethttp.StatusNoContent
-    }
-
-    return response.StatusCode()
 }
 
 var _ eventseam.AfterFailureGuard = (*KernelResponseEvent)(nil)
@@ -309,6 +299,8 @@ func NewKernelExceptionEvent(
 }
 
 type KernelExceptionEvent struct {
+    afterFailureDoor
+
     runtime               containercontract.Runtime
     request               httpcontract.Request
     err                   error
@@ -337,9 +329,14 @@ func (instance *KernelExceptionEvent) Response() httpcontract.Response {
     return instance.response
 }
 
-/* SetResponse answers the event and ends the dispatch: the first responder wins, and a listener that must see every error sits at a higher priority. */
+/* SetResponse answers the event and ends the dispatch: the first responder wins, and a listener that must see every error sits at a higher priority; a listener running after a failure answers only through ListenerConfig.Failure.ReplacesResponseAfterFailure. */
 func (instance *KernelExceptionEvent) SetResponse(response httpcontract.Response) {
-    instance.response = normalizedEventResponse(response)
+    response = normalizedEventResponse(response)
+    if false == instance.admitAfterFailureWrite(afterFailureWriteResponse, instance.response, response, nil, response == instance.response) {
+        return
+    }
+
+    instance.response = response
 }
 
 func (instance *KernelExceptionEvent) IsPropagationStopped() bool {
@@ -347,3 +344,4 @@ func (instance *KernelExceptionEvent) IsPropagationStopped() bool {
 }
 
 var _ eventcontract.PropagationStopper = (*KernelExceptionEvent)(nil)
+var _ eventseam.AfterFailureGuard = (*KernelExceptionEvent)(nil)

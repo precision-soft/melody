@@ -58,8 +58,8 @@ func userUpdateUnderTest(t *testing.T) (*deleteCountingCache, melodycontainercon
 }
 
 func dispatchUserUpdated(runtimeInstance melodycontainercontract.Runtime, user *entity.User, previousUsername string) {
-    listener := NewUserEventSubscriber().SubscribedEvents()[event.UserUpdatedEventName][0].Listener()
-    _ = listener(runtimeInstance, melodyevent.NewEvent(event.UserUpdatedEventName, event.NewUserUpdatedEvent(user, previousUsername), melodyclock.NewSystemClock().Now()))
+    listener := NewUserEventSubscriber().SubscribedEvents()[event.EventUserUpdated][0].Listener()
+    _ = listener(runtimeInstance, melodyevent.NewEvent(event.EventUserUpdated, event.NewUserUpdatedEvent(user, previousUsername), melodyclock.NewSystemClock().Now()))
 }
 
 /* a rename leaves the by-username entry under the spelling before it; dropped, the name before the rename can neither sign in from the cache nor be refused as taken when it is registered again */

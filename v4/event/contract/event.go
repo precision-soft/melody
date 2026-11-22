@@ -13,7 +13,7 @@ type Event interface {
 
     IsPropagationStopped() bool
 
-    /* PriorFailure is the failure that ended the dispatch ahead of this listener, joined with the failures of the listeners that ran after it and before this one; nil for every listener of a dispatch nothing failed in. Only a listener an EventConfig.RunAfterFailureTags selected reads a non-nil one; it is the very failure the dispatch answers its caller, so a listener that logs or marks it has filed the caller's record. */
+    /* PriorFailure is the failure that ended the dispatch ahead of this listener, joined with the failures of the listeners that ran after it and before this one; nil for every listener of a dispatch nothing failed in. Only a listener an EventConfig.TagsToRunAfterFailure selected reads a non-nil one; it is the very failure the dispatch answers its caller, so a listener that logs or marks it has filed the caller's record. */
     PriorFailure() error
 }
 

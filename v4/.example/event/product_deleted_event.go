@@ -1,7 +1,7 @@
 package event
 
 const (
-    ProductDeletedEventName = "product.deleted"
+    EventProductDeleted = "product.deleted"
 )
 
 func NewProductDeletedEvent(productId string) *ProductDeletedEvent {

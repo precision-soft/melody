@@ -66,7 +66,7 @@ type ApplicationConfig struct {
     /* EnvironmentKeys are the .env keys the application owns, outside the MELODY_ namespace, each with the default, rule, secret mark, retired spellings and refusals of a module's key. They are declared when the application is built, before any parameter is read. A key in the MELODY_ namespace is refused. */
     EnvironmentKeys []configcontract.EnvironmentKey
 
-    /* Events is what the application declares on the framework's own events, by event name: kernel.request, kernel.controller, kernel.response, kernel.terminate, kernel.exception, the six security.* events and http.request.profile. The application declares all twelve when it is built, each with the framework's own tags followed by the RunAfterFailureTags given here, so EventDispatcher.DeclareEvent on one of those names is refused as already declared. A name that is not a framework event, a tag in the melody. namespace and a malformed tag refuse the application by name; an application event is declared through EventDispatcher.DeclareEvent. */
+    /* Events is what the application declares on the framework's own events, by event name: kernel.request, kernel.controller, kernel.response, kernel.terminate, kernel.exception, the six security.* events and http.request.profile. The application declares all twelve through EventDispatcher.DeclareEvent when it is built, each with the framework's own tags followed by the TagsToRunAfterFailure given here and under the dispatcher's rules, so a later DeclareEvent on one of those names is refused as already declared. A name that is not a framework event refuses the application by name, and a tag the dispatcher refuses is answered naming this field; an application event is declared through EventDispatcher.DeclareEvent. */
     Events map[string]eventcontract.EventConfig
 
     /* MessageBus is what the framework hands the melody:messagebus:consume command it registers. */
@@ -150,11 +150,6 @@ func NewApplication(
         exception.Panic(exception.NewError("the unavailable retry after is refused", nil, unavailableRetryAfterErr))
     }
 
-    frameworkEventDeclarations, eventsErr := resolveFrameworkEventConfigs(applicationConfig.Events)
-    if nil != eventsErr {
-        exception.Panic(exception.NewError("the events are refused", nil, eventsErr))
-    }
-
     routeRegistry := http.NewRouteRegistry()
     httpRouter := http.NewRouterWithRouteRegistry(routeRegistry)
 
@@ -162,8 +157,8 @@ func NewApplication(
 
     /* declared before the kernel holds the dispatcher, so nothing can declare a framework event ahead of the framework */
     eventDispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
-    for _, declaration := range frameworkEventDeclarations {
-        eventDispatcher.DeclareEvent(declaration.eventName, declaration.config)
+    if eventsErr := declareFrameworkEvents(eventDispatcher, applicationConfig.Events); nil != eventsErr {
+        exception.Panic(exception.NewError("the events are refused", nil, eventsErr))
     }
 
     kernelInstance := kernel.NewKernel(

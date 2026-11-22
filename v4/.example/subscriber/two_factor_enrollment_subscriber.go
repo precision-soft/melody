@@ -21,8 +21,8 @@ func NewTwoFactorEnrollmentSubscriber(storeSource twofactor.StoreSource) *TwoFac
 
 func (instance *TwoFactorEnrollmentSubscriber) SubscribedEvents() map[string][]melodyeventcontract.SubscribedEvent {
     return map[string][]melodyeventcontract.SubscribedEvent{
-        event.UserDeletedEventName: {
-            melodyevent.NewSubscribedEvent(instance.onUserDeleted(), melodyeventcontract.ListenerConfig{Priority: 10, Tags: []string{event.UserDeletedTagRelease}}),
+        event.EventUserDeleted: {
+            melodyevent.NewSubscribedEvent(instance.onUserDeleted(), melodyeventcontract.ListenerConfig{Priority: 10, Tags: []string{event.ListenerTagUserDeletedRelease}}),
         },
     }
 }

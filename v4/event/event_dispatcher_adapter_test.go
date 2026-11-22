@@ -334,7 +334,7 @@ func TestEventDispatcherAdapter_RegisteredEvents_ReportsTheRequiredListenerMarks
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
-        eventcontract.ListenerConfig{Required: true},
+        eventcontract.ListenerConfig{Failure: eventcontract.ListenerFailureConfig{Required: true}},
     )
 
     registeredEvents := adapter.RegisteredEvents()
@@ -342,7 +342,7 @@ func TestEventDispatcherAdapter_RegisteredEvents_ReportsTheRequiredListenerMarks
         t.Fatalf("expected one registered listener")
     }
 
-    if false == registeredEvents[0].Listeners[0].Required {
+    if false == registeredEvents[0].Listeners[0].Config.Failure.Required {
         t.Fatalf("expected the required mark to be reported")
     }
 }
@@ -485,7 +485,7 @@ func TestEventDispatcherAdapter_RecordsMaySkipRequiredListenersForInspection(t *
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
-        eventcontract.ListenerConfig{MaySkipRequiredListeners: true},
+        eventcontract.ListenerConfig{Failure: eventcontract.ListenerFailureConfig{MaySkipRequiredListeners: true}},
     )
 
     registeredEvents := adapter.RegisteredEvents()
@@ -493,10 +493,10 @@ func TestEventDispatcherAdapter_RecordsMaySkipRequiredListenersForInspection(t *
         t.Fatalf("expected one registered listener, got %#v", registeredEvents)
     }
 
-    if false == registeredEvents[0].Listeners[0].MaySkipRequiredListeners {
+    if false == registeredEvents[0].Listeners[0].Config.Failure.MaySkipRequiredListeners {
         t.Fatalf("expected the opt-out mark to be reported by the inspection")
     }
-    if true == registeredEvents[0].Listeners[0].Required {
+    if true == registeredEvents[0].Listeners[0].Config.Failure.Required {
         t.Fatalf("expected the opt-out mark not to arm the required one")
     }
 }
@@ -794,7 +794,7 @@ func TestEventDispatcherAdapter_RegisteredEventsReportsADeclarationMadeOnTheWrap
     dispatcher, _ := testNewEventDispatcher()
     adapter := NewEventDispatcherAdapter(dispatcher)
 
-    dispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+    dispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cleanup"}})
     adapter.AddListener("e", testNoopEventListener, eventcontract.ListenerConfig{Name: "tagged", Tags: []string{"cleanup"}})
 
     registeredEvents := adapter.RegisteredEvents()
@@ -803,7 +803,7 @@ func TestEventDispatcherAdapter_RegisteredEventsReportsADeclarationMadeOnTheWrap
     }
 
     registeredEvent := registeredEvents[0]
-    if false == registeredEvent.Declared || 1 != len(registeredEvent.RunAfterFailureTags) || "cleanup" != registeredEvent.RunAfterFailureTags[0] {
+    if false == registeredEvent.Declared || 1 != len(registeredEvent.Config.TagsToRunAfterFailure) || "cleanup" != registeredEvent.Config.TagsToRunAfterFailure[0] {
         t.Fatalf("expected the wrapped dispatcher's declaration reported, got %+v", registeredEvent)
     }
 
@@ -817,7 +817,7 @@ func TestEventDispatcherAdapter_DeclareEventReachesTheWrappedDispatcher(t *testi
     adapter := NewEventDispatcherAdapter(dispatcher)
     recorder := newTagsTestRecorder()
 
-    adapter.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+    adapter.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cleanup"}})
     adapter.AddListener("e", recorder.listener("failing", errors.New("failure")), eventcontract.ListenerConfig{Priority: 30})
     adapter.AddListener("e", recorder.listener("cleanup", nil), eventcontract.ListenerConfig{Priority: 10, Tags: []string{"cleanup"}})
 

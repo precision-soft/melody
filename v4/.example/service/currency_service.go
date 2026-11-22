@@ -171,7 +171,7 @@ func (instance *CurrencyService) Create(
         return nil, createErr
     }
 
-    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.CurrencyCreatedEventName, event.NewCurrencyCreatedEvent(currency), currency.Id, CacheKeyCurrencyList, CacheKeyCurrencyById(currency.Id))
+    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.EventCurrencyCreated, event.NewCurrencyCreatedEvent(currency), currency.Id, CacheKeyCurrencyList, CacheKeyCurrencyById(currency.Id))
 
     return currency, nil
 }
@@ -212,7 +212,7 @@ func (instance *CurrencyService) Update(
         /* the row is written and the entries serving its old code and name never expire, so the event goes out with the fields as written even though the row cannot be read back, and the read-back failure is what the caller is answered */
         _, dispatchErr := instance.eventDispatcher.DispatchName(
             runtimeInstance,
-            event.CurrencyUpdatedEventName,
+            event.EventCurrencyUpdated,
             event.NewCurrencyUpdatedEvent(&modified),
         )
 
@@ -222,7 +222,7 @@ func (instance *CurrencyService) Update(
         return nil, false, nil
     }
 
-    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.CurrencyUpdatedEventName, event.NewCurrencyUpdatedEvent(written), written.Id, CacheKeyCurrencyList, CacheKeyCurrencyById(written.Id))
+    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.EventCurrencyUpdated, event.NewCurrencyUpdatedEvent(written), written.Id, CacheKeyCurrencyList, CacheKeyCurrencyById(written.Id))
 
     return written, true, nil
 }
@@ -320,7 +320,7 @@ func (instance *CurrencyService) UpdateRate(
     updatedEvent := event.NewCurrencyUpdatedEvent(&modified)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
-        event.CurrencyUpdatedEventName,
+        event.EventCurrencyUpdated,
         updatedEvent,
     )
     if nil != dispatchErr {
@@ -415,7 +415,7 @@ func (instance *CurrencyService) DeleteById(
         return false, nil
     }
 
-    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.CurrencyDeletedEventName, event.NewCurrencyDeletedEvent(currencyId), currencyId, CacheKeyCurrencyList, CacheKeyCurrencyById(currencyId))
+    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.EventCurrencyDeleted, event.NewCurrencyDeletedEvent(currencyId), currencyId, CacheKeyCurrencyList, CacheKeyCurrencyById(currencyId))
 
     return true, nil
 }

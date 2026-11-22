@@ -27,25 +27,25 @@ func TestOpenApiRegistry_DescribesTheExampleRoutesWithTheirTypes(t *testing.T) {
     expected := map[string]melodyopenapi.Descriptor{
         route.ProductsApiCreateName: {
             Summary:     "Create a product",
-            Tags:        []string{"products"},
+            Tags:        []string{OpenApiTagProducts},
             RequestType: melodyopenapi.TypeOf[handlerproduct.CreateRequest](),
             Responses:   []melodyopenapi.ResponseDescription{{Status: 201, Type: melodyopenapi.TypeOf[handlerproduct.ProductResponse]()}},
         },
         route.CurrenciesApiCreateName: {
             Summary:     "Create a currency",
-            Tags:        []string{"currencies"},
+            Tags:        []string{OpenApiTagCurrencies},
             RequestType: melodyopenapi.TypeOf[handlercurrency.CreateRequest](),
             Responses:   []melodyopenapi.ResponseDescription{{Status: 201, Type: melodyopenapi.TypeOf[handlercurrency.CurrencyResponse]()}},
         },
         route.I18nGreetingName: {
             Summary:   "Translated greeting",
-            Tags:      []string{"i18n"},
+            Tags:      []string{OpenApiTagI18n},
             Responses: []melodyopenapi.ResponseDescription{{Status: 200, Type: melodyopenapi.TypeOf[handleri18n.GreetingResponse]()}},
         },
         route.ReportsApiExportName: {
             Summary:     "Export the reading archive",
             Description: "The readings of the history door, newest first under the same limit, as a text/csv attachment named catalog-readings-<date>.csv.",
-            Tags:        []string{"reports"},
+            Tags:        []string{OpenApiTagReports},
         },
     }
 

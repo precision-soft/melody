@@ -427,7 +427,7 @@ func TestEventCommand_CarriesTheListenerDetailInTheVerboseJsonFormat(t *testing.
         ) error {
             return nil
         },
-        eventcontract.ListenerConfig{Priority: 7, Required: true},
+        eventcontract.ListenerConfig{Priority: 7, Failure: eventcontract.ListenerFailureConfig{Required: true}},
     )
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
@@ -455,8 +455,12 @@ func TestEventCommand_CarriesTheListenerDetailInTheVerboseJsonFormat(t *testing.
             } `json:"events"`
             Listeners []struct {
                 EventName string `json:"eventName"`
-                Priority  int    `json:"priority"`
-                Required  bool   `json:"required"`
+                Config    struct {
+                    Priority int `json:"priority"`
+                    Failure  struct {
+                        Required bool `json:"required"`
+                    } `json:"failure"`
+                } `json:"config"`
             } `json:"listeners"`
         } `json:"data"`
     }{}
@@ -473,7 +477,7 @@ func TestEventCommand_CarriesTheListenerDetailInTheVerboseJsonFormat(t *testing.
     }
 
     listenerEntry := decoded.Data.Listeners[0]
-    if "event.guarded" != listenerEntry.EventName || 7 != listenerEntry.Priority || true != listenerEntry.Required {
+    if "event.guarded" != listenerEntry.EventName || 7 != listenerEntry.Config.Priority || true != listenerEntry.Config.Failure.Required {
         t.Fatalf("unexpected listener entry %+v", listenerEntry)
     }
 }
@@ -575,8 +579,7 @@ func TestRenderRequiredListenerMark_TellsTheFourCombinationsApart(t *testing.T) 
 
     for _, expectedEntry := range expectedList {
         rendered := renderRequiredListenerMark(eventcontract.RegisteredListener{
-            Required:                 expectedEntry.required,
-            MaySkipRequiredListeners: expectedEntry.maySkip,
+            Config: eventcontract.ListenerConfig{Failure: eventcontract.ListenerFailureConfig{Required: expectedEntry.required, MaySkipRequiredListeners: expectedEntry.maySkip}},
         })
 
         if expectedEntry.expected != rendered {
@@ -746,8 +749,8 @@ func TestEventCommand_DescendingOrderReachesTheListenerDetail(t *testing.T) {
 func newEventTagsTestRuntime() containercontract.Runtime {
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
-    dispatcher.DeclareEvent("event.declared", eventcontract.EventConfig{RunAfterFailureTags: []string{"cache", "release"}})
-    dispatcher.DeclareEvent("event.unheard", eventcontract.EventConfig{RunAfterFailureTags: []string{"audit"}})
+    dispatcher.DeclareEvent("event.declared", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cache", "release"}})
+    dispatcher.DeclareEvent("event.unheard", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"audit"}})
     dispatcher.AddListener("event.declared", eventOrderProbeListenerAlpha, eventcontract.ListenerConfig{Priority: 20, Tags: []string{"release"}})
     dispatcher.AddListener("event.declared", eventOrderProbeListenerBeta, eventcontract.ListenerConfig{Priority: 10})
 
@@ -786,6 +789,10 @@ func TestEventCommand_VerboseTableCarriesTheTagsAndTheDeclarations(t *testing.T)
     if 2 != len(declarationRow) || "event.declared" != declarationRow[0][0] || "cache,release" != declarationRow[0][1] || "event.unheard" != declarationRow[1][0] || "audit" != declarationRow[1][1] {
         t.Fatalf("expected both declarations listed, the one with no listener included, got %v in %q", declarationRow, rendered)
     }
+
+    if false == strings.Contains(rendered, "tags to run after failure") {
+        t.Fatalf("expected the declarations headed by their field, got %q", rendered)
+    }
 }
 
 func TestEventCommand_VerboseJsonCarriesTheTagsAndTheDeclarations(t *testing.T) {
@@ -801,12 +808,16 @@ func TestEventCommand_VerboseJsonCarriesTheTagsAndTheDeclarations(t *testing.T) 
     decoded := struct {
         Data struct {
             Listeners []struct {
-                Tags             []string `json:"tags"`
-                RunsAfterFailure bool     `json:"runsAfterFailure"`
+                Config struct {
+                    Tags []string `json:"tags"`
+                } `json:"config"`
+                RunsAfterFailure bool `json:"runsAfterFailure"`
             } `json:"listeners"`
             Declarations []struct {
-                EventName           string   `json:"eventName"`
-                RunAfterFailureTags []string `json:"runAfterFailureTags"`
+                EventName string `json:"eventName"`
+                Config    struct {
+                    TagsToRunAfterFailure []string `json:"tagsToRunAfterFailure"`
+                } `json:"config"`
             } `json:"declarations"`
         } `json:"data"`
     }{}
@@ -814,11 +825,11 @@ func TestEventCommand_VerboseJsonCarriesTheTagsAndTheDeclarations(t *testing.T) 
         t.Fatalf("failed to decode the rendered envelope: %v, rendered %q", decodeErr, rendered)
     }
 
-    if 2 != len(decoded.Data.Listeners) || false == decoded.Data.Listeners[0].RunsAfterFailure || 1 != len(decoded.Data.Listeners[0].Tags) || true == decoded.Data.Listeners[1].RunsAfterFailure {
+    if 2 != len(decoded.Data.Listeners) || false == decoded.Data.Listeners[0].RunsAfterFailure || 1 != len(decoded.Data.Listeners[0].Config.Tags) || true == decoded.Data.Listeners[1].RunsAfterFailure {
         t.Fatalf("expected the listener tags and marks, got %+v", decoded.Data.Listeners)
     }
 
-    if 2 != len(decoded.Data.Declarations) || "event.declared" != decoded.Data.Declarations[0].EventName || 2 != len(decoded.Data.Declarations[0].RunAfterFailureTags) {
+    if 2 != len(decoded.Data.Declarations) || "event.declared" != decoded.Data.Declarations[0].EventName || 2 != len(decoded.Data.Declarations[0].Config.TagsToRunAfterFailure) {
         t.Fatalf("expected the declarations, got %+v", decoded.Data.Declarations)
     }
 
@@ -840,8 +851,8 @@ func TestRenderRunsAfterFailureMark_NamesTheReplaceDoor(t *testing.T) {
         {false, false, "-"},
     } {
         rendered := renderRunsAfterFailureMark(eventcontract.RegisteredListener{
-            RunsAfterFailure:             expectedEntry.runsAfterFailure,
-            ReplacesResponseAfterFailure: expectedEntry.replaces,
+            RunsAfterFailure: expectedEntry.runsAfterFailure,
+            Config:           eventcontract.ListenerConfig{Failure: eventcontract.ListenerFailureConfig{ReplacesResponseAfterFailure: expectedEntry.replaces}},
         })
         if expectedEntry.expected != rendered {
             t.Fatalf("expected %q for %+v, got %q", expectedEntry.expected, expectedEntry, rendered)
@@ -851,8 +862,8 @@ func TestRenderRunsAfterFailureMark_NamesTheReplaceDoor(t *testing.T) {
 
 func TestEventCommand_VerboseJsonCarriesTheReplaceDoor(t *testing.T) {
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
-    dispatcher.DeclareEvent("event.declared", eventcontract.EventConfig{RunAfterFailureTags: []string{"release"}})
-    dispatcher.AddListener("event.declared", eventOrderProbeListenerAlpha, eventcontract.ListenerConfig{Tags: []string{"release"}, ReplacesResponseAfterFailure: true})
+    dispatcher.DeclareEvent("event.declared", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"release"}})
+    dispatcher.AddListener("event.declared", eventOrderProbeListenerAlpha, eventcontract.ListenerConfig{Tags: []string{"release"}, Failure: eventcontract.ListenerFailureConfig{ReplacesResponseAfterFailure: true}})
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(

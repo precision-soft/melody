@@ -173,7 +173,7 @@ func (instance *UserService) Create(
     createdEvent := event.NewUserCreatedEvent(user)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
-        event.UserCreatedEventName,
+        event.EventUserCreated,
         createdEvent,
     )
     if nil != dropErr || nil != dispatchErr {
@@ -217,7 +217,7 @@ func (instance *UserService) GrantRole(
     updatedEvent := event.NewUserUpdatedEvent(account, account.Username)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
-        event.UserUpdatedEventName,
+        event.EventUserUpdated,
         updatedEvent,
     )
     if nil != dropErr || nil != dispatchErr {
@@ -273,7 +273,7 @@ func (instance *UserService) Update(
     updatedEvent := event.NewUserUpdatedEvent(after, before.Username)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
-        event.UserUpdatedEventName,
+        event.EventUserUpdated,
         updatedEvent,
     )
     if nil != dropErr || nil != dispatchErr {
@@ -303,7 +303,7 @@ func (instance *UserService) DeleteById(
     deletedEvent := event.NewUserDeletedEvent(removed.Id, removed.Username)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
-        event.UserDeletedEventName,
+        event.EventUserDeleted,
         deletedEvent,
     )
     if nil != dropErr || nil != dispatchErr {

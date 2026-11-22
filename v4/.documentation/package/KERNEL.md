@@ -33,7 +33,7 @@ This is an internal integration package. Userland code should not construct a ke
     - [`EventKernelResponse`](../../kernel/contract/event.go)
     - [`EventKernelTerminate`](../../kernel/contract/event.go)
     - [`EventKernelException`](../../kernel/contract/event.go)
-    - [`ListenerTagAccessLog`](../../kernel/contract/event.go), [`ListenerTagCors`](../../kernel/contract/event.go) — the tags the access log and the cors response listener carry, which the application declares on `kernel.terminate` and `kernel.response`
+    - [`ListenerTagKernelAccessLog`](../../kernel/contract/event.go), [`ListenerTagKernelCors`](../../kernel/contract/event.go) — the tags the access log and the cors response listener carry, which the application declares on `kernel.terminate` and `kernel.response`
 
 ### Constructors (`kernel`)
 

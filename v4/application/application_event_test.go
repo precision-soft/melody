@@ -2,6 +2,7 @@ package application
 
 import (
     "context"
+    "errors"
     "go/ast"
     "go/parser"
     "go/token"
@@ -10,112 +11,147 @@ import (
     "strings"
     "testing"
 
+    "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
 )
 
-func declarationOf(t *testing.T, declarations []frameworkEventDeclaration, eventName string) frameworkEventDeclaration {
+func declaredEventsOf(t *testing.T, events map[string]eventcontract.EventConfig) map[string][]string {
     t.Helper()
 
-    for _, declaration := range declarations {
-        if eventName == declaration.eventName {
-            return declaration
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{})
+    if declareErr := declareFrameworkEvents(dispatcher, events); nil != declareErr {
+        t.Fatalf("unexpected refusal: %v", declareErr)
+    }
+
+    declared := make(map[string][]string)
+    for _, registeredEvent := range dispatcher.RegisteredEvents() {
+        if true == registeredEvent.Declared {
+            declared[registeredEvent.EventName] = registeredEvent.Config.TagsToRunAfterFailure
         }
     }
 
-    t.Fatalf("expected %s declared", eventName)
-
-    return frameworkEventDeclaration{}
+    return declared
 }
 
-func TestResolveFrameworkEventConfigs_DeclaresTheTwelveFrameworkEvents(t *testing.T) {
-    declarations, resolveErr := resolveFrameworkEventConfigs(nil)
-    if nil != resolveErr || 12 != len(declarations) {
-        t.Fatalf("expected twelve declarations, got %d: %v", len(declarations), resolveErr)
+func TestDeclareFrameworkEvents_DeclaresTheTwelveFrameworkEvents(t *testing.T) {
+    declared := declaredEventsOf(t, nil)
+    if 12 != len(declared) {
+        t.Fatalf("expected twelve declarations, got %d: %v", len(declared), declared)
     }
 
-    for _, declaration := range declarations {
+    for eventName, tags := range declared {
         expected := ""
-        switch declaration.eventName {
+        switch eventName {
         case kernelcontract.EventKernelResponse:
-            expected = kernelcontract.ListenerTagCors
+            expected = kernelcontract.ListenerTagKernelCors
         case kernelcontract.EventKernelTerminate:
-            expected = kernelcontract.ListenerTagAccessLog
+            expected = kernelcontract.ListenerTagKernelAccessLog
         }
 
-        if expected != strings.Join(declaration.config.RunAfterFailureTags, ",") {
-            t.Fatalf("%s: expected tags %q, got %v", declaration.eventName, expected, declaration.config.RunAfterFailureTags)
+        if expected != strings.Join(tags, ",") {
+            t.Fatalf("%s: expected tags %q, got %v", eventName, expected, tags)
         }
     }
 }
 
-func TestResolveFrameworkEventConfigs_MergesTheApplicationsTagsAfterTheFrameworks(t *testing.T) {
+func TestDeclareFrameworkEvents_DeclaresTheApplicationsTagsAfterTheFrameworks(t *testing.T) {
     applicationTags := []string{"audit", "cache"}
 
-    declarations, resolveErr := resolveFrameworkEventConfigs(map[string]eventcontract.EventConfig{
-        kernelcontract.EventKernelResponse: {RunAfterFailureTags: applicationTags},
-        kernelcontract.EventKernelRequest:  {RunAfterFailureTags: []string{"audit"}},
+    declared := declaredEventsOf(t, map[string]eventcontract.EventConfig{
+        kernelcontract.EventKernelResponse: {TagsToRunAfterFailure: applicationTags},
+        kernelcontract.EventKernelRequest:  {TagsToRunAfterFailure: []string{"audit"}},
     })
-    if nil != resolveErr {
-        t.Fatalf("unexpected refusal: %v", resolveErr)
+
+    if "melody.cors,audit,cache" != strings.Join(declared[kernelcontract.EventKernelResponse], ",") {
+        t.Fatalf("expected the framework's tags first, got %v", declared[kernelcontract.EventKernelResponse])
     }
 
-    merged := declarationOf(t, declarations, kernelcontract.EventKernelResponse).config.RunAfterFailureTags
-    if "melody.cors,audit,cache" != strings.Join(merged, ",") {
-        t.Fatalf("expected the framework's tags first, got %v", merged)
-    }
-
-    merged[1] = "changed"
-    if "audit" != applicationTags[0] {
-        t.Fatalf("expected the caller's slice not aliased")
-    }
-
-    if "audit" != strings.Join(declarationOf(t, declarations, kernelcontract.EventKernelRequest).config.RunAfterFailureTags, ",") {
-        t.Fatalf("expected an event without framework tags to carry the application's alone")
+    if "audit" != strings.Join(declared[kernelcontract.EventKernelRequest], ",") {
+        t.Fatalf("expected an event without framework tags to carry the application's alone, got %v", declared[kernelcontract.EventKernelRequest])
     }
 }
 
-func eventsRefusalOf(t *testing.T, events map[string]eventcontract.EventConfig) *exception.Error {
+func TestDeclareFrameworkEvents_AllowsAFrameworkTagOnAnotherFrameworkEvent(t *testing.T) {
+    declared := declaredEventsOf(t, map[string]eventcontract.EventConfig{kernelcontract.EventKernelRequest: {TagsToRunAfterFailure: []string{kernelcontract.ListenerTagKernelCors}}})
+
+    if kernelcontract.ListenerTagKernelCors != strings.Join(declared[kernelcontract.EventKernelRequest], ",") {
+        t.Fatalf("expected the framework tag declared on kernel.request, got %v", declared[kernelcontract.EventKernelRequest])
+    }
+}
+
+func eventsRefusalOf(t *testing.T, events map[string]eventcontract.EventConfig) (*exception.Error, eventcontract.EventDispatcher) {
     t.Helper()
 
-    _, resolveErr := resolveFrameworkEventConfigs(events)
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{})
+    declareErr := declareFrameworkEvents(dispatcher, events)
 
-    refusal, isRefusal := resolveErr.(*exception.Error)
+    refusal, isRefusal := declareErr.(*exception.Error)
     if false == isRefusal {
-        t.Fatalf("expected a refusal, got %v", resolveErr)
+        t.Fatalf("expected a refusal, got %v", declareErr)
     }
 
-    return refusal
+    return refusal, dispatcher
 }
 
-func TestResolveFrameworkEventConfigs_RefusesAnEventTheFrameworkDoesNotOwn(t *testing.T) {
-    refusal := eventsRefusalOf(t, map[string]eventcontract.EventConfig{"user.deleted": {}, "app.created": {}})
+func TestDeclareFrameworkEvents_RefusesAnEventTheFrameworkDoesNotOwn(t *testing.T) {
+    refusal, dispatcher := eventsRefusalOf(t, map[string]eventcontract.EventConfig{"user.deleted": {}, "app.created": {}, kernelcontract.EventKernelRequest: {}})
 
     if "ApplicationConfig.Events names an event the framework does not own; an application event is declared through EventDispatcher.DeclareEvent" != refusal.Message() || "app.created" != refusal.Context()["eventName"] {
         t.Fatalf("expected the sorted first unknown event named, got %q %v", refusal.Message(), refusal.Context())
     }
-}
 
-func TestResolveFrameworkEventConfigs_RefusesATagInTheFrameworkNamespace(t *testing.T) {
-    for eventName, tag := range map[string]string{kernelcontract.EventKernelResponse: kernelcontract.ListenerTagCors, kernelcontract.EventKernelRequest: "melody.anything"} {
-        refusal := eventsRefusalOf(t, map[string]eventcontract.EventConfig{eventName: {RunAfterFailureTags: []string{"audit", tag}}})
-
-        if "ApplicationConfig.Events carries a tag in the melody. namespace, which the framework declares itself" != refusal.Message() || tag != refusal.Context()["tag"] || `ApplicationConfig.Events["`+eventName+`"].RunAfterFailureTags` != refusal.Context()["field"] {
-            t.Fatalf("%s: expected the reserved tag refused naming the field, got %q %v", eventName, refusal.Message(), refusal.Context())
+    for _, registeredEvent := range dispatcher.RegisteredEvents() {
+        if true == registeredEvent.Declared {
+            t.Fatalf("expected nothing declared ahead of the ownership refusal, got %s", registeredEvent.EventName)
         }
     }
 }
 
-func TestResolveFrameworkEventConfigs_RefusesAMalformedTagNamingTheField(t *testing.T) {
-    for _, tags := range [][]string{{""}, {"a b"}, {"audit", "audit"}} {
-        refusal := eventsRefusalOf(t, map[string]eventcontract.EventConfig{kernelcontract.EventKernelRequest: {RunAfterFailureTags: tags}})
+func TestDeclareFrameworkEvents_AnswersTheDispatchersRefusalNamingTheApplicationsField(t *testing.T) {
+    for _, testCase := range []struct {
+        name      string
+        eventName string
+        tags      []string
+        reason    string
+    }{
+        {"empty", kernelcontract.EventKernelRequest, []string{""}, "may not carry an empty tag"},
+        {"whitespace", kernelcontract.EventKernelRequest, []string{"a b"}, "carries a tag with whitespace"},
+        {"twice", kernelcontract.EventKernelRequest, []string{"audit", "audit"}, "carries a tag twice"},
+        {"reserved", kernelcontract.EventKernelRequest, []string{"melody.anything"}, "carries a tag in the melody. namespace the framework does not define"},
+        {"a framework tag repeated on its own event", kernelcontract.EventKernelResponse, []string{kernelcontract.ListenerTagKernelCors}, "carries a tag twice"},
+    } {
+        refusal, _ := eventsRefusalOf(t, map[string]eventcontract.EventConfig{testCase.eventName: {TagsToRunAfterFailure: testCase.tags}})
 
-        if false == strings.HasPrefix(refusal.Message(), `ApplicationConfig.Events["kernel.request"].RunAfterFailureTags `) {
-            t.Fatalf("%v: expected the field named, got %q", tags, refusal.Message())
+        if "ApplicationConfig.Events is refused" != refusal.Message() || `ApplicationConfig.Events["`+testCase.eventName+`"].TagsToRunAfterFailure` != refusal.Context()["field"] || testCase.eventName != refusal.Context()["eventName"] {
+            t.Fatalf("%s: expected the application's field named, got %q %v", testCase.name, refusal.Message(), refusal.Context())
+        }
+
+        var cause *exception.Error
+        if false == errors.As(refusal.Unwrap(), &cause) || "EventConfig.TagsToRunAfterFailure "+testCase.reason != cause.Message() {
+            t.Fatalf("%s: expected the dispatcher's refusal as the cause, got %v", testCase.name, refusal.Unwrap())
         }
     }
+}
+
+type panickingDeclarationDispatcher struct {
+    eventcontract.EventDispatcher
+}
+
+func (instance *panickingDeclarationDispatcher) DeclareEvent(string, eventcontract.EventConfig) {
+    panic("not a refusal")
+}
+
+func TestDeclareFrameworkEvents_APanicThatIsNoRefusalPasses(t *testing.T) {
+    defer func() {
+        if "not a refusal" != recover() {
+            t.Fatalf("expected the panic to pass")
+        }
+    }()
+
+    _ = declareFrameworkEvents(&panickingDeclarationDispatcher{EventDispatcher: event.NewEventDispatcher(event.EventDispatcherConfig{})}, nil)
 }
 
 func TestNewApplication_DeclaresTheFrameworkEventsSoALaterDeclarationIsRefused(t *testing.T) {
@@ -129,8 +165,7 @@ func TestNewApplication_DeclaresTheFrameworkEventsSoALaterDeclarationIsRefused(t
         }
     }
 
-    frameworkDeclarations, _ := resolveFrameworkEventConfigs(nil)
-    for _, declaration := range frameworkDeclarations {
+    for _, declaration := range frameworkEvents() {
         if false == slices.Contains(declared, declaration.eventName) {
             t.Fatalf("expected %s declared before the boot, got %v", declaration.eventName, declared)
         }
@@ -140,19 +175,19 @@ func TestNewApplication_DeclaresTheFrameworkEventsSoALaterDeclarationIsRefused(t
         dispatcher.DeclareEvent(kernelcontract.EventKernelTerminate, eventcontract.EventConfig{})
     }, "already declared")
 
-    dispatcher.DeclareEvent("app.event", eventcontract.EventConfig{RunAfterFailureTags: []string{"audit"}})
+    dispatcher.DeclareEvent("app.event", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"audit"}})
 }
 
 /* a new framework event constant without a row in frameworkEvents fails here */
 func TestFrameworkEvents_ListEveryFrameworkEventConstant(t *testing.T) {
-    declarations, _ := resolveFrameworkEventConfigs(nil)
+    declarations := frameworkEvents()
     declaredNames := make([]string, 0, len(declarations))
     for _, declaration := range declarations {
         declaredNames = append(declaredNames, declaration.eventName)
     }
 
     found := 0
-    for _, sourcePath := range []string{"../kernel/contract/event.go", "../security/contract/const.go", "../http/profiling_kernel.go"} {
+    for _, sourcePath := range []string{"../kernel/contract/event.go", "../security/contract/const.go", "../http/contract/event.go"} {
         parsed, parseErr := parser.ParseFile(token.NewFileSet(), sourcePath, nil, 0)
         if nil != parseErr {
             t.Fatalf("parse %s: %v", sourcePath, parseErr)

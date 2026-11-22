@@ -36,10 +36,6 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                 return nil
             }
 
-            if nil != requestEvent.Response() || nil != requestEvent.Refusal() {
-                return nil
-            }
-
             firewall, matched := registry.Match(requestEvent.Request())
             if false == matched || nil == firewall {
                 return nil
@@ -120,7 +116,7 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
 
             return nil
         },
-        eventcontract.ListenerConfig{Priority: KernelFirewallListenerPriority},
+        eventcontract.ListenerConfig{Priority: KernelFirewallListenerPriority, Failure: eventcontract.ListenerFailureConfig{MaySkipRequiredListeners: true}},
     )
 }
 

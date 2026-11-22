@@ -25,7 +25,7 @@ func RegisterListeners(eventDispatcher eventcontract.EventDispatcher, service *S
     RegisterResponseListener(eventDispatcher, service)
 }
 
-/* RegisterRequestListener answers a well-formed preflight from an allowed origin before the security chain runs; anything else falls through untouched, so it never widens what security refuses. A preflight an earlier listener already answered keeps its status and is decorated with the cross-origin headers. */
+/* RegisterRequestListener answers a well-formed preflight from an allowed origin before the security chain runs, which ends the kernel.request dispatch; anything else falls through untouched, so it never widens what security refuses. It may skip the required listeners behind it, since a preflight runs no handler. */
 func RegisterRequestListener(eventDispatcher eventcontract.EventDispatcher, service *Service) {
     requireService(service, "cors.RegisterRequestListener")
 
@@ -46,22 +46,6 @@ func RegisterRequestListener(eventDispatcher eventcontract.EventDispatcher, serv
                 return nil
             }
 
-            /* a refused preflight has no response to decorate yet; the kernel's rendering passes kernel.response, whose listener decorates it */
-            if nil != requestEvent.Refusal() {
-                return nil
-            }
-
-            /* an earlier listener, the rate limiter among them, answered the preflight: its refusal is decorated so the browser can read it, and its status is left untouched */
-            if existingResponse := requestEvent.Response(); nil != existingResponse {
-                if nil == existingResponse.Headers() {
-                    existingResponse.SetHeaders(make(nethttp.Header))
-                }
-
-                service.ApplyPreflightHeaders(origin, existingResponse.Headers())
-
-                return nil
-            }
-
             response := http.EmptyResponse(nethttp.StatusNoContent)
             service.ApplyPreflightHeaders(origin, response.Headers())
 
@@ -69,11 +53,11 @@ func RegisterRequestListener(eventDispatcher eventcontract.EventDispatcher, serv
 
             return nil
         },
-        eventcontract.ListenerConfig{Priority: RequestListenerPriority},
+        eventcontract.ListenerConfig{Priority: RequestListenerPriority, Failure: eventcontract.ListenerFailureConfig{MaySkipRequiredListeners: true}},
     )
 }
 
-/* RegisterResponseListener decorates the response the kernel is about to write. A handler that committed its own headers before returning, a stream or a long poll, is past its reach and needs the Middleware. */
+/* RegisterResponseListener decorates the response the kernel is about to write, a preflight's with the preflight headers too. A handler that committed its own headers before returning, a stream or a long poll, is past its reach and needs the Middleware. */
 func RegisterResponseListener(eventDispatcher eventcontract.EventDispatcher, service *Service) {
     requireService(service, "cors.RegisterResponseListener")
 
@@ -106,10 +90,15 @@ func RegisterResponseListener(eventDispatcher eventcontract.EventDispatcher, ser
                 return nil
             }
 
+            /* a preflight answered or refused by a listener ahead of the request listener, the rate limiter among them, carries the preflight headers so the browser can read its answer; the status and the body are left untouched */
+            if true == service.IsPreflight(responseEvent.Request()) {
+                service.ApplyPreflightHeaders(origin, response.Headers())
+            }
+
             service.ApplyResponseHeaders(origin, response.Headers())
 
             return nil
         },
-        eventcontract.ListenerConfig{Priority: ResponseListenerPriority, Tags: []string{kernelcontract.ListenerTagCors}},
+        eventcontract.ListenerConfig{Priority: ResponseListenerPriority, Tags: []string{kernelcontract.ListenerTagKernelCors}},
     )
 }

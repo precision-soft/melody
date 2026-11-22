@@ -26,7 +26,7 @@ func TestKernelHttpProfilerListener_EmitsProfileWhenAttributesAreNil(t *testing.
 
     var capturedProfile *HttpRequestProfile
     dispatcher.AddListener(
-        EventHttpRequestProfile,
+        httpcontract.EventHttpRequestProfile,
         func(_ containercontract.Runtime, eventValue eventcontract.Event) error {
             capturedProfile, _ = eventValue.Payload().(*HttpRequestProfile)
 
@@ -107,7 +107,7 @@ func TestKernelHttpProfilerListener_EmitsProfileWhenAttributesAreATypedNil(t *te
 
     var capturedProfile *HttpRequestProfile
     dispatcher.AddListener(
-        EventHttpRequestProfile,
+        httpcontract.EventHttpRequestProfile,
         func(_ containercontract.Runtime, eventValue eventcontract.Event) error {
             capturedProfile, _ = eventValue.Payload().(*HttpRequestProfile)
 
@@ -166,7 +166,7 @@ func TestKernelHttpProfilerListener_EmitsNoProfileForATypedNilRequest(t *testing
 
     profileCount := 0
     dispatcher.AddListener(
-        EventHttpRequestProfile,
+        httpcontract.EventHttpRequestProfile,
         func(_ containercontract.Runtime, eventValue eventcontract.Event) error {
             profileCount++
 

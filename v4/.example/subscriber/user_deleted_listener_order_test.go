@@ -44,7 +44,7 @@ func deletionRuntime(t *testing.T, cacheInstance melodycachecontract.Cache) melo
 /* the three listeners of the deletion, registered in the composition root's order: the cache's first, the token release, then the two-factor release over the given store source, the event declared as the composition root declares it */
 func deletionDispatcher(tokenStore melodysecuritycontract.EpochRevocableTokenStore, twoFactorStore twofactor.StoreSource) *melodyevent.EventDispatcher {
     dispatcher := undeclaredDeletionDispatcher(tokenStore, twoFactorStore)
-    dispatcher.DeclareEvent(event.UserDeletedEventName, event.UserDeletedEventConfig())
+    dispatcher.DeclareEvent(event.EventUserDeleted, event.UserDeletedEventConfig())
 
     return dispatcher
 }
@@ -63,9 +63,9 @@ func undeclaredDeletionDispatcher(tokenStore melodysecuritycontract.EpochRevocab
 
 /* the token release outranks every other listener of the deletion, read off the real subscribers: the order the listeners run in when nothing fails, the tokens first */
 func TestUserDeleted_TheTokenReleaseOutranksTheOtherListeners(t *testing.T) {
-    releasePriority := NewAccessTokenReleaseSubscriber(nil).SubscribedEvents()[event.UserDeletedEventName][0].Config().Priority
-    twoFactorPriority := NewTwoFactorEnrollmentSubscriber(nil).SubscribedEvents()[event.UserDeletedEventName][0].Config().Priority
-    cachePriority := NewUserEventSubscriber().SubscribedEvents()[event.UserDeletedEventName][0].Config().Priority
+    releasePriority := NewAccessTokenReleaseSubscriber(nil).SubscribedEvents()[event.EventUserDeleted][0].Config().Priority
+    twoFactorPriority := NewTwoFactorEnrollmentSubscriber(nil).SubscribedEvents()[event.EventUserDeleted][0].Config().Priority
+    cachePriority := NewUserEventSubscriber().SubscribedEvents()[event.EventUserDeleted][0].Config().Priority
 
     if releasePriority <= twoFactorPriority || twoFactorPriority <= cachePriority {
         t.Fatalf("expected the token release above the two-factor release above the cache listener, got %d, %d, %d", releasePriority, twoFactorPriority, cachePriority)
@@ -86,7 +86,7 @@ func TestUserDeleted_AFailingListenerDoesNotLeaveTheDeletedAccountsTokens(t *tes
     }
 
     runtimeInstance := deletionRuntime(t, refusing)
-    _, dispatchErr := deletionDispatcher(tokenStore, panicking).DispatchName(runtimeInstance, event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "dave"))
+    _, dispatchErr := deletionDispatcher(tokenStore, panicking).DispatchName(runtimeInstance, event.EventUserDeleted, event.NewUserDeletedEvent("user-4", "dave"))
     if nil == dispatchErr {
         t.Fatal("expected the dispatch to fail on the panicking two-factor release")
     }
@@ -110,7 +110,7 @@ func TestUserDeleted_AFailingListenerDoesNotLeaveTheDeletedAccountsTokens(t *tes
     controlDispatcher.AddSubscriber(NewTwoFactorEnrollmentSubscriber(fixedTwoFactorStore(twofactor.NewStore(database))))
 
     controlRuntime := deletionRuntime(t, refusing)
-    if _, controlErr := controlDispatcher.DispatchName(controlRuntime, event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "dave")); nil != controlErr {
+    if _, controlErr := controlDispatcher.DispatchName(controlRuntime, event.EventUserDeleted, event.NewUserDeletedEvent("user-4", "dave")); nil != controlErr {
         t.Fatalf("expected the two releases to succeed together, got %v", controlErr)
     }
 
@@ -157,7 +157,7 @@ func TestUserDeleted_ATokenStoreOutageStillReleasesTheSecondFactorAndDropsTheCac
     cacheInstance := newRecordingDeleteCache()
 
     runtimeInstance := deletionRuntime(t, cacheInstance)
-    _, dispatchErr := deletionDispatcher(tokenStore, fixedTwoFactorStore(twofactor.NewStore(database))).DispatchName(runtimeInstance, event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "dave"))
+    _, dispatchErr := deletionDispatcher(tokenStore, fixedTwoFactorStore(twofactor.NewStore(database))).DispatchName(runtimeInstance, event.EventUserDeleted, event.NewUserDeletedEvent("user-4", "dave"))
 
     if false == errors.Is(dispatchErr, outage) {
         t.Fatalf("expected the answer to carry the outage, got %v", dispatchErr)
@@ -181,7 +181,7 @@ func TestUserDeleted_AFailingUntaggedListenerAheadOfTheReleaseDoesNotSkipIt(t *t
     applicationFailure := errors.New("the application's listener failed")
     dispatcher := deletionDispatcher(tokenStore, fixedTwoFactorStore(twofactor.NewStore(database)))
     dispatcher.AddListener(
-        event.UserDeletedEventName,
+        event.EventUserDeleted,
         func(runtimeInstance melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
             return applicationFailure
         },
@@ -189,7 +189,7 @@ func TestUserDeleted_AFailingUntaggedListenerAheadOfTheReleaseDoesNotSkipIt(t *t
     )
 
     runtimeInstance := deletionRuntime(t, newRecordingDeleteCache())
-    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "dave"))
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, event.EventUserDeleted, event.NewUserDeletedEvent("user-4", "dave"))
 
     if false == errors.Is(dispatchErr, applicationFailure) {
         t.Fatalf("expected the application's failure answered, got %v", dispatchErr)
@@ -207,7 +207,7 @@ func TestUserDeleted_WithoutTheDeclarationTheReleasesBehindAFailureDoNotRun(t *t
     cacheInstance := newRecordingDeleteCache()
 
     runtimeInstance := deletionRuntime(t, cacheInstance)
-    _, _ = undeclaredDeletionDispatcher(tokenStore, fixedTwoFactorStore(twofactor.NewStore(database))).DispatchName(runtimeInstance, event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "dave"))
+    _, _ = undeclaredDeletionDispatcher(tokenStore, fixedTwoFactorStore(twofactor.NewStore(database))).DispatchName(runtimeInstance, event.EventUserDeleted, event.NewUserDeletedEvent("user-4", "dave"))
 
     if 0 != twoFactorReleaseCount(recorder) || 0 != len(cacheInstance.deletedKeys) {
         t.Fatalf("expected nothing behind the failed release to run without the declaration, got %v and %v", recorder.recordedQueries(), cacheInstance.deletedKeys)

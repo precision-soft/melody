@@ -26,6 +26,9 @@ import (
 
 const apiPathSegment = "/api/"
 
+/* AttributeRequestContextReady is the request attribute the required request context listener sets */
+const AttributeRequestContextReady = "example.requestContextReady"
+
 func (instance *Module) RegisterEventSubscribers(kernelInstance melodykernelcontract.Kernel) {
     instance.registerSubscribers(kernelInstance.EventDispatcher())
 }
@@ -33,7 +36,7 @@ func (instance *Module) RegisterEventSubscribers(kernelInstance melodykernelcont
 /* registerSubscribers installs the application's subscribers on the dispatcher; a door of its own so what the composition root INSTALLS can be read off a dispatcher, not only what each subscriber does once installed. */
 func (instance *Module) registerSubscribers(eventDispatcher melodyeventcontract.EventDispatcher) {
     /* the deletion's owner declares which of its listeners still run after a failure, ahead of the subscribers carrying the tags */
-    eventDispatcher.DeclareEvent(event.UserDeletedEventName, event.UserDeletedEventConfig())
+    eventDispatcher.DeclareEvent(event.EventUserDeleted, event.UserDeletedEventConfig())
 
     instance.registerRequiredRequestContextListener(eventDispatcher)
     instance.registerApiExceptionListener(eventDispatcher)
@@ -141,7 +144,7 @@ func requestBudgetConfig(trustedProxyResolver *trustedProxyResolver) melodyhttpm
     }
 }
 
-/* registerRequiredRequestContextListener registers a required kernel.request listener that prepares a per-request attribute later stages depend on; the kernel fails closed if another kernel.request listener stops propagation before it. */
+/* registerRequiredRequestContextListener registers a required kernel.request listener that prepares a per-request attribute later stages depend on; the kernel fails closed if another kernel.request listener stops propagation before it, while a framework decision ahead of it, the firewall's or access control's, ends the request without it. */
 func (instance *Module) registerRequiredRequestContextListener(eventDispatcher melodyeventcontract.EventDispatcher) {
     eventDispatcher.AddListener(
         melodykernelcontract.EventKernelRequest,
@@ -151,11 +154,11 @@ func (instance *Module) registerRequiredRequestContextListener(eventDispatcher m
                 return nil
             }
 
-            requestEvent.Request().Attributes().Set("example.requestContextReady", true)
+            requestEvent.Request().Attributes().Set(AttributeRequestContextReady, true)
 
             return nil
         },
-        melodyeventcontract.ListenerConfig{Priority: 10, Required: true},
+        melodyeventcontract.ListenerConfig{Priority: 10, Failure: melodyeventcontract.ListenerFailureConfig{Required: true}},
     )
 }
 

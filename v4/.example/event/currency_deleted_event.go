@@ -1,7 +1,7 @@
 package event
 
 const (
-    CurrencyDeletedEventName = "currency.deleted"
+    EventCurrencyDeleted = "currency.deleted"
 )
 
 func NewCurrencyDeletedEvent(currencyId string) *CurrencyDeletedEvent {

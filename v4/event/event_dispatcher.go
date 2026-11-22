@@ -127,10 +127,10 @@ func (instance *EventDispatcher) appendListenerLocked(
             listenerId:                   listenerId,
             priority:                     config.Priority,
             name:                         config.Name,
-            required:                     config.Required,
-            maySkipRequiredListeners:     config.MaySkipRequiredListeners,
+            required:                     config.Failure.Required,
+            maySkipRequiredListeners:     config.Failure.MaySkipRequiredListeners,
             tags:                         copyTags(config.Tags),
-            replacesResponseAfterFailure: config.ReplacesResponseAfterFailure,
+            replacesResponseAfterFailure: config.Failure.ReplacesResponseAfterFailure,
         },
     )
 
@@ -199,7 +199,7 @@ func (instance *EventDispatcher) DeclareEvent(eventName string, config eventcont
         )
     }
 
-    requireTags("EventConfig.RunAfterFailureTags", eventName, config.RunAfterFailureTags)
+    requireTags("EventConfig.TagsToRunAfterFailure", eventName, config.TagsToRunAfterFailure)
 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -217,7 +217,7 @@ func (instance *EventDispatcher) DeclareEvent(eventName string, config eventcont
     }
 
     instance.eventConfigs[eventName] = eventConfigEntry{
-        runAfterFailureTags: copyTags(config.RunAfterFailureTags),
+        tagsToRunAfterFailure: copyTags(config.TagsToRunAfterFailure),
     }
 }
 
@@ -372,16 +372,21 @@ func (instance *EventDispatcher) RegisteredEvents() []eventcontract.RegisteredEv
             registeredListenerList = append(
                 registeredListenerList,
                 eventcontract.RegisteredListener{
-                    Priority:                     entry.priority,
-                    Source:                       source,
-                    Owner:                        owner,
-                    ListenerId:                   listenerId,
-                    ListenerName:                 listenerName,
-                    Required:                     entry.required,
-                    MaySkipRequiredListeners:     entry.maySkipRequiredListeners,
-                    Tags:                         copyTags(entry.tags),
-                    RunsAfterFailure:             runsAfterFailure(entry.tags, eventConfig.runAfterFailureTags),
-                    ReplacesResponseAfterFailure: entry.replacesResponseAfterFailure,
+                    Source:       source,
+                    Owner:        owner,
+                    ListenerId:   listenerId,
+                    ListenerName: listenerName,
+                    Config: eventcontract.ListenerConfig{
+                        Priority: entry.priority,
+                        Name:     entry.name,
+                        Tags:     copyTags(entry.tags),
+                        Failure: eventcontract.ListenerFailureConfig{
+                            Required:                     entry.required,
+                            MaySkipRequiredListeners:     entry.maySkipRequiredListeners,
+                            ReplacesResponseAfterFailure: entry.replacesResponseAfterFailure,
+                        },
+                    },
+                    RunsAfterFailure: runsAfterFailure(entry.tags, eventConfig.tagsToRunAfterFailure),
                 },
             )
         }
@@ -389,10 +394,10 @@ func (instance *EventDispatcher) RegisteredEvents() []eventcontract.RegisteredEv
         registeredEvents = append(
             registeredEvents,
             eventcontract.RegisteredEvent{
-                EventName:           eventName,
-                Declared:            declared,
-                RunAfterFailureTags: copyTags(eventConfig.runAfterFailureTags),
-                Listeners:           registeredListenerList,
+                EventName: eventName,
+                Declared:  declared,
+                Config:    eventcontract.EventConfig{TagsToRunAfterFailure: copyTags(eventConfig.tagsToRunAfterFailure)},
+                Listeners: registeredListenerList,
             },
         )
     }
@@ -469,7 +474,7 @@ func (instance *EventDispatcher) dispatch(runtimeInstance containercontract.Runt
     instance.mutex.RLock()
     listenerList := instance.listeners[eventName]
     listenerListSnapshot := append([]listenerWithPriority(nil), listenerList...)
-    runAfterFailureTags := instance.eventConfigs[eventName].runAfterFailureTags
+    tagsToRunAfterFailure := instance.eventConfigs[eventName].tagsToRunAfterFailure
     instance.mutex.RUnlock()
 
     listenerList = listenerListSnapshot
@@ -570,7 +575,7 @@ func (instance *EventDispatcher) dispatch(runtimeInstance containercontract.Runt
 
             /* only the listeners behind the failure, those ahead having run; the stop flag is not read here, since a failure is no deliberate stop and a tagged listener's stop does not cancel the cleanup behind it */
             for _, entry := range listenerList[failedIndex+1:] {
-                if false == runsAfterFailure(entry.tags, runAfterFailureTags) {
+                if false == runsAfterFailure(entry.tags, tagsToRunAfterFailure) {
                     skippedListenerList = append(skippedListenerList, entry)
 
                     continue
@@ -922,7 +927,7 @@ type listenerWithPriority struct {
 }
 
 type eventConfigEntry struct {
-    runAfterFailureTags []string
+    tagsToRunAfterFailure []string
 }
 
 type subscriberRegistration struct {

@@ -16,27 +16,35 @@ func (instance *Module) openApiDocumentInfo() melodyopenapi.Info {
     }
 }
 
+/* the tags the example's openapi document groups its operations under */
+const (
+    OpenApiTagProducts   = "products"
+    OpenApiTagCurrencies = "currencies"
+    OpenApiTagI18n       = "i18n"
+    OpenApiTagReports    = "reports"
+)
+
 /* the descriptors below bind the handler types themselves, never a hand-written copy of them: a copy drifts from the validation rules and the published document then documents a body the route rejects. */
 func (instance *Module) buildOpenApi() {
     instance.openApiRegistry = melodyopenapi.NewRegistry()
 
     instance.openApiRegistry.Describe(route.ProductsApiCreateName, melodyopenapi.Descriptor{
         Summary:     "Create a product",
-        Tags:        []string{"products"},
+        Tags:        []string{OpenApiTagProducts},
         RequestType: melodyopenapi.TypeOf[handlerproduct.CreateRequest](),
         Responses:   []melodyopenapi.ResponseDescription{melodyopenapi.Response[handlerproduct.ProductResponse](201)},
     })
 
     instance.openApiRegistry.Describe(route.CurrenciesApiCreateName, melodyopenapi.Descriptor{
         Summary:     "Create a currency",
-        Tags:        []string{"currencies"},
+        Tags:        []string{OpenApiTagCurrencies},
         RequestType: melodyopenapi.TypeOf[handlercurrency.CreateRequest](),
         Responses:   []melodyopenapi.ResponseDescription{melodyopenapi.Response[handlercurrency.CurrencyResponse](201)},
     })
 
     instance.openApiRegistry.Describe(route.I18nGreetingName, melodyopenapi.Descriptor{
         Summary:   "Translated greeting",
-        Tags:      []string{"i18n"},
+        Tags:      []string{OpenApiTagI18n},
         Responses: []melodyopenapi.ResponseDescription{melodyopenapi.Response[handleri18n.GreetingResponse](200)},
     })
 
@@ -44,6 +52,6 @@ func (instance *Module) buildOpenApi() {
     instance.openApiRegistry.Describe(route.ReportsApiExportName, melodyopenapi.Descriptor{
         Summary:     "Export the reading archive",
         Description: "The readings of the history door, newest first under the same limit, as a text/csv attachment named catalog-readings-<date>.csv.",
-        Tags:        []string{"reports"},
+        Tags:        []string{OpenApiTagReports},
     })
 }

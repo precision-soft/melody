@@ -106,7 +106,7 @@ func (instance *CategoryService) Create(
         return nil, createErr
     }
 
-    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.CategoryCreatedEventName, event.NewCategoryCreatedEvent(category), category.Id, CacheKeyCategoryList, CacheKeyCategoryById(category.Id))
+    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.EventCategoryCreated, event.NewCategoryCreatedEvent(category), category.Id, CacheKeyCategoryList, CacheKeyCategoryById(category.Id))
 
     return category, nil
 }
@@ -139,7 +139,7 @@ func (instance *CategoryService) Update(
         return nil, false, nil
     }
 
-    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.CategoryUpdatedEventName, event.NewCategoryUpdatedEvent(&modified), modified.Id, CacheKeyCategoryList, CacheKeyCategoryById(modified.Id))
+    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.EventCategoryUpdated, event.NewCategoryUpdatedEvent(&modified), modified.Id, CacheKeyCategoryList, CacheKeyCategoryById(modified.Id))
 
     return &modified, true, nil
 }
@@ -173,7 +173,7 @@ func (instance *CategoryService) DeleteById(
         return false, nil
     }
 
-    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.CategoryDeletedEventName, event.NewCategoryDeletedEvent(categoryId), categoryId, CacheKeyCategoryList, CacheKeyCategoryById(categoryId))
+    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.EventCategoryDeleted, event.NewCategoryDeletedEvent(categoryId), categoryId, CacheKeyCategoryList, CacheKeyCategoryById(categoryId))
 
     return true, nil
 }

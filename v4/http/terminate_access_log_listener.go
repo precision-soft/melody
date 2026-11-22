@@ -126,6 +126,6 @@ func RegisterKernelTerminateAccessLogListener(eventDispatcher eventcontract.Even
             return nil
         },
         /* tagged so it still logs the request when a kernel.terminate listener ahead of it failed, on a dispatcher that declares the tag, as the application's does */
-        eventcontract.ListenerConfig{Priority: KernelTerminateAccessLogListenerPriority, Tags: []string{kernelcontract.ListenerTagAccessLog}},
+        eventcontract.ListenerConfig{Priority: KernelTerminateAccessLogListenerPriority, Tags: []string{kernelcontract.ListenerTagKernelAccessLog}},
     )
 }

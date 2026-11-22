@@ -5,7 +5,7 @@ import (
 )
 
 const (
-    ProductUpdatedEventName = "product.updated"
+    EventProductUpdated = "product.updated"
 )
 
 func NewProductUpdatedEvent(product *entity.Product) *ProductUpdatedEvent {

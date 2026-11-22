@@ -934,7 +934,7 @@ func TestRegisterKernelAccessControlListener_RegistersTheListenerRequiredInOneCa
             continue
         }
 
-        if 1 != len(registeredEvent.Listeners) || false == registeredEvent.Listeners[0].Required || KernelAccessControlListenerPriority != registeredEvent.Listeners[0].Priority {
+        if 1 != len(registeredEvent.Listeners) || false == registeredEvent.Listeners[0].Config.Failure.Required || KernelAccessControlListenerPriority != registeredEvent.Listeners[0].Config.Priority {
             t.Fatalf("expected one required listener at the access control priority, got %+v", registeredEvent.Listeners)
         }
 
@@ -1181,7 +1181,8 @@ func TestAccessControlListener_StandsAsideAfterAResolutionRefusal(t *testing.T) 
     }
 }
 
-func TestSecurityListeners_StandAsideOnAnEarlierRefusal(t *testing.T) {
+/* a refusal is the request's decision and stops the dispatch, so neither security listener runs; access control, required, is reported skipped */
+func TestSecurityListeners_DoNotRunOnAnEarlierRefusal(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
 
@@ -1207,16 +1208,19 @@ func TestSecurityListeners_StandAsideOnAnEarlierRefusal(t *testing.T) {
     requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, newSecurityTestRequest("GET", "/admin", nil, runtimeInstance))
     requestEvent.Refuse(earlier)
 
-    if _, dispatchErr := kernel.EventDispatcher().DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, requestEvent); nil != dispatchErr {
-        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    _, dispatchErr := kernel.EventDispatcher().DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, requestEvent)
+
+    var skipped *event.RequiredListenerSkippedError
+    if false == errors.As(dispatchErr, &skipped) {
+        t.Fatalf("expected access control reported skipped, got %v", dispatchErr)
     }
 
     if _, exists := SecurityContextFromRuntime(runtimeInstance); true == exists {
-        t.Fatalf("expected the resolution listener to stand aside, it published a security context")
+        t.Fatalf("expected the resolution listener not to run, it published a security context")
     }
 
     if 0 != deniedCount {
-        t.Fatalf("expected access control to stand aside, it denied %d times", deniedCount)
+        t.Fatalf("expected access control not to run, it denied %d times", deniedCount)
     }
 
     if earlier != requestEvent.Refusal() {
@@ -1725,5 +1729,42 @@ func TestAccessControlListener_HandsItsRuntimeToTheDecisionManager(t *testing.T)
 
     if runtimeInstance != decisionManager.calledRuntime {
         t.Fatalf("expected the decision manager handed the listener's runtime, not the request's")
+    }
+}
+
+/* the firewall's door answers and refusals and access control's own decision end the kernel.request dispatch; both may skip the required listeners behind them, and access control stays required */
+func TestSecurityListeners_MaySkipTheRequiredListeners(t *testing.T) {
+    kernel := newTestKernel()
+
+    registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{
+        newRefusalSiteFirewall(CompiledFirewallConfig{TokenSource: &resolutionListenerTestTokenSource{}}),
+    }, newRefusalSiteAccessControl()))
+    RegisterKernelSecurityResolutionListener(kernel, registry)
+    RegisterKernelAccessControlListener(kernel, registry)
+
+    found := 0
+    for _, registeredEvent := range kernel.EventDispatcher().RegisteredEvents() {
+        if kernelcontract.EventKernelRequest != registeredEvent.EventName {
+            continue
+        }
+
+        for _, listener := range registeredEvent.Listeners {
+            switch listener.Config.Priority {
+            case KernelFirewallListenerPriority:
+                found++
+                if false == listener.Config.Failure.MaySkipRequiredListeners || true == listener.Config.Failure.Required {
+                    t.Fatalf("expected the firewall listener to may skip and not be required, got %+v", listener.Config.Failure)
+                }
+            case KernelAccessControlListenerPriority:
+                found++
+                if false == listener.Config.Failure.MaySkipRequiredListeners || false == listener.Config.Failure.Required {
+                    t.Fatalf("expected access control required and allowed to skip, got %+v", listener.Config.Failure)
+                }
+            }
+        }
+    }
+
+    if 2 != found {
+        t.Fatalf("expected both security listeners on kernel.request, found %d", found)
     }
 }

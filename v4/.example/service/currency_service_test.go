@@ -45,8 +45,8 @@ func TestCurrencyServiceUpdateRate_WritesTheQuoteAndTellsTheListeners(t *testing
 
     /* the listener is what drops the cached list and the cached currency, so a write that skipped the dispatch would leave every reader on the rate it replaced */
     dispatched := dispatcher.names()
-    if 1 != len(dispatched) || event.CurrencyUpdatedEventName != dispatched[0] {
-        t.Errorf("the update dispatched %v, wanted one %s", dispatched, event.CurrencyUpdatedEventName)
+    if 1 != len(dispatched) || event.EventCurrencyUpdated != dispatched[0] {
+        t.Errorf("the update dispatched %v, wanted one %s", dispatched, event.EventCurrencyUpdated)
     }
 
     stored, storedFound, storedErr := currencyService.FindById(exampleTestRuntime(), "cur-usd")
@@ -422,7 +422,7 @@ func TestCurrencyServiceUpdate_AnswersAndPublishesTheRowAsWrittenAfterAConcurren
 
     var published *entity.Currency
     dispatcher.dispatcher.AddListener(
-        event.CurrencyUpdatedEventName,
+        event.EventCurrencyUpdated,
         func(listenerRuntime melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
             if updatedEvent, isUpdated := eventValue.Payload().(*event.CurrencyUpdatedEvent); true == isUpdated {
                 published = updatedEvent.Currency()
@@ -479,7 +479,7 @@ func TestCurrencyServiceUpdate_AFailedReadBackAfterTheWriteStillDispatchesTheEve
         t.Fatalf("expected the read-back failure answered over a written row, got found %v and %v", found, updateErr)
     }
 
-    if 1 != len(dispatcher.names()) || event.CurrencyUpdatedEventName != dispatcher.names()[0] {
+    if 1 != len(dispatcher.names()) || event.EventCurrencyUpdated != dispatcher.names()[0] {
         t.Fatalf("expected the update event dispatched once despite the failed read-back, got %v", dispatcher.names())
     }
 }
@@ -593,7 +593,7 @@ func TestCurrencyService_AnswersTheCommittedRowWhenADispatchFails(t *testing.T) 
     if nil != createErr || nil == currency {
         t.Fatalf("expected the created currency answered, got %+v, %v", currency, createErr)
     }
-    catalogue.assertCommittedDispatchFailure(t, event.CurrencyCreatedEventName, "cur-committed", CacheKeyCurrencyList, CacheKeyCurrencyById("cur-committed"))
+    catalogue.assertCommittedDispatchFailure(t, event.EventCurrencyCreated, "cur-committed", CacheKeyCurrencyList, CacheKeyCurrencyById("cur-committed"))
 
     catalogue.logger.records = nil
     catalogue.prime(t, CacheKeyCurrencyList, CacheKeyCurrencyById("cur-committed"))
@@ -601,7 +601,7 @@ func TestCurrencyService_AnswersTheCommittedRowWhenADispatchFails(t *testing.T) 
     if nil != updateErr || false == found || nil == updated {
         t.Fatalf("expected the updated currency answered, got %+v, %t, %v", updated, found, updateErr)
     }
-    catalogue.assertCommittedDispatchFailure(t, event.CurrencyUpdatedEventName, "cur-committed", CacheKeyCurrencyList, CacheKeyCurrencyById("cur-committed"))
+    catalogue.assertCommittedDispatchFailure(t, event.EventCurrencyUpdated, "cur-committed", CacheKeyCurrencyList, CacheKeyCurrencyById("cur-committed"))
 
     catalogue.logger.records = nil
     catalogue.prime(t, CacheKeyCurrencyList, CacheKeyCurrencyById("cur-committed"))
@@ -609,7 +609,7 @@ func TestCurrencyService_AnswersTheCommittedRowWhenADispatchFails(t *testing.T) 
     if nil != deleteErr || false == deleted {
         t.Fatalf("expected the delete answered, got %t, %v", deleted, deleteErr)
     }
-    catalogue.assertCommittedDispatchFailure(t, event.CurrencyDeletedEventName, "cur-committed", CacheKeyCurrencyList, CacheKeyCurrencyById("cur-committed"))
+    catalogue.assertCommittedDispatchFailure(t, event.EventCurrencyDeleted, "cur-committed", CacheKeyCurrencyList, CacheKeyCurrencyById("cur-committed"))
 }
 
 type slowCurrencyRepository struct {

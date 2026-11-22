@@ -88,14 +88,14 @@ func TestKernelResponseEvent_AReplacementAfterAFailureIsRefusedWithoutTheDoor(t 
         t.Fatalf("expected the standing response kept")
     }
 
-    replacements := payload.takeAfterFailureReplacements()
-    if 1 != len(replacements) || true == replacements[0].admitted || other != replacements[0].discarded || nethttp.StatusOK != replacements[0].servedStatus || nethttp.StatusTeapot != replacements[0].discardedStatus {
+    replacements := payload.takeAfterFailureWrites()
+    if 1 != len(replacements) || true == replacements[0].admitted || other != replacements[0].written || original != replacements[0].standing || afterFailureWriteResponse != replacements[0].write {
         t.Fatalf("expected one refused replacement recorded, got %+v", replacements)
     }
 
     third := TextResponse(nethttp.StatusAccepted, "third")
     payload.SetResponse(third)
-    if third != payload.Response() || 0 != len(payload.takeAfterFailureReplacements()) {
+    if third != payload.Response() || 0 != len(payload.takeAfterFailureWrites()) {
         t.Fatalf("expected a replacement outside the pass taken without a record")
     }
 }
@@ -109,8 +109,8 @@ func TestKernelResponseEvent_AReplacementAfterAFailureIsServedThroughTheDoor(t *
     payload.SetResponse(other)
     leave()
 
-    replacements := payload.takeAfterFailureReplacements()
-    if other != payload.Response() || 1 != len(replacements) || false == replacements[0].admitted || original != replacements[0].discarded || nethttp.StatusTeapot != replacements[0].servedStatus {
+    replacements := payload.takeAfterFailureWrites()
+    if other != payload.Response() || 1 != len(replacements) || false == replacements[0].admitted || original != replacements[0].standing || other != replacements[0].written {
         t.Fatalf("expected the replacement served and recorded, got %+v", replacements)
     }
 }
@@ -123,7 +123,7 @@ func TestKernelResponseEvent_SettingTheStandingResponseAfterAFailureIsNoReplacem
     payload.SetResponse(original)
     leave()
 
-    if 0 != len(payload.takeAfterFailureReplacements()) {
+    if 0 != len(payload.takeAfterFailureWrites()) {
         t.Fatalf("expected no record for the standing response set again")
     }
 
@@ -135,16 +135,10 @@ func TestKernelResponseEvent_SettingTheStandingResponseAfterAFailureIsNoReplacem
     payload.SetResponse(other)
     leaveOpen()
 
-    replacements := payload.takeAfterFailureReplacements()
+    replacements := payload.takeAfterFailureWrites()
     if other != payload.Response() || 1 != len(replacements) || "open" != replacements[0].listener.ListenerName {
         t.Fatalf("expected the outer listener's door to judge after the inner one left, got %+v", replacements)
     }
-}
-
-func TestKernelResponseEvent_ANilPayloadEntersNothing(t *testing.T) {
-    var payload *KernelResponseEvent
-
-    payload.EnterAfterFailureListener(eventseam.NewToken(), eventseam.AfterFailureListener{})()
 }
 
 func newReplacementKernelFixture(t *testing.T, door bool) (*httptest.ResponseRecorder, *afterFailureRecordingLogger, *closeRecordingBody, *closeRecordingBody) {
@@ -163,7 +157,7 @@ func newReplacementKernelFixture(t *testing.T, door bool) (*httptest.ResponseRec
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
 
     dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
-    dispatcher.DeclareEvent(kernelcontract.EventKernelResponse, eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+    dispatcher.DeclareEvent(kernelcontract.EventKernelResponse, eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cleanup"}})
     dispatcher.AddListener(kernelcontract.EventKernelResponse, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         return errors.New("the response listener failed")
     }, eventcontract.ListenerConfig{Priority: 10})
@@ -171,7 +165,7 @@ func newReplacementKernelFixture(t *testing.T, door bool) (*httptest.ResponseRec
         eventValue.Payload().(*KernelResponseEvent).SetResponse(replacement)
 
         return nil
-    }, eventcontract.ListenerConfig{Priority: 0, Name: "replacing", Tags: []string{"cleanup"}, ReplacesResponseAfterFailure: door})
+    }, eventcontract.ListenerConfig{Priority: 0, Name: "replacing", Tags: []string{"cleanup"}, Failure: eventcontract.ListenerFailureConfig{ReplacesResponseAfterFailure: door}})
 
     recorder := httptest.NewRecorder()
     NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/replaced", nil))
@@ -187,12 +181,12 @@ func TestKernel_AListenerReplacingTheResponseAfterAFailureIsRefusedAndWarned(t *
     }
 
     messages, contexts := recordingLogger.warnings()
-    if 1 != len(messages) || "a listener's response replacement after a failure is refused; the response standing at the failure is served" != messages[0] {
+    if 1 != len(messages) || "a listener's response replacement after a failure is refused" != messages[0] {
         t.Fatalf("expected one refusal warning, got %v", messages)
     }
 
     context := contexts[0]
-    if kernelcontract.EventKernelResponse != context["eventName"] || "replacing" != context["listenerName"] || nethttp.StatusOK != context["servedResponseStatus"] || nethttp.StatusTeapot != context["refusedResponseStatus"] || "ListenerConfig.ReplacesResponseAfterFailure" != context["door"] {
+    if kernelcontract.EventKernelResponse != context["eventName"] || "replacing" != context["listenerName"] || nethttp.StatusOK != context["servedResponseStatus"] || nethttp.StatusTeapot != context["refusedResponseStatus"] || "ListenerConfig.Failure.ReplacesResponseAfterFailure" != context["door"] || afterFailureRefusedByDoor != context["refusedBy"] || afterFailureWriteResponse != context["write"] {
         t.Fatalf("expected the warning to name the listener, the statuses and the door, got %v", context)
     }
 
@@ -230,12 +224,12 @@ func TestKernel_AReplacementInACleanDispatchWritesNoWarning(t *testing.T) {
         serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
 
         dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
-        dispatcher.DeclareEvent(kernelcontract.EventKernelResponse, eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+        dispatcher.DeclareEvent(kernelcontract.EventKernelResponse, eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cleanup"}})
         dispatcher.AddListener(kernelcontract.EventKernelResponse, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             eventValue.Payload().(*KernelResponseEvent).SetResponse(TextResponse(nethttp.StatusTeapot, "replaced"))
 
             return nil
-        }, eventcontract.ListenerConfig{Tags: []string{"cleanup"}, ReplacesResponseAfterFailure: door})
+        }, eventcontract.ListenerConfig{Tags: []string{"cleanup"}, Failure: eventcontract.ListenerFailureConfig{ReplacesResponseAfterFailure: door}})
 
         recorder := httptest.NewRecorder()
         NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/clean", nil))
@@ -260,7 +254,7 @@ func TestKernel_TheAccessLogStillRunsAfterAFailedTerminateListener(t *testing.T)
 
         dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
         if true == declared {
-            dispatcher.DeclareEvent(kernelcontract.EventKernelTerminate, eventcontract.EventConfig{RunAfterFailureTags: []string{kernelcontract.ListenerTagAccessLog}})
+            dispatcher.DeclareEvent(kernelcontract.EventKernelTerminate, eventcontract.EventConfig{TagsToRunAfterFailure: []string{kernelcontract.ListenerTagKernelAccessLog}})
         }
         dispatcher.AddListener(kernelcontract.EventKernelTerminate, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return errors.New("the terminate listener failed")
@@ -294,7 +288,7 @@ func TestKernel_TheAccessLogStillRunsAfterAFailedTerminateListener(t *testing.T)
     }
 }
 
-func TestKernel_ARefusalAboveAFailureAheadOfARequiredListenerNamesBothCausesInDevelopment(t *testing.T) {
+func TestKernel_ARefusingListenerThatFailsAheadOfARequiredListenerNamesBothCausesInDevelopment(t *testing.T) {
     for _, environment := range []string{config.EnvironmentDevelopment, config.EnvironmentProduction} {
         serviceContainer := newHttpTestContainerInEnvironment(environment)
 
@@ -302,14 +296,11 @@ func TestKernel_ARefusalAboveAFailureAheadOfARequiredListenerNamesBothCausesInDe
         eventDispatcher.AddListener(kernelcontract.EventKernelRequest, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             eventValue.Payload().(*KernelRequestEvent).Refuse(exception.Forbidden("not you"))
 
-            return nil
-        }, eventcontract.ListenerConfig{Priority: 50})
-        eventDispatcher.AddListener(kernelcontract.EventKernelRequest, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
-            return errors.New("the listener below the refusal failed")
-        }, eventcontract.ListenerConfig{Priority: 30, Name: "failing"})
+            return errors.New("the refusing listener failed")
+        }, eventcontract.ListenerConfig{Priority: 50, Name: "failing", Failure: eventcontract.ListenerFailureConfig{MaySkipRequiredListeners: true}})
         eventDispatcher.AddListener(kernelcontract.EventKernelRequest, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
-        }, eventcontract.ListenerConfig{Priority: 10, Required: true})
+        }, eventcontract.ListenerConfig{Priority: 10, Failure: eventcontract.ListenerFailureConfig{Required: true}})
 
         recorder := httptest.NewRecorder()
         NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/guarded", nil))
@@ -320,7 +311,7 @@ func TestKernel_ARefusalAboveAFailureAheadOfARequiredListenerNamesBothCausesInDe
 
         body := recorder.Body.String()
         if config.EnvironmentDevelopment == environment {
-            if false == strings.Contains(body, "refused: 403 not you; then: event propagation stopped before a required listener ran (stopped by failing): event listener returned error: the listener below the refusal failed") {
+            if false == strings.Contains(body, "refused: 403 not you; then: event propagation stopped before a required listener ran (stopped by failing): event listener returned error: the refusing listener failed") {
                 t.Fatalf("expected both causes named in development, got %s", body)
             }
 
@@ -371,7 +362,7 @@ func TestKernelResponseEvent_AZeroTokenEntersNothing(t *testing.T) {
     defer leave()
 
     payload.SetResponse(TextResponse(nethttp.StatusTeapot, "forged"))
-    if nethttp.StatusTeapot != payload.Response().StatusCode() || 0 != len(payload.takeAfterFailureReplacements()) {
+    if nethttp.StatusTeapot != payload.Response().StatusCode() || 0 != len(payload.takeAfterFailureWrites()) {
         t.Fatalf("expected a zero token to change nothing")
     }
 
@@ -400,7 +391,7 @@ func TestKernel_AResponseRefusedTwiceIsClosedOnceAndWarnedTwice(t *testing.T) {
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
 
     dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
-    dispatcher.DeclareEvent(kernelcontract.EventKernelResponse, eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+    dispatcher.DeclareEvent(kernelcontract.EventKernelResponse, eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cleanup"}})
     dispatcher.AddListener(kernelcontract.EventKernelResponse, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         return errors.New("the response listener failed")
     }, eventcontract.ListenerConfig{Priority: 10})
@@ -433,7 +424,7 @@ func TestKernel_AnExitAfterARefusedReplacementStillWarnsAndClosesIt(t *testing.T
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
 
     dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
-    dispatcher.DeclareEvent(kernelcontract.EventKernelResponse, eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+    dispatcher.DeclareEvent(kernelcontract.EventKernelResponse, eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cleanup"}})
     dispatcher.AddListener(kernelcontract.EventKernelResponse, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         return errors.New("the response listener failed")
     }, eventcontract.ListenerConfig{Priority: 10})
@@ -479,8 +470,11 @@ func TestKernelResponseEvent_AnAdmittedNilResponseIsWarnedAs204(t *testing.T) {
     payload.SetResponse(nil)
     leave()
 
-    replacements := payload.takeAfterFailureReplacements()
-    if 1 != len(replacements) || nethttp.StatusNoContent != replacements[0].servedStatus || nethttp.StatusOK != replacements[0].discardedStatus {
-        t.Fatalf("expected the nil response read as the 204 the kernel writes, got %+v", replacements)
+    recordingLogger := &afterFailureRecordingLogger{}
+    warnAfterFailureWrites(recordingLogger, payload.takeAfterFailureWrites(), afterFailureVerdict{nilResponseStatus: nethttp.StatusNoContent})
+
+    messages, contexts := recordingLogger.warnings()
+    if 1 != len(messages) || nethttp.StatusNoContent != contexts[0]["servedResponseStatus"] || nethttp.StatusOK != contexts[0]["replacedResponseStatus"] {
+        t.Fatalf("expected the nil response read as the 204 the kernel writes, got %v %v", messages, contexts)
     }
 }

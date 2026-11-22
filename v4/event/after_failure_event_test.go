@@ -15,7 +15,7 @@ func TestEventDispatcher_ATaggedListenersRecordNamesTheCallersEventTypeAndItsWri
 
     payload := &tagsTestPayload{}
 
-    dispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+    dispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cleanup"}})
     dispatcher.AddListener("e", func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error { return errors.New("failure") }, eventcontract.ListenerConfig{Priority: 30})
     dispatcher.AddListener(
         "e",

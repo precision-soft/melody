@@ -41,10 +41,10 @@ func TestDispatch_AnnouncesEachAfterFailureListenerToAGuardingPayload(t *testing
     dispatcher, clockInstance := testNewEventDispatcher()
     payload := &guardRecordingPayload{}
 
-    dispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"t"}})
+    dispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"t"}})
     dispatcher.AddListener("e", recordingListener(payload, "ahead", nil), eventcontract.ListenerConfig{Priority: 50, Name: "ahead", Tags: []string{"t"}})
     dispatcher.AddListener("e", recordingListener(payload, "failing", errors.New("failure")), eventcontract.ListenerConfig{Priority: 40, Name: "failing"})
-    dispatcher.AddListener("e", recordingListener(payload, "A", nil), eventcontract.ListenerConfig{Priority: 30, Name: "A", Tags: []string{"t"}, ReplacesResponseAfterFailure: true})
+    dispatcher.AddListener("e", recordingListener(payload, "A", nil), eventcontract.ListenerConfig{Priority: 30, Name: "A", Tags: []string{"t"}, Failure: eventcontract.ListenerFailureConfig{ReplacesResponseAfterFailure: true}})
     dispatcher.AddListener("e", recordingListener(payload, "untagged", nil), eventcontract.ListenerConfig{Priority: 20, Name: "untagged"})
     dispatcher.AddListener("e", recordingListener(payload, "B", nil), eventcontract.ListenerConfig{Priority: 10, Name: "B", Tags: []string{"t"}})
 
@@ -57,8 +57,8 @@ func TestDispatch_AnnouncesEachAfterFailureListenerToAGuardingPayload(t *testing
 
     clean := &guardRecordingPayload{}
     cleanDispatcher, _ := testNewEventDispatcher()
-    cleanDispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"t"}})
-    cleanDispatcher.AddListener("e", recordingListener(clean, "A", nil), eventcontract.ListenerConfig{Name: "A", Tags: []string{"t"}, ReplacesResponseAfterFailure: true})
+    cleanDispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"t"}})
+    cleanDispatcher.AddListener("e", recordingListener(clean, "A", nil), eventcontract.ListenerConfig{Name: "A", Tags: []string{"t"}, Failure: eventcontract.ListenerFailureConfig{ReplacesResponseAfterFailure: true}})
 
     _, _ = cleanDispatcher.Dispatch(newEventDispatcherAdapterTestRuntime(t), NewEvent("e", clean, clockInstance.Now()))
 
@@ -71,7 +71,7 @@ func TestDispatch_LeavesTheGuardWhenAnAfterFailureListenerPanicsOrExits(t *testi
     dispatcher, clockInstance := testNewEventDispatcher()
     payload := &guardRecordingPayload{}
 
-    dispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"t"}})
+    dispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"t"}})
     dispatcher.AddListener("e", recordingListener(payload, "failing", errors.New("failure")), eventcontract.ListenerConfig{Priority: 20, Name: "failing"})
     dispatcher.AddListener("e", func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         panic("the tagged listener panicked")
@@ -85,7 +85,7 @@ func TestDispatch_LeavesTheGuardWhenAnAfterFailureListenerPanicsOrExits(t *testi
 
     exiting := &guardRecordingPayload{}
     exitingDispatcher, _ := testNewEventDispatcher()
-    exitingDispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"t"}})
+    exitingDispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"t"}})
     exitingDispatcher.AddListener("e", recordingListener(exiting, "failing", errors.New("failure")), eventcontract.ListenerConfig{Priority: 20, Name: "failing"})
     exitingDispatcher.AddListener("e", func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         exception.Exit(exception.NewExitError(3, exception.NewError("the command is done", nil, nil)))
@@ -112,7 +112,7 @@ func TestDispatch_LeavesTheGuardWhenAnAfterFailureListenerPanicsOrExits(t *testi
 func TestDispatch_APayloadThatGuardsNothingIsDispatchedUnchanged(t *testing.T) {
     for name, payload := range map[string]any{"plain": "payload", "nil": nil, "typed nil guard": (*guardRecordingPayload)(nil)} {
         dispatcher, clockInstance := testNewEventDispatcher()
-        dispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"t"}})
+        dispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"t"}})
         dispatcher.AddListener("e", func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return errors.New("failure")
         }, eventcontract.ListenerConfig{Priority: 20})
@@ -122,7 +122,7 @@ func TestDispatch_APayloadThatGuardsNothingIsDispatchedUnchanged(t *testing.T) {
             ran = true
 
             return nil
-        }, eventcontract.ListenerConfig{Priority: 10, Tags: []string{"t"}, ReplacesResponseAfterFailure: true})
+        }, eventcontract.ListenerConfig{Priority: 10, Tags: []string{"t"}, Failure: eventcontract.ListenerFailureConfig{ReplacesResponseAfterFailure: true}})
 
         if _, err := dispatcher.Dispatch(newEventDispatcherAdapterTestRuntime(t), NewEvent("e", payload, clockInstance.Now())); nil == err || false == ran {
             t.Fatalf("%s: expected the tagged listener to run and the failure answered, got ran %v and %v", name, ran, err)
@@ -137,10 +137,10 @@ func TestRegisteredEvents_ReportsReplacesResponseAfterFailure(t *testing.T) {
 
         adapter.AddListener("e", func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
-        }, eventcontract.ListenerConfig{Tags: []string{"t"}, ReplacesResponseAfterFailure: door})
+        }, eventcontract.ListenerConfig{Tags: []string{"t"}, Failure: eventcontract.ListenerFailureConfig{ReplacesResponseAfterFailure: door}})
 
         for name, registeredEvents := range map[string][]eventcontract.RegisteredEvent{"dispatcher": dispatcher.RegisteredEvents(), "adapter": adapter.RegisteredEvents()} {
-            if 1 != len(registeredEvents) || 1 != len(registeredEvents[0].Listeners) || door != registeredEvents[0].Listeners[0].ReplacesResponseAfterFailure {
+            if 1 != len(registeredEvents) || 1 != len(registeredEvents[0].Listeners) || door != registeredEvents[0].Listeners[0].Config.Failure.ReplacesResponseAfterFailure {
                 t.Fatalf("%s: expected the door reported as %v, got %+v", name, door, registeredEvents)
             }
         }

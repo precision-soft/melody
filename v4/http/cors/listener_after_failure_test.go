@@ -22,7 +22,7 @@ func failingListener(runtimeInstance containercontract.Runtime, eventValue event
 
 func TestResponseListener_DecoratesAfterAFailedListenerAndReplacesNothing(t *testing.T) {
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
-    dispatcher.DeclareEvent(kernelcontract.EventKernelResponse, eventcontract.EventConfig{RunAfterFailureTags: []string{kernelcontract.ListenerTagCors}})
+    dispatcher.DeclareEvent(kernelcontract.EventKernelResponse, eventcontract.EventConfig{TagsToRunAfterFailure: []string{kernelcontract.ListenerTagKernelCors}})
     RegisterListeners(dispatcher, NewService(Config{}))
     dispatcher.AddListener(kernelcontract.EventKernelResponse, failingListener, eventcontract.ListenerConfig{Priority: 0})
 
@@ -54,11 +54,11 @@ func TestRegisterListeners_TagsTheResponseListenerOnly(t *testing.T) {
         for _, listener := range registeredEvent.Listeners {
             expected := ""
             if kernelcontract.EventKernelResponse == registeredEvent.EventName {
-                expected = kernelcontract.ListenerTagCors
+                expected = kernelcontract.ListenerTagKernelCors
             }
 
-            if expected != strings.Join(listener.Tags, ",") || true == listener.ReplacesResponseAfterFailure {
-                t.Fatalf("%s: expected tags %q and no replace door, got %v %v", registeredEvent.EventName, expected, listener.Tags, listener.ReplacesResponseAfterFailure)
+            if expected != strings.Join(listener.Config.Tags, ",") || true == listener.Config.Failure.ReplacesResponseAfterFailure {
+                t.Fatalf("%s: expected tags %q and no replace door, got %v %v", registeredEvent.EventName, expected, listener.Config.Tags, listener.Config.Failure.ReplacesResponseAfterFailure)
             }
         }
     }
@@ -66,7 +66,7 @@ func TestRegisterListeners_TagsTheResponseListenerOnly(t *testing.T) {
 
 func TestRequestListener_DoesNotAnswerAPreflightAfterAFailure(t *testing.T) {
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
-    dispatcher.DeclareEvent(kernelcontract.EventKernelRequest, eventcontract.EventConfig{RunAfterFailureTags: []string{kernelcontract.ListenerTagCors}})
+    dispatcher.DeclareEvent(kernelcontract.EventKernelRequest, eventcontract.EventConfig{TagsToRunAfterFailure: []string{kernelcontract.ListenerTagKernelCors}})
     RegisterRequestListener(dispatcher, NewService(Config{}))
     dispatcher.AddListener(kernelcontract.EventKernelRequest, failingListener, eventcontract.ListenerConfig{Priority: RequestListenerPriority + 10})
 

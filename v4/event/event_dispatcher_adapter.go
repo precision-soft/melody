@@ -77,7 +77,7 @@ func (instance *EventDispatcherAdapter) DeclareEvent(eventName string, config ev
     defer instance.mutex.Unlock()
 
     instance.eventConfigs[eventName] = eventConfigEntry{
-        runAfterFailureTags: copyTags(config.RunAfterFailureTags),
+        tagsToRunAfterFailure: copyTags(config.TagsToRunAfterFailure),
     }
 }
 
@@ -173,7 +173,7 @@ func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.Regis
     wrappedDeclarations := make(map[string][]string)
     for _, wrappedEvent := range instance.eventDispatcher.RegisteredEvents() {
         if true == wrappedEvent.Declared {
-            wrappedDeclarations[wrappedEvent.EventName] = wrappedEvent.RunAfterFailureTags
+            wrappedDeclarations[wrappedEvent.EventName] = wrappedEvent.Config.TagsToRunAfterFailure
         }
     }
 
@@ -200,7 +200,7 @@ func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.Regis
         registeredSlice := instance.listenerRegistrations[eventName]
         eventConfig, declared := instance.eventConfigs[eventName]
         if wrappedTags, declaredOnTheWrapped := wrappedDeclarations[eventName]; true == declaredOnTheWrapped {
-            eventConfig = eventConfigEntry{runAfterFailureTags: wrappedTags}
+            eventConfig = eventConfigEntry{tagsToRunAfterFailure: wrappedTags}
             declared = true
         }
         listenerList := make([]adapterListenerRegistration, len(registeredSlice))
@@ -235,16 +235,12 @@ func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.Regis
             registeredListenerList = append(
                 registeredListenerList,
                 eventcontract.RegisteredListener{
-                    Priority:                     entry.config.Priority,
-                    Source:                       entry.source,
-                    Owner:                        entry.owner,
-                    ListenerId:                   listenerId,
-                    ListenerName:                 listenerName,
-                    Required:                     entry.config.Required,
-                    MaySkipRequiredListeners:     entry.config.MaySkipRequiredListeners,
-                    Tags:                         copyTags(entry.config.Tags),
-                    RunsAfterFailure:             runsAfterFailure(entry.config.Tags, eventConfig.runAfterFailureTags),
-                    ReplacesResponseAfterFailure: entry.config.ReplacesResponseAfterFailure,
+                    Source:           entry.source,
+                    Owner:            entry.owner,
+                    ListenerId:       listenerId,
+                    ListenerName:     listenerName,
+                    Config:           reportedListenerConfig(entry.config),
+                    RunsAfterFailure: runsAfterFailure(entry.config.Tags, eventConfig.tagsToRunAfterFailure),
                 },
             )
         }
@@ -252,10 +248,10 @@ func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.Regis
         registeredEvents = append(
             registeredEvents,
             eventcontract.RegisteredEvent{
-                EventName:           eventName,
-                Declared:            declared,
-                RunAfterFailureTags: copyTags(eventConfig.runAfterFailureTags),
-                Listeners:           registeredListenerList,
+                EventName: eventName,
+                Declared:  declared,
+                Config:    eventcontract.EventConfig{TagsToRunAfterFailure: copyTags(eventConfig.tagsToRunAfterFailure)},
+                Listeners: registeredListenerList,
             },
         )
     }

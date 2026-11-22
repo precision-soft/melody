@@ -187,34 +187,45 @@ func TestRegisterRequestListener_FallsThroughForAnOptionsRequestWithoutARequeste
 }
 
 /* a preflight from an allowed origin that a listener ahead of this one already answered — the rate limiter's 429 among them — is decorated with the cross-origin headers rather than left opaque: the earlier listener's status stands, but a browser can now read the refusal as a rate limit instead of a bare cors failure. */
-func TestRegisterRequestListener_DecoratesAnAlreadyAnsweredPreflight(t *testing.T) {
+/* a preflight an earlier kernel.request listener answered, the rate limiter's 429, never reaches the request listener; the response listener decorates it with the preflight headers, its status and body untouched */
+func TestRegisterResponseListener_DecoratesAPreflightAnEarlierListenerAnswered(t *testing.T) {
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
-    RegisterRequestListener(dispatcher, RestrictiveService([]string{"https://app.example.com"}))
-
-    requestEvent := http.NewKernelRequestEvent(newTestRuntime(), testhelper.NewHttpTestRequestFromHttpRequest(newPreflightTestRequest("/api/item")))
+    RegisterResponseListener(dispatcher, RestrictiveService([]string{"https://app.example.com"}))
 
     alreadySetResponse := http.JsonErrorResponse(nethttp.StatusTooManyRequests, "rate limited")
-    requestEvent.SetResponse(alreadySetResponse)
+    payload := http.NewKernelResponseEvent(testhelper.NewHttpTestRequestFromHttpRequest(newPreflightTestRequest("/api/item")), alreadySetResponse)
 
-    _, err := dispatcher.DispatchName(newTestRuntime(), kernelcontract.EventKernelRequest, requestEvent)
+    _, err := dispatcher.DispatchName(newTestRuntime(), kernelcontract.EventKernelResponse, payload)
     if nil != err {
         t.Fatalf("unexpected dispatch error: %v", err)
     }
 
-    if alreadySetResponse != requestEvent.Response() {
-        t.Fatalf("expected the earlier listener's response object to stay, got %#v", requestEvent.Response())
+    if alreadySetResponse != payload.Response() || nethttp.StatusTooManyRequests != payload.Response().StatusCode() {
+        t.Fatalf("expected the earlier listener's 429 to stand, got %#v", payload.Response())
     }
 
-    if nethttp.StatusTooManyRequests != requestEvent.Response().StatusCode() {
-        t.Fatalf("expected the earlier listener's 429 status to stand, got %d", requestEvent.Response().StatusCode())
+    if "" == alreadySetResponse.Headers().Get("Access-Control-Allow-Methods") || "" == alreadySetResponse.Headers().Get("Access-Control-Allow-Origin") {
+        t.Fatalf("expected the answered preflight decorated with the preflight headers, got %v", alreadySetResponse.Headers())
+    }
+}
+
+func TestRegisterResponseListener_DoesNotAddPreflightHeadersToAnOrdinaryRequest(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+
+    RegisterResponseListener(dispatcher, RestrictiveService([]string{"https://app.example.com"}))
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/api/item", nil)
+    request.Header.Set("Origin", "https://app.example.com")
+    response := http.EmptyResponse(nethttp.StatusOK)
+    payload := http.NewKernelResponseEvent(testhelper.NewHttpTestRequestFromHttpRequest(request), response)
+
+    if _, err := dispatcher.DispatchName(newTestRuntime(), kernelcontract.EventKernelResponse, payload); nil != err {
+        t.Fatalf("unexpected dispatch error: %v", err)
     }
 
-    if "" == requestEvent.Response().Headers().Get("Access-Control-Allow-Methods") {
-        t.Fatalf("expected the already-answered preflight to be decorated with the allow-methods header")
-    }
-    if "" == requestEvent.Response().Headers().Get("Access-Control-Allow-Origin") {
-        t.Fatalf("expected the already-answered preflight to be decorated with the allow-origin header")
+    if "" != response.Headers().Get("Access-Control-Allow-Methods") || "" == response.Headers().Get("Access-Control-Allow-Origin") {
+        t.Fatalf("expected the response headers alone on an ordinary request, got %v", response.Headers())
     }
 }
 
@@ -482,5 +493,16 @@ func TestMiddleware_And_Listener_PassTheRequestOfTheCall(t *testing.T) {
         if false == found {
             t.Fatalf("expected the function handed the request served at %s, saw %v", expected, paths)
         }
+    }
+}
+
+/* the preflight answer ends the kernel.request dispatch; it may skip the required listeners behind it, since a preflight runs no handler */
+func TestRegisterRequestListener_MaySkipTheRequiredListeners(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+    RegisterRequestListener(dispatcher, NewService(Config{}))
+
+    registeredEvents := dispatcher.RegisteredEvents()
+    if 1 != len(registeredEvents) || 1 != len(registeredEvents[0].Listeners) || false == registeredEvents[0].Listeners[0].Config.Failure.MaySkipRequiredListeners {
+        t.Fatalf("expected the preflight listener to declare it may skip, got %+v", registeredEvents)
     }
 }

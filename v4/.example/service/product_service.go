@@ -163,7 +163,7 @@ func (instance *ProductService) Create(
         return nil, createErr
     }
 
-    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.ProductCreatedEventName, event.NewProductCreatedEvent(product), product.Id, CacheKeyProductList, CacheKeyProductById(product.Id))
+    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.EventProductCreated, event.NewProductCreatedEvent(product), product.Id, CacheKeyProductList, CacheKeyProductById(product.Id))
 
     return product, nil
 }
@@ -219,7 +219,7 @@ func (instance *ProductService) Update(
         return nil, false, nil
     }
 
-    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.ProductUpdatedEventName, event.NewProductUpdatedEvent(&modified), modified.Id, CacheKeyProductList, CacheKeyProductById(modified.Id))
+    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.EventProductUpdated, event.NewProductUpdatedEvent(&modified), modified.Id, CacheKeyProductList, CacheKeyProductById(modified.Id))
 
     return &modified, true, nil
 }
@@ -236,7 +236,7 @@ func (instance *ProductService) DeleteById(
         return false, nil
     }
 
-    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.ProductDeletedEventName, event.NewProductDeletedEvent(productId), productId, CacheKeyProductList, CacheKeyProductById(productId), CacheKeyProductViews(productId))
+    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.EventProductDeleted, event.NewProductDeletedEvent(productId), productId, CacheKeyProductList, CacheKeyProductById(productId), CacheKeyProductViews(productId))
 
     return true, nil
 }

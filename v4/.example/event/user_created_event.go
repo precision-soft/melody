@@ -3,7 +3,7 @@ package event
 import "github.com/precision-soft/melody/v4/.example/entity"
 
 const (
-    UserCreatedEventName = "user.created"
+    EventUserCreated = "user.created"
 )
 
 func NewUserCreatedEvent(user *entity.User) *UserCreatedEvent {

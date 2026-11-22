@@ -32,19 +32,15 @@ func RegisterRateLimitRequestListener(
                 return nil
             }
 
-            if nil != requestEvent.Response() || nil != requestEvent.Refusal() {
-                return nil
-            }
-
             gate.Apply(runtimeInstance, requestEvent)
 
             return nil
         },
-        eventcontract.ListenerConfig{Priority: RateLimitRequestListenerPriority},
+        eventcontract.ListenerConfig{Priority: RateLimitRequestListenerPriority, Failure: eventcontract.ListenerFailureConfig{MaySkipRequiredListeners: true}},
     )
 }
 
-/* NewRateLimitGate is the request listener's decision for a door that meters only its own requests on kernel.request. A nil or typed-nil limiter is refused. */
+/* NewRateLimitGate is the request listener's decision for a door that meters only its own requests on kernel.request. A nil or typed-nil limiter is refused. Its answer or refusal ends the kernel.request dispatch, so the listener calling Apply declares Failure.MaySkipRequiredListeners, else a decision ahead of a required listener answers 500. */
 func NewRateLimitGate(limiter httpcontract.RateLimiter, config RateLimitConfig) *RateLimitGate {
     return newRateLimitGate(limiter, config, "limiter is required for rate limit gate", "NewRateLimitGate")
 }

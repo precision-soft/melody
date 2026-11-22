@@ -608,14 +608,27 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         }
 
         kernelRequestEvent := NewKernelRequestEvent(runtimeInstance, melodyRequest)
-        _, eventKernelRequestErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, kernelRequestEvent)
-        instance.logEventDispatchError(requestLogger, "kernel request error", eventKernelRequestErr)
+        eventKernelRequestErr := instance.dispatchGuarded(runtimeInstance, eventDispatcher, requestLogger, kernelcontract.EventKernelRequest, kernelRequestEvent, &kernelRequestEvent.afterFailureDoor, "kernel request error", func() httpcontract.Response {
+            return kernelRequestEvent.Response()
+        })
 
-        /* fails closed: a response set beside a failure is half made, and the listeners behind the failure, access control among them, did not run */
+        /* fails closed: a response set beside a failure is half made, and the listeners behind the failure, access control among them, did not run; a decision a door admitted after the failure stands unless a required listener did not run */
         _, requiredListenerSkipped := eventKernelRequestErr.(*event.RequiredListenerSkippedError)
+        admittedDecision := true == kernelRequestEvent.hasAdmittedAfterFailureWrite() && true == kernelRequestEvent.hasDecision()
+
+        requestVerdict := afterFailureVerdict{held: []httpcontract.Response{kernelRequestEvent.Response()}}
+        switch {
+        case true == kernelRequestEvent.decisionRefused:
+            requestVerdict.refusedBy = afterFailureRefusedBySecondDecision
+        case nil != eventKernelRequestErr && true == requiredListenerSkipped:
+            requestVerdict.refusedBy = afterFailureRefusedByRequiredListenerSkipped
+        case nil != eventKernelRequestErr && false == admittedDecision:
+            requestVerdict.refusedBy = afterFailureRefusedByNoResponse
+        }
+        warnAfterFailureWrites(requestLogger, kernelRequestEvent.takeAfterFailureWrites(), requestVerdict)
 
         /* read on its own, since a listener that recovers its own panic leaves the dispatch clean */
-        if true == kernelRequestEvent.decisionRefused || (nil != eventKernelRequestErr && (true == requiredListenerSkipped || nil == kernelRequestEvent.Refusal())) {
+        if true == kernelRequestEvent.decisionRefused || (nil != eventKernelRequestErr && (true == requiredListenerSkipped || (nil == kernelRequestEvent.Refusal() && false == admittedDecision))) {
             statusCode := nethttp.StatusInternalServerError
             message := "internal server error"
             if true == debugMode && nil != eventKernelRequestErr {
@@ -740,11 +753,24 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         }
 
         kernelControllerEvent := NewKernelControllerEvent(runtimeInstance, melodyRequest)
-        _, eventKernelControllerErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelController, kernelControllerEvent)
-        instance.logEventDispatchError(requestLogger, "kernel controller error", eventKernelControllerErr)
+        eventKernelControllerErr := instance.dispatchGuarded(runtimeInstance, eventDispatcher, requestLogger, kernelcontract.EventKernelController, kernelControllerEvent, &kernelControllerEvent.afterFailureDoor, "kernel controller error", func() httpcontract.Response {
+            return kernelControllerEvent.Response()
+        })
 
-        /* fails closed on any failure: a response set beside one is half made */
-        if nil != eventKernelControllerErr {
+        /* fails closed on any failure: a response set beside one is half made; a response a door admitted after the failure stands unless a required listener did not run */
+        _, controllerRequiredListenerSkipped := eventKernelControllerErr.(*event.RequiredListenerSkippedError)
+        admittedControllerResponse := true == kernelControllerEvent.hasAdmittedAfterFailureWrite() && nil != kernelControllerEvent.Response()
+
+        controllerVerdict := afterFailureVerdict{held: []httpcontract.Response{kernelControllerEvent.Response()}}
+        switch {
+        case nil != eventKernelControllerErr && true == controllerRequiredListenerSkipped:
+            controllerVerdict.refusedBy = afterFailureRefusedByRequiredListenerSkipped
+        case nil != eventKernelControllerErr && false == admittedControllerResponse:
+            controllerVerdict.refusedBy = afterFailureRefusedByNoResponse
+        }
+        warnAfterFailureWrites(requestLogger, kernelControllerEvent.takeAfterFailureWrites(), controllerVerdict)
+
+        if nil != eventKernelControllerErr && (true == controllerRequiredListenerSkipped || false == admittedControllerResponse) {
             statusCode := nethttp.StatusInternalServerError
             message := "internal server error"
             if true == debugMode {
@@ -833,16 +859,28 @@ func (instance *Kernel) dispatchResponseAndWrite(
             return
         }
 
-        warnAfterFailureReplacements(requestLogger, kernelResponseEvent, kernelResponseEvent.Response(), *finalResponse)
+        warnAfterFailureWrites(requestLogger, kernelResponseEvent.takeAfterFailureWrites(), afterFailureVerdict{nilResponseStatus: nethttp.StatusNoContent, standingServed: true, held: []httpcontract.Response{kernelResponseEvent.Response(), *finalResponse}})
     }()
 
     _, eventKernelResponseErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, kernelResponseEvent)
     instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelResponseErr)
 
+    responseWrites := kernelResponseEvent.takeAfterFailureWrites()
+    responseVerdict := afterFailureVerdict{nilResponseStatus: nethttp.StatusNoContent, standingServed: true}
+
+    /* a replacement a door admitted does not waive a required listener that did not run: the response the failure left is served */
+    if _, responseRequiredListenerSkipped := eventKernelResponseErr.(*event.RequiredListenerSkippedError); true == responseRequiredListenerSkipped {
+        if firstAdmitted := firstAdmittedAfterFailureWrite(responseWrites); nil != firstAdmitted {
+            kernelResponseEvent.response = firstAdmitted.standing
+            responseVerdict.refusedBy = afterFailureRefusedByRequiredListenerSkipped
+        }
+    }
+
     publishedResponse := kernelResponseEvent.Response()
 
     replacementsWarned = true
-    warnAfterFailureReplacements(requestLogger, kernelResponseEvent, publishedResponse, *finalResponse)
+    responseVerdict.held = []httpcontract.Response{publishedResponse, *finalResponse}
+    warnAfterFailureWrites(requestLogger, responseWrites, responseVerdict)
 
     if nil != *finalResponse && *finalResponse != publishedResponse {
         closeDiscardedResponseBody(*finalResponse, requestLogger)
@@ -871,6 +909,39 @@ func (instance *Kernel) dispatchResponseAndWrite(
     )
 }
 
+/* dispatchGuarded dispatches a payload guarding its writes after a failure and files the dispatch's failure; on a listener's exit, which no caller answers with the payload's response, the writes recorded so far are warned about as refused and every response they touched is closed once, the payload's abandoned one included, before the exit passes */
+func (instance *Kernel) dispatchGuarded(
+    runtimeInstance containercontract.Runtime,
+    eventDispatcher eventcontract.EventDispatcher,
+    requestLogger loggingcontract.Logger,
+    eventName string,
+    payload any,
+    door *afterFailureDoor,
+    failureMessage string,
+    exitAbandoned func() httpcontract.Response,
+) error {
+    completed := false
+    defer func() {
+        if true == completed {
+            return
+        }
+
+        closedResponses := warnAfterFailureWrites(requestLogger, door.takeAfterFailureWrites(), afterFailureVerdict{refusedBy: afterFailureRefusedByExit})
+
+        abandoned := exitAbandoned()
+        if false == internal.IsNilInterface(abandoned) && false == slices.Contains(closedResponses, abandoned) {
+            closeDiscardedResponseBody(abandoned, requestLogger)
+        }
+    }()
+
+    _, dispatchErr := eventDispatcher.DispatchName(runtimeInstance, eventName, payload)
+    instance.logEventDispatchError(requestLogger, failureMessage, dispatchErr)
+
+    completed = true
+
+    return dispatchErr
+}
+
 /* a failed dispatch answers nothing: a response set by a listener that then panicked is half made */
 func (instance *Kernel) raiseException(
     runtimeInstance containercontract.Runtime,
@@ -882,12 +953,26 @@ func (instance *Kernel) raiseException(
 ) httpcontract.Response {
     exceptionEvent := NewKernelExceptionEvent(runtimeInstance, request, err, KernelExceptionEventConfig{UnavailableRetryAfter: instance.unavailableRetryAfterLimit()})
 
-    _, dispatchErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
-    instance.logEventDispatchError(requestLogger, "kernel exception error", dispatchErr)
+    dispatchErr := instance.dispatchGuarded(runtimeInstance, eventDispatcher, requestLogger, kernelcontract.EventKernelException, exceptionEvent, &exceptionEvent.afterFailureDoor, "kernel exception error", func() httpcontract.Response {
+        return exceptionEvent.Response()
+    })
 
     answered := exceptionEvent.Response()
 
-    if nil != answered && nil == dispatchErr {
+    /* a response a door admitted after the failure stands unless a required listener did not run */
+    _, exceptionRequiredListenerSkipped := dispatchErr.(*event.RequiredListenerSkippedError)
+    admittedAnswer := nil != dispatchErr && false == exceptionRequiredListenerSkipped && true == exceptionEvent.hasAdmittedAfterFailureWrite() && nil != answered
+
+    exceptionVerdict := afterFailureVerdict{held: []httpcontract.Response{answered}}
+    switch {
+    case nil != dispatchErr && true == exceptionRequiredListenerSkipped:
+        exceptionVerdict.refusedBy = afterFailureRefusedByRequiredListenerSkipped
+    case nil != dispatchErr && false == admittedAnswer:
+        exceptionVerdict.refusedBy = afterFailureRefusedByNoResponse
+    }
+    warnAfterFailureWrites(requestLogger, exceptionEvent.takeAfterFailureWrites(), exceptionVerdict)
+
+    if nil != answered && (nil == dispatchErr || true == admittedAnswer) {
         return answered
     }
 
@@ -1075,40 +1160,3 @@ func (instance *Kernel) buildHandler(
 
 var _ httpcontract.Kernel = (*Kernel)(nil)
 
-/* warnAfterFailureReplacements writes one warning per response a listener set after a failure, refused or replaced, and closes the response that lost unless the kernel still holds it */
-func warnAfterFailureReplacements(logger loggingcontract.Logger, kernelResponseEvent *KernelResponseEvent, publishedResponse httpcontract.Response, finalResponse httpcontract.Response) {
-    closedResponses := make([]httpcontract.Response, 0)
-
-    for _, replacement := range kernelResponseEvent.takeAfterFailureReplacements() {
-        if true == replacement.admitted {
-            logger.Warning(
-                "a listener replaced the response after a failure",
-                loggingcontract.Context{
-                    "eventName":              replacement.listener.EventName,
-                    "listenerName":           replacement.listener.ListenerName,
-                    "servedResponseStatus":   replacement.servedStatus,
-                    "replacedResponseStatus": replacement.discardedStatus,
-                },
-            )
-        } else {
-            logger.Warning(
-                "a listener's response replacement after a failure is refused; the response standing at the failure is served",
-                loggingcontract.Context{
-                    "eventName":             replacement.listener.EventName,
-                    "listenerName":          replacement.listener.ListenerName,
-                    "servedResponseStatus":  replacement.servedStatus,
-                    "refusedResponseStatus": replacement.discardedStatus,
-                    "door":                  "ListenerConfig.ReplacesResponseAfterFailure",
-                },
-            )
-        }
-
-        /* the response the kernel started from is closed by the caller once it is replaced, and the published one is written */
-        if true == internal.IsNilInterface(replacement.discarded) || replacement.discarded == publishedResponse || replacement.discarded == finalResponse || true == slices.Contains(closedResponses, replacement.discarded) {
-            continue
-        }
-
-        closeDiscardedResponseBody(replacement.discarded, logger)
-        closedResponses = append(closedResponses, replacement.discarded)
-    }
-}

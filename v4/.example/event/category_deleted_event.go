@@ -1,7 +1,7 @@
 package event
 
 const (
-    CategoryDeletedEventName = "category.deleted"
+    EventCategoryDeleted = "category.deleted"
 )
 
 func NewCategoryDeletedEvent(categoryId string) *CategoryDeletedEvent {

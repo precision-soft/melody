@@ -17,9 +17,9 @@ import (
 func TestCurrencyEventSubscriber_EveryListenerDropsItsEntriesUnderACanceledEvent(t *testing.T) {
     currencyInstance := entity.NewCurrency("currency-7", "EUR", "Euro", 1, time.Unix(0, 0))
     eventList := map[string]any{
-        event.CurrencyCreatedEventName: event.NewCurrencyCreatedEvent(currencyInstance),
-        event.CurrencyUpdatedEventName: event.NewCurrencyUpdatedEvent(currencyInstance),
-        event.CurrencyDeletedEventName: event.NewCurrencyDeletedEvent(currencyInstance.Id),
+        event.EventCurrencyCreated: event.NewCurrencyCreatedEvent(currencyInstance),
+        event.EventCurrencyUpdated: event.NewCurrencyUpdatedEvent(currencyInstance),
+        event.EventCurrencyDeleted: event.NewCurrencyDeletedEvent(currencyInstance.Id),
     }
 
     for eventName, payload := range eventList {

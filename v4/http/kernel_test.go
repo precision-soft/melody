@@ -643,7 +643,7 @@ func TestKernel_AnUnloggedFailureJoinedBesideALoggedPanicReachesTheJournal(t *te
 
     dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
 
-    dispatcher.DeclareEvent(kernelcontract.EventKernelRequest, eventcontract.EventConfig{RunAfterFailureTags: []string{"audit"}})
+    dispatcher.DeclareEvent(kernelcontract.EventKernelRequest, eventcontract.EventConfig{TagsToRunAfterFailure: []string{"audit"}})
 
     dispatcher.AddListener(
         kernelcontract.EventKernelRequest,
@@ -700,7 +700,7 @@ func TestKernel_AJoinWhoseEveryFailureIsLoggedWritesNoSecondRecord(t *testing.T)
 
     dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
 
-    dispatcher.DeclareEvent(kernelcontract.EventKernelRequest, eventcontract.EventConfig{RunAfterFailureTags: []string{"audit"}})
+    dispatcher.DeclareEvent(kernelcontract.EventKernelRequest, eventcontract.EventConfig{TagsToRunAfterFailure: []string{"audit"}})
 
     dispatcher.AddListener(
         kernelcontract.EventKernelRequest,
@@ -763,7 +763,7 @@ func TestKernel_KernelRequestStoppingListenerThatAnswersStillFailsClosedBeforeAR
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
-        eventcontract.ListenerConfig{Priority: 10, Required: true},
+        eventcontract.ListenerConfig{Priority: 10, Failure: eventcontract.ListenerFailureConfig{Required: true}},
     )
 
     dispatcher.AddListener(
@@ -818,7 +818,7 @@ func TestKernel_KernelRequestFailingMaySkipListenerThatRefusesStillFailsClosedBe
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
-        eventcontract.ListenerConfig{Priority: 10, Required: true},
+        eventcontract.ListenerConfig{Priority: 10, Failure: eventcontract.ListenerFailureConfig{Required: true}},
     )
 
     dispatcher.AddListener(
@@ -833,7 +833,7 @@ func TestKernel_KernelRequestFailingMaySkipListenerThatRefusesStillFailsClosedBe
 
             return errors.New("the cache listener's own failure")
         },
-        eventcontract.ListenerConfig{Priority: 50, MaySkipRequiredListeners: true},
+        eventcontract.ListenerConfig{Priority: 50, Failure: eventcontract.ListenerFailureConfig{MaySkipRequiredListeners: true}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -867,7 +867,7 @@ func TestKernel_KernelControllerStoppingListenerThatAnswersStillFailsClosedBefor
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
-        eventcontract.ListenerConfig{Priority: 10, Required: true},
+        eventcontract.ListenerConfig{Priority: 10, Failure: eventcontract.ListenerFailureConfig{Required: true}},
     )
 
     dispatcher.AddListener(
@@ -4894,7 +4894,7 @@ func TestKernel_ARequiredListenerSkippedByTheResponderDropsTheAnswer(t *testing.
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
-        eventcontract.ListenerConfig{Required: true},
+        eventcontract.ListenerConfig{Failure: eventcontract.ListenerFailureConfig{Required: true}},
     )
 
     recorder := httptest.NewRecorder()
@@ -4955,7 +4955,7 @@ func TestKernel_ServeHttpInstallsTheBuiltInListenerOnce(t *testing.T) {
             continue
         }
 
-        if 1 != len(registeredEvent.Listeners) || math.MinInt != registeredEvent.Listeners[0].Priority {
+        if 1 != len(registeredEvent.Listeners) || math.MinInt != registeredEvent.Listeners[0].Config.Priority {
             t.Fatalf("expected one listener at the lowest priority, got %+v", registeredEvent.Listeners)
         }
 
@@ -5158,7 +5158,7 @@ func TestKernel_ARefusalBesideASkippedRequiredListenerFailsClosed(t *testing.T) 
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
-        eventcontract.ListenerConfig{Required: true},
+        eventcontract.ListenerConfig{Failure: eventcontract.ListenerFailureConfig{Required: true}},
     )
 
     recorder := httptest.NewRecorder()
@@ -5195,7 +5195,7 @@ func TestKernel_ARefusalAboveAFailureAheadOfARequiredListenerFailsClosed(t *test
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
-        eventcontract.ListenerConfig{Priority: 10, Required: true},
+        eventcontract.ListenerConfig{Priority: 10, Failure: eventcontract.ListenerFailureConfig{Required: true}},
     )
 
     recorder := httptest.NewRecorder()

@@ -151,7 +151,7 @@ func TestUserService_GrantRoleTellsTheListeners(t *testing.T) {
     }
 
     clockInstance := melodyclock.NewSystemClock()
-    dispatcher := newRecordingDispatcher(clockInstance, event.UserUpdatedEventName)
+    dispatcher := newRecordingDispatcher(clockInstance, event.EventUserUpdated)
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
@@ -177,7 +177,7 @@ func TestUserService_GrantRoleTellsTheListeners(t *testing.T) {
         t.Fatalf("the grant answered %v, %d, %v", granted, outcome, grantErr)
     }
 
-    if 1 != len(dispatcher.names()) || event.UserUpdatedEventName != dispatcher.names()[0] {
+    if 1 != len(dispatcher.names()) || event.EventUserUpdated != dispatcher.names()[0] {
         t.Fatalf("the grant dispatched %v, wanted the one updated event", dispatcher.names())
     }
 
@@ -208,7 +208,7 @@ func TestUserService_GrantRoleHealsTheCacheWhenTheRoleIsAlreadyHeld(t *testing.T
     }
 
     clockInstance := melodyclock.NewSystemClock()
-    dispatcher := newRecordingDispatcher(clockInstance, event.UserUpdatedEventName)
+    dispatcher := newRecordingDispatcher(clockInstance, event.EventUserUpdated)
     refusing := &refusingOnceDispatcher{EventDispatcher: dispatcher.dispatcher}
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -257,7 +257,7 @@ func TestUserService_GrantRoleAlreadyHeldDropsTheListEntryToo(t *testing.T) {
     }
 
     clockInstance := melodyclock.NewSystemClock()
-    dispatcher := newRecordingDispatcher(clockInstance, event.UserUpdatedEventName)
+    dispatcher := newRecordingDispatcher(clockInstance, event.EventUserUpdated)
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
@@ -298,7 +298,7 @@ func TestUserService_UpdateStoresACopyOfTheCallersRoleList(t *testing.T) {
         t.Fatalf("unexpected repository error: %v", repositoryErr)
     }
 
-    dispatcher := newRecordingDispatcher(melodyclock.NewSystemClock(), event.UserUpdatedEventName)
+    dispatcher := newRecordingDispatcher(melodyclock.NewSystemClock(), event.EventUserUpdated)
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })

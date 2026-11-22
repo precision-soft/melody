@@ -93,10 +93,6 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 return nil
             }
 
-            if nil != requestEvent.Response() || nil != requestEvent.Refusal() {
-                return nil
-            }
-
             path := ""
             if nil != requestEvent.Request().HttpRequest() && nil != requestEvent.Request().HttpRequest().URL {
                 /* the spelling the router matched, not the decoded URL.Path, so a rule cannot claim "/public%2F" as "/public/" while the router serves it through another route */
@@ -391,7 +387,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
 
             return nil
         },
-        eventcontract.ListenerConfig{Priority: KernelAccessControlListenerPriority, Required: true},
+        eventcontract.ListenerConfig{Priority: KernelAccessControlListenerPriority, Failure: eventcontract.ListenerFailureConfig{Required: true, MaySkipRequiredListeners: true}},
     )
 }
 

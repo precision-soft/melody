@@ -113,7 +113,7 @@ func TestProductService_AnswersTheCommittedRowWhenADispatchFails(t *testing.T) {
     if nil != createErr || nil == product || "prod-committed" != product.Id {
         t.Fatalf("expected the created product answered, got %+v, %v", product, createErr)
     }
-    catalogue.assertCommittedDispatchFailure(t, event.ProductCreatedEventName, "prod-committed", CacheKeyProductList, CacheKeyProductById("prod-committed"))
+    catalogue.assertCommittedDispatchFailure(t, event.EventProductCreated, "prod-committed", CacheKeyProductList, CacheKeyProductById("prod-committed"))
 
     catalogue.logger.records = nil
     catalogue.prime(t, CacheKeyProductList, CacheKeyProductById("prod-committed"))
@@ -121,7 +121,7 @@ func TestProductService_AnswersTheCommittedRowWhenADispatchFails(t *testing.T) {
     if nil != updateErr || false == found || nil == updated || "Renamed" != updated.Name {
         t.Fatalf("expected the updated product answered, got %+v, %t, %v", updated, found, updateErr)
     }
-    catalogue.assertCommittedDispatchFailure(t, event.ProductUpdatedEventName, "prod-committed", CacheKeyProductList, CacheKeyProductById("prod-committed"))
+    catalogue.assertCommittedDispatchFailure(t, event.EventProductUpdated, "prod-committed", CacheKeyProductList, CacheKeyProductById("prod-committed"))
 
     catalogue.logger.records = nil
     catalogue.prime(t, CacheKeyProductList, CacheKeyProductById("prod-committed"), CacheKeyProductViews("prod-committed"))
@@ -129,7 +129,7 @@ func TestProductService_AnswersTheCommittedRowWhenADispatchFails(t *testing.T) {
     if nil != deleteErr || false == deleted {
         t.Fatalf("expected the delete answered, got %t, %v", deleted, deleteErr)
     }
-    catalogue.assertCommittedDispatchFailure(t, event.ProductDeletedEventName, "prod-committed", CacheKeyProductList, CacheKeyProductById("prod-committed"), CacheKeyProductViews("prod-committed"))
+    catalogue.assertCommittedDispatchFailure(t, event.EventProductDeleted, "prod-committed", CacheKeyProductList, CacheKeyProductById("prod-committed"), CacheKeyProductViews("prod-committed"))
 }
 
 func TestProductService_JournalsNothingWhenTheDispatchSucceeds(t *testing.T) {

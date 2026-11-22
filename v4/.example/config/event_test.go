@@ -70,7 +70,7 @@ func TestRegisterSubscribers_InstallsTheTwoFactorEnrollmentReleaseWhenThereIsADa
 
         var owners []string
         for _, registered := range eventDispatcher.RegisteredEvents() {
-            if event.UserDeletedEventName != registered.EventName {
+            if event.EventUserDeleted != registered.EventName {
                 continue
             }
 
@@ -89,7 +89,7 @@ func TestRegisterSubscribers_InstallsTheTwoFactorEnrollmentReleaseWhenThereIsADa
     with := ownersOnDeletion(withStore)
 
     if len(without)+1 != len(with) {
-        t.Fatalf("expected the database to add one owner on %s, got %v without and %v with", event.UserDeletedEventName, without, with)
+        t.Fatalf("expected the database to add one owner on %s, got %v without and %v with", event.EventUserDeleted, without, with)
     }
 
     found := false
@@ -100,7 +100,7 @@ func TestRegisterSubscribers_InstallsTheTwoFactorEnrollmentReleaseWhenThereIsADa
     }
 
     if false == found {
-        t.Fatalf("expected the enrollment subscriber among the owners of %s, got %v", event.UserDeletedEventName, with)
+        t.Fatalf("expected the enrollment subscriber among the owners of %s, got %v", event.EventUserDeleted, with)
     }
 }
 
@@ -115,25 +115,25 @@ func TestRegisterSubscribers_TheEnrollmentReleaseOutranksTheCacheClearOnUserDele
     releasePriority, cachePriority := 0, 0
     releaseFound, cacheFound := false, false
     for _, registered := range eventDispatcher.RegisteredEvents() {
-        if event.UserDeletedEventName != registered.EventName {
+        if event.EventUserDeleted != registered.EventName {
             continue
         }
 
         for _, listener := range registered.Listeners {
             if true == strings.Contains(listener.Owner, "TwoFactorEnrollmentSubscriber") {
-                releasePriority, releaseFound = listener.Priority, true
+                releasePriority, releaseFound = listener.Config.Priority, true
             }
             if true == strings.Contains(listener.Owner, "UserEventSubscriber") {
-                cachePriority, cacheFound = listener.Priority, true
+                cachePriority, cacheFound = listener.Config.Priority, true
             }
         }
     }
 
     if false == releaseFound || false == cacheFound {
-        t.Fatalf("expected both the release and the cache subscriber on %s, found release %v and cache %v", event.UserDeletedEventName, releaseFound, cacheFound)
+        t.Fatalf("expected both the release and the cache subscriber on %s, found release %v and cache %v", event.EventUserDeleted, releaseFound, cacheFound)
     }
     if releasePriority <= cachePriority {
-        t.Fatalf("expected the release (%d) to outrank the cache clear (%d) on %s", releasePriority, cachePriority, event.UserDeletedEventName)
+        t.Fatalf("expected the release (%d) to outrank the cache clear (%d) on %s", releasePriority, cachePriority, event.EventUserDeleted)
     }
 }
 
@@ -146,12 +146,12 @@ func TestRegisterSubscribers_DeclaresTheDeletionsCleanupTags(t *testing.T) {
     moduleInstance.registerSubscribers(eventDispatcher)
 
     for _, registered := range eventDispatcher.RegisteredEvents() {
-        if event.UserDeletedEventName != registered.EventName {
+        if event.EventUserDeleted != registered.EventName {
             continue
         }
 
-        if false == registered.Declared || "release,cache" != strings.Join(registered.RunAfterFailureTags, ",") {
-            t.Fatalf("expected %s declared with the release and cache tags, got %+v", event.UserDeletedEventName, registered)
+        if false == registered.Declared || "release,cache" != strings.Join(registered.Config.TagsToRunAfterFailure, ",") {
+            t.Fatalf("expected %s declared with the release and cache tags, got %+v", event.EventUserDeleted, registered)
         }
 
         if 3 != len(registered.Listeners) {
@@ -167,7 +167,7 @@ func TestRegisterSubscribers_DeclaresTheDeletionsCleanupTags(t *testing.T) {
         return
     }
 
-    t.Fatalf("expected %s among the registered events", event.UserDeletedEventName)
+    t.Fatalf("expected %s among the registered events", event.EventUserDeleted)
 }
 
 /* the budget is the switch's number of requests per HOUR: the limiter admits exactly that many from one

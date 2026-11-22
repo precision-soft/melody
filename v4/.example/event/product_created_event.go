@@ -3,7 +3,7 @@ package event
 import "github.com/precision-soft/melody/v4/.example/entity"
 
 const (
-    ProductCreatedEventName = "product.created"
+    EventProductCreated = "product.created"
 )
 
 func NewProductCreatedEvent(product *entity.Product) *ProductCreatedEvent {

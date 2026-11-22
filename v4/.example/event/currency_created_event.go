@@ -3,7 +3,7 @@ package event
 import "github.com/precision-soft/melody/v4/.example/entity"
 
 const (
-    CurrencyCreatedEventName = "currency.created"
+    EventCurrencyCreated = "currency.created"
 )
 
 func NewCurrencyCreatedEvent(currency *entity.Currency) *CurrencyCreatedEvent {

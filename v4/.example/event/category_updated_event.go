@@ -3,7 +3,7 @@ package event
 import "github.com/precision-soft/melody/v4/.example/entity"
 
 const (
-    CategoryUpdatedEventName = "category.updated"
+    EventCategoryUpdated = "category.updated"
 )
 
 func NewCategoryUpdatedEvent(category *entity.Category) *CategoryUpdatedEvent {

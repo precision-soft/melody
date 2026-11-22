@@ -23,8 +23,8 @@ func TestProductEventSubscriber_DropsTheViewCounterOnDelete(t *testing.T) {
         t.Fatalf("prime the neighbour's counter: %v", incrementErr)
     }
 
-    listener := NewProductEventSubscriber().SubscribedEvents()[event.ProductDeletedEventName][0].Listener()
-    _ = listener(runtimeInstance, melodyevent.NewEvent(event.ProductDeletedEventName, event.NewProductDeletedEvent("prod-7"), melodyclock.NewSystemClock().Now()))
+    listener := NewProductEventSubscriber().SubscribedEvents()[event.EventProductDeleted][0].Listener()
+    _ = listener(runtimeInstance, melodyevent.NewEvent(event.EventProductDeleted, event.NewProductDeletedEvent("prod-7"), melodyclock.NewSystemClock().Now()))
 
     if held, _ := cacheInstance.Has(exampleTestRuntime(), service.CacheKeyProductViews("prod-7")); true == held {
         t.Fatalf("expected the deleted product's view counter dropped")
@@ -45,8 +45,8 @@ func TestProductEventSubscriber_DropsTheEntriesUnderARequestContextAlreadyDone(t
     cancel()
     canceledRuntime := melodyruntime.WithContext(runtimeInstance, canceledContext)
 
-    listener := NewProductEventSubscriber().SubscribedEvents()[event.ProductDeletedEventName][0].Listener()
-    _ = listener(canceledRuntime, melodyevent.NewEvent(event.ProductDeletedEventName, event.NewProductDeletedEvent("prod-7"), melodyclock.NewSystemClock().Now()))
+    listener := NewProductEventSubscriber().SubscribedEvents()[event.EventProductDeleted][0].Listener()
+    _ = listener(canceledRuntime, melodyevent.NewEvent(event.EventProductDeleted, event.NewProductDeletedEvent("prod-7"), melodyclock.NewSystemClock().Now()))
 
     if held, _ := cacheInstance.Has(exampleTestRuntime(), service.CacheKeyProductViews("prod-7")); true == held {
         t.Fatalf("expected the view counter dropped although the request context was done")

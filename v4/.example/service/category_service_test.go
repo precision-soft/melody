@@ -75,7 +75,7 @@ func TestCategoryService_AnswersTheCommittedRowWhenADispatchFails(t *testing.T) 
     if nil != createErr || nil == category {
         t.Fatalf("expected the created category answered, got %+v, %v", category, createErr)
     }
-    catalogue.assertCommittedDispatchFailure(t, event.CategoryCreatedEventName, "cat-committed", CacheKeyCategoryList, CacheKeyCategoryById("cat-committed"))
+    catalogue.assertCommittedDispatchFailure(t, event.EventCategoryCreated, "cat-committed", CacheKeyCategoryList, CacheKeyCategoryById("cat-committed"))
 
     catalogue.logger.records = nil
     catalogue.prime(t, CacheKeyCategoryList, CacheKeyCategoryById("cat-committed"))
@@ -83,7 +83,7 @@ func TestCategoryService_AnswersTheCommittedRowWhenADispatchFails(t *testing.T) 
     if nil != updateErr || false == found || nil == updated {
         t.Fatalf("expected the updated category answered, got %+v, %t, %v", updated, found, updateErr)
     }
-    catalogue.assertCommittedDispatchFailure(t, event.CategoryUpdatedEventName, "cat-committed", CacheKeyCategoryList, CacheKeyCategoryById("cat-committed"))
+    catalogue.assertCommittedDispatchFailure(t, event.EventCategoryUpdated, "cat-committed", CacheKeyCategoryList, CacheKeyCategoryById("cat-committed"))
 
     catalogue.logger.records = nil
     catalogue.prime(t, CacheKeyCategoryList, CacheKeyCategoryById("cat-committed"))
@@ -91,7 +91,7 @@ func TestCategoryService_AnswersTheCommittedRowWhenADispatchFails(t *testing.T) 
     if nil != deleteErr || false == deleted {
         t.Fatalf("expected the delete answered, got %t, %v", deleted, deleteErr)
     }
-    catalogue.assertCommittedDispatchFailure(t, event.CategoryDeletedEventName, "cat-committed", CacheKeyCategoryList, CacheKeyCategoryById("cat-committed"))
+    catalogue.assertCommittedDispatchFailure(t, event.EventCategoryDeleted, "cat-committed", CacheKeyCategoryList, CacheKeyCategoryById("cat-committed"))
 }
 
 /* refusingUpdateCategoryRepository refuses every update after the change reached it, the way a write the database rejected leaves the caller's value changed */

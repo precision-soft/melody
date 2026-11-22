@@ -505,7 +505,7 @@ func TestRegisterRateLimitRequestListener_ItsFailureEndsTheDispatch(t *testing.T
 
             return nil
         },
-        eventcontract.ListenerConfig{Priority: 20, Required: true},
+        eventcontract.ListenerConfig{Priority: 20, Failure: eventcontract.ListenerFailureConfig{Required: true}},
     )
 
     runtimeInstance := newRateLimitListenerTestRuntime()
@@ -518,5 +518,16 @@ func TestRegisterRateLimitRequestListener_ItsFailureEndsTheDispatch(t *testing.T
 
     if _, isRefusal := err.(*event.RequiredListenerSkippedError); false == isRefusal {
         t.Fatalf("expected the required listener's refusal, got %T (%v)", err, err)
+    }
+}
+
+/* the rate limiter's answer or refusal ends the kernel.request dispatch; it may skip the required listeners behind it, access control among them, so its 429 is served and not turned into a 500 */
+func TestRegisterRateLimitRequestListener_MaySkipTheRequiredListeners(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+    RegisterRateLimitRequestListener(dispatcher, NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{}), RateLimitConfig{})
+
+    registeredEvents := dispatcher.RegisteredEvents()
+    if 1 != len(registeredEvents) || 1 != len(registeredEvents[0].Listeners) || false == registeredEvents[0].Listeners[0].Config.Failure.MaySkipRequiredListeners {
+        t.Fatalf("expected the rate limit listener to declare it may skip, got %+v", registeredEvents)
     }
 }

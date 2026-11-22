@@ -283,7 +283,7 @@ func TestEventDispatcher_StopBeforeRequiredListener_FailsClosed(t *testing.T) {
             requiredRan = true
             return nil
         },
-        eventcontract.ListenerConfig{Required: true},
+        eventcontract.ListenerConfig{Failure: eventcontract.ListenerFailureConfig{Required: true}},
     )
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
@@ -306,7 +306,7 @@ func TestEventDispatcher_MaySkipRequiredListeners_RestoresProceed(t *testing.T) 
             eventValue.StopPropagation()
             return nil
         },
-        eventcontract.ListenerConfig{Priority: 100, MaySkipRequiredListeners: true},
+        eventcontract.ListenerConfig{Priority: 100, Failure: eventcontract.ListenerFailureConfig{MaySkipRequiredListeners: true}},
     )
 
     dispatcher.AddListener(
@@ -314,7 +314,7 @@ func TestEventDispatcher_MaySkipRequiredListeners_RestoresProceed(t *testing.T) 
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
-        eventcontract.ListenerConfig{Required: true},
+        eventcontract.ListenerConfig{Failure: eventcontract.ListenerFailureConfig{Required: true}},
     )
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
@@ -333,7 +333,7 @@ func TestEventDispatcher_StopAfterRequiredListener_DoesNotFail(t *testing.T) {
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
-        eventcontract.ListenerConfig{Priority: 100, Required: true},
+        eventcontract.ListenerConfig{Priority: 100, Failure: eventcontract.ListenerFailureConfig{Required: true}},
     )
 
     _ = dispatcher.AddListener(
@@ -897,7 +897,7 @@ func TestEventDispatcher_StoppingListenerThatAlsoFails_StillReportsTheSkippedReq
 
             return nil
         },
-        eventcontract.ListenerConfig{Required: true},
+        eventcontract.ListenerConfig{Failure: eventcontract.ListenerFailureConfig{Required: true}},
     )
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
@@ -993,7 +993,7 @@ func TestEventDispatcher_EventThatArrivedStopped_ReportsTheSkippedRequiredListen
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
-        eventcontract.ListenerConfig{Required: true},
+        eventcontract.ListenerConfig{Failure: eventcontract.ListenerFailureConfig{Required: true}},
     )
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
@@ -1093,7 +1093,7 @@ func TestEventDispatcher_RegisteredEvents_ReportsTheRequiredListenerMarks(t *tes
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
-        eventcontract.ListenerConfig{Required: true},
+        eventcontract.ListenerConfig{Failure: eventcontract.ListenerFailureConfig{Required: true}},
     )
 
     registeredEvents := dispatcher.RegisteredEvents()
@@ -1105,11 +1105,11 @@ func TestEventDispatcher_RegisteredEvents_ReportsTheRequiredListenerMarks(t *tes
         t.Fatalf("expected 1 registered listener, got: %d", len(registeredEvents[0].Listeners))
     }
 
-    if false == registeredEvents[0].Listeners[0].Required {
+    if false == registeredEvents[0].Listeners[0].Config.Failure.Required {
         t.Fatalf("expected the required mark to be reported")
     }
 
-    if true == registeredEvents[0].Listeners[0].MaySkipRequiredListeners {
+    if true == registeredEvents[0].Listeners[0].Config.Failure.MaySkipRequiredListeners {
         t.Fatalf("expected the may-skip mark to be absent")
     }
 }
@@ -1341,7 +1341,7 @@ func TestEventDispatcher_AnExitFromATaggedListenerFilesTheFailuresCollectedSoFar
 
             behindRan := false
 
-            dispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+            dispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cleanup"}})
             dispatcher.AddListener("e", func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                 return firstFailure
             }, eventcontract.ListenerConfig{Priority: 30})
@@ -1392,7 +1392,7 @@ func TestEventDispatcher_APanicFromATaggedListenerJoinsTheAnswerAndThePassGoesOn
     firstFailure := errors.New("the first failure")
     behindRan := false
 
-    dispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+    dispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cleanup"}})
     dispatcher.AddListener("e", func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         return firstFailure
     }, eventcontract.ListenerConfig{Priority: 30})
@@ -1829,7 +1829,7 @@ func TestEventDispatcher_AFailingListenerAheadOfARequiredListenerIsRefused(t *te
 
             return nil
         },
-        eventcontract.ListenerConfig{Required: true},
+        eventcontract.ListenerConfig{Failure: eventcontract.ListenerFailureConfig{Required: true}},
     )
 
     _, err := dispatcher.Dispatch(newEventDispatcherAdapterTestRuntime(t), NewEvent("e", nil, clockInstance.Now()))
@@ -1870,7 +1870,7 @@ func TestEventDispatcher_FailingListenerWithMaySkip_StillReportsTheSkippedRequir
 
             return listenerFailure
         },
-        eventcontract.ListenerConfig{Priority: 100, MaySkipRequiredListeners: true},
+        eventcontract.ListenerConfig{Priority: 100, Failure: eventcontract.ListenerFailureConfig{MaySkipRequiredListeners: true}},
     )
 
     dispatcher.AddListener(
@@ -1878,7 +1878,7 @@ func TestEventDispatcher_FailingListenerWithMaySkip_StillReportsTheSkippedRequir
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
-        eventcontract.ListenerConfig{Required: true},
+        eventcontract.ListenerConfig{Failure: eventcontract.ListenerFailureConfig{Required: true}},
     )
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
@@ -1907,7 +1907,7 @@ func TestEventDispatcher_FailingListenerAfterTheRequiredListenerRan_ReportsItsOw
 
             return nil
         },
-        eventcontract.ListenerConfig{Priority: 100, Required: true},
+        eventcontract.ListenerConfig{Priority: 100, Failure: eventcontract.ListenerFailureConfig{Required: true}},
     )
 
     _ = dispatcher.AddListener(
@@ -2097,7 +2097,7 @@ func TestEventDispatcher_TheAfterFailurePassWritesAStartedRecordPerTaggedListene
 
     dispatcher := NewEventDispatcher(EventDispatcherConfig{Clock: clock.NewSystemClock()})
 
-    dispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+    dispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cleanup"}})
     dispatcher.AddListener("e", func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         return errors.New("failure")
     }, eventcontract.ListenerConfig{Priority: 30, Name: "failing"})
@@ -2219,7 +2219,7 @@ func TestEventDispatcher_NamesTheStoppingListenerInTheRequiredRefusalWithDebugOf
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
-        eventcontract.ListenerConfig{Priority: 100, Required: true},
+        eventcontract.ListenerConfig{Priority: 100, Failure: eventcontract.ListenerFailureConfig{Required: true}},
     )
 
     _, dispatchErr := dispatcher.DispatchName(testRuntimeWithLogger(t, logger), "gate.stop", nil)
@@ -2526,7 +2526,7 @@ func TestEventDispatcher_APayloadStopBeforeARequiredListenerIsRefused(t *testing
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
-        eventcontract.ListenerConfig{Required: true},
+        eventcontract.ListenerConfig{Failure: eventcontract.ListenerFailureConfig{Required: true}},
     )
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, "payload.required", &testStoppingPayload{})
@@ -2861,7 +2861,7 @@ func TestEventDispatcher_RegisteredEventsReportsTheListenerConfig(t *testing.T) 
     dispatcher, _ := testNewEventDispatcher()
     adapter := NewEventDispatcherAdapter(dispatcher)
 
-    adapter.AddListener("e", testNoopEventListener, eventcontract.ListenerConfig{Priority: 5, Name: "x", Required: true})
+    adapter.AddListener("e", testNoopEventListener, eventcontract.ListenerConfig{Priority: 5, Name: "x", Failure: eventcontract.ListenerFailureConfig{Required: true}})
 
     for _, registeredEvents := range [][]eventcontract.RegisteredEvent{dispatcher.RegisteredEvents(), adapter.RegisteredEvents()} {
         if 1 != len(registeredEvents) || 1 != len(registeredEvents[0].Listeners) {
@@ -2869,7 +2869,7 @@ func TestEventDispatcher_RegisteredEventsReportsTheListenerConfig(t *testing.T) 
         }
 
         listener := registeredEvents[0].Listeners[0]
-        if "x" != listener.ListenerName || 5 != listener.Priority || false == listener.Required || true == listener.MaySkipRequiredListeners {
+        if "x" != listener.ListenerName || 5 != listener.Config.Priority || false == listener.Config.Failure.Required || true == listener.Config.Failure.MaySkipRequiredListeners {
             t.Fatalf("expected the declared config reported, got %+v", listener)
         }
     }
@@ -2905,7 +2905,7 @@ func (instance *configuredSubscriber) SubscribedEvents() map[string][]eventcontr
 
                     return nil
                 },
-                eventcontract.ListenerConfig{Priority: 1, Required: true},
+                eventcontract.ListenerConfig{Priority: 1, Failure: eventcontract.ListenerFailureConfig{Required: true}},
             ),
             NewSubscribedEvent(
                 func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
@@ -2988,7 +2988,7 @@ func TestEventDispatcher_ATaggedListenerBehindTheFailureRunsWhenTheEventDeclares
 
     failure := errors.New("the first failure")
 
-    dispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"cache"}})
+    dispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cache"}})
     dispatcher.AddListener("e", recorder.listener("failing", failure), eventcontract.ListenerConfig{Priority: 30})
     dispatcher.AddListener("e", recorder.listener("untagged", nil), eventcontract.ListenerConfig{Priority: 20})
     dispatcher.AddListener("e", recorder.listener("otherTag", nil), eventcontract.ListenerConfig{Priority: 15, Tags: []string{"audit"}})
@@ -3023,7 +3023,7 @@ func TestEventDispatcher_ATaggedListenerAheadOfTheFailureRunsOnce(t *testing.T) 
     dispatcher, clockInstance := testNewEventDispatcher()
     recorder := newTagsTestRecorder()
 
-    dispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"cache"}})
+    dispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cache"}})
     dispatcher.AddListener("e", recorder.listener("aheadCache", nil), eventcontract.ListenerConfig{Priority: 40, Tags: []string{"cache"}})
     dispatcher.AddListener("e", recorder.listener("failing", errors.New("failure")), eventcontract.ListenerConfig{Priority: 30})
     dispatcher.AddListener("e", recorder.listener("behindCache", nil), eventcontract.ListenerConfig{Priority: 10, Tags: []string{"cache"}})
@@ -3043,7 +3043,7 @@ func TestEventDispatcher_TheAnswerJoinsTheTaggedFailuresInRunOrderAndThePassGoes
     secondFailure := errors.New("second failure")
     thirdFailure := errors.New("third failure")
 
-    dispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+    dispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cleanup"}})
     dispatcher.AddListener("e", recorder.listener("first", firstFailure), eventcontract.ListenerConfig{Priority: 30})
     dispatcher.AddListener("e", recorder.listener("second", secondFailure), eventcontract.ListenerConfig{Priority: 20, Tags: []string{"cleanup"}})
     dispatcher.AddListener("e", recorder.listener("third", thirdFailure), eventcontract.ListenerConfig{Priority: 10, Tags: []string{"cleanup"}})
@@ -3074,7 +3074,7 @@ func TestEventDispatcher_PriorFailureIsWhatFailedAheadOfTheListener(t *testing.T
     firstFailure := errors.New("first failure")
     secondFailure := errors.New("second failure")
 
-    dispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+    dispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cleanup"}})
     dispatcher.AddListener("e", recorder.listener("clean", nil), eventcontract.ListenerConfig{Priority: 40, Tags: []string{"cleanup"}})
     dispatcher.AddListener("e", recorder.listener("first", firstFailure), eventcontract.ListenerConfig{Priority: 30})
     dispatcher.AddListener("e", recorder.listener("second", secondFailure), eventcontract.ListenerConfig{Priority: 20, Tags: []string{"cleanup"}})
@@ -3110,7 +3110,7 @@ func TestEventDispatcher_PriorFailureIsNilOnACleanDispatch(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
     recorder := newTagsTestRecorder()
 
-    dispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+    dispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cleanup"}})
     dispatcher.AddListener("e", recorder.listener("first", nil), eventcontract.ListenerConfig{Priority: 20})
     dispatcher.AddListener("e", recorder.listener("second", nil), eventcontract.ListenerConfig{Priority: 10, Tags: []string{"cleanup"}})
 
@@ -3128,7 +3128,7 @@ func TestEventDispatcher_ADeliberateStopRunsNoTaggedListener(t *testing.T) {
     dispatcher, clockInstance := testNewEventDispatcher()
     recorder := newTagsTestRecorder()
 
-    dispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+    dispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cleanup"}})
     dispatcher.AddListener(
         "e",
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
@@ -3151,7 +3151,7 @@ func TestEventDispatcher_AListenerThatFailsAndStopsStillRunsTheTaggedListeners(t
     dispatcher, clockInstance := testNewEventDispatcher()
     recorder := newTagsTestRecorder()
 
-    dispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+    dispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cleanup"}})
     dispatcher.AddListener(
         "e",
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
@@ -3186,9 +3186,9 @@ func TestEventDispatcher_ARequiredListenerThatRanAfterTheFailureIsNotRefused(t *
 
     failure := errors.New("failure")
 
-    dispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+    dispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cleanup"}})
     dispatcher.AddListener("e", recorder.listener("failing", failure), eventcontract.ListenerConfig{Priority: 30})
-    dispatcher.AddListener("e", recorder.listener("required", nil), eventcontract.ListenerConfig{Priority: 10, Required: true, Tags: []string{"cleanup"}})
+    dispatcher.AddListener("e", recorder.listener("required", nil), eventcontract.ListenerConfig{Priority: 10, Tags: []string{"cleanup"}, Failure: eventcontract.ListenerFailureConfig{Required: true}})
 
     _, err := dispatcher.Dispatch(newEventDispatcherAdapterTestRuntime(t), NewEvent("e", nil, clockInstance.Now()))
 
@@ -3208,10 +3208,10 @@ func TestEventDispatcher_AnUntaggedRequiredListenerBehindTheFailureIsRefusedWith
     firstFailure := errors.New("first failure")
     taggedFailure := errors.New("tagged failure")
 
-    dispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+    dispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cleanup"}})
     dispatcher.AddListener("e", recorder.listener("failing", firstFailure), eventcontract.ListenerConfig{Priority: 30})
     dispatcher.AddListener("e", recorder.listener("tagged", taggedFailure), eventcontract.ListenerConfig{Priority: 20, Tags: []string{"cleanup"}})
-    dispatcher.AddListener("e", recorder.listener("required", nil), eventcontract.ListenerConfig{Priority: 10, Required: true})
+    dispatcher.AddListener("e", recorder.listener("required", nil), eventcontract.ListenerConfig{Priority: 10, Failure: eventcontract.ListenerFailureConfig{Required: true}})
 
     _, err := dispatcher.Dispatch(newEventDispatcherAdapterTestRuntime(t), NewEvent("e", nil, clockInstance.Now()))
 
@@ -3244,7 +3244,7 @@ func TestEventDispatcher_TheLoggedMarkOfTheAnswerNeedsEveryFailureLogged(t *test
             _ = exception.MarkLogged(taggedFailure)
         }
 
-        dispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+        dispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cleanup"}})
         dispatcher.AddListener("e", func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error { panic("the listener broke") }, eventcontract.ListenerConfig{Priority: 30})
         dispatcher.AddListener("e", func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error { return taggedFailure }, eventcontract.ListenerConfig{Priority: 10, Tags: []string{"cleanup"}})
 
@@ -3259,9 +3259,9 @@ func TestEventDispatcher_TheLoggedMarkOfTheAnswerNeedsEveryFailureLogged(t *test
 func TestEventDispatcher_DeclareEventIsRefusedASecondTimeAndForAnEmptyName(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
 
-    dispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+    dispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cleanup"}})
 
-    for _, config := range []eventcontract.EventConfig{{RunAfterFailureTags: []string{"cleanup"}}, {}} {
+    for _, config := range []eventcontract.EventConfig{{TagsToRunAfterFailure: []string{"cleanup"}}, {}} {
         refusal := requireTagsTestPanic(t, func() { dispatcher.DeclareEvent("e", config) })
         if "the event is already declared; an event's config has one owner" != refusal.Message() || "e" != refusal.Context()["eventName"] {
             t.Fatalf("expected the second declaration refused by name, got %s %v", refusal.Message(), refusal.Context())
@@ -3285,7 +3285,7 @@ func TestEventDispatcher_ADeclarationMadeAfterTheListenersAppliesToTheNextDispat
 
     _, _ = dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
 
-    dispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+    dispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cleanup"}})
 
     _, _ = dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
 
@@ -3298,8 +3298,8 @@ func TestEventDispatcher_RegisteredEventsReportsTheDeclarationAndTheTags(t *test
     dispatcher, _ := testNewEventDispatcher()
     adapter := NewEventDispatcherAdapter(dispatcher)
 
-    adapter.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
-    adapter.DeclareEvent("empty.declared", eventcontract.EventConfig{RunAfterFailureTags: []string{"audit"}})
+    adapter.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"cleanup"}})
+    adapter.DeclareEvent("empty.declared", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"audit"}})
     adapter.AddListener("e", testNoopEventListener, eventcontract.ListenerConfig{Priority: 20, Name: "tagged", Tags: []string{"cleanup"}})
     adapter.AddListener("e", testNoopEventListener, eventcontract.ListenerConfig{Priority: 10, Name: "otherTag", Tags: []string{"audit"}})
     adapter.AddListener("u", testNoopEventListener, eventcontract.ListenerConfig{Name: "untagged"})
@@ -3311,19 +3311,19 @@ func TestEventDispatcher_RegisteredEventsReportsTheDeclarationAndTheTags(t *test
 
         declared, emptyDeclared, undeclared := registeredEvents[0], registeredEvents[1], registeredEvents[2]
 
-        if "e" != declared.EventName || false == declared.Declared || 1 != len(declared.RunAfterFailureTags) || "cleanup" != declared.RunAfterFailureTags[0] {
+        if "e" != declared.EventName || false == declared.Declared || 1 != len(declared.Config.TagsToRunAfterFailure) || "cleanup" != declared.Config.TagsToRunAfterFailure[0] {
             t.Fatalf("expected the declaration reported, got %+v", declared)
         }
 
-        if false == declared.Listeners[0].RunsAfterFailure || "cleanup" != declared.Listeners[0].Tags[0] || true == declared.Listeners[1].RunsAfterFailure {
+        if false == declared.Listeners[0].RunsAfterFailure || "cleanup" != declared.Listeners[0].Config.Tags[0] || true == declared.Listeners[1].RunsAfterFailure {
             t.Fatalf("expected only the listener carrying a declared tag to run after a failure, got %+v", declared.Listeners)
         }
 
-        if "empty.declared" != emptyDeclared.EventName || false == emptyDeclared.Declared || 0 != len(emptyDeclared.Listeners) || "audit" != emptyDeclared.RunAfterFailureTags[0] {
+        if "empty.declared" != emptyDeclared.EventName || false == emptyDeclared.Declared || 0 != len(emptyDeclared.Listeners) || "audit" != emptyDeclared.Config.TagsToRunAfterFailure[0] {
             t.Fatalf("expected the declared event with no listener listed, got %+v", emptyDeclared)
         }
 
-        if "u" != undeclared.EventName || true == undeclared.Declared || nil == undeclared.RunAfterFailureTags || 0 != len(undeclared.RunAfterFailureTags) || nil == undeclared.Listeners[0].Tags || 0 != len(undeclared.Listeners[0].Tags) {
+        if "u" != undeclared.EventName || true == undeclared.Declared || nil == undeclared.Config.TagsToRunAfterFailure || 0 != len(undeclared.Config.TagsToRunAfterFailure) || nil == undeclared.Listeners[0].Config.Tags || 0 != len(undeclared.Listeners[0].Config.Tags) {
             t.Fatalf("expected an undeclared event with empty, non-nil tag lists, got %+v", undeclared)
         }
     }
@@ -3341,7 +3341,7 @@ func TestEventDispatcher_AForwardedFailureViewCarriesNoPriorFailureIntoAnotherDi
         return nil
     }, eventcontract.ListenerConfig{})
 
-    first.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: []string{"forward"}})
+    first.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"forward"}})
     first.AddListener("e", func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         return errors.New("the first failure")
     }, eventcontract.ListenerConfig{Priority: 20})

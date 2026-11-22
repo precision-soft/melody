@@ -20,6 +20,7 @@ func TestEventDispatcher_TagsAreRefusedByTheirField(t *testing.T) {
         {name: "tab", tags: []string{"ca\tche"}, expectedMessage: "carries a tag with whitespace"},
         {name: "control", tags: []string{"ca\x00che"}, expectedMessage: "carries a tag with whitespace"},
         {name: "duplicate", tags: []string{"cache", "audit", "cache"}, expectedMessage: "carries a tag twice"},
+        {name: "reserved", tags: []string{"cache", "melody.cache"}, expectedMessage: "carries a tag in the melody. namespace the framework does not define"},
     } {
         dispatcher, _ := testNewEventDispatcher()
 
@@ -29,7 +30,7 @@ func TestEventDispatcher_TagsAreRefusedByTheirField(t *testing.T) {
         }{
             {field: "ListenerConfig.Tags", call: func() { dispatcher.AddListener("e", testNoopEventListener, eventcontract.ListenerConfig{Tags: testCase.tags}) }},
             {field: "ListenerConfig.Tags", call: func() { dispatcher.InstallFloorListener("f", testNoopEventListener, eventcontract.ListenerConfig{Tags: testCase.tags}) }},
-            {field: "EventConfig.RunAfterFailureTags", call: func() { dispatcher.DeclareEvent("d", eventcontract.EventConfig{RunAfterFailureTags: testCase.tags}) }},
+            {field: "EventConfig.TagsToRunAfterFailure", call: func() { dispatcher.DeclareEvent("d", eventcontract.EventConfig{TagsToRunAfterFailure: testCase.tags}) }},
         } {
             refusal := requireTagsTestPanic(t, door.call)
             if door.field+" "+testCase.expectedMessage != refusal.Message() {
@@ -40,6 +41,31 @@ func TestEventDispatcher_TagsAreRefusedByTheirField(t *testing.T) {
         if 0 != len(dispatcher.RegisteredEvents()) {
             t.Fatalf("%s: expected nothing registered or declared, got %+v", testCase.name, dispatcher.RegisteredEvents())
         }
+    }
+}
+
+func TestEventDispatcher_AnUnknownFrameworkTagIsRefusedNamingTheFrameworksTags(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    refusal := requireTagsTestPanic(t, func() {
+        dispatcher.AddSubscriber(&testSubscriber{events: map[string][]eventcontract.SubscribedEvent{"s": {NewSubscribedEvent(testNoopEventListener, eventcontract.ListenerConfig{Tags: []string{"melody.audit"}})}}})
+    })
+
+    frameworkTags, _ := refusal.Context()["frameworkTags"].([]string)
+    if "ListenerConfig.Tags carries a tag in the melody. namespace the framework does not define" != refusal.Message() || "melody.audit" != refusal.Context()["tag"] || 0 != refusal.Context()["index"] || 2 != len(frameworkTags) {
+        t.Fatalf("expected the reserved tag refused with the framework's tags, got %s %v", refusal.Message(), refusal.Context())
+    }
+}
+
+func TestEventDispatcher_TheFrameworksOwnTagsAreAccepted(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    dispatcher.AddListener("e", testNoopEventListener, eventcontract.ListenerConfig{Tags: []string{"melody.cors", "melody.access_log"}})
+    dispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: []string{"melody.cors"}})
+
+    registeredEvents := dispatcher.RegisteredEvents()
+    if 1 != len(registeredEvents) || false == registeredEvents[0].Listeners[0].RunsAfterFailure {
+        t.Fatalf("expected the framework's tags accepted, got %+v", registeredEvents)
     }
 }
 
@@ -70,7 +96,7 @@ func TestEventDispatcher_TheCallersTagSlicesAreCopied(t *testing.T) {
     declaredTags := []string{"cleanup"}
     listenerTags := []string{"cleanup"}
 
-    dispatcher.DeclareEvent("e", eventcontract.EventConfig{RunAfterFailureTags: declaredTags})
+    dispatcher.DeclareEvent("e", eventcontract.EventConfig{TagsToRunAfterFailure: declaredTags})
     dispatcher.AddListener("e", recorder.listener("failing", errors.New("failure")), eventcontract.ListenerConfig{Priority: 30})
     dispatcher.AddListener("e", recorder.listener("cleanup", nil), eventcontract.ListenerConfig{Priority: 10, Tags: listenerTags})
 
@@ -84,11 +110,11 @@ func TestEventDispatcher_TheCallersTagSlicesAreCopied(t *testing.T) {
     }
 
     registeredEvents := dispatcher.RegisteredEvents()
-    registeredEvents[0].RunAfterFailureTags[0] = "changed"
-    registeredEvents[0].Listeners[1].Tags[0] = "changed"
+    registeredEvents[0].Config.TagsToRunAfterFailure[0] = "changed"
+    registeredEvents[0].Listeners[1].Config.Tags[0] = "changed"
 
     again := dispatcher.RegisteredEvents()
-    if "cleanup" != again[0].RunAfterFailureTags[0] || "cleanup" != again[0].Listeners[1].Tags[0] {
+    if "cleanup" != again[0].Config.TagsToRunAfterFailure[0] || "cleanup" != again[0].Listeners[1].Config.Tags[0] {
         t.Fatalf("expected inspection to answer copies, got %+v", again)
     }
 }

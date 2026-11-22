@@ -31,14 +31,14 @@ func userUsernameCacheKey(username string) string {
 
 func (instance *UserEventSubscriber) SubscribedEvents() map[string][]melodyeventcontract.SubscribedEvent {
     return map[string][]melodyeventcontract.SubscribedEvent{
-        event.UserCreatedEventName: {
+        event.EventUserCreated: {
             melodyevent.NewSubscribedEvent(instance.onUserCreated(), melodyeventcontract.ListenerConfig{}),
         },
-        event.UserUpdatedEventName: {
+        event.EventUserUpdated: {
             melodyevent.NewSubscribedEvent(instance.onUserUpdated(), melodyeventcontract.ListenerConfig{}),
         },
-        event.UserDeletedEventName: {
-            melodyevent.NewSubscribedEvent(instance.onUserDeleted(), melodyeventcontract.ListenerConfig{Tags: []string{event.UserDeletedTagCache}}),
+        event.EventUserDeleted: {
+            melodyevent.NewSubscribedEvent(instance.onUserDeleted(), melodyeventcontract.ListenerConfig{Tags: []string{event.ListenerTagUserDeletedCache}}),
         },
     }
 }

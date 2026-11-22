@@ -315,7 +315,7 @@ func currencyServiceUnderTest(t *testing.T) (*CurrencyService, *recordingDispatc
     }
 
     clockInstance := &frozenClock{instant: currencyQuoteInstant}
-    dispatcher := newRecordingDispatcher(clockInstance, event.CurrencyUpdatedEventName)
+    dispatcher := newRecordingDispatcher(clockInstance, event.EventCurrencyUpdated)
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
