@@ -2,7 +2,9 @@ package http
 
 import (
     "fmt"
+    "strings"
 
+    "github.com/precision-soft/melody/v4/event"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
 )
@@ -44,4 +46,43 @@ func debugErrorMessage(err error) (message string) {
     }()
 
     return err.Error()
+}
+
+/* debugKernelRequestFailureMessage names the refusal first, then what failed, so a 500 that replaced a refusal still shows the refusal in development */
+func debugKernelRequestFailureMessage(refusal error, dispatchErr error) string {
+    failurePart := debugErrorMessage(dispatchErr)
+
+    if skippedErr, isSkipped := dispatchErr.(*event.RequiredListenerSkippedError); true == isSkipped {
+        var melodyError *exception.Error
+        if true == exception.ChainAs(skippedErr, &melodyError) && nil != melodyError {
+            failurePart = failurePart + fmt.Sprintf(" (stopped by %v)", melodyError.Context()["stoppedByListener"])
+
+            if causeErr := melodyError.CauseErr(); false == internal.IsNilInterface(causeErr) {
+                failurePart = failurePart + ": " + debugCauseChainMessage(causeErr)
+            }
+        }
+    }
+
+    if true == internal.IsNilInterface(refusal) {
+        return failurePart
+    }
+
+    refusalPart := debugErrorMessage(refusal)
+    if true == exception.AnswersUnavailable(refusal) {
+        refusalPart = "503 service unavailable"
+    } else if httpException := exception.AsHttpException(refusal); nil != httpException {
+        refusalPart = fmt.Sprintf("%d %s", httpException.StatusCode(), httpException.Message())
+    }
+
+    return "refused: " + refusalPart + "; then: " + failurePart
+}
+
+/* debugCauseChainMessage renders an error and the causes it wraps on one line, so a listener's failure reads past the dispatcher's wrapper */
+func debugCauseChainMessage(err error) string {
+    links := exception.BuildCauseChain(err, 8)
+    if 0 == len(links) {
+        return debugErrorMessage(err)
+    }
+
+    return strings.Join(links, ": ")
 }

@@ -17,6 +17,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
+    "github.com/precision-soft/melody/v4/internal/eventseam"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
@@ -122,13 +123,14 @@ func (instance *EventDispatcher) appendListenerLocked(
     instance.listeners[eventName] = append(
         instance.listeners[eventName],
         listenerWithPriority{
-            listener:                 listener,
-            listenerId:               listenerId,
-            priority:                 config.Priority,
-            name:                     config.Name,
-            required:                 config.Required,
-            maySkipRequiredListeners: config.MaySkipRequiredListeners,
-            tags:                     copyTags(config.Tags),
+            listener:                     listener,
+            listenerId:                   listenerId,
+            priority:                     config.Priority,
+            name:                         config.Name,
+            required:                     config.Required,
+            maySkipRequiredListeners:     config.MaySkipRequiredListeners,
+            tags:                         copyTags(config.Tags),
+            replacesResponseAfterFailure: config.ReplacesResponseAfterFailure,
         },
     )
 
@@ -370,15 +372,16 @@ func (instance *EventDispatcher) RegisteredEvents() []eventcontract.RegisteredEv
             registeredListenerList = append(
                 registeredListenerList,
                 eventcontract.RegisteredListener{
-                    Priority:                 entry.priority,
-                    Source:                   source,
-                    Owner:                    owner,
-                    ListenerId:               listenerId,
-                    ListenerName:             listenerName,
-                    Required:                 entry.required,
-                    MaySkipRequiredListeners: entry.maySkipRequiredListeners,
-                    Tags:                     copyTags(entry.tags),
-                    RunsAfterFailure:         runsAfterFailure(entry.tags, eventConfig.runAfterFailureTags),
+                    Priority:                     entry.priority,
+                    Source:                       source,
+                    Owner:                        owner,
+                    ListenerId:                   listenerId,
+                    ListenerName:                 listenerName,
+                    Required:                     entry.required,
+                    MaySkipRequiredListeners:     entry.maySkipRequiredListeners,
+                    Tags:                         copyTags(entry.tags),
+                    RunsAfterFailure:             runsAfterFailure(entry.tags, eventConfig.runAfterFailureTags),
+                    ReplacesResponseAfterFailure: entry.replacesResponseAfterFailure,
                 },
             )
         }
@@ -562,6 +565,9 @@ func (instance *EventDispatcher) dispatch(runtimeInstance containercontract.Runt
                 panic(recoveredValue)
             }()
 
+            /* a payload that guards a write made after a failure is told which listener runs, and with which door */
+            afterFailureGuard, guards := eventValue.Payload().(eventseam.AfterFailureGuard)
+
             /* only the listeners behind the failure, those ahead having run; the stop flag is not read here, since a failure is no deliberate stop and a tagged listener's stop does not cancel the cleanup behind it */
             for _, entry := range listenerList[failedIndex+1:] {
                 if false == runsAfterFailure(entry.tags, runAfterFailureTags) {
@@ -584,7 +590,18 @@ func (instance *EventDispatcher) dispatch(runtimeInstance containercontract.Runt
                     )
                 }
 
-                afterFailureErr := instance.callListenerSafely(runtimeInstance, eventName, eventValue, newAfterFailureEvent(eventValue, joinListenerErrors(failureErrs)), entry, time.Now(), logger)
+                afterFailureErr := func() error {
+                    if true == guards && false == internal.IsNilInterface(afterFailureGuard) {
+                        leave := afterFailureGuard.EnterAfterFailureListener(eventseam.Token{}, eventseam.AfterFailureListener{
+                            EventName:        eventName,
+                            ListenerName:     entryNameOf(entry),
+                            ReplacesResponse: entry.replacesResponseAfterFailure,
+                        })
+                        defer leave()
+                    }
+
+                    return instance.callListenerSafely(runtimeInstance, eventName, eventValue, newAfterFailureEvent(eventValue, joinListenerErrors(failureErrs)), entry, time.Now(), logger)
+                }()
                 if nil != afterFailureErr {
                     failureErrs = append(failureErrs, afterFailureErr)
                 }
@@ -894,13 +911,14 @@ func (instance *EventDispatcher) removeListenerById(eventName string, listenerId
 }
 
 type listenerWithPriority struct {
-    listener                 eventcontract.EventListener
-    listenerId               uint64
-    priority                 int
-    name                     string
-    required                 bool
-    maySkipRequiredListeners bool
-    tags                     []string
+    listener                     eventcontract.EventListener
+    listenerId                   uint64
+    priority                     int
+    name                         string
+    required                     bool
+    maySkipRequiredListeners     bool
+    tags                         []string
+    replacesResponseAfterFailure bool
 }
 
 type eventConfigEntry struct {

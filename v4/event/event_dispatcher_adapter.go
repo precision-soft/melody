@@ -235,15 +235,16 @@ func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.Regis
             registeredListenerList = append(
                 registeredListenerList,
                 eventcontract.RegisteredListener{
-                    Priority:                 entry.config.Priority,
-                    Source:                   entry.source,
-                    Owner:                    entry.owner,
-                    ListenerId:               listenerId,
-                    ListenerName:             listenerName,
-                    Required:                 entry.config.Required,
-                    MaySkipRequiredListeners: entry.config.MaySkipRequiredListeners,
-                    Tags:                     copyTags(entry.config.Tags),
-                    RunsAfterFailure:         runsAfterFailure(entry.config.Tags, eventConfig.runAfterFailureTags),
+                    Priority:                     entry.config.Priority,
+                    Source:                       entry.source,
+                    Owner:                        entry.owner,
+                    ListenerId:                   listenerId,
+                    ListenerName:                 listenerName,
+                    Required:                     entry.config.Required,
+                    MaySkipRequiredListeners:     entry.config.MaySkipRequiredListeners,
+                    Tags:                         copyTags(entry.config.Tags),
+                    RunsAfterFailure:             runsAfterFailure(entry.config.Tags, eventConfig.runAfterFailureTags),
+                    ReplacesResponseAfterFailure: entry.config.ReplacesResponseAfterFailure,
                 },
             )
         }

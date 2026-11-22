@@ -618,7 +618,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             statusCode := nethttp.StatusInternalServerError
             message := "internal server error"
             if true == debugMode && nil != eventKernelRequestErr {
-                message = debugErrorMessage(eventKernelRequestErr)
+                message = debugKernelRequestFailureMessage(kernelRequestEvent.Refusal(), eventKernelRequestErr)
             }
 
             if nil == eventKernelRequestErr {
@@ -829,6 +829,8 @@ func (instance *Kernel) dispatchResponseAndWrite(
     instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelResponseErr)
 
     publishedResponse := kernelResponseEvent.Response()
+
+    warnAfterFailureReplacements(requestLogger, kernelResponseEvent, publishedResponse, *finalResponse)
 
     if nil != *finalResponse && *finalResponse != publishedResponse {
         closeDiscardedResponseBody(*finalResponse, requestLogger)
@@ -1060,3 +1062,38 @@ func (instance *Kernel) buildHandler(
 }
 
 var _ httpcontract.Kernel = (*Kernel)(nil)
+
+/* warnAfterFailureReplacements writes one warning per response a listener set after a failure, refused or replaced, and closes the response that lost unless the kernel still holds it */
+func warnAfterFailureReplacements(logger loggingcontract.Logger, kernelResponseEvent *KernelResponseEvent, publishedResponse httpcontract.Response, finalResponse httpcontract.Response) {
+    for _, replacement := range kernelResponseEvent.takeAfterFailureReplacements() {
+        if true == replacement.admitted {
+            logger.Warning(
+                "a listener replaced the response after a failure",
+                loggingcontract.Context{
+                    "eventName":              replacement.listener.EventName,
+                    "listenerName":           replacement.listener.ListenerName,
+                    "servedResponseStatus":   replacement.servedStatus,
+                    "replacedResponseStatus": replacement.discardedStatus,
+                },
+            )
+        } else {
+            logger.Warning(
+                "a listener's response replacement after a failure is refused; the response standing at the failure is served",
+                loggingcontract.Context{
+                    "eventName":             replacement.listener.EventName,
+                    "listenerName":          replacement.listener.ListenerName,
+                    "servedResponseStatus":  replacement.servedStatus,
+                    "refusedResponseStatus": replacement.discardedStatus,
+                    "door":                  "ListenerConfig.ReplacesResponseAfterFailure",
+                },
+            )
+        }
+
+        /* the response the kernel started from is closed by the caller once it is replaced, and the published one is written */
+        if true == internal.IsNilInterface(replacement.discarded) || replacement.discarded == publishedResponse || replacement.discarded == finalResponse {
+            continue
+        }
+
+        closeDiscardedResponseBody(replacement.discarded, logger)
+    }
+}

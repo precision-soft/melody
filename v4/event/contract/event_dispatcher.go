@@ -14,7 +14,7 @@ type SubscriberRegistration struct {
     SubscriberId uint64
 }
 
-/* ListenerConfig is what a registration declares about its listener; the zero value is priority 0, unnamed, untagged, neither required nor allowed to skip. */
+/* ListenerConfig is what a registration declares about its listener; the zero value is priority 0, unnamed, untagged, neither required nor allowed to skip, replacing nothing after a failure. */
 type ListenerConfig struct {
     /* Priority orders the listeners of one event, the highest first; on InstallFloorListener it is the reserved floor. */
     Priority int
@@ -30,6 +30,9 @@ type ListenerConfig struct {
 
     /* Tags name what the listener is, in its event owner's vocabulary ("cache", "audit"). An event that declares one of them in EventConfig.RunAfterFailureTags runs this listener after a listener ahead of it failed; on an event that declares none, tags change nothing. A tag is non-empty, carries no whitespace or control character and appears once. */
     Tags []string
+
+    /* ReplacesResponseAfterFailure lets this listener, when it runs after a failure through its tags, replace the response of a payload that guards it; the http kernel's kernel.response payload does. Without it such a replacement is ignored and the response standing at the failure is served; either way the kernel writes a warning naming the listener. It is not read in a dispatch nothing failed in, nor on kernel.request, kernel.controller and kernel.exception, where the kernel answers a failed dispatch itself. */
+    ReplacesResponseAfterFailure bool
 }
 
 /* EventConfig is what the owner of an event name declares about its dispatch; the zero value declares nothing: the first failure ends the dispatch and no listener behind it runs. */

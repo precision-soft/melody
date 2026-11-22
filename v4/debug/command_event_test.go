@@ -826,3 +826,45 @@ func TestEventCommand_VerboseJsonCarriesTheTagsAndTheDeclarations(t *testing.T) 
         t.Fatalf("expected an untagged listener's tags as an empty list, got %q", rendered)
     }
 }
+
+/* the after-failure column says whether the listener runs after a failure and whether it may replace the response there; the door without a declared tag is inert and reads as not running */
+func TestRenderRunsAfterFailureMark_NamesTheReplaceDoor(t *testing.T) {
+    for _, expectedEntry := range []struct {
+        runsAfterFailure bool
+        replaces         bool
+        expected         string
+    }{
+        {true, true, "yes (may replace)"},
+        {true, false, "yes"},
+        {false, true, "-"},
+        {false, false, "-"},
+    } {
+        rendered := renderRunsAfterFailureMark(eventcontract.RegisteredListener{
+            RunsAfterFailure:             expectedEntry.runsAfterFailure,
+            ReplacesResponseAfterFailure: expectedEntry.replaces,
+        })
+        if expectedEntry.expected != rendered {
+            t.Fatalf("expected %q for %+v, got %q", expectedEntry.expected, expectedEntry, rendered)
+        }
+    }
+}
+
+func TestEventCommand_VerboseJsonCarriesTheReplaceDoor(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+    dispatcher.DeclareEvent("event.declared", eventcontract.EventConfig{RunAfterFailureTags: []string{"release"}})
+    dispatcher.AddListener("event.declared", eventOrderProbeListenerAlpha, eventcontract.ListenerConfig{Tags: []string{"release"}, ReplacesResponseAfterFailure: true})
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    serviceContainer.MustRegister(
+        event.ServiceEventDispatcher,
+        func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
+            return dispatcher, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    rendered, runErr := runDebugCommand(&EventCommand{}, newTestRuntime(serviceContainer), []string{"--format=json", "--verbose"})
+    if nil != runErr || false == strings.Contains(rendered, `"replacesResponseAfterFailure":true`) {
+        t.Fatalf("expected the door in the json listing, got %v %q", runErr, rendered)
+    }
+}

@@ -15,6 +15,7 @@ import (
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     "github.com/precision-soft/melody/v4/event"
+    eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/http"
@@ -64,6 +65,9 @@ type ApplicationConfig struct {
 
     /* EnvironmentKeys are the .env keys the application owns, outside the MELODY_ namespace, each with the default, rule, secret mark, retired spellings and refusals of a module's key. They are declared when the application is built, before any parameter is read. A key in the MELODY_ namespace is refused. */
     EnvironmentKeys []configcontract.EnvironmentKey
+
+    /* Events is what the application declares on the framework's own events, by event name: kernel.request, kernel.controller, kernel.response, kernel.terminate, kernel.exception, the six security.* events and http.request.profile. The application declares all twelve when it is built, each with the framework's own tags followed by the RunAfterFailureTags given here, so EventDispatcher.DeclareEvent on one of those names is refused as already declared. A name that is not a framework event, a tag in the melody. namespace and a malformed tag refuse the application by name; an application event is declared through EventDispatcher.DeclareEvent. */
+    Events map[string]eventcontract.EventConfig
 
     /* MessageBus is what the framework hands the melody:messagebus:consume command it registers. */
     MessageBus MessageBusConfig
@@ -146,10 +150,21 @@ func NewApplication(
         exception.Panic(exception.NewError("the unavailable retry after is refused", nil, unavailableRetryAfterErr))
     }
 
+    frameworkEventDeclarations, eventsErr := resolveFrameworkEventConfigs(applicationConfig.Events)
+    if nil != eventsErr {
+        exception.Panic(exception.NewError("the events are refused", nil, eventsErr))
+    }
+
     routeRegistry := http.NewRouteRegistry()
     httpRouter := http.NewRouterWithRouteRegistry(routeRegistry)
 
     clockInstance := clock.NewSystemClock()
+
+    /* declared before the kernel holds the dispatcher, so nothing can declare a framework event ahead of the framework */
+    eventDispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
+    for _, declaration := range frameworkEventDeclarations {
+        eventDispatcher.DeclareEvent(declaration.eventName, declaration.config)
+    }
 
     kernelInstance := kernel.NewKernel(
         configuration,
@@ -159,7 +174,7 @@ func NewApplication(
             TeardownSequential:   resolveContainerTeardownSequential(configuration, applicationConfig),
         }),
         httpRouter,
-        event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance}),
+        eventDispatcher,
         clockInstance,
     )
 

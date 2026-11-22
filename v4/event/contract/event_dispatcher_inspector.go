@@ -25,6 +25,9 @@ type RegisteredListener struct {
 
     /* RunsAfterFailure reports that the event declares one of the listener's tags, so the listener runs after a failure ahead of it. */
     RunsAfterFailure bool `json:"runsAfterFailure"`
+
+    /* ReplacesResponseAfterFailure reports the listener's ListenerConfig door: running after a failure, it may replace the response. */
+    ReplacesResponseAfterFailure bool `json:"replacesResponseAfterFailure"`
 }
 
 const (

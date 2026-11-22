@@ -296,16 +296,17 @@ func collectListenerListItems(
             listenerItems = append(
                 listenerItems,
                 eventListenerListItem{
-                    EventName:                registeredEvent.EventName,
-                    Order:                    index + 1,
-                    Priority:                 listener.Priority,
-                    Required:                 listener.Required,
-                    MaySkipRequiredListeners: listener.MaySkipRequiredListeners,
-                    Tags:                     append(make([]string, 0, len(listener.Tags)), listener.Tags...),
-                    RunsAfterFailure:         listener.RunsAfterFailure,
-                    Source:                   listener.Source,
-                    Owner:                    listener.Owner,
-                    ListenerName:             listener.ListenerName,
+                    EventName:                    registeredEvent.EventName,
+                    Order:                        index + 1,
+                    Priority:                     listener.Priority,
+                    Required:                     listener.Required,
+                    MaySkipRequiredListeners:     listener.MaySkipRequiredListeners,
+                    Tags:                         append(make([]string, 0, len(listener.Tags)), listener.Tags...),
+                    RunsAfterFailure:             listener.RunsAfterFailure,
+                    ReplacesResponseAfterFailure: listener.ReplacesResponseAfterFailure,
+                    Source:                       listener.Source,
+                    Owner:                        listener.Owner,
+                    ListenerName:                 listener.ListenerName,
                 },
             )
         }
@@ -349,6 +350,10 @@ func renderListenerTags(tags []string) string {
 
 func renderRunsAfterFailureMark(listener eventcontract.RegisteredListener) string {
     if true == listener.RunsAfterFailure {
+        if true == listener.ReplacesResponseAfterFailure {
+            return "yes (may replace)"
+        }
+
         return "yes"
     }
 
@@ -380,16 +385,17 @@ type eventListItem struct {
 }
 
 type eventListenerListItem struct {
-    EventName                string `json:"eventName"`
-    Order                    int    `json:"order"`
-    Priority                 int    `json:"priority"`
-    Required                 bool   `json:"required"`
-    MaySkipRequiredListeners bool     `json:"maySkipRequiredListeners"`
-    Tags                     []string `json:"tags"`
-    RunsAfterFailure         bool     `json:"runsAfterFailure"`
-    Source                   string `json:"source"`
-    Owner                    string `json:"owner"`
-    ListenerName             string `json:"listenerName"`
+    EventName                    string `json:"eventName"`
+    Order                        int    `json:"order"`
+    Priority                     int    `json:"priority"`
+    Required                     bool   `json:"required"`
+    MaySkipRequiredListeners     bool     `json:"maySkipRequiredListeners"`
+    Tags                         []string `json:"tags"`
+    RunsAfterFailure             bool     `json:"runsAfterFailure"`
+    ReplacesResponseAfterFailure bool `json:"replacesResponseAfterFailure"`
+    Source                       string `json:"source"`
+    Owner                        string `json:"owner"`
+    ListenerName                 string `json:"listenerName"`
 }
 
 type eventDeclarationListItem struct {

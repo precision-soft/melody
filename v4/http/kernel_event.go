@@ -11,6 +11,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
+    "github.com/precision-soft/melody/v4/internal/eventseam"
 )
 
 /* normalizedEventResponse stores a typed-nil response as nil, since every reader of these events asks `nil == Response()`. */
@@ -163,6 +164,41 @@ func NewKernelResponseEvent(request httpcontract.Request, response httpcontract.
 type KernelResponseEvent struct {
     request  httpcontract.Request
     response httpcontract.Response
+
+    /* the listener of the after-failure pass running now, nil outside that pass */
+    afterFailureListener     *eventseam.AfterFailureListener
+    afterFailureReplacements []afterFailureReplacement
+}
+
+/* afterFailureReplacement is one SetResponse a listener made after a failure: admitted through its door or refused, with the response that lost, which the kernel closes */
+type afterFailureReplacement struct {
+    listener        eventseam.AfterFailureListener
+    admitted        bool
+    discarded       httpcontract.Response
+    servedStatus    int
+    discardedStatus int
+}
+
+/* EnterAfterFailureListener is the dispatcher's door: the listener named runs after a failure until the function answered is called. */
+func (instance *KernelResponseEvent) EnterAfterFailureListener(token eventseam.Token, listener eventseam.AfterFailureListener) func() {
+    if nil == instance {
+        return func() {}
+    }
+
+    previous := instance.afterFailureListener
+    instance.afterFailureListener = &listener
+
+    return func() {
+        instance.afterFailureListener = previous
+    }
+}
+
+/* takeAfterFailureReplacements answers the replacements recorded so far and forgets them, so each is warned about once */
+func (instance *KernelResponseEvent) takeAfterFailureReplacements() []afterFailureReplacement {
+    replacements := instance.afterFailureReplacements
+    instance.afterFailureReplacements = nil
+
+    return replacements
 }
 
 func (instance *KernelResponseEvent) Request() httpcontract.Request {
@@ -173,9 +209,46 @@ func (instance *KernelResponseEvent) Response() httpcontract.Response {
     return instance.response
 }
 
+/* SetResponse replaces the response; a listener running after a failure replaces it only through ListenerConfig.ReplacesResponseAfterFailure, its attempt recorded either way for the kernel's warning. */
 func (instance *KernelResponseEvent) SetResponse(response httpcontract.Response) {
-    instance.response = normalizedEventResponse(response)
+    response = normalizedEventResponse(response)
+
+    if nil != instance.afterFailureListener && response != instance.response {
+        admitted := instance.afterFailureListener.ReplacesResponse
+
+        replacement := afterFailureReplacement{
+            listener: *instance.afterFailureListener,
+            admitted: admitted,
+        }
+        if true == admitted {
+            replacement.discarded = instance.response
+            replacement.servedStatus = responseStatusOf(response)
+        } else {
+            replacement.discarded = response
+            replacement.servedStatus = responseStatusOf(instance.response)
+        }
+        replacement.discardedStatus = responseStatusOf(replacement.discarded)
+
+        instance.afterFailureReplacements = append(instance.afterFailureReplacements, replacement)
+
+        if false == admitted {
+            return
+        }
+    }
+
+    instance.response = response
 }
+
+/* responseStatusOf answers 0 for no response */
+func responseStatusOf(response httpcontract.Response) int {
+    if true == internal.IsNilInterface(response) {
+        return 0
+    }
+
+    return response.StatusCode()
+}
+
+var _ eventseam.AfterFailureGuard = (*KernelResponseEvent)(nil)
 
 func NewKernelTerminateEvent(
     runtimeInstance containercontract.Runtime,

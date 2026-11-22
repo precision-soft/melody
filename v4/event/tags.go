@@ -1,61 +1,30 @@
 package event
 
 import (
-    "unicode"
-
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    "github.com/precision-soft/melody/v4/internal"
 )
 
 /* requireTags refuses a tag list a dispatch could not match exactly: an empty tag, a tag carrying whitespace or a control character, and a tag listed twice. The field names the refusal; nil and an empty list are both untagged. */
 func requireTags(field string, eventName string, tags []string) {
-    seenTags := make(map[string]struct{}, len(tags))
-
-    for index, tag := range tags {
-        if "" == tag {
-            exception.Panic(
-                exception.NewError(
-                    field+" may not carry an empty tag",
-                    exceptioncontract.Context{
-                        "eventName": eventName,
-                        "index":     index,
-                    },
-                    nil,
-                ),
-            )
-        }
-
-        for _, character := range tag {
-            if true == unicode.IsSpace(character) || true == unicode.IsControl(character) {
-                exception.Panic(
-                    exception.NewError(
-                        field+" carries a tag with whitespace",
-                        exceptioncontract.Context{
-                            "eventName": eventName,
-                            "index":     index,
-                            "tag":       tag,
-                        },
-                        nil,
-                    ),
-                )
-            }
-        }
-
-        if _, seen := seenTags[tag]; true == seen {
-            exception.Panic(
-                exception.NewError(
-                    field+" carries a tag twice",
-                    exceptioncontract.Context{
-                        "eventName": eventName,
-                        "tag":       tag,
-                    },
-                    nil,
-                ),
-            )
-        }
-
-        seenTags[tag] = struct{}{}
+    reason, index, tag, refused := internal.RefusedListenerTag(tags)
+    if false == refused {
+        return
     }
+
+    refusalContext := exceptioncontract.Context{"eventName": eventName}
+    switch reason {
+    case internal.ListenerTagRefusalEmpty:
+        refusalContext["index"] = index
+    case internal.ListenerTagRefusalWhitespace:
+        refusalContext["index"] = index
+        refusalContext["tag"] = tag
+    default:
+        refusalContext["tag"] = tag
+    }
+
+    exception.Panic(exception.NewError(field+" "+reason, refusalContext, nil))
 }
 
 /* copyTags answers a list of the dispatcher's own, never nil, so a caller's later write reaches nothing and inspection answers [] for none. */
