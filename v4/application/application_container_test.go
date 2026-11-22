@@ -1329,7 +1329,7 @@ func openBootRuntime(t *testing.T, applicationInstance *Application) {
     t.Helper()
 
     bootRuntime, finish := runtime.NewBoot(t.Context(), applicationInstance.kernel.ServiceContainer())
-    applicationInstance.kernel.(kernelseam.BootRuntimeInstaller).InstallBootRuntime(kernelseam.Token{}, bootRuntime)
+    applicationInstance.kernel.(kernelseam.BootRuntimeInstaller).InstallBootRuntime(kernelseam.NewToken(), bootRuntime)
     t.Cleanup(func() {
         _ = finish()
     })

@@ -21,7 +21,7 @@ import (
 )
 
 func TestNewClientRefusesAnEmptyAccessKey(t *testing.T) {
-    _, clientErr := NewClient(Config{Endpoint: "localhost:9000", AccessKey: "", SecretKey: "secret"})
+    _, clientErr := NewClient("localhost:9000", Config{AccessKey: "", SecretKey: "secret"})
 
     if nil == clientErr {
         t.Fatal("expected an empty access key to be refused rather than silently downgrading to anonymous access")
@@ -33,7 +33,7 @@ func TestNewClientRefusesAnEmptyAccessKey(t *testing.T) {
 }
 
 func TestNewClientRefusesAnEmptySecretKey(t *testing.T) {
-    _, clientErr := NewClient(Config{Endpoint: "localhost:9000", AccessKey: "access", SecretKey: ""})
+    _, clientErr := NewClient("localhost:9000", Config{AccessKey: "access", SecretKey: ""})
 
     if nil == clientErr {
         t.Fatal("expected an empty secret key to be refused rather than silently downgrading to anonymous access")
@@ -41,7 +41,7 @@ func TestNewClientRefusesAnEmptySecretKey(t *testing.T) {
 }
 
 func TestNewClientAcceptsCompleteCredentials(t *testing.T) {
-    client, clientErr := NewClient(Config{Endpoint: "localhost:9000", AccessKey: "access", SecretKey: "secret"})
+    client, clientErr := NewClient("localhost:9000", Config{AccessKey: "access", SecretKey: "secret"})
 
     if nil != clientErr {
         t.Fatalf("expected complete credentials to build a client, got %v", clientErr)
@@ -97,8 +97,7 @@ func TestEnsureBucketTreatsALostCreationRaceAsSuccessWhenTheBucketIsUsable(t *te
     server := httptest.NewServer(handler)
     defer server.Close()
 
-    client, clientErr := NewClient(Config{
-        Endpoint:  strings.TrimPrefix(server.URL, "http://"),
+    client, clientErr := NewClient(strings.TrimPrefix(server.URL, "http://"), Config{
         AccessKey: "access",
         SecretKey: "secret",
         Insecure:  true,
@@ -143,8 +142,7 @@ func TestEnsureBucketStillRefusesANameOwnedElsewhere(t *testing.T) {
     server := httptest.NewServer(aloneConflictServer{})
     defer server.Close()
 
-    client, clientErr := NewClient(Config{
-        Endpoint:  strings.TrimPrefix(server.URL, "http://"),
+    client, clientErr := NewClient(strings.TrimPrefix(server.URL, "http://"), Config{
         AccessKey: "access",
         SecretKey: "secret",
         Insecure:  true,
@@ -160,7 +158,6 @@ func TestEnsureBucketStillRefusesANameOwnedElsewhere(t *testing.T) {
 
 func TestConfig_RedactsCredentialsOnEveryFmtVerb(t *testing.T) {
     config := Config{
-        Endpoint:  "s3.example:9000",
         AccessKey: "AKIA-public-part",
         SecretKey: "wJalrXUtn-the-secret",
         Region:    "us-east-1",
@@ -174,8 +171,8 @@ func TestConfig_RedactsCredentialsOnEveryFmtVerb(t *testing.T) {
         if true == strings.Contains(rendered, "wJalrXUtn-the-secret") {
             t.Fatalf("verb %s leaked the secret key: %s", verb, rendered)
         }
-        if false == strings.Contains(rendered, "s3.example:9000") {
-            t.Fatalf("verb %s dropped the safe Endpoint field: %s", verb, rendered)
+        if false == strings.Contains(rendered, "us-east-1") {
+            t.Fatalf("verb %s dropped the safe Region field: %s", verb, rendered)
         }
     }
 
@@ -229,8 +226,7 @@ func TestEnsureBucketNamesAReCheckThatCouldNotComplete(t *testing.T) {
     server := httptest.NewServer(&recheckFailingConflictServer{})
     defer server.Close()
 
-    client, clientErr := NewClient(Config{
-        Endpoint:  strings.TrimPrefix(server.URL, "http://"),
+    client, clientErr := NewClient(strings.TrimPrefix(server.URL, "http://"), Config{
         AccessKey: "access",
         SecretKey: "secret",
         Insecure:  true,
@@ -247,20 +243,22 @@ func TestEnsureBucketNamesAReCheckThatCouldNotComplete(t *testing.T) {
 
 func TestNewClient_ARefusalNamesTheField(t *testing.T) {
     testCases := []struct {
-        config Config
-        field  string
+        endpoint string
+        config   Config
+        key      string
+        name     string
     }{
-        {Config{AccessKey: "access", SecretKey: "secret"}, "Config.Endpoint"},
-        {Config{Endpoint: "localhost:9000", SecretKey: "secret"}, "Config.AccessKey"},
-        {Config{Endpoint: "localhost:9000", AccessKey: "access"}, "Config.SecretKey"},
+        {"", Config{AccessKey: "access", SecretKey: "secret"}, "argument", "endpoint"},
+        {"localhost:9000", Config{SecretKey: "secret"}, "field", "Config.AccessKey"},
+        {"localhost:9000", Config{AccessKey: "access"}, "field", "Config.SecretKey"},
     }
 
     for _, testCase := range testCases {
-        _, clientErr := NewClient(testCase.config)
+        _, clientErr := NewClient(testCase.endpoint, testCase.config)
 
         var refusal *exception.Error
-        if false == errors.As(clientErr, &refusal) || testCase.field != refusal.Context()["field"] {
-            t.Fatalf("expected a refusal naming %s, got %v", testCase.field, clientErr)
+        if false == errors.As(clientErr, &refusal) || testCase.name != refusal.Context()[testCase.key] {
+            t.Fatalf("expected a refusal naming %s under %s, got %v", testCase.name, testCase.key, clientErr)
         }
     }
 }
@@ -292,8 +290,7 @@ func TestEnsureBucket_TheConfiguredRegionReachesTheCreation(t *testing.T) {
     server := httptest.NewServer(handler)
     defer server.Close()
 
-    client, clientErr := NewClient(Config{
-        Endpoint:  strings.TrimPrefix(server.URL, "http://"),
+    client, clientErr := NewClient(strings.TrimPrefix(server.URL, "http://"), Config{
         AccessKey: "access",
         SecretKey: "secret",
         Insecure:  true,
@@ -373,7 +370,7 @@ func TestEnsureBucket_EachOfItsThreeCallsEndsWithTheRuntimesContext(t *testing.T
         handler := &phaseBlockingServer{blockPhase: phase, released: make(chan struct{})}
         server := httptest.NewServer(handler)
 
-        client, clientErr := NewClient(Config{Endpoint: strings.TrimPrefix(server.URL, "http://"), AccessKey: "access", SecretKey: "secret", Insecure: true})
+        client, clientErr := NewClient(strings.TrimPrefix(server.URL, "http://"), Config{AccessKey: "access", SecretKey: "secret", Insecure: true})
         if nil != clientErr {
             t.Fatalf("could not build the client: %v", clientErr)
         }

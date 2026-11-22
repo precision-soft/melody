@@ -207,7 +207,7 @@ func TestDecodeHmacHeaderValue_RefusesASignatureOverOtherContent(t *testing.T) {
 }
 
 func TestHmacEnvelope_TheWireFieldOfTheApplicationIsApp(t *testing.T) {
-    signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), HmacEnvelopeSignerConfig{Application: "wms-service"})
+    signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
     headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, nil)
     if nil != signErr {
         t.Fatalf("expected the envelope to sign, got %v", signErr)

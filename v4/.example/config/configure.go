@@ -24,8 +24,8 @@ import (
 
 func (instance *Module) otlpModuleConfig(endpoint string) melodyotlp.ModuleConfig {
     return melodyotlp.ModuleConfig{
+        Endpoint: endpoint,
         Config: melodyotlp.Config{
-            Endpoint:       endpoint,
             Protocol:       melodyotlp.ProtocolGrpc,
             ServiceName:    "melody.example",
             ServiceVersion: instance.applicationVersion,

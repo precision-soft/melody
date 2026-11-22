@@ -18,9 +18,6 @@ import (
 
 /* HmacEnvelopeSignerConfig configures the client side of the internal-auth scheme, which a calling service uses to sign a request its callee's HmacTokenSource accepts. */
 type HmacEnvelopeSignerConfig struct {
-    /* Application is the calling application's own name, recorded in the envelope and matched against the callee's application registry. */
-    Application string
-
     /* HeaderName overrides the header the envelope is written to; defaults to DefaultHmacHeaderName. */
     HeaderName string
 
@@ -43,10 +40,11 @@ var hmacEnvelopeSignerTtlRule = bound.Rule[time.Duration]{
     Minimum: bound.TtlMinimum,
 }
 
-/* NewHmacEnvelopeSigner judges the provider's current key under the runtime given, whatever the provider: it must exist, be bound to the signer's application and hold at least MinimumSecretLength bytes. The signer is built at boot, inside a container provider registered BuiltAtBoot, under the runtime resolver.Runtime() answers, with BootFailureFailsBoot over a static provider; a nil runtime, a refusal and a provider that could not answer panic. Sign judges the key again whenever the current key id changes. */
+/* NewHmacEnvelopeSigner signs for application, the calling application's own name, recorded in the envelope and matched against the callee's application registry; an empty one is refused naming the argument. It judges the provider's current key under the runtime given, whatever the provider: it must exist, be bound to the signer's application and hold at least MinimumSecretLength bytes. The signer is built at boot, inside a container provider registered BuiltAtBoot, under the runtime resolver.Runtime() answers, with BootFailureFailsBoot over a static provider; a nil runtime, a refusal and a provider that could not answer panic. Sign judges the key again whenever the current key id changes. */
 func NewHmacEnvelopeSigner(
     runtimeInstance containercontract.Runtime,
     secrets HmacSecretProvider,
+    application string,
     config HmacEnvelopeSignerConfig,
 ) *HmacEnvelopeSigner {
     if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance, "security.NewHmacEnvelopeSigner"); nil != runtimeErr {
@@ -60,8 +58,8 @@ func NewHmacEnvelopeSigner(
 
     minimumSecretLength := resolveMinimumSecretLength(config.MinimumSecretLength, "HmacEnvelopeSignerConfig.MinimumSecretLength")
 
-    if "" == config.Application {
-        exception.Panic(exception.NewError("hmac signer application is empty", nil, nil))
+    if "" == application {
+        exception.Panic(exception.NewError("hmac signer application is empty", map[string]any{"argument": "application"}, nil))
     }
 
     if true == internal.IsNilInterface(secrets) {
@@ -79,7 +77,7 @@ func NewHmacEnvelopeSigner(
     }
 
     signer := &HmacEnvelopeSigner{
-        application:         config.Application,
+        application:         application,
         secrets:             secrets,
         headerName:          headerName,
         ttl:                 ttl.Value,
@@ -232,7 +230,7 @@ func (instance *HmacEnvelopeSigner) currentSecret(runtimeInstance containercontr
     }
 
     if instance.minimumSecretLength > len(secret) {
-        shortSecret := shortSecretContext("NewHmacEnvelopeSigner.secrets", len(secret), instance.minimumSecretLength)
+        shortSecret := shortSecretContext("argument", "secrets", len(secret), instance.minimumSecretLength)
         shortSecret["keyId"] = keyId
 
         return nil, exception.NewError("hmac signer secret is shorter than its minimum, so it signs nothing", shortSecret, nil)

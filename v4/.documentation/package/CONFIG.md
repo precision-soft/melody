@@ -450,7 +450,7 @@ func example() configcontract.Configuration {
     - `RegisterRuntimeSecret(name string, value any)`
     - `MarkSecret(name string) bool`
     - `Resolve() error`
-    - [`MarkServing(token)`](../../config/configuration.go) — called by `Application.Run` alone, the token one only the framework can spell: records that the wiring phase is over, after which `Resolve` is refused: services built during boot hold the values they read, so re-resolving reconfigures nothing and only rewrites the parameter store under readers that expect it settled. Registering a parameter still works, since a registration resolves itself
+    - [`MarkServing(token)`](../../config/configuration.go) — called by `Application.Run` alone, the token one only the framework can build, any other refused: records that the wiring phase is over, after which `Resolve` is refused: services built during boot hold the values they read, so re-resolving reconfigures nothing and only rewrites the parameter store under readers that expect it settled. Registering a parameter still works, since a registration resolves itself
     - `Names() []string`
     - `Kernel() configcontract.KernelConfiguration`
     - `Http() configcontract.HttpConfiguration`

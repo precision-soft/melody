@@ -21,8 +21,7 @@ import awss3 "github.com/precision-soft/melody/integrations/aws/s3/v4"
 ## Usage
 
 ```go
-client, clientErr := awss3.NewClient(awss3.Config{
-    Endpoint:  "s3.example.com",
+client, clientErr := awss3.NewClient("s3.example.com", awss3.Config{
     AccessKey: "...",
     SecretKey: "...",
 })

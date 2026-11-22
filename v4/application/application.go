@@ -106,7 +106,7 @@ func (instance *Application) Boot() kernelcontract.Kernel {
     }
 
     bootRuntime, finishBoot := runtime.NewBoot(instance.ctx, instance.kernel.ServiceContainer())
-    installer.InstallBootRuntime(kernelseam.Token{}, bootRuntime)
+    installer.InstallBootRuntime(kernelseam.NewToken(), bootRuntime)
 
     /* the teardown finishes it too: a refused boot exits through closeBeforeExit, after its exit record and before the container closes */
     instance.finishBoot = finishBoot
@@ -716,7 +716,7 @@ func markConfigurationServing(configuration configcontract.Configuration) {
         return
     }
 
-    marker.MarkServing(configseam.Token{})
+    marker.MarkServing(configseam.NewToken())
 }
 
 /* markOpenApiRegistryServing tells the openapi registry the wiring phase is over, so a later Describe is refused at its door instead of writing under the spec handler's readers. The registry is looked up by its published name, which runs its provider in every mode; a registry without the marker, or none, is left alone, and a failing provider leaves its failure to the first consumer. */
@@ -735,7 +735,7 @@ func markOpenApiRegistryServing(ctx context.Context, serviceContainer containerc
         return
     }
 
-    marker.MarkServing(openapiseam.Token{})
+    marker.MarkServing(openapiseam.NewToken())
 }
 
 var _ applicationcontract.ParameterRegistrar = (*Application)(nil)

@@ -214,7 +214,7 @@ func TestOtlpModuleConfig_ReportsTheStampedApplicationVersion(t *testing.T) {
 func TestOtlpModuleConfig_CarriesTheEndpointAndGrpc(t *testing.T) {
     moduleConfig := (&Module{applicationVersion: "9.9.9"}).otlpModuleConfig("otel-collector:4317")
 
-    if "otel-collector:4317" != moduleConfig.Config.Endpoint || melodyotlp.ProtocolGrpc != moduleConfig.Config.Protocol || false == moduleConfig.Config.Insecure {
+    if "otel-collector:4317" != moduleConfig.Endpoint || melodyotlp.ProtocolGrpc != moduleConfig.Config.Protocol || false == moduleConfig.Config.Insecure {
         t.Fatalf("expected the endpoint over plaintext grpc, got %+v", moduleConfig.Config)
     }
 }

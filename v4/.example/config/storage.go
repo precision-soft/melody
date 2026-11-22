@@ -18,8 +18,7 @@ func (instance *Module) buildStorage() {
         bucket = "melody-example"
     }
 
-    client, clientErr := melodyawss3.NewClient(melodyawss3.Config{
-        Endpoint:  endpoint,
+    client, clientErr := melodyawss3.NewClient(endpoint, melodyawss3.Config{
         AccessKey: instance.parameterValue(parameterS3AccessKey),
         SecretKey: instance.parameterValue(parameterS3SecretKey),
         Insecure:  instance.booleanSwitch(environmentKeyS3Insecure, parameterS3Insecure),

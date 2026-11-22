@@ -129,7 +129,7 @@ func ActorFromToken(token securitycontract.Token) (securitycontract.Actor, bool)
 var _ securitycontract.Actor = (*Actor)(nil)
 var _ securitycontract.ActorImpersonating = (*Actor)(nil)
 
-/* refuseTypedNilDependency refuses an optional dependency that holds a typed nil, naming the argument and the door; a plain nil is the ordinary "none". */
+/* refuseTypedNilField refuses an optional config field that holds a typed nil, naming the field and the door; a plain nil is the ordinary "none". */
 func refuseTypedNilField(message string, field string, door string, dependency any) {
     if nil == dependency || false == internal.IsNilInterface(dependency) {
         return
@@ -147,6 +147,7 @@ func refuseTypedNilField(message string, field string, door string, dependency a
     )
 }
 
+/* refuseTypedNilDependency refuses an optional dependency that holds a typed nil, naming the argument and the door; a plain nil is the ordinary "none". */
 func refuseTypedNilDependency(message string, argument string, door string, dependency any) {
     if nil == dependency || false == internal.IsNilInterface(dependency) {
         return

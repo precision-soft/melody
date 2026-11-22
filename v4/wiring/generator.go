@@ -401,13 +401,13 @@ var keptResolutionTypes = map[string]bool{
 func refuseLifetime(constructor *Constructor) error {
     for _, argument := range constructor.Arguments {
         if true == argument.Type.IsPointer && true == isNamedType(argument.Type, "context", "Context") {
-            return lifetimeRefusal("a pointer to a context cannot be resolved: take context.Context", constructor, argument, nil)
+            return lifetimeRefusal("a pointer to a context cannot be resolved: take context.Context", "", constructor, argument, nil)
         }
     }
 
     if true == constructor.IsScoped {
         if true == constructor.KeepsContext {
-            return lifetimeRefusal("a keeps-context directive on a scoped constructor admits nothing: remove it", constructor, nil, nil)
+            return lifetimeRefusal("a keeps-context directive on a scoped constructor admits nothing: remove it", "", constructor, nil, nil)
         }
 
         return nil
@@ -416,7 +416,7 @@ func refuseLifetime(constructor *Constructor) error {
     takesResolution := false
     for _, argument := range constructor.Arguments {
         if true == requestLifetimeTypes[structKey(argument.Type)] {
-            return lifetimeRefusal("a process service cannot be built from a value of one request: mark the constructor //melody:scoped, or take the value at each call", constructor, argument, nil)
+            return lifetimeRefusal("a process service cannot be built from a value of one request: mark the constructor //melody:scoped, or take the value at each call", scopedDirective, constructor, argument, nil)
         }
 
         if true == argument.IsContext || true == argument.IsRuntime {
@@ -437,7 +437,7 @@ func refuseLifetime(constructor *Constructor) error {
 
     if nil == keptField {
         if true == constructor.KeepsContext {
-            return lifetimeRefusal("a keeps-context directive on a constructor that keeps no context of its resolution admits nothing: remove it", constructor, nil, nil)
+            return lifetimeRefusal("a keeps-context directive on a constructor that keeps no context of its resolution admits nothing: remove it", "", constructor, nil, nil)
         }
 
         return nil
@@ -447,15 +447,19 @@ func refuseLifetime(constructor *Constructor) error {
         return nil
     }
 
-    return lifetimeRefusal("a process service cannot keep the context of the resolution that built it: mark the constructor //melody:scoped, or take the context at each call", constructor, nil, keptField)
+    return lifetimeRefusal("a process service that takes its resolution cannot keep a context: mark the constructor //melody:scoped, or take the context at each call", keepsContextDirective, constructor, nil, keptField)
 }
 
-func lifetimeRefusal(message string, constructor *Constructor, argument *Argument, field *FieldReference) error {
+/* lifetimeRefusal names the door that admits the refused shape, none where no door does */
+func lifetimeRefusal(message string, door string, constructor *Constructor, argument *Argument, field *FieldReference) error {
     context := map[string]any{
         "constructor": constructor.Name,
         "file":        constructor.File,
         "line":        constructor.Line,
-        "door":        keepsContextDirective,
+    }
+
+    if "" != door {
+        context["door"] = door
     }
 
     if nil != argument {

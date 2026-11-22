@@ -163,7 +163,7 @@ func NewApplication(
     }
 
     kernelInstance := kernel.NewKernel(
-        kernelseam.Token{},
+        kernelseam.NewToken(),
         configuration,
         container.NewContainer(container.ContainerConfig{
             ScopeTeardownTimeout: scopeTeardownTimeout.Limit(),

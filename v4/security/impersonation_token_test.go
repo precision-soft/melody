@@ -8,7 +8,7 @@ import (
 )
 
 func impersonationProbeTokens() (securitycontract.Token, securitycontract.Token) {
-    impersonated := newAuthenticatedTokenFromClaims(securitycontract.Claims{
+    impersonated := NewAuthenticatedTokenFromClaims(securitycontract.Claims{
         UserIdentifier: "target",
         Roles:          []string{"ROLE_USER"},
         Scope:          map[string]any{"tenant": "acme"},

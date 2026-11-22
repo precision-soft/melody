@@ -4098,6 +4098,21 @@ func TestTransport_AQueueDeclaredWithoutTheDeadLetterArgumentNamesTheDoor(t *tes
     if false == errors.As(sendErr, &refusal) || "amqp queue declare failed" != refusal.Message() || "TransportConfig.DeadLetterDisabled" != refusal.Context()["door"] {
         t.Fatalf("expected the redeclare refused naming the door, got %v", sendErr)
     }
+
+    /* the door already thrown is not named: a queue declared with the dead-letter argument refuses a declare without it */
+    otherQueueName := queueName + ".reverse"
+    defer deleteTopologyOf(connection, otherQueueName)
+
+    if declareErr := openTopologyFor(t, connection, otherQueueName, false); nil != declareErr {
+        t.Fatalf("declare the queue with its dead-letter argument: %v", declareErr)
+    }
+
+    disabledErr := openTopologyFor(t, connection, otherQueueName, true)
+
+    var disabledRefusal *exception.Error
+    if false == errors.As(disabledErr, &disabledRefusal) || "amqp queue declare failed" != disabledRefusal.Message() || nil != disabledRefusal.Context()["door"] {
+        t.Fatalf("expected the redeclare behind the thrown door refused naming no door, got %v", disabledErr)
+    }
 }
 
 func TestNewTransport_DeadLetterIsOnUnlessItsDoorIsSet(t *testing.T) {

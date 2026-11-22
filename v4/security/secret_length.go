@@ -25,9 +25,10 @@ func resolveMinimumSecretLength(limit bound.Count, field string) int {
     return resolved.Value
 }
 
-func shortSecretContext(field string, secretLength int, minimumLength int) exceptioncontract.Context {
+/* shortSecretContext names the short secret under key, "field" for a config field, "argument" for a positional provider */
+func shortSecretContext(key string, name string, secretLength int, minimumLength int) exceptioncontract.Context {
     return exceptioncontract.Context{
-        "field":         field,
+        key:             name,
         "secretLength":  secretLength,
         "minimumLength": minimumLength,
     }

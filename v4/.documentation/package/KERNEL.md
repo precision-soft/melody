@@ -13,7 +13,7 @@ This is an internal integration package. Userland code should not construct a ke
 
 ## Responsibilities
 
-- Construct a kernel instance and validate constructor invariants: `kernel.NewKernel` takes a token only the framework can spell, so the application builds its kernel and userland never does
+- Construct a kernel instance and validate constructor invariants: `kernel.NewKernel` takes a token only the framework can build and refuses any other, so the application builds its kernel and userland never does
 - Expose core infrastructure to framework subsystems through the `kernelcontract.Kernel` interface:
     - configuration access
     - container access

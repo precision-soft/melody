@@ -31,9 +31,8 @@ var batchTimeoutRule = bound.Rule[time.Duration]{
     Minimum: bound.TimeoutMinimum,
 }
 
-/* Config describes how to export spans to an OTLP collector. Endpoint is required, host:port without a scheme, for example "otel-collector:4317", filled by the deployment from a parameter or .env; Protocol is grpc when empty; ServiceName is melody when empty; Sampling samples every trace when left out; Headers are the exporter's extra headers; Insecure skips transport security. BatchTimeout is the batch span processor's flush interval: 5s by default, at least 1ms, unlimited refused, since an unflushed batch is never exported. */
+/* Config describes how to export spans to an OTLP collector; the collector's endpoint is NewTracerProvider's argument. Protocol is grpc when empty; ServiceName is melody when empty; Sampling samples every trace when left out; Headers are the exporter's extra headers; Insecure skips transport security. BatchTimeout is the batch span processor's flush interval: 5s by default, at least 1ms, unlimited refused, since an unflushed batch is never exported. */
 type Config struct {
-    Endpoint       string
     Protocol       string
     ServiceName    string
     ServiceVersion string
@@ -46,8 +45,7 @@ type Config struct {
 /* String and Format keep Headers out of every rendering fmt routes through this value's methods, Headers reduced to its count, since it is an exported field that carries the collector auth token. Format answers %#v and the numeric verbs too, and value receivers make a Config and a pointer to it redact alike. %p and %w never reach Format, and a Config held in an unexported field of another struct is walked by reflection with no method called. */
 func (instance Config) String() string {
     return fmt.Sprintf(
-        "otlp.Config{Endpoint:%q, Protocol:%q, ServiceName:%q, ServiceVersion:%q, Sampling:%v, Insecure:%v, BatchTimeout:%v, Headers:[redacted %d]}",
-        instance.Endpoint,
+        "otlp.Config{Protocol:%q, ServiceName:%q, ServiceVersion:%q, Sampling:%v, Insecure:%v, BatchTimeout:%v, Headers:[redacted %d]}",
         instance.Protocol,
         instance.ServiceName,
         instance.ServiceVersion,
@@ -62,16 +60,16 @@ func (instance Config) Format(state fmt.State, verb rune) {
     _, _ = state.Write([]byte(instance.String()))
 }
 
-/* NewTracerProvider builds a batching TracerProvider wired to an OTLP exporter under the runtime's context; a nil runtime, a runtime whose context is already done, an empty endpoint, a sampling or a batch timeout outside its rule is answered as the error, naming the field. The caller owns its lifecycle and runs Shutdown on exit to flush pending spans; the Module in this package does so by registering it as a container-managed service. */
-func NewTracerProvider(runtimeInstance containercontract.Runtime, config Config) (*sdktrace.TracerProvider, error) {
+/* NewTracerProvider builds a batching TracerProvider wired to an OTLP exporter of endpoint, host:port without a scheme, for example "otel-collector:4317", under the runtime's context; a nil runtime, a runtime whose context is already done, an empty endpoint, a sampling or a batch timeout outside its rule is answered as the error, naming the field. The caller owns its lifecycle and runs Shutdown on exit to flush pending spans; the Module in this package does so by registering it as a container-managed service. */
+func NewTracerProvider(runtimeInstance containercontract.Runtime, endpoint string, config Config) (*sdktrace.TracerProvider, error) {
     if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance, "otlp.NewTracerProvider"); nil != runtimeErr {
         return nil, runtimeErr
     }
 
     ctx := runtimeInstance.Context()
 
-    if "" == config.Endpoint {
-        return nil, exception.NewError("otlp tracer provider endpoint is required", exceptioncontract.Context{"field": "Config.Endpoint"}, nil)
+    if "" == endpoint {
+        return nil, exception.NewError("otlp tracer provider endpoint is required", exceptioncontract.Context{"argument": "endpoint"}, nil)
     }
 
     sampler, samplerErr := resolveSampler(config.Sampling)
@@ -88,7 +86,7 @@ func NewTracerProvider(runtimeInstance containercontract.Runtime, config Config)
         return nil, exception.NewError("the runtime's context is done before the otlp exporter is dialled", nil, context.Cause(ctx))
     }
 
-    exporter, exporterErr := newExporter(ctx, config)
+    exporter, exporterErr := newExporter(ctx, endpoint, config)
     if nil != exporterErr {
         return nil, exporterErr
     }
@@ -113,7 +111,7 @@ func NewTracerProvider(runtimeInstance containercontract.Runtime, config Config)
     return tracerProvider, nil
 }
 
-func newExporter(ctx context.Context, config Config) (*otlptrace.Exporter, error) {
+func newExporter(ctx context.Context, endpoint string, config Config) (*otlptrace.Exporter, error) {
     protocol := config.Protocol
     if "" == protocol {
         protocol = ProtocolGrpc
@@ -121,7 +119,7 @@ func newExporter(ctx context.Context, config Config) (*otlptrace.Exporter, error
 
     switch protocol {
     case ProtocolGrpc:
-        options := []otlptracegrpc.Option{otlptracegrpc.WithEndpoint(config.Endpoint)}
+        options := []otlptracegrpc.Option{otlptracegrpc.WithEndpoint(endpoint)}
         if true == config.Insecure {
             options = append(options, otlptracegrpc.WithInsecure())
         }
@@ -135,7 +133,7 @@ func newExporter(ctx context.Context, config Config) (*otlptrace.Exporter, error
         return otlptracegrpc.New(ctx, options...)
 
     case ProtocolHttp:
-        options := []otlptracehttp.Option{otlptracehttp.WithEndpoint(config.Endpoint)}
+        options := []otlptracehttp.Option{otlptracehttp.WithEndpoint(endpoint)}
         if true == config.Insecure {
             options = append(options, otlptracehttp.WithInsecure())
         }

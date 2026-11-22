@@ -102,7 +102,7 @@ func (instance *Application) armRouteCollisionRecorder() {
         return
     }
 
-    installer.InstallBootCollisionRecorder(routeseam.Token{}, instance.recordBootCollision)
+    installer.InstallBootCollisionRecorder(routeseam.NewToken(), instance.recordBootCollision)
 }
 
 func (instance *Application) disarmRouteCollisionRecorder() {
@@ -111,7 +111,7 @@ func (instance *Application) disarmRouteCollisionRecorder() {
         return
     }
 
-    installer.InstallBootCollisionRecorder(routeseam.Token{}, nil)
+    installer.InstallBootCollisionRecorder(routeseam.NewToken(), nil)
 }
 
 /* callerOrigin names the first stack frame outside the framework's own registration plumbing; a fixed frame count would name whichever delegation layer sits in between. */

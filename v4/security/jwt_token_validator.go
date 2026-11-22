@@ -50,7 +50,7 @@ func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
     if minimumSecretLength > len(config.Secret) {
         exception.Panic(exception.NewError(
             "jwt secret is shorter than its minimum, the 32 bytes RFC 7518 asks of an HS256 key unless MinimumSecretLength raises it",
-            shortSecretContext("JwtConfig.Secret", len(config.Secret), minimumSecretLength),
+            shortSecretContext("field", "JwtConfig.Secret", len(config.Secret), minimumSecretLength),
             nil,
         ))
     }

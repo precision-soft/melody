@@ -14,7 +14,7 @@ import (
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
 )
 
-/* NewKernel is called by the application alone: the token cannot be spelled outside v4. */
+/* NewKernel is called by the application alone: a token NewToken did not build is refused. */
 func NewKernel(
     token kernelseam.Token,
     applicationConfiguration configcontract.Configuration,
@@ -23,6 +23,12 @@ func NewKernel(
     eventDispatcher eventcontract.EventDispatcher,
     clock clockcontract.Clock,
 ) kernelcontract.Kernel {
+    if false == token.Valid() {
+        exception.Panic(
+            exception.NewError("NewKernel is called by the framework only", nil, nil),
+        )
+    }
+
     if true == internal.IsNilInterface(applicationConfiguration) {
         exception.Panic(
             exception.NewError("application configuration is required for new kernel", nil, nil),
@@ -80,6 +86,12 @@ func (instance *kernel) BootRuntime() containercontract.Runtime {
 }
 
 func (instance *kernel) InstallBootRuntime(token kernelseam.Token, bootRuntime containercontract.Runtime) {
+    if false == token.Valid() {
+        exception.Panic(
+            exception.NewError("kernel InstallBootRuntime is called by the framework only", nil, nil),
+        )
+    }
+
     instance.bootRuntime = bootRuntime
 }
 

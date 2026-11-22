@@ -136,6 +136,12 @@ type Configuration struct {
 
 /* MarkServing ends the wiring phase: Resolve is refused from then on, and a parameter registered later resolves on registration. */
 func (instance *Configuration) MarkServing(token configseam.Token) {
+    if false == token.Valid() {
+        exception.Panic(
+            exception.NewError("configuration MarkServing is called by the framework only", nil, nil),
+        )
+    }
+
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 

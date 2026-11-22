@@ -90,7 +90,7 @@ func resolveLimiterConfig(name string, limit int, window time.Duration, config L
     }
 }
 
-/* the context keys are bound.Resolve's, so a required value is refused in the form a bound is */
+/* value and minimum are written as bound.Resolve writes them, the value named by its argument */
 func refuseBelowMinimum(isBelow bool, argument string, value string, minimum string) {
     if false == isBelow {
         return

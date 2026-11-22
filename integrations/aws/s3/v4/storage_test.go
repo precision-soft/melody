@@ -41,8 +41,7 @@ func TestObjectStorage_PutGetExistsPresignDelete(t *testing.T) {
         t.Skip("MINIO_ENDPOINT not set; skipping object storage integration test")
     }
 
-    client, clientErr := NewClient(Config{
-        Endpoint:  endpoint,
+    client, clientErr := NewClient(endpoint, Config{
         AccessKey: os.Getenv("MINIO_ACCESS_KEY"),
         SecretKey: os.Getenv("MINIO_SECRET_KEY"),
         Insecure:  true,
@@ -354,8 +353,7 @@ func newRecordingObjectServer(t *testing.T) *recordingObjectServer {
 }
 
 func (instance *recordingObjectServer) newStorage(t *testing.T) *Storage {
-    client, clientErr := NewClient(Config{
-        Endpoint:  strings.TrimPrefix(instance.server.URL, "http://"),
+    client, clientErr := NewClient(strings.TrimPrefix(instance.server.URL, "http://"), Config{
         AccessKey: "test",
         SecretKey: "test",
         Insecure:  true,
@@ -685,8 +683,7 @@ func TestObjectStorage_RejectedPutPreservesTheStoredObject(t *testing.T) {
         t.Skip("MINIO_ENDPOINT not set; skipping object storage integration test")
     }
 
-    client, clientErr := NewClient(Config{
-        Endpoint:  endpoint,
+    client, clientErr := NewClient(endpoint, Config{
         AccessKey: os.Getenv("MINIO_ACCESS_KEY"),
         SecretKey: os.Getenv("MINIO_SECRET_KEY"),
         Insecure:  true,
@@ -756,8 +753,7 @@ func TestObjectStorage_StreamedPutAboveTheSpoolLimitIsAllOrNothing(t *testing.T)
         t.Skip("MINIO_ENDPOINT not set; skipping object storage integration test")
     }
 
-    client, clientErr := NewClient(Config{
-        Endpoint:  endpoint,
+    client, clientErr := NewClient(endpoint, Config{
         AccessKey: os.Getenv("MINIO_ACCESS_KEY"),
         SecretKey: os.Getenv("MINIO_SECRET_KEY"),
         Insecure:  true,
@@ -918,8 +914,7 @@ type multipartAbortServer struct {
 }
 
 func (instance *multipartAbortServer) newStorage(t *testing.T) *Storage {
-    client, clientErr := NewClient(Config{
-        Endpoint:  strings.TrimPrefix(instance.server.URL, "http://"),
+    client, clientErr := NewClient(strings.TrimPrefix(instance.server.URL, "http://"), Config{
         AccessKey: "test",
         SecretKey: "test",
         Insecure:  true,
@@ -989,8 +984,7 @@ func TestObjectStorage_CancelledMultipartPutLeavesNoIncompleteUpload(t *testing.
         t.Skip("MINIO_ENDPOINT not set; skipping object storage integration test")
     }
 
-    client, clientErr := NewClient(Config{
-        Endpoint:  endpoint,
+    client, clientErr := NewClient(endpoint, Config{
         AccessKey: os.Getenv("MINIO_ACCESS_KEY"),
         SecretKey: os.Getenv("MINIO_SECRET_KEY"),
         Insecure:  true,
@@ -1201,7 +1195,7 @@ func TestStorage_TheMultipartAbortTimeoutBoundsTheDetachedAbort(t *testing.T) {
     }))
     defer server.Close()
 
-    client, clientErr := NewClient(Config{Endpoint: strings.TrimPrefix(server.URL, "http://"), AccessKey: "access", SecretKey: "secret", Insecure: true, Region: "us-east-1"})
+    client, clientErr := NewClient(strings.TrimPrefix(server.URL, "http://"), Config{AccessKey: "access", SecretKey: "secret", Insecure: true, Region: "us-east-1"})
     if nil != clientErr {
         t.Fatalf("could not build the client: %v", clientErr)
     }
@@ -1225,7 +1219,7 @@ func TestObjectStorage_AStreamedSingleShotPutThatOverReadsLeavesTheObjectUntouch
         t.Skip("MINIO_ENDPOINT not set; skipping object storage integration test")
     }
 
-    client, clientErr := NewClient(Config{Endpoint: endpoint, AccessKey: os.Getenv("MINIO_ACCESS_KEY"), SecretKey: os.Getenv("MINIO_SECRET_KEY"), Insecure: true})
+    client, clientErr := NewClient(endpoint, Config{AccessKey: os.Getenv("MINIO_ACCESS_KEY"), SecretKey: os.Getenv("MINIO_SECRET_KEY"), Insecure: true})
     if nil != clientErr {
         t.Fatalf("client: %v", clientErr)
     }
@@ -1275,7 +1269,7 @@ func TestStorage_TheDetachedAbortFollowsMinioPartSizeWhateverTheSpoolLimit(t *te
     }))
     defer server.Close()
 
-    client, clientErr := NewClient(Config{Endpoint: strings.TrimPrefix(server.URL, "http://"), AccessKey: "access", SecretKey: "secret", Insecure: true, Region: "us-east-1"})
+    client, clientErr := NewClient(strings.TrimPrefix(server.URL, "http://"), Config{AccessKey: "access", SecretKey: "secret", Insecure: true, Region: "us-east-1"})
     if nil != clientErr {
         t.Fatalf("could not build the client: %v", clientErr)
     }
@@ -1432,8 +1426,7 @@ func newScriptedObjectServer(t *testing.T, headStatus int, getStatus int, body s
 }
 
 func (instance *scriptedObjectServer) newStorage(t *testing.T) *Storage {
-    client, clientErr := NewClient(Config{
-        Endpoint:  strings.TrimPrefix(instance.server.URL, "http://"),
+    client, clientErr := NewClient(strings.TrimPrefix(instance.server.URL, "http://"), Config{
         AccessKey: "test",
         SecretKey: "test",
         Insecure:  true,

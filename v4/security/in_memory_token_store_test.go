@@ -50,7 +50,7 @@ func TestInMemoryTokenStore_PreservesOriginatingActor(t *testing.T) {
         t.Fatalf("unexpected actor after round-trip: %+v", claims.OriginatingActor)
     }
 
-    token := newAuthenticatedTokenFromClaims(claims)
+    token := NewAuthenticatedTokenFromClaims(claims)
     if _, present := token.OnBehalfOf(); false == present {
         t.Fatal("expected the rebuilt token to carry the actor")
     }

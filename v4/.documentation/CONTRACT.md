@@ -7,7 +7,7 @@ This document lists every exported interface of the fourth major — the core mo
 - **application** — an application, or a module outside this repository, is expected to implement it. It gains no method, loses none and changes none within v4; a new capability is a new small interface the framework probes by type assertion and documents.
 - **framework** — the framework, or the integration that owns it, ships the only implementations meant to exist; an application calls it and may embed the shipped type, but an out-of-tree implementation is unsupported. It may gain a method in a MINOR, marked `**Breaking**` in the changelog for whoever implemented it anyway. It never loses or changes one within v4: its callers are owed that.
 
-An interface an application implements only in its tests, such as a clock, an http client or a logger, is `application`: a broken test build is a broken build.
+An interface an application implements only in its tests, such as a clock, an http client or a logger, is `application`: a broken test build is a broken build. A registrar a module hook is handed is the exception: the framework builds it, so it is `framework`, and a test spy that implements one does so at its own risk, following the method a MINOR adds.
 
 "Within v4" starts at the tag `v4.0.0`. Until then a capability the framework prefers, or refuses to run without, is a method of its contract rather than an optional interface.
 
@@ -110,7 +110,7 @@ Every module below has one section, headed by its directory, and one row per exp
 | [`messagebus/contract.HandlerLocator`](../messagebus/contract/locator.go) | application | an application may locate its own handlers |
 | [`messagebus/contract.MessageHandler`](../messagebus/contract/handler.go) | application | every message handler of an application implements it |
 | [`messagebus/contract.Stamp`](../messagebus/contract/envelope.go) | application | an application writes its own stamps |
-| [`messagebus/contract.Subscription`](../messagebus/contract/transport.go) | framework | a transport returns it, and the framework's bus is the only reader |
+| [`messagebus/contract.Subscription`](../messagebus/contract/transport.go) | application | a transport the application or an integration writes returns its own, so its author implements it with the `Transport` |
 | [`messagebus/contract.Transport`](../messagebus/contract/transport.go) | application | a broker transport is written by the application or an integration (amqp ships one) |
 | [`security.HmacApplicationRegistry`](../security/hmac_application_registry.go) | application | the application holds the registry of the services it trusts |
 | [`security.HmacSecretProvider`](../security/hmac_secret_provider.go) | application | the application supplies the secrets the envelope is signed with |
@@ -196,7 +196,7 @@ The module exports no interface.
 | [`audit.TransactionRider`](../../integrations/bunorm/v4/audit/storage.go) | application | the application rides its audit writes on its own transaction |
 | [`encrypt.Cipher`](../../integrations/bunorm/v4/encrypt/cipher.go) | application | an application may bring its own cipher |
 | [`encrypt.CipherReference`](../../integrations/bunorm/v4/encrypt/cipher_registry.go) | application | an application column names its cipher through it |
-| [`encrypt.EncryptedColumn`](../../integrations/bunorm/v4/encrypt/encrypted_string.go) | application | every encrypted column type an application declares implements it |
+| [`encrypt.EncryptedColumn`](../../integrations/bunorm/v4/encrypt/encrypted_string.go) | framework | sealed by an unexported method, so only the column types the integration ships implement it |
 | [`encrypt.KeyProvider`](../../integrations/bunorm/v4/encrypt/key_provider.go) | application | the application supplies the keys |
 | [`encrypt.SealBindingReference`](../../integrations/bunorm/v4/encrypt/cipher_registry.go) | application | an application column names its seal binding through it |
 

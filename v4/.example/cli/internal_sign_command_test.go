@@ -26,9 +26,8 @@ func newInternalSignTestSigner(runtimeInstance melodycontainercontract.Runtime, 
         },
     })
 
-    return melodysecurity.NewHmacEnvelopeSigner(runtimeInstance, secrets, melodysecurity.HmacEnvelopeSignerConfig{
-        Application: "wms-service",
-        Ttl:         ttl,
+    return melodysecurity.NewHmacEnvelopeSigner(runtimeInstance, secrets, "wms-service", melodysecurity.HmacEnvelopeSignerConfig{
+        Ttl: ttl,
     })
 }
 
@@ -301,7 +300,7 @@ func TestInternalSignCommandAsksTheProviderUnderTheBootRuntimeAtBootAndTheRunsRu
         },
     })}
     newSigner := func(runtimeInstance melodycontainercontract.Runtime, ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner {
-        return melodysecurity.NewHmacEnvelopeSigner(runtimeInstance, secrets, melodysecurity.HmacEnvelopeSignerConfig{Application: "wms-service", Ttl: ttl})
+        return melodysecurity.NewHmacEnvelopeSigner(runtimeInstance, secrets, "wms-service", melodysecurity.HmacEnvelopeSignerConfig{Ttl: ttl})
     }
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})

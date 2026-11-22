@@ -55,8 +55,7 @@ func (instance *Module) registerInternalAuthSignerService(registrar melodyapplic
 }
 
 func (instance *Module) internalAuthSigner(runtimeInstance melodycontainercontract.Runtime, ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner {
-    return melodysecurity.NewHmacEnvelopeSigner(runtimeInstance, instance.hmacSecrets, melodysecurity.HmacEnvelopeSignerConfig{
-        Application: instance.internalAuthApplication,
-        Ttl:         ttl,
+    return melodysecurity.NewHmacEnvelopeSigner(runtimeInstance, instance.hmacSecrets, instance.internalAuthApplication, melodysecurity.HmacEnvelopeSignerConfig{
+        Ttl: ttl,
     })
 }

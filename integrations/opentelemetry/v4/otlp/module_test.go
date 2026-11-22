@@ -65,7 +65,7 @@ func TestModule_NamesAndDescribesItself(t *testing.T) {
 func TestModule_RegisterServicesDoesNotBuildTheExporter(t *testing.T) {
     registrar := &moduleSpyRegistrar{}
 
-    NewModule(ModuleConfig{Config: Config{Endpoint: ""}}).RegisterServices(registrar)
+    NewModule(ModuleConfig{Endpoint: ""}).RegisterServices(registrar)
 
     if 1 != len(registrar.names) {
         t.Fatalf("expected the registration to be recorded without building anything, got %v", registrar.names)
@@ -259,7 +259,7 @@ func TestModule_RegisterHttpMiddlewaresBuildsTheProviderUnderTheBootRuntime(t *t
 func TestModule_TheModulesProviderBuildsUnderTheRuntimeItIsResolvedThrough(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     registrar := &containerServiceRegistrar{Container: serviceContainer}
-    NewModule(ModuleConfig{Config: Config{Endpoint: "collector:4317"}}).RegisterServices(registrar)
+    NewModule(ModuleConfig{Endpoint: "collector:4317"}).RegisterServices(registrar)
 
     doneContext, cancel := context.WithCancel(context.Background())
     cancel()

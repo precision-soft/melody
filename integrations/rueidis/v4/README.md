@@ -122,10 +122,8 @@ The instants on both sides of that comparison come from application clocks. `Tok
 ```go
 nonceGuard := rueidis.NewNonceGuard(client, rueidis.NonceGuardConfig{})
 
-tokenSource := security.NewHmacTokenSource(security.HmacTokenSourceConfig{
-    Secrets:      secrets,
-    Applications: applications,
-    NonceGuard:   nonceGuard,
+tokenSource := security.NewHmacTokenSource(secrets, applications, security.HmacTokenSourceConfig{
+    NonceGuard: nonceGuard,
 })
 ```
 

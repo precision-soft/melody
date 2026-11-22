@@ -207,7 +207,7 @@ func TestNewStorage_ASingleLabelPlaintextEndpointWarns(t *testing.T) {
 
 func TestConfig_TheZeroValueBuildsAnHttpsClientAndInsecureAnHttpOne(t *testing.T) {
     for insecure, scheme := range map[bool]string{false: "https", true: "http"} {
-        client, clientErr := NewClient(Config{Endpoint: "s3.example.com", AccessKey: "access", SecretKey: "secret", Insecure: insecure})
+        client, clientErr := NewClient("s3.example.com", Config{AccessKey: "access", SecretKey: "secret", Insecure: insecure})
         if nil != clientErr {
             t.Fatalf("client: %v", clientErr)
         }

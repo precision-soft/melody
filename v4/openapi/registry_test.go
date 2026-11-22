@@ -94,7 +94,7 @@ func TestRegistry_DescribeChainsAndTheLastDescriptionWins(t *testing.T) {
 func TestRegistry_DescribeIsRefusedOnceTheRegistryIsMarkedServing(t *testing.T) {
     registry := NewRegistry().Describe("example.one", Descriptor{Summary: "first"})
 
-    registry.MarkServing(openapiseam.Token{})
+    registry.MarkServing(openapiseam.NewToken())
 
     testhelper.AssertPanicsWithError(
         t,
@@ -117,7 +117,7 @@ func TestRegistry_DescribeIsRefusedOnceTheRegistryIsMarkedServing(t *testing.T) 
 /* the refusal carries the route under routeName, which is what an operator reads to find the module describing too late */
 func TestRegistry_ALateDescribeNamesTheRouteInItsRefusal(t *testing.T) {
     registry := NewRegistry()
-    registry.MarkServing(openapiseam.Token{})
+    registry.MarkServing(openapiseam.NewToken())
 
     defer func() {
         recoveredValue := recover()

@@ -16,7 +16,8 @@ func NewAuthenticatedToken(userIdentifier string, roles []string, actor security
     }
 }
 
-func newAuthenticatedTokenFromClaims(claims securitycontract.Claims) *AuthenticatedToken {
+/* NewAuthenticatedTokenFromClaims builds the token of the validated claims, scope, attributes and actor included: the door an application's own TokenSource turns what its TokenValidator answered into the framework's token through. */
+func NewAuthenticatedTokenFromClaims(claims securitycontract.Claims) *AuthenticatedToken {
     var actor securitycontract.Actor
     if rebuilt := NewActorFromData(claims.OriginatingActor); nil != rebuilt {
         actor = rebuilt

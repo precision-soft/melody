@@ -83,6 +83,12 @@ func copyDescriptor(descriptor Descriptor) Descriptor {
 
 /* MarkServing ends the wiring phase: the application calls it from Run, and from then on Describe is refused. A registry never marked keeps admitting descriptions. */
 func (instance *Registry) MarkServing(token openapiseam.Token) {
+    if false == token.Valid() {
+        exception.Panic(
+            exception.NewError("openapi registry MarkServing is called by the framework only", nil, nil),
+        )
+    }
+
     instance.serving.Store(true)
 }
 

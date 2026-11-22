@@ -207,7 +207,7 @@ func objectServerCounting(t *testing.T, headStatuses []int, getStatus int, body 
     }))
     t.Cleanup(server.Close)
 
-    client, clientErr := melodyawss3.NewClient(melodyawss3.Config{Endpoint: strings.TrimPrefix(server.URL, "http://"), AccessKey: "test", SecretKey: "test", Region: "us-east-1", Insecure: true})
+    client, clientErr := melodyawss3.NewClient(strings.TrimPrefix(server.URL, "http://"), melodyawss3.Config{AccessKey: "test", SecretKey: "test", Region: "us-east-1", Insecure: true})
     if nil != clientErr {
         t.Fatalf("client: %v", clientErr)
     }

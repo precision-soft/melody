@@ -21,8 +21,9 @@ const ServiceTracerProvider = "service.opentelemetry.otlp.tracer_provider"
 
 const defaultTracerName = "melody"
 
-/* ModuleConfig is the plug-and-play wiring for OTLP tracing: given the exporter Config, the Module builds the TracerProvider, adds the tracing middleware and flushes on shutdown. TracerName is melody when empty and Propagator W3C TraceContext when nil. */
+/* ModuleConfig is the plug-and-play wiring for OTLP tracing: given the collector's Endpoint, host:port without a scheme, and the exporter Config, the Module builds the TracerProvider, adds the tracing middleware and flushes on shutdown. TracerName is melody when empty and Propagator W3C TraceContext when nil. */
 type ModuleConfig struct {
+    Endpoint   string
     Config     Config
     TracerName string
     Propagator propagation.TextMapPropagator
@@ -49,7 +50,7 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
     registrar.RegisterService(
         ServiceTracerProvider,
         func(resolver containercontract.Resolver) (*providerHandle, error) {
-            provider, providerErr := NewTracerProvider(resolver.Runtime(), instance.config.Config)
+            provider, providerErr := NewTracerProvider(resolver.Runtime(), instance.config.Endpoint, instance.config.Config)
             if nil != providerErr {
                 return nil, providerErr
             }

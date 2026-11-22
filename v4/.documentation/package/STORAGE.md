@@ -58,7 +58,7 @@ A handler that resolves the application's storage binds it in one call: `storage
 For S3-compatible object storage, use the [`awss3`](../../../integrations/aws/s3/v4) integration, which implements the same contract over `minio-go`:
 
 ```go
-client, _ := awss3.NewClient(awss3.Config{Endpoint: "s3.example.com", AccessKey: "...", SecretKey: "..."})
+client, _ := awss3.NewClient("s3.example.com", awss3.Config{AccessKey: "...", SecretKey: "..."})
 store := awss3.NewStorage(client, "documents", awss3.StorageConfig{})
 ```
 

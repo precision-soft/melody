@@ -373,7 +373,7 @@ func TestDeclareEnvironmentKey_RefusedAfterTheBootResolve(t *testing.T) {
     declarationRefusal(t, resolved.DeclareEnvironmentKey("x", textKey("")), "an environment key is declared after the configuration resolved")
 
     serving := mustConfigurationFromValues(t, map[string]string{})
-    serving.MarkServing(configseam.Token{})
+    serving.MarkServing(configseam.NewToken())
     declarationRefusal(t, serving.DeclareEnvironmentKey("x", textKey("")), "an environment key is declared after the configuration resolved")
 }
 

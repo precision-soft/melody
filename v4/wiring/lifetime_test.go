@@ -146,7 +146,7 @@ func TestResolveArguments_RefusesAPointerToAContext(t *testing.T) {
         Arguments: []*Argument{{Name: "ctx", Type: &TypeReference{Expression: "*context.Context", Qualifier: "context", ImportPath: "context", IsPointer: true}}},
     })
 
-    if nil == resolveErr || "a pointer to a context cannot be resolved: take context.Context" != exception.FromError(resolveErr).Message() || "ctx" != exception.FromError(resolveErr).Context()["argument"] {
+    if nil == resolveErr || "a pointer to a context cannot be resolved: take context.Context" != exception.FromError(resolveErr).Message() || "ctx" != exception.FromError(resolveErr).Context()["argument"] || nil != exception.FromError(resolveErr).Context()["door"] {
         t.Fatalf("expected the pointer refused naming the argument, got %v", resolveErr)
     }
 }
@@ -172,7 +172,7 @@ func TestGenerate_RefusesAProcessConstructorKeepingTheResolutionContext(t *testi
         resolveErr := resolveLifetime(t, &Constructor{Name: "NewWorker", File: "worker.go", Line: 7, Arguments: []*Argument{testCase.argument}, ReturnFields: testCase.fields})
 
         refusal := exception.FromError(resolveErr)
-        if nil == resolveErr || false == strings.HasPrefix(refusal.Message(), "a process service cannot keep the context of the resolution that built it") || "kept" != refusal.Context()["field"] || "NewWorker" != refusal.Context()["constructor"] || "worker.go" != refusal.Context()["file"] || 7 != refusal.Context()["line"] || "//melody:keeps-context" != refusal.Context()["door"] {
+        if nil == resolveErr || false == strings.HasPrefix(refusal.Message(), "a process service that takes its resolution cannot keep a context") || "kept" != refusal.Context()["field"] || "NewWorker" != refusal.Context()["constructor"] || "worker.go" != refusal.Context()["file"] || 7 != refusal.Context()["line"] || "//melody:keeps-context" != refusal.Context()["door"] {
             t.Fatalf("%s: expected the kept resolution refused naming the constructor, the field and the door, got %v", testCase.fields[1].Type.Expression, resolveErr)
         }
     }
@@ -207,8 +207,8 @@ func TestGenerate_RefusesAProcessConstructorTakingARequestLifetimeValue(t *testi
     for _, argumentType := range requestLifetimeArguments {
         resolveErr := resolveLifetime(t, &Constructor{Name: "NewHolder", Arguments: []*Argument{{Name: "value", Type: argumentType}}})
 
-        if nil == resolveErr || false == strings.HasPrefix(exception.FromError(resolveErr).Message(), "a process service cannot be built from a value of one request") || "value" != exception.FromError(resolveErr).Context()["argument"] {
-            t.Fatalf("%s: expected the request value refused naming the argument, got %v", argumentType.Expression, resolveErr)
+        if nil == resolveErr || false == strings.HasPrefix(exception.FromError(resolveErr).Message(), "a process service cannot be built from a value of one request") || "value" != exception.FromError(resolveErr).Context()["argument"] || "//melody:scoped" != exception.FromError(resolveErr).Context()["door"] {
+            t.Fatalf("%s: expected the request value refused naming the argument and the scoped door, got %v", argumentType.Expression, resolveErr)
         }
     }
 }
@@ -264,8 +264,8 @@ func TestGenerate_TheOffDoorAdmitsAKeptContext(t *testing.T) {
         "scoped":       {Name: "NewWorker", KeepsContext: true, IsScoped: true, Arguments: []*Argument{contextArgument}, ReturnFields: keptField("context.Context", "context")},
     } {
         resolveErr := resolveLifetime(t, constructor)
-        if nil == resolveErr || false == strings.Contains(exception.FromError(resolveErr).Message(), "admits nothing: remove it") {
-            t.Fatalf("%s: expected a door that admits nothing refused, got %v", name, resolveErr)
+        if nil == resolveErr || false == strings.Contains(exception.FromError(resolveErr).Message(), "admits nothing: remove it") || nil != exception.FromError(resolveErr).Context()["door"] {
+            t.Fatalf("%s: expected a door that admits nothing refused naming no door, got %v", name, resolveErr)
         }
     }
 }

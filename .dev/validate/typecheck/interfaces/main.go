@@ -15,9 +15,11 @@ import (
 type interfaceEntry struct {
     name string
     file string
+    /* the name apidiff reports the interface's methods under when it is not the entry's own: the unexported interface an alias names */
+    measuredName string
 }
 
-/* main prints every exported named interface of the module in the working directory, one `<name>\t<file>` line each, sorted, for the contract completeness check of .dev/validate/apidiff.sh. The module loads under whatever workspace the caller hands it, so an integration ahead of its pins still type-checks; a package that does not type-check fails the run, because a list read off a broken package is a list nobody can trust to be whole. */
+/* main prints every exported named interface of the module in the working directory, one `<name>\t<file>` line each, sorted, with a third field, the name apidiff reports its methods under, on an alias of an unexported interface, for the contract completeness check of .dev/validate/apidiff.sh. The module loads under whatever workspace the caller hands it, so an integration ahead of its pins still type-checks; a package that does not type-check fails the run, because a list read off a broken package is a list nobody can trust to be whole. */
 func main() {
     workingDirectory, workingDirectoryErr := os.Getwd()
     if nil != workingDirectoryErr {
@@ -32,11 +34,17 @@ func main() {
     }
 
     for _, entry := range entryList {
+        if "" != entry.measuredName {
+            fmt.Printf("%s\t%s\t%s\n", entry.name, entry.file, entry.measuredName)
+
+            continue
+        }
+
         fmt.Printf("%s\t%s\n", entry.name, entry.file)
     }
 }
 
-/* listInterfaces loads every package of the module rooted at moduleDirectory and returns its exported named interfaces. Out: unexported names, a package under an internal/ directory (no importer outside the module can reach it), a main package, a test file, a package of another module the workspace nests beneath this one, and an interface that is a type set (a constraint only, which nothing implements). In: a generic interface, which is implemented like any other. An alias is resolved to the type it names: an alias of an interface the module declares itself adds no entry, the declaration is the entry; an alias of an interface declared outside the module, or under its internal/ directory, is the module's own name for that contract and is listed under the alias. */
+/* listInterfaces loads every package of the module rooted at moduleDirectory and returns its exported named interfaces. Out: unexported names, a package under an internal/ directory (no importer outside the module can reach it), a main package, a test file, a package of another module the workspace nests beneath this one, and an interface that is a type set (a constraint only, which nothing implements). In: a generic interface, which is implemented like any other. An alias is resolved to the type it names: an alias of an exported interface the module declares itself adds no entry, the declaration is the entry; an alias of an interface declared outside the module, under its internal/ directory, unexported or anonymous is the module's own name for that contract and is listed under the alias. */
 func listInterfaces(moduleDirectory string, environment []string) ([]interfaceEntry, error) {
     absoluteModuleDirectory, absoluteErr := filepath.Abs(moduleDirectory)
     if nil != absoluteErr {
@@ -105,7 +113,15 @@ func listInterfaces(moduleDirectory string, environment []string) ([]interfaceEn
                 entryName = relativePackagePath + "." + objectName
             }
 
-            entryList = append(entryList, interfaceEntry{name: entryName, file: filepath.ToSlash(relativeFile)})
+            measuredName := ""
+            if namedType, isNamed := types.Unalias(typeName.Type()).(*types.Named); true == typeName.IsAlias() && true == isNamed && false == namedType.Obj().Exported() {
+                measuredName = namedType.Obj().Name()
+                if "" != relativePackagePath {
+                    measuredName = relativePackagePath + "." + measuredName
+                }
+            }
+
+            entryList = append(entryList, interfaceEntry{name: entryName, file: filepath.ToSlash(relativeFile), measuredName: measuredName})
         }
     }
 
@@ -120,7 +136,7 @@ func listInterfaces(moduleDirectory string, environment []string) ([]interfaceEn
     return entryList, nil
 }
 
-/* isListedInterface answers whether an exported type name is a contract row: a named interface that is a method set, declared here, or an alias of one declared outside the module or under its internal/ directory. */
+/* isListedInterface answers whether an exported type name is a contract row: a named interface that is a method set, declared here, or an alias of an anonymous interface, of an unexported one, or of one declared outside the module or under its internal/ directory. */
 func isListedInterface(typeName *types.TypeName, modulePath string) bool {
     resolvedType := types.Unalias(typeName.Type())
 
@@ -133,9 +149,10 @@ func isListedInterface(typeName *types.TypeName, modulePath string) bool {
         return true
     }
 
+    /* an alias of an anonymous interface names a method set no declaration lists */
     namedType, isNamed := resolvedType.(*types.Named)
     if false == isNamed || nil == namedType.Obj().Pkg() {
-        return false
+        return true
     }
 
     targetPackagePath := namedType.Obj().Pkg().Path()
@@ -143,7 +160,11 @@ func isListedInterface(typeName *types.TypeName, modulePath string) bool {
         return true
     }
 
-    /* an alias of an interface the module keeps under internal/ is the only name an importer can reach it by */
+    /* an alias of an unexported interface, or of one the module keeps under internal/, is the only name an importer can reach it by */
+    if false == namedType.Obj().Exported() {
+        return true
+    }
+
     return isInternalPath(strings.TrimPrefix(strings.TrimPrefix(targetPackagePath, modulePath), "/"))
 }
 

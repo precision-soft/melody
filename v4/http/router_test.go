@@ -908,7 +908,7 @@ func TestRouterAddRoute_ADeclinedDuplicateDoesNotEnterTheMatchingTree(t *testing
     }
 
     recordedCollisions := []string{}
-    router.routeRegistry.InstallBootCollisionRecorder(routeseam.Token{}, func(kind string, name string) {
+    router.routeRegistry.InstallBootCollisionRecorder(routeseam.NewToken(), func(kind string, name string) {
         recordedCollisions = append(recordedCollisions, name)
     })
 

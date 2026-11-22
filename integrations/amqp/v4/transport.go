@@ -1792,7 +1792,7 @@ func (instance *Transport) declareTopology(channel *amqp091.Channel) error {
 
         /* a queue declared earlier without the dead-letter argument answers 406 to the default declare */
         var brokerErr *amqp091.Error
-        if true == errors.As(queueErr, &brokerErr) && amqp091.PreconditionFailed == brokerErr.Code {
+        if true == instance.deadLetter && true == errors.As(queueErr, &brokerErr) && amqp091.PreconditionFailed == brokerErr.Code {
             queueContext["door"] = "TransportConfig.DeadLetterDisabled"
         }
 

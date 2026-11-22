@@ -92,7 +92,7 @@ func (instance *customHmacSecretProvider) ApplicationForKeyId(runtimeInstance co
     return "wms-service", true, nil
 }
 
-func expectShortSecretRefusal(t *testing.T, field string, secretLength int, minimumLength int, keyId string, callback func()) {
+func expectShortSecretRefusal(t *testing.T, key string, field string, secretLength int, minimumLength int, keyId string, callback func()) {
     t.Helper()
 
     defer func() {
@@ -104,7 +104,7 @@ func expectShortSecretRefusal(t *testing.T, field string, secretLength int, mini
         }
 
         context := refusal.Context()
-        if field != context["field"] || secretLength != context["secretLength"] || minimumLength != context["minimumLength"] {
+        if field != context[key] || secretLength != context["secretLength"] || minimumLength != context["minimumLength"] {
             t.Fatalf("expected %s refused at %d under %d, got %q %v", field, secretLength, minimumLength, refusal.Message(), context)
         }
 
@@ -123,7 +123,7 @@ func expectShortSecretRefusal(t *testing.T, field string, secretLength int, mini
 }
 
 func TestNewJwtTokenValidator_RefusesASecretShorterThanTheMinimum(t *testing.T) {
-    expectShortSecretRefusal(t, "JwtConfig.Secret", 31, 32, "", func() {
+    expectShortSecretRefusal(t, "field", "JwtConfig.Secret", 31, 32, "", func() {
         NewJwtTokenValidator(JwtConfig{Secret: []byte("short-secret-of-31-bytes-long!!")})
     })
 
@@ -131,7 +131,7 @@ func TestNewJwtTokenValidator_RefusesASecretShorterThanTheMinimum(t *testing.T) 
 }
 
 func TestNewJwtTokenValidator_MinimumSecretLengthRaisesTheFloorOnly(t *testing.T) {
-    expectShortSecretRefusal(t, "JwtConfig.Secret", 32, 40, "", func() {
+    expectShortSecretRefusal(t, "field", "JwtConfig.Secret", 32, 40, "", func() {
         NewJwtTokenValidator(JwtConfig{Secret: []byte(thirtyTwoByteSecret), MinimumSecretLength: bound.Of(40)})
     })
 
@@ -146,7 +146,7 @@ func TestNewJwtTokenValidator_MinimumSecretLengthRaisesTheFloorOnly(t *testing.T
 }
 
 func TestNewStaticHmacSecretProvider_RefusesAShortSecretOfAnyKey(t *testing.T) {
-    expectShortSecretRefusal(t, "HmacKeyRing.Keys", 9, 32, "key-previous", func() {
+    expectShortSecretRefusal(t, "field", "HmacKeyRing.Keys", 9, 32, "key-previous", func() {
         NewStaticHmacSecretProvider(HmacKeyRing{
             CurrentKeyId: "key-current",
             Keys: map[string]HmacKey{
@@ -156,7 +156,7 @@ func TestNewStaticHmacSecretProvider_RefusesAShortSecretOfAnyKey(t *testing.T) {
         })
     })
 
-    expectShortSecretRefusal(t, "HmacKeyRing.Keys", 32, 48, "key-current", func() {
+    expectShortSecretRefusal(t, "field", "HmacKeyRing.Keys", 32, 48, "key-current", func() {
         NewStaticHmacSecretProvider(HmacKeyRing{
             CurrentKeyId:        "key-current",
             Keys:                map[string]HmacKey{"key-current": {Application: "wms-service", Secret: []byte(thirtyTwoByteSecret)}},
@@ -194,7 +194,7 @@ func TestHmacTokenSource_AShortSecretOfACustomProviderVerifiesNothing(t *testing
 
     context := exception.LogContext(cause, exception.LogContextConfig{})
     rendered := fmt.Sprintf("%v", context)
-    for _, expected := range []string{"NewHmacTokenSource.secrets", "key-custom", "secretLength:19", "minimumLength:32"} {
+    for _, expected := range []string{"argument:secrets", "key-custom", "secretLength:19", "minimumLength:32"} {
         if false == strings.Contains(rendered, expected) {
             t.Fatalf("expected the short secret named by field, key id and length in the cause, missing %q in %s", expected, rendered)
         }
@@ -227,12 +227,12 @@ func TestHmacTokenSource_AShortSecretOfACustomProviderVerifiesNothing(t *testing
 }
 
 func TestHmacEnvelopeSigner_RefusesToSignWithAShortSecret(t *testing.T) {
-    expectShortSecretRefusal(t, "NewHmacEnvelopeSigner.secrets", 19, 32, "key-custom", func() {
-        NewHmacEnvelopeSigner(hmacTestRuntime(), &customHmacSecretProvider{secret: []byte("short-custom-secret")}, HmacEnvelopeSignerConfig{Application: "wms-service"})
+    expectShortSecretRefusal(t, "argument", "secrets", 19, 32, "key-custom", func() {
+        NewHmacEnvelopeSigner(hmacTestRuntime(), &customHmacSecretProvider{secret: []byte("short-custom-secret")}, "wms-service", HmacEnvelopeSignerConfig{})
     })
 
     rotatingProvider := &customHmacSecretProvider{secret: []byte(thirtyTwoByteSecret)}
-    signer := NewHmacEnvelopeSigner(hmacTestRuntime(), rotatingProvider, HmacEnvelopeSignerConfig{Application: "wms-service"})
+    signer := NewHmacEnvelopeSigner(hmacTestRuntime(), rotatingProvider, "wms-service", HmacEnvelopeSignerConfig{})
     rotatingProvider.secret = []byte("short-custom-secret")
 
     headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal", nil, nil)
@@ -241,17 +241,17 @@ func TestHmacEnvelopeSigner_RefusesToSignWithAShortSecret(t *testing.T) {
     }
 
     refusal, isRefusal := signErr.(*exception.Error)
-    if false == isRefusal || "NewHmacEnvelopeSigner.secrets" != refusal.Context()["field"] || "key-custom" != refusal.Context()["keyId"] || 19 != refusal.Context()["secretLength"] {
+    if false == isRefusal || "secrets" != refusal.Context()["argument"] || "key-custom" != refusal.Context()["keyId"] || 19 != refusal.Context()["secretLength"] {
         t.Fatalf("expected the short secret refused naming the field and the key id, got %v", signErr)
     }
 
-    longSigner := NewHmacEnvelopeSigner(hmacTestRuntime(), &customHmacSecretProvider{secret: []byte(thirtyTwoByteSecret)}, HmacEnvelopeSignerConfig{Application: "wms-service"})
+    longSigner := NewHmacEnvelopeSigner(hmacTestRuntime(), &customHmacSecretProvider{secret: []byte(thirtyTwoByteSecret)}, "wms-service", HmacEnvelopeSignerConfig{})
     if _, longErr := longSigner.Sign(newTestRuntime(), "GET", "/internal", nil, nil); nil != longErr {
         t.Fatalf("expected a 32-byte secret to sign, got %v", longErr)
     }
 
     expectPanicNamingField(t, "HmacEnvelopeSignerConfig.MinimumSecretLength", func() {
-        NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), HmacEnvelopeSignerConfig{Application: "wms-service", MinimumSecretLength: bound.UnlimitedCount()})
+        NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{MinimumSecretLength: bound.UnlimitedCount()})
     })
 }
 

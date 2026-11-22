@@ -50,7 +50,7 @@ func TestRouteRegistry_ARecorderDefersTheDispatchDuplicateAndTheFirstRegistratio
     router := NewRouterWithRouteRegistry(registry)
 
     recorded := make([][2]string, 0, 1)
-    registry.InstallBootCollisionRecorder(routeseam.Token{}, func(kind string, name string) {
+    registry.InstallBootCollisionRecorder(routeseam.NewToken(), func(kind string, name string) {
         recorded = append(recorded, [2]string{kind, name})
     })
 
@@ -73,7 +73,7 @@ func TestRouteRegistry_ARecorderDefersTheDispatchDuplicateAndTheFirstRegistratio
         t.Fatalf("expected the first registration to win, got %d routes", len(registry.RouteDefinitions()))
     }
 
-    registry.InstallBootCollisionRecorder(routeseam.Token{}, nil)
+    registry.InstallBootCollisionRecorder(routeseam.NewToken(), nil)
 
     testhelper.AssertPanicsWithError(t, func() {
         router.Handle("/health", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
@@ -86,7 +86,7 @@ func TestRouteRegistry_ARecorderDefersTheNameDuplicateAndBothRoutesStayDispatcha
     router := NewRouterWithRouteRegistry(registry)
 
     recorded := make([][2]string, 0, 1)
-    registry.InstallBootCollisionRecorder(routeseam.Token{}, func(kind string, name string) {
+    registry.InstallBootCollisionRecorder(routeseam.NewToken(), func(kind string, name string) {
         recorded = append(recorded, [2]string{kind, name})
     })
 

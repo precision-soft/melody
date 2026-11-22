@@ -50,7 +50,7 @@ func TestAuthenticatedTokenWithoutActorReportsAbsent(t *testing.T) {
     }
 }
 
-func TestAuthenticatedTokenFromClaimsRebuildsActor(t *testing.T) {
+func TestNewAuthenticatedTokenFromClaimsRebuildsActor(t *testing.T) {
     claims := securitycontract.Claims{
         UserIdentifier: "billing-service",
         Roles:          []string{"ROLE_SERVICE"},
@@ -62,7 +62,7 @@ func TestAuthenticatedTokenFromClaimsRebuildsActor(t *testing.T) {
         },
     }
 
-    token := newAuthenticatedTokenFromClaims(claims)
+    token := NewAuthenticatedTokenFromClaims(claims)
 
     actor, present := token.OnBehalfOf()
     if false == present {
@@ -78,10 +78,10 @@ func TestAuthenticatedTokenFromClaimsRebuildsActor(t *testing.T) {
     }
 }
 
-func TestAuthenticatedTokenFromClaimsWithoutActor(t *testing.T) {
+func TestNewAuthenticatedTokenFromClaimsWithoutActor(t *testing.T) {
     claims := securitycontract.Claims{UserIdentifier: "u", Roles: []string{"ROLE_USER"}}
 
-    token := newAuthenticatedTokenFromClaims(claims)
+    token := NewAuthenticatedTokenFromClaims(claims)
 
     if _, present := token.OnBehalfOf(); false != present {
         t.Fatal("expected no actor when claims omit one")

@@ -89,7 +89,7 @@ func (instance *BearerTokenSource) Resolve(
         claims = enrichedClaims
     }
 
-    return newAuthenticatedTokenFromClaims(claims), nil
+    return NewAuthenticatedTokenFromClaims(claims), nil
 }
 
 func extractBearerToken(headerValue string) (string, bool) {

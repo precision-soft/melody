@@ -69,14 +69,14 @@ Every request, short-circuited ones included, gets a lifecycle span; the tracing
 
 The `TracerProvider` the tracing middleware needs is not something you have to assemble yourself: the [`otlp`](./otlp) subpackage ships one wired to an OTLP exporter.
 
-[`otlp.NewTracerProvider(runtimeInstance, otlp.Config{...})`](./otlp/tracer_provider.go) returns, under the runtime's context, a batching `*sdktrace.TracerProvider`. The caller then owns its lifecycle — `Shutdown` must run on application exit to flush pending spans. `Config.Sampling` samples every trace when left out; `otlp.SampleRatio(x)` keeps the fraction `x` in `(0, 1]` and `otlp.SampleNone()` keeps none of the traces that start here; a ratio of `0`, one above `1` and NaN are refused at construction naming `Config.Sampling`, so "none" has the one spelling. The sampler is parent-based: a client's `traceparent` sampled flag decides for the whole trace, so at an untrusted edge the decision is the client's to make — strip or ignore the inbound header there.
+[`otlp.NewTracerProvider(runtimeInstance, endpoint, otlp.Config{...})`](./otlp/tracer_provider.go) returns, under the runtime's context, a batching `*sdktrace.TracerProvider` exporting to `endpoint`, `host:port` without a scheme; an empty one returns `otlp tracer provider endpoint is required`, naming the argument. The caller then owns its lifecycle — `Shutdown` must run on application exit to flush pending spans. `Config.Sampling` samples every trace when left out; `otlp.SampleRatio(x)` keeps the fraction `x` in `(0, 1]` and `otlp.SampleNone()` keeps none of the traces that start here; a ratio of `0`, one above `1` and NaN are refused at construction naming `Config.Sampling`, so "none" has the one spelling. The sampler is parent-based: a client's `traceparent` sampled flag decides for the whole trace, so at an untrusted edge the decision is the client's to make — strip or ignore the inbound header there.
 
 [`otlp.NewModule`](./otlp/module.go) is the plug-and-play alternative and is the recommended path: it registers the provider as the container service `otlp.ServiceTracerProvider` (`"service.opentelemetry.otlp.tracer_provider"`) wrapped in a closeable handle, so the container's shutdown flushes for you, and it installs the tracing middleware itself. The container reaches that handle through its context-taking close, so the flush runs under the teardown budget the application declares rather than under a figure of this module's own.
 
 ```go
 app.RegisterModule(otlp.NewModule(otlp.ModuleConfig{
+    Endpoint: "otel-collector:4317",
     Config: otlp.Config{
-        Endpoint:    "otel-collector:4317",
         ServiceName: "my-service",
         Insecure:    true,
     },
@@ -87,7 +87,6 @@ app.RegisterModule(otlp.NewModule(otlp.ModuleConfig{
 
 | Field            | Meaning                                                                                                         | Default           |
 |------------------|-----------------------------------------------------------------------------------------------------------------|-------------------|
-| `Endpoint`       | `host:port`, no scheme. **Required** — an empty value returns `otlp tracer provider endpoint is required`       | —                 |
 | `Protocol`       | `otlp.ProtocolGrpc` (`"grpc"`, collector port 4317) or `otlp.ProtocolHttp` (`"http"`, http/protobuf, port 4318) | `grpc`            |
 | `ServiceName`    | the `service.name` resource attribute                                                                           | `melody`          |
 | `ServiceVersion` | the `service.version` resource attribute                                                                        | empty             |
@@ -96,7 +95,7 @@ app.RegisterModule(otlp.NewModule(otlp.ModuleConfig{
 | `Insecure`       | skip transport security — for a collector on the local network                                                  | `false`           |
 | `BatchTimeout`   | batch span processor flush interval, a `bound.Duration`: at least 1ms, unlimited refused                        | `5s`              |
 
-`ModuleConfig` additionally takes `TracerName` (default `melody`) and `Propagator` (nil selects W3C TraceContext). The provider's shutdown runs under the teardown's own context, `MELODY_TEARDOWN_TIMEOUT`, deadline or none. The endpoint and its credentials are deployment-owned, so read them from a parameter or `.env` rather than hardcoding them. `Config` redacts `Headers` in every `fmt` rendering (`String`/`Format`), since that field carries the collector auth token: a config dropped into a log or an error context prints `Headers:[redacted N]` beside its safe fields, never the token.
+`ModuleConfig` additionally takes `Endpoint`, the collector's `host:port` it hands `NewTracerProvider`, `TracerName` (default `melody`) and `Propagator` (nil selects W3C TraceContext). The provider's shutdown runs under the teardown's own context, `MELODY_TEARDOWN_TIMEOUT`, deadline or none. The endpoint and its credentials are deployment-owned, so read them from a parameter or `.env` rather than hardcoding them. `Config` redacts `Headers` in every `fmt` rendering (`String`/`Format`), since that field carries the collector auth token: a config dropped into a log or an error context prints `Headers:[redacted N]` beside its safe fields, never the token.
 
 ### Register as a module
 

@@ -40,6 +40,12 @@ type RouteRegistry struct {
 
 /* InstallBootCollisionRecorder arms the aggregated collision channel: a dispatch duplicate is recorded, the first registration winning, instead of panicking, so a boot reports every collision at once. A nil recorder restores the immediate refusal. */
 func (instance *RouteRegistry) InstallBootCollisionRecorder(token routeseam.Token, recorder func(kind string, name string)) {
+    if false == token.Valid() {
+        exception.Panic(
+            exception.NewError("route registry InstallBootCollisionRecorder is called by the framework only", nil, nil),
+        )
+    }
+
     instance.bootCollisionRecorder = recorder
 }
 

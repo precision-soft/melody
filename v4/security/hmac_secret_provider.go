@@ -65,7 +65,7 @@ func NewStaticHmacSecretProvider(ring HmacKeyRing) *StaticHmacSecretProvider {
         }
 
         if minimumSecretLength > len(key.Secret) {
-            shortSecret := shortSecretContext("HmacKeyRing.Keys", len(key.Secret), minimumSecretLength)
+            shortSecret := shortSecretContext("field", "HmacKeyRing.Keys", len(key.Secret), minimumSecretLength)
             shortSecret["keyId"] = keyId
 
             exception.Panic(

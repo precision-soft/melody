@@ -63,7 +63,7 @@ type CompiledFirewallConfig struct {
 
 func NewCompiledFirewall(config CompiledFirewallConfig) *CompiledFirewall {
     if "" == config.Name {
-        exception.Panic(exception.NewError("security firewall name may not be empty", nil, nil))
+        exception.Panic(exception.NewError("security firewall name may not be empty", exceptioncontract.Context{"field": "CompiledFirewallConfig.Name"}, nil))
     }
 
     if true == internal.IsNilInterface(config.Matcher) {

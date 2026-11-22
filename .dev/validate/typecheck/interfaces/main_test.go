@@ -36,6 +36,14 @@ type RootAlias = RootContract
 type Writer = io.Writer
 
 type Hidden = secret.Contract
+
+type localContract interface{ First() }
+
+type LocalAlias = localContract
+
+type AnonymousAlias = interface{ First() }
+
+type EmptyAlias = interface{}
 `,
         "contract/contract.go": `package contract
 
@@ -73,7 +81,7 @@ func fixtureEnvironment() []string {
     return append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod")
 }
 
-/* the reading the contract list depends on, one fixture: exported only, an alias resolved, internal/ out, a type-set constraint out, a generic interface in, and nothing of a test file or of a module nested beneath this one. */
+/* the reading the contract list depends on, one fixture: exported only, an alias resolved, an alias of an unexported or an anonymous interface listed under the alias, internal/ out, a type-set constraint out, a generic interface in, and nothing of a test file or of a module nested beneath this one. */
 func TestListInterfaces_ReadsTheExportedContractsOfTheModuleOnly(t *testing.T) {
     moduleDirectory := writeFixtureModule(t)
 
@@ -88,10 +96,13 @@ func TestListInterfaces_ReadsTheExportedContractsOfTheModuleOnly(t *testing.T) {
     }
 
     expectedFileByName := map[string]string{
-        "Box":              "root.go",
-        "Hidden":           "root.go",
-        "RootContract":     "root.go",
-        "Writer":           "root.go",
+        "AnonymousAlias":  "root.go",
+        "Box":             "root.go",
+        "EmptyAlias":      "root.go",
+        "Hidden":          "root.go",
+        "LocalAlias":      "root.go",
+        "RootContract":    "root.go",
+        "Writer":          "root.go",
         "contract.Listed": "contract/contract.go",
     }
 
@@ -110,6 +121,27 @@ func TestListInterfaces_ReadsTheExportedContractsOfTheModuleOnly(t *testing.T) {
     }
 }
 
+/* apidiff reports a method of an alias's unexported interface under the interface's own name, so the entry carries it for the classification; every other entry is measured under its own name */
+func TestListInterfaces_NamesTheInterfaceAnAliasIsMeasuredUnder(t *testing.T) {
+    moduleDirectory := writeFixtureModule(t)
+
+    entryList, listErr := listInterfaces(moduleDirectory, fixtureEnvironment())
+    if nil != listErr {
+        t.Fatalf("list the fixture's interfaces: %v", listErr)
+    }
+
+    for _, entry := range entryList {
+        expectedMeasuredName := ""
+        if "LocalAlias" == entry.name {
+            expectedMeasuredName = "localContract"
+        }
+
+        if expectedMeasuredName != entry.measuredName {
+            t.Fatalf("%s is measured under %q, the list says %q", entry.name, expectedMeasuredName, entry.measuredName)
+        }
+    }
+}
+
 /* each exclusion on its own, so a mutation that lets one of them in names the one it let in */
 func TestListInterfaces_LeavesOutWhatNoImplementerCanReach(t *testing.T) {
     moduleDirectory := writeFixtureModule(t)
@@ -121,6 +153,7 @@ func TestListInterfaces_LeavesOutWhatNoImplementerCanReach(t *testing.T) {
 
     refusedNameMap := map[string]string{
         "unexportedContract":       "an unexported interface",
+        "localContract":            "an unexported interface, listed under its exported alias",
         "Number":                   "a type-set constraint",
         "RootAlias":                "an alias of an interface the module declares itself",
         "internal/secret.Contract": "an interface under internal/",

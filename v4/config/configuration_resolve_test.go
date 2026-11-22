@@ -679,7 +679,7 @@ func TestConfiguration_ResolveIsRefusedOnceServing(t *testing.T) {
         t.Fatalf("expected the pre-serving resolve to succeed, got %v", resolveErr)
     }
 
-    configuration.MarkServing(configseam.Token{})
+    configuration.MarkServing(configseam.NewToken())
 
     resolveErr := configuration.Resolve()
     if nil == resolveErr {
@@ -714,7 +714,7 @@ func TestConfiguration_RegisterRuntimeStillResolvesOnceServing(t *testing.T) {
         t.Fatalf("expected the pre-serving resolve to succeed, got %v", resolveErr)
     }
 
-    configuration.MarkServing(configseam.Token{})
+    configuration.MarkServing(configseam.NewToken())
 
     configuration.RegisterRuntime("app.late", "%env(APP_TAG)%")
 

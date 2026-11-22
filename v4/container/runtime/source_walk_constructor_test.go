@@ -33,6 +33,8 @@ var configRequiredFieldException = map[string]string{
     "integrations/bunorm/v4/encrypt:CommandContextConfig.Name":       "an entry of the module's context list cannot be positional",
     "integrations/bunorm/v4/encrypt:CommandContextConfig.Cipher":     "an entry of the module's context list cannot be positional",
     "integrations/websocket/v4:ModuleConfig.Streams":                 "an entry of the module's stream list cannot be positional; the refusal names the index",
+    "v4/security:CompiledFirewallConfig.Name":                        "a firewall's name is its declaration, which the security configuration's list of firewalls carries",
+    "v4/http/static:Config.FileSystem":                               "required only in the embedded mode; the filesystem mode builds it from the public directory",
 }
 
 /* the framework-only names, keyed by package and receiver, none declared exported */
@@ -50,9 +52,21 @@ var frameworkOnlySymbol = []string{
     "v4/http/middleware/pipeline:MiddlewareBuildReport.SetSelectedNames",
     "v4/http/middleware/pipeline:NewInactiveMiddleware",
     "v4/http/middleware/pipeline:NewMiddlewareBuildReport",
-    "v4/security:NewAuthenticatedTokenFromClaims",
     "v4/security:NewMatchedAccessControlRule",
     "v4/security:SecurityContext.SetMatchedRule",
+}
+
+/* the framework-only names that left the surface under another name, each with the name that took its place */
+var frameworkOnlySymbolSuccessor = map[string]string{
+    "v4/http:RouteRegistry.SetBootCollisionRecorder": "RouteRegistry.InstallBootCollisionRecorder",
+}
+
+/* unexportedTwin answers the name an entry is declared under once unexported: the function's, or the method's, first letter lowered */
+func unexportedTwin(name string) string {
+    separatorIndex := max(strings.LastIndex(name, "."), strings.LastIndex(name, ":"))
+    prefix, function := name[:separatorIndex+1], name[separatorIndex+1:]
+
+    return prefix + strings.ToLower(function[:1]) + function[1:]
 }
 
 type productionSource struct {
@@ -216,8 +230,8 @@ func baseTypeName(expression ast.Expr) string {
 }
 
 func TestConfigStructs_HoldNoRequiredField(t *testing.T) {
-    requiredMessage := regexp.MustCompile(`is nil|is empty|is required|needs`)
-    configField := regexp.MustCompile(`^[A-Z][A-Za-z0-9]*Config\.[A-Z][A-Za-z0-9]*`)
+    requiredMessage := regexp.MustCompile(`is nil|is empty|is required|needs|may not be`)
+    configField := regexp.MustCompile(`^([A-Z][A-Za-z0-9]*)?Config\.[A-Z][A-Za-z0-9]*`)
     seen := map[string]bool{}
     refusals := 0
 
@@ -271,6 +285,69 @@ func TestConfigStructs_HoldNoRequiredField(t *testing.T) {
         })
     }
 
+    /* a refusal that names no field is met through the guard that raises it: a config parameter's field compared with its zero value */
+    for _, source := range fourthMajorProductionSourceList(t) {
+        for _, declaration := range source.file.Decls {
+            function, isFunction := declaration.(*ast.FuncDecl)
+            if false == isFunction || nil == function.Body {
+                continue
+            }
+
+            configParameters := map[string]string{}
+            for _, parameter := range function.Type.Params.List {
+                typeName := baseTypeName(parameter.Type)
+                if false == strings.HasSuffix(typeName, "Config") {
+                    continue
+                }
+
+                for _, name := range parameter.Names {
+                    configParameters[name.Name] = typeName
+                }
+            }
+
+            if 0 == len(configParameters) {
+                continue
+            }
+
+            ast.Inspect(function.Body, func(node ast.Node) bool {
+                guard, isGuard := node.(*ast.IfStmt)
+                if false == isGuard {
+                    return true
+                }
+
+                field := guardedConfigField(guard.Cond, configParameters)
+                if "" == field {
+                    return true
+                }
+
+                ast.Inspect(guard.Body, func(inner ast.Node) bool {
+                    call, isCall := inner.(*ast.CallExpr)
+                    if false == isCall || 0 == len(call.Args) {
+                        return true
+                    }
+
+                    message, isMessage := stringLiteralValue(call.Args[0])
+                    if false == isMessage || false == requiredMessage.MatchString(message) || true == namesAContextKey(call) {
+                        return true
+                    }
+
+                    refusals++
+                    exceptionKey := source.key + ":" + field
+                    seen[exceptionKey] = true
+                    if _, excepted := configRequiredFieldException[exceptionKey]; true == excepted {
+                        return false
+                    }
+
+                    t.Errorf("%s: %s is refused as %q, naming no field; a required value is a positional argument", source.set.Position(call.Pos()), exceptionKey, message)
+
+                    return false
+                })
+
+                return true
+            })
+        }
+    }
+
     if 50 > refusals {
         t.Fatalf("expected the fourth major's required-value refusals, walked %d", refusals)
     }
@@ -284,6 +361,79 @@ func TestConfigStructs_HoldNoRequiredField(t *testing.T) {
             t.Errorf("the exception for %s matches no refusal any more; drop it", key)
         }
     }
+}
+
+/* guardedConfigField answers "<Type>.<Field>" when the condition compares a field of a config parameter with "" or nil, or asks IsNilInterface of it */
+func guardedConfigField(condition ast.Expr, configParameters map[string]string) string {
+    fieldOf := func(expression ast.Expr) string {
+        selector, isSelector := ast.Unparen(expression).(*ast.SelectorExpr)
+        if false == isSelector {
+            return ""
+        }
+
+        owner, isOwner := selector.X.(*ast.Ident)
+        if false == isOwner {
+            return ""
+        }
+
+        typeName, isConfig := configParameters[owner.Name]
+        if false == isConfig {
+            return ""
+        }
+
+        return typeName + "." + selector.Sel.Name
+    }
+
+    isZero := func(expression ast.Expr) bool {
+        if value, isString := stringLiteralValue(expression); true == isString {
+            return "" == value
+        }
+
+        identifier, isIdentifier := ast.Unparen(expression).(*ast.Ident)
+
+        return true == isIdentifier && "nil" == identifier.Name
+    }
+
+    switch typed := ast.Unparen(condition).(type) {
+    case *ast.BinaryExpr:
+        if token.EQL != typed.Op {
+            return ""
+        }
+
+        if true == isZero(typed.X) {
+            return fieldOf(typed.Y)
+        }
+
+        if true == isZero(typed.Y) {
+            return fieldOf(typed.X)
+        }
+    case *ast.CallExpr:
+        selector, isSelector := typed.Fun.(*ast.SelectorExpr)
+        if true == isSelector && "IsNilInterface" == selector.Sel.Name && 1 == len(typed.Args) {
+            return fieldOf(typed.Args[0])
+        }
+    }
+
+    return ""
+}
+
+/* namesAContextKey answers whether a refusal names what it refuses under "field" or "argument", which the walk over the keys reads */
+func namesAContextKey(call *ast.CallExpr) bool {
+    named := false
+    ast.Inspect(call, func(node ast.Node) bool {
+        pair, isPair := node.(*ast.KeyValueExpr)
+        if false == isPair {
+            return true
+        }
+
+        if key, isKey := stringLiteralValue(pair.Key); true == isKey && ("field" == key || "argument" == key) {
+            named = true
+        }
+
+        return true
+    })
+
+    return named
 }
 
 func stringLiteralValue(expression ast.Expr) (string, bool) {
@@ -307,6 +457,7 @@ func TestFrameworkOnlySymbols_AreNotExported(t *testing.T) {
     }
 
     packages := map[string]bool{}
+    declared := map[string]bool{}
 
     for _, source := range fourthMajorSourceList(t) {
         slashed := filepath.ToSlash(source)
@@ -324,8 +475,22 @@ func TestFrameworkOnlySymbols_AreNotExported(t *testing.T) {
         packages[key] = true
 
         for _, declaration := range file.Decls {
+            if general, isGeneral := declaration.(*ast.GenDecl); true == isGeneral && token.VAR == general.Tok {
+                for _, specification := range general.Specs {
+                    for _, variableName := range specification.(*ast.ValueSpec).Names {
+                        name := key + ":" + variableName.Name
+                        declared[name] = true
+                        if true == variableName.IsExported() && true == removed[name] {
+                            t.Errorf("%s: %s is framework-only and left the surface; a variable does not re-export it", fileSet.Position(variableName.Pos()), name)
+                        }
+                    }
+                }
+
+                continue
+            }
+
             function, isFunction := declaration.(*ast.FuncDecl)
-            if false == isFunction || false == function.Name.IsExported() {
+            if false == isFunction {
                 continue
             }
 
@@ -334,15 +499,38 @@ func TestFrameworkOnlySymbols_AreNotExported(t *testing.T) {
                 name = key + ":" + baseTypeName(function.Recv.List[0].Type) + "." + function.Name.Name
             }
 
-            if true == removed[name] {
+            declared[name] = true
+            if true == function.Name.IsExported() && true == removed[name] {
                 t.Errorf("%s: %s is framework-only and left the surface; keep it unexported", fileSet.Position(function.Pos()), name)
             }
         }
     }
 
+    /* an entry pins something only while the unexported twin, or the successor named for it, is declared */
     for _, symbol := range frameworkOnlySymbol {
-        if false == packages[strings.SplitN(symbol, ":", 2)[0]] {
+        packageName := strings.SplitN(symbol, ":", 2)[0]
+        if false == packages[packageName] {
             t.Errorf("the framework-only entry %s names no package of the fourth major", symbol)
+
+            continue
+        }
+
+        if successor, hasSuccessor := frameworkOnlySymbolSuccessor[symbol]; true == hasSuccessor {
+            if false == declared[packageName+":"+successor] {
+                t.Errorf("the framework-only entry %s names the successor %s, which is not declared", symbol, successor)
+            }
+
+            continue
+        }
+
+        if false == declared[unexportedTwin(symbol)] {
+            t.Errorf("the framework-only entry %s has no unexported twin %s declared: drop the entry or name its successor", symbol, unexportedTwin(symbol))
+        }
+    }
+
+    for symbol := range frameworkOnlySymbolSuccessor {
+        if false == removed[symbol] {
+            t.Errorf("the successor row %s names no framework-only entry", symbol)
         }
     }
 }

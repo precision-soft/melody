@@ -61,7 +61,7 @@ func TestNewKernel_InitialState(t *testing.T) {
     httpRouter := http.NewRouterWithRouteRegistry(routeRegistry)
 
     kernelInstance := NewKernel(
-        kernelseam.Token{},
+        kernelseam.NewToken(),
         configuration,
         serviceContainer,
         httpRouter,
@@ -95,7 +95,7 @@ func TestKernel_DebugModeFalseOutsideDevelopment(t *testing.T) {
     clockInstance := clock.NewSystemClock()
 
     kernelInstance := NewKernel(
-        kernelseam.Token{},
+        kernelseam.NewToken(),
         newTestConfiguration(t, config.EnvironmentProduction),
         container.NewContainer(container.ContainerConfig{}),
         httpRouter,
@@ -128,7 +128,7 @@ func TestNewKernel_ATypedNilCollaboratorIsRefusedByName(t *testing.T) {
     }()
 
     NewKernel(
-        kernelseam.Token{},
+        kernelseam.NewToken(),
         absentConfiguration,
         container.NewContainer(container.ContainerConfig{}),
         http.NewRouterWithRouteRegistry(routeRegistry),
@@ -143,7 +143,7 @@ func TestKernel_BootRuntimeAnswersTheRuntimeTheApplicationInstalled(t *testing.T
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     kernelInstance := NewKernel(
-        kernelseam.Token{},
+        kernelseam.NewToken(),
         newTestConfiguration(t, config.EnvironmentProduction),
         serviceContainer,
         http.NewRouterWithRouteRegistry(http.NewRouteRegistry()),
@@ -160,7 +160,7 @@ func TestKernel_BootRuntimeAnswersTheRuntimeTheApplicationInstalled(t *testing.T
         _ = finish()
     }()
 
-    kernelInstance.(kernelseam.BootRuntimeInstaller).InstallBootRuntime(kernelseam.Token{}, bootRuntime)
+    kernelInstance.(kernelseam.BootRuntimeInstaller).InstallBootRuntime(kernelseam.NewToken(), bootRuntime)
 
     if bootRuntime != kernelInstance.BootRuntime() {
         t.Fatalf("expected the kernel to answer the installed boot runtime")
