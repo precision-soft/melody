@@ -466,7 +466,7 @@ func (instance *rereadRefusingCurrencyRepository) FindById(ctx context.Context, 
 func TestCurrencyServiceUpdate_AFailedReadBackAfterTheWriteStillDispatchesTheEvent(t *testing.T) {
     _, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
 
-    currencyRepository, repositoryErr := repository.NewCurrencyRepository(persistence.NewCatalogStorage(nil))
+    currencyRepository, repositoryErr := repository.NewCurrencyRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
     if nil != repositoryErr {
         t.Fatalf("building the repository failed: %v", repositoryErr)
     }
@@ -494,7 +494,7 @@ func (instance *paddingCurrencyRepository) FindById(ctx context.Context, id stri
 }
 
 func TestCurrencyService_FindByIdAnswersAPaddedIdentifierAsAbsentAndCachesNothingUnderIt(t *testing.T) {
-    currencyRepository, currencyErr := repository.NewCurrencyRepository(persistence.NewCatalogStorage(nil))
+    currencyRepository, currencyErr := repository.NewCurrencyRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
     if nil != currencyErr {
         t.Fatalf("build the currency repository: %v", currencyErr)
     }
@@ -529,7 +529,7 @@ func TestCurrencyService_AProductWriteCannotPassItsCheckWhileTheCurrencyIsDelete
 
     storage := persistence.NewCatalogStorage(nil)
 
-    currencyRepository, currencyErr := repository.NewCurrencyRepository(storage)
+    currencyRepository, currencyErr := repository.NewCurrencyRepository(storage, &persistence.CatalogSchema{})
     if nil != currencyErr {
         t.Fatalf("build the currency repository: %v", currencyErr)
     }
@@ -538,7 +538,7 @@ func TestCurrencyService_AProductWriteCannotPassItsCheckWhileTheCurrencyIsDelete
         t.Fatalf("create the unused currency: %v", createErr)
     }
 
-    categoryRepository, categoryErr := repository.NewCategoryRepository(storage)
+    categoryRepository, categoryErr := repository.NewCategoryRepository(storage, &persistence.CatalogSchema{})
     if nil != categoryErr {
         t.Fatalf("build the category repository: %v", categoryErr)
     }

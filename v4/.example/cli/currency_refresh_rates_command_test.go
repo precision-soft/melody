@@ -40,7 +40,7 @@ func rateRefreshCommandRuntime(t *testing.T, document string, dispatcherOf func(
     }))
     t.Cleanup(provider.Close)
 
-    currencyRepository, repositoryErr := repository.NewCurrencyRepository(persistence.NewCatalogStorage(nil))
+    currencyRepository, repositoryErr := repository.NewCurrencyRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
     if nil != repositoryErr {
         t.Fatalf("build the currency repository: %v", repositoryErr)
     }

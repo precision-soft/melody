@@ -80,11 +80,11 @@ type Module struct {
     storageBucket string
     storage       *melodyawss3.Storage
 
-    /* the definitions the registry is built over, by its provider: the registry is the one door onto both connections, and the catalogue handle is its default manager. Both are opened at the first resolution of the service that publishes them, under that resolution's runtime, so a process that never reads the catalogue never dials it, and a pool that was opened is one the container resolved and therefore closes at its teardown; catalogueWired says the environment declared the catalogue. */
+    /* the definitions the registry is built over, by its provider: the registry is the one door onto both connections, and the catalogue handle is its default manager. Both are opened at the first resolution of the service that publishes them, under that resolution's runtime, so a command that never reads the catalogue never dials it, an http process reading it at boot through the catalogue schema, and a pool that was opened is one the container resolved and therefore closes at its teardown; catalogueWired says the environment declared the catalogue. */
     databaseDefinitions []melodybunorm.ProviderDefinition
     catalogueWired      bool
 
-    /* processContext is the process's own context, which the boot-time schema work and the archive storage are bound to */
+    /* processContext is the process's own context, which the archive storage and the outbox schema are bound to */
     processContext context.Context
 
     /* trustedProxyResolver is the one client resolver both budgets read the client through; the list it resolves is re-read on a schedule, so a balancer restarted onto a new address is trusted again within the interval */
@@ -99,7 +99,7 @@ type Module struct {
     cipher          melodyencrypt.Cipher
 }
 
-/* NewExampleModule builds the eager half of the wiring. The context is the process's: a signal cancels it, and the database registry binds its lazy opens to it — an open in flight when the process is asked to stop ends with the signal rather than with its retry budget, so a teardown has nothing to wait behind. */
+/* NewExampleModule builds the eager half of the wiring. The context is the process's: a signal cancels it, and the archive storage and the outbox schema are bound to it. The database registry opens a handle under the runtime of the resolution that publishes it, the boot's in an http process, whose context is this one. */
 func NewExampleModule(ctx context.Context, configuration melodyconfigcontract.Configuration) *Module {
     moduleInstance := &Module{
         processContext:   ctx,

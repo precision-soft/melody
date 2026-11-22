@@ -48,7 +48,7 @@ type accessTokenDoorCall struct {
 func callAccessTokenDoor(t *testing.T, call accessTokenDoorCall) int {
     t.Helper()
 
-    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
+    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed(), &persistence.CatalogSchema{})
     if nil != repositoryErr {
         t.Fatalf("build the user repository: %v", repositoryErr)
     }

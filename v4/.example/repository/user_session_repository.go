@@ -7,7 +7,6 @@ import (
     "strings"
     "time"
 
-    "github.com/precision-soft/melody/v4/.example/migration"
     "github.com/precision-soft/melody/v4/.example/persistence"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -45,16 +44,11 @@ func MustGetUserSessionRepository(ctx context.Context, resolver melodycontainerc
     return melodycontainer.MustFromResolver[UserSessionRepository](ctx, resolver, ServiceUserSessionRepository)
 }
 
-/* NewUserSessionRepository answers the database-backed index when a connection is configured and the in-memory one otherwise, as NewUserRepository does; the table belongs to the catalogue's one migration set. */
+/* NewUserSessionRepository answers the database-backed index when a connection is configured and the in-memory one otherwise, as NewUserRepository does; the table belongs to the catalogue's one migration set. It performs no query: the catalogue schema it takes is the proof that the migration set, the trail's tables and the seeds are in. */
 //melody:service ServiceUserSessionRepository
-func NewUserSessionRepository(storage *persistence.CatalogStorage) (UserSessionRepository, error) {
+func NewUserSessionRepository(storage *persistence.CatalogStorage, catalogSchema *persistence.CatalogSchema) (UserSessionRepository, error) {
     if false == storage.IsPersistent() {
         return newInMemoryUserSessionRepository(), nil
-    }
-
-    migrateErr := migration.EnsureMigrated(context.Background(), storage.Database())
-    if nil != migrateErr {
-        return nil, migrateErr
     }
 
     return newBunUserSessionRepository(storage.Database()), nil

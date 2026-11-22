@@ -6,14 +6,23 @@ import (
     "github.com/minio/minio-go/v7"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
 )
 
-/* ModuleConfig registers the storage service over Client and Bucket, built from Storage; an empty one registers nothing, and a Bucket or a Storage with no Client fails the boot. */
+/* ModuleConfig registers the storage service over Client and Bucket, built from Storage; an empty one registers nothing, and a Bucket, a Storage or a BucketCheck with no Client fails the boot. */
 type ModuleConfig struct {
-    Client  *minio.Client
-    Bucket  string
-    Storage StorageConfig
+    Client      *minio.Client
+    Bucket      string
+    Storage     StorageConfig
+    BucketCheck BucketCheckConfig
+}
+
+/* BucketCheckConfig has the storage's provider ensure the bucket, under the runtime of whoever resolves the storage, before it answers the storage; the storage is then built at boot. BootFailure is the mode of that build: the zero value warns at boot and has the first use of the storage check the bucket again, BootFailureFailsBoot stops the boot on a bucket that cannot be ensured. Region is the region a missing bucket is created in. A Region or a BootFailure without Enabled is refused. */
+type BucketCheckConfig struct {
+    Enabled     bool
+    Region      string
+    BootFailure containercontract.BootFailureMode
 }
 
 func NewModule(config ModuleConfig) *Module {
@@ -42,6 +51,14 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
             ))
         }
 
+        if false == reflect.ValueOf(instance.config.BucketCheck).IsZero() {
+            exception.Panic(exception.NewError(
+                "the aws.s3 module is handed a bucket check and has no client",
+                map[string]any{"field": "ModuleConfig.BucketCheck", "requires": "ModuleConfig.Client"},
+                nil,
+            ))
+        }
+
         if false == reflect.ValueOf(instance.config.Storage).IsZero() {
             exception.Panic(exception.NewError(
                 "the aws.s3 module is handed a storage configuration and has no client",
@@ -53,7 +70,16 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
         return
     }
 
-    RegisterStorageService(registrar, instance.config.Client, instance.config.Bucket, instance.config.Storage)
+    bucketCheck := instance.config.BucketCheck
+    if false == bucketCheck.Enabled && false == reflect.ValueOf(bucketCheck).IsZero() {
+        exception.Panic(exception.NewError(
+            "the aws.s3 module's bucket check is configured and not enabled",
+            map[string]any{"field": "ModuleConfig.BucketCheck", "requires": "ModuleConfig.BucketCheck.Enabled"},
+            nil,
+        ))
+    }
+
+    registerStorageService(registrar, instance.config.Client, instance.config.Bucket, instance.config.Storage, bucketCheck)
 }
 
 /* the code is declared whether or not a client is handed, so a command's MELODY_CLI_BOOT_WARNINGS_IGNORED may name it in every environment the module is registered in */

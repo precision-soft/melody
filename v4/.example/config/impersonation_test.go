@@ -32,7 +32,7 @@ func impersonationRuntime(t *testing.T, userRepository repository.UserRepository
 func seededUserRepository(t *testing.T) repository.UserRepository {
     t.Helper()
 
-    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
+    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed(), &persistence.CatalogSchema{})
     if nil != repositoryErr {
         t.Fatalf("new user repository: %v", repositoryErr)
     }

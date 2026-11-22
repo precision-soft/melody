@@ -309,7 +309,7 @@ type containerRuntime struct {
 func currencyServiceUnderTest(t *testing.T) (*CurrencyService, *recordingDispatcher, *containerRuntime) {
     t.Helper()
 
-    currencyRepository, repositoryErr := repository.NewCurrencyRepository(persistence.NewCatalogStorage(nil))
+    currencyRepository, repositoryErr := repository.NewCurrencyRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
     if nil != repositoryErr {
         t.Fatalf("building the repository failed: %v", repositoryErr)
     }
@@ -354,7 +354,7 @@ func (instance *updateCountingCurrencyRepository) UpdateQuote(ctx context.Contex
 func newInMemoryProductRepositoryForTest(t *testing.T) repository.ProductRepository {
     t.Helper()
 
-    productRepository, productRepositoryErr := repository.NewProductRepository(persistence.NewCatalogStorage(nil))
+    productRepository, productRepositoryErr := repository.NewProductRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
     if nil != productRepositoryErr {
         t.Fatalf("build the product repository: %v", productRepositoryErr)
     }
@@ -451,17 +451,17 @@ func newCatalogueUnderTest(t *testing.T, refusing bool) *catalogueUnderTest {
 
     storage := persistence.NewCatalogStorage(nil)
 
-    productRepository, productRepositoryErr := repository.NewProductRepository(storage)
+    productRepository, productRepositoryErr := repository.NewProductRepository(storage, &persistence.CatalogSchema{})
     if nil != productRepositoryErr {
         t.Fatalf("build the product repository: %v", productRepositoryErr)
     }
 
-    categoryRepository, categoryRepositoryErr := repository.NewCategoryRepository(storage)
+    categoryRepository, categoryRepositoryErr := repository.NewCategoryRepository(storage, &persistence.CatalogSchema{})
     if nil != categoryRepositoryErr {
         t.Fatalf("build the category repository: %v", categoryRepositoryErr)
     }
 
-    currencyRepository, currencyRepositoryErr := repository.NewCurrencyRepository(storage)
+    currencyRepository, currencyRepositoryErr := repository.NewCurrencyRepository(storage, &persistence.CatalogSchema{})
     if nil != currencyRepositoryErr {
         t.Fatalf("build the currency repository: %v", currencyRepositoryErr)
     }
@@ -543,7 +543,7 @@ type userServiceUnderTest struct {
 func newUserServiceUnderTest(t *testing.T, dispatcherOf func(melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher, cacheOf func(melodycachecontract.Cache) melodycachecontract.Cache) *userServiceUnderTest {
     t.Helper()
 
-    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
+    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed(), &persistence.CatalogSchema{})
     if nil != repositoryErr {
         t.Fatalf("build the user repository: %v", repositoryErr)
     }

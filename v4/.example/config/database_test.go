@@ -513,9 +513,9 @@ func TestRegisterDatabaseServices_BuildsTheRegistryAtBootSoARefusedDefinitionFai
     )
     moduleInstance.registerDatabaseServices(containerRegistrar{Container: containerInstance})
 
-    names, _ := builtAtBootNames(containerInstance)
-    if 1 != len(names) || serviceDatabaseRegistry != names[0] {
-        t.Fatalf("expected the registry registered to be built at boot, got %v", names)
+    names, modes := builtAtBootNames(containerInstance)
+    if 1 != len(names) || serviceDatabaseRegistry != names[0] || melodycontainer.BootFailureFailsBoot != modes[serviceDatabaseRegistry] {
+        t.Fatalf("expected the registry registered to be built at boot and to fail it, got %v %v", names, modes)
     }
 
     bootRuntime, finish := melodyruntime.NewBoot(t.Context(), containerInstance)

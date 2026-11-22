@@ -108,7 +108,7 @@ type Seeder interface {
     SeedIfEmpty(ctx context.Context) error
 }
 
-/* the seeder services and their collection priorities: a product names its category and its currency, so those two are seeded first and a reset reads in the order the rows refer to each other. The schema carries no foreign key between the four tables, so the order is declared here rather than enforced by the database */
+/* the seeder services and their collection priorities: a product names its category and its currency, so those two are seeded first and a reset reads in the order the rows refer to each other. The product table refers to the category and the currency by foreign key, so a product seeded ahead of them is refused by the database */
 const (
     ServiceCategorySeeder = "service.example.seeder_category"
     ServiceCurrencySeeder = "service.example.seeder_currency"

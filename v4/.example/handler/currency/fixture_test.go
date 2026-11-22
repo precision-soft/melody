@@ -62,12 +62,12 @@ func newCurrencyDoorFixture(t *testing.T) *currencyDoorFixture {
         t.Fatalf("new configuration: %v", configurationErr)
     }
 
-    currencyRepository, repositoryErr := repository.NewCurrencyRepository(persistence.NewCatalogStorage(nil))
+    currencyRepository, repositoryErr := repository.NewCurrencyRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
     if nil != repositoryErr {
         t.Fatalf("build the currency repository: %v", repositoryErr)
     }
 
-    productRepository, productRepositoryErr := repository.NewProductRepository(persistence.NewCatalogStorage(nil))
+    productRepository, productRepositoryErr := repository.NewProductRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
     if nil != productRepositoryErr {
         t.Fatalf("build the product repository: %v", productRepositoryErr)
     }

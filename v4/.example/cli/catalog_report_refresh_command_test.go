@@ -226,11 +226,11 @@ func newRefreshFixture(t *testing.T, option refreshFixtureOption) *refreshFixtur
     cacheInstance := &sequenceCache{Cache: melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true}), sequence: sequence}
 
     storage := persistence.NewCatalogStorage(nil)
-    productRepository, productErr := repository.NewProductRepository(storage)
+    productRepository, productErr := repository.NewProductRepository(storage, &persistence.CatalogSchema{})
     if nil != productErr {
         t.Fatalf("build the product repository: %v", productErr)
     }
-    journalRepository, journalErr := repository.NewCatalogJournalRepository(storage)
+    journalRepository, journalErr := repository.NewCatalogJournalRepository(storage, &persistence.CatalogSchema{})
     if nil != journalErr {
         t.Fatalf("build the journal repository: %v", journalErr)
     }

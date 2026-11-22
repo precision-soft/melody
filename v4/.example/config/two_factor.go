@@ -5,7 +5,7 @@ import (
 
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
     "github.com/precision-soft/melody/v4/.example/entity"
-    "github.com/precision-soft/melody/v4/.example/migration"
+    "github.com/precision-soft/melody/v4/.example/persistence"
     "github.com/precision-soft/melody/v4/.example/security"
     "github.com/precision-soft/melody/v4/.example/service"
     "github.com/precision-soft/melody/v4/.example/twofactor"
@@ -33,7 +33,7 @@ const (
     secondFactorBudgetWindow    = 15 * time.Minute
 )
 
-/* registerTwoFactorStoreService wires the two-factor store, which keeps a user's TOTP secret and single-use recovery codes encrypted at rest, only when a database is configured; the enrollment table belongs to the example's migration set. The store is resolved at the first request that needs it, so a refused migration answers 503 to that request and the next one resolves again. */
+/* registerTwoFactorStoreService wires the two-factor store, which keeps a user's TOTP secret and single-use recovery codes encrypted at rest, only when a database is configured; the enrollment table belongs to the example's migration set. The store is resolved at the first request that needs it, after the catalogue schema, so a refused migration answers 503 to that request and the next one resolves again. */
 func (instance *Module) registerTwoFactorStoreService(registrar melodyapplicationcontract.ServiceRegistrar) {
     if false == instance.catalogueWired {
         return
@@ -48,8 +48,9 @@ func (instance *Module) registerTwoFactorStoreService(registrar melodyapplicatio
                 return nil, resolveErr
             }
 
-            if migrateErr := migration.EnsureMigrated(instance.processContext, database); nil != migrateErr {
-                return nil, migrateErr
+            /* the enrollment table belongs to the catalogue's migration set, which the catalogue schema applies under this resolution's runtime */
+            if _, schemaErr := melodycontainer.FromResolver[*persistence.CatalogSchema](resolver.Runtime().Context(), resolver, persistence.ServiceCatalogSchema); nil != schemaErr {
+                return nil, schemaErr
             }
 
             return twofactor.NewStore(database), nil

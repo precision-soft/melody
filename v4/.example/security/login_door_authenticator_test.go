@@ -776,7 +776,7 @@ func newSecondFactorLoginWith(t *testing.T, options secondFactorLoginOptions) *s
         t.Fatalf("register clock: %v", registerClockErr)
     }
 
-    sessionIndex, sessionIndexErr := repository.NewUserSessionRepository(persistence.NewCatalogStorage(nil))
+    sessionIndex, sessionIndexErr := repository.NewUserSessionRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
     if nil != sessionIndexErr {
         t.Fatalf("new session index: %v", sessionIndexErr)
     }

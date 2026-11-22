@@ -418,7 +418,6 @@ The six `service.<module>` names of a module's principal service, `service.cache
 | `service-example-user-service` | `service.example.user_service` |
 | `service.example.archive.locker` | `service.example.archive_locker` |
 | `service.example.archive.storage` | `service.example.archive_storage` |
-| `service.example.audit.schema` | `service.example.audit_schema` |
 | `service.example.catalog.journal.repository` | `service.example.catalog_journal_repository` |
 | `service.example.catalog.journal.service` | `service.example.catalog_journal_service` |
 | `service.example.catalog.notification.hub` | `service.example.catalog_notification_hub` |
@@ -436,7 +435,6 @@ The six `service.<module>` names of a module's principal service, `service.cache
 | `service.example.seeder.currency` | `service.example.seeder_currency` |
 | `service.example.seeder.product` | `service.example.seeder_product` |
 | `service.example.seeder.user` | `service.example.seeder_user` |
-| `service.example.storage.bucket` | `service.example.storage_bucket` |
 | `service.example.user.repository` | `service.example.user_repository` |
 | `service.example.user.session.repository` | `service.example.user_session_repository` |
 
@@ -2082,7 +2080,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **Symptom.** `Secure: true`, `EnsureBucket(ctx, client, bucket, region)`, `NewStorage(client, bucket)` and `RegisterStorageService(registrar, client, bucket)` no longer compile. A configuration that named neither `Secure` nor `Insecure` dials https where it dialed plaintext http, so a plaintext endpoint answers the TLS handshake with an error.
 
-**Remedy.** Drop `Secure: true`; write `Insecure: true` where `Secure` was false on purpose, for a local endpoint. `EnsureBucket(resolver.Runtime(), client, bucket, awss3.EnsureBucketConfig{Region: region})` from a provider registered `RegisterOptions{BuiltAtBoot: true}`, resolved by what writes to the bucket, so a missing bucket is a boot warning and the first use checks it again (`BootFailure: container.BootFailureFailsBoot` keeps it failing `Boot`); `EnsureBucket` refuses a nil runtime and bounds its calls by the runtime's context; `NewStorage(client, bucket, awss3.StorageConfig{})`; `RegisterStorageService(registrar, client, bucket, awss3.StorageConfig{})`.
+**Remedy.** Drop `Secure: true`; write `Insecure: true` where `Secure` was false on purpose, for a local endpoint. `EnsureBucket(resolver.Runtime(), client, bucket, awss3.EnsureBucketConfig{Region: region})` from a provider registered `RegisterOptions{BuiltAtBoot: true}`, resolved by what writes to the bucket, so a missing bucket is a boot warning and the first use checks it again (`BootFailure: container.BootFailureFailsBoot` keeps it failing `Boot`), or hand the module `ModuleConfig.BucketCheck{Enabled: true, Region: region}`, which has the storage's own provider check it; `EnsureBucket` refuses a nil runtime and bounds its calls by the runtime's context; `NewStorage(client, bucket, awss3.StorageConfig{})`; `RegisterStorageService(registrar, client, bucket, awss3.StorageConfig{})`.
 
 ### Event: `NewEventDispatcherAdapter` takes the dispatcher alone
 

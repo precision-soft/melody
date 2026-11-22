@@ -306,16 +306,16 @@ func TestRememberEntityOrAbsenceReadsTheStoreAsRememberAloneDoes(t *testing.T) {
 /* a list is remembered under the entities' bound, so a load racing a write and its invalidation serves the stale list for at most that long */
 func TestTheCatalogueListsAreRememberedUnderTheEntityBound(t *testing.T) {
     storage := persistence.NewCatalogStorage(nil)
-    productRepository, _ := repository.NewProductRepository(storage)
-    categoryRepository, _ := repository.NewCategoryRepository(storage)
-    currencyRepository, _ := repository.NewCurrencyRepository(storage)
+    productRepository, _ := repository.NewProductRepository(storage, &persistence.CatalogSchema{})
+    categoryRepository, _ := repository.NewCategoryRepository(storage, &persistence.CatalogSchema{})
+    currencyRepository, _ := repository.NewCurrencyRepository(storage, &persistence.CatalogSchema{})
     cacheInstance := newTtlRecordingCache()
     ctx := context.Background()
 
     categoryService := NewCategoryService(categoryRepository, productRepository, cacheInstance, nil)
     currencyService := NewCurrencyService(currencyRepository, productRepository, cacheInstance, nil, melodyclock.NewSystemClock())
     productService := NewProductService(productRepository, categoryService, currencyService, cacheInstance, nil, melodyclock.NewSystemClock())
-    userRepository, _ := repository.NewUserRepository(storage)
+    userRepository, _ := repository.NewUserRepository(storage, &persistence.CatalogSchema{})
     userService := NewUserService(userRepository, cacheInstance, nil)
 
     if _, listErr := productService.List(exampleTestRuntimeUnder(ctx)); nil != listErr {

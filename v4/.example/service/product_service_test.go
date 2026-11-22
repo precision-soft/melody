@@ -51,7 +51,7 @@ func TestProductService_RecordViewCountsEachReadOnTheProductsOwnCounter(t *testi
 func TestProductService_RefusesAReferenceThatNamesNothing(t *testing.T) {
     currencyService, _, runtimeInstance := currencyServiceUnderTest(t)
 
-    categoryRepository, categoryErr := repository.NewCategoryRepository(persistence.NewCatalogStorage(nil))
+    categoryRepository, categoryErr := repository.NewCategoryRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
     if nil != categoryErr {
         t.Fatalf("build the category repository: %v", categoryErr)
     }
@@ -157,7 +157,7 @@ func TestProductService_ARefusedUpdateLeavesTheStoredEntityUntouched(t *testing.
     catalogue := newCatalogueUnderTest(t, false)
     storage := persistence.NewCatalogStorage(nil)
 
-    productRepository, productRepositoryErr := repository.NewProductRepository(storage)
+    productRepository, productRepositoryErr := repository.NewProductRepository(storage, &persistence.CatalogSchema{})
     if nil != productRepositoryErr {
         t.Fatalf("build the product repository: %v", productRepositoryErr)
     }

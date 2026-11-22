@@ -4,7 +4,6 @@ import (
     "context"
     "time"
 
-    "github.com/precision-soft/melody/v4/.example/migration"
     "github.com/precision-soft/melody/v4/.example/persistence"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -48,16 +47,11 @@ func MustGetCatalogJournalRepository(ctx context.Context, resolver melodycontain
     return melodycontainer.MustFromResolver[CatalogJournalRepository](ctx, resolver, ServiceCatalogJournalRepository)
 }
 
-/* NewCatalogJournalRepository answers the database-backed journal when a connection is configured and a process-local one otherwise. It is never absent, because every change to the nomenclature records what it did. */
+/* NewCatalogJournalRepository answers the database-backed journal when a connection is configured and a process-local one otherwise. It is never absent, because every change to the nomenclature records what it did. It performs no query: the catalogue schema it takes is the proof that the migration set, the trail's tables and the seeds are in. */
 //melody:service ServiceCatalogJournalRepository
-func NewCatalogJournalRepository(storage *persistence.CatalogStorage) (CatalogJournalRepository, error) {
+func NewCatalogJournalRepository(storage *persistence.CatalogStorage, catalogSchema *persistence.CatalogSchema) (CatalogJournalRepository, error) {
     if false == storage.IsPersistent() {
         return newInMemoryCatalogJournalRepository(), nil
-    }
-
-    migrateErr := migration.EnsureMigrated(context.Background(), storage.Database())
-    if nil != migrateErr {
-        return nil, migrateErr
     }
 
     return newBunCatalogJournalRepository(storage.Database()), nil

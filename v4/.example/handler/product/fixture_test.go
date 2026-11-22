@@ -80,17 +80,17 @@ func newProductDoorFixtureOver(t *testing.T, wrap func(stores productDoorStores)
 
     storage := persistence.NewCatalogStorage(nil)
 
-    productRepository, productRepositoryErr := repository.NewProductRepository(storage)
+    productRepository, productRepositoryErr := repository.NewProductRepository(storage, &persistence.CatalogSchema{})
     if nil != productRepositoryErr {
         t.Fatalf("build the product repository: %v", productRepositoryErr)
     }
 
-    categoryRepository, categoryRepositoryErr := repository.NewCategoryRepository(storage)
+    categoryRepository, categoryRepositoryErr := repository.NewCategoryRepository(storage, &persistence.CatalogSchema{})
     if nil != categoryRepositoryErr {
         t.Fatalf("build the category repository: %v", categoryRepositoryErr)
     }
 
-    currencyRepository, currencyRepositoryErr := repository.NewCurrencyRepository(storage)
+    currencyRepository, currencyRepositoryErr := repository.NewCurrencyRepository(storage, &persistence.CatalogSchema{})
     if nil != currencyRepositoryErr {
         t.Fatalf("build the currency repository: %v", currencyRepositoryErr)
     }

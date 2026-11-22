@@ -70,7 +70,7 @@ func newCommandFixtureOverUsers(t *testing.T, dispatcherOf func(melodyeventcontr
 
     storage := persistence.NewCatalogStorage(nil).WithAccountSeed()
 
-    userRepository, repositoryErr := repository.NewUserRepository(storage)
+    userRepository, repositoryErr := repository.NewUserRepository(storage, &persistence.CatalogSchema{})
     if nil != repositoryErr {
         t.Fatalf("build the user repository: %v", repositoryErr)
     }
@@ -382,7 +382,7 @@ func newResetRuntimeWithArchive(
 func mustProductRepository(t *testing.T) repository.ProductRepository {
     t.Helper()
 
-    productRepository, productRepositoryErr := repository.NewProductRepository(persistence.NewCatalogStorage(nil))
+    productRepository, productRepositoryErr := repository.NewProductRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
     if nil != productRepositoryErr {
         t.Fatalf("build the product repository: %v", productRepositoryErr)
     }

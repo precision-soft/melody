@@ -3,8 +3,10 @@ package config
 import (
     "bytes"
     "context"
+    "database/sql"
     "errors"
     "fmt"
+    "os"
     "reflect"
     "slices"
     "strings"
@@ -29,6 +31,7 @@ import (
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     rueidis "github.com/redis/rueidis"
     bun "github.com/uptrace/bun"
+    "github.com/uptrace/bun/dialect/mysqldialect"
 )
 
 /* The catalog storage is the one door an ordinary http process passes through on its way to a repository: the generated wiring resolves it by type for every one of them. A provider that captures the handle the composition root already built resolves nothing, so the container records no dependency, the registry's SetLogger never runs and at SIGTERM neither the pool nor the registry is closed. Resolving is what writes the edge. */
@@ -116,8 +119,8 @@ func TestRegisterCatalogStorageService_SeedsTheAccountsInDevelopmentOnly(t *test
     }
 }
 
-/* the trail's tables are created at boot: the schema is a service built at boot, and a database that cannot create them answers the schema's failure, which fails the boot rather than the first audited write */
-func TestRegisterAuditSchemaService_IsBuiltAtBootAndAnswersASchemaItCannotCreate(t *testing.T) {
+/* the catalogue schema is built at boot with the warning mode, and a database that does not answer answers the schema's failure, so an http boot goes on with a warning */
+func TestRegisterCatalogSchemaService_IsBuiltAtBootWarnsAndAnswersACatalogueItCannotPrepare(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     containerInstance.MustRegister(serviceDatabase, func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {
         return newUndialedDatabase(), nil
@@ -126,41 +129,136 @@ func TestRegisterAuditSchemaService_IsBuiltAtBootAndAnswersASchemaItCannotCreate
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.catalogueWired = true
     moduleInstance.registerCatalogStorageService(containerRegistrar{Container: containerInstance})
-    moduleInstance.registerAuditSchemaService(containerRegistrar{Container: containerInstance})
+    moduleInstance.registerCatalogSchemaService(containerRegistrar{Container: containerInstance})
 
-    builtAtBoot, _ := builtAtBootNames(containerInstance)
-    if false == slices.Contains(builtAtBoot, persistence.ServiceAuditSchema) {
-        t.Fatalf("expected the audit schema built at boot")
+    builtAtBoot, modes := builtAtBootNames(containerInstance)
+    if false == slices.Contains(builtAtBoot, persistence.ServiceCatalogSchema) || melodycontainer.BootFailureWarns != modes[persistence.ServiceCatalogSchema] {
+        t.Fatalf("expected the catalogue schema built at boot with the warning mode, got %v %v", builtAtBoot, modes)
     }
 
-    _, schemaErr := melodycontainer.FromResolver[*persistence.AuditSchema](t.Context(), containerInstance, persistence.ServiceAuditSchema)
-    if nil == schemaErr || false == strings.Contains(schemaErr.Error(), "could not create the audit transaction table") {
-        t.Fatalf("expected the schema's failure answered, got %v", schemaErr)
+    if _, schemaErr := melodycontainer.FromResolver[*persistence.CatalogSchema](t.Context(), containerInstance, persistence.ServiceCatalogSchema); nil == schemaErr {
+        t.Fatal("expected the schema's failure answered")
     }
 }
 
-/* the module's own registration builds the schema at boot, and first: a service built at boot ahead of it that reached a repository would seed audited rows before the trail's tables exist */
-func TestModuleRegisterServices_BuildsTheAuditSchemaFirstAtBoot(t *testing.T) {
+type callerContextMarker struct{}
+
+/* seedContextHook records every seed insert that ran on a context other than the caller's */
+type seedContextHook struct {
+    mutex   sync.Mutex
+    foreign []string
+}
+
+func (instance *seedContextHook) BeforeQuery(ctx context.Context, event *bun.QueryEvent) context.Context {
+    if true == strings.HasPrefix(event.Query, "INSERT INTO `melody_example_v4_") && nil == ctx.Value(callerContextMarker{}) {
+        instance.mutex.Lock()
+        instance.foreign = append(instance.foreign, event.Query)
+        instance.mutex.Unlock()
+    }
+
+    return ctx
+}
+
+func (instance *seedContextHook) AfterQuery(ctx context.Context, event *bun.QueryEvent) {}
+
+/* seededCatalogueTables are the nomenclatures the catalogue schema seeds whatever the environment; the accounts are seeded in development alone */
+var seededCatalogueTables = []string{"melody_example_v4_category", "melody_example_v4_currency", "melody_example_v4_product"}
+
+/* the heal: a database that did not answer at the first resolution is reached by the next one, which prepares the catalogue, the storage built anew since a failed creation leaves nothing behind */
+func TestRegisterCatalogSchemaService_TheNextResolutionAfterTheDatabaseAnswersPreparesTheCatalogue(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping the catalogue schema heal on MySQL")
+    }
+
+    sqlDatabase, openErr := sql.Open("mysql", dsn+"?parseTime=true")
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    t.Cleanup(func() { _ = sqlDatabase.Close() })
+
+    database := bun.NewDB(sqlDatabase, mysqldialect.New())
+    hook := &seedContextHook{}
+    database.AddQueryHook(hook)
+
+    /* the fourth major's own trail table is dropped and its seeded nomenclatures emptied, so the heal has to create and seed them again */
+    if _, dropErr := database.NewRaw("DROP TABLE IF EXISTS " + persistence.AuditTable).Exec(t.Context()); nil != dropErr {
+        t.Fatalf("drop the trail table: %v", dropErr)
+    }
+
+    /* emptied in the reverse of the seeding order, since a product refers to its category and its currency */
+    for index := len(seededCatalogueTables) - 1; 0 <= index; index-- {
+        table := seededCatalogueTables[index]
+        if _, deleteErr := database.NewRaw("DELETE FROM " + table).Exec(t.Context()); nil != deleteErr && false == strings.Contains(deleteErr.Error(), "doesn't exist") {
+            t.Fatalf("empty %s: %v", table, deleteErr)
+        }
+    }
+
+    answers := false
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    containerInstance.MustRegister(serviceDatabase, func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {
+        if false == answers {
+            return nil, errors.New("the database did not answer")
+        }
+
+        return database, nil
+    }, melodycontainer.RegisterOptions{Closer: registryOwnedDatabaseCloser})
+
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.catalogueWired = true
+    moduleInstance.registerCatalogStorageService(containerRegistrar{Container: containerInstance})
+    moduleInstance.registerCatalogSchemaService(containerRegistrar{Container: containerInstance})
+
+    if _, schemaErr := melodycontainer.FromResolver[*persistence.CatalogSchema](t.Context(), containerInstance, persistence.ServiceCatalogSchema); nil == schemaErr {
+        t.Fatal("expected the schema refused while the database does not answer")
+    }
+
+    answers = true
+
+    callerContext := context.WithValue(t.Context(), callerContextMarker{}, true)
+    if _, schemaErr := melodycontainer.FromResolver[*persistence.CatalogSchema](callerContext, containerInstance, persistence.ServiceCatalogSchema); nil != schemaErr {
+        t.Fatalf("expected the next resolution to prepare the catalogue, got %v", schemaErr)
+    }
+
+    if 0 != len(hook.foreign) {
+        t.Fatalf("expected every seed written on the resolving caller's context, got %v", hook.foreign)
+    }
+
+    for _, table := range seededCatalogueTables {
+        rowCount, countErr := database.NewSelect().Table(table).Count(t.Context())
+        if nil != countErr || 0 == rowCount {
+            t.Fatalf("expected %s seeded, got %d rows: %v", table, rowCount, countErr)
+        }
+    }
+
+    trailTables := 0
+    if scanErr := database.NewRaw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?", persistence.AuditTable).Scan(t.Context(), &trailTables); nil != scanErr || 1 != trailTables {
+        t.Fatalf("expected the trail table created again, got %d: %v", trailTables, scanErr)
+    }
+}
+
+/* the module's own registration builds the catalogue schema at boot with the warning mode */
+func TestModuleRegisterServices_BuildsTheCatalogueSchemaAtBootAndWarns(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.messageBusTransport = melodymessagebus.NewInMemoryTransport(melodymessagebus.InMemoryTransportConfig{})
     moduleInstance.RegisterServices(containerRegistrar{Container: containerInstance})
 
-    builtAtBoot, _ := builtAtBootNames(containerInstance)
-    if 0 == len(builtAtBoot) || persistence.ServiceAuditSchema != builtAtBoot[0] {
-        t.Fatalf("expected the audit schema the first service built at boot, got %v", builtAtBoot)
+    builtAtBoot, modes := builtAtBootNames(containerInstance)
+    if false == slices.Contains(builtAtBoot, persistence.ServiceCatalogSchema) || melodycontainer.BootFailureWarns != modes[persistence.ServiceCatalogSchema] {
+        t.Fatalf("expected the catalogue schema built at boot with the warning mode, got %v %v", builtAtBoot, modes)
     }
 }
 
-/* without a database there is no trail: the schema is published without a statement */
-func TestRegisterAuditSchemaService_PublishesTheSchemaWithoutADatabase(t *testing.T) {
+/* without a database there is nothing to prepare: the schema is published without a statement */
+func TestRegisterCatalogSchemaService_PublishesTheSchemaWithoutADatabase(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.registerCatalogStorageService(containerRegistrar{Container: containerInstance})
-    moduleInstance.registerAuditSchemaService(containerRegistrar{Container: containerInstance})
+    moduleInstance.registerCatalogSchemaService(containerRegistrar{Container: containerInstance})
 
-    schema, schemaErr := melodycontainer.FromResolver[*persistence.AuditSchema](t.Context(), containerInstance, persistence.ServiceAuditSchema)
+    schema, schemaErr := melodycontainer.FromResolver[*persistence.CatalogSchema](t.Context(), containerInstance, persistence.ServiceCatalogSchema)
     if nil != schemaErr || nil == schema {
         t.Fatalf("expected the schema published without a database, got %v", schemaErr)
     }
@@ -240,6 +338,9 @@ func TestGeneratedServices_ConcurrentScopesKeepRequestStateSeparate(t *testing.T
     registerCatalogJournalSourceService(serviceContainer)
     melodycontainer.MustRegisterType(serviceContainer, func(melodycontainercontract.Resolver) (*persistence.CatalogStorage, error) {
         return persistence.NewCatalogStorage(nil), nil
+    }, melodycontainer.RegisterOptions{})
+    melodycontainer.MustRegisterType(serviceContainer, func(melodycontainercontract.Resolver) (*persistence.CatalogSchema, error) {
+        return &persistence.CatalogSchema{}, nil
     }, melodycontainer.RegisterOptions{})
     melodycontainer.MustRegisterType(serviceContainer, func(melodycontainercontract.Resolver) (melodyclockcontract.Clock, error) {
         return melodyclock.NewSystemClock(), nil

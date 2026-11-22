@@ -6,7 +6,6 @@ import (
     "strings"
 
     "github.com/precision-soft/melody/v4/.example/entity"
-    "github.com/precision-soft/melody/v4/.example/migration"
     "github.com/precision-soft/melody/v4/.example/persistence"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -98,26 +97,14 @@ func MustGetUserRepository(ctx context.Context, resolver melodycontainercontract
     return melodycontainer.MustFromResolver[UserRepository](ctx, resolver, ServiceUserRepository)
 }
 
-/* NewUserRepository answers the database-backed repository when a connection is configured and the in-memory one otherwise; the generated wiring fills it from the container, and the storage handle carries the choice. The migration set is applied and the table seeded on the way out, over the trail's own tables, which the boot created, since an audited write is one transaction over both. */
+/* NewUserRepository answers the database-backed repository when a connection is configured and the in-memory one otherwise; the generated wiring fills it from the container, and the storage handle carries the choice. It performs no query: the catalogue schema it takes is the proof that the migration set, the trail's tables and the seeds are in. */
 //melody:service ServiceUserRepository
-func NewUserRepository(storage *persistence.CatalogStorage) (UserRepository, error) {
+func NewUserRepository(storage *persistence.CatalogStorage, catalogSchema *persistence.CatalogSchema) (UserRepository, error) {
     if false == storage.IsPersistent() {
         return newInMemoryUserRepository(storage.SeedsAccounts()), nil
     }
 
-    migrateErr := migration.EnsureMigrated(context.Background(), storage.Database())
-    if nil != migrateErr {
-        return nil, migrateErr
-    }
-
-    repositoryInstance := newBunUserRepository(storage)
-
-    seedErr := repositoryInstance.seedIfEmpty(context.Background())
-    if nil != seedErr {
-        return nil, seedErr
-    }
-
-    return repositoryInstance, nil
+    return newBunUserRepository(storage), nil
 }
 
 /* validateUser reports the first field the user fails on, shared by both implementations so they refuse with the same words. */

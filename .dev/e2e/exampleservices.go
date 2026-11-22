@@ -102,7 +102,7 @@ type exampleContainerDescription struct {
     TypeName string `json:"typeName"`
 }
 
-/* exampleProcessServiceInventoryOf answers the inventory one major's example is held to: the rows name their module path, and the fourth major adds the cipher of its integration module, the internal-auth signer, whose judged key id is kept under its lock, the bucket check and the audit schema it builds at boot, and the prometheus registry the metrics module tears down */
+/* exampleProcessServiceInventoryOf answers the inventory one major's example is held to: the rows name their module path, and the fourth major adds the cipher of its integration module, the internal-auth signer, whose judged key id is kept under its lock, the catalogue schema it builds at boot, and the prometheus registry the metrics module tears down */
 func exampleProcessServiceInventoryOf(major exampleMajor) map[string]processServiceClassification {
     inventory := make(map[string]processServiceClassification, len(exampleProcessServiceInventory)+1)
     for serviceName, classification := range exampleProcessServiceInventory {
@@ -112,8 +112,7 @@ func exampleProcessServiceInventoryOf(major exampleMajor) map[string]processServ
     if 4 == major.number {
         inventory["service.encrypt.cipher"] = processServiceClassification{typeName: "*encrypt.aes256Cipher", category: processServiceStore}
         inventory["service.example.internal_auth_signer"] = processServiceClassification{typeName: "*security.HmacEnvelopeSigner", category: processServiceStore}
-        inventory["service.example.storage_bucket"] = processServiceClassification{typeName: "*config.storageBucketReady", category: processServiceStateless}
-        inventory["service.example.audit_schema"] = processServiceClassification{typeName: "*persistence.AuditSchema", category: processServiceStateless}
+        inventory["service.example.catalog_schema"] = processServiceClassification{typeName: "*persistence.CatalogSchema", category: processServiceStateless}
         inventory["service.opentelemetry.prometheus_metrics"] = processServiceClassification{typeName: "*opentelemetry.PrometheusMetrics", category: processServiceStore}
     }
 
@@ -134,7 +133,7 @@ var fourthMajorServiceNameByThirdMajorName = map[string]string{
     "service-example-user-service":                      "service.example.user_service",
     "service.example.archive.locker":                    "service.example.archive_locker",
     "service.example.archive.storage":                   "service.example.archive_storage",
-    "service.example.audit.schema":                      "service.example.audit_schema",
+    "service.example.catalog.schema":                    "service.example.catalog_schema",
     "service.example.catalog.journal.repository":        "service.example.catalog_journal_repository",
     "service.example.catalog.journal.service":           "service.example.catalog_journal_service",
     "service.example.catalog.notification.hub":          "service.example.catalog_notification_hub",
@@ -152,7 +151,6 @@ var fourthMajorServiceNameByThirdMajorName = map[string]string{
     "service.example.seeder.currency":                   "service.example.seeder_currency",
     "service.example.seeder.product":                    "service.example.seeder_product",
     "service.example.seeder.user":                       "service.example.seeder_user",
-    "service.example.storage.bucket":                    "service.example.storage_bucket",
     "service.example.user.repository":                   "service.example.user_repository",
     "service.example.user.session.repository":           "service.example.user_session_repository",
     "service.http.request.context":                      "service.http.request_context",

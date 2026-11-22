@@ -38,26 +38,14 @@ func MustGetCurrencyRepository(ctx context.Context, resolver melodycontainercont
     return melodycontainer.MustFromResolver[CurrencyRepository](ctx, resolver, ServiceCurrencyRepository)
 }
 
-/* NewCurrencyRepository answers the database-backed repository when a connection is configured and the in-memory one otherwise; the generated wiring fills it from the container, and the storage handle carries the choice. The migration set is applied and the table seeded on the way out. */
+/* NewCurrencyRepository answers the database-backed repository when a connection is configured and the in-memory one otherwise; the generated wiring fills it from the container, and the storage handle carries the choice. It performs no query: the catalogue schema it takes is the proof that the migration set, the trail's tables and the seeds are in. */
 //melody:service ServiceCurrencyRepository
-func NewCurrencyRepository(storage *persistence.CatalogStorage) (CurrencyRepository, error) {
+func NewCurrencyRepository(storage *persistence.CatalogStorage, catalogSchema *persistence.CatalogSchema) (CurrencyRepository, error) {
     if false == storage.IsPersistent() {
         return newInMemoryCurrencyRepository(), nil
     }
 
-    migrateErr := migration.EnsureMigrated(context.Background(), storage.Database())
-    if nil != migrateErr {
-        return nil, migrateErr
-    }
-
-    repositoryInstance := newBunCurrencyRepository(storage.Database())
-
-    seedErr := repositoryInstance.seedIfEmpty(context.Background())
-    if nil != seedErr {
-        return nil, seedErr
-    }
-
-    return repositoryInstance, nil
+    return newBunCurrencyRepository(storage.Database()), nil
 }
 
 /* validateCurrency reports the first field the currency fails on, shared by both implementations so they refuse with the same words. */

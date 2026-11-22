@@ -22,7 +22,7 @@ func TestSessionsPastCap_AnswersEverySessionButTheNewestCapMinusOne(t *testing.T
 }
 
 func TestUserSessionRepositoryAdmit_RefusesAnAdmissionWithoutAccountOrSession(t *testing.T) {
-    repositoryInstance, newErr := NewUserSessionRepository(persistence.NewCatalogStorage(nil))
+    repositoryInstance, newErr := NewUserSessionRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
     if nil != newErr {
         t.Fatalf("new session index: %v", newErr)
     }

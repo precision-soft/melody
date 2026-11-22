@@ -47,15 +47,15 @@ func productListRuntimeOver(t *testing.T, requestContext context.Context, journa
 
     storage := persistence.NewCatalogStorage(nil)
 
-    productRepository, productErr := repository.NewProductRepository(storage)
+    productRepository, productErr := repository.NewProductRepository(storage, &persistence.CatalogSchema{})
     if nil != productErr {
         t.Fatalf("build the product repository: %v", productErr)
     }
-    categoryRepository, categoryErr := repository.NewCategoryRepository(storage)
+    categoryRepository, categoryErr := repository.NewCategoryRepository(storage, &persistence.CatalogSchema{})
     if nil != categoryErr {
         t.Fatalf("build the category repository: %v", categoryErr)
     }
-    currencyRepository, currencyErr := repository.NewCurrencyRepository(storage)
+    currencyRepository, currencyErr := repository.NewCurrencyRepository(storage, &persistence.CatalogSchema{})
     if nil != currencyErr {
         t.Fatalf("build the currency repository: %v", currencyErr)
     }

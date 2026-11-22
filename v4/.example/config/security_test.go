@@ -285,7 +285,7 @@ func TestRegisterSecurity_TheDeviceFirewallHonoursATokenOnlyWhileItsAccountExist
             storage = storage.WithAccountSeed()
         }
 
-        userRepository, repositoryErr := repository.NewUserRepository(storage)
+        userRepository, repositoryErr := repository.NewUserRepository(storage, &persistence.CatalogSchema{})
         if nil != repositoryErr {
             t.Fatalf("new user repository: %v", repositoryErr)
         }

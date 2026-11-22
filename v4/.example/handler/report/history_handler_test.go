@@ -157,12 +157,12 @@ func historyDoorOver(t *testing.T, cacheInstance melodycachecontract.Cache) map[
     clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.October, 6, 10, 30, 0, 0, time.UTC))
     catalogStorage := persistence.NewCatalogStorage(nil)
 
-    productRepository, productRepositoryErr := repository.NewProductRepository(catalogStorage)
+    productRepository, productRepositoryErr := repository.NewProductRepository(catalogStorage, &persistence.CatalogSchema{})
     if nil != productRepositoryErr {
         t.Fatalf("product repository: %v", productRepositoryErr)
     }
 
-    journalRepository, journalRepositoryErr := repository.NewCatalogJournalRepository(catalogStorage)
+    journalRepository, journalRepositoryErr := repository.NewCatalogJournalRepository(catalogStorage, &persistence.CatalogSchema{})
     if nil != journalRepositoryErr {
         t.Fatalf("journal repository: %v", journalRepositoryErr)
     }

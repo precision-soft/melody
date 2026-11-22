@@ -51,7 +51,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
     )
 
     instance.registerCatalogStorageService(registrar)
-    instance.registerAuditSchemaService(registrar)
+    instance.registerCatalogSchemaService(registrar)
     instance.registerArchiveStorageService(registrar)
     registerCatalogJournalSourceService(registrar)
     repository.RegisterSeeders(registrar)
@@ -257,23 +257,23 @@ func (instance *Module) registerCatalogStorageService(registrar melodyapplicatio
     )
 }
 
-/* registerAuditSchemaService creates the audit trail's tables at boot, under the boot runtime, so a schema that cannot be created fails the boot rather than the first audited write. No service built at boot before it resolves a repository, whose constructor seeds audited rows over these tables; requests and commands run after the boot. */
-func (instance *Module) registerAuditSchemaService(registrar melodyapplicationcontract.ServiceRegistrar) {
+/* registerCatalogSchemaService publishes the proof that the catalogue is ready: the migration set, the trail's tables and the seeds, under the runtime of whoever resolves it. Every repository over the catalogue takes it, so it sits on the path of every catalogue read and write. An http process builds it at boot, a cli process at the first command that reads the catalogue; when the database does not answer, the http boot goes on with a boot warning, requests answer 503 and the first one after the database is back prepares the catalogue. */
+func (instance *Module) registerCatalogSchemaService(registrar melodyapplicationcontract.ServiceRegistrar) {
     registrar.RegisterService(
-        persistence.ServiceAuditSchema,
-        func(resolver melodycontainercontract.Resolver) (*persistence.AuditSchema, error) {
+        persistence.ServiceCatalogSchema,
+        func(resolver melodycontainercontract.Resolver) (*persistence.CatalogSchema, error) {
             storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](resolver.Runtime().Context(), resolver, persistence.ServiceCatalogStorage)
             if nil != storageErr {
                 return nil, storageErr
             }
 
-            if schemaErr := storage.EnsureAuditSchema(resolver.Runtime()); nil != schemaErr {
-                return nil, schemaErr
+            if prepareErr := repository.PrepareCatalog(resolver.Runtime(), storage); nil != prepareErr {
+                return nil, prepareErr
             }
 
-            return &persistence.AuditSchema{}, nil
+            return &persistence.CatalogSchema{}, nil
         },
-        melodycontainer.RegisterOptions{BuiltAtBoot: true, BootFailure: melodycontainer.BootFailureFailsBoot},
+        melodycontainer.RegisterOptions{BuiltAtBoot: true, BootFailure: melodycontainer.BootFailureWarns},
     )
 }
 

@@ -3,6 +3,8 @@ package config
 import (
     "bytes"
     "errors"
+    "os"
+    "path/filepath"
     "strings"
     "testing"
 
@@ -103,9 +105,15 @@ func TestBuiltAtBoot_ACurrentKeyNotBoundToTheSignerApplicationFailsTheBoot(t *te
 func buildServicesBuiltAtBoot(t *testing.T, containerInstance melodycontainercontract.Container) error {
     t.Helper()
 
-    names, _ := builtAtBootNames(containerInstance)
+    names, modes := builtAtBootNames(containerInstance)
     if 2 != len(names) || subscriber.ServiceCatalogNotificationHub != names[0] || ServiceInternalAuthSigner != names[1] {
         t.Fatalf("expected the hub and the signer registered to be built at boot, got %v", names)
+    }
+
+    for _, serviceName := range names {
+        if melodycontainer.BootFailureFailsBoot != modes[serviceName] {
+            t.Fatalf("expected %s to fail the boot, a refusal being configuration, got %s", serviceName, modes[serviceName])
+        }
     }
 
     bootRuntime, finish := melodyruntime.NewBoot(t.Context(), containerInstance)
@@ -165,5 +173,41 @@ func TestBuiltAtBoot_TheInternalAuthSignerIsJudgedUnderTheBootRuntime(t *testing
         if melodycontainercontract.KindBoot != kind {
             t.Fatalf("expected every read under the boot runtime, got %s", kind)
         }
+    }
+}
+
+/* every service the example builds at boot states its mode, the default included, so the composition root reads as the document of the option */
+func TestBuiltAtBoot_EveryRegistrationOfTheCompositionRootStatesItsMode(t *testing.T) {
+    sourcePaths, globErr := filepath.Glob("*.go")
+    if nil != globErr {
+        t.Fatalf("glob: %v", globErr)
+    }
+
+    stated := 0
+    for _, sourcePath := range sourcePaths {
+        if true == strings.HasSuffix(sourcePath, "_test.go") {
+            continue
+        }
+
+        source, readErr := os.ReadFile(sourcePath)
+        if nil != readErr {
+            t.Fatalf("read %s: %v", sourcePath, readErr)
+        }
+
+        for _, line := range strings.Split(string(source), "\n") {
+            if false == strings.Contains(line, "BuiltAtBoot: true") {
+                continue
+            }
+
+            if false == strings.Contains(line, "BootFailure: melodycontainer.BootFailure") {
+                t.Fatalf("%s: expected the boot failure mode stated beside BuiltAtBoot, got %q", sourcePath, strings.TrimSpace(line))
+            }
+
+            stated = stated + 1
+        }
+    }
+
+    if 4 != stated {
+        t.Fatalf("expected the hub, the signer, the database registry and the catalogue schema, got %d registrations", stated)
     }
 }

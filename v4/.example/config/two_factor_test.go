@@ -57,7 +57,10 @@ func TestRegisterTwoFactorStoreService_ARefusedMigrationIsAskedAgainAtTheNextRes
         melodycontainer.RegisterOptions{TypeRegistrationDisabled: true, Closer: registryOwnedDatabaseCloser},
     )
 
-    moduleInstance := &Module{processContext: context.Background(), catalogueWired: true}
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.catalogueWired = true
+    moduleInstance.registerCatalogStorageService(containerRegistrar{Container: containerInstance})
+    moduleInstance.registerCatalogSchemaService(containerRegistrar{Container: containerInstance})
     moduleInstance.registerTwoFactorStoreService(containerRegistrar{Container: containerInstance})
 
     attemptsBefore := int64(0)

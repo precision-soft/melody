@@ -83,10 +83,7 @@ func Configure(ctx context.Context, app *melodyapplication.Application, applicat
     app.RegisterModule(melodywebsocket.NewModule(moduleInstance.websocketModuleConfig()))
 
     if nil != moduleInstance.storageClient {
-        app.RegisterModule(melodyawss3.NewModule(melodyawss3.ModuleConfig{
-            Client: moduleInstance.storageClient,
-            Bucket: moduleInstance.storageBucket,
-        }))
+        app.RegisterModule(melodyawss3.NewModule(moduleInstance.storageModuleConfig()))
     }
 
     if nil != moduleInstance.redisClient {

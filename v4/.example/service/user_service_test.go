@@ -31,7 +31,7 @@ func TestUserService_FindByUsernameAnswersANameTheTableCannotHoldAsAbsent(t *tes
     manager := melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
     t.Cleanup(func() { _ = manager.CloseWithContext(context.Background()) })
 
-    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
+    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed(), &persistence.CatalogSchema{})
     if nil != repositoryErr {
         t.Fatalf("unexpected repository error: %v", repositoryErr)
     }
@@ -60,7 +60,7 @@ func TestUserService_AuthenticateAdmitsTheRightPasswordRefusesAWrongOneAndPaysFo
     manager := melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
     t.Cleanup(func() { _ = manager.CloseWithContext(context.Background()) })
 
-    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
+    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed(), &persistence.CatalogSchema{})
     if nil != repositoryErr {
         t.Fatalf("unexpected repository error: %v", repositoryErr)
     }
@@ -93,7 +93,7 @@ func TestUserService_AuthenticateReadsTheAccountPastTheCache(t *testing.T) {
     manager := melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
     t.Cleanup(func() { _ = manager.CloseWithContext(context.Background()) })
 
-    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
+    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed(), &persistence.CatalogSchema{})
     if nil != repositoryErr {
         t.Fatalf("unexpected repository error: %v", repositoryErr)
     }
@@ -145,7 +145,7 @@ func TestUserService_AuthenticateAnswersANameTheTableCannotHoldBeforeTheReposito
 }
 
 func TestUserService_GrantRoleTellsTheListeners(t *testing.T) {
-    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
+    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed(), &persistence.CatalogSchema{})
     if nil != repositoryErr {
         t.Fatalf("unexpected repository error: %v", repositoryErr)
     }
@@ -202,7 +202,7 @@ func (instance *refusingOnceDispatcher) DispatchName(runtimeInstance melodyconta
 }
 
 func TestUserService_GrantRoleHealsTheCacheWhenTheRoleIsAlreadyHeld(t *testing.T) {
-    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
+    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed(), &persistence.CatalogSchema{})
     if nil != repositoryErr {
         t.Fatalf("unexpected repository error: %v", repositoryErr)
     }
@@ -251,7 +251,7 @@ func TestUserService_GrantRoleHealsTheCacheWhenTheRoleIsAlreadyHeld(t *testing.T
 }
 
 func TestUserService_GrantRoleAlreadyHeldDropsTheListEntryToo(t *testing.T) {
-    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
+    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed(), &persistence.CatalogSchema{})
     if nil != repositoryErr {
         t.Fatalf("unexpected repository error: %v", repositoryErr)
     }
@@ -293,7 +293,7 @@ func TestUserService_GrantRoleAlreadyHeldDropsTheListEntryToo(t *testing.T) {
 }
 
 func TestUserService_UpdateStoresACopyOfTheCallersRoleList(t *testing.T) {
-    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
+    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed(), &persistence.CatalogSchema{})
     if nil != repositoryErr {
         t.Fatalf("unexpected repository error: %v", repositoryErr)
     }
@@ -341,7 +341,7 @@ func (instance *paddingUserRepository) FindById(ctx context.Context, id string) 
 }
 
 func TestFindByIdAnswersARowFoundForAnotherSpellingAsAbsentAndCachesNothing(t *testing.T) {
-    inMemory, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
+    inMemory, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed(), &persistence.CatalogSchema{})
     if nil != repositoryErr {
         t.Fatalf("unexpected repository error: %v", repositoryErr)
     }

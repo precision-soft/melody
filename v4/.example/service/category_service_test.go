@@ -24,7 +24,7 @@ func (instance *paddingCategoryRepository) FindById(ctx context.Context, id stri
 }
 
 func TestCategoryService_FindByIdAnswersAPaddedIdentifierAsAbsentAndCachesNothingUnderIt(t *testing.T) {
-    categoryRepository, categoryErr := repository.NewCategoryRepository(persistence.NewCatalogStorage(nil))
+    categoryRepository, categoryErr := repository.NewCategoryRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
     if nil != categoryErr {
         t.Fatalf("build the category repository: %v", categoryErr)
     }
@@ -43,7 +43,7 @@ func TestCategoryService_FindByIdAnswersAPaddedIdentifierAsAbsentAndCachesNothin
 func TestCategoryService_RefusesToDeleteACategoryAProductSitsIn(t *testing.T) {
     _, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
 
-    categoryRepository, categoryErr := repository.NewCategoryRepository(persistence.NewCatalogStorage(nil))
+    categoryRepository, categoryErr := repository.NewCategoryRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
     if nil != categoryErr {
         t.Fatalf("build the category repository: %v", categoryErr)
     }
@@ -107,12 +107,12 @@ func TestCategoryService_ARefusedUpdateLeavesTheStoredEntityUntouched(t *testing
     catalogue := newCatalogueUnderTest(t, false)
     storage := persistence.NewCatalogStorage(nil)
 
-    categoryRepository, categoryRepositoryErr := repository.NewCategoryRepository(storage)
+    categoryRepository, categoryRepositoryErr := repository.NewCategoryRepository(storage, &persistence.CatalogSchema{})
     if nil != categoryRepositoryErr {
         t.Fatalf("build the category repository: %v", categoryRepositoryErr)
     }
 
-    productRepository, productRepositoryErr := repository.NewProductRepository(storage)
+    productRepository, productRepositoryErr := repository.NewProductRepository(storage, &persistence.CatalogSchema{})
     if nil != productRepositoryErr {
         t.Fatalf("build the product repository: %v", productRepositoryErr)
     }

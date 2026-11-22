@@ -52,7 +52,7 @@ func TestNextUserIdContinuesTheSeededNumbering(t *testing.T) {
 
 /* the example's accounts sign in with their names as passwords: a directory on a handle nobody marked starts empty, in memory and in the database, and one marked by the development composition root starts from the three */
 func TestNewUserRepository_SeedsTheAccountsOnlyOnAMarkedStorage(t *testing.T) {
-    unmarked, unmarkedErr := NewUserRepository(persistence.NewCatalogStorage(nil))
+    unmarked, unmarkedErr := NewUserRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
     if nil != unmarkedErr {
         t.Fatalf("build the unmarked repository: %v", unmarkedErr)
     }
@@ -61,7 +61,7 @@ func TestNewUserRepository_SeedsTheAccountsOnlyOnAMarkedStorage(t *testing.T) {
         t.Fatalf("expected an unmarked in-memory directory empty, got %d accounts", len(users))
     }
 
-    marked, markedErr := NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
+    marked, markedErr := NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed(), &persistence.CatalogSchema{})
     if nil != markedErr {
         t.Fatalf("build the marked repository: %v", markedErr)
     }

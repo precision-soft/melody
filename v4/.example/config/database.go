@@ -79,7 +79,7 @@ func (instance *Module) catalogProviderDefinition() (melodybunorm.ProviderDefini
         port = "3306"
     }
 
-    /* the catalogue is opened by the first request or command that reads it, never at boot, so its retry budget is request-sized; only transient errors (connection refused) retry, so a real misconfiguration still fails fast, and a database not yet up is refused by name and opened again by the next resolution. */
+    /* the catalogue is opened at boot by an http process, through the catalogue schema, and by the first read otherwise, so its retry budget is request-sized; only transient errors (connection refused) retry, so a real misconfiguration still fails fast, and a database not yet up is refused by name and opened again by the next resolution. */
     provider := melodymysql.NewProvider(melodymysql.ProviderConfig{
         Retry: melodymysql.RetryConfig{
             MaxAttempts: bound.Of(lazyOpenAttempts),

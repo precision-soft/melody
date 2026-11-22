@@ -6,7 +6,6 @@ import (
     "strings"
 
     "github.com/precision-soft/melody/v4/.example/entity"
-    "github.com/precision-soft/melody/v4/.example/migration"
     "github.com/precision-soft/melody/v4/.example/persistence"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -42,35 +41,14 @@ func MustGetProductRepository(ctx context.Context, resolver melodycontainercontr
     return melodycontainer.MustFromResolver[ProductRepository](ctx, resolver, ServiceProductRepository)
 }
 
-/* NewProductRepository answers the database-backed repository when a connection is configured and the in-memory one otherwise; the generated wiring fills it from the container, and the storage handle carries the choice. The migration set is applied and the table seeded on the way out, over the trail's own tables, which the boot created, since an audited write is one transaction over both. */
+/* NewProductRepository answers the database-backed repository when a connection is configured and the in-memory one otherwise; the generated wiring fills it from the container, and the storage handle carries the choice. It performs no query: the catalogue schema it takes is the proof that the migration set, the trail's tables and the seeds are in. */
 //melody:service ServiceProductRepository
-func NewProductRepository(storage *persistence.CatalogStorage) (ProductRepository, error) {
+func NewProductRepository(storage *persistence.CatalogStorage, catalogSchema *persistence.CatalogSchema) (ProductRepository, error) {
     if false == storage.IsPersistent() {
         return newInMemoryProductRepository(), nil
     }
 
-    migrateErr := migration.EnsureMigrated(context.Background(), storage.Database())
-    if nil != migrateErr {
-        return nil, migrateErr
-    }
-
-    /* a product row references its category and its currency by foreign key, so a resolution that reaches an emptied catalogue first seeds the two nomenclatures it names; both seeds change nothing over tables that hold rows */
-    if seedErr := newBunCategoryRepository(storage.Database()).seedIfEmpty(context.Background()); nil != seedErr {
-        return nil, seedErr
-    }
-
-    if seedErr := newBunCurrencyRepository(storage.Database()).seedIfEmpty(context.Background()); nil != seedErr {
-        return nil, seedErr
-    }
-
-    repositoryInstance := newBunProductRepository(storage)
-
-    seedErr := repositoryInstance.seedIfEmpty(context.Background())
-    if nil != seedErr {
-        return nil, seedErr
-    }
-
-    return repositoryInstance, nil
+    return newBunProductRepository(storage), nil
 }
 
 /* validateProduct reports the first field the product fails on, shared by both implementations so they refuse with the same words. */
