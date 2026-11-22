@@ -45,6 +45,9 @@ func (instance *capturingEventDispatcher) RemoveListener(registration eventcontr
     return false
 }
 
+func (instance *capturingEventDispatcher) DeclareEvent(eventName string, config eventcontract.EventConfig) {
+}
+
 func (instance *capturingEventDispatcher) AddSubscriber(subscriber eventcontract.EventSubscriber) eventcontract.SubscriberRegistration {
     return eventcontract.SubscriberRegistration{}
 }
@@ -90,6 +93,10 @@ func (instance *payloadEvent) StopPropagation() {
 
 func (instance *payloadEvent) IsPropagationStopped() bool {
     return false
+}
+
+func (instance *payloadEvent) PriorFailure() error {
+    return nil
 }
 
 func captureResponseNormalizerListener(t *testing.T) eventcontract.EventListener {

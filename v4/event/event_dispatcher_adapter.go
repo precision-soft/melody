@@ -27,6 +27,7 @@ func NewEventDispatcherAdapter(
     return &EventDispatcherAdapter{
         eventDispatcher:       eventDispatcher,
         listenerRegistrations: make(map[string][]adapterListenerRegistration),
+        eventConfigs:          make(map[string]eventConfigEntry),
         subscribers:           newSubscriberBookkeeping[eventcontract.ListenerRegistration](),
     }
 }
@@ -36,6 +37,7 @@ type EventDispatcherAdapter struct {
     mutex                 sync.RWMutex
     eventDispatcher       eventcontract.EventDispatcher
     listenerRegistrations map[string][]adapterListenerRegistration
+    eventConfigs          map[string]eventConfigEntry
     subscribers           *subscriberBookkeeping[eventcontract.ListenerRegistration]
 }
 
@@ -65,6 +67,18 @@ func (instance *EventDispatcherAdapter) AddListener(eventName string, listener e
         eventcontract.RegisteredListenerSourceListener,
         "-",
     )
+}
+
+/* DeclareEvent forwards to the wrapped dispatcher, which validates the declaration and refuses a second one, and records what it declared for inspection. */
+func (instance *EventDispatcherAdapter) DeclareEvent(eventName string, config eventcontract.EventConfig) {
+    instance.eventDispatcher.DeclareEvent(eventName, config)
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.eventConfigs[eventName] = eventConfigEntry{
+        runAfterFailureTags: copyTags(config.RunAfterFailureTags),
+    }
 }
 
 func (instance *EventDispatcherAdapter) RemoveListener(registration eventcontract.ListenerRegistration) bool {
@@ -158,9 +172,15 @@ func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.Regis
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
 
-    eventNameList := make([]string, 0, len(instance.listenerRegistrations))
+    eventNameList := make([]string, 0, len(instance.listenerRegistrations)+len(instance.eventConfigs))
     for eventName := range instance.listenerRegistrations {
         eventNameList = append(eventNameList, eventName)
+    }
+
+    for eventName := range instance.eventConfigs {
+        if _, hasListeners := instance.listenerRegistrations[eventName]; false == hasListeners {
+            eventNameList = append(eventNameList, eventName)
+        }
     }
 
     sort.Strings(eventNameList)
@@ -170,6 +190,7 @@ func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.Regis
     for _, eventName := range eventNameList {
         /* a copy is sorted, since the map-owned slice is shared by concurrent readers under RLock */
         registeredSlice := instance.listenerRegistrations[eventName]
+        eventConfig, declared := instance.eventConfigs[eventName]
         listenerList := make([]adapterListenerRegistration, len(registeredSlice))
         copy(listenerList, registeredSlice)
 
@@ -209,6 +230,8 @@ func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.Regis
                     ListenerName:             listenerName,
                     Required:                 entry.config.Required,
                     MaySkipRequiredListeners: entry.config.MaySkipRequiredListeners,
+                    Tags:                     copyTags(entry.config.Tags),
+                    RunsAfterFailure:         runsAfterFailure(entry.config.Tags, eventConfig.runAfterFailureTags),
                 },
             )
         }
@@ -216,8 +239,10 @@ func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.Regis
         registeredEvents = append(
             registeredEvents,
             eventcontract.RegisteredEvent{
-                EventName: eventName,
-                Listeners: registeredListenerList,
+                EventName:           eventName,
+                Declared:            declared,
+                RunAfterFailureTags: copyTags(eventConfig.runAfterFailureTags),
+                Listeners:           registeredListenerList,
             },
         )
     }
@@ -252,6 +277,9 @@ func (instance *EventDispatcherAdapter) recordListenerRegistration(
     source string,
     owner string,
 ) {
+    /* the tags are the adapter's own copy, so a caller's later write does not reach inspection */
+    config.Tags = copyTags(config.Tags)
+
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 

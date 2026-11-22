@@ -626,6 +626,116 @@ func TestKernel_AKernelControllerResponseSetBesideAFailureIsDroppedForTheErrorPa
     }
 }
 
+func TestKernel_AnUnloggedFailureJoinedBesideALoggedPanicReachesTheJournal(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        "/joined",
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "handled"), nil
+        },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
+    )
+
+    recordingLogger := &errorContextRecordingLogger{}
+
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
+
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
+
+    dispatcher.DeclareEvent(kernelcontract.EventKernelRequest, eventcontract.EventConfig{RunAfterFailureTags: []string{"audit"}})
+
+    dispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+            panic("first listener panicked")
+        },
+        eventcontract.ListenerConfig{Priority: 50},
+    )
+
+    dispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+            return errors.New("second listener failed unlogged")
+        },
+        eventcontract.ListenerConfig{Priority: 20, Tags: []string{"audit"}},
+    )
+
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/joined", nil)
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the fail-closed 500, got %d", recorder.Code)
+    }
+
+    recordingLogger.mutex.Lock()
+    journal := fmt.Sprintf("%v %v", recordingLogger.errorMessages, recordingLogger.errorContexts)
+    recordingLogger.mutex.Unlock()
+
+    if false == strings.Contains(journal, "second listener failed unlogged") {
+        t.Fatalf("expected the unlogged failure joined beside the logged panic to reach the journal, got %s", journal)
+    }
+}
+
+func TestKernel_AJoinWhoseEveryFailureIsLoggedWritesNoSecondRecord(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        "/joined",
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "handled"), nil
+        },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
+    )
+
+    recordingLogger := &errorContextRecordingLogger{}
+
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
+
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
+
+    dispatcher.DeclareEvent(kernelcontract.EventKernelRequest, eventcontract.EventConfig{RunAfterFailureTags: []string{"audit"}})
+
+    dispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+            panic("first listener panicked")
+        },
+        eventcontract.ListenerConfig{Priority: 50},
+    )
+
+    dispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+            return exception.MarkLogged(exception.NewError("second listener failed logged", nil, nil))
+        },
+        eventcontract.ListenerConfig{Priority: 20, Tags: []string{"audit"}},
+    )
+
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
+
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/joined", nil))
+
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the fail-closed 500, got %d", recorder.Code)
+    }
+
+    recordingLogger.mutex.Lock()
+    defer recordingLogger.mutex.Unlock()
+
+    for _, message := range recordingLogger.errorMessages {
+        if "kernel request error" == message {
+            t.Fatalf("expected no dispatch record when every joined failure is logged, got %v", recordingLogger.errorMessages)
+        }
+    }
+}
+
 func TestKernel_KernelRequestStoppingListenerThatAnswersStillFailsClosedBeforeARequiredListener(t *testing.T) {
     router := NewRouter()
     router.Handle(

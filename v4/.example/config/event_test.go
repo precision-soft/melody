@@ -104,7 +104,7 @@ func TestRegisterSubscribers_InstallsTheTwoFactorEnrollmentReleaseWhenThereIsADa
     }
 }
 
-/* the composition root registers the cache subscriber before the release, and the dispatcher ends a dispatch at the first listener that fails: at equal priority the release would run behind a cache listener whose backend is gone and never run, leaving the row for the next holder of the identifier. Read off the dispatcher the root fills: on the deletion event the release outranks the cache subscriber's listener, whatever order they are registered in. */
+/* the composition root registers the cache subscriber before the release, so the order the two run in when nothing fails is set by priority: read off the dispatcher the root fills, on the deletion event the release outranks the cache subscriber's listener, whatever order they are registered in. */
 func TestRegisterSubscribers_TheEnrollmentReleaseOutranksTheCacheClearOnUserDeleted(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.catalogueWired = true
@@ -135,6 +135,39 @@ func TestRegisterSubscribers_TheEnrollmentReleaseOutranksTheCacheClearOnUserDele
     if releasePriority <= cachePriority {
         t.Fatalf("expected the release (%d) to outrank the cache clear (%d) on %s", releasePriority, cachePriority, event.UserDeletedEventName)
     }
+}
+
+/* the composition root declares the deletion's cleanup tags, and the three listeners of the deletion carry one of them, so each runs after a failure ahead of it; read off the dispatcher the root fills */
+func TestRegisterSubscribers_DeclaresTheDeletionsCleanupTags(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.catalogueWired = true
+
+    eventDispatcher := melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()})
+    moduleInstance.registerSubscribers(eventDispatcher)
+
+    for _, registered := range eventDispatcher.RegisteredEvents() {
+        if event.UserDeletedEventName != registered.EventName {
+            continue
+        }
+
+        if false == registered.Declared || "release,cache" != strings.Join(registered.RunAfterFailureTags, ",") {
+            t.Fatalf("expected %s declared with the release and cache tags, got %+v", event.UserDeletedEventName, registered)
+        }
+
+        if 3 != len(registered.Listeners) {
+            t.Fatalf("expected the three listeners of the deletion, got %+v", registered.Listeners)
+        }
+
+        for _, listener := range registered.Listeners {
+            if false == listener.RunsAfterFailure {
+                t.Fatalf("expected every listener of the deletion to run after a failure, got %+v", listener)
+            }
+        }
+
+        return
+    }
+
+    t.Fatalf("expected %s among the registered events", event.UserDeletedEventName)
 }
 
 /* the budget is the switch's number of requests per HOUR: the limiter admits exactly that many from one

@@ -78,17 +78,34 @@ func dispatchProductCreated(
 
 ## The first failure ends the dispatch
 
-A dispatch runs the listeners of the event in priority order until one of them fails or stops propagation. A listener that fails — a returned error or a recovered panic alike — ends the dispatch: no listener behind it runs, and the answer is that failure itself, so its type reaches the caller unchanged, reachable through `errors.Is` and `errors.As`. A listener that stops propagation ends it too, and the answer is nil. Either way a required listener behind the end is refused (below). Order is the protection: a listener below a gate that failed — the rate limit listener, the security resolution listener, the access control listener on `kernel.request` — never acts on a request the gate did not judge.
+A dispatch runs the listeners of the event in priority order until one of them fails or stops propagation. A listener that fails — a returned error or a recovered panic alike — ends the dispatch: no listener behind it runs, unless it carries a tag the event declared to run after a failure (below), and the answer is that failure itself, so its type reaches the caller unchanged, reachable through `errors.Is` and `errors.As`. A listener that stops propagation ends it too, and the answer is nil. Either way a required listener behind the end is refused (below). Order is the protection: a listener below a gate that failed — the rate limit listener, the security resolution listener, the access control listener on `kernel.request` — never acts on a request the gate did not judge.
 
 ## Registering a listener
 
-[`eventcontract.ListenerConfig`](../../event/contract/event_dispatcher.go) is what a registration declares, handed to `AddListener`, `InstallFloorListener` and a subscriber's `SubscribedEvent.Config()`: `Priority` (the highest first), `Name` (what inspection and the journal call the listener, the function's qualified name when empty), `Required` and `MaySkipRequiredListeners`. The zero value is priority 0 with nothing declared. `RegisteredEvents` reports what each listener declared.
+[`eventcontract.ListenerConfig`](../../event/contract/event_dispatcher.go) is what a registration declares, handed to `AddListener`, `InstallFloorListener` and a subscriber's `SubscribedEvent.Config()`: `Priority` (the highest first), `Name` (what inspection and the journal call the listener, the function's qualified name when empty), `Required`, `MaySkipRequiredListeners` and `Tags`. The zero value is priority 0 with nothing declared. `RegisteredEvents` reports what each listener declared.
+
+## Tags, and what still runs after a failure
+
+A listener carries tags, `ListenerConfig.Tags`, naming what it is in its event owner's vocabulary (`cache`, `release`, `audit`). The owner of an event name — whoever defines its constant — declares once, through [`EventDispatcher.DeclareEvent(eventName, eventcontract.EventConfig{RunAfterFailureTags})`](../../event/contract/event_dispatcher.go), which tags still run after a failure. Once a listener failed, every listener behind it carrying at least one declared tag runs, in priority order; the others do not. Among those listeners the dispatch runs every one: a tagged listener's failure is joined to the first, and the next tagged listener still runs. The answer is the first failure itself when no tagged listener failed, otherwise the failures joined in run order, the first at index 0, each reachable through `errors.Is` and `errors.As` and through `Unwrap() []error`, the join reading already logged (`exception.IsAlreadyLogged`) only when every failure does, so the caller's record names a failure no one logged beside one that was.
+
+A tagged listener reads what failed through `Event.PriorFailure()`: the first failure, joined with the failures of the tagged listeners that ran before it; nil for every listener of a dispatch nothing failed in, the failed listener included. The dispatcher hands such a listener a view of the caller's event, every write reaching the caller's event and `Dispatch` answering the caller's own value; a listener that type-asserts the event to `*event.Event` rather than reading its payload sees the view's type after a failure. An application's own `Event` answers `PriorFailure() error { return nil }`.
+
+- **Declared once, by the owner.** A second `DeclareEvent` of a name is refused by name, an identical one included, so two owners cannot disagree in silence. Listeners register before or after it; a dispatch reads the declaration standing when it starts. The framework declares none of its own events, so on every framework event the first failure ends the dispatch.
+- **A tag** is non-empty, carries no whitespace or control character and appears once in its list; a malformed one is refused at `AddListener`, `InstallFloorListener`, `DeclareEvent` and `AddSubscriber`, naming `ListenerConfig.Tags` or `EventConfig.RunAfterFailureTags`, a subscriber installing none of its listeners. Tags match exactly, case-sensitive; the slices are copied.
+- **A tag no event declares, and a declared tag no listener carries, are nothing**: the two sides are written by different owners at different times. `RegisteredEvents` reports `Declared`, `RunAfterFailureTags`, each listener's `Tags` and `RunsAfterFailure`, and a declared event with no listener is listed; `debug:events --verbose` renders them.
+- **A deliberate stop runs no tagged listener.** The stop flag is not read once a listener failed: a listener that failed and stopped counts as failed, and a tagged listener's stop does not cancel the tagged listener behind it.
+
+| The listener | Listeners behind it | Tagged listeners behind it | Required listener behind it | Answer |
+|---|---|---|---|---|
+| returns nil | run | run (normal pass) | runs | nil |
+| stops, returns nil | do not run | do not run | `RequiredListenerSkippedError` unless the stopper declared `MaySkipRequiredListeners` | nil or the refusal |
+| fails (error or panic), stopped or not | do not run | run, read `PriorFailure`, failures joined | `RequiredListenerSkippedError` (cause: the join) unless it ran as a tagged listener; opt-out not read | the failure, the join, or the refusal |
 
 ## Required listeners and failing closed
 
 A listener may stop propagation, and the listeners behind it then do not run. That is the point of the mechanism, and it is also a way to skip a listener that was never optional — the security firewall's access-control listener, for instance, which sits on `kernel.request` at priority 20. `ListenerConfig.Required` closes that hole:
 
-- A listener registered with `Required: true` must not be skipped. If another listener stops propagation or fails while a required listener behind it has not run, the dispatch returns an [`event.RequiredListenerSkippedError`](../../event/required_listener_skipped_error.go) instead of completing quietly; the failure travels as that refusal's cause.
+- A listener registered with `Required: true` must not be skipped. If another listener stops propagation or fails while a required listener behind it has not run, the dispatch returns an [`event.RequiredListenerSkippedError`](../../event/required_listener_skipped_error.go) instead of completing quietly; the failures travel as that refusal's cause. A required listener that ran after the failure as a tagged one was not skipped.
 - The explicit opt-out, `MaySkipRequiredListeners: true`, is for a listener that knowingly short-circuits past required listeners. It licenses a stop, never a failure: a listener that fails and stops is refused as any other.
 
 Both default off, so a dispatcher whose listeners declare nothing behaves exactly as it would without the mechanism. The security firewall registers its own access-control listener required, so an application using it is covered with no code change.
@@ -97,7 +114,7 @@ The http kernel is the consumer that acts on the error. On `kernel.request` and 
 
 A listener that means to serve the request without authorization running should be registered below the access-control listener's priority. One that truly must run above it says so with `MaySkipRequiredListeners: true`.
 
-`debug:events --verbose` renders a `required` column, so whether the guarantee is armed can be read off the running application rather than inferred from the wiring code.
+`debug:events --verbose` renders a `required` column, beside the `tags` and `after failure` columns, so whether the guarantee is armed can be read off the running application rather than inferred from the wiring code.
 
 ## A payload that ends the dispatch
 
@@ -112,7 +129,7 @@ A listener receives the event and writes to its payload, and the payload has no 
 - Event names are validated for the empty string only. Whitespace-only names are not normalized by design.
 - Dispatching requires a runtime instance (`Dispatch` / `DispatchName`), because listeners execute in a runtime context.
 - Listener ordering is deterministic: listeners are sorted by priority, and dispatch uses a snapshot of listeners for the duration of the dispatch. A listener registered during a dispatch therefore does not run in that dispatch.
-- **A failing listener ends the dispatch.** The listeners behind it do not run, and the caller receives the failure beside the dispatched event. A listener that only observes — reporting, metrics, an audit trail — journals its own failure and returns nil, so the listeners behind it still run. A release that must happen belongs in the store the entity lives in (a cascade, a transaction), or sits above every listener that may fail.
+- **A failing listener ends the dispatch.** The listeners behind it do not run, and the caller receives the failure beside the dispatched event. A listener that only observes — reporting, metrics, an audit trail — journals its own failure and returns nil, so the listeners behind it still run. A release that must happen belongs in the store the entity lives in (a cascade, a transaction), or carries a tag its event declares to run after a failure.
 - **A listener panic becomes an error.** It is recovered, logged with the panic value, its type and the stack — unless the panic value already reports itself logged —, and answered as the dispatch's failure, ending it as any failure does, so one misbehaving listener does not take the process down. An `*exception.ExitError` is the exception: it is re-raised unchanged, because the exit code belongs to whoever owns the process boundary.
 - **An event is not reusable.** `Dispatch` returns the event object it was given, and propagation, once stopped, stays stopped: dispatching that same object again runs no listener at all. Build a fresh event per dispatch — `DispatchName` does.
 - **`Event` is not safe for concurrent use.** The listeners of one dispatch run in sequence, so each sees the writes of the ones before it; dispatching one event value from two goroutines, or writing to it from a goroutine a listener started, races on the propagation flag.

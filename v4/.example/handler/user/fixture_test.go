@@ -405,6 +405,9 @@ func (instance *silentEventDispatcher) RemoveListener(registration melodyeventco
     return false
 }
 
+func (instance *silentEventDispatcher) DeclareEvent(eventName string, config melodyeventcontract.EventConfig) {
+}
+
 func (instance *silentEventDispatcher) AddSubscriber(subscriber melodyeventcontract.EventSubscriber) melodyeventcontract.SubscriberRegistration {
     return melodyeventcontract.SubscriberRegistration{}
 }

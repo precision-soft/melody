@@ -10,6 +10,8 @@ import (
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
+    melodylogging "github.com/precision-soft/melody/v4/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
 type UserEventSubscriber struct{}
@@ -36,7 +38,7 @@ func (instance *UserEventSubscriber) SubscribedEvents() map[string][]melodyevent
             melodyevent.NewSubscribedEvent(instance.onUserUpdated(), melodyeventcontract.ListenerConfig{}),
         },
         event.UserDeletedEventName: {
-            melodyevent.NewSubscribedEvent(instance.onUserDeleted(), melodyeventcontract.ListenerConfig{}),
+            melodyevent.NewSubscribedEvent(instance.onUserDeleted(), melodyeventcontract.ListenerConfig{Tags: []string{event.UserDeletedTagCache}}),
         },
     }
 }
@@ -160,6 +162,17 @@ func (instance *UserEventSubscriber) onUserDeleted() melodyeventcontract.EventLi
         listDeleteErr := detachedCache.Delete(service.CacheKeyUserList)
         if nil != listDeleteErr {
             return listDeleteErr
+        }
+
+        /* the deletion declares the cache tag this listener carries, so it runs behind a failed release too, and the record says so */
+        if nil != eventValue.PriorFailure() {
+            melodylogging.LoggerMustFromRuntime(runtimeInstance).Info(
+                "the deleted account's cache keys were dropped after a failed release",
+                melodyloggingcontract.Context{
+                    "userId":       payloadInstance.UserId(),
+                    "afterFailure": true,
+                },
+            )
         }
 
         return recordCatalogChange(

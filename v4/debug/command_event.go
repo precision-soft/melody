@@ -173,7 +173,7 @@ func (instance *EventCommand) Run(
         if true == option.Verbose {
             verboseBlock := builder.AddBlock(
                 "LISTENERS",
-                []string{"event", "order", "priority", "required", "source", "owner", "listener"},
+                []string{"event", "order", "priority", "required", "tags", "after failure", "source", "owner", "listener"},
             )
 
             for _, registeredEvent := range selectSortedRegisteredEvents(registeredEvents, items, option.Order) {
@@ -191,6 +191,8 @@ func (instance *EventCommand) Run(
                         fmt.Sprintf("%d", index+1),
                         fmt.Sprintf("%d", listener.Priority),
                         renderRequiredListenerMark(listener),
+                        renderListenerTags(listener.Tags),
+                        renderRunsAfterFailureMark(listener),
                         listener.Source,
                         listener.Owner,
                         listener.ListenerName,
@@ -198,6 +200,22 @@ func (instance *EventCommand) Run(
                 }
 
                 verboseBlock.AddRow(output.TableRowSeparatorToken)
+            }
+
+            /* a declaration is listed on its own, so one made for an event no listener carries yet stays visible */
+            declarationItems := collectDeclarationListItems(registeredEvents, items, option.Order)
+            if 0 < len(declarationItems) {
+                declarationBlock := builder.AddBlock(
+                    "DECLARED EVENTS",
+                    []string{"event", "run after failure tags"},
+                )
+
+                for _, declarationItem := range declarationItems {
+                    declarationBlock.AddRow(
+                        declarationItem.EventName,
+                        renderListenerTags(declarationItem.RunAfterFailureTags),
+                    )
+                }
             }
         }
 
@@ -217,6 +235,7 @@ func (instance *EventCommand) Run(
             envelope.Data = eventListVerbosePayload{
                 Events:                  eventsPayload,
                 Listeners:               collectListenerListItems(registeredEvents, items, option.Order),
+                Declarations:            collectDeclarationListItems(registeredEvents, items, option.Order),
                 ServingProcessListeners: instance.deferredListeners(),
             }
         } else {
@@ -282,6 +301,8 @@ func collectListenerListItems(
                     Priority:                 listener.Priority,
                     Required:                 listener.Required,
                     MaySkipRequiredListeners: listener.MaySkipRequiredListeners,
+                    Tags:                     append(make([]string, 0, len(listener.Tags)), listener.Tags...),
+                    RunsAfterFailure:         listener.RunsAfterFailure,
                     Source:                   listener.Source,
                     Owner:                    listener.Owner,
                     ListenerName:             listener.ListenerName,
@@ -291,6 +312,47 @@ func collectListenerListItems(
     }
 
     return listenerItems
+}
+
+/* collectDeclarationListItems answers the declared events of the window, in the listing's order. */
+func collectDeclarationListItems(
+    registeredEvents []eventcontract.RegisteredEvent,
+    items []eventListItem,
+    order output.SortOrder,
+) []eventDeclarationListItem {
+    declarationItems := make([]eventDeclarationListItem, 0)
+
+    for _, registeredEvent := range selectSortedRegisteredEvents(registeredEvents, items, order) {
+        if false == registeredEvent.Declared {
+            continue
+        }
+
+        declarationItems = append(
+            declarationItems,
+            eventDeclarationListItem{
+                EventName:           registeredEvent.EventName,
+                RunAfterFailureTags: append(make([]string, 0, len(registeredEvent.RunAfterFailureTags)), registeredEvent.RunAfterFailureTags...),
+            },
+        )
+    }
+
+    return declarationItems
+}
+
+func renderListenerTags(tags []string) string {
+    if 0 == len(tags) {
+        return "-"
+    }
+
+    return strings.Join(tags, ",")
+}
+
+func renderRunsAfterFailureMark(listener eventcontract.RegisteredListener) string {
+    if true == listener.RunsAfterFailure {
+        return "yes"
+    }
+
+    return "-"
 }
 
 func renderRequiredListenerMark(listener eventcontract.RegisteredListener) string {
@@ -322,15 +384,23 @@ type eventListenerListItem struct {
     Order                    int    `json:"order"`
     Priority                 int    `json:"priority"`
     Required                 bool   `json:"required"`
-    MaySkipRequiredListeners bool   `json:"maySkipRequiredListeners"`
+    MaySkipRequiredListeners bool     `json:"maySkipRequiredListeners"`
+    Tags                     []string `json:"tags"`
+    RunsAfterFailure         bool     `json:"runsAfterFailure"`
     Source                   string `json:"source"`
     Owner                    string `json:"owner"`
     ListenerName             string `json:"listenerName"`
 }
 
+type eventDeclarationListItem struct {
+    EventName           string   `json:"eventName"`
+    RunAfterFailureTags []string `json:"runAfterFailureTags"`
+}
+
 type eventListVerbosePayload struct {
     Events                  output.ListPayload[eventListItem] `json:"events"`
     Listeners               []eventListenerListItem           `json:"listeners"`
+    Declarations            []eventDeclarationListItem        `json:"declarations"`
     ServingProcessListeners []DeferredListener                `json:"servingProcessListeners,omitempty"`
 }
 

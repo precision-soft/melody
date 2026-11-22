@@ -17,7 +17,7 @@ import (
 /* AccessTokenStoreSource answers the token store the device tokens of an account live in, with the revocation epochs the bearer firewall reads beside it */
 type AccessTokenStoreSource func(runtimeInstance melodycontainercontract.Runtime) melodysecuritycontract.EpochRevocableTokenStore
 
-/* AccessTokenReleasePriority is the release's place on the deletion event: above every other listener of it, so the tokens go first. The dispatch ends at the first listener that fails, so the release sits above the others: no outage of the two-factor release or of the cache listener can skip it. The release can fail: a store outage is the listener's error, so the deletion is reported failed with the row already gone, the listeners behind it do not run, and the tokens it left are refused by the device firewall, which honours a token only while its account exists (see deviceAccountEnricher). */
+/* AccessTokenReleasePriority is the release's place on the deletion event: the tokens go first when nothing fails; it is an order, not the protection. The protection is the tag: the event's owner declares release and cache in event.UserDeletedEventConfig, so the release runs even when a listener ahead of it failed, and the two-factor release and the cache drop behind it run after an outage of the token store. The release can fail: the deletion is then reported failed with the row already gone, and the tokens it left are refused by the device firewall, which honours a token only while its account exists (see deviceAccountEnricher). */
 const AccessTokenReleasePriority = 20
 
 /* AccessTokenReleaseSubscriber releases the tokens of an account with the account: a token outlives its account otherwise, and a deleted account keeps its api access until each token expires. It listens where the deletion is published, so every door that deletes an account releases its tokens. Two doors are used, because neither alone is the revocation: DeleteByUser removes the device tokens the store holds, and RevokeBefore at the deletion's instant refuses every token of the account issued up to it — the bearer tokens, which no store holds, and on redis a device token the walk of DeleteByUser missed. A token issued after the deletion is the issue door's to refuse (see the access-token handler). Both run on a runtime detached from the request's cancellation, so a client that hangs up after the row is gone does not leave the account's tokens honoured. */
@@ -32,7 +32,7 @@ func NewAccessTokenReleaseSubscriber(storeSource AccessTokenStoreSource) *Access
 func (instance *AccessTokenReleaseSubscriber) SubscribedEvents() map[string][]melodyeventcontract.SubscribedEvent {
     return map[string][]melodyeventcontract.SubscribedEvent{
         event.UserDeletedEventName: {
-            melodyevent.NewSubscribedEvent(instance.onUserDeleted(), melodyeventcontract.ListenerConfig{Priority: AccessTokenReleasePriority}),
+            melodyevent.NewSubscribedEvent(instance.onUserDeleted(), melodyeventcontract.ListenerConfig{Priority: AccessTokenReleasePriority, Tags: []string{event.UserDeletedTagRelease}}),
         },
     }
 }

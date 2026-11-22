@@ -14,7 +14,7 @@ type SubscriberRegistration struct {
     SubscriberId uint64
 }
 
-/* ListenerConfig is what a registration declares about its listener; the zero value is priority 0, unnamed, neither required nor allowed to skip. */
+/* ListenerConfig is what a registration declares about its listener; the zero value is priority 0, unnamed, untagged, neither required nor allowed to skip. */
 type ListenerConfig struct {
     /* Priority orders the listeners of one event, the highest first; on InstallFloorListener it is the reserved floor. */
     Priority int
@@ -27,6 +27,15 @@ type ListenerConfig struct {
 
     /* MaySkipRequiredListeners lets this listener stop propagation ahead of required listeners without the refusal; it is not read when the listener failed. */
     MaySkipRequiredListeners bool
+
+    /* Tags name what the listener is, in its event owner's vocabulary ("cache", "audit"). An event that declares one of them in EventConfig.RunAfterFailureTags runs this listener after a listener ahead of it failed; on an event that declares none, tags change nothing. A tag is non-empty, carries no whitespace or control character and appears once. */
+    Tags []string
+}
+
+/* EventConfig is what the owner of an event name declares about its dispatch; the zero value declares nothing: the first failure ends the dispatch and no listener behind it runs. */
+type EventConfig struct {
+    /* RunAfterFailureTags are the listener tags that still run once a listener failed: every listener behind the failed one carrying at least one of them runs, in priority order, reads the failure through Event.PriorFailure and has its own failure joined to it. A deliberate stop runs none of them. */
+    RunAfterFailureTags []string
 }
 
 type EventDispatcher interface {
@@ -37,13 +46,16 @@ type EventDispatcher interface {
 
     RemoveListener(registration ListenerRegistration) bool
 
+    /* DeclareEvent records what the owner of the event name declares. An event is declared once: a second declaration of the name is refused by name, whatever it carries, so two owners cannot disagree in silence. Listeners may be registered before or after it; a dispatch reads the declaration standing when it starts. */
+    DeclareEvent(eventName string, config EventConfig)
+
     /* AddSubscriber installs every listener the subscriber declares and answers the registration that owns them; hold it to remove them. A value subscriber is installable, and one subscriber installed twice is two installations. */
     AddSubscriber(subscriber EventSubscriber) SubscriberRegistration
 
     /* RemoveSubscriber removes the listeners installed by one AddSubscriber call and answers how many were removed. An unknown registration removes nothing and answers zero. */
     RemoveSubscriber(registration SubscriberRegistration) int
 
-    /* Dispatch runs the listeners registered for the event's name in descending priority order. The first listener that fails, by a returned error or a recovered panic, ends the dispatch, as a stop does; the answer is that failure, reachable through errors.Is and errors.As, and is the cause of a RequiredListenerSkippedError when the dispatch ended before a required listener ran. */
+    /* Dispatch runs the listeners registered for the event's name in descending priority order. The first listener that fails, by a returned error or a recovered panic, ends the dispatch, as a stop does; only the listeners behind it carrying a tag the event declared in EventConfig.RunAfterFailureTags still run. The answer is that failure, joined in run order with the failures of the tagged listeners, each reachable through errors.Is and errors.As, and is the cause of a RequiredListenerSkippedError when a required listener did not run. */
     Dispatch(runtimeInstance containercontract.Runtime, event Event) (Event, error)
 
     /* DispatchName behaves like Dispatch for an event of the name and payload, stamped with the dispatcher's clock. */

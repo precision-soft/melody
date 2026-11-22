@@ -73,4 +73,9 @@ func (instance *Event) IsPropagationStopped() bool {
     return true == instance.propagationStopped
 }
 
+/* PriorFailure answers nil: the dispatcher hands a listener that runs after a failure a view carrying it, never a write on the event. */
+func (instance *Event) PriorFailure() error {
+    return nil
+}
+
 var _ eventcontract.Event = (*Event)(nil)

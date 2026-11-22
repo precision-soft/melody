@@ -171,6 +171,8 @@ func (instance *emptyNameEvent) StopPropagation() {}
 
 func (instance *emptyNameEvent) IsPropagationStopped() bool { return false }
 
+func (instance *emptyNameEvent) PriorFailure() error { return nil }
+
 func TestEventDispatcher_Dispatch_PanicsOnEmptyName(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
 
@@ -1491,6 +1493,10 @@ func (instance *testPanickingPropagationEvent) StopPropagation() {
 
 func (instance *testPanickingPropagationEvent) IsPropagationStopped() bool {
     panic(instance.panicValue)
+}
+
+func (instance *testPanickingPropagationEvent) PriorFailure() error {
+    return nil
 }
 
 func TestEventDispatcher_DispatchPanic_IsDescribedWithTheEventAndTheStack(t *testing.T) {

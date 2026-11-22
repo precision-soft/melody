@@ -42,6 +42,7 @@ func NewEventDispatcher(config EventDispatcherConfig) *EventDispatcher {
         subscribers:    newSubscriberBookkeeping[subscriberRegistration](),
         clock:          clockInstance,
         priorityFloors: make(map[string]int),
+        eventConfigs:   make(map[string]eventConfigEntry),
     }
 }
 
@@ -54,6 +55,8 @@ type EventDispatcher struct {
     nextListenerId uint64
     /* eventName -> the priority InstallFloorListener reserved; read and written under mutex */
     priorityFloors map[string]int
+    /* eventName -> what DeclareEvent recorded; read and written under mutex */
+    eventConfigs map[string]eventConfigEntry
 }
 
 func (instance *EventDispatcher) AddListener(
@@ -80,6 +83,8 @@ func (instance *EventDispatcher) AddListener(
             ),
         )
     }
+
+    requireTags("ListenerConfig.Tags", eventName, config.Tags)
 
     instance.mutex.Lock()
 
@@ -123,6 +128,7 @@ func (instance *EventDispatcher) appendListenerLocked(
             name:                     config.Name,
             required:                 config.Required,
             maySkipRequiredListeners: config.MaySkipRequiredListeners,
+            tags:                     copyTags(config.Tags),
         },
     )
 
@@ -167,6 +173,8 @@ func (instance *EventDispatcher) InstallFloorListener(
         )
     }
 
+    requireTags("ListenerConfig.Tags", eventName, config.Tags)
+
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -179,6 +187,36 @@ func (instance *EventDispatcher) InstallFloorListener(
     instance.priorityFloors[eventName] = config.Priority
 
     return registration, true
+}
+
+/* DeclareEvent records the owner's declaration of the event name, once: a second declaration is refused whatever it carries, an identical one included. The tags are copied. */
+func (instance *EventDispatcher) DeclareEvent(eventName string, config eventcontract.EventConfig) {
+    if "" == eventName {
+        exception.Panic(
+            exception.NewError("event name is required to declare an event", nil, nil),
+        )
+    }
+
+    requireTags("EventConfig.RunAfterFailureTags", eventName, config.RunAfterFailureTags)
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if _, declared := instance.eventConfigs[eventName]; true == declared {
+        exception.Panic(
+            exception.NewError(
+                "the event is already declared; an event's config has one owner",
+                exceptioncontract.Context{
+                    "eventName": eventName,
+                },
+                nil,
+            ),
+        )
+    }
+
+    instance.eventConfigs[eventName] = eventConfigEntry{
+        runAfterFailureTags: copyTags(config.RunAfterFailureTags),
+    }
 }
 
 func (instance *EventDispatcher) RemoveListener(registration eventcontract.ListenerRegistration) bool {
@@ -247,7 +285,7 @@ func (instance *EventDispatcher) removeSubscriberListener(entry subscriberRegist
     return instance.removeListenerById(entry.eventName, entry.listenerId)
 }
 
-/* Dispatch runs the listeners of the event's name in priority order until propagation is stopped or a listener fails, a returned error and a recovered panic alike: the first failure ends the dispatch. The answer is that failure itself, or the refusal of a required listener the dispatch ended before, with the failure as its cause. */
+/* Dispatch runs the listeners of the event's name in priority order until propagation is stopped or a listener fails, a returned error and a recovered panic alike: the first failure ends the dispatch, and only the listeners behind it carrying a tag the event declared to run after a failure still run, each reading the failure through PriorFailure. The answer is the first failure itself, the failures joined in run order when a tagged listener failed too, the join reading already logged only when every failure does, or the refusal of a required listener that did not run, with the failures as its cause. */
 func (instance *EventDispatcher) Dispatch(runtimeInstance containercontract.Runtime, event eventcontract.Event) (eventcontract.Event, error) {
     return instance.dispatchSafely(
         runtimeInstance,
@@ -285,9 +323,16 @@ func (instance *EventDispatcher) RegisteredEvents() []eventcontract.RegisteredEv
         byId[registration.listenerId] = registration.subscriberType
     })
 
-    eventNameList := make([]string, 0, len(instance.listeners))
+    eventNameList := make([]string, 0, len(instance.listeners)+len(instance.eventConfigs))
     for eventName := range instance.listeners {
         eventNameList = append(eventNameList, eventName)
+    }
+
+    /* a declared event with no listener is listed too, so a declaration is never invisible */
+    for eventName := range instance.eventConfigs {
+        if _, hasListeners := instance.listeners[eventName]; false == hasListeners {
+            eventNameList = append(eventNameList, eventName)
+        }
     }
 
     sort.Strings(eventNameList)
@@ -296,6 +341,7 @@ func (instance *EventDispatcher) RegisteredEvents() []eventcontract.RegisteredEv
 
     for _, eventName := range eventNameList {
         listenerList := instance.listeners[eventName]
+        eventConfig, declared := instance.eventConfigs[eventName]
 
         registeredListenerList := make([]eventcontract.RegisteredListener, 0, len(listenerList))
 
@@ -326,6 +372,8 @@ func (instance *EventDispatcher) RegisteredEvents() []eventcontract.RegisteredEv
                     ListenerName:             listenerName,
                     Required:                 entry.required,
                     MaySkipRequiredListeners: entry.maySkipRequiredListeners,
+                    Tags:                     copyTags(entry.tags),
+                    RunsAfterFailure:         runsAfterFailure(entry.tags, eventConfig.runAfterFailureTags),
                 },
             )
         }
@@ -333,8 +381,10 @@ func (instance *EventDispatcher) RegisteredEvents() []eventcontract.RegisteredEv
         registeredEvents = append(
             registeredEvents,
             eventcontract.RegisteredEvent{
-                EventName: eventName,
-                Listeners: registeredListenerList,
+                EventName:           eventName,
+                Declared:            declared,
+                RunAfterFailureTags: copyTags(eventConfig.runAfterFailureTags),
+                Listeners:           registeredListenerList,
             },
         )
     }
@@ -407,9 +457,11 @@ func (instance *EventDispatcher) dispatch(runtimeInstance containercontract.Runt
         )
     }
 
+    /* the declaration is read beside the listeners under one lock, so a dispatch sees one consistent view; its tags are never written after DeclareEvent, so the slice is shared */
     instance.mutex.RLock()
     listenerList := instance.listeners[eventName]
     listenerListSnapshot := append([]listenerWithPriority(nil), listenerList...)
+    runAfterFailureTags := instance.eventConfigs[eventName].runAfterFailureTags
     instance.mutex.RUnlock()
 
     listenerList = listenerListSnapshot
@@ -464,6 +516,7 @@ func (instance *EventDispatcher) dispatch(runtimeInstance containercontract.Runt
             runtimeInstance,
             eventName,
             eventValue,
+            eventValue,
             entry,
             listenerStartedAt,
             logger,
@@ -486,7 +539,24 @@ func (instance *EventDispatcher) dispatch(runtimeInstance containercontract.Runt
     }
 
     if -1 != failedIndex {
-        skippedListenerList := listenerList[failedIndex+1:]
+        skippedListenerList := make([]listenerWithPriority, 0)
+        ranAfterFailureCount := 0
+
+        /* only the listeners behind the failure, those ahead having run; the stop flag is not read here, since a failure is no deliberate stop and a tagged listener's stop does not cancel the cleanup behind it */
+        for _, entry := range listenerList[failedIndex+1:] {
+            if false == runsAfterFailure(entry.tags, runAfterFailureTags) {
+                skippedListenerList = append(skippedListenerList, entry)
+
+                continue
+            }
+
+            ranAfterFailureCount++
+
+            afterFailureErr := instance.callListenerSafely(runtimeInstance, eventName, eventValue, newAfterFailureEvent(eventValue, joinListenerErrors(failureErrs)), entry, time.Now(), logger)
+            if nil != afterFailureErr {
+                failureErrs = append(failureErrs, afterFailureErr)
+            }
+        }
 
         failureErr := joinListenerErrors(failureErrs)
 
@@ -495,8 +565,9 @@ func (instance *EventDispatcher) dispatch(runtimeInstance containercontract.Runt
                 "event dispatch ended by a listener failure",
                 loggingcontract.Context{
                     "eventName":          eventName,
-                    "failedListenerName": entryNameOf(failedEntry),
-                    "skippedCount":       len(skippedListenerList),
+                    "failedListenerName":   entryNameOf(failedEntry),
+                    "ranAfterFailureCount": ranAfterFailureCount,
+                    "skippedCount":         len(skippedListenerList),
                 },
             )
         }
@@ -645,10 +716,12 @@ func refuseSkippedRequiredListeners(
     return nil
 }
 
+/* callListenerSafely hands the listener listenerEvent, the caller's event or the view a listener running after a failure reads; the records name the caller's event type. */
 func (instance *EventDispatcher) callListenerSafely(
     runtimeInstance containercontract.Runtime,
     eventName string,
     eventValue eventcontract.Event,
+    listenerEvent eventcontract.Event,
     entry listenerWithPriority,
     listenerStartedAt time.Time,
     logger loggingcontract.Logger,
@@ -709,7 +782,7 @@ func (instance *EventDispatcher) callListenerSafely(
         returnedErr = exceptionErr
     }()
 
-    listenerErr := listener(runtimeInstance, eventValue)
+    listenerErr := listener(runtimeInstance, listenerEvent)
 
     /* the test reads through the interface, since a typed-nil error from a listener reports success, and reading it as a failure would fail the request closed */
     if true == internal.IsNilInterface(listenerErr) {
@@ -794,6 +867,11 @@ type listenerWithPriority struct {
     name                     string
     required                 bool
     maySkipRequiredListeners bool
+    tags                     []string
+}
+
+type eventConfigEntry struct {
+    runAfterFailureTags []string
 }
 
 type subscriberRegistration struct {
@@ -916,12 +994,16 @@ func planSubscriberRegistrations(subscriber eventcontract.EventSubscriber) []pla
                 )
             }
 
+            config := subscribedEvent.Config()
+
+            requireTags("ListenerConfig.Tags", eventName, config.Tags)
+
             plannedList = append(
                 plannedList,
                 plannedSubscriberRegistration{
                     eventName: eventName,
                     listener:  listener,
-                    config:    subscribedEvent.Config(),
+                    config:    config,
                 },
             )
         }

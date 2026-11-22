@@ -540,8 +540,8 @@ func TestEventCommand_VerboseListsListenersInDispatchOrder(t *testing.T) {
             t.Fatalf("expected the order column to carry the dispatch rank, got %q at row %d", cell[1], index)
         }
 
-        if false == strings.HasSuffix(cell[6], expectedSuffixes[index]) {
-            t.Fatalf("expected row %d to carry the listener registered %s, got %q", index, expectedSuffixes[index], cell[6])
+        if false == strings.HasSuffix(cell[8], expectedSuffixes[index]) {
+            t.Fatalf("expected row %d to carry the listener registered %s, got %q", index, expectedSuffixes[index], cell[8])
         }
     }
 }
@@ -742,3 +742,87 @@ func TestEventCommand_DescendingOrderReachesTheListenerDetail(t *testing.T) {
     }
 }
 
+
+func newEventTagsTestRuntime() containercontract.Runtime {
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+
+    dispatcher.DeclareEvent("event.declared", eventcontract.EventConfig{RunAfterFailureTags: []string{"cache", "release"}})
+    dispatcher.DeclareEvent("event.unheard", eventcontract.EventConfig{RunAfterFailureTags: []string{"audit"}})
+    dispatcher.AddListener("event.declared", eventOrderProbeListenerAlpha, eventcontract.ListenerConfig{Priority: 20, Tags: []string{"release"}})
+    dispatcher.AddListener("event.declared", eventOrderProbeListenerBeta, eventcontract.ListenerConfig{Priority: 10})
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    serviceContainer.MustRegister(
+        event.ServiceEventDispatcher,
+        func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
+            return dispatcher, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    return newTestRuntime(serviceContainer)
+}
+
+func TestEventCommand_VerboseTableCarriesTheTagsAndTheDeclarations(t *testing.T) {
+    rendered, runErr := runDebugCommand(
+        &EventCommand{},
+        newEventTagsTestRuntime(),
+        []string{"--format=table", "--table-width=400", "--verbose"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    row := debugTableBlockRow(rendered, "LISTENERS")
+    if 2 != len(row) {
+        t.Fatalf("expected two listener rows, got %d in %q", len(row), rendered)
+    }
+
+    if "release" != row[0][4] || "yes" != row[0][5] || "-" != row[1][4] || "-" != row[1][5] {
+        t.Fatalf("expected the tags and after-failure columns, got %v", row)
+    }
+
+    declarationRow := debugTableBlockRow(rendered, "DECLARED EVENTS")
+    if 2 != len(declarationRow) || "event.declared" != declarationRow[0][0] || "cache,release" != declarationRow[0][1] || "event.unheard" != declarationRow[1][0] || "audit" != declarationRow[1][1] {
+        t.Fatalf("expected both declarations listed, the one with no listener included, got %v in %q", declarationRow, rendered)
+    }
+}
+
+func TestEventCommand_VerboseJsonCarriesTheTagsAndTheDeclarations(t *testing.T) {
+    rendered, runErr := runDebugCommand(
+        &EventCommand{},
+        newEventTagsTestRuntime(),
+        []string{"--format=json", "--verbose"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    decoded := struct {
+        Data struct {
+            Listeners []struct {
+                Tags             []string `json:"tags"`
+                RunsAfterFailure bool     `json:"runsAfterFailure"`
+            } `json:"listeners"`
+            Declarations []struct {
+                EventName           string   `json:"eventName"`
+                RunAfterFailureTags []string `json:"runAfterFailureTags"`
+            } `json:"declarations"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(rendered), &decoded); nil != decodeErr {
+        t.Fatalf("failed to decode the rendered envelope: %v, rendered %q", decodeErr, rendered)
+    }
+
+    if 2 != len(decoded.Data.Listeners) || false == decoded.Data.Listeners[0].RunsAfterFailure || 1 != len(decoded.Data.Listeners[0].Tags) || true == decoded.Data.Listeners[1].RunsAfterFailure {
+        t.Fatalf("expected the listener tags and marks, got %+v", decoded.Data.Listeners)
+    }
+
+    if 2 != len(decoded.Data.Declarations) || "event.declared" != decoded.Data.Declarations[0].EventName || 2 != len(decoded.Data.Declarations[0].RunAfterFailureTags) {
+        t.Fatalf("expected the declarations, got %+v", decoded.Data.Declarations)
+    }
+
+    if false == strings.Contains(rendered, `"tags":[]`) {
+        t.Fatalf("expected an untagged listener's tags as an empty list, got %q", rendered)
+    }
+}

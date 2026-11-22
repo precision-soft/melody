@@ -4,6 +4,7 @@ import (
     "strings"
     "time"
 
+    "github.com/precision-soft/melody/v4/.example/event"
     "github.com/precision-soft/melody/v4/.example/presenter"
     "github.com/precision-soft/melody/v4/.example/route"
     examplesecurity "github.com/precision-soft/melody/v4/.example/security"
@@ -31,6 +32,9 @@ func (instance *Module) RegisterEventSubscribers(kernelInstance melodykernelcont
 
 /* registerSubscribers installs the application's subscribers on the dispatcher; a door of its own so what the composition root INSTALLS can be read off a dispatcher, not only what each subscriber does once installed. */
 func (instance *Module) registerSubscribers(eventDispatcher melodyeventcontract.EventDispatcher) {
+    /* the deletion's owner declares which of its listeners still run after a failure, ahead of the subscribers carrying the tags */
+    eventDispatcher.DeclareEvent(event.UserDeletedEventName, event.UserDeletedEventConfig())
+
     instance.registerRequiredRequestContextListener(eventDispatcher)
     instance.registerApiExceptionListener(eventDispatcher)
 
@@ -55,7 +59,7 @@ func (instance *Module) registerSubscribers(eventDispatcher melodyeventcontract.
         subscriber.NewSecurityAuthenticationEventSubscriber(),
     )
 
-    /* the tokens go with the account, from the store the token firewalls read: redis when wired, the process's own otherwise. The release outranks every other listener of the deletion, so no outage of theirs skips it; an outage of its own store fails the deletion loudly, and the device firewall refuses the tokens it left, its account being gone */
+    /* the tokens go with the account, from the store the token firewalls read: redis when wired, the process's own otherwise. The release carries the release tag the deletion declares, so no failure of a listener ahead of it skips it; an outage of its own store fails the deletion loudly, the two-factor release and the cache drop behind it still run, and the device firewall refuses the tokens it left, its account being gone */
     eventDispatcher.AddSubscriber(
         subscriber.NewAccessTokenReleaseSubscriber(func(runtimeInstance melodycontainercontract.Runtime) melodysecuritycontract.EpochRevocableTokenStore {
             return examplesecurity.TokenStoreFromRuntime(runtimeInstance).TokenStore()
