@@ -157,7 +157,7 @@ const (
     environmentKeySmtpAddress     = "SMTP_ADDRESS"
     environmentKeySmtpUsername    = "SMTP_USERNAME"
     environmentKeySmtpPassword    = "SMTP_PASSWORD"
-    environmentKeySmtpRequireTls  = "SMTP_REQUIRE_TLS"
+    environmentKeySmtpAllowPlaintext  = "SMTP_ALLOW_PLAINTEXT"
     environmentKeySmtpImplicitTls = "SMTP_IMPLICIT_TLS"
 
     environmentKeyDeviceIdentifierMaxBytes = "APP_DEVICE_IDENTIFIER_MAX_BYTES"

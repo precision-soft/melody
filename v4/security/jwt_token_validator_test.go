@@ -72,7 +72,7 @@ func TestJwtTokenValidator_FutureChecksTolerateTheClaimsOneSecondResolution(t *t
         {name: "fractional iat 500ms in the past", claim: "iat", value: 1000.001, now: time.Unix(1000, 501_000_000)},
         {name: "fractional nbf 500ms in the past", claim: "nbf", value: 1000.001, now: time.Unix(1000, 501_000_000)},
     } {
-        validator := NewJwtTokenValidator(JwtConfig{Secret: secret, Leeway: strictLeeway, RejectFutureIssuedAt: true, Clock: clock.NewFrozenClock(testCase.now)})
+        validator := NewJwtTokenValidator(JwtConfig{Secret: secret, Leeway: strictLeeway, Clock: clock.NewFrozenClock(testCase.now)})
 
         token := signJwtHs256(secret, map[string]any{"sub": "user-1", "exp": 5000, testCase.claim: testCase.value})
         if _, validateErr := validator.Validate(testRuntime(), token); nil != validateErr {
@@ -85,7 +85,7 @@ func TestJwtTokenValidator_FutureChecksTolerateTheClaimsOneSecondResolution(t *t
 func TestJwtTokenValidator_TheResolutionToleranceIsOneSecondAndSparesTheExpiry(t *testing.T) {
     secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
     frozen := clock.NewFrozenClock(time.Unix(998, 500_000_000))
-    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, Leeway: strictLeeway, RejectFutureIssuedAt: true, Clock: frozen})
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, Leeway: strictLeeway, Clock: frozen})
 
     for claim, expected := range map[string]string{"iat": "jwt is issued in the future", "nbf": "jwt is not yet valid"} {
         token := signJwtHs256(secret, map[string]any{"sub": "user-1", "exp": 5000, claim: 1000})
@@ -241,7 +241,7 @@ func TestJwtTokenValidator_RejectsMissingAudience(t *testing.T) {
 
 func TestJwtTokenValidator_RejectsTokenIssuedInTheFuture(t *testing.T) {
     secret := []byte("super-secret-padded-to-the-hs256-minimum")
-    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RejectFutureIssuedAt: true})
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret})
 
     tokenString := signJwtHs256(secret, map[string]any{
         "sub": "user-1",
@@ -320,27 +320,27 @@ func TestJwtTokenValidator_RejectsEmptySubject(t *testing.T) {
     }
 }
 
-func TestJwtTokenValidator_FutureIssuedAtAcceptedByDefault(t *testing.T) {
+func TestJwtTokenValidator_AllowFutureIssuedAtAcceptsAFutureIssuedAt(t *testing.T) {
+    secret := []byte("super-secret-padded-to-the-hs256-minimum")
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, AllowFutureIssuedAt: true})
+
+    future := time.Now().Add(1 * time.Hour).Unix()
+    tokenString := signJwtHs256(secret, map[string]any{"sub": "user-1", "exp": float64(future + 3600), "iat": float64(future)})
+
+    if _, validateErr := validator.Validate(testRuntime(), tokenString); nil != validateErr {
+        t.Fatalf("expected a future iat to be accepted through the door: %v", validateErr)
+    }
+}
+
+func TestJwtTokenValidator_ZeroConfigRefusesAFutureIssuedAt(t *testing.T) {
     secret := []byte("super-secret-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret})
 
     future := time.Now().Add(1 * time.Hour).Unix()
     tokenString := signJwtHs256(secret, map[string]any{"sub": "user-1", "exp": float64(future + 3600), "iat": float64(future)})
 
-    if _, validateErr := validator.Validate(testRuntime(), tokenString); nil != validateErr {
-        t.Fatalf("expected a future iat to be accepted by default: %v", validateErr)
-    }
-}
-
-func TestJwtTokenValidator_FutureIssuedAtRejectedWhenConfigured(t *testing.T) {
-    secret := []byte("super-secret-padded-to-the-hs256-minimum")
-    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RejectFutureIssuedAt: true})
-
-    future := time.Now().Add(1 * time.Hour).Unix()
-    tokenString := signJwtHs256(secret, map[string]any{"sub": "user-1", "exp": float64(future + 3600), "iat": float64(future)})
-
-    if _, validateErr := validator.Validate(testRuntime(), tokenString); nil == validateErr {
-        t.Fatalf("expected a future iat to be rejected when RejectFutureIssuedAt is set")
+    if _, validateErr := validator.Validate(testRuntime(), tokenString); nil == validateErr || false == strings.Contains(validateErr.Error(), "jwt is issued in the future") {
+        t.Fatalf("expected a future iat refused by default, got %v", validateErr)
     }
 }
 
@@ -465,7 +465,7 @@ func TestJwtTokenValidator_UnderAStoreTheFutureIssuedAtToleratesTheSkewNotTheLee
 
 func TestJwtTokenValidator_WithoutAStoreTheFutureIssuedAtToleratesTheLeeway(t *testing.T) {
     secret := []byte("secret-padded-to-the-hs256-minimum")
-    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RejectFutureIssuedAt: true, Clock: clock.NewFrozenClock(time.Unix(1000, 0))})
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, Clock: clock.NewFrozenClock(time.Unix(1000, 0))})
 
     admitted := signJwtHs256(secret, map[string]any{"sub": "alice", "iat": 1006, "exp": 5000})
     if _, validateErr := validator.Validate(testRuntime(), admitted); nil != validateErr {
@@ -679,12 +679,10 @@ func TestJwtTokenValidator_RefusesWhenTheBoundaryStoreCannotAnswer(t *testing.T)
     }
 }
 
-func TestJwtTokenValidator_WithRevocationEpochForcesFutureIssuedAtToBeRejected(t *testing.T) {
+func TestJwtTokenValidator_WithRevocationEpochRefusesAFutureIssuedAt(t *testing.T) {
     secret := []byte("secret-padded-to-the-hs256-minimum")
 
-    config := JwtConfig{Secret: secret, RejectFutureIssuedAt: false}
-    config.RevocationEpochStore = &revocationEpochStoreStub{}
-    validator := NewJwtTokenValidator(config)
+    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RevocationEpochStore: &revocationEpochStoreStub{}})
 
     token := signJwtHs256(secret, map[string]any{
         "sub": "alice",
@@ -695,11 +693,17 @@ func TestJwtTokenValidator_WithRevocationEpochForcesFutureIssuedAtToBeRejected(t
     if _, err := validator.Validate(testRuntime(), token); nil == err {
         t.Fatalf("a token stamped in the future was accepted, so it would outlive every revocation")
     }
+}
 
-    config.RevocationEpochStore = nil
-    if true == NewJwtTokenValidator(config).rejectFutureIssuedAt {
-        t.Fatalf("without a store the configuration's answer must be kept, or forcing it with the store proves nothing")
-    }
+func TestNewJwtTokenValidator_RefusesAllowFutureIssuedAtUnderARevocationEpochStore(t *testing.T) {
+    defer func() {
+        refusal, isRefusal := recover().(*exception.Error)
+        if false == isRefusal || "JwtConfig.AllowFutureIssuedAt" != refusal.Context()["field"] || "JwtConfig.RevocationEpochStore" != refusal.Context()["conflictsWith"] {
+            t.Fatalf("expected the future iat door refused under a store naming both fields, got %v", refusal)
+        }
+    }()
+
+    NewJwtTokenValidator(JwtConfig{Secret: []byte("secret-padded-to-the-hs256-minimum"), AllowFutureIssuedAt: true, RevocationEpochStore: &revocationEpochStoreStub{}})
 }
 
 func TestNewJwtTokenValidator_RefusesATypedNilStoreAndANegativeLeewayOrSkew(t *testing.T) {

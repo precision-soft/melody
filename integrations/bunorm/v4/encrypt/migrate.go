@@ -31,10 +31,10 @@ type TableSpecification struct {
     SealBindings map[string]ColumnSealBinding
 }
 
-/* ColumnSealBinding is one column's binding as a run reads it: the label, and whether the run stops on a value that is not bound to it, a seal without a binding or a value without the marker, before any key is asked for. */
+/* ColumnSealBinding is one column's binding as a run reads it: the label, and UnboundAdmitted, without which the run stops on a value that is not bound to it, a seal without a binding or a value without the marker, before any key is asked for. */
 type ColumnSealBinding struct {
-    Label         string
-    RefuseUnbound bool
+    Label           string
+    UnboundAdmitted bool
 }
 
 var tableSpecificationBatchSizeRule = bound.Rule[int]{
@@ -91,7 +91,7 @@ func (instance *Migrator) resolveSpecificationBindings(specification TableSpecif
             )
         }
 
-        bindings[column] = sealBinding{label: columnBinding.Label, refuseUnbound: columnBinding.RefuseUnbound}
+        bindings[column] = sealBinding{label: columnBinding.Label, refuseUnbound: false == columnBinding.UnboundAdmitted}
     }
 
     return bindings, nil
@@ -267,7 +267,7 @@ func (instance *Migrator) migrateDecrypt(ctx context.Context, specification Tabl
     for column, binding := range bindings {
         if true == binding.refuseUnbound {
             return migrateStats{}, exception.NewError(
-                "migrate decrypt cannot write bare values into a column that refuses unbound values; deploy the binding without RefuseUnbound first",
+                "migrate decrypt cannot write bare values into a column that refuses unbound values; deploy the binding with UnboundAdmitted first",
                 map[string]any{"field": "TableSpecification.SealBindings", "table": specification.Table, "column": column, "sealBinding": binding.label},
                 nil,
             )
@@ -347,7 +347,7 @@ func columnTransform(
     }
 }
 
-/* openBoundStored reads a stored value of a bound column as its column type does, refusing an unknown format and, under RefuseUnbound, an unbound value before any key is asked for; a marked value that does not open under the binding is another binding's seal, damage or a retired key, and the run stops on it */
+/* openBoundStored reads a stored value of a bound column as its column type does, refusing an unknown format and, without UnboundAdmitted, an unbound value before any key is asked for; a marked value that does not open under the binding is another binding's seal, damage or a retired key, and the run stops on it */
 func (instance *Migrator) openBoundStored(binding sealBinding, value string) (openedSeal, error) {
     opened, openErr := instance.cipher.(bindingSealer).openStored(value, binding)
     if nil == openErr {

@@ -258,7 +258,7 @@ func TestExampleKeys_EachRuleRefusesWhatItsReaderRefuses(t *testing.T) {
         {environmentKeyMysqlInsecure, []string{"TRUE", "1", "yes", " true"}, []string{"", "true", "false"}},
         {environmentKeyPgsqlInsecure, []string{"on"}, []string{"true"}},
         {environmentKeyS3Insecure, []string{"treu"}, []string{"false"}},
-        {environmentKeySmtpRequireTls, []string{"yes"}, []string{"true"}},
+        {environmentKeySmtpAllowPlaintext, []string{"yes"}, []string{"true"}},
         {environmentKeySmtpImplicitTls, []string{"1"}, []string{"false"}},
         {environmentKeySessionCookieSecure, []string{"bogus", " always"}, []string{"", "always", "from-scheme"}},
         {environmentKeyDeviceIdentifierMaxBytes, []string{"0", "256", "abc", "unlimited"}, []string{"", "1", "255"}},

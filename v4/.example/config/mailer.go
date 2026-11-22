@@ -23,12 +23,12 @@ func (instance *Module) buildMailer() {
     )
 }
 
-/* smtpConfig reads the relay's address, its credentials and its two tls switches; a combination the transport would not honour as written refuses the boot naming its keys */
+/* smtpConfig reads the relay's address, its credentials, the plaintext door and the implicit tls switch; a combination the transport would not honour as written refuses the boot naming its keys */
 func (instance *Module) smtpConfig() melodymailer.SmtpConfig {
     address := instance.parameterValue(parameterSmtpAddress)
     username := instance.parameterValue(parameterSmtpUsername)
     password := instance.parameterValue(parameterSmtpPassword)
-    requireTls := instance.booleanSwitch(environmentKeySmtpRequireTls, parameterSmtpRequireTls)
+    allowPlaintext := instance.booleanSwitch(environmentKeySmtpAllowPlaintext, parameterSmtpAllowPlaintext)
     implicitTls := instance.booleanSwitch(environmentKeySmtpImplicitTls, parameterSmtpImplicitTls)
 
     if "" == username && "" != password {
@@ -39,9 +39,9 @@ func (instance *Module) smtpConfig() melodymailer.SmtpConfig {
         refuseSmtpConfig("the smtp username is set without a password", map[string]any{"key": environmentKeySmtpUsername, "requires": environmentKeySmtpPassword})
     }
 
-    /* under implicit tls the transport never sends STARTTLS, so the second switch would be read as a promise nothing keeps */
-    if true == requireTls && true == implicitTls {
-        refuseSmtpConfig("the smtp tls switches are both on", map[string]any{"key": environmentKeySmtpRequireTls, "conflictsWith": environmentKeySmtpImplicitTls})
+    /* under implicit tls nothing is ever sent in clear, so the plaintext door would be read as a promise nothing keeps */
+    if true == allowPlaintext && true == implicitTls {
+        refuseSmtpConfig("the smtp plaintext door is set under implicit tls", map[string]any{"key": environmentKeySmtpAllowPlaintext, "conflictsWith": environmentKeySmtpImplicitTls})
     }
 
     /* without an address the log transport is wired, so a relay setting would be dropped without a signal */
@@ -49,7 +49,7 @@ func (instance *Module) smtpConfig() melodymailer.SmtpConfig {
         for _, setting := range []struct{ environmentKey, parameter string }{
             {environmentKeySmtpUsername, parameterSmtpUsername},
             {environmentKeySmtpPassword, parameterSmtpPassword},
-            {environmentKeySmtpRequireTls, parameterSmtpRequireTls},
+            {environmentKeySmtpAllowPlaintext, parameterSmtpAllowPlaintext},
             {environmentKeySmtpImplicitTls, parameterSmtpImplicitTls},
         } {
             if "" != strings.TrimSpace(instance.parameterValue(setting.parameter)) {
@@ -63,7 +63,7 @@ func (instance *Module) smtpConfig() melodymailer.SmtpConfig {
         Username:              username,
         Password:              password,
         RequireAuthentication: "" != username,
-        RequireTls:            requireTls,
+        AllowPlaintext:        allowPlaintext,
         ImplicitTls:           implicitTls,
     }
 }

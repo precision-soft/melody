@@ -137,7 +137,7 @@ func newTransport(config TransportConfig, parent componentParent) *Transport {
         prefetch:            prefetch.Value,
         registry:            config.Registry,
         serializer:          serializerInstance,
-        deadLetter:          config.DeadLetter,
+        deadLetter:          false == config.DeadLetterDisabled,
         publishReturnBuffer: publishReturnBuffer.Value,
         reconnect:           reconnect,
         delayBuckets:        delayBuckets,
@@ -158,7 +158,8 @@ type TransportConfig struct {
     Prefetch   bound.Count
     Registry   *MessageRegistry
     Serializer serializercontract.Serializer
-    DeadLetter bool
+    /* DeadLetterDisabled declares the queue without its <queue>.dlx exchange and <queue>.dlq queue, so a poison message is dropped; left out, it is dead-lettered. */
+    DeadLetterDisabled bool
     /* Reconnect is the re-dial backoff; a field left out is inherited from the provider. */
     Reconnect ReconnectConfig
     /* PublishReturnBuffer buffers the broker's returns: 16 by default, at least 1. */
@@ -1788,7 +1789,15 @@ func (instance *Transport) declareTopology(channel *amqp091.Channel) error {
 
     _, queueErr := channel.QueueDeclare(instance.queue, true, false, false, false, queueArgs)
     if nil != queueErr {
-        return exception.NewError("amqp queue declare failed", map[string]any{"queue": instance.queue}, queueErr)
+        queueContext := map[string]any{"queue": instance.queue}
+
+        /* a queue declared earlier without the dead-letter argument answers 406 to the default declare */
+        var brokerErr *amqp091.Error
+        if true == errors.As(queueErr, &brokerErr) && amqp091.PreconditionFailed == brokerErr.Code {
+            queueContext["door"] = "TransportConfig.DeadLetterDisabled"
+        }
+
+        return exception.NewError("amqp queue declare failed", queueContext, queueErr)
     }
 
     delayQueue := instance.queue + ".delay"

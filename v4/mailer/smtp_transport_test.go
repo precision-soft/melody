@@ -35,6 +35,7 @@ func TestSmtpTransport_RequireAuthenticationFailsWhenServerHasNoAuthExtension(t 
     go serveAuthlessSmtp(listener)
 
     transport := NewSmtpTransport(SmtpConfig{
+        AllowPlaintext: true,
         Address:               listener.Addr().String(),
         Username:              "user",
         Password:              "pass",
@@ -66,6 +67,7 @@ func TestSmtpTransport_RequireAuthenticationFailsWhenNoUsernameConfigured(t *tes
     go serveAuthlessSmtp(listener)
 
     transport := NewSmtpTransport(SmtpConfig{
+        AllowPlaintext: true,
         Address:               listener.Addr().String(),
         RequireAuthentication: true,
     })
@@ -138,7 +140,6 @@ func TestSmtpTransport_AuthSucceedsWhenHostDiffersFromAddress(t *testing.T) {
         Username:              "user",
         Password:              "pass",
         RequireAuthentication: true,
-        RequireTls:            true,
         TlsConfig:             &tls.Config{InsecureSkipVerify: true},
     })
 
@@ -599,6 +600,7 @@ func TestSmtpTransport_SendsLargePayloadToSlowButSteadyReader(t *testing.T) {
     go serveSlowSteadyDataSmtp(listener)
 
     transport := NewSmtpTransport(SmtpConfig{
+        AllowPlaintext: true,
         Address: listener.Addr().String(),
         Host:    "127.0.0.1",
         Timeout: bound.Of(500 * time.Millisecond),
@@ -639,6 +641,7 @@ func TestSmtpTransport_TimesOutWhenServerStopsReadingMidPayload(t *testing.T) {
     const sessionTimeout = 500 * time.Millisecond
 
     transport := NewSmtpTransport(SmtpConfig{
+        AllowPlaintext: true,
         Address: listener.Addr().String(),
         Host:    "127.0.0.1",
         Timeout: bound.Of(sessionTimeout),
@@ -1011,6 +1014,7 @@ func TestSmtpTransport_SlowDotAcknowledgmentSucceedsWithinItsOwnCeiling(t *testi
     go serveDelayedDotAcknowledgmentSmtp(listener, 700*time.Millisecond)
 
     transport := NewSmtpTransport(SmtpConfig{
+        AllowPlaintext: true,
         Address:                listener.Addr().String(),
         Host:                   "127.0.0.1",
         Timeout:                bound.Of(200 * time.Millisecond),
@@ -1130,6 +1134,7 @@ func TestSmtpTransport_ConfiguredCredentialsFailClosedWhenAuthIsNotAdvertised(t 
 
     /* RequireAuthentication deliberately left false — the zero-value default: before the guard, this exact configuration skipped the whole auth branch and delivered the message as anonymous submission while reporting success, the operator's configured identity quietly unused; configured credentials that cannot be applied must refuse, not degrade */
     transport := NewSmtpTransport(SmtpConfig{
+        AllowPlaintext: true,
         Address:  listener.Addr().String(),
         Username: "user",
         Password: "pass",
@@ -1211,7 +1216,7 @@ func TestSmtpTransport_MailCommandFailureNamesTheCommandNotAVerdict(t *testing.T
 
     go serveMailRejectingSmtp(listener)
 
-    transport := NewSmtpTransport(SmtpConfig{Address: listener.Addr().String()})
+    transport := NewSmtpTransport(SmtpConfig{AllowPlaintext: true, Address: listener.Addr().String()})
 
     _, sendErr := transport.Send(testRuntime(), mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
@@ -1324,7 +1329,7 @@ func TestSmtpTransport_QuitFailureWarningCarriesTheCause(t *testing.T) {
 
     runtimeInstance, logger := testRuntimeWithRecordingLogger()
 
-    transport := NewSmtpTransport(SmtpConfig{Address: listener.Addr().String()})
+    transport := NewSmtpTransport(SmtpConfig{AllowPlaintext: true, Address: listener.Addr().String()})
 
     _, sendErr := transport.Send(runtimeInstance, mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
@@ -1406,7 +1411,7 @@ func TestSmtpTransport_EnvelopeRefusalsCarryTheAddressAndTheDotVerdictIsNamed(t 
 
         go serveMailRejectingSmtp(listener)
 
-        transport := NewSmtpTransport(SmtpConfig{Address: listener.Addr().String()})
+        transport := NewSmtpTransport(SmtpConfig{AllowPlaintext: true, Address: listener.Addr().String()})
         _, sendErr := transport.Send(testRuntime(), mailercontract.Message{
             From:    mailercontract.Address{Email: "shop@example.com"},
             To:      []mailercontract.Address{{Email: "ada@example.com"}},
@@ -1433,7 +1438,7 @@ func TestSmtpTransport_EnvelopeRefusalsCarryTheAddressAndTheDotVerdictIsNamed(t 
 
         go serveRcptRejectingSmtp(listener)
 
-        transport := NewSmtpTransport(SmtpConfig{Address: listener.Addr().String()})
+        transport := NewSmtpTransport(SmtpConfig{AllowPlaintext: true, Address: listener.Addr().String()})
         _, sendErr := transport.Send(testRuntime(), mailercontract.Message{
             From:    mailercontract.Address{Email: "shop@example.com"},
             To:      []mailercontract.Address{{Email: "ada@example.com"}},
@@ -1460,7 +1465,7 @@ func TestSmtpTransport_EnvelopeRefusalsCarryTheAddressAndTheDotVerdictIsNamed(t 
 
         go serveDotRejectingSmtp(listener)
 
-        transport := NewSmtpTransport(SmtpConfig{Address: listener.Addr().String()})
+        transport := NewSmtpTransport(SmtpConfig{AllowPlaintext: true, Address: listener.Addr().String()})
         _, sendErr := transport.Send(testRuntime(), mailercontract.Message{
             From:    mailercontract.Address{Email: "shop@example.com"},
             To:      []mailercontract.Address{{Email: "ada@example.com"}},
@@ -1601,7 +1606,7 @@ func TestSmtpTransport_TheReceiptCarriesTheMessageIdTheServerReceived(t *testing
         captured := make(chan string, 1)
         go serveCapturingSmtp(listener, captured)
 
-        receipt, sendErr := NewSmtpTransport(SmtpConfig{Address: listener.Addr().String(), Host: "127.0.0.1", Timeout: bound.Of(2 * time.Second)}).Send(testRuntime(), mailercontract.Message{
+        receipt, sendErr := NewSmtpTransport(SmtpConfig{AllowPlaintext: true, Address: listener.Addr().String(), Host: "127.0.0.1", Timeout: bound.Of(2 * time.Second)}).Send(testRuntime(), mailercontract.Message{
             From:    mailercontract.Address{Email: "shop@example.com"},
             To:      []mailercontract.Address{{Email: "ada@example.com"}},
             Subject: "Hello",
@@ -1622,4 +1627,103 @@ func TestSmtpTransport_TheReceiptCarriesTheMessageIdTheServerReceived(t *testing
             t.Fatalf("expected the caller's own Message-ID, got %q", receipt.MessageId)
         }
     }
+}
+
+func TestSmtpTransport_ZeroConfigRefusesARelayWithoutStartTls(t *testing.T) {
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("listen: %v", listenErr)
+    }
+    defer listener.Close()
+
+    captured := make(chan string, 1)
+    go serveCapturingSmtp(listener, captured)
+
+    _, sendErr := NewSmtpTransport(SmtpConfig{Address: listener.Addr().String(), Host: "127.0.0.1", Timeout: bound.Of(2 * time.Second)}).Send(testRuntime(), mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Hello",
+        Text:    "body",
+    })
+
+    var refusal *exception.Error
+    if false == errors.As(sendErr, &refusal) || "smtp server does not offer STARTTLS but tls is required" != refusal.Message() || "SmtpConfig.AllowPlaintext" != refusal.Context()["door"] {
+        t.Fatalf("expected the default to refuse a relay without STARTTLS naming the door, got %v", sendErr)
+    }
+
+    select {
+    case body := <-captured:
+        t.Fatalf("expected nothing sent, the server received:\n%s", body)
+    default:
+    }
+}
+
+func TestSmtpTransport_AllowPlaintextSendsToARelayWithoutStartTls(t *testing.T) {
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("listen: %v", listenErr)
+    }
+    defer listener.Close()
+
+    captured := make(chan string, 1)
+    go serveCapturingSmtp(listener, captured)
+
+    _, sendErr := NewSmtpTransport(SmtpConfig{Address: listener.Addr().String(), Host: "127.0.0.1", AllowPlaintext: true, Timeout: bound.Of(2 * time.Second)}).Send(testRuntime(), mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Hello",
+        Text:    "body",
+    })
+    if nil != sendErr {
+        t.Fatalf("expected the plaintext door to deliver, got %v", sendErr)
+    }
+
+    if body := <-captured; false == strings.Contains(body, "Subject: Hello") {
+        t.Fatalf("expected the message delivered, the server received:\n%s", body)
+    }
+}
+
+func TestSmtpTransport_AllowPlaintextStillUpgradesWhenStartTlsIsOffered(t *testing.T) {
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("listen: %v", listenErr)
+    }
+    defer listener.Close()
+
+    authResult := make(chan bool, 1)
+    go serveStartTlsAuthSmtp(listener, generateSelfSignedCertificate(t), authResult)
+
+    /* smtp.PlainAuth refuses a host other than localhost over a connection that is not tls, so the accepted AUTH proves the session was upgraded */
+    _, sendErr := NewSmtpTransport(SmtpConfig{
+        Address:               listener.Addr().String(),
+        Host:                  "smtp.internal.example",
+        Username:              "user",
+        Password:              "pass",
+        RequireAuthentication: true,
+        AllowPlaintext:        true,
+        TlsConfig:             &tls.Config{InsecureSkipVerify: true},
+    }).Send(testRuntime(), mailercontract.Message{
+        From:    mailercontract.Address{Email: "shop@example.com"},
+        To:      []mailercontract.Address{{Email: "ada@example.com"}},
+        Subject: "Hello",
+        Text:    "body",
+    })
+    if nil != sendErr {
+        t.Fatalf("expected the offered STARTTLS taken under the plaintext door, got %v", sendErr)
+    }
+
+    if true != <-authResult {
+        t.Fatal("expected the server to accept AUTH over the upgraded session")
+    }
+}
+
+func TestNewSmtpTransport_RefusesAllowPlaintextUnderImplicitTls(t *testing.T) {
+    defer func() {
+        refusal, isRefusal := recover().(*exception.Error)
+        if false == isRefusal || "smtp plaintext is allowed under implicit tls, which never sends in clear" != refusal.Message() || "SmtpConfig.AllowPlaintext" != refusal.Context()["field"] || "SmtpConfig.ImplicitTls" != refusal.Context()["conflictsWith"] {
+            t.Fatalf("expected the plaintext door refused under implicit tls naming both fields, got %v", refusal)
+        }
+    }()
+
+    NewSmtpTransport(SmtpConfig{Address: "smtp.example.com:465", AllowPlaintext: true, ImplicitTls: true})
 }

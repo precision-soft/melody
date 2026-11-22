@@ -6,7 +6,7 @@ import (
 
 var fakeCipherSequenceNumber atomic.Uint64
 
-/* NewFakeCipher answers a cipher whose every operation is the identity, for tests and local development. In production it writes plaintext into every encrypted column with no error, where having no cipher fails closed at the first write, so no production wiring path may reach it. A bound column over it stores the plaintext as well, and its binding and the binding's RefuseUnbound mean nothing, since there is no format to read. */
+/* NewFakeCipher answers a cipher whose every operation is the identity, for tests and local development. In production it writes plaintext into every encrypted column with no error, where having no cipher fails closed at the first write, so no production wiring path may reach it. A bound column over it stores the plaintext as well, and its binding and the binding's UnboundAdmitted mean nothing, since there is no format to read. */
 func NewFakeCipher() Cipher {
     return &fakeCipher{
         instanceNumber: fakeCipherSequenceNumber.Add(1),

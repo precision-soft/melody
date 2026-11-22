@@ -104,6 +104,8 @@ the session apart, `session.NewUnavailableSession` builds one.
 
 ### Changed
 
+- mailer: **Breaking**: `SmtpConfig.RequireTls` is `AllowPlaintext`, so a relay that does not offer STARTTLS refuses the send unless the door is set, the refusal's context naming `SmtpConfig.AllowPlaintext`; `AllowPlaintext` beside `ImplicitTls` is refused at construction naming both fields.
+- security: **Breaking**: `JwtConfig.RejectFutureIssuedAt` is `AllowFutureIssuedAt`, so a token whose `iat` is ahead of the clock by more than the leeway and one second is refused unless the door is set; `AllowFutureIssuedAt` beside a `RevocationEpochStore` is refused at construction naming both fields, where the store forced the check whatever the field said.
 - container: **Breaking**: `containercontract.RefuseNilRuntime(runtimeInstance, door)` takes the name of the door that refuses, written under `door` in the refusal's context beside `argument`, the message unchanged; every door of the framework and of the fourth major's integrations names itself as `<package>.<Type>.<Method>`, a helper refusing for its callers passing the caller's door. See `UPGRADE.md`.
 
 - application, http: a middleware factory's refusal names its module: the registrar a module's `RegisterHttpMiddlewares` hook receives is bound to the module's `Name()`, the application's `RegisterHttpMiddlewares` and `RegisterHttpMiddlewareFactories` register as `the application`, and a factory that fails or yields nil and a definition whose factory is nil are refused with `moduleName` beside `middlewareName`, and a nil entry of a registration with `moduleName` beside `field` and `index`; `pipeline.HttpMiddlewareDefinition` gains `Module`, a definition with none carrying no `moduleName` key.

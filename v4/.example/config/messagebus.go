@@ -72,6 +72,5 @@ func (instance *Module) buildMessageBusTransport() melodymessagebuscontract.Tran
         Queue:      messageBusQueue,
         Prefetch:   melodybound.Of(10),
         Registry:   registry,
-        DeadLetter: true,
     })
 }

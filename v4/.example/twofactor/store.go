@@ -54,13 +54,13 @@ func (instance PendingRecoveryCodesColumn) SealBinding() string {
     return "melody_example_v4_two_factor_pending.recovery_codes"
 }
 
-/* SealBindings declares the four bound columns to the encrypt module. Both refuse an unbound value, which holds for a database whose every enrollment was written through the bound types; an enrollment written before the columns were bound is refused and is cleared with example:twofactor:reset or example:db:reset --force. */
+/* SealBindings declares the four bound columns to the encrypt module. Each refuses an unbound value, the default, which holds for a database whose every enrollment was written through the bound types; an enrollment written before the columns were bound is refused and is cleared with example:twofactor:reset or example:db:reset --force. */
 func SealBindings() []melodyencrypt.SealBindingConfig {
     return []melodyencrypt.SealBindingConfig{
-        {Reference: SecretColumn{}, RefuseUnbound: true},
-        {Reference: RecoveryCodesColumn{}, RefuseUnbound: true},
-        {Reference: PendingSecretColumn{}, RefuseUnbound: true},
-        {Reference: PendingRecoveryCodesColumn{}, RefuseUnbound: true},
+        {Reference: SecretColumn{}},
+        {Reference: RecoveryCodesColumn{}},
+        {Reference: PendingSecretColumn{}},
+        {Reference: PendingRecoveryCodesColumn{}},
     }
 }
 

@@ -57,7 +57,6 @@ transport := amqp.NewTransport(amqp.TransportConfig{
     Queue:      "welcome_email",
     Prefetch:   bound.Of(10),
     Registry:   registry,
-    DeadLetter: true,
 })
 ```
 
@@ -199,7 +198,7 @@ A failed `Send` is marked with `exception.MarkInfrastructureFailure` — an outa
 
 ## Dead-lettering and retries
 
-When `DeadLetter` is `true`, the transport declares a dead-letter exchange (`<queue>.dlx`) and queue (`<queue>.dlq`), and points the main queue at it via `x-dead-letter-exchange`.
+By default the transport declares a dead-letter exchange (`<queue>.dlx`) and queue (`<queue>.dlq`), and points the main queue at it via `x-dead-letter-exchange`; `DeadLetterDisabled: true` declares neither. A queue declared earlier without that argument makes the default declare fail with `PRECONDITION_FAILED` (406), the error's context naming `TransportConfig.DeadLetterDisabled`: drain and delete the queue so it is declared again, or keep its arguments with the door.
 
 - A handler success acknowledges the delivery (`Ack`).
 - A handler failure is retried under the consumer's `RetryPolicy` (max retries, base delay, optional dead-letter transport). The transport re-publishes the message carrying an incremented `x-redelivery-count` header, so the retry count survives across deliveries instead of relying on the broker's one-shot `redelivered` flag; a `DelayStamp` parks the message in a delay queue that dead-letters back to the main queue, so retries are spaced out by the configured backoff (see [Delay buckets](#delay-buckets) below). Once the retries are exhausted the message is `Nack`ed without requeue so the broker routes it to the dead-letter exchange.
@@ -222,7 +221,7 @@ The consequence to plan for: **an effective delay quantizes DOWN to its bucket.*
 A delay **below the smallest bucket** keeps the legacy `<queue>.delay` queue with a precise per-message `expiration`, where head-of-line waiting is bounded by that smallest bucket. That queue is always declared, so messages parked by an older deployment still drain. A per-message expiration is clamped to ~49.7 days, the range RabbitMQ's 32-bit millisecond parse allows.
 
 - `Receive` answers a subscription; when the consume loop ends for good — the connection gone with no dialer, a channel it could not reopen — its `Err()` names why, and the consume command reports it. A stop through the runtime or `CloseWithContext` ends it with no reason.
-- A delivery that cannot be decoded (missing or unknown `x-message-type`, bad body) is `Nack`ed without requeue. It is dead-lettered only when `DeadLetter` is enabled; otherwise the broker discards it (enable `DeadLetter` in production so undecodable deliveries are retained).
+- A delivery that cannot be decoded (missing or unknown `x-message-type`, bad body) is `Nack`ed without requeue. It is dead-lettered by default; with `DeadLetterDisabled` the broker discards it.
 
 ## Server-Sent Events backplane
 

@@ -40,7 +40,7 @@ var jwtRevocationEpochSkewRule = bound.Rule[time.Duration]{
     Name: "JwtConfig.RevocationEpochSkew",
 }
 
-/* NewJwtTokenValidator builds the validator, panicking on an empty secret, a secret shorter than MinimumSecretLength, a typed-nil revocation epoch store and a leeway or skew its rule refuses, each by the field's name. */
+/* NewJwtTokenValidator builds the validator, panicking on an empty secret, a secret shorter than MinimumSecretLength, a typed-nil revocation epoch store, AllowFutureIssuedAt beside a store and a leeway or skew its rule refuses, each by the field's name. */
 func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
     if 0 == len(config.Secret) {
         exception.Panic(exception.NewError("jwt secret is empty", exceptioncontract.Context{"field": "JwtConfig.Secret"}, nil))
@@ -74,7 +74,15 @@ func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
     }
 
     /* the boundary is compared with iat, so a token claiming a future iat would outlive every boundary drawn before that instant */
-    rejectFutureIssuedAt := config.RejectFutureIssuedAt || nil != config.RevocationEpochStore
+    if true == config.AllowFutureIssuedAt && nil != config.RevocationEpochStore {
+        exception.Panic(exception.NewError(
+            "jwt future issued-at is allowed under a revocation epoch store, whose boundary a future iat would outlive",
+            exceptioncontract.Context{"field": "JwtConfig.AllowFutureIssuedAt", "conflictsWith": "JwtConfig.RevocationEpochStore"},
+            nil,
+        ))
+    }
+
+    rejectFutureIssuedAt := false == config.AllowFutureIssuedAt
 
     /* a token an ahead issuer stamped before a revocation carries an iat past the boundary, so under a store the future check tolerates only what the boundary was widened by */
     futureIssuedAtTolerance := leeway.Value
@@ -130,7 +138,7 @@ type JwtConfig struct {
     /* Clock is the clock the time claims are verified against; nil uses the system clock. Inject a frozen clock for deterministic tests. */
     Clock clockcontract.Clock
 
-    /* RevocationEpochStore, when set, reads a revocation boundary per user and device and refuses a token issued before it; it forces RejectFutureIssuedAt, since a token claiming a future iat would outlive every boundary drawn before that instant. nil reads no boundary; a typed nil is refused. */
+    /* RevocationEpochStore, when set, reads a revocation boundary per user and device and refuses a token issued before it; AllowFutureIssuedAt beside it is refused, since a token claiming a future iat would outlive every boundary drawn before that instant. nil reads no boundary; a typed nil is refused. */
     RevocationEpochStore securitycontract.RevocationEpochStore
 
     /* RevocationEpochSkew widens the boundary by the clock skew between instances, and is what the future check of iat tolerates under a RevocationEpochStore, one second more for the claim's resolution: 0 when left out, at least 0, unlimited refused. */
@@ -139,7 +147,9 @@ type JwtConfig struct {
     /* Leeway widens the exp, nbf and iat checks by this much, and the future checks of nbf and iat tolerate one second more, the resolution of a whole-second claim: 5s when left out, bound.Of(time.Duration(0)) for strict, at most 5m, unlimited refused. Neither the revocation boundary nor, under a RevocationEpochStore, the future check of iat is widened by it, since a token an ahead issuer stamped before a revocation would outlive it; RevocationEpochSkew decides those. */
     Leeway               bound.Duration
     AllowWithoutExpiry   bool
-    RejectFutureIssuedAt bool
+
+    /* AllowFutureIssuedAt accepts a token whose iat is ahead of the clock by more than the leeway; left out, such a token is refused. Refused beside a RevocationEpochStore. */
+    AllowFutureIssuedAt  bool
     Issuer               string
     Audience             string
 }

@@ -30,10 +30,10 @@ type ModuleConfig struct {
     SealBindings []SealBindingConfig
 }
 
-/* SealBindingConfig declares one bound column. Reference is the marker value its column type is parameterized by. RefuseUnbound, false when left out, makes the column read nothing but a seal bound to it: a seal without a binding and a value without the marker are refused, on the column's Scan and in its equality candidates. Leave it out until every value of the column is a bound seal: deploy the declaration, run melody:encrypt:database --mode encrypt over the column, which seals its plain values and re-seals its unbound seals under the binding, then set it. A declaration the module cannot hold is refused at registration naming ModuleConfig.SealBindings and the index: a nil, typed-nil or pointer-form Reference, a label outside <table>.<column> with each part of [A-Za-z0-9_]{1,64}, a cipher name the module installs no cipher under, a marker with fields, with SealBinding on its pointer receiver or embedding DefaultCipherReference by pointer, a marker declared twice, a label declared twice over one cipher instance under one name or two, and a cipher implemented outside the package. A later registration replaces the whole binding table, so a marker it does not declare is unbound. */
+/* SealBindingConfig declares one bound column. Reference is the marker value its column type is parameterized by. The column reads nothing but a seal bound to it: a seal without a binding and a value without the marker are refused, on the column's Scan and in its equality candidates. UnboundAdmitted is the door for a column that still holds plain values or unbound seals: deploy the declaration with it set, run melody:encrypt:database --mode encrypt over the column, which seals its plain values and re-seals its unbound seals under the binding, then remove it. A declaration the module cannot hold is refused at registration naming ModuleConfig.SealBindings and the index: a nil, typed-nil or pointer-form Reference, a label outside <table>.<column> with each part of [A-Za-z0-9_]{1,64}, a cipher name the module installs no cipher under, a marker with fields, with SealBinding on its pointer receiver or embedding DefaultCipherReference by pointer, a marker declared twice, a label declared twice over one cipher instance under one name or two, and a cipher implemented outside the package. A later registration replaces the whole binding table, so a marker it does not declare is unbound. */
 type SealBindingConfig struct {
-    Reference     SealBindingReference
-    RefuseUnbound bool
+    Reference       SealBindingReference
+    UnboundAdmitted bool
 }
 
 /* CommandContextConfig is one key compartment: its Cipher is installed under Name for the columns bound through a CipherReference naming it, and its Database or DatabaseFactory, at most one, serves melody:encrypt:database:<Name>; with neither, the compartment registers no command. An empty or repeated Name and a nil Cipher are refused at registration. The name selects the registry entry and is not bound into the ciphertext, so two compartments holding the same key under the same id decrypt each other, and a provider merging every compartment's keys lets either read the other's rows. */
@@ -87,7 +87,7 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
     bindings := make(map[reflect.Type]sealBinding, len(instance.config.SealBindings))
     for _, bindingConfig := range instance.config.SealBindings {
         marker := reflect.TypeOf(bindingConfig.Reference)
-        bindings[marker] = sealBinding{label: reflect.Zero(marker).Interface().(SealBindingReference).SealBinding(), refuseUnbound: bindingConfig.RefuseUnbound}
+        bindings[marker] = sealBinding{label: reflect.Zero(marker).Interface().(SealBindingReference).SealBinding(), refuseUnbound: false == bindingConfig.UnboundAdmitted}
     }
 
     replaceRegistries(ciphers, bindings)

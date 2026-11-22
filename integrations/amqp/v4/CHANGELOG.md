@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Breaking** — `transport.go`: `TransportConfig.DeadLetter` is `DeadLetterDisabled`, so the transport declares `<queue>.dlx` and `<queue>.dlq` and dead-letters a poison message unless the door is set; a queue declared earlier without `x-dead-letter-exchange` fails the declare with `PRECONDITION_FAILED`, the error's context naming `TransportConfig.DeadLetterDisabled`.
 - **Breaking** — `transport.go`: `Receive` answers a `messagebuscontract.Subscription`, whose `Err()` names why the consume loop ended for good, the connection gone with no dialer or the channel it could not reopen, nil for a stop through the runtime or `CloseWithContext`; `Nack` takes a `messagebuscontract.NackConfig{Requeue}`.
 - **Breaking** — `transport.go`: `TransportConfig.PublishTimeout` is `CallTimeout`, the name the backplane uses for the same bound, its refusal naming `TransportConfig.CallTimeout` and its log and error context key `callTimeout`, and the publish refusals read "within the call timeout" where they read "within the publish timeout". See `UPGRADE.md`.
 - **Breaking** with the framework: the fourth major's runtime is read from `v4/container/contract` and built through `v4/container/runtime`, a runtime resolving through its scope only; `runtime.New` and `Runtime.Container()` are gone. See the framework's `UPGRADE.md`.

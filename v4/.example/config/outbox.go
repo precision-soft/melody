@@ -101,7 +101,6 @@ func (instance *Module) buildOutboxTransport() (melodymessagebuscontract.Transpo
         Dialer:     amqp.NewProvider(amqp.ProviderConfig{}).Dialer(dsn),
         Queue:      "outbox_notice",
         Registry:   registry,
-        DeadLetter: true,
     }), nil
 }
 

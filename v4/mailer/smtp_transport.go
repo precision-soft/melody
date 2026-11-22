@@ -68,6 +68,16 @@ func NewSmtpTransport(config SmtpConfig) *SmtpTransport {
         )
     }
 
+    if true == config.AllowPlaintext && true == config.ImplicitTls {
+        exception.Panic(
+            exception.NewError(
+                "smtp plaintext is allowed under implicit tls, which never sends in clear",
+                exceptioncontract.Context{"field": "SmtpConfig.AllowPlaintext", "conflictsWith": "SmtpConfig.ImplicitTls"},
+                nil,
+            ),
+        )
+    }
+
     dialTimeout, dialTimeoutErr := bound.Resolve(config.DialTimeout, smtpDialTimeoutRule)
     if nil != dialTimeoutErr {
         exception.Panic(exception.FromError(dialTimeoutErr))
@@ -88,7 +98,7 @@ func NewSmtpTransport(config SmtpConfig) *SmtpTransport {
         host:                   host,
         username:               config.Username,
         password:               config.Password,
-        requireTls:             config.RequireTls,
+        requireTls:             false == config.AllowPlaintext,
         requireAuthentication:  config.RequireAuthentication,
         implicitTls:            config.ImplicitTls,
         tlsConfig:              config.TlsConfig,
@@ -104,7 +114,8 @@ type SmtpConfig struct {
     Host                  string
     Username              string
     Password              string
-    RequireTls            bool
+    /* AllowPlaintext lets a relay that does not offer STARTTLS receive the message in clear; left out, such a relay refuses the send. */
+    AllowPlaintext        bool
     RequireAuthentication bool
     ImplicitTls           bool
     TlsConfig             *tls.Config
@@ -440,7 +451,7 @@ func (instance *SmtpTransport) startTls(client *smtp.Client, connection net.Conn
         if true == instance.requireTls {
             return exception.NewError(
                 "smtp server does not offer STARTTLS but tls is required",
-                map[string]any{"address": instance.address},
+                map[string]any{"address": instance.address, "door": "SmtpConfig.AllowPlaintext"},
                 nil,
             )
         }

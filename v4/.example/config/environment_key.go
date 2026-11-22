@@ -57,7 +57,7 @@ const (
     parameterSmtpAddress     = "app.smtp.address"
     parameterSmtpUsername    = "app.smtp.username"
     parameterSmtpPassword    = "app.smtp.password"
-    parameterSmtpRequireTls  = "app.smtp.require_tls"
+    parameterSmtpAllowPlaintext  = "app.smtp.allow_plaintext"
     parameterSmtpImplicitTls = "app.smtp.implicit_tls"
 
     parameterDeviceIdentifierMaxBytes = "app.device_identifier.max_bytes"
@@ -132,7 +132,7 @@ func EnvironmentKeys() []configcontract.EnvironmentKey {
         exampleKey(environmentKeySmtpAddress, parameterSmtpAddress, "", false, nil),
         exampleKey(environmentKeySmtpUsername, parameterSmtpUsername, "", false, nil),
         exampleKey(environmentKeySmtpPassword, parameterSmtpPassword, "", true, nil),
-        exampleKey(environmentKeySmtpRequireTls, parameterSmtpRequireTls, "", false, switchRule),
+        exampleKey(environmentKeySmtpAllowPlaintext, parameterSmtpAllowPlaintext, "", false, switchRule),
         exampleKey(environmentKeySmtpImplicitTls, parameterSmtpImplicitTls, "", false, switchRule),
 
         exampleKey(environmentKeyDeviceIdentifierMaxBytes, parameterDeviceIdentifierMaxBytes, strconv.Itoa(defaultDeviceIdentifierMaximumBytes), false, melodyconfig.LimitKeyRule(deviceIdentifierMaximumBytesRule)),

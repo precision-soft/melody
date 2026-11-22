@@ -542,7 +542,7 @@ func wedgeAPublishOnAFakeBroker(t *testing.T) *fakeBrokerWedge {
     wedge := &fakeBrokerWedge{connection: connection, channel: channel, gated: gated, brokerSide: brokerSide, written: make(chan struct{})}
 
     go func() {
-        _ = channel.Publish("", "melody.amqp.test.wedged", false, false, amqp091.Publishing{Body: []byte("wedged")})
+        _ = channel.Publish("", "melody.amqp.v4.test.wedged", false, false, amqp091.Publishing{Body: []byte("wedged")})
 
         close(wedge.written)
     }()

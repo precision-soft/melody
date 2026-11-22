@@ -2241,7 +2241,7 @@ func TestMigrator_StopsOnASealOfAnotherBinding(t *testing.T) {
     }
 }
 
-/* the Migrator honours RefuseUnbound on what it reads, else a relocated gcm1 seal would be re-sealed bound by the next run */
+/* the Migrator refuses an unbound value it reads on what it reads, else a relocated gcm1 seal would be re-sealed bound by the next run */
 func TestMigrator_RefusingUnboundStopsOnAGcm1SealAndOnPlaintext(t *testing.T) {
     cipherInstance := newRotationCipher(t)
     unbound, _ := cipherInstance.Encrypt("unbound")

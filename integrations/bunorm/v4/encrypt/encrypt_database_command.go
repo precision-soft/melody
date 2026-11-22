@@ -308,7 +308,7 @@ func (instance *EncryptDatabaseCommand) resolveSealBindings(table string, column
             bindings = make(map[string]ColumnSealBinding, len(columns))
         }
 
-        bindings[column] = ColumnSealBinding{Label: label, RefuseUnbound: bindingConfig.RefuseUnbound}
+        bindings[column] = ColumnSealBinding{Label: label, UnboundAdmitted: bindingConfig.UnboundAdmitted}
     }
 
     return bindings, nil

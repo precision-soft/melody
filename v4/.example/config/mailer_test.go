@@ -37,20 +37,20 @@ func TestSmtpConfig_CarriesTheCredentialsAndRequiresAuthentication(t *testing.T)
     }
 }
 
-func TestSmtpConfig_ReadsTheTwoTlsSwitches(t *testing.T) {
-    requireTls := moduleWithEnvironment(t, map[string]string{environmentKeySmtpAddress: "relay.example.test:587", environmentKeySmtpRequireTls: "true"}).smtpConfig()
-    if false == requireTls.RequireTls || true == requireTls.ImplicitTls {
-        t.Fatalf("expected STARTTLS required alone, got %+v", requireTls)
+func TestSmtpConfig_ReadsThePlaintextDoorAndTheImplicitTlsSwitch(t *testing.T) {
+    allowPlaintext := moduleWithEnvironment(t, map[string]string{environmentKeySmtpAddress: "relay.example.test:587", environmentKeySmtpAllowPlaintext: "true"}).smtpConfig()
+    if false == allowPlaintext.AllowPlaintext || true == allowPlaintext.ImplicitTls {
+        t.Fatalf("expected the plaintext door open alone, got %+v", allowPlaintext)
     }
 
-    implicitTls := moduleWithEnvironment(t, map[string]string{environmentKeySmtpAddress: "relay.example.test:465", environmentKeySmtpImplicitTls: "true", environmentKeySmtpRequireTls: "false"}).smtpConfig()
-    if true == implicitTls.RequireTls || false == implicitTls.ImplicitTls {
+    implicitTls := moduleWithEnvironment(t, map[string]string{environmentKeySmtpAddress: "relay.example.test:465", environmentKeySmtpImplicitTls: "true", environmentKeySmtpAllowPlaintext: "false"}).smtpConfig()
+    if true == implicitTls.AllowPlaintext || false == implicitTls.ImplicitTls {
         t.Fatalf("expected implicit tls alone, got %+v", implicitTls)
     }
 
     neither := moduleWithEnvironment(t, map[string]string{}).smtpConfig()
-    if true == neither.RequireTls || true == neither.ImplicitTls {
-        t.Fatalf("expected both switches off when empty, got %+v", neither)
+    if true == neither.AllowPlaintext || true == neither.ImplicitTls {
+        t.Fatalf("expected STARTTLS required and implicit tls off when both keys are empty, got %+v", neither)
     }
 }
 
@@ -68,7 +68,7 @@ func TestSmtpConfig_RefusesAPasswordWithoutAUsername(t *testing.T) {
 }
 
 func TestSmtpConfig_RefusesASwitchThatIsNotABoolean(t *testing.T) {
-    for _, environmentKey := range []string{environmentKeySmtpRequireTls, environmentKeySmtpImplicitTls} {
+    for _, environmentKey := range []string{environmentKeySmtpAllowPlaintext, environmentKeySmtpImplicitTls} {
         module := moduleWithEnvironment(t, map[string]string{environmentKeySmtpAddress: "relay.example.test:587", environmentKey: "yes"})
 
         refusal := recoveredRefusal(t, func() { module.smtpConfig() })
@@ -85,9 +85,9 @@ func TestSmtpConfig_RefusesACombinationTheTransportWouldNotHonour(t *testing.T) 
         key         string
     }{
         {map[string]string{environmentKeySmtpAddress: "relay.example.test:587", environmentKeySmtpUsername: "mailer"}, "the smtp username is set without a password", environmentKeySmtpUsername},
-        {map[string]string{environmentKeySmtpAddress: "relay.example.test:465", environmentKeySmtpRequireTls: "true", environmentKeySmtpImplicitTls: "true"}, "the smtp tls switches are both on", environmentKeySmtpRequireTls},
+        {map[string]string{environmentKeySmtpAddress: "relay.example.test:465", environmentKeySmtpAllowPlaintext: "true", environmentKeySmtpImplicitTls: "true"}, "the smtp plaintext door is set under implicit tls", environmentKeySmtpAllowPlaintext},
         {map[string]string{environmentKeySmtpUsername: "mailer", environmentKeySmtpPassword: "relay-password"}, "the smtp relay setting is set without an address", environmentKeySmtpUsername},
-        {map[string]string{environmentKeySmtpRequireTls: "true"}, "the smtp relay setting is set without an address", environmentKeySmtpRequireTls},
+        {map[string]string{environmentKeySmtpAllowPlaintext: "true"}, "the smtp relay setting is set without an address", environmentKeySmtpAllowPlaintext},
         {map[string]string{environmentKeySmtpImplicitTls: "false"}, "the smtp relay setting is set without an address", environmentKeySmtpImplicitTls},
     }
 
@@ -230,9 +230,10 @@ func TestBuildMailer_HandsTheRelayTheConfiguredCredentials(t *testing.T) {
     relay := newSmtpRelayStub(t)
 
     sendErr := sendThroughBuiltMailer(t, map[string]string{
-        environmentKeySmtpAddress:  relay.listener.Addr().String(),
-        environmentKeySmtpUsername: "mailer",
-        environmentKeySmtpPassword: "relay-password",
+        environmentKeySmtpAddress:        relay.listener.Addr().String(),
+        environmentKeySmtpUsername:       "mailer",
+        environmentKeySmtpPassword:       "relay-password",
+        environmentKeySmtpAllowPlaintext: "true",
     })
     if nil == sendErr {
         t.Fatal("expected the stub's auth refusal answered")
@@ -247,14 +248,13 @@ func TestBuildMailer_HandsTheRelayTheConfiguredCredentials(t *testing.T) {
     }
 }
 
-func TestBuildMailer_HandsTheRelayTheRequireTlsSwitch(t *testing.T) {
+func TestBuildMailer_RefusesARelayWithoutStartTlsWhenThePlaintextDoorIsLeftOut(t *testing.T) {
     relay := newSmtpRelayStub(t)
 
     sendErr := sendThroughBuiltMailer(t, map[string]string{
-        environmentKeySmtpAddress:    relay.listener.Addr().String(),
-        environmentKeySmtpRequireTls: "true",
+        environmentKeySmtpAddress: relay.listener.Addr().String(),
     })
     if nil == sendErr || false == strings.Contains(sendErr.Error(), "tls is required") {
-        t.Fatalf("expected a relay without STARTTLS refused under the switch, got %v", sendErr)
+        t.Fatalf("expected a relay without STARTTLS refused by default, got %v", sendErr)
     }
 }

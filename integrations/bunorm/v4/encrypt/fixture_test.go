@@ -612,7 +612,7 @@ func boundNotesSpec(refuseUnbound bool, deterministic bool) TableSpecification {
         PrimaryKey:    "id",
         Columns:       []string{"notes"},
         Deterministic: deterministic,
-        SealBindings:  map[string]ColumnSealBinding{"notes": {Label: "accounts.notes", RefuseUnbound: refuseUnbound}},
+        SealBindings:  map[string]ColumnSealBinding{"notes": {Label: "accounts.notes", UnboundAdmitted: false == refuseUnbound}},
     }
 }
 

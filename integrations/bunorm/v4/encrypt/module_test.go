@@ -801,7 +801,7 @@ func TestModule_RefusesASealBindingItCannotHold(t *testing.T) {
         "an unknown cipher name":            newBindingModuleConfig(valid, SealBindingConfig{Reference: otherCompartmentBinding{}}),
         "an empty name without the default": withDefaultCipher(newBindingModuleConfig(valid, SealBindingConfig{Reference: emptyNameBinding{}})),
         "the default with no Cipher":        newBindingModuleConfig(valid, SealBindingConfig{Reference: defaultSecretBinding{}}),
-        "the marker twice":                  newBindingModuleConfig(valid, SealBindingConfig{Reference: crmIbanBinding{}, RefuseUnbound: true}),
+        "the marker twice":                  newBindingModuleConfig(valid, SealBindingConfig{Reference: crmIbanBinding{}}),
         "a marker with fields":              newBindingModuleConfig(valid, SealBindingConfig{Reference: labelBinding{label: "customer.fields"}}),
         "DefaultCipherReference by pointer": withDefaultCipher(newBindingModuleConfig(valid, SealBindingConfig{Reference: pointerDefaultBinding{}})),
         "a label outside the grammar":       newBindingModuleConfig(valid, SealBindingConfig{Reference: badLabelBinding{}}),
@@ -881,10 +881,21 @@ func TestModule_ALaterRegistrationReplacesABinding(t *testing.T) {
     installCipher(t, "test:crm", NewFakeCipher())
     installSealBinding(t, crmIbanBinding{}, false)
 
-    NewModule(newBindingModuleConfig(SealBindingConfig{Reference: crmIbanBinding{}, RefuseUnbound: true})).RegisterServices(newModuleRegistrar())
+    NewModule(newBindingModuleConfig(SealBindingConfig{Reference: crmIbanBinding{}})).RegisterServices(newModuleRegistrar())
 
     if binding, declared := sealBindingOf(reflect.TypeOf(crmIbanBinding{})); false == declared || false == binding.refuseUnbound || "customer.iban" != binding.label {
         t.Fatalf("expected the later registration's binding, got %+v (declared %v)", binding, declared)
+    }
+}
+
+func TestSealBindingConfig_UnboundAdmittedIsTheDoorOfTheRefusal(t *testing.T) {
+    preserveRegistries(t)
+    installCipher(t, "test:crm", NewFakeCipher())
+
+    NewModule(newBindingModuleConfig(SealBindingConfig{Reference: crmIbanBinding{}, UnboundAdmitted: true})).RegisterServices(newModuleRegistrar())
+
+    if binding, declared := sealBindingOf(reflect.TypeOf(crmIbanBinding{})); false == declared || true == binding.refuseUnbound {
+        t.Fatalf("expected the door to admit unbound values, got %+v (declared %v)", binding, declared)
     }
 }
 
@@ -928,8 +939,8 @@ func TestModule_HandsEachCommandTheBindingsOfItsCompartment(t *testing.T) {
         },
         SealBindings: []SealBindingConfig{
             {Reference: defaultSecretBinding{}},
-            {Reference: crmIbanBinding{}, RefuseUnbound: true},
-            {Reference: crmEmailBinding{}},
+            {Reference: crmIbanBinding{}},
+            {Reference: crmEmailBinding{}, UnboundAdmitted: true},
         },
     })
 
@@ -952,15 +963,15 @@ func TestModule_HandsEachCommandTheBindingsOfItsCompartment(t *testing.T) {
         t.Fatalf("expected the crm command handed its own bindings, got %v", labelsByCommand)
     }
 
-    if true != labelsByCommandRefuseUnbound(module, "melody:encrypt:database:test:crm", "customer.iban") {
-        t.Fatal("expected the crm command to carry the declaration's RefuseUnbound")
+    if false != labelsByCommandUnboundAdmitted(module, "melody:encrypt:database:test:crm", "customer.iban") || true != labelsByCommandUnboundAdmitted(module, "melody:encrypt:database:test:crm", "customer.email") {
+        t.Fatal("expected the crm command to carry each declaration's door as declared")
     }
 }
 
-func labelsByCommandRefuseUnbound(module *Module, commandName string, label string) bool {
+func labelsByCommandUnboundAdmitted(module *Module, commandName string, label string) bool {
     for _, command := range module.RegisterCliCommands(nil) {
         if commandName == command.Name() {
-            return command.(*EncryptDatabaseCommand).sealBindingsByLabel[label].RefuseUnbound
+            return command.(*EncryptDatabaseCommand).sealBindingsByLabel[label].UnboundAdmitted
         }
     }
 

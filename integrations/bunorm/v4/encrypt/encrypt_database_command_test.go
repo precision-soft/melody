@@ -373,7 +373,7 @@ func TestEncryptDatabaseCommand_RefusesANegativeBatchBeforeResolvingTheDatabase(
 
 func TestEncryptDatabaseCommand_BindsADeclaredColumn(t *testing.T) {
     cipherInstance := newRotationCipher(t)
-    command, stub := newScriptedNotesCommand(t, cipherInstance, [][]driver.Value{{"1", "plain"}}, SealBindingConfig{Reference: accountsNotesBinding{}})
+    command, stub := newScriptedNotesCommand(t, cipherInstance, [][]driver.Value{{"1", "plain"}}, SealBindingConfig{Reference: accountsNotesBinding{}, UnboundAdmitted: true})
 
     if runErr := runCommandLine(t, command, logging.NewNopLogger(), "--table", "accounts", "--column", "notes"); nil != runErr {
         t.Fatalf("unexpected run error: %v", runErr)
@@ -398,13 +398,13 @@ func TestEncryptDatabaseCommand_RunsAnUndeclaredColumnUnbound(t *testing.T) {
 /* a physical table spelled otherwise than the label binds its column through the flag */
 func TestEncryptDatabaseCommand_SealBindingFlagNamesTheLabel(t *testing.T) {
     cipherInstance := newRotationCipher(t)
-    command, stub := newScriptedNotesCommand(t, cipherInstance, [][]driver.Value{{"1", "plain"}}, SealBindingConfig{Reference: accountsNotesBinding{}, RefuseUnbound: true})
+    command, stub := newScriptedNotesCommand(t, cipherInstance, [][]driver.Value{{"1", "plain"}}, SealBindingConfig{Reference: accountsNotesBinding{}})
 
     if runErr := runCommandLine(t, command, logging.NewNopLogger(), "--table", "accounts_archive", "--column", "notes", "--seal-binding", "notes=accounts.notes"); nil == runErr || false == exception.ChainIs(runErr, ErrUnboundValueRefused) {
-        t.Fatalf("expected the flag to carry the declaration's RefuseUnbound onto the plaintext row, got %v", runErr)
+        t.Fatalf("expected the flag to carry the declaration's refusal of unbound values onto the plaintext row, got %v", runErr)
     }
 
-    command, stub = newScriptedNotesCommand(t, cipherInstance, [][]driver.Value{{"1", "plain"}}, SealBindingConfig{Reference: accountsNotesBinding{}})
+    command, stub = newScriptedNotesCommand(t, cipherInstance, [][]driver.Value{{"1", "plain"}}, SealBindingConfig{Reference: accountsNotesBinding{}, UnboundAdmitted: true})
 
     if runErr := runCommandLine(t, command, logging.NewNopLogger(), "--table", "accounts_archive", "--column", "notes", "--seal-binding", "notes=accounts.notes"); nil != runErr {
         t.Fatalf("unexpected run error: %v", runErr)
@@ -453,7 +453,7 @@ func TestEncryptDatabaseCommand_RefusesASealBindingFlagItCannotResolve(t *testin
 func TestEncryptDatabaseCommand_LogsWhatItBound(t *testing.T) {
     cipherInstance := newRotationCipher(t)
     unbound, _ := cipherInstance.Encrypt("unbound")
-    command, _ := newScriptedNotesCommand(t, cipherInstance, [][]driver.Value{{"1", "plain"}, {"2", unbound}, {"3", unbound}}, SealBindingConfig{Reference: accountsNotesBinding{}})
+    command, _ := newScriptedNotesCommand(t, cipherInstance, [][]driver.Value{{"1", "plain"}, {"2", unbound}, {"3", unbound}}, SealBindingConfig{Reference: accountsNotesBinding{}, UnboundAdmitted: true})
 
     logger := &recordingLogger{}
     if runErr := runCommandLine(t, command, logger, "--table", "accounts", "--column", "notes"); nil != runErr {
@@ -535,7 +535,7 @@ func TestEncryptDatabaseCommand_RefusesAColumnDifferingFromItsLabelByCase(t *tes
 
 func TestEncryptDatabaseCommand_RefusesALabelDeclaredTwice(t *testing.T) {
     refusalContext := recoverRefusalContext(t, func() {
-        NewEncryptDatabaseCommand(NewFakeCipher(), EncryptDatabaseCommandConfig{Database: newMysqlDatabase(), SealBindings: []SealBindingConfig{{Reference: accountsNotesBinding{}}, {Reference: accountsNotesBinding{}, RefuseUnbound: true}}})
+        NewEncryptDatabaseCommand(NewFakeCipher(), EncryptDatabaseCommandConfig{Database: newMysqlDatabase(), SealBindings: []SealBindingConfig{{Reference: accountsNotesBinding{}}, {Reference: accountsNotesBinding{}}}})
     })
 
     if "EncryptDatabaseCommandConfig.SealBindings" != refusalContext["field"] || 1 != refusalContext["index"] || "accounts.notes" != refusalContext["sealBinding"] {
@@ -610,7 +610,7 @@ func TestEncryptDatabaseCommand_LogsTheStoredSpelling(t *testing.T) {
         "decrypt":   {rows: [][]driver.Value{{"1", sealed}}, arguments: []string{"--mode", "decrypt"}},
     } {
         t.Run(mode, func(t *testing.T) {
-            command, _ := newScriptedNotesCommand(t, cipherInstance, testCase.rows, SealBindingConfig{Reference: capitalisedNotesBinding{}})
+            command, _ := newScriptedNotesCommand(t, cipherInstance, testCase.rows, SealBindingConfig{Reference: capitalisedNotesBinding{}, UnboundAdmitted: true})
 
             logger := &recordingLogger{}
             if runErr := runCommandLine(t, command, logger, append([]string{"--table", "Accounts", "--column", "Notes"}, testCase.arguments...)...); nil != runErr {
