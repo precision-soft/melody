@@ -69,7 +69,7 @@ Every door of `storagecontract.Storage` takes the runtime it runs under first; t
 - `storage.For(runtimeInstance, storageInstance)` binds a storage the caller already holds, the form a service writes: it keeps the unbound storage in a field and binds it at the top of each method.
 - A view is a value of one runtime: it is never kept in a service, a field or a goroutine that outlives the runtime, and no provider registers one, so the wiring generator refuses a constructor that asks for a `storage.Bound`.
 - The `Object.Body` a `Get` answers is read after the door returned, under the bound runtime's context on a backend that reads one, the awss3 `Storage`; a call that needs another deadline, or one that must outlive the caller's cancellation, binds again over `runtime.WithContext(runtimeInstance, ctx)`.
-- A view over no storage, a nil or a typed nil, refuses every door with `storage instance is nil`. A nil runtime is handed to the backend as it is, the backend's to refuse; no shipped backend refuses it yet. Binding and calling allocate nothing of their own; `storage.FromRuntime` costs the by-name resolution, so a function binds once and calls many times.
+- A view over no storage, a nil or a typed nil, refuses every door with `storage instance is nil`. A nil runtime is handed to the backend as it is, and both shipped backends refuse it first at every door, with `the runtime is nil or carries no context`, before the local storage touches its base directory and before the S3 backend sends a request. Binding and calling allocate nothing of their own; `storage.FromRuntime` costs the by-name resolution, so a function binds once and calls many times.
 - `Runtime()` and `Storage()` answer the two halves the view is bound over.
 
 ## Footguns & caveats

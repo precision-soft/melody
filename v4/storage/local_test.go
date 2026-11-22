@@ -748,7 +748,7 @@ func TestLocalStorage_PresignedUrlIsRefusedAsUnsupported(t *testing.T) {
     local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
 
     for _, config := range []storagecontract.PresignConfig{{}, {Method: http.MethodPut}} {
-        url, presignErr := local.PresignedUrl(nil, "reports/report.csv", config)
+        url, presignErr := local.PresignedUrl(testRuntime(), "reports/report.csv", config)
         if false == exception.ChainIs(presignErr, storagecontract.ErrPresignUnsupported) || false == strings.Contains(presignErr.Error(), "presigned urls are not supported by local storage") {
             t.Fatalf("%v: expected the local storage to refuse a presigned url as unsupported, got %v", config, presignErr)
         }
@@ -1617,5 +1617,29 @@ func TestLocalStorage_AMetadataWriteThatFailsAnswersAnErrorOverTheStoredObject(t
 
     if temporaryList, _ := filepath.Glob(filepath.Join(base, "labels", ".melody-storage-*.tmp")); 0 != len(temporaryList) {
         t.Fatalf("expected no temporary left behind, got %v", temporaryList)
+    }
+}
+
+/* every door refuses a nil runtime before it touches the base directory, as the cache, the http client and the session do, where a nil one reached a dereference on the S3 backend */
+func TestLocalStorage_EveryDoorRefusesANilRuntimeFirst(t *testing.T) {
+    local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
+
+    _, getErr := local.Get(nil, "a.txt", storagecontract.GetOptions{})
+    _, statErr := local.Stat(nil, "a.txt")
+    _, presignErr := local.PresignedUrl(nil, "a.txt", storagecontract.PresignConfig{})
+    for door, doorErr := range map[string]error{
+        "Put":          local.Put(nil, "a.txt", strings.NewReader("x"), 1, storagecontract.PutOptions{}),
+        "Get":          getErr,
+        "Stat":         statErr,
+        "Delete":       local.Delete(nil, "a.txt"),
+        "PresignedUrl": presignErr,
+    } {
+        if nil == doorErr || false == strings.Contains(doorErr.Error(), "the runtime is nil or carries no context") {
+            t.Fatalf("%s: expected the nil runtime refused, got %v", door, doorErr)
+        }
+    }
+
+    if entries, readErr := os.ReadDir(local.baseDirectory); nil != readErr || 0 != len(entries) {
+        t.Fatalf("expected nothing written under the base, got %v %v", entries, readErr)
     }
 }

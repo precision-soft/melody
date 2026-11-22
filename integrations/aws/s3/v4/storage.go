@@ -125,6 +125,10 @@ func (instance *Storage) Put(
     size int64,
     options storagecontract.PutOptions,
 ) error {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return refuseErr
+    }
+
     instance.plaintextEndpointWarning.write(runtimeInstance)
 
     normalizedKey, keyErr := normalizeObjectKey(key)
@@ -389,6 +393,10 @@ func (instance *Storage) Get(
     key string,
     options storagecontract.GetOptions,
 ) (storagecontract.Object, error) {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return storagecontract.Object{}, refuseErr
+    }
+
     instance.plaintextEndpointWarning.write(runtimeInstance)
 
     normalizedKey, keyErr := normalizeObjectKey(key)
@@ -446,6 +454,10 @@ func (instance *Storage) Stat(
     runtimeInstance containercontract.Runtime,
     key string,
 ) (storagecontract.ObjectInfo, error) {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return storagecontract.ObjectInfo{}, refuseErr
+    }
+
     instance.plaintextEndpointWarning.write(runtimeInstance)
 
     normalizedKey, keyErr := normalizeObjectKey(key)
@@ -494,6 +506,10 @@ func (instance *Storage) Delete(
     runtimeInstance containercontract.Runtime,
     key string,
 ) error {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return refuseErr
+    }
+
     instance.plaintextEndpointWarning.write(runtimeInstance)
 
     normalizedKey, keyErr := normalizeObjectKey(key)
@@ -514,6 +530,10 @@ func (instance *Storage) PresignedUrl(
     key string,
     config storagecontract.PresignConfig,
 ) (string, error) {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return "", refuseErr
+    }
+
     instance.plaintextEndpointWarning.write(runtimeInstance)
 
     normalizedKey, keyErr := normalizeObjectKey(key)

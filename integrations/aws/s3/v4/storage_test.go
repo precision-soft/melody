@@ -1792,3 +1792,30 @@ func TestStorage_GetRefusesANegativeRangeBeforeAskingTheBucket(t *testing.T) {
         t.Fatalf("expected no request for a negative range, got %v", methodList)
     }
 }
+
+/* every door refuses a nil runtime before any request leaves, where the backend dereferenced it */
+func TestStorage_EveryDoorRefusesANilRuntimeFirst(t *testing.T) {
+    recorder := newRecordingObjectServer(t)
+    store := recorder.newStorage(t)
+
+    _, getErr := store.Get(nil, "a.txt", storagecontract.GetOptions{})
+    _, statErr := store.Stat(nil, "a.txt")
+    _, presignErr := store.PresignedUrl(nil, "a.txt", storagecontract.PresignConfig{})
+    for door, doorErr := range map[string]error{
+        "Put":          store.Put(nil, "a.txt", strings.NewReader("x"), 1, storagecontract.PutOptions{}),
+        "Get":          getErr,
+        "Stat":         statErr,
+        "Delete":       store.Delete(nil, "a.txt"),
+        "PresignedUrl": presignErr,
+    } {
+        if nil == doorErr || false == strings.Contains(doorErr.Error(), "the runtime is nil or carries no context") {
+            t.Fatalf("%s: expected the nil runtime refused, got %v", door, doorErr)
+        }
+    }
+
+    recorder.mutex.Lock()
+    defer recorder.mutex.Unlock()
+    if 0 != len(recorder.requestList) {
+        t.Fatalf("expected no request sent, got %d", len(recorder.requestList))
+    }
+}

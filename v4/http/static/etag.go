@@ -8,6 +8,7 @@ import (
     "strconv"
     "strings"
 
+    "github.com/precision-soft/melody/v4/internal/entitytag"
     "github.com/precision-soft/melody/v4/version"
 )
 
@@ -21,13 +22,11 @@ func GenerateEtag(info fs.FileInfo, weak bool) string {
         return formatEtag(digestEtagInput(fmt.Sprintf("%d-%s", info.Size(), version.BuildVersion())), weak)
     }
 
-    return formatEtag(digestEtagInput(fmt.Sprintf("%d-%d", info.Size(), info.ModTime().UnixNano())), weak)
+    return formatEtag(entitytag.OfSizeAndModificationTime(info.Size(), info.ModTime().UnixNano()), weak)
 }
 
 func digestEtagInput(input string) string {
-    digest := sha256.Sum256([]byte(input))
-
-    return hex.EncodeToString(digest[:8])
+    return entitytag.Digest(input)
 }
 
 func formatEtag(etag string, weak bool) string {

@@ -10,7 +10,6 @@ import (
     "math"
     "os"
     "path/filepath"
-    "strconv"
     "strings"
     "syscall"
     "time"
@@ -18,6 +17,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/internal/entitytag"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
@@ -106,6 +106,10 @@ func (instance *LocalStorage) Put(
     size int64,
     options storagecontract.PutOptions,
 ) error {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return refuseErr
+    }
+
     relativeKey, keyErr := storageRelativeKey(key)
     if nil != keyErr {
         return keyErr
@@ -324,6 +328,10 @@ func (instance *LocalStorage) Get(
     key string,
     options storagecontract.GetOptions,
 ) (storagecontract.Object, error) {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return storagecontract.Object{}, refuseErr
+    }
+
     relativeKey, keyErr := storageRelativeKey(key)
     if nil != keyErr {
         return storagecontract.Object{}, keyErr
@@ -385,6 +393,10 @@ func (instance *LocalStorage) Stat(
     runtimeInstance containercontract.Runtime,
     key string,
 ) (storagecontract.ObjectInfo, error) {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return storagecontract.ObjectInfo{}, refuseErr
+    }
+
     relativeKey, keyErr := storageRelativeKey(key)
     if nil != keyErr {
         return storagecontract.ObjectInfo{}, keyErr
@@ -528,9 +540,7 @@ func readStorageContentType(root *os.Root, relativeKey string, fileInfo os.FileI
 
 /* localEntityTag is the tag the static file server gives a file of this size and modification time, without its quotes */
 func localEntityTag(fileInfo os.FileInfo) string {
-    digest := sha256.Sum256([]byte(strconv.FormatInt(fileInfo.Size(), 10) + "-" + strconv.FormatInt(fileInfo.ModTime().UnixNano(), 10)))
-
-    return hex.EncodeToString(digest[:8])
+    return entitytag.OfSizeAndModificationTime(fileInfo.Size(), fileInfo.ModTime().UnixNano())
 }
 
 /* storageAbsenceCause carries ErrObjectNotFound beside an error that means the key names no object, and leaves every other error as it is */
@@ -546,6 +556,10 @@ func (instance *LocalStorage) Delete(
     runtimeInstance containercontract.Runtime,
     key string,
 ) error {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return refuseErr
+    }
+
     relativeKey, keyErr := storageRelativeKey(key)
     if nil != keyErr {
         return keyErr
@@ -586,6 +600,10 @@ func (instance *LocalStorage) PresignedUrl(
     key string,
     config storagecontract.PresignConfig,
 ) (string, error) {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return "", refuseErr
+    }
+
     return "", exception.NewError("presigned urls are not supported by local storage", map[string]any{"key": key}, storagecontract.ErrPresignUnsupported)
 }
 

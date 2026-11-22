@@ -101,6 +101,8 @@ the session apart, `session.NewUnavailableSession` builds one.
 
 ### Changed
 
+- storage: **Breaking**: every door of `LocalStorage` refuses a nil runtime, and one carrying no context, first, answering `the runtime is nil or carries no context` before the base directory is touched; the local storage and the static file server derive an entity tag through one internal formula, the tag unchanged.
+
 - storage: **Breaking**: `Storage.Get(runtime, key, GetOptions)` answers an `Object{Body, Info}`, the info from the stat both backends already take, and `Storage.PresignedUrl(runtime, key, PresignConfig)` takes the expiry as a `bound.Duration` and signs an upload under `Method: http.MethodPut`; `LocalStorage.PresignedUrl` carries `ErrPresignUnsupported`. See `UPGRADE.md`.
 - storage: **Behavioural change**: a presign expiry left out is 15 minutes where `0` was refused, a value outside 1s to 7 days is refused naming `PresignConfig.Expiry`, and an absent key answers `ErrObjectNotFound` in the chain where it answered a sentence over the backend's error; `LocalStorage` keeps a hidden `.melody-storage-….metadata` object beside an object stored with a content type, written after the object, refuses a key with a segment spelled like one or like a temp object, and refuses at `Put`, naming `PutOptions.ContentType`, a content type whose metadata could pass 4 KiB. See `UPGRADE.md`.
 - example: the storage doors call the storage through `storage.For` and `storage.FromRuntime`; the get door reads the object once, answers 404 on `ErrObjectNotFound`, refuses past 8 MiB from the declared size before a byte is read and answers the stored `contentType` and `size`, and the link door asks `Stat` and signs through `PresignConfig`.
