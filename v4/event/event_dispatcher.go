@@ -592,7 +592,7 @@ func (instance *EventDispatcher) dispatch(runtimeInstance containercontract.Runt
 
                 afterFailureErr := func() error {
                     if true == guards && false == internal.IsNilInterface(afterFailureGuard) {
-                        leave := afterFailureGuard.EnterAfterFailureListener(eventseam.Token{}, eventseam.AfterFailureListener{
+                        leave := afterFailureGuard.EnterAfterFailureListener(eventseam.NewToken(), eventseam.AfterFailureListener{
                             EventName:        eventName,
                             ListenerName:     entryNameOf(entry),
                             ReplacesResponse: entry.replacesResponseAfterFailure,

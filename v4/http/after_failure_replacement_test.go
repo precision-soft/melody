@@ -5,6 +5,7 @@ import (
     "io"
     nethttp "net/http"
     "net/http/httptest"
+    "reflect"
     "strings"
     "sync"
     "testing"
@@ -79,7 +80,7 @@ func TestKernelResponseEvent_AReplacementAfterAFailureIsRefusedWithoutTheDoor(t 
     other := TextResponse(nethttp.StatusTeapot, "other")
     payload := NewKernelResponseEvent(nil, original)
 
-    leave := payload.EnterAfterFailureListener(eventseam.Token{}, eventseam.AfterFailureListener{EventName: kernelcontract.EventKernelResponse, ListenerName: "late"})
+    leave := payload.EnterAfterFailureListener(eventseam.NewToken(), eventseam.AfterFailureListener{EventName: kernelcontract.EventKernelResponse, ListenerName: "late"})
     payload.SetResponse(other)
     leave()
 
@@ -104,7 +105,7 @@ func TestKernelResponseEvent_AReplacementAfterAFailureIsServedThroughTheDoor(t *
     other := TextResponse(nethttp.StatusTeapot, "other")
     payload := NewKernelResponseEvent(nil, original)
 
-    leave := payload.EnterAfterFailureListener(eventseam.Token{}, eventseam.AfterFailureListener{ListenerName: "late", ReplacesResponse: true})
+    leave := payload.EnterAfterFailureListener(eventseam.NewToken(), eventseam.AfterFailureListener{ListenerName: "late", ReplacesResponse: true})
     payload.SetResponse(other)
     leave()
 
@@ -118,7 +119,7 @@ func TestKernelResponseEvent_SettingTheStandingResponseAfterAFailureIsNoReplacem
     original := TextResponse(nethttp.StatusOK, "original")
     payload := NewKernelResponseEvent(nil, original)
 
-    leave := payload.EnterAfterFailureListener(eventseam.Token{}, eventseam.AfterFailureListener{ListenerName: "late"})
+    leave := payload.EnterAfterFailureListener(eventseam.NewToken(), eventseam.AfterFailureListener{ListenerName: "late"})
     payload.SetResponse(original)
     leave()
 
@@ -126,8 +127,8 @@ func TestKernelResponseEvent_SettingTheStandingResponseAfterAFailureIsNoReplacem
         t.Fatalf("expected no record for the standing response set again")
     }
 
-    leaveOpen := payload.EnterAfterFailureListener(eventseam.Token{}, eventseam.AfterFailureListener{ListenerName: "open", ReplacesResponse: true})
-    leaveClosed := payload.EnterAfterFailureListener(eventseam.Token{}, eventseam.AfterFailureListener{ListenerName: "closed"})
+    leaveOpen := payload.EnterAfterFailureListener(eventseam.NewToken(), eventseam.AfterFailureListener{ListenerName: "open", ReplacesResponse: true})
+    leaveClosed := payload.EnterAfterFailureListener(eventseam.NewToken(), eventseam.AfterFailureListener{ListenerName: "closed"})
     leaveClosed()
 
     other := TextResponse(nethttp.StatusTeapot, "other")
@@ -143,7 +144,7 @@ func TestKernelResponseEvent_SettingTheStandingResponseAfterAFailureIsNoReplacem
 func TestKernelResponseEvent_ANilPayloadEntersNothing(t *testing.T) {
     var payload *KernelResponseEvent
 
-    payload.EnterAfterFailureListener(eventseam.Token{}, eventseam.AfterFailureListener{})()
+    payload.EnterAfterFailureListener(eventseam.NewToken(), eventseam.AfterFailureListener{})()
 }
 
 func newReplacementKernelFixture(t *testing.T, door bool) (*httptest.ResponseRecorder, *afterFailureRecordingLogger, *closeRecordingBody, *closeRecordingBody) {
@@ -359,5 +360,127 @@ func TestDebugKernelRequestFailureMessage(t *testing.T) {
         if message := debugKernelRequestFailureMessage(testCase.refusal, testCase.err); testCase.expected != message {
             t.Fatalf("%s: expected %q, got %q", testCase.name, testCase.expected, message)
         }
+    }
+}
+
+func TestKernelResponseEvent_AZeroTokenEntersNothing(t *testing.T) {
+    original := TextResponse(nethttp.StatusOK, "original")
+    payload := NewKernelResponseEvent(nil, original)
+
+    leave := payload.EnterAfterFailureListener(eventseam.Token{}, eventseam.AfterFailureListener{ListenerName: "forged", ReplacesResponse: true})
+    defer leave()
+
+    payload.SetResponse(TextResponse(nethttp.StatusTeapot, "forged"))
+    if nethttp.StatusTeapot != payload.Response().StatusCode() || 0 != len(payload.takeAfterFailureReplacements()) {
+        t.Fatalf("expected a zero token to change nothing")
+    }
+
+    tokenType := reflect.TypeOf(eventseam.Token{})
+    for index := 0; index < tokenType.NumField(); index++ {
+        if true == tokenType.Field(index).IsExported() {
+            t.Fatalf("expected the token to carry unexported fields alone, so no type outside v4 is assignable to it")
+        }
+    }
+
+    if 0 == tokenType.NumField() {
+        t.Fatalf("expected the token to carry an unexported field")
+    }
+}
+
+func TestKernel_AResponseRefusedTwiceIsClosedOnceAndWarnedTwice(t *testing.T) {
+    replacement, replacementBody := responseWithClosingBody(nethttp.StatusTeapot, "replaced")
+
+    router := NewRouter()
+    router.Handle("/twice", func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return TextResponse(nethttp.StatusOK, "handler"), nil
+    }, RouteOptions{Methods: []string{nethttp.MethodGet}})
+
+    recordingLogger := &afterFailureRecordingLogger{}
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
+
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
+    dispatcher.DeclareEvent(kernelcontract.EventKernelResponse, eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+    dispatcher.AddListener(kernelcontract.EventKernelResponse, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+        return errors.New("the response listener failed")
+    }, eventcontract.ListenerConfig{Priority: 10})
+    dispatcher.AddListener(kernelcontract.EventKernelResponse, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+        eventValue.Payload().(*KernelResponseEvent).SetResponse(replacement)
+        eventValue.Payload().(*KernelResponseEvent).SetResponse(replacement)
+
+        return nil
+    }, eventcontract.ListenerConfig{Tags: []string{"cleanup"}})
+
+    recorder := httptest.NewRecorder()
+    NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/twice", nil))
+
+    messages, _ := recordingLogger.warnings()
+    if nethttp.StatusOK != recorder.Code || 2 != len(messages) || 1 != replacementBody.closed {
+        t.Fatalf("expected 200, two warnings and one close, got %d %v %d", recorder.Code, messages, replacementBody.closed)
+    }
+}
+
+func TestKernel_AnExitAfterARefusedReplacementStillWarnsAndClosesIt(t *testing.T) {
+    replacement, replacementBody := responseWithClosingBody(nethttp.StatusTeapot, "replaced")
+
+    router := NewRouter()
+    router.Handle("/exiting", func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return TextResponse(nethttp.StatusOK, "handler"), nil
+    }, RouteOptions{Methods: []string{nethttp.MethodGet}})
+
+    recordingLogger := &afterFailureRecordingLogger{}
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
+
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
+    dispatcher.DeclareEvent(kernelcontract.EventKernelResponse, eventcontract.EventConfig{RunAfterFailureTags: []string{"cleanup"}})
+    dispatcher.AddListener(kernelcontract.EventKernelResponse, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+        return errors.New("the response listener failed")
+    }, eventcontract.ListenerConfig{Priority: 10})
+    /* one-shot: the kernel's recovery dispatches kernel.response again for the page it renders after the exit */
+    replaced := false
+    dispatcher.AddListener(kernelcontract.EventKernelResponse, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+        if false == replaced {
+            replaced = true
+            eventValue.Payload().(*KernelResponseEvent).SetResponse(replacement)
+        }
+
+        return nil
+    }, eventcontract.ListenerConfig{Priority: 5, Tags: []string{"cleanup"}})
+    exited := false
+    dispatcher.AddListener(kernelcontract.EventKernelResponse, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+        if false == exited {
+            exited = true
+            exception.Exit(exception.NewExitError(3, exception.NewError("the process is done", nil, nil)))
+        }
+
+        return nil
+    }, eventcontract.ListenerConfig{Priority: 0, Tags: []string{"cleanup"}})
+
+    recorder := httptest.NewRecorder()
+    func() {
+        defer func() {
+            _ = recover()
+        }()
+
+        NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/exiting", nil))
+    }()
+
+    messages, _ := recordingLogger.warnings()
+    if 1 != len(messages) || 1 != replacementBody.closed {
+        t.Fatalf("expected the refused replacement warned and closed once on the exit, got %v and %d closes", messages, replacementBody.closed)
+    }
+}
+
+func TestKernelResponseEvent_AnAdmittedNilResponseIsWarnedAs204(t *testing.T) {
+    payload := NewKernelResponseEvent(nil, TextResponse(nethttp.StatusOK, "original"))
+
+    leave := payload.EnterAfterFailureListener(eventseam.NewToken(), eventseam.AfterFailureListener{ListenerName: "emptying", ReplacesResponse: true})
+    payload.SetResponse(nil)
+    leave()
+
+    replacements := payload.takeAfterFailureReplacements()
+    if 1 != len(replacements) || nethttp.StatusNoContent != replacements[0].servedStatus || nethttp.StatusOK != replacements[0].discardedStatus {
+        t.Fatalf("expected the nil response read as the 204 the kernel writes, got %+v", replacements)
     }
 }

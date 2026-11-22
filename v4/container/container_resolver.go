@@ -353,7 +353,7 @@ func (instance *container) serviceWithCreationGuardLocked(
                         return createFunction.Name()
                     }(),
                 },
-                nil,
+                ErrProviderReturnedNil,
             )
         }
 

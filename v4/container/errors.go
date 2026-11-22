@@ -76,6 +76,12 @@ var ErrServiceNotRegistered = errors.New("service is not registered")
 /* ErrServiceTypeAmbiguous is the cause of a by-type resolution's refusal for a type more than one service is registered under, in the container or in a scope. */
 var ErrServiceTypeAmbiguous = errors.New("service type has multiple registrations")
 
+/* ErrServiceTypeMismatch is the cause of a resolution's refusal for a service whose value is not the type the caller asked for. */
+var ErrServiceTypeMismatch = errors.New("service has wrong type")
+
+/* ErrProviderReturnedNil is the cause of a resolution's refusal for a provider that answered neither a value nor an error. */
+var ErrProviderReturnedNil = errors.New("service provider returned nil")
+
 /* ErrContainerClosed is the cause of every refusal the container answers after Close, distinct from ErrScopeClosed. */
 var ErrContainerClosed = errors.New("container is closed")
 

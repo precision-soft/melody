@@ -18,7 +18,7 @@ type ModuleConfig struct {
     BucketCheck BucketCheckConfig
 }
 
-/* BucketCheckConfig has the storage's provider ensure the bucket, under the runtime of whoever resolves the storage, before it answers the storage; the storage is then built at boot. BootFailure is the mode of that build: the zero value warns at boot and has the first use of the storage check the bucket again, BootFailureFailsBoot stops the boot on a bucket that cannot be ensured. Region is the region a missing bucket is created in. A Region or a BootFailure without Enabled is refused. */
+/* BucketCheckConfig has the storage's provider ensure the bucket, under the runtime of whoever resolves the storage, before it answers the storage; the storage is then built at boot by an http process, and a command checks the bucket at its first use of the storage unless the mode is BootFailureFailsBoot. BootFailure is the mode of that build: the zero value warns at boot and has the first use of the storage check the bucket again, BootFailureFailsBoot stops the boot on a bucket that cannot be ensured. Region is the region a missing bucket is created in. A Region or a BootFailure without Enabled is refused. */
 type BucketCheckConfig struct {
     Enabled     bool
     Region      string

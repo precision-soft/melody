@@ -1,6 +1,7 @@
 package http
 
 import (
+    nethttp "net/http"
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
@@ -181,7 +182,8 @@ type afterFailureReplacement struct {
 
 /* EnterAfterFailureListener is the dispatcher's door: the listener named runs after a failure until the function answered is called. */
 func (instance *KernelResponseEvent) EnterAfterFailureListener(token eventseam.Token, listener eventseam.AfterFailureListener) func() {
-    if nil == instance {
+    /* a token built outside v4 enters nothing, so no listener opens the door for itself */
+    if nil == instance || false == token.Valid() {
         return func() {}
     }
 
@@ -239,10 +241,10 @@ func (instance *KernelResponseEvent) SetResponse(response httpcontract.Response)
     instance.response = response
 }
 
-/* responseStatusOf answers 0 for no response */
+/* responseStatusOf answers 204 for no response, the status the kernel writes for one */
 func responseStatusOf(response httpcontract.Response) int {
     if true == internal.IsNilInterface(response) {
-        return 0
+        return nethttp.StatusNoContent
     }
 
     return response.StatusCode()

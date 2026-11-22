@@ -276,6 +276,27 @@ func TestBuildServicesBuiltAtBoot_AWiringRefusalFailsTheBootUnderTheDefaultMode(
             },
         },
         {
+            name: "a dependency of another type",
+            register: func(applicationInstance *Application) {
+                applicationInstance.RegisterService("app.other.type", func(resolver containercontract.Resolver) (*thirdBootProbe, error) {
+                    return &thirdBootProbe{}, nil
+                }, containercontract.RegisterOptions{})
+                applicationInstance.RegisterService("app.built.wiring", func(resolver containercontract.Resolver) (*warnedBootProbe, error) {
+                    _, resolveErr := runtime.FromRuntime[*firstBuiltAtBootProbe](resolver.Runtime(), "app.other.type")
+
+                    return nil, resolveErr
+                }, containercontract.RegisterOptions{BuiltAtBoot: true})
+            },
+        },
+        {
+            name: "a provider answering nothing",
+            register: func(applicationInstance *Application) {
+                applicationInstance.RegisterService("app.built.wiring", func(resolver containercontract.Resolver) (*warnedBootProbe, error) {
+                    return nil, nil
+                }, containercontract.RegisterOptions{BuiltAtBoot: true})
+            },
+        },
+        {
             name: "a value that closes without the teardown's context",
             register: func(applicationInstance *Application) {
                 applicationInstance.RegisterService("app.built.wiring", func(resolver containercontract.Resolver) (bootAmbiguousProbe, error) {
@@ -440,5 +461,21 @@ func TestBootWarningRegistry_TheBuiltAtBootCodeIsKnownAndNotACliCode(t *testing.
         if internal.BootWarningNameServiceBuiltAtBootFailed == name {
             t.Fatalf("expected the code not written by a cli process, which builds no warn-mode service at boot")
         }
+    }
+}
+
+func TestBuildServicesBuiltAtBoot_TheWarningsCauseNumbersEveryLinkAfterTheFirst(t *testing.T) {
+    applicationInstance := newHttpBootFailureApplication(t)
+    applicationInstance.RegisterService("app.built.chained", func(resolver containercontract.Resolver) (*warnedBootProbe, error) {
+        return nil, exception.NewError("the catalogue could not be opened", nil, errors.New("connection refused"))
+    }, containercontract.RegisterOptions{BuiltAtBoot: true})
+
+    if recovered := runBuiltAtBootLoop(t, applicationInstance); nil != recovered {
+        t.Fatalf("expected the boot to go on, got %v", recovered)
+    }
+
+    cause, _ := builtAtBootFailureWarnings(applicationInstance)[0].Context["cause"].(string)
+    if "the catalogue could not be opened: cause 1: connection refused" != cause {
+        t.Fatalf("expected the first link unnumbered and the next ones numbered from 1, got %q", cause)
     }
 }

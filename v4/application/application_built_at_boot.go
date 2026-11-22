@@ -1,8 +1,6 @@
 package application
 
 import (
-    "strings"
-
     "github.com/precision-soft/melody/v4/config"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -24,9 +22,8 @@ var builtAtBootWiringRefusals = []error{
     container.ErrCircularDependency,
     container.ErrScopedServiceAtBoot,
     containercontract.ErrRuntimeKindRefused,
-    container.ErrLazyHandleNameNotRegistered,
-    container.ErrLazyHandleTypeIsAmbiguous,
-    container.ErrLazyHandleTypeMismatch,
+    container.ErrServiceTypeMismatch,
+    container.ErrProviderReturnedNil,
 }
 
 func (instance *Application) buildServicesBuiltAtBoot(bootRuntime containercontract.Runtime) {
@@ -68,7 +65,7 @@ func (instance *Application) buildServicesBuiltAtBoot(bootRuntime containercontr
             Message: "a service built at boot could not be built: the boot goes on, the first resolution of the service builds it again and answers the failure if it still cannot be built",
             Context: loggingcontract.Context{
                 "serviceName": registration.ServiceName,
-                "cause":       strings.TrimPrefix(internal.AppendCauseChain("", exception.BuildCauseChain(buildErr, builtAtBootCauseChainDepth), builtAtBootCauseChainDepth), ": cause 1: "),
+                "cause":       builtAtBootCauseOf(buildErr),
             },
         })
     }
@@ -91,4 +88,14 @@ func builtAtBootFailureFailsBoot(bootRuntime containercontract.Runtime, registra
     }
 
     return false
+}
+
+/* builtAtBootCauseOf renders the failure and its causes on one line, as the exit line does: the first link, then ": cause N: " before each next one */
+func builtAtBootCauseOf(buildErr error) string {
+    links := exception.BuildCauseChain(buildErr, builtAtBootCauseChainDepth)
+    if 0 == len(links) {
+        return ""
+    }
+
+    return internal.AppendCauseChain(internal.BoundDiagnosticText(internal.EscapeControlCharacters(links[0])), links[1:], builtAtBootCauseChainDepth)
 }

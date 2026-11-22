@@ -28,7 +28,7 @@ func affectedAtLeastOneRow(result sql.Result) bool {
     return 0 < affected
 }
 
-/* seedIfEmptyRows fills an empty table the constructor's migration set has already created, from the rows the caller builds. The table is read through the row type itself, so a caller cannot count one table and insert into another, and the insert ignores duplicate keys because several applications may reach an empty table at once. */
+/* seedIfEmptyRows fills an empty table the catalogue's migration set has already created, from the rows the caller builds. The table is read through the row type itself, so a caller cannot count one table and insert into another, and the insert ignores duplicate keys because several applications may reach an empty table at once. */
 func seedIfEmptyRows[Row any](ctx context.Context, database *bun.DB, buildRows func() []*Row) error {
     count, countErr := database.
         NewSelect().

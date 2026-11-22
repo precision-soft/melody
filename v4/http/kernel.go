@@ -4,6 +4,7 @@ import (
     "context"
     nethttp "net/http"
     "runtime/debug"
+    "slices"
     "sort"
     "strings"
     "sync/atomic"
@@ -825,11 +826,22 @@ func (instance *Kernel) dispatchResponseAndWrite(
         closeDiscardedResponseBody(discardCandidate, requestLogger)
     }()
 
+    /* an exit raised by a listener unwinds past the warnings below, so what the payload recorded is warned about and closed here too */
+    replacementsWarned := false
+    defer func() {
+        if true == replacementsWarned {
+            return
+        }
+
+        warnAfterFailureReplacements(requestLogger, kernelResponseEvent, kernelResponseEvent.Response(), *finalResponse)
+    }()
+
     _, eventKernelResponseErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, kernelResponseEvent)
     instance.logEventDispatchError(requestLogger, "kernel response error", eventKernelResponseErr)
 
     publishedResponse := kernelResponseEvent.Response()
 
+    replacementsWarned = true
     warnAfterFailureReplacements(requestLogger, kernelResponseEvent, publishedResponse, *finalResponse)
 
     if nil != *finalResponse && *finalResponse != publishedResponse {
@@ -1065,6 +1077,8 @@ var _ httpcontract.Kernel = (*Kernel)(nil)
 
 /* warnAfterFailureReplacements writes one warning per response a listener set after a failure, refused or replaced, and closes the response that lost unless the kernel still holds it */
 func warnAfterFailureReplacements(logger loggingcontract.Logger, kernelResponseEvent *KernelResponseEvent, publishedResponse httpcontract.Response, finalResponse httpcontract.Response) {
+    closedResponses := make([]httpcontract.Response, 0)
+
     for _, replacement := range kernelResponseEvent.takeAfterFailureReplacements() {
         if true == replacement.admitted {
             logger.Warning(
@@ -1090,10 +1104,11 @@ func warnAfterFailureReplacements(logger loggingcontract.Logger, kernelResponseE
         }
 
         /* the response the kernel started from is closed by the caller once it is replaced, and the published one is written */
-        if true == internal.IsNilInterface(replacement.discarded) || replacement.discarded == publishedResponse || replacement.discarded == finalResponse {
+        if true == internal.IsNilInterface(replacement.discarded) || replacement.discarded == publishedResponse || replacement.discarded == finalResponse || true == slices.Contains(closedResponses, replacement.discarded) {
             continue
         }
 
         closeDiscardedResponseBody(replacement.discarded, logger)
+        closedResponses = append(closedResponses, replacement.discarded)
     }
 }

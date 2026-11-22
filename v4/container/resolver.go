@@ -76,7 +76,7 @@ func resolvedAs[T any](serviceName string, value any, getErr error) (T, error) {
                 "expectedType": expectedType.String(),
                 "actualType":   typeString(value),
             },
-            nil,
+            ErrServiceTypeMismatch,
         )
     }
 

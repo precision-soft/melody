@@ -127,7 +127,7 @@ func (instance seederFunc) SeedIfEmpty(ctx context.Context) error {
     return instance(ctx)
 }
 
-/* the four seeders run the same seedIfEmpty as the repositories' constructors, over the database of a persistent storage, so a reset leaves the state of a fresh volume */
+/* the four seeders run the same seedIfEmpty as the catalogue schema's PrepareCatalog, over the database of a persistent storage, so a reset leaves the state of a fresh volume */
 func newCategorySeeder(storage *persistence.CatalogStorage) Seeder {
     return seederFunc(newBunCategoryRepository(storage.Database()).seedIfEmpty)
 }

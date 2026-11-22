@@ -87,7 +87,7 @@ func (instance *BootWarningRegistry) WrittenInCli(name string) bool {
     return false
 }
 
-/* BootWarning is one hazard a configuration admits and the framework does not refuse, written once into the configured journal. Every boot warning of the framework has this shape: Name is a stable dotted identifier, Message says what the configuration does and what follows from it, and Context names the configuration (the keys "firewall", "entry", "configurationKey" and "serviceName"), a failure's cause chain under "cause", and never a value that may be a secret. */
+/* BootWarning is one hazard a configuration admits and the framework does not refuse, written once into the configured journal. Every boot warning of the framework has this shape: Name is a stable dotted identifier, Message says what the configuration does and what follows from it, and Context names the configuration (the keys "firewall", "entry", "configurationKey" and "serviceName"), and never a value that may be a secret; "cause" carries a failure's own text, which its author keeps free of secrets. */
 type BootWarning struct {
     Name    string
     Message string

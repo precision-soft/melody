@@ -4,7 +4,7 @@ import (
     "github.com/uptrace/bun/migrate"
 )
 
-/* Migrations is the single source of this example's schema on mysql: the repository constructors and the two-factor store's provider run it at first use through EnsureMigrated, and the db:* family runs the same set from the operator's side. It is one migration holding the whole schema, so a volume in an older shape is refused by name at the first resolution (see refuseSchemaDrift) until example:db:reset brings it here, and every statement tolerates a second run and concurrent processes. It covers the eight tables this example owns and the constraints declared with them, not the tables the framework's modules create. */
+/* Migrations is the single source of this example's schema on mysql: the catalogue schema runs it through EnsureMigrated, at boot in an http process and at the first read otherwise, and the db:* family runs the same set from the operator's side. It is one migration holding the whole schema, so a volume in an older shape is refused by name at the first resolution (see refuseSchemaDrift) until example:db:reset brings it here, and every statement tolerates a second run and concurrent processes. It covers the eight tables this example owns and the constraints declared with them, not the tables the framework's modules create. */
 var Migrations = migrate.NewMigrations()
 
 /* SchemaTableNameList names every table this example's set owns, in the order the schema drops them. It is

@@ -107,3 +107,19 @@ func TestErrServiceTypeAmbiguous_IsTheCauseOfAnAmbiguousByTypeRefusal(t *testing
         t.Fatalf("expected the ambiguous type refused with the sentinel, got %v", getErr)
     }
 }
+
+func TestErrServiceTypeMismatchAndErrProviderReturnedNil_AreTheCausesOfTheirRefusals(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    MustRegister[*bootFailureModeProbe](serviceContainer, "app.probe", bootFailureModeProvider, RegisterOptions{})
+    MustRegister[*unregisteredTypeProbe](serviceContainer, "app.nothing", func(resolver containercontract.Resolver) (*unregisteredTypeProbe, error) {
+        return nil, nil
+    }, RegisterOptions{})
+
+    if _, getErr := FromResolver[*unregisteredTypeProbe](t.Context(), serviceContainer, "app.probe"); false == errors.Is(getErr, ErrServiceTypeMismatch) {
+        t.Fatalf("expected the type mismatch refused with its sentinel, got %v", getErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "app.nothing"); false == errors.Is(getErr, ErrProviderReturnedNil) {
+        t.Fatalf("expected the nil provider refused with its sentinel, got %v", getErr)
+    }
+}
