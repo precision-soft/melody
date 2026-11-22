@@ -108,6 +108,8 @@ The two tables bun keeps, the applied migrations and the migration lock, are nam
 | `MELODY_BUNORM_MIGRATE_MIGRATIONS_TABLE` | `melody.bunorm.migrate.migrations_table` | `bun_migrations` |
 | `MELODY_BUNORM_MIGRATE_LOCKS_TABLE` | `melody.bunorm.migrate.locks_table` | `bun_migration_locks` |
 
+The defaults are bun's own names, not `melody_*`, on purpose: a renamed default would make `db:migrate` on an existing database see no history and replay every migration. The two keys are the door for an application that wants the prefix.
+
 The keys are the one source of the names: `ModuleConfig.KeyDefaults{MigrationsTable, LocksTable}` sets only what a key reads when no `.env` file sets it, an empty field taking bun's name. A value that is not a plain identifier, `[A-Za-z_][A-Za-z0-9_]*` of at most 64 bytes, fails the boot with `a module's environment key is refused`, the error's context naming the key; `NewModule` refuses such a default, and two defaults naming one table, naming the field. Two keys naming one table, letter case aside, are refused at the command's run, before the database is opened. A host that builds the commands without the module declares the keys through `EnvironmentKeys(defaults)` from its own module; commands driven outside an application, with no configuration service, act on bun's names. Every message that names a table, the held lock, the failed release and a migration that ran but was not recorded, names the configured one.
 
 `RegisterCommands` refuses a `nil` migration set rather than answering with no commands: the silence left a

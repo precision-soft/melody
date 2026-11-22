@@ -6,7 +6,7 @@
 #   .dev/validate/apidiff.sh [--report]
 #   .dev/validate/apidiff.sh --module DIR [--module DIR ...]
 #   .dev/validate/apidiff.sh --list
-#   .dev/validate/apidiff.sh --compare OLD NEW
+#   .dev/validate/apidiff.sh --compare OLD NEW [--interfaces FILE]
 #
 # The band exists because no other lane asks the question. The compatibility lane next to it builds each
 # integration against the framework version its go.mod pins, which is the CONSUMER's question: does what I
@@ -76,7 +76,8 @@
 # still stale. `--list` prints the discovered modules and needs no container: all.sh reads it to key the
 # band per module.
 #
-# `--compare OLD NEW` compares one explicit pair, without the baseline, and prints the classified rows.
+# `--compare OLD NEW [--interfaces FILE]` compares one explicit pair, without the baseline, and prints the
+# classified rows.
 # OLD and NEW are each a module directory in this tree or a `path@version`. This is the second axis the
 # major split needs — a copied major against the one it was copied from — and it comes with a measured
 # limit: apidiff matches packages by their path relative to the module root, so two majors DO line up,
@@ -86,6 +87,57 @@
 # moved. A row that still reads `changed from X to X` after that is real: apidiff prints identical text
 # when the named type behind the text changed identity, such as a type that became an alias of a type
 # in another package.
+#
+# The fourth major adds a question the rows alone cannot answer: WHO implements the interface a row
+# changes. `v4/.documentation/CONTRACT.md` is the one source of that answer, one `## Module `<dir>``
+# section per v4-line module (`v4` and every `integrations/.../v4`), one row per exported interface with
+# its class, `framework` or `application`, and a reason. v1 to v3 keep the policy they were published
+# under and are never read against it. Two checks read the list:
+#
+# Completeness runs in the gate for every selected v4-line module BEFORE the tags are read, so a module
+# with no tag yet — the whole fourth major until `v4.0.0` — is checked all the same. The interfaces come
+# from `.dev/validate/typecheck/interfaces`, which loads the module under the repository's workspace and
+# reads go/types from source: exported only, `internal/` out, a type-set constraint out, a generic
+# interface in, an alias of an interface the module declares adding no row, an alias of a foreign one
+# listed under the alias. Every interface has exactly one row, every row names an interface and links
+# the file that declares it, the class is one of the two and the reason is not empty; a row naming a
+# module the band does not discover as a v4-line module is stale whatever the selection.
+#
+# Classification judges an `incompatible` row filed `keep` whose object is a method of a listed
+# interface, `./<package>.<Interface>.<Method>` or `<Interface>.<Method>` in the root package. Measured
+# with `--compare` on a planted pair under `.temp/v4-g1/apidiff-fixture/`: a method added to an
+# interface prints `- ./contract.Grown.Second: added`, a method removed `- ./contract.Shrunk.Second:
+# removed`, a method whose signature changed `- ./contract.Changed.First: changed from func() to func()
+# error`, all three under `Incompatible changes:`, and the root package's `- RootGrown.Second: added`.
+# Two interfaces whose method sets were equal on the old side also print `no longer implements` on the
+# interface object itself; that row names no method, so the classification leaves it to the baseline as
+# any other. An `application` interface refuses every method row filed `keep`; a `framework` interface
+# admits `added` and prints it under "framework-implemented contracts grown — MINOR, marked **Breaking**",
+# and refuses `removed` and `changed`. `cut` and `unclassified` rows are not judged: neither ships. In
+# `--compare` mode there is no baseline, so every row reads as proposed to ship, against the list
+# `--interfaces FILE` names or, for a v4-line NEW, the major's own list. The move of an interface from
+# `application` to `framework` is a break the tool cannot see, having no history; the list's header
+# says so and the changelog's `**Breaking**` marker is its record.
+#
+# The pins, run by hand on 2026-11-22. P4-1: `--module v4` passes, 135 interfaces, 63 framework and 72
+# application; every integration v4 module passes, 18 interfaces, 7 and 11. P4-2: the row of
+# `clock/contract.Clock` deleted (the interface left unlisted, which is what a planted declaration
+# measures, without writing into a module a test matrix was reading) fails naming the interface, its
+# file and the list. P4-3: a row for `clock/contract.Gone` fails as "the row names nothing: delete it".
+# P4-4: a duplicate row, an unknown class, an empty class and an empty reason fail as four distinct
+# lines. P4-5: the outbox `Repository` row deleted fails under `--module integrations/outbox/v4` and not
+# under `--module v4`. P4-6: `--module v3`, whose interfaces have no row at all, passes. P4-7: the pair,
+# `contract.Grown` listed `application`, is refused with the application message. P4-8: the pair,
+# listed `framework`, is admitted and printed under the grown heading. P4-9: the pair reversed is
+# refused. P4-10: the lister's Go test. P4-11: a row repointed at a file that does not exist fails here
+# naming the declaring file; the citation band reads the list too and reports the dead link as a `link`
+# finding on v4, a major it does not gate yet, so the gate on the list's links is this band's.
+# The mutants, each run against its pin and restored: completeness behind the no-tag skip (P4-2 passes),
+# one direction only (P4-3 passes), every module read (P4-6 fails on v3), both classes admitted (P4-7
+# passes), any change admitted on `framework` (P4-9 passes), an unexported or `internal/` interface
+# listed (P4-10 fails), an empty class accepted (P4-4 loses its line): seven of seven killed. The
+# unexported mutant survived the first lister, which read types from export data, where an unexported
+# declaration never appears; the lister reads source since.
 #
 # Like its neighbours the band needs the development container, because the Go toolchain and apidiff live
 # there, and it needs the network on a cold module cache — it fetches the tagged version of each module,
@@ -109,6 +161,7 @@ cd "${REPOSITORY_ROOT_DIRECTORY_STRING}"
 MODE_STRING="gate"
 COMPARE_OLD_STRING=""
 COMPARE_NEW_STRING=""
+COMPARE_INTERFACES_FILE_STRING=""
 REQUESTED_MODULE_LIST_STRING=""
 if [[ "--report" = "${1-}" ]]; then
     MODE_STRING="report"
@@ -138,8 +191,16 @@ elif [[ "--compare" = "${1-}" ]]; then
     if [[ "" = "${COMPARE_OLD_STRING}" || "" = "${COMPARE_NEW_STRING}" ]]; then
         fail "--compare needs OLD and NEW, each a module directory in this tree or a path@version"
     fi
-    if [[ "" != "${4-}" ]]; then
-        fail "--compare takes exactly two arguments"
+    if [[ "--interfaces" = "${4-}" ]]; then
+        COMPARE_INTERFACES_FILE_STRING="${5-}"
+        if [[ "" = "${COMPARE_INTERFACES_FILE_STRING}" ]]; then
+            fail "--interfaces takes the path of a contract list shaped like v4/.documentation/CONTRACT.md"
+        fi
+        if [[ "" != "${6-}" ]]; then
+            fail "--compare takes OLD, NEW and an optional --interfaces FILE, nothing more"
+        fi
+    elif [[ "" != "${4-}" ]]; then
+        fail "--compare takes OLD, NEW and an optional --interfaces FILE, nothing more"
     fi
 elif [[ "" != "${1-}" ]]; then
     fail "unknown flag: ${1}"
@@ -148,6 +209,8 @@ fi
 SERVICE_NAME_STRING="dev"
 CONTAINER_ROOT_PATH="/app"
 BASELINE_FILE_PATH="${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/apidiff.baseline"
+CONTRACT_FILE_RELATIVE_PATH="v4/.documentation/CONTRACT.md"
+CONTRACT_FILE_PATH="${REPOSITORY_ROOT_DIRECTORY_STRING}/${CONTRACT_FILE_RELATIVE_PATH}"
 
 # the tool is pinned, not `@latest`, for the reason the vulncheck band records: the container builds it
 # with the image's own toolchain under GOTOOLCHAIN=local, so a go directive past the image's refuses the
@@ -751,6 +814,346 @@ get_old_spec_of_module() {
 }
 
 # ---------------------------------------------------------------------------------------------------------
+# the contract list: every exported interface of a v4-line module, with the class that says who implements it
+# ---------------------------------------------------------------------------------------------------------
+
+# the fourth major's line is the only one the contract list covers: v1 to v3 keep the policy they were
+# published under, which knows no class, and reading them against v4's list would refuse what their own
+# policy admits
+is_contract_line_module() {
+    local MODULE_RELATIVE_PATH_STRING="${1:?}"
+
+    [[ "v4" = "${MODULE_RELATIVE_PATH_STRING}" || "${MODULE_RELATIVE_PATH_STRING}" =~ ^integrations/.+/v4$ ]]
+}
+
+# the rows of a contract list, one per line: ROW, module, interface, class, reason, link, line number; and
+# MALFORMED, line number, the cause, for every row the reader refuses. A module section is a `## Module
+# `<dir>`` heading; a table row outside one is refused, because a row that names no module checks nothing.
+# The interface is the first backticked text of the first cell, the link the target of that cell's link.
+# An empty class and an unknown class are two refusals, so a reader that let either through is caught
+# by a row planted for each.
+read_contract_row_list() {
+    local CONTRACT_PATH_STRING="${1:?}"
+
+    awk '
+        function trim(text) {
+            gsub(/^[ \t]+|[ \t]+$/, "", text)
+            return text
+        }
+        /^## / {
+            module = ""
+            if (match($0, /^## Module `[^`]+`$/)) {
+                module = substr($0, 12, length($0) - 12)
+            }
+            next
+        }
+        /^\|/ {
+            if ($0 ~ /^\| *Interface *\|/ || $0 ~ /^\|[-| :]+\|$/) {
+                next
+            }
+            if ("" == module) {
+                print "MALFORMED\t" NR "\ta table row outside a `## Module `<dir>`` section names no module"
+                next
+            }
+            line = $0
+            sub(/^\|/, "", line)
+            sub(/\|[ \t]*$/, "", line)
+            cellCount = split(line, cell, "|")
+            if (3 != cellCount) {
+                print "MALFORMED\t" NR "\ta row has " cellCount " cell(s), not the three of interface, class and reason"
+                next
+            }
+            interfaceCell = trim(cell[1])
+            class = trim(cell[2])
+            reason = trim(cell[3])
+            name = ""
+            if (match(interfaceCell, /`[^`]+`/)) {
+                name = substr(interfaceCell, RSTART + 1, RLENGTH - 2)
+            }
+            link = ""
+            if (match(interfaceCell, /\]\([^)]+\)/)) {
+                link = substr(interfaceCell, RSTART + 2, RLENGTH - 3)
+            }
+            if ("" == name) {
+                print "MALFORMED\t" NR "\tthe interface cell names no interface in backticks"
+                next
+            }
+            if ("" == class) {
+                print "MALFORMED\t" NR "\t" name " has an empty class — a row has to say framework or application"
+                next
+            }
+            if ("framework" != class && "application" != class) {
+                print "MALFORMED\t" NR "\t" name " has the unknown class \"" class "\" — a row has to say framework or application"
+                next
+            }
+            if ("" == reason) {
+                print "MALFORMED\t" NR "\t" name " has an empty reason — a class nobody can review is not a decision"
+                next
+            }
+            if ((module "\t" name) in seen) {
+                print "MALFORMED\t" NR "\t" name " in " module " has a second row (the first is line " seen[module "\t" name] ") — one interface has one class"
+                next
+            }
+            seen[module "\t" name] = NR
+            print "ROW\t" module "\t" name "\t" class "\t" reason "\t" link "\t" NR
+        }
+    ' "${CONTRACT_PATH_STRING}"
+}
+
+# the rows of a list, refused whole when one of them is malformed: a list the reader cannot read whole is a
+# list nothing can be checked against
+read_valid_contract_row_list() {
+    local CONTRACT_PATH_STRING="${1:?}"
+    local CONTRACT_LABEL_STRING="${2:?}"
+
+    if [[ ! -f "${CONTRACT_PATH_STRING}" ]]; then
+        fail "the contract list ${CONTRACT_LABEL_STRING} does not exist — the classes of the fourth major's interfaces are read from it"
+    fi
+
+    local ROW_LIST_STRING
+    ROW_LIST_STRING="$(read_contract_row_list "${CONTRACT_PATH_STRING}")"
+
+    local MALFORMED_LIST_STRING
+    MALFORMED_LIST_STRING="$(awk -F'\t' '$1 == "MALFORMED" { print "    " label ":" $2 ": " $3 }' label="${CONTRACT_LABEL_STRING}" <<<"${ROW_LIST_STRING}")"
+    if [[ "" != "${MALFORMED_LIST_STRING}" ]]; then
+        printf '%s\n' "${MALFORMED_LIST_STRING}" >&2
+        fail "the contract list ${CONTRACT_LABEL_STRING} carries the malformed row(s) above — fix each one before the list can be read"
+    fi
+
+    awk -F'\t' '$1 == "ROW"' <<<"${ROW_LIST_STRING}"
+}
+
+# every exported interface of each module, as the tool beside the type checker reads it through go/types:
+# module, INTERFACE, name, declaring file; LISTERROR with the cause when a module cannot be read; and a
+# LISTED line per module that finished, so a module that produced nothing is told from one that has no
+# interface. The tool loads under the repository's workspace, as the new side of the comparison does, so
+# an integration ahead of the framework version it pins still type-checks.
+list_module_interface_list() {
+    docker_compose_no_log exec -T "${SERVICE_NAME_STRING}" sh -s -- "$@" <<'CONTAINER_SCRIPT'
+set -u
+TOOL_BINARY="/tmp/melody-interface-list"
+BUILD_OUTPUT="$(cd /app/.dev/validate/typecheck && GOWORK=off go build -o "${TOOL_BINARY}" ./interfaces 2>&1)"
+if [ 0 -ne $? ]; then
+    printf 'PROTOCOL\tTOOL-FAILED\t%s\n' "$(printf '%s' "${BUILD_OUTPUT}" | tr '\t\n' '  ' | tail -c 600)"
+    exit 0
+fi
+for MODULE_PATH in "$@"; do
+    [ -n "${MODULE_PATH}" ] || continue
+    LIST_OUTPUT="$(cd "/app/${MODULE_PATH}" && "${TOOL_BINARY}" 2>&1)"
+    if [ 0 -ne $? ]; then
+        printf '%s\tLISTERROR\t%s\n' "${MODULE_PATH}" "$(printf '%s' "${LIST_OUTPUT}" | tr '\t\n' '  ' | tail -c 600)"
+        continue
+    fi
+    printf '%s\n' "${LIST_OUTPUT}" | awk -F'\t' -v module="${MODULE_PATH}" 'NF >= 2 { print module "\tINTERFACE\t" $1 "\t" $2 }'
+    printf '%s\tLISTED\n' "${MODULE_PATH}"
+done
+CONTAINER_SCRIPT
+}
+
+# completeness, live from the first commit of the major rather than from its first tag: it reads the code
+# and the list, never a published surface, so it runs for every selected v4-line module whether or not the
+# module carries a tag. Every interface has exactly one row, every row names an interface, and every link
+# is the declaring file; a row naming a module the band does not discover as a v4-line module is stale
+# whatever the selection, like a baseline row naming no module.
+check_contract_completeness() {
+    local CONTRACT_MODULE_LIST=()
+    local MODULE_RELATIVE_PATH_STRING
+    for MODULE_RELATIVE_PATH_STRING in "$@"; do
+        if is_contract_line_module "${MODULE_RELATIVE_PATH_STRING}"; then
+            CONTRACT_MODULE_LIST+=("${MODULE_RELATIVE_PATH_STRING}")
+        fi
+    done
+
+    if [[ 0 -eq "${#CONTRACT_MODULE_LIST[@]}" ]]; then
+        return 0
+    fi
+
+    local CONTRACT_ROW_LIST_STRING
+    CONTRACT_ROW_LIST_STRING="$(read_valid_contract_row_list "${CONTRACT_FILE_PATH}" "${CONTRACT_FILE_RELATIVE_PATH}")"
+
+    local INTERFACE_OUTPUT_STRING
+    INTERFACE_OUTPUT_STRING="$(list_module_interface_list "${CONTRACT_MODULE_LIST[@]}")"
+
+    if grep -q $'^PROTOCOL\tTOOL-FAILED\t' <<<"${INTERFACE_OUTPUT_STRING}"; then
+        printf '%s\n' "${INTERFACE_OUTPUT_STRING}" | grep $'^PROTOCOL\tTOOL-FAILED\t' | cut -f3- | sed 's/^/    /' >&2
+        fail "the interface lister under .dev/validate/typecheck/interfaces did not build — without it no v4-line module's interfaces are read, and a complete list would be vouched for unread"
+    fi
+
+    local LISTERROR_LIST_STRING
+    LISTERROR_LIST_STRING="$(printf '%s\n' "${INTERFACE_OUTPUT_STRING}" | grep $'\tLISTERROR\t' || true)"
+    if [[ "" != "${LISTERROR_LIST_STRING}" ]]; then
+        printf '%s\n' "${LISTERROR_LIST_STRING}" | cut -f1,3- | sed 's/^/    /' >&2
+        fail "the interfaces of the module(s) above could not be read — a module that does not type-check gives no list, and a list nobody read is not complete"
+    fi
+
+    local LISTED_COUNT_NUMBER
+    LISTED_COUNT_NUMBER="$(printf '%s\n' "${INTERFACE_OUTPUT_STRING}" | grep -c $'\tLISTED$' || true)"
+    if [[ "${LISTED_COUNT_NUMBER}" -ne "${#CONTRACT_MODULE_LIST[@]}" ]]; then
+        fail "${LISTED_COUNT_NUMBER} of ${#CONTRACT_MODULE_LIST[@]} v4-line module(s) reported their interfaces — a module that vanished from the run is not a module whose list held"
+    fi
+
+    local FAILURE_LIST_STRING
+    FAILURE_LIST_STRING="$(awk -F'\t' -v contract="${CONTRACT_FILE_RELATIVE_PATH}" -v selected="$(printf '%s\n' "${CONTRACT_MODULE_LIST[@]}")" -v discovered="${DISCOVERED_MODULE_LIST_STRING}" '
+        BEGIN {
+            count = split(selected, entry, "\n")
+            for (i = 1; i <= count; i++) {
+                if ("" != entry[i]) {
+                    isSelected[entry[i]] = 1
+                }
+            }
+            count = split(discovered, entry, "\n")
+            for (i = 1; i <= count; i++) {
+                if (entry[i] == "v4" || entry[i] ~ /^integrations\/.+\/v4$/) {
+                    isLine[entry[i]] = 1
+                }
+            }
+        }
+        $1 == "ROW" {
+            key = $2 "\t" $3
+            rowClass[key] = $4
+            rowLink[key] = $6
+            rowLine[key] = $7
+            rowModule[key] = $2
+            next
+        }
+        $2 == "INTERFACE" {
+            key = $1 "\t" $3
+            declared[key] = $4
+            next
+        }
+        END {
+            for (key in rowClass) {
+                split(key, part, "\t")
+                if (!(part[1] in isLine)) {
+                    print "    " contract ":" rowLine[key] ": the row " part[2] " names the module " part[1] ", which is not a v4-line module this band discovers: delete the row or the section"
+                    continue
+                }
+                if (!(part[1] in isSelected)) {
+                    continue
+                }
+                if (!(key in declared)) {
+                    print "    " contract ":" rowLine[key] ": " part[1] " " part[2] " — the row names nothing: delete it"
+                    continue
+                }
+                if ("v4" == part[1]) {
+                    expected = "../" declared[key]
+                } else {
+                    expected = "../../" part[1] "/" declared[key]
+                }
+                if (rowLink[key] != expected) {
+                    print "    " contract ":" rowLine[key] ": " part[1] " " part[2] " links \"" rowLink[key] "\" and is declared in " part[1] "/" declared[key] ": link it as " expected
+                }
+            }
+            for (key in declared) {
+                if (!(key in rowClass)) {
+                    split(key, part, "\t")
+                    print "    " part[1] " " part[2] " (declared in " part[1] "/" declared[key] ") has no row: add a row to " contract
+                }
+            }
+        }
+    ' <(printf '%s\n' "${CONTRACT_ROW_LIST_STRING}") <(printf '%s\n' "${INTERFACE_OUTPUT_STRING}") | sort)"
+    if [[ "" != "${FAILURE_LIST_STRING}" ]]; then
+        printf '%s\n' "${FAILURE_LIST_STRING}" >&2
+        fail "the exported interfaces of the v4-line module(s) and ${CONTRACT_FILE_RELATIVE_PATH} disagree — every interface has one row with its class and reason, and every row names an interface the module declares"
+    fi
+
+    for MODULE_RELATIVE_PATH_STRING in "${CONTRACT_MODULE_LIST[@]}"; do
+        info "contract list: ${MODULE_RELATIVE_PATH_STRING} — $(awk -F'\t' -v module="${MODULE_RELATIVE_PATH_STRING}" '
+            $1 == "ROW" && $2 == module { total++; if ("framework" == $4) framework++; else application++ }
+            END { printf "%d interface(s), %d framework-implemented, %d application-implemented", total, framework, application }
+        ' <<<"${CONTRACT_ROW_LIST_STRING}")"
+    done
+}
+
+# the class of every interface method row a module is about to ship, read against the list. A row's object
+# is `./<package>.<Interface>.<Method>`, or `<Interface>.<Method>` in the root package; the interface is
+# the object without its last part, and an object whose interface the list does not name is no interface
+# method — the completeness check guarantees every interface of a v4-line module has a row. Input rows are
+# module, class, disposition, object, change; only an incompatible row decided `keep` is judged, because
+# `cut` and `unclassified` already keep it from shipping. Output lines: REFUSED with the reason, or GROWN
+# for a method added to a framework-implemented interface, which ships in a MINOR marked **Breaking**.
+classify_contract_row_list() {
+    local DECIDED_ROW_LIST_STRING="${1}"
+    local CONTRACT_ROW_LIST_STRING="${2}"
+    local CONTRACT_LABEL_STRING="${3:?}"
+
+    awk -F'\t' -v contract="${CONTRACT_LABEL_STRING}" '
+        FNR == NR {
+            if ("ROW" == $1) {
+                interfaceClass[$2 "\t" $3] = $4
+            }
+            next
+        }
+        $2 != "incompatible" || $3 != "keep" { next }
+        {
+            module = $1
+            object = $4
+            change = $5
+            isPackage = sub(/^\.\//, "", object)
+            directory = ""
+            rest = object
+            slash = 0
+            for (position = length(object); position > 0; position--) {
+                if ("/" == substr(object, position, 1)) {
+                    slash = position
+                    break
+                }
+            }
+            if (0 < slash) {
+                directory = substr(object, 1, slash)
+                rest = substr(object, slash + 1)
+            }
+            partCount = split(rest, part, ".")
+            if (1 == isPackage && 3 == partCount) {
+                interface = directory part[1] "." part[2]
+            } else if (0 == isPackage && 2 == partCount) {
+                interface = part[1]
+            } else {
+                next
+            }
+            key = module "\t" interface
+            if (!(key in interfaceClass)) {
+                next
+            }
+            if ("application" == interfaceClass[key]) {
+                print "REFUSED\t" module "\t" $4 "\t" change "\t" interface " is application-implemented (" contract "): a method added, removed or changed breaks every implementer — cut it, or move the capability to a new optional interface"
+                next
+            }
+            if ("added" == change) {
+                print "GROWN\t" module "\t" $4 "\t" change
+                next
+            }
+            print "REFUSED\t" module "\t" $4 "\t" change "\t" interface " is framework-implemented (" contract "): a method removed or changed breaks every caller, who is owed it within the major — cut it"
+        }
+    ' <(printf '%s\n' "${CONTRACT_ROW_LIST_STRING}") <(printf '%s\n' "${DECIDED_ROW_LIST_STRING}")
+}
+
+# the judgement of the classification, printed: every refusal, then the framework-implemented contracts
+# grown under their own heading. Answers 1 when a row was refused.
+report_contract_classification() {
+    local CLASSIFICATION_LIST_STRING="${1}"
+
+    local REFUSED_LIST_STRING
+    REFUSED_LIST_STRING="$(awk -F'\t' '$1 == "REFUSED" { print "refused: " $2 " " $3 ": " $4 " — " $5 }' <<<"${CLASSIFICATION_LIST_STRING}")"
+    local GROWN_LIST_STRING
+    GROWN_LIST_STRING="$(awk -F'\t' '$1 == "GROWN" { print "    " $2 " " $3 ": " $4 }' <<<"${CLASSIFICATION_LIST_STRING}")"
+
+    if [[ "" != "${GROWN_LIST_STRING}" ]]; then
+        println ""
+        println "framework-implemented contracts grown — MINOR, marked **Breaking** — $(grep -c . <<<"${GROWN_LIST_STRING}") row(s)"
+        printf '%s\n' "${GROWN_LIST_STRING}"
+    fi
+
+    if [[ "" != "${REFUSED_LIST_STRING}" ]]; then
+        println ""
+        printf '%s\n' "${REFUSED_LIST_STRING}"
+        return 1
+    fi
+
+    return 0
+}
+
+# ---------------------------------------------------------------------------------------------------------
 # --compare OLD NEW: one explicit pair, no baseline
 # ---------------------------------------------------------------------------------------------------------
 
@@ -791,6 +1194,23 @@ if [[ "compare" = "${MODE_STRING}" ]]; then
     COMPATIBLE_COUNT_NUMBER="$(printf '%s\n' "${MEASURED_FACT_LIST_STRING}" | awk -F'\t' '$2 == "compatible"' | grep -c . || true)"
     info "${NEW_RELATIVE_PATH_STRING} against ${COMPARE_OLD_STRING}: ${INCOMPATIBLE_COUNT_NUMBER} incompatible, ${COMPATIBLE_COUNT_NUMBER} compatible"
     printf '%s\n' "${MEASURED_FACT_LIST_STRING}" | awk -F'\t' 'NF >= 4 { print $1 " ~ " $2 " ~ " $3 " ~ " $4 }'
+
+    # the pair has no baseline, so every row reads as a row proposed to ship: the classification judges
+    # each one as if it were filed `keep`, against the list --interfaces names or, for a v4-line NEW, the
+    # one source of the major
+    COMPARE_CONTRACT_PATH_STRING=""
+    if [[ "" != "${COMPARE_INTERFACES_FILE_STRING}" ]]; then
+        COMPARE_CONTRACT_PATH_STRING="${COMPARE_INTERFACES_FILE_STRING}"
+    elif is_contract_line_module "${NEW_RELATIVE_PATH_STRING}"; then
+        COMPARE_CONTRACT_PATH_STRING="${CONTRACT_FILE_RELATIVE_PATH}"
+    fi
+    if [[ "" != "${COMPARE_CONTRACT_PATH_STRING}" ]]; then
+        COMPARE_CONTRACT_ROW_LIST_STRING="$(read_valid_contract_row_list "${COMPARE_CONTRACT_PATH_STRING}" "${COMPARE_CONTRACT_PATH_STRING}")"
+        CLASSIFICATION_LIST_STRING="$(classify_contract_row_list "$(awk -F'\t' 'NF >= 4 { print $1 "\t" $2 "\tkeep\t" $3 "\t" $4 }' <<<"${MEASURED_FACT_LIST_STRING}")" "${COMPARE_CONTRACT_ROW_LIST_STRING}" "${COMPARE_CONTRACT_PATH_STRING}")"
+        if ! report_contract_classification "${CLASSIFICATION_LIST_STRING}"; then
+            fail "the row(s) above change a method of an interface ${COMPARE_CONTRACT_PATH_STRING} does not let change within the major"
+        fi
+    fi
     exit 0
 fi
 
@@ -816,6 +1236,12 @@ UNREADABLE_LINE_LIST_STRING="$(printf '%s\n' "${DECLARATION_OUTPUT_STRING}" | gr
 if [[ "" != "${UNREADABLE_LINE_LIST_STRING}" ]]; then
     printf '%s\n' "${UNREADABLE_LINE_LIST_STRING}" | cut -f1,3- | sed 's/^/    /'
     fail "the toolchain could not read the module declaration of the module(s) above — the band cannot tell what they publish, and a module whose path it cannot read is not a module that passed"
+fi
+
+# the contract list is checked before any tag is read: a module before its first tag publishes no surface,
+# but its interfaces and their classes are already the promise its first tag will make
+if [[ "gate" = "${MODE_STRING}" ]]; then
+    check_contract_completeness "${MODULE_RELATIVE_PATH_LIST[@]}"
 fi
 
 # the comparison input: module directory, module path, old side — one line per module that has a tag. A
@@ -944,8 +1370,20 @@ for INDEX_NUMBER in "${!BASELINE_KEY_LIST[@]}"; do
     println "stale baseline row: ${BASELINE_MODULE_LIST[${INDEX_NUMBER}]} ${STALE_OBJECT_STRING} no longer differs from the last tag — the change it files is gone, or a release moved the tag past it, so the row has to go"
 done
 
+# a row filed `keep` on a method of a listed interface ships only if its class admits it; the list is read
+# only when a v4-line module has a decided row, so a run over the frozen majors never depends on it
+CLASSIFICATION_LIST_STRING=""
+CONTRACT_DECIDED_ROW_LIST_STRING="$(printf '%s' "${DECIDED_ROW_LIST_STRING}" | awk -F'\t' '$1 == "v4" || $1 ~ /^integrations\/.+\/v4$/')"
+if [[ "" != "${CONTRACT_DECIDED_ROW_LIST_STRING}" ]]; then
+    CLASSIFICATION_LIST_STRING="$(classify_contract_row_list "${CONTRACT_DECIDED_ROW_LIST_STRING}" "$(read_valid_contract_row_list "${CONTRACT_FILE_PATH}" "${CONTRACT_FILE_RELATIVE_PATH}")" "${CONTRACT_FILE_RELATIVE_PATH}")"
+    if awk -F'\t' '$1 == "REFUSED" { found = 1 } END { exit !found }' <<<"${CLASSIFICATION_LIST_STRING}"; then
+        FAILED_BOOLEAN="true"
+        awk -F'\t' '$1 == "REFUSED" { print "refused: " $2 " " $3 ": " $4 " — " $5 }' <<<"${CLASSIFICATION_LIST_STRING}"
+    fi
+fi
+
 if [[ "true" = "${FAILED_BOOLEAN}" ]]; then
-    fail "the differences from the last tags and the baseline disagree — file each new difference with its class and a disposition, re-decide every row whose class or change moved, and delete every stale row"
+    fail "the differences from the last tags and the baseline disagree — file each new difference with its class and a disposition, re-decide every row whose class or change moved or whose interface class refuses it, and delete every stale row"
 fi
 
 # the green report reads by class and disposition, per module, with the tag beside the module: the
@@ -975,6 +1413,7 @@ print_rows_of "incompatible" "keep" "incompatible, decided to ship on this major
 print_rows_of "compatible" "unclassified" "compatible additions, undecided"
 print_rows_of "compatible" "cut" "compatible additions, decided to leave this major"
 print_rows_of "compatible" "keep" "compatible additions, decided to ship"
+report_contract_classification "${CLASSIFICATION_LIST_STRING}"
 
 UNDECIDED_COUNT_NUMBER="$(printf '%s' "${DECIDED_ROW_LIST_STRING}" | awk -F'\t' '$3 == "unclassified"' | grep -c . || true)"
 println ""

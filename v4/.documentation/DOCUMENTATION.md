@@ -59,6 +59,21 @@ Include:
 
 Purpose: documentation canon (this file).
 
+### [`.documentation/CONTRACT.md`](./CONTRACT.md)
+
+Purpose: the list of every exported interface of the major, the core module and each `integrations/*/v4` module, with who implements it.
+
+Include:
+
+- The two classes, `framework` and `application`, and what each promises from `v4.0.0` on
+- One section per module, headed `## Module` and the module's directory, and one row per exported interface: the interface linked to its declaring file, the class and a one-line reason
+
+Exclude:
+
+- Interfaces under `internal/`, unexported ones and type-set constraints
+- Current API reference
+- Author guidelines / checklists
+
 ### [`.documentation/ROADMAP.md`](./ROADMAP.md)
 
 Purpose: repository roadmap (future plans only).

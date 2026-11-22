@@ -30,6 +30,15 @@
 #                 whole claim, and a generic reason would be a reason nobody can review. The gate counts
 #                 these rows: that number is the work left before a tag.
 #
+# On a v4-line module (`v4` and every `integrations/.../v4`) a `keep` on an incompatible row whose object
+# is a method of an interface is admitted only as the interface's class in v4/.documentation/CONTRACT.md
+# allows. An `application` interface, which an application or a module outside this repository is
+# expected to implement, gains no method, loses none and changes none within v4: such a row cannot be
+# kept, only cut. A `framework` interface, whose only implementations the framework ships, may gain a
+# method in a MINOR — the row is kept, listed apart as a contract grown and marked `**Breaking**` in the
+# changelog — and never loses or changes one, which its callers are owed. The class is not a field here:
+# the list is its one source, and the gate reads it. The v1 to v3 rows know no class.
+#
 # The tag each module is compared with is deliberately not a field. The run reads it from git and prints
 # it beside the module, so this file cannot carry a version that has gone stale. Every field is compared
 # for exact equality, so nothing here is a pattern: a `*` in an object is a pointer receiver in apidiff's

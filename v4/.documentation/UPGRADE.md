@@ -6,21 +6,31 @@ It is a companion to [`CHANGELOG.md`](../CHANGELOG.md), not a replacement: the c
 
 ## Versioning policy for breaking changes
 
-Melody releases a behavioural break as a **MINOR**, with the entry marked `**Behavioural change**` in the changelog and listed here with its symptom and remedy. It does not open a new major for one. A defect repair whose fix an application can observe, with no exported API added or changed, ships as a **PATCH**, marked and listed the same way: `v3.14.1` and `integrations/outbox/v3` `v3.2.1` are two.
+**Before the tag.** Every compatibility break of the fourth major lands before its freeze, on 2027-01-15. This document lists each one under `Unreleased`, with the symptom an upgrader sees and the remedy.
 
-The same decision covers a **method added to an exported contract**, which breaks an out-of-tree implementation of that interface at compile time: it ships as a MINOR with a `**Breaking**` note. A new major would put `/v4` into the import path of every file of every consumer — the cost is paid by everyone, including the majority that implements no framework contract — to spare the one consumer that implements it the addition of a single method. That is the same cost already rejected for behavioural breaks, so it is rejected here too. What a break of either kind does instead is accumulate: the API it supersedes is marked with a `/* Deprecated: ... */` doc comment and kept working, and the deprecations are removed together at the v4 cut, slated for Q1 2027. An application that adopts the replacement while still on v3 carries no change across that cut.
+**After `v4.0.0`.** A PATCH repairs a defect, and nothing else ships until the first MINOR. A MINOR adds: a struct field, which is why configuration travels in structs, a function, an optional capability. No exported signature changes, no symbol leaves, and no default that protects is lowered.
 
-The third major's last feature release, `v3.14.0`, ships every reshaped signature of the stabilisation sweep in its released form, beside a compatible twin where an application still needs the reshaped one, and the reshaped forms live on the fourth major; the changelog entries marked `**C→v4**` name each one and the form v4 carries. The 30 incompatibilities `apidiff` still reports against `v3.13.0`, 24 in the core module and 6 in the integrations' third-major modules, are kept on purpose. Five are compile breaks that repair what the released contract already called wrong: the two `application` timeout types the released process never read, and `Transport.Close` dropping the parameter the container's teardown could not pass, with its in-memory and amqp implementations. The other 25 are type identities behind aliases and struct comparability, which no released spelling or caller can notice.
+**Interfaces.** Every exported interface of the major is listed in [`CONTRACT.md`](./CONTRACT.md) with who implements it. An `application` interface, one an application or a module outside this repository is expected to implement, gains no method, loses none and changes none within v4: a new capability is a new small interface the framework probes by type assertion and documents. A `framework` interface, one only the framework ships implementations of, may gain a method in a MINOR, marked `**Breaking**` for whoever implemented it anyway, and never loses or changes one. "Within v4" starts at the tag `v4.0.0`: until then a capability the framework prefers, or refuses to run without, is a method of its contract, which is why the slices before the tag folded their optional interfaces into the contracts they probed.
+
+**Behaviour.** After the tag a behavioural change is a defect repair, or it waits for v5. A hardening that would refuse what a released v4 accepted ships as a warning in v4 and as a refusal in v5. Every protection on by default has a documented door that turns it off.
+
+**What a v4 signature looks like**, so the rule can be checked by a reader: a required value is an argument, configuration is a struct, a bool's zero value is the safe side, no constructor takes variadic options, and a limit is a [`bound`](../bound/limit.go) value. A few shapes are kept on purpose although they read as exceptions:
+
+- The close door keeps the name `CloseWithContext`: a type with `Close(ctx)` cannot also satisfy `io.Closer`, the suffix says at the call site that the close is bounded, and it is greppable. It is the major's one close name by decision, not a leftover `…Context` double.
+- The flag and context types of [`cli/contract`](../cli/contract/type.go) are urfave/cli v3's by alias, so that library's method set is part of melody v4's surface: a urfave major is a melody major. Melody owns the command contract, `clicontract.Command`, and the output envelope, not the parser.
+- The internal-auth envelope's wire key stays `app` although the Go names say `Application`: a fleet upgrades service by service, and a v3 signer must verify on a v4 verifier and back. The wire format is frozen across majors; the Go spelling is not.
+- The migration tables default to bun's own `bun_migrations` and `bun_migration_locks`, not `melody_*`: a renamed default would make `db:migrate` on an existing database see no history and replay every migration. The two `.env` keys of the migrate module are the door for an application that wants the prefix.
+- `MELODY_ENV` and its values `dev` and `prod` stay abbreviated: they are operator-facing strings in every deployed `.env`, and a rename would be a silent misconfiguration, an unknown value, where a renamed Go name fails to compile.
 
 An upgrader who needs the old behaviour of any entry below pins the previous patch release; the remedies here are the supported path forward.
 
 ## Unreleased
 
-This section covers the changes that shipped in the `[v3.14.0]` block of the third major's [`CHANGELOG.md`](../../v3/CHANGELOG.md), a MINOR release, those of the patch releases after it (`[v3.14.1]`, `[v3.14.2]`), and those that land in its `[Unreleased]` block. Each entry the changelog marks **Behavioural change** or **Breaking** has its section here, and the sections that answer no marked entry are notes beside them — an opt-in API, a contract repair the changelog already describes, an addition worth knowing before an upgrade — which ask nothing of an application that does not use what they name. The integration sections apply to an application that upgrades that integration module too; each module's own `CHANGELOG.md` records its entries and its release.
+This section covers every change of the fourth major before its first tag, which this major's [`CHANGELOG.md`](../CHANGELOG.md) records under `[Unreleased]`. Each entry the changelog marks **Behavioural change** or **Breaking** has its section here, and the sections that answer no marked entry are notes beside them — an opt-in API, a contract repair the changelog already describes, an addition worth knowing before an upgrade — which ask nothing of an application that does not use what they name. The integration sections apply to an application that upgrades that integration module too; each module's own `CHANGELOG.md` records its entries and its release.
 
-Every entry below that the third major shipped is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. Two of them lost data — both in the `awss3` object storage integration, where a wrongly declared size could replace a stored object with a truncated one and then delete what was left.
+The fourth major starts from the third: the sections the third major shipped, in the `[v3.14.0]` block of its [`CHANGELOG.md`](../../v3/CHANGELOG.md) and the patch releases after it, are kept here because an application that upgrades from an earlier third-major release meets them too. Each of those is the consequence of fixing a defect, not a preference: each one describes behaviour that was wrong, and the changelog entry for it names the failure it produced. Two of them lost data — both in the `awss3` object storage integration, where a wrongly declared size could replace a stored object with a truncated one and then delete what was left.
 
-The fourth major takes the forms the third major kept compatible: a section that names a sibling interface, a deprecated door or a released signature on the third major describes here the form the fourth major carries instead, and this major's [`CHANGELOG.md`](../CHANGELOG.md) marks each **Breaking**.
+The fourth major takes the forms the third major kept compatible: a section that names a sibling interface, a deprecated door or a released signature on the third major describes here the form the fourth major carries instead, and this major's changelog marks each **Breaking**.
 
 ### Constructors: a value object takes a config
 
@@ -603,6 +613,8 @@ The six `service.<module>` names of a module's principal service, `service.cache
 
 **Remedy.** Call `serviceContainer.CloseWithContext(ctx)`, `context.Background()` for no deadline.
 
+The name stays `CloseWithContext` on purpose: a `Close(ctx)` could not also satisfy `io.Closer`, and the suffix says at the call site that the close is bounded (see [the policy](#versioning-policy-for-breaking-changes)).
+
 ### Config: an environment source loads under a context
 
 **What changed.** [`EnvironmentSource.Load`](../config/contract/environment_source.go) is `Load(ctx context.Context) (map[string]string, error)` and [`config.NewEnvironment`](../config/environment.go) is `NewEnvironment(ctx, source)`, a nil context refused naming the door; `NewApplication` hands the context it was given. The framework's file source judges the context once, before it reads, since a file read waits on nothing; a source that reads a remote store bounds its read by it.
@@ -901,6 +913,8 @@ As in the third major, a failure ahead of a `Required` listener that did not run
 
 **Remedy.** Nothing to do to keep bun's tables. To name them, set the keys in the `.env` files, or `KeyDefaults` for the application's own default.
 
+The defaults stay bun's own names rather than `melody_*`: a renamed default would make `db:migrate` on an existing database see no history and replay every migration; the two keys are the door for an application that wants the prefix.
+
 ### Audit: a `FileStorage` line names its keys in camelCase, and `changes` is an array
 
 **What changed.** A line [`audit.FileStorage`](../../integrations/bunorm/v4/audit/storage.go) appends names every key in camelCase and embeds the entry's changes as the json array they are:
@@ -1017,6 +1031,8 @@ A `Changes` that is not a json array, an `Entry` built by hand, is written as a 
 
 **Remedy.** Rename the Go names; nothing changes in `.env`.
 
+`MELODY_ENV`, `dev` and `prod` stay abbreviated on purpose: they are operator-facing strings in every deployed `.env`, where a rename would be a silent misconfiguration, an unknown value, while a renamed Go name fails to compile.
+
 ### Httpclient: the idle pool's fields are spelled out
 
 **What changed.** [`TransportConfig`](../httpclient/transport_config.go)'s `MaxIdleConns`, `MaxIdleConnsPerHost` and `IdleConnTimeout` are `MaxIdleConnections`, `MaxIdleConnectionsPerHost` and `IdleConnectionTimeout`, beside `IdleConnectionsDisabled`, and a refusal names the new field. The values still reach net/http's own fields.
@@ -1048,6 +1064,8 @@ A `Changes` that is not a json array, an `Entry` built by hand, is written as a 
 **Symptom.** `undefined: security.NewStaticHmacAppRegistry`; an `HmacKey{App: …}` or `HmacTokenSourceConfig{Apps: …}` literal no longer compiles; a secret provider of the application's own that implements `AppForKeyId` no longer satisfies `HmacSecretProvider`. A journal query on `claimedApp` matches nothing.
 
 **Remedy.** Rename the Go names and the method of a provider of your own; read the context keys under their new names.
+
+The wire key stays `app` on purpose: a fleet upgrades service by service, and a v3 signer must verify on a v4 verifier and back, so the wire format is frozen across majors while the Go spelling is not.
 
 ### Mailer: `SmtpConfig.RequireAuth` is `RequireAuthentication`
 

@@ -270,7 +270,8 @@ run_race_go_suites() {
 # they cover the parsing the harness does before it ever reaches a backend — the section catalogue, the
 # server-sent-event frame reader, the prometheus exposition reader, the token minters — and nothing else
 # executes them, so without this lane a harness assertion could stop working and every live run would
-# still report a pass.
+# still report a pass. The type checker's module rides along for the same reason: nothing else vets it or
+# runs the tests of the interface lister the api surface band reads the v4-line modules through.
 run_e2e_harness_checks() {
     if [[ ! -f "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/e2e/go.mod" ]]; then
         fail "the e2e harness module is missing: .dev/e2e/go.mod does not exist, so the harness lane cannot run. It is not optional — reporting success here would mean the whole lane silently contributed nothing"
@@ -281,7 +282,8 @@ run_e2e_harness_checks() {
         run_batch_in_service_shell "${SERVICE_NAME_STRING}" \
         "cd ${CONTAINER_ROOT_PATH}/.dev/e2e && GOWORK=off go vet ./..." \
         "cd ${CONTAINER_ROOT_PATH}/.dev/e2e && GOWORK=off go test -count=1 ./..." \
-        "cd ${CONTAINER_ROOT_PATH}/.dev/validate/typecheck && GOWORK=off go vet ./..."
+        "cd ${CONTAINER_ROOT_PATH}/.dev/validate/typecheck && GOWORK=off go vet ./..." \
+        "cd ${CONTAINER_ROOT_PATH}/.dev/validate/typecheck && GOWORK=off go test -count=1 ./..."
 }
 
 # the package documents against the code of every major. The three majors are near-copies whose documents
@@ -384,8 +386,10 @@ run_compatibility_checks() {
 # and this one asks the publisher's: what moved in the API since the tag, a signature, a removed symbol,
 # a constant's value, an interface a third party implements, and what was added. Every difference is
 # filed with a class and a disposition in .dev/validate/apidiff.baseline, so the list a release manager
-# decides on before a tag is measured rather than remembered. Needs the dev container for apidiff and
-# the network on a cold module cache, because the old side is fetched from the proxy.
+# decides on before a tag is measured rather than remembered. Every v4-line module is also checked against
+# v4/.documentation/CONTRACT.md, the list of its interfaces by class, before its first tag as after it.
+# Needs the dev container for apidiff and the network on a cold module cache, because the old side is
+# fetched from the proxy.
 run_apidiff_checks() {
     if [[ ! -x "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/apidiff.sh" ]]; then
         fail "the api surface check is missing or not executable: .dev/validate/apidiff.sh. It is not optional — it is the only lane that compares what a module exports with what its last tag exported, so a skip here reports a pass for exactly the class of change a release has to decide on; restore it or chmod +x it"
@@ -446,6 +450,12 @@ tags $(validation_cache_tag_digest)"
     if [[ "vulncheck" = "${LANE_STRING}" ]]; then
         LANE_KEY_STRING="${LANE_KEY_STRING}
 day $(date -u +%Y-%m-%d)"
+    fi
+    # the apidiff lane also checks every v4-line module's interfaces against the one contract list, read
+    # through the interface lister beside the type checker, so both are part of every module's key
+    if [[ "apidiff" = "${LANE_STRING}" ]]; then
+        LANE_KEY_STRING="${LANE_KEY_STRING}
+$(validation_cache_object_list v4/.documentation/CONTRACT.md .dev/validate/typecheck)"
     fi
 
     local MODULE_COUNT_INTEGER="0"
