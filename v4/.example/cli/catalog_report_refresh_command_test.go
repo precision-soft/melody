@@ -295,7 +295,7 @@ func newRefreshFixture(t *testing.T, option refreshFixtureOption) *refreshFixtur
         lockerProvider := option.lockerProvider
         if nil == lockerProvider {
             lockerProvider = func(resolver melodycontainercontract.Resolver) (melodylockcontract.Locker, error) {
-                return &sequenceLocker{sequence: sequence, inner: melodylock.NewInMemoryLocker(clockInstance)}, nil
+                return &sequenceLocker{sequence: sequence, inner: melodylock.NewInMemoryLocker(melodylock.InMemoryLockerConfig{Clock: clockInstance})}, nil
             }
         }
 
@@ -386,7 +386,7 @@ func TestCatalogReportRefreshCommandSkipsTheWholeRunWhenTheLockIsHeldElsewhere(t
     sequenceHolder := &refreshSequence{}
     fixture := newRefreshFixture(t, refreshFixtureOption{
         lockerProvider: func(resolver melodycontainercontract.Resolver) (melodylockcontract.Locker, error) {
-            return &sequenceLocker{sequence: sequenceHolder, inner: melodylock.NewInMemoryLocker(melodyclock.NewSystemClock()), heldAway: true}, nil
+            return &sequenceLocker{sequence: sequenceHolder, inner: melodylock.NewInMemoryLocker(melodylock.InMemoryLockerConfig{}), heldAway: true}, nil
         },
     })
 
@@ -503,7 +503,7 @@ func TestCatalogReportRefreshCommandSaysAStopDuringTheAcquireIsNotAnotherProcess
     sequence := &refreshSequence{}
     fixture := newRefreshFixture(t, refreshFixtureOption{
         lockerProvider: func(resolver melodycontainercontract.Resolver) (melodylockcontract.Locker, error) {
-            return &sequenceLocker{sequence: sequence, inner: melodylock.NewInMemoryLocker(melodyclock.NewSystemClock()), acquireErr: context.Canceled}, nil
+            return &sequenceLocker{sequence: sequence, inner: melodylock.NewInMemoryLocker(melodylock.InMemoryLockerConfig{}), acquireErr: context.Canceled}, nil
         },
     })
 
@@ -526,7 +526,7 @@ func TestCatalogReportRefreshCommandReadsAndExportsWhenTheLockCannotBeTaken(t *t
     acquireErr := errors.New("pgsql lock acquire failed")
     fixture := newRefreshFixture(t, refreshFixtureOption{
         lockerProvider: func(resolver melodycontainercontract.Resolver) (melodylockcontract.Locker, error) {
-            return &sequenceLocker{sequence: sequence, inner: melodylock.NewInMemoryLocker(melodyclock.NewSystemClock()), acquireErr: acquireErr}, nil
+            return &sequenceLocker{sequence: sequence, inner: melodylock.NewInMemoryLocker(melodylock.InMemoryLockerConfig{}), acquireErr: acquireErr}, nil
         },
     })
 

@@ -97,7 +97,7 @@ func TestTotpSecondFactorAuthenticator_ReadsItsStoresThroughTheRuntimeItWasHande
     store := &runtimeRecordingEnrollmentStore{secret: secret}
     guard := &runtimeRecordingNonceGuard{}
     primary := &runtimeRecordingAuthenticator{}
-    authenticator := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{Primary: primary, Enrollments: store, ReplayGuard: guard})
+    authenticator := NewTotpSecondFactorAuthenticator(primary, store, TotpSecondFactorAuthenticatorConfig{ReplayGuard: guard})
 
     runtimeInstance := newTestRuntime()
     token, err := authenticator.Authenticate(runtimeInstance, totpRequest(code))

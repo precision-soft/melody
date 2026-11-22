@@ -7,6 +7,8 @@ import (
     "strings"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
 )
 
@@ -21,24 +23,33 @@ const defaultTableMinColumnWidth = 4
 
 const defaultTableMaxWidth = 120
 
-func NewTablePrinter(tableMaxWidth int) *TablePrinter {
-    normalizedTableMaxWidth := tableMaxWidth
-    if 1 > normalizedTableMaxWidth {
-        normalizedTableMaxWidth = defaultTableMaxWidth
+/* TablePrinterConfig is what a table printer is built with; every zero value is the default. */
+type TablePrinterConfig struct {
+    /* MaxWidth caps a table's width in characters: absent is 120, a value is at least 1, unlimited lets the table be as wide as its content. */
+    MaxWidth bound.Count
+}
+
+var tablePrinterMaxWidthRule = bound.Rule[int]{
+    Name:              "TablePrinterConfig.MaxWidth",
+    Default:           defaultTableMaxWidth,
+    Minimum:           1,
+    UnlimitedAdmitted: true,
+}
+
+/* NewTablePrinter answers a table printer; a MaxWidth its rule does not admit panics naming the field. */
+func NewTablePrinter(config TablePrinterConfig) *TablePrinter {
+    maxWidth, resolveErr := bound.Resolve(config.MaxWidth, tablePrinterMaxWidthRule)
+    if nil != resolveErr {
+        exception.Panic(exception.FromError(resolveErr))
+    }
+
+    if true == maxWidth.Unlimited {
+        return &TablePrinter{tableMaxWidth: 0}
     }
 
     return &TablePrinter{
-        tableMaxWidth: normalizedTableMaxWidth,
+        tableMaxWidth: maxWidth.Value,
     }
-}
-
-func NewDefaultTablePrinter() *TablePrinter {
-    return NewTablePrinter(defaultTableMaxWidth)
-}
-
-/* NewUnboundedTablePrinter answers a table printer with no width cap, the table as wide as its content. */
-func NewUnboundedTablePrinter() *TablePrinter {
-    return &TablePrinter{tableMaxWidth: 0}
 }
 
 type TablePrinter struct {

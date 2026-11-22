@@ -9,7 +9,7 @@ import (
 func TestNewMatchedAccessControlRule_CarriesTheMatchAndAnswersACopyHoldingNoneOfTheCallersAttributes(t *testing.T) {
     callerAttributes := []string{"ROLE_EDITOR", "ROLE_ADMIN"}
 
-    matched := NewMatchedAccessControlRule(
+    matched := newMatchedAccessControlRule(
         accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: callerAttributes}),
         SourceFirewall,
         3,
@@ -47,7 +47,7 @@ func TestNewMatchedAccessControlRule_CarriesTheMatchAndAnswersACopyHoldingNoneOf
 }
 
 func TestNewMatchedAccessControlRule_ARuleWithoutAttributesCarriesAnEmptyList(t *testing.T) {
-    matched := NewMatchedAccessControlRule(accesscontrol.Rule{}, SourceGlobal, 0, "")
+    matched := newMatchedAccessControlRule(accesscontrol.Rule{}, SourceGlobal, 0, "")
 
     if nil == matched.Attributes() {
         t.Fatalf("expected an empty attribute list rather than a nil one")
@@ -75,7 +75,7 @@ func TestNewMatchedAccessControlRule_AnswersTheDeclarationOfEveryMode(t *testing
     }
 
     for _, testCase := range testCases {
-        matched := NewMatchedAccessControlRule(testCase.rule, SourceFirewall, 0, "main")
+        matched := newMatchedAccessControlRule(testCase.rule, SourceFirewall, 0, "main")
 
         if testCase.expectedMatching != matched.Matching() {
             t.Fatalf("expected the mode %s, got %s", testCase.expectedMatching, matched.Matching())

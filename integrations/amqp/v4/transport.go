@@ -78,21 +78,22 @@ var errBrokerVerdict = errors.New("the broker refused the message")
 /* a nack says the broker cannot take a message now, so it is an outage and never a verdict */
 var errBrokerNack = errors.New("the broker nacked the publish")
 
-func NewTransport(config TransportConfig) *Transport {
-    return newTransport(config, defaultComponentParent)
+/* NewTransport sends and consumes the messages registry knows over queue; an empty queue or a nil registry panics naming the argument. */
+func NewTransport(queue string, registry *MessageRegistry, config TransportConfig) *Transport {
+    return newTransport(queue, registry, config, defaultComponentParent)
 }
 
-func newTransport(config TransportConfig, parent componentParent) *Transport {
+func newTransport(queue string, registry *MessageRegistry, config TransportConfig, parent componentParent) *Transport {
     if nil == config.Connection && nil == config.Dialer {
         exception.Panic(exception.NewError("amqp transport needs a connection or a dialer", exceptioncontract.Context{"field": "TransportConfig.Connection", "alternative": "TransportConfig.Dialer"}, nil))
     }
 
-    if "" == config.Queue {
-        exception.Panic(exception.NewError("amqp transport queue is empty", exceptioncontract.Context{"field": "TransportConfig.Queue"}, nil))
+    if "" == queue {
+        exception.Panic(exception.NewError("amqp transport queue is empty", exceptioncontract.Context{"argument": "queue"}, nil))
     }
 
-    if nil == config.Registry {
-        exception.Panic(exception.NewError("amqp transport registry is nil", exceptioncontract.Context{"field": "TransportConfig.Registry"}, nil))
+    if nil == registry {
+        exception.Panic(exception.NewError("amqp transport registry is nil", exceptioncontract.Context{"argument": "registry"}, nil))
     }
 
     serializerInstance := config.Serializer
@@ -131,11 +132,11 @@ func newTransport(config TransportConfig, parent componentParent) *Transport {
         connection:          config.Connection,
         connectedOnce:       nil != config.Connection,
         dialer:              config.Dialer,
-        queue:               config.Queue,
+        queue:               queue,
         exchange:            config.Exchange,
         routingKey:          config.RoutingKey,
         prefetch:            prefetch.Value,
-        registry:            config.Registry,
+        registry:            registry,
         serializer:          serializerInstance,
         deadLetter:          false == config.DeadLetterDisabled,
         publishReturnBuffer: publishReturnBuffer.Value,
@@ -147,16 +148,14 @@ func newTransport(config TransportConfig, parent componentParent) *Transport {
     }
 }
 
-/* TransportConfig declares one transport; Connection or Dialer, Queue and Registry are required. */
+/* TransportConfig declares one transport beside its queue and registry; Connection or Dialer is required. */
 type TransportConfig struct {
     Connection *amqp091.Connection
     Dialer     func() (*amqp091.Connection, error)
-    Queue      string
     Exchange   string
     RoutingKey string
     /* Prefetch is the unacknowledged deliveries in flight: 10 by default, 1 to 65535. */
     Prefetch   bound.Count
-    Registry   *MessageRegistry
     Serializer serializercontract.Serializer
     /* DeadLetterDisabled declares the queue without its <queue>.dlx exchange and <queue>.dlq queue, so a poison message is dropped; left out, it is dead-lettered. */
     DeadLetterDisabled bool

@@ -109,7 +109,7 @@ func runtimeRefusingEveryMediaType(t *testing.T) (melodycontainercontract.Runtim
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/refused", nil)
     httpRequest.Header.Set("Accept", "*/*;q=0")
 
-    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("test", time.Now()))
+    request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("test", time.Now())})
 
     return runtimeInstance, request
 }
@@ -140,7 +140,7 @@ func runtimeRefusingNothing(t *testing.T) (melodycontainercontract.Runtime, melo
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/refused", nil)
     httpRequest.Header.Set("Accept", "application/json")
 
-    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("test", time.Now()))
+    request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("test", time.Now())})
 
     return runtimeInstance, request
 }
@@ -153,7 +153,7 @@ func requestAcceptingLines(t *testing.T, runtimeInstance melodycontainercontract
         httpRequest.Header.Add("Accept", acceptLine)
     }
 
-    return melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("test", time.Now()))
+    return melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("test", time.Now())})
 }
 
 func TestBuildApiResponseReadsEveryAcceptLine(t *testing.T) {
@@ -479,7 +479,7 @@ func runtimeWithJournal(t *testing.T) (melodycontainercontract.Runtime, melodyht
     )
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/twofactor/verify%2Fx", nil)
-    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("test", time.Now()))
+    request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("test", time.Now())})
 
     return runtimeInstance, request, logger
 }
@@ -574,7 +574,7 @@ func TestApiErrorWithErrFilesAClientThatLeftAtWarning(t *testing.T) {
 
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
-    leftRequest := melodyhttp.NewRequest(request.HttpRequest().WithContext(cancelledContext), nil, runtimeInstance, melodyhttp.NewRequestContext("test", time.Now()))
+    leftRequest := melodyhttp.NewRequest(request.HttpRequest().WithContext(cancelledContext), runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("test", time.Now())})
 
     _ = ApiErrorWithErr(runtimeInstance, leftRequest, nethttp.StatusInternalServerError, "could not read the archive", context.Canceled)
 
@@ -593,7 +593,7 @@ func TestBuildErrorContextCarriesTheMintedRequestIdNotTheClaimedOne(t *testing.T
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/refused", nil)
     httpRequest.Header.Set(melodyhttp.HeaderRequestId, "claimed-by-the-client")
 
-    request := melodyhttp.NewRequest(httpRequest, nil, nil, melodyhttp.NewRequestContext("minted-by-the-kernel", time.Now()))
+    request := melodyhttp.NewRequest(httpRequest, nil, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("minted-by-the-kernel", time.Now())})
 
     errorContext := buildErrorContext(request, nethttp.StatusNotFound, nil, false)
 
@@ -606,7 +606,7 @@ func TestHtmlErrorNamesTheMintedRequestIdAsItsReference(t *testing.T) {
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/missing", nil)
     httpRequest.Header.Set(melodyhttp.HeaderRequestId, "claimed-by-the-client")
 
-    request := melodyhttp.NewRequest(httpRequest, nil, nil, melodyhttp.NewRequestContext("minted<by>the-kernel", time.Now()))
+    request := melodyhttp.NewRequest(httpRequest, nil, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("minted<by>the-kernel", time.Now())})
 
     response := HtmlError(nil, request, nethttp.StatusNotFound, "not found")
 
@@ -628,7 +628,7 @@ func TestHtmlErrorNamesTheMintedRequestIdAsItsReference(t *testing.T) {
 func TestHtmlErrorEscapesItsMessage(t *testing.T) {
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/missing", nil)
 
-    request := melodyhttp.NewRequest(httpRequest, nil, nil, melodyhttp.NewRequestContext("minted-by-the-kernel", time.Now()))
+    request := melodyhttp.NewRequest(httpRequest, nil, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("minted-by-the-kernel", time.Now())})
 
     response := HtmlError(nil, request, nethttp.StatusNotFound, " <script>alert(1)</script> ")
 
@@ -650,7 +650,7 @@ func TestHtmlErrorEscapesItsMessage(t *testing.T) {
 func TestHtmlErrorLinksTheLoginPagePattern(t *testing.T) {
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/missing", nil)
 
-    request := melodyhttp.NewRequest(httpRequest, nil, nil, melodyhttp.NewRequestContext("minted-by-the-kernel", time.Now()))
+    request := melodyhttp.NewRequest(httpRequest, nil, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("minted-by-the-kernel", time.Now())})
 
     response := HtmlError(nil, request, nethttp.StatusNotFound, "not found")
 

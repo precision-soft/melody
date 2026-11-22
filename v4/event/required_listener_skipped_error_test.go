@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewRequiredListenerSkippedError_IsAssertableAndNamesWhatWasSkipped(t *testing.T) {
-    skippedErr := NewRequiredListenerSkippedError("kernel.request", "app.short.circuit.listener", nil)
+    skippedErr := newRequiredListenerSkippedError("kernel.request", "app.short.circuit.listener", nil)
 
     var typedError *RequiredListenerSkippedError
     if false == errors.As(error(skippedErr), &typedError) {
@@ -57,7 +57,7 @@ func TestRequiredListenerSkippedError_TheZeroValueAnswersInsteadOfDereferencing(
 
 func TestNewRequiredListenerSkippedError_CarriesTheStoppingListenerFailureAsTheCause(t *testing.T) {
     listenerErr := errors.New("the listener failed while it stopped propagation")
-    skippedErr := NewRequiredListenerSkippedError("kernel.request", "app.short.circuit.listener", listenerErr)
+    skippedErr := newRequiredListenerSkippedError("kernel.request", "app.short.circuit.listener", listenerErr)
 
     if false == errors.Is(skippedErr, listenerErr) {
         t.Fatalf("expected the stopping listener's failure to travel as the cause")

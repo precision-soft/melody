@@ -82,7 +82,7 @@ func (instance *Module) registerLockerService(registrar melodyapplicationcontrac
                 return nil, clockErr
             }
 
-            return melodylock.NewInMemoryLocker(clockInstance), nil
+            return melodylock.NewInMemoryLocker(melodylock.InMemoryLockerConfig{Clock: clockInstance}), nil
         },
         melodycontainer.RegisterOptions{},
     )
@@ -99,7 +99,7 @@ func (instance *Module) registerArchiveLockerService(registrar melodyapplication
                     return nil, clockErr
                 }
 
-                return melodylock.NewInMemoryLocker(clockInstance), nil
+                return melodylock.NewInMemoryLocker(melodylock.InMemoryLockerConfig{Clock: clockInstance}), nil
             }
 
             database, resolveErr := melodycontainer.FromResolver[*bun.DB](resolver.Runtime().Context(), resolver, serviceArchiveDatabase)

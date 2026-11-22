@@ -104,9 +104,10 @@ func (instance *ImpersonationToken) OnBehalfOf() (securitycontract.Actor, bool) 
     actor := NewActor(
         instance.impersonated.UserIdentifier(),
         securitycontract.ActorTypeUser,
-        instance.effectiveRoles(),
-        nil,
-        impersonator,
+        ActorConfig{
+            Roles:        instance.effectiveRoles(),
+            Impersonator: impersonator,
+        },
     )
 
     return actor, true
@@ -123,9 +124,9 @@ func (instance *ImpersonationToken) impersonatorActor() securitycontract.Actor {
     return NewActor(
         instance.impersonator.UserIdentifier(),
         securitycontract.ActorTypeUser,
-        instance.impersonator.Roles(),
-        nil,
-        nil,
+        ActorConfig{
+            Roles: instance.impersonator.Roles(),
+        },
     )
 }
 

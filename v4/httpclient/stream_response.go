@@ -10,10 +10,15 @@ import (
     "github.com/precision-soft/melody/v4/internal"
 )
 
-func NewStreamResponse(statusCode int, headers nethttp.Header, body io.ReadCloser) *StreamResponse {
+/* StreamResponseConfig is what a stream response carries beside its status code and body; a field left out is empty. */
+type StreamResponseConfig struct {
+    Headers nethttp.Header
+}
+
+func NewStreamResponse(statusCode int, body io.ReadCloser, config StreamResponseConfig) *StreamResponse {
     return &StreamResponse{
         statusCode: statusCode,
-        headers:    headers,
+        headers:    config.Headers,
         body:       body,
     }
 }

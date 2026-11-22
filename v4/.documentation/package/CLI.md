@@ -95,22 +95,20 @@ This subpackage provides shared helpers that commands can use for consistent out
     - [`output.SelectPrinter(option output.Option) (output.Printer, error)`](../../cli/output/printer_selector.go) — refuses a `TableMaxWidth` its rule does not admit, whatever the format
 
 - List payloads:
-    - [`output.NewListPayload(items []T, total int, limit bound.Count, offset bound.Count) output.ListPayload[T]`](../../cli/output/list_payload.go) — the document carries the limit and the offset as given, `null` when left out
+    - [`output.NewListPayload(items []T, config output.ListPayloadConfig) output.ListPayload[T]`](../../cli/output/list_payload.go) — `Total`, `Limit` and `Offset`; the document carries the limit and the offset as given, `null` when left out
     - [`output.WindowItems(items []T, limit bound.Count, offset bound.Count) ([]T, error)`](../../cli/output/list_payload.go) — the shared `--limit`/`--offset` window over an already-ordered slice, so a command never bounds-checks the flags itself: a limit left out or unlimited runs to the end, `0` lists nothing, an offset past the end yields an empty window, and a negative limit or offset is refused naming the field. Report `Total` from the full slice and `Items` from the window.
 
 - Table output:
     - [`output.NewTableBuilder() *output.TableBuilder`](../../cli/output/table_builder.go)
-    - [`output.NewTablePrinter(tableMaxWidth int) *output.TablePrinter`](../../cli/output/table_printer.go)
-    - [`output.NewDefaultTablePrinter() *output.TablePrinter`](../../cli/output/table_printer.go)
-    - [`output.NewUnboundedTablePrinter() *output.TablePrinter`](../../cli/output/table_printer.go) — no width cap, the printer `SelectPrinter` answers for an unlimited `TableMaxWidth`
+    - [`output.NewTablePrinter(config output.TablePrinterConfig) *output.TablePrinter`](../../cli/output/table_printer.go) — [`TablePrinterConfig.MaxWidth`](../../cli/output/table_printer.go) caps the table's width in characters: 120 when left out, at least 1, `bound.UnlimitedCount()` no cap, the printer `SelectPrinter` answers for an unlimited `TableMaxWidth`; a refused value is a panic naming `TablePrinterConfig.MaxWidth`
 
 - Structured envelopes:
     - [`output.NewEnvelope(...)`](../../cli/output/envelope_factory.go)
-    - [`output.NewMeta(...)`](../../cli/output/envelope_factory.go)
+    - [`output.NewMeta(command string, config output.MetaConfig) output.Meta`](../../cli/output/envelope_factory.go) — `Arguments`, `Option`, `StartedAt`, `Duration` and `Version`; an empty Melody or Go version is the running binary's, and the application's is the option's
     - [`output.NewWarning(code, message, details)`](../../cli/output/envelope_factory.go)
-    - [`output.NewError(code, message, details, cause)`](../../cli/output/envelope_factory.go)
+    - [`output.NewError(code string, message string, config output.ErrorConfig) *output.Error`](../../cli/output/envelope_factory.go) — `Details` and `Cause`
     - [`output.NewErrorCause(message, details)`](../../cli/output/envelope_factory.go)
-    - [`output.NewListPayload[T](...)`](../../cli/output/list_payload.go)
+    - [`output.NewListPayload[T](items, config)`](../../cli/output/list_payload.go)
     - [`output.Envelope`](../../cli/output/envelope.go)
 
 - Application version:

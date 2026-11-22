@@ -16,7 +16,7 @@ func NewAuthenticatedToken(userIdentifier string, roles []string, actor security
     }
 }
 
-func NewAuthenticatedTokenFromClaims(claims securitycontract.Claims) *AuthenticatedToken {
+func newAuthenticatedTokenFromClaims(claims securitycontract.Claims) *AuthenticatedToken {
     var actor securitycontract.Actor
     if rebuilt := NewActorFromData(claims.OriginatingActor); nil != rebuilt {
         actor = rebuilt

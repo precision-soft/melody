@@ -58,11 +58,7 @@ func containsName(names []string, want string) bool {
 }
 
 func newModuleTestRelay() *Relay {
-    return NewRelay(RelayConfig{
-        Repository: &fakeRepository{},
-        Transport:  &fakeTransport{},
-        Codec:      &stringCodec{},
-    })
+    return NewRelay(&fakeRepository{}, &fakeTransport{}, &stringCodec{}, RelayConfig{})
 }
 
 func TestModule_NameAndDescription(t *testing.T) {

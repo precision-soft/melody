@@ -209,17 +209,33 @@ func newStubConfiguration(values map[string]string) *stubConfiguration {
 
 /* newStubConfigurationNamed answers the stub under the given application name; an empty name leaves the cli configuration absent, the shape of a double that never declared one */
 func newStubConfigurationNamed(values map[string]string, applicationName string) *stubConfiguration {
-    parameters := make(map[string]configcontract.Parameter, len(values))
-    for name, value := range values {
-        parameters[name] = melodyconfig.NewParameter(name, value, value, false)
-    }
-
-    configuration := &stubConfiguration{parameters: parameters}
+    configuration := &stubConfiguration{parameters: registeredParameters(values)}
     if "" != applicationName {
         configuration.cli = &stubCliConfiguration{name: applicationName}
     }
 
     return configuration
+}
+
+/* registeredParameters answers each value as the parameter a real configuration registers under its name */
+func registeredParameters(values map[string]string) map[string]configcontract.Parameter {
+    environment, environmentErr := melodyconfig.NewEnvironment(context.Background(), &stubEnvironmentSource{values: map[string]string{}})
+    if nil != environmentErr {
+        panic(environmentErr)
+    }
+
+    configuration, configurationErr := melodyconfig.NewConfiguration(environment, os.TempDir(), melodyconfig.ConfigurationConfig{})
+    if nil != configurationErr {
+        panic(configurationErr)
+    }
+
+    parameters := make(map[string]configcontract.Parameter, len(values))
+    for name, value := range values {
+        configuration.RegisterRuntime(name, value)
+        parameters[name] = configuration.Get(name)
+    }
+
+    return parameters
 }
 
 func (instance *stubConfiguration) Get(name string) configcontract.Parameter {

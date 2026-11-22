@@ -118,9 +118,10 @@ func callCreateDoor(t *testing.T, body string) (int, string) {
 
     request := melodyhttp.NewRequest(
         httpRequest,
-        nil,
         runtimeInstance,
-        melodyhttp.NewRequestContext("product-door-test", time.Now()),
+        melodyhttp.RequestConfig{
+            RequestContext: melodyhttp.NewRequestContext("product-door-test", time.Now()),
+        },
     )
 
     response, handlerErr := ApiCreateHandler()(runtimeInstance, httptest.NewRecorder(), request)

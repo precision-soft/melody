@@ -16,16 +16,12 @@ import (
 /* DefaultSwitchUserHeaderName is the request header that names the user to impersonate unless a source overrides it. */
 const DefaultSwitchUserHeaderName = "X-Switch-User"
 
-/* ImpersonationTokenSourceConfig configures the switch-user decorator. Inner resolves the real (admin) token first; when the switch header is present, the admin is authenticated and holds SwitchRole, Users resolves the target identity and the result impersonates it. An absent header, an anonymous admin or an admin without SwitchRole leaves the admin's own token untouched; a target that does not resolve, resolves unauthenticated or fails the resolver answers the anonymous token. */
+/* ImpersonationTokenSourceConfig configures the switch-user decorator NewImpersonationTokenSource builds over its inner source and user resolver. The inner source resolves the real (admin) token first; when the switch header is present, the admin is authenticated and holds SwitchRole, the users resolver resolves the target identity and the result impersonates it. An absent header, an anonymous admin or an admin without SwitchRole leaves the admin's own token untouched; a target that does not resolve, resolves unauthenticated or fails the resolver answers the anonymous token. */
 type ImpersonationTokenSourceConfig struct {
-    Inner securitycontract.TokenSource
-
-    Users securitycontract.ImpersonatedUserResolver
-
     /* HeaderName overrides the switch-user header; defaults to DefaultSwitchUserHeaderName. */
     HeaderName string
 
-    /* SwitchRole is the role the admin must hold to be allowed to switch; defaults to contract.RoleAllowedToSwitch. The role reaches every identity Users answers, an administrator's included, so a ceiling on whom a holder may become belongs in the resolver: it refuses the identities this admin may not take on. */
+    /* SwitchRole is the role the admin must hold to be allowed to switch; defaults to contract.RoleAllowedToSwitch. The role reaches every identity the users resolver answers, an administrator's included, so a ceiling on whom a holder may become belongs in the resolver: it refuses the identities this admin may not take on. */
     SwitchRole string
 
     /* RoleMode selects whose roles the impersonation token authorizes with: RoleModeImpersonated (the default) takes on the target's roles for their full context, RoleModeImpersonator keeps the admin's own rights. The impersonator stays auditable and propagates between services in either mode. */
@@ -35,13 +31,14 @@ type ImpersonationTokenSourceConfig struct {
     RoleHierarchy *RoleHierarchy
 }
 
-func NewImpersonationTokenSource(config ImpersonationTokenSourceConfig) *ImpersonationTokenSource {
-    if true == internal.IsNilInterface(config.Inner) {
-        exception.Panic(exception.NewError("impersonation inner token source is nil", nil, nil))
+/* NewImpersonationTokenSource decorates inner so an allowed admin takes on the identity users resolves from the switch header; a nil inner or users panics naming the argument. */
+func NewImpersonationTokenSource(inner securitycontract.TokenSource, users securitycontract.ImpersonatedUserResolver, config ImpersonationTokenSourceConfig) *ImpersonationTokenSource {
+    if true == internal.IsNilInterface(inner) {
+        exception.Panic(exception.NewError("impersonation inner token source is nil", exceptioncontract.Context{"argument": "inner"}, nil))
     }
 
-    if true == internal.IsNilInterface(config.Users) {
-        exception.Panic(exception.NewError("impersonation user resolver is nil", nil, nil))
+    if true == internal.IsNilInterface(users) {
+        exception.Panic(exception.NewError("impersonation user resolver is nil", exceptioncontract.Context{"argument": "users"}, nil))
     }
 
     if RoleModeImpersonated != config.RoleMode && RoleModeImpersonator != config.RoleMode {
@@ -68,8 +65,8 @@ func NewImpersonationTokenSource(config ImpersonationTokenSourceConfig) *Imperso
     }
 
     return &ImpersonationTokenSource{
-        inner:         config.Inner,
-        users:         config.Users,
+        inner:         inner,
+        users:         users,
         headerName:    headerName,
         switchRole:    switchRole,
         roleMode:      config.RoleMode,
@@ -93,7 +90,7 @@ type boundRoleHierarchy struct {
     hierarchy    securitycontract.RoleHierarchy
 }
 
-/* BindRoleHierarchy records the hierarchy of the firewall holding the source, which the switch-role check reads when RoleHierarchy is left nil, and answers an error when another firewall already bound a different one, a nil one included: the source holds one hierarchy, and the second would change who may switch behind the first firewall. An explicit RoleHierarchy records nothing. A binder Inner is handed the same call. */
+/* BindRoleHierarchy records the hierarchy of the firewall holding the source, which the switch-role check reads when RoleHierarchy is left nil, and answers an error when another firewall already bound a different one, a nil one included: the source holds one hierarchy, and the second would change who may switch behind the first firewall. An explicit RoleHierarchy records nothing. An inner source that binds is handed the same call. */
 func (instance *ImpersonationTokenSource) BindRoleHierarchy(firewallName string, hierarchy securitycontract.RoleHierarchy) error {
     if inner, isBinder := instance.inner.(securitycontract.RoleHierarchyBinder); true == isBinder {
         if innerErr := inner.BindRoleHierarchy(firewallName, hierarchy); nil != innerErr {

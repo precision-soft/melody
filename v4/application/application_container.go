@@ -357,7 +357,7 @@ func newContainerLogger(
             )
         }
 
-        fileWriter, openFileErr := logging.NewReopenableFileWriter(logPath)
+        fileWriter, openFileErr := logging.NewReopenableFileWriter(logPath, logging.ReopenableFileWriterConfig{})
         if nil != openFileErr {
             exception.Panic(
                 exception.NewError(

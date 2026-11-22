@@ -270,9 +270,7 @@ func TestCompile_TheOverrideOnlyStrategyIgnoresTheGlobalRules(t *testing.T) {
 }
 
 func impersonationSourceForCompile(hierarchy *security.RoleHierarchy) *security.ImpersonationTokenSource {
-    return security.NewImpersonationTokenSource(security.ImpersonationTokenSourceConfig{
-        Inner:         &anonymousTokenSource{},
-        Users:         impersonatedUserResolverStub{},
+    return security.NewImpersonationTokenSource(&anonymousTokenSource{}, impersonatedUserResolverStub{}, security.ImpersonationTokenSourceConfig{
         RoleHierarchy: hierarchy,
     })
 }

@@ -175,7 +175,7 @@ The two idle pools are decided each on its own: `MaxIdleConnections` bounds the 
 - [`type RequestOptions`](../../httpclient/request_option.go) and [`type BasicAuth`](../../httpclient/request_option.go) — the contract's structs
 - Responses:
     - [`type Response`](../../httpclient/response.go)
-        - [`NewResponse(...)`](../../httpclient/response.go)
+        - [`NewResponse(statusCode int, config ResponseConfig) *Response`](../../httpclient/response.go) — `Status`, `Headers`, `Body` and `Request`, for a `Client` of the application's own
         - `StatusCode`, `Status`, `Headers`, `Body`, `Request`, `Json`, `String`, `IsSuccess`, `IsClientError`, `IsServerError`
     - [`type StreamResponse`](../../httpclient/stream_response.go)
-        - [`NewStreamResponse(...)`](../../httpclient/stream_response.go)
+        - [`NewStreamResponse(statusCode int, body io.ReadCloser, config StreamResponseConfig) *StreamResponse`](../../httpclient/stream_response.go) — `Headers`

@@ -12,6 +12,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     middlewarepipeline "github.com/precision-soft/melody/v4/http/middleware/pipeline"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
 )
 
 type middlewareCommandTestEnvelope struct {
@@ -425,16 +426,14 @@ func TestMiddlewareCommand_DefaultListingRunsNoBuild(t *testing.T) {
 func TestMiddlewareCommand_ListsTheInactiveEntriesWithTheirReason(t *testing.T) {
     command := NewMiddlewareCommand(
         func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
-            report := middlewarepipeline.NewMiddlewareBuildReport(
-                "http",
-                "prod",
-                []string{},
-                []*middlewarepipeline.InactiveMiddleware{
-                    middlewarepipeline.NewInactiveMiddleware("profiler", "enabled for environments [dev]"),
+            _, report, describeErr := middlewarepipeline.NewBuilder(
+                []middlewarepipeline.HttpMiddlewareDefinition{
+                    {Name: "profiler", EnabledEnvironments: []string{"dev"}, Factory: newInactiveTestMiddlewareFactory()},
                 },
-                nil,
-                false,
-            )
+            ).Describe("prod", "")
+            if nil != describeErr {
+                t.Fatalf("expected the description to build, got %v", describeErr)
+            }
 
             return []middlewarepipeline.MiddlewareDescription{{Name: "static", Priority: -1000}}, report, nil
         },
@@ -453,7 +452,7 @@ func TestMiddlewareCommand_ListsTheInactiveEntriesWithTheirReason(t *testing.T) 
         t.Fatalf("expected an active and an inactive row, got %d in %q", len(row), rendered)
     }
 
-    if "profiler" != row[1][1] || "inactive" != row[1][4] || "enabled for environments [dev]" != row[1][5] {
+    if "profiler" != row[1][1] || "inactive" != row[1][4] || "disabled: environment mismatch" != row[1][5] {
         t.Fatalf("expected the inactive row with its reason, got %v", row[1])
     }
 }
@@ -503,24 +502,25 @@ func TestMiddlewareCommand_RendersTheDescriptionRefusal(t *testing.T) {
 }
 
 func TestMiddlewareCommand_SameNameInactiveEntriesKeepTheReasonOrder(t *testing.T) {
-    inactiveEntries := make([]*middlewarepipeline.InactiveMiddleware, 0, 16)
-    for index := 15; index >= 0; index-- {
-        inactiveEntries = append(
-            inactiveEntries,
-            middlewarepipeline.NewInactiveMiddleware("profiler", fmt.Sprintf("reason %02d", index)),
-        )
+    definitions := []middlewarepipeline.HttpMiddlewareDefinition{
+        {Name: "profiler", Factory: newInactiveTestMiddlewareFactory()},
+    }
+    for index := 0; index < 5; index++ {
+        definitions = append(definitions, middlewarepipeline.HttpMiddlewareDefinition{Name: "profiler", Factory: newInactiveTestMiddlewareFactory()})
+    }
+    for index := 0; index < 5; index++ {
+        definitions = append(definitions, middlewarepipeline.HttpMiddlewareDefinition{Name: "profiler", Groups: []string{"admin"}, Factory: newInactiveTestMiddlewareFactory()})
+    }
+    for index := 0; index < 5; index++ {
+        definitions = append(definitions, middlewarepipeline.HttpMiddlewareDefinition{Name: "profiler", EnabledEnvironments: []string{"dev"}, Factory: newInactiveTestMiddlewareFactory()})
     }
 
     command := NewMiddlewareCommand(
         func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
-            report := middlewarepipeline.NewMiddlewareBuildReport(
-                "http",
-                "prod",
-                []string{},
-                inactiveEntries,
-                nil,
-                false,
-            )
+            _, report, describeErr := middlewarepipeline.NewBuilder(definitions).Describe("prod", "http")
+            if nil != describeErr {
+                t.Fatalf("expected the description to build, got %v", describeErr)
+            }
 
             return nil, report, nil
         },
@@ -535,12 +535,13 @@ func TestMiddlewareCommand_SameNameInactiveEntriesKeepTheReasonOrder(t *testing.
     }
 
     row := debugTableBlockRow(rendered, "MIDDLEWARE")
-    if 16 != len(row) {
-        t.Fatalf("expected 16 inactive rows, got %d", len(row))
+    if 15 != len(row) {
+        t.Fatalf("expected 15 inactive rows, got %d", len(row))
     }
 
+    expectedReasons := []string{"disabled: environment mismatch", "disabled: group mismatch", "skipped: duplicate definition"}
     for index, columns := range row {
-        expectedReason := fmt.Sprintf("reason %02d", index)
+        expectedReason := expectedReasons[index/5]
         if expectedReason != columns[5] {
             t.Fatalf("expected the same-name rows ordered by reason, row %d carries %q", index, columns[5])
         }
@@ -624,4 +625,10 @@ func TestMiddlewareCommand_ABuildPanicCarryingAnExitErrorIsReRaised(t *testing.T
     _, _ = newPanickingBuildMiddlewareCommand(exitErr).runBuildProviderRecovered()
 
     t.Fatalf("expected the exit error re-raised")
+}
+
+func newInactiveTestMiddlewareFactory() middlewarepipeline.MiddlewareFactory {
+    return func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
+        return nil, nil
+    }
 }

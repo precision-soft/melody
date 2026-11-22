@@ -1,4 +1,4 @@
-/* Package kernelseam is the door the application installs its boot runtime on the kernel through; Token cannot be spelled outside v4, so no exported setter exists. */
+/* Package kernelseam is the door the application builds its kernel and installs the boot runtime on it through; Token cannot be spelled outside v4, so neither door is callable from userland. */
 package kernelseam
 
 import (

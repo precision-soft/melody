@@ -459,7 +459,7 @@ func (instance *versionProbeCliCommand) Run(
 ) error {
     option := output.ParseOptionFromCommand(commandContext)
     instance.optionVersion = option.ApplicationVersion
-    instance.metaVersion = output.NewMeta(instance.Name(), nil, option, time.Now(), 0, output.Version{}).Version.Application
+    instance.metaVersion = output.NewMeta(instance.Name(), output.MetaConfig{Option: option, StartedAt: time.Now()}).Version.Application
 
     return nil
 }

@@ -1467,7 +1467,7 @@ func TestLoginDoor_WithoutAnAuthenticatorASessionOutageIsRefusedBeforeTheHandler
 }
 
 func TestRequestSessionAtFirewallDoor_AnApplicationsUnavailableSessionOverAnUnmarkedCauseIsAnOutage(t *testing.T) {
-    request := http.NewRequest(httptest.NewRequest(nethttp.MethodPost, doorLoginPath, nil), nil, nil, nil)
+    request := http.NewRequest(httptest.NewRequest(nethttp.MethodPost, doorLoginPath, nil), nil, http.RequestConfig{})
     cause := errors.New("the application's store is down")
 
     if publishErr := http.SetRequestSession(request, session.NewUnavailableSession(cause)); nil != publishErr {

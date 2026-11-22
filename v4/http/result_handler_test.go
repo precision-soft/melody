@@ -59,7 +59,7 @@ func TestNormalizeResultToResponse_JoinsRepeatedAcceptLines(t *testing.T) {
     httpRequest.Header.Add("Accept", "application/json;q=0")
     httpRequest.Header.Add("Accept", "text/plain")
 
-    request := NewRequest(httpRequest, nil, runtimeInstance, NewRequestContext("test", time.Now()))
+    request := NewRequest(httpRequest, runtimeInstance, RequestConfig{RequestContext: NewRequestContext("test", time.Now())})
 
     response, err := NormalizeResultToResponse(runtimeInstance, request, map[string]any{"a": "b"})
     if nil != err {
@@ -119,7 +119,7 @@ func TestWrapResultHandler_ATextPlainClientReadsLines(t *testing.T) {
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/order", nil)
     httpRequest.Header.Set("Accept", "text/plain")
-    request := NewRequest(httpRequest, nil, runtimeInstance, NewRequestContext("test", time.Now()))
+    request := NewRequest(httpRequest, runtimeInstance, RequestConfig{RequestContext: NewRequestContext("test", time.Now())})
 
     handler := WrapResultHandler(
         func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (any, error) {
@@ -288,7 +288,7 @@ func TestNormalizeResultToResponse_AFailedResolutionIsRecordedBeforeTheFallback(
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/value", nil)
     httpRequest.Header.Set("Accept", ",,,")
 
-    request := NewRequest(httpRequest, nil, runtimeInstance, NewRequestContext("test", time.Now()))
+    request := NewRequest(httpRequest, runtimeInstance, RequestConfig{RequestContext: NewRequestContext("test", time.Now())})
 
     response, err := NormalizeResultToResponse(runtimeInstance, request, map[string]any{"a": "b"})
     if nil != err {

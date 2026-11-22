@@ -46,13 +46,12 @@ Custom `Headers` whose name collides with a header the renderer emits itself (`C
 ## Usage
 
 ```go
-transport := mailer.NewSmtpTransport(mailer.SmtpConfig{
-    Address:  "localhost:1025",
+transport := mailer.NewSmtpTransport("localhost:1025", mailer.SmtpConfig{
     Username: "",
     Password: "",
 })
 
-mailerInstance := mailer.NewManager(transport)
+mailerInstance := mailer.NewManager(transport, mailer.ManagerConfig{})
 
 receipt, sendErr := mailerInstance.Send(runtimeInstance, mailercontract.Message{
     From:    mailercontract.Address{Name: "Shop", Email: "shop@example.com"},
@@ -67,7 +66,7 @@ For tests, swap in [`InMemoryTransport`](../../mailer/in_memory_transport.go) an
 
 ## Configuration
 
-[`SmtpConfig.Address`](../../mailer/smtp_transport.go) is required and written `host:port`, the form the dial reads: [`NewSmtpTransport`](../../mailer/smtp_transport.go) refuses an empty address, a padded one, one without a host or a port, and one whose port the dial cannot read first, naming the field, so an empty struct is refused by the address rather than by a derived timeout. `SmtpConfig` exposes three timeout tunables, each a `bound.Duration` resolved once in [`NewSmtpTransport`](../../mailer/smtp_transport.go): a field left out takes the default below, a value under 1ms or unlimited is refused naming the field.
+The address is [`NewSmtpTransport`](../../mailer/smtp_transport.go)'s first argument, written `host:port`, the form the dial reads: an empty address, a padded one, one without a host or a port, and one whose port the dial cannot read are refused first, naming the `address` argument, so an empty address is refused by itself rather than by a derived timeout. `SmtpConfig` exposes three timeout tunables, each a `bound.Duration` resolved once in [`NewSmtpTransport`](../../mailer/smtp_transport.go): a field left out takes the default below, a value under 1ms or unlimited is refused naming the field.
 
 | Field                    | Bounds                                                                                                                                                                                                             | Default when left out                                   |
 |--------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------|
@@ -100,8 +99,8 @@ Because the deadline is re-armed per step and per payload chunk, `Timeout` measu
 
 ### Types and constructors (`mailer`)
 
-- [`Manager`](../../mailer/manager.go) — [`NewManager(transport mailercontract.Transport) *Manager`](../../mailer/manager.go)
-- [`SmtpTransport`](../../mailer/smtp_transport.go) / [`SmtpConfig`](../../mailer/smtp_transport.go) — [`NewSmtpTransport(config SmtpConfig) *SmtpTransport`](../../mailer/smtp_transport.go); `SmtpConfig.LocalName` is the client name of the hello, `localhost` when left out, a name holding whitespace or a control character refused; `Send` refuses an address that is not a bare addr-spec itself, as the manager does
+- [`Manager`](../../mailer/manager.go) — [`NewManager(transport mailercontract.Transport, config ManagerConfig) *Manager`](../../mailer/manager.go); [`ManagerConfig`](../../mailer/manager.go) holds no field yet, so a field it gains later breaks no caller
+- [`SmtpTransport`](../../mailer/smtp_transport.go) / [`SmtpConfig`](../../mailer/smtp_transport.go) — [`NewSmtpTransport(address string, config SmtpConfig) *SmtpTransport`](../../mailer/smtp_transport.go); `SmtpConfig.LocalName` is the client name of the hello, `localhost` when left out, a name holding whitespace or a control character refused; `Send` refuses an address that is not a bare addr-spec itself, as the manager does
 - [`InMemoryTransport`](../../mailer/in_memory_transport.go) — [`NewInMemoryTransport() *InMemoryTransport`](../../mailer/in_memory_transport.go), [`(*InMemoryTransport).Sent() []mailercontract.Message`](../../mailer/in_memory_transport.go)
 - [`LogTransport`](../../mailer/log_transport.go) — [`NewLogTransport(logger loggingcontract.Logger) *LogTransport`](../../mailer/log_transport.go); logs each message's recipients (To, Cc, Bcc), subject, both the text and HTML bodies, and per-attachment metadata (filename, content type, Content-ID, inline flag, byte size — never the raw content) at info level instead of delivering it (development aid). With a `nil` logger it resolves the request-scoped logger from the runtime, and is a safe no-op when neither is available.
 - [`RenderMessage(message mailercontract.Message) ([]byte, error)`](../../mailer/message.go)

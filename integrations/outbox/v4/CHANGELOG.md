@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Breaking** — `relay.go`: `NewRelay(repository, transport, codec, config)` takes the repository, the transport and the codec positionally, a nil one refused with the same message and its context naming `argument`; they leave `RelayConfig`.
 - **Breaking** — `store.go`, `repository.go`: the table gains `sent_at`, the send time `MarkSent` records, and `PruneSent` judges `PruneSentOptions.SentBefore` against it, where it judged the enqueue time `created_at`; a sent row with no send time is never pruned. `EnsureSchema` adds the column to a table created without it, `TIMESTAMPTZ` on PostgreSQL and `DATETIME` on MySQL; a table managed by migrations is altered before the new binary is deployed, since `Enqueue` and `ClaimDueMessages` name the column, see `UPGRADE.md`.
 
 - **Breaking** — `repository.go`, `store.go`, `lazy.go`, `relay.go`: every door of `Repository` takes the runtime it runs under first, a nil runtime, a typed nil and one carrying no context refused with "the runtime is nil or carries no context", and the contract gains `ReleaseClaims(runtime, ids, claimToken)`, an empty token refused, `RequeueDead(runtime, RequeueDeadOptions{Ids, Limit})`, more `Ids` than the limit refused, and `PruneSent(runtime, PruneSentOptions{SentBefore, Limit})`, a zero `SentBefore` refused; the relay releases the rows after the one a failed batch stopped at, that row keeping its claim until `VisibilityTimeout`, a failed release logged. See `UPGRADE.md`.

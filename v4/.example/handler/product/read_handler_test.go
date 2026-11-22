@@ -41,9 +41,11 @@ func conversionRequest(t *testing.T, target string) melodyhttpcontract.Request {
 
     return melodyhttp.NewRequest(
         httptest.NewRequest(nethttp.MethodGet, target, nil),
-        map[string]string{"id": "prod-1"},
         nil,
-        melodyhttp.NewRequestContext("conversion-door-test", conversionQuoteInstant),
+        melodyhttp.RequestConfig{
+            RouteParameters: map[string]string{"id": "prod-1"},
+            RequestContext:  melodyhttp.NewRequestContext("conversion-door-test", conversionQuoteInstant),
+        },
     )
 }
 

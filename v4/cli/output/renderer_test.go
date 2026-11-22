@@ -14,11 +14,10 @@ func newRendererTestEnvelope() Envelope {
     return NewEnvelope(
         NewMeta(
             "debug:container",
-            []string{"missing.service.name"},
-            Option{},
-            time.Now(),
-            time.Duration(0),
-            Version{},
+            MetaConfig{
+                Arguments: []string{"missing.service.name"},
+                StartedAt: time.Now(),
+            },
         ),
     )
 }
@@ -86,7 +85,7 @@ func TestRender_ReturnsNilForAnEnvelopeCarryingOnlyWarnings(t *testing.T) {
 }
 
 func TestRender_ReturnsTheEnvelopeFailureUnmarked(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
     envelope.SetError("cmd.failed", "the command failed", nil, nil)
 
     renderErr := Render(&bytes.Buffer{}, envelope, Option{})
@@ -107,7 +106,7 @@ func TestRender_ReturnsTheEnvelopeFailureUnmarked(t *testing.T) {
 }
 
 func TestRender_LeavesTheUnnamedAndReservedDetailsOutOfTheReportedContext(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
     envelope.SetError(
         "cmd.failed",
         "the command failed",
@@ -151,7 +150,7 @@ func (instance *failingRenderWriter) Write(payload []byte) (int, error) {
 }
 
 func TestRender_KeepsTheEnvelopeFailureWhenThePrintingFails(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
     envelope.SetError("cmd.failed", "the business failure", nil, nil)
 
     renderErr := Render(&failingRenderWriter{}, envelope, Option{})
@@ -176,7 +175,7 @@ func TestRender_KeepsTheEnvelopeFailureWhenThePrintingFails(t *testing.T) {
 }
 
 func TestRender_ReturnsThePrintFailureAloneWhenTheEnvelopeCarriesNoError(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
 
     renderErr := Render(&failingRenderWriter{}, envelope, Option{Format: FormatJson})
     if nil == renderErr {

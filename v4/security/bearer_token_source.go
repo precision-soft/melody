@@ -13,20 +13,23 @@ import (
 
 const bearerPrefix = "Bearer "
 
-/* NewBearerTokenSource resolves a bearer token through the validator; enricher, nil for none, rewrites the claims after validation. A nil validator and a typed-nil enricher are refused. */
-func NewBearerTokenSource(
-    validator securitycontract.TokenValidator,
-    enricher securitycontract.TokenEnricher,
-) *BearerTokenSource {
+/* BearerTokenSourceConfig is what a bearer token source is built from beside its validator; the zero value is a source without an enricher. */
+type BearerTokenSourceConfig struct {
+    /* Enricher rewrites the claims after validation; a typed nil is refused. */
+    Enricher securitycontract.TokenEnricher
+}
+
+/* NewBearerTokenSource resolves a bearer token through the validator. A nil validator and a typed-nil enricher are refused. */
+func NewBearerTokenSource(validator securitycontract.TokenValidator, config BearerTokenSourceConfig) *BearerTokenSource {
     if true == internal.IsNilInterface(validator) {
         exception.Panic(exception.NewError("token validator is nil", nil, nil))
     }
 
-    refuseTypedNilDependency("token enricher is a typed nil", "enricher", "NewBearerTokenSource", enricher)
+    refuseTypedNilField("token enricher is a typed nil", "BearerTokenSourceConfig.Enricher", "NewBearerTokenSource", config.Enricher)
 
     return &BearerTokenSource{
         validator: validator,
-        enricher:  enricher,
+        enricher:  config.Enricher,
     }
 }
 
@@ -86,7 +89,7 @@ func (instance *BearerTokenSource) Resolve(
         claims = enrichedClaims
     }
 
-    return NewAuthenticatedTokenFromClaims(claims), nil
+    return newAuthenticatedTokenFromClaims(claims), nil
 }
 
 func extractBearerToken(headerValue string) (string, bool) {

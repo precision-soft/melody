@@ -51,9 +51,7 @@ func totpRequest(codeHeaderValue string) httpcontract.Request {
 }
 
 func totpAuthenticator(secret string, enrolled bool, guard securitycontract.NonceGuard) *TotpSecondFactorAuthenticator {
-    return NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
-        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
-        Enrollments: &fixedEnrollmentStore{secret: secret, enrolled: enrolled},
+    return NewTotpSecondFactorAuthenticator(&fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)}, &fixedEnrollmentStore{secret: secret, enrolled: enrolled}, TotpSecondFactorAuthenticatorConfig{
         ReplayGuard: guard,
     })
 }
@@ -95,9 +93,7 @@ func TestTotpSecondFactor_AConfigOutsideItsRangesIsRefusedAtConstruction(t *test
         "totp.Config.Skew":   {Skew: bound.Of(11)},
     } {
         expectPanicNamingField(t, field, func() {
-            NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
-                Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
-                Enrollments: &fixedEnrollmentStore{enrolled: false},
+            NewTotpSecondFactorAuthenticator(&fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)}, &fixedEnrollmentStore{enrolled: false}, TotpSecondFactorAuthenticatorConfig{
                 Totp:        config,
             })
         })
@@ -113,9 +109,7 @@ func TestTotpSecondFactor_ATotpClockBesideTheAuthenticatorsIsRefused(t *testing.
     } {
         t.Run(name, func(t *testing.T) {
             expectPanicNamingField(t, "TotpSecondFactorAuthenticatorConfig.Totp.Clock", func() {
-                NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
-                    Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
-                    Enrollments: &fixedEnrollmentStore{enrolled: false},
+                NewTotpSecondFactorAuthenticator(&fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)}, &fixedEnrollmentStore{enrolled: false}, TotpSecondFactorAuthenticatorConfig{
                     Totp:        totp.Config{Clock: totpClock},
                 })
             })
@@ -247,10 +241,7 @@ func totpRecoveryRequest(recoveryValue string) httpcontract.Request {
 }
 
 func totpAuthenticatorFor(store securitycontract.TwoFactorEnrollmentStore) *TotpSecondFactorAuthenticator {
-    return NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
-        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
-        Enrollments: store,
-    })
+    return NewTotpSecondFactorAuthenticator(&fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)}, store, TotpSecondFactorAuthenticatorConfig{})
 }
 
 func TestTotpSecondFactor_RecoveryCodeAuthenticatesAndIsSingleUse(t *testing.T) {
@@ -303,9 +294,7 @@ func TestTotpSecondFactor_RecoveryIgnoredWhenStoreUnsupported(t *testing.T) {
 }
 
 func TestTotpSecondFactor_ReplayWindowCoversEverySpanACodeVerifies(t *testing.T) {
-    authenticator := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
-        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
-        Enrollments: &fixedEnrollmentStore{enrolled: false},
+    authenticator := NewTotpSecondFactorAuthenticator(&fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)}, &fixedEnrollmentStore{enrolled: false}, TotpSecondFactorAuthenticatorConfig{
         Totp:        totp.Config{Period: bound.Of(60 * time.Second), Skew: bound.Of(10)},
     })
 
@@ -315,10 +304,7 @@ func TestTotpSecondFactor_ReplayWindowCoversEverySpanACodeVerifies(t *testing.T)
 }
 
 func TestTotpSecondFactor_AnonymousPrimaryPassesThrough(t *testing.T) {
-    authenticator := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
-        Primary:     &fixedAuthenticator{token: NewAnonymousToken()},
-        Enrollments: &fixedEnrollmentStore{enrolled: true},
-    })
+    authenticator := NewTotpSecondFactorAuthenticator(&fixedAuthenticator{token: NewAnonymousToken()}, &fixedEnrollmentStore{enrolled: true}, TotpSecondFactorAuthenticatorConfig{})
 
     token, _ := authenticator.Authenticate(withItsRuntime(totpRequest("")))
     if true == token.IsAuthenticated() {
@@ -338,9 +324,7 @@ func TestTotpSecondFactor_VerifiesOnTheInjectedClock(t *testing.T) {
     }
 
     frozen := clock.NewFrozenClock(time.Unix(1_000_000, 0))
-    authenticator := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
-        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
-        Enrollments: &fixedEnrollmentStore{secret: secret, enrolled: true},
+    authenticator := NewTotpSecondFactorAuthenticator(&fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)}, &fixedEnrollmentStore{secret: secret, enrolled: true}, TotpSecondFactorAuthenticatorConfig{
         Clock:       frozen,
     })
 
@@ -385,9 +369,7 @@ func (instance *failingEnrollmentStore) FindTotpSecret(
 func TestTotpSecondFactor_AFailingEnrollmentLookupRefusesInsteadOfPassingThrough(t *testing.T) {
     lookupErr := errors.New("enrollment store unavailable")
 
-    authenticator := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
-        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
-        Enrollments: &failingEnrollmentStore{lookupErr: lookupErr},
+    authenticator := NewTotpSecondFactorAuthenticator(&fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)}, &failingEnrollmentStore{lookupErr: lookupErr}, TotpSecondFactorAuthenticatorConfig{
         ReplayGuard: nil,
     })
 
@@ -454,11 +436,11 @@ func TestTotpSecondFactor_MarksItsThreeStoreFailures(t *testing.T) {
         request       httpcontract.Request
     }{
         "the enrollment lookup": {
-            authenticator: NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{Primary: primary, Enrollments: &failingEnrollmentStore{lookupErr: storeErr}}),
+            authenticator: NewTotpSecondFactorAuthenticator(primary, &failingEnrollmentStore{lookupErr: storeErr}, TotpSecondFactorAuthenticatorConfig{}),
             request:       totpRequest(""),
         },
         "the recovery redemption": {
-            authenticator: NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{Primary: primary, Enrollments: &failingRecoveryEnrollmentStore{redeemErr: storeErr}}),
+            authenticator: NewTotpSecondFactorAuthenticator(primary, &failingRecoveryEnrollmentStore{redeemErr: storeErr}, TotpSecondFactorAuthenticatorConfig{}),
             request:       totpRecoveryRequest("recovery-1"),
         },
         "the replay guard": {
@@ -502,10 +484,7 @@ func (instance *failingPrimaryAuthenticator) Authenticate(_ containercontract.Ru
 func TestTotpSecondFactor_ThePrimarysErrorPassesThroughUnmarked(t *testing.T) {
     primaryErr := errors.New("malformed credentials")
 
-    _, err := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
-        Primary:     &failingPrimaryAuthenticator{err: primaryErr},
-        Enrollments: &fixedEnrollmentStore{secret: "JBSWY3DPEHPK3PXP", enrolled: true},
-    }).Authenticate(withItsRuntime(totpRequest("")))
+    _, err := NewTotpSecondFactorAuthenticator(&failingPrimaryAuthenticator{err: primaryErr}, &fixedEnrollmentStore{secret: "JBSWY3DPEHPK3PXP", enrolled: true}, TotpSecondFactorAuthenticatorConfig{}).Authenticate(withItsRuntime(totpRequest("")))
     if false == errors.Is(err, primaryErr) || true == exception.IsInfrastructureFailure(err) {
         t.Fatalf("expected the primary's error untouched, got %v", err)
     }
@@ -515,18 +494,12 @@ func TestTotpSecondFactor_AStoreFailureItsStoreFiledStaysFiled(t *testing.T) {
     filed := exception.NewError("enrollment store unavailable", nil, nil)
     _ = exception.MarkLogged(filed)
 
-    _, filedErr := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
-        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
-        Enrollments: &failingEnrollmentStore{lookupErr: filed},
-    }).Authenticate(withItsRuntime(totpRequest("")))
+    _, filedErr := NewTotpSecondFactorAuthenticator(&fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)}, &failingEnrollmentStore{lookupErr: filed}, TotpSecondFactorAuthenticatorConfig{}).Authenticate(withItsRuntime(totpRequest("")))
     if false == exception.IsAlreadyLogged(filedErr) || false == exception.IsInfrastructureFailure(filedErr) {
         t.Fatalf("expected a filed store failure to stay filed under the mark, got %v", filedErr)
     }
 
-    _, unfiledErr := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
-        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
-        Enrollments: &failingEnrollmentStore{lookupErr: errors.New("enrollment store unavailable")},
-    }).Authenticate(withItsRuntime(totpRequest("")))
+    _, unfiledErr := NewTotpSecondFactorAuthenticator(&fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)}, &failingEnrollmentStore{lookupErr: errors.New("enrollment store unavailable")}, TotpSecondFactorAuthenticatorConfig{}).Authenticate(withItsRuntime(totpRequest("")))
     if true == exception.IsAlreadyLogged(unfiledErr) {
         t.Fatalf("expected an unfiled store failure left to be filed, got %v", unfiledErr)
     }
@@ -535,11 +508,28 @@ func TestTotpSecondFactor_AStoreFailureItsStoreFiledStaysFiled(t *testing.T) {
 func TestTotpSecondFactor_APrimaryThatCouldNotCheckTheCredentialIsPassedThrough(t *testing.T) {
     unavailable := &unavailableAuthenticatedToken{}
 
-    token, err := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
-        Primary:     &fixedAuthenticator{token: unavailable},
-        Enrollments: &fixedEnrollmentStore{secret: "JBSWY3DPEHPK3PXP", enrolled: true},
-    }).Authenticate(withItsRuntime(totpRequest("")))
+    token, err := NewTotpSecondFactorAuthenticator(&fixedAuthenticator{token: unavailable}, &fixedEnrollmentStore{secret: "JBSWY3DPEHPK3PXP", enrolled: true}, TotpSecondFactorAuthenticatorConfig{}).Authenticate(withItsRuntime(totpRequest("")))
     if nil != err || securitycontract.Token(unavailable) != token {
         t.Fatalf("expected the unavailable token passed through, got %T, %v", token, err)
+    }
+}
+
+func TestNewTotpSecondFactorAuthenticator_RefusesANilRequiredArgumentByName(t *testing.T) {
+    cases := []struct {
+        name        string
+        primary     securitycontract.Authenticator
+        enrollments securitycontract.TwoFactorEnrollmentStore
+        argument    string
+    }{
+        {"a nil primary authenticator", nil, &fixedEnrollmentStore{}, "primary"},
+        {"a nil enrollment store", &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)}, nil, "enrollments"},
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            expectPanicNamingTheArgument(t, testCase.argument, func() {
+                NewTotpSecondFactorAuthenticator(testCase.primary, testCase.enrollments, TotpSecondFactorAuthenticatorConfig{})
+            })
+        })
     }
 }

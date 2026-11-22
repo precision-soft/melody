@@ -22,6 +22,59 @@ Every entry below that the third major shipped is the consequence of fixing a de
 
 The fourth major takes the forms the third major kept compatible: a section that names a sibling interface, a deprecated door or a released signature on the third major describes here the form the fourth major carries instead, and this major's [`CHANGELOG.md`](../CHANGELOG.md) marks each **Breaking**.
 
+### Constructors: a value object takes a config
+
+**What changed.** A constructor of a value object keeps the values that name it positional and takes the rest in a config struct whose zero value is the empty or default value, and the doors over a fixed value or a positional optional gain one:
+
+- [`output.NewMeta`](../cli/output/envelope_factory.go): `NewMeta(command, arguments, option, startedAt, duration, version)` is `NewMeta(command, output.MetaConfig{Arguments, Option, StartedAt, Duration, Version})`; an empty Melody or Go version is still the running binary's and the application's is still the option's.
+- [`output.NewError`](../cli/output/envelope_factory.go): `NewError(code, message, details, cause)` is `NewError(code, message, output.ErrorConfig{Details, Cause})`. `output.NewWarning(code, message, details)` is unchanged.
+- [`output.NewListPayload`](../cli/output/list_payload.go): `NewListPayload(items, total, limit, offset)` is `NewListPayload(items, output.ListPayloadConfig{Total, Limit, Offset})`.
+- [`httpclient.NewResponse`](../httpclient/response.go): `NewResponse(statusCode, status, headers, body, request)` is `NewResponse(statusCode, httpclient.ResponseConfig{Status, Headers, Body, Request})`.
+- [`httpclient.NewStreamResponse`](../httpclient/stream_response.go): `NewStreamResponse(statusCode, headers, body)` is `NewStreamResponse(statusCode, body, httpclient.StreamResponseConfig{Headers})`.
+- [`security.NewActor`](../security/actor.go): `NewActor(identifier, actorType, roles, attributes, impersonator)` is `NewActor(identifier, actorType, security.ActorConfig{Roles, Attributes, Impersonator})`; a typed-nil impersonator is refused naming `ActorConfig.Impersonator`.
+- [`cache.NewItem`](../cache/item.go): `NewItem(key, payload, createdAt, expiresAt)` is `NewItem(key, payload, cache.ItemConfig{CreatedAt, ExpiresAt})`.
+- [`security.NewBearerTokenSource`](../security/bearer_token_source.go): `NewBearerTokenSource(validator, enricher)` is `NewBearerTokenSource(validator, security.BearerTokenSourceConfig{Enricher})`; a typed-nil enricher is refused naming `BearerTokenSourceConfig.Enricher`.
+- [`security.NewJsonEntryPoint`](../security/json_entry_point.go): `NewJsonEntryPoint()` is `NewJsonEntryPoint(security.JsonEntryPointConfig{Challenge})`; the 401's `WWW-Authenticate` is the challenge, `security.DefaultJsonEntryPointChallenge` (`Bearer`) when left out, and a challenge holding a control character or a line break is refused at construction naming `JsonEntryPointConfig.Challenge`.
+- [`logging.NewReopenableFileWriter`](../logging/reopenable_file_writer.go): `NewReopenableFileWriter(path)` is `NewReopenableFileWriter(path, logging.ReopenableFileWriterConfig{})`; the struct holds no field yet and the file still opens with mode `0o644`.
+- [`http.NewRequest`](../http/request.go): `NewRequest(httpRequest, routeParameters, runtimeInstance, requestContext)` is `NewRequest(httpRequest, runtimeInstance, http.RequestConfig{RouteParameters, RequestContext})`; a request built with neither still has no route parameter and answers a nil `RequestContext()`.
+- [`lock.NewInMemoryLocker`](../lock/in_memory.go): `NewInMemoryLocker(clock)` is `NewInMemoryLocker(lock.InMemoryLockerConfig{Clock, PurgeInterval})`; a clock left out is the system clock, where a nil clock was refused, and a typed nil is refused naming `InMemoryLockerConfig.Clock`. `PurgeInterval` is the acquisitions between two sweeps of the expired holders, `lock.DefaultInMemoryLockerPurgeInterval` (512) when left out, at least 1, `bound.UnlimitedCount()` leaving the sweep to `PurgeExpired`.
+- [`mailer.NewManager`](../mailer/manager.go): `NewManager(transport)` is `NewManager(transport, mailer.ManagerConfig{})`; the struct holds no field yet.
+- [`output.NewTablePrinter`](../cli/output/table_printer.go): `NewTablePrinter(width)`, `NewDefaultTablePrinter()` and `NewUnboundedTablePrinter()` are one `NewTablePrinter(output.TablePrinterConfig{MaxWidth})`: 120 when left out, `bound.UnlimitedCount()` no cap, `bound.Of(width)` the width; a width below 1 is refused naming `TablePrinterConfig.MaxWidth`, where it fell back to 120.
+- [`BootWarningRegistrar.DeclareBootWarning`](../application/contract/boot_warning_module.go): `DeclareBootWarning(name, writtenInCli)` is `DeclareBootWarning(name, applicationcontract.BootWarningConfig{WrittenInCli})`, and a registrar of the application's own, a test spy among them, takes the config.
+
+**Symptom.** `too many arguments in call to output.NewMeta`, `output.NewError`, `output.NewListPayload`, `httpclient.NewResponse`, `httpclient.NewStreamResponse`, `security.NewActor`, `cache.NewItem` or `security.NewBearerTokenSource`; `not enough arguments in call to security.NewJsonEntryPoint`, `logging.NewReopenableFileWriter`, `lock.NewInMemoryLocker`, `mailer.NewManager` or `output.NewTablePrinter`; `too many arguments in call to http.NewRequest`; `undefined: output.NewDefaultTablePrinter` or `output.NewUnboundedTablePrinter`; `cannot use true (untyped bool constant) as applicationcontract.BootWarningConfig value` at `DeclareBootWarning`, and a registrar of the application's own that no longer implements `BootWarningRegistrar`; a width below 1 handed to the table printer panicking naming `TablePrinterConfig.MaxWidth`; a typed-nil impersonator or enricher refused with a context naming `field` where it named `argument`.
+
+**Remedy.** Move each value after the positional ones into the config field of its name and leave out the nil, zero or empty ones: `output.NewMeta(name, output.MetaConfig{Arguments: arguments, Option: option, StartedAt: startedAt})`, `output.NewListPayload(items, output.ListPayloadConfig{Total: total, Limit: option.Limit, Offset: option.Offset})`, `security.NewActor(identifier, actorType, security.ActorConfig{Roles: roles})`, `security.NewBearerTokenSource(validator, security.BearerTokenSourceConfig{})`, `security.NewJsonEntryPoint(security.JsonEntryPointConfig{})`, `logging.NewReopenableFileWriter(path, logging.ReopenableFileWriterConfig{})`, `http.NewRequest(httpRequest, runtimeInstance, http.RequestConfig{RouteParameters: parameters})`, `lock.NewInMemoryLocker(lock.InMemoryLockerConfig{})`, `mailer.NewManager(transport, mailer.ManagerConfig{})`, `output.NewTablePrinter(output.TablePrinterConfig{})` for the default printer, `{MaxWidth: bound.UnlimitedCount()}` for the unbounded one and `{MaxWidth: bound.Of(width)}` for a width, and `registrar.DeclareBootWarning(name, applicationcontract.BootWarningConfig{WrittenInCli: true})`.
+
+### Framework-only constructors left the surface
+
+**What changed.** Seven constructors of values only the framework builds are unexported: `http.NewRouteDefinition`, `http.NewHttpRequestProfile`, `http.NewErrorResponsePayload`, `pipeline.NewMiddlewareBuildReport`, `config.NewParameter`, `security.NewMatchedAccessControlRule` and `event.NewRequiredListenerSkippedError`; [`kernel.NewKernel`](../kernel/kernel.go) takes as its first argument a token only the framework can spell, so the application builds its kernel and userland does not. The types stay exported and readable. [`(*HttpMiddleware).LastBuildReport`](../application/http_middleware.go) answers an empty report before the first build, its kernel environment empty.
+
+The doors the framework alone writes at boot follow: `MiddlewareBuildReport.SetSelectedNames`, `SetInactive`, `SetMissingReference` and `SetCycleDetected`, `pipeline.NewInactiveMiddleware`, `http.NewUrlGenerationRouteDefinition`, `SecurityContext.SetMatchedRule` and `security.NewAuthenticatedTokenFromClaims` are unexported. `RouteRegistry.SetBootCollisionRecorder` is [`RouteRegistry.InstallBootCollisionRecorder`](../http/route_registry.go), and [`Configuration.MarkServing`](../config/configuration.go) and [`openapi.Registry.MarkServing`](../openapi/registry.go) take a token only the framework can spell, so an application can neither arm nor disarm the boot collision recorder nor end its own wiring phase early. [`application.NewHttpMiddleware`](../application/http_middleware.go) takes the static file server config alone, the configuration it never read dropped.
+
+**Symptom.** `undefined: http.NewRouteDefinition`, `http.NewHttpRequestProfile`, `http.NewErrorResponsePayload`, `pipeline.NewMiddlewareBuildReport`, `config.NewParameter`, `security.NewMatchedAccessControlRule` or `event.NewRequiredListenerSkippedError`; `not enough arguments in call to kernel.NewKernel`; `report.SetInactive undefined`, `undefined: pipeline.NewInactiveMiddleware`, `http.NewUrlGenerationRouteDefinition`, `security.NewAuthenticatedTokenFromClaims`, `registry.SetBootCollisionRecorder undefined`; `not enough arguments in call to configuration.MarkServing` or `registry.MarkServing`; `too many arguments in call to application.NewHttpMiddleware`.
+
+**Remedy.** Build the application through `application.NewApplication`, which builds the kernel. A parameter is registered through `Configuration.RegisterRuntime` or `RegisterRuntimeSecret` and read back through `Get`. A test of a `debug:middleware` provider builds its report through `pipeline.NewBuilder(definitions).Describe(environment, group)`, the inactive entries the definitions the environment or the group leave out. `Application.Run` arms the collision recorder and marks the configuration and the openapi registry serving; a registry built by hand and never marked keeps admitting descriptions. `NewHttpMiddleware(staticConfig, configuration)` is `NewHttpMiddleware(staticConfig)`. A `RequiredListenerSkippedError` is met on the dispatch that skips a required listener, asserted on the error the dispatch returns. A route definition, a request profile, an error payload and a matched rule are read from the router, the profiler, the response body and the access control listener that build them.
+
+### Constructors: a required value is an argument
+
+**What changed.** A value a constructor cannot do without leaves its config struct and becomes a positional argument before the config, so the compiler refuses the call that leaves it out; a nil or empty one is still refused with the same message, its context naming `argument` instead of `field`:
+
+- [`security.NewHmacTokenSource`](../security/hmac_token_source.go): `NewHmacTokenSource(HmacTokenSourceConfig{Secrets: secrets, Applications: applications, …})` is `NewHmacTokenSource(secrets, applications, HmacTokenSourceConfig{…})`.
+- [`security.NewTotpSecondFactorAuthenticator`](../security/totp_second_factor_authenticator.go): `Primary` and `Enrollments` are `NewTotpSecondFactorAuthenticator(primary, enrollments, TotpSecondFactorAuthenticatorConfig{…})`.
+- [`security.NewImpersonationTokenSource`](../security/impersonation_token_source.go): `Inner` and `Users` are `NewImpersonationTokenSource(inner, users, ImpersonationTokenSourceConfig{…})`.
+- [`security.NewApiKeyHeaderAuthenticator`](../security/api_key_authenticator.go) and [`security.NewApiKeyHeaderRule`](../security/rule.go): `ExpectedValue` is `NewApiKeyHeaderAuthenticator(expectedValue, config)` and `NewApiKeyHeaderRule(matcher, expectedValue, config)`; `HeaderName` stays in the struct and is `security.DefaultApiKeyHeaderName` (`X-Api-Key`) when empty instead of refused.
+- [`mailer.NewSmtpTransport`](../mailer/smtp_transport.go): `SmtpConfig.Address` is `NewSmtpTransport(address, SmtpConfig{…})`.
+- [`middleware.SimpleRateLimit`, `IpRateLimit` and `UserRateLimit`](../http/middleware/rate_limit.go): `QuickLimitConfig.RequestsPerMinute` is `SimpleRateLimit(requestsPerMinute, config)` and `IpRateLimit(requestsPerMinute, config)`; `UserLimitConfig.RequestsPerMinute` and `UserId` are `UserRateLimit(requestsPerMinute, userId, config)`.
+- [`amqp.NewTransport`](../../integrations/amqp/v4/transport.go) and `Provider.NewTransport`: `Queue` and `Registry` are `NewTransport(queue, registry, TransportConfig{…})`; the connection or dialer stays in the struct.
+- [`amqp.NewServerSentEventBackplane`](../../integrations/amqp/v4/server_sent_event_backplane.go) and `Provider.NewServerSentEventBackplane`: `Hub` is `NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{…})`.
+- [`outbox.NewRelay`](../../integrations/outbox/v4/relay.go): `Repository`, `Transport` and `Codec` are `NewRelay(repository, transport, codec, RelayConfig{…})`.
+- [`session.NewFileStorage`](../session/file_storage.go): `FileStorageConfig.Path` is `NewFileStorage(path, config)` and `FileStorageConfig.File` is the new `NewFileStorageOverFile(file, config)`; the refusals of both or neither are gone, an empty path and a nil file refused instead.
+
+**Symptom.** `unknown field Secrets in struct literal of type security.HmacTokenSourceConfig` (and `Applications`, `Primary`, `Enrollments`, `Inner`, `Users`, `ExpectedValue`, `Address`, `RequestsPerMinute`, `UserId`, `Queue`, `Registry`, `Hub`, `Repository`, `Transport`, `Codec`, `Path` and `File` likewise), and `not enough arguments in call to NewHmacTokenSource` for each constructor above. Code that reads the refusal's `field` key for these values finds it under `argument`.
+
+**Remedy.** Move each value out of the literal into the argument before the config, in the order above, and build a storage over an open handle with `session.NewFileStorageOverFile(file, config)`. An api key header that was `X-Api-Key` may drop `HeaderName`.
+
 ### Hardening: the safe value of a switch is its zero value
 
 **What changed.** Four switches that switched a protection on are inverted, so that leaving the field out keeps the protection and setting it is the documented door:
@@ -1634,11 +1687,11 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 ### Security: a value with one optional dependency is built through one door
 
-**What changed.** [`NewActor`](../security/actor.go) takes the impersonator as its fifth argument, [`NewAuthenticatedToken`](../security/authenticated_token.go) the actor it carries as its third and [`NewBearerTokenSource`](../security/bearer_token_source.go) the enricher as its second, nil for none and a typed nil refused naming the argument; [`NewImpersonationToken`](../security/impersonation_token.go) takes the role mode as its third, `RoleModeImpersonated` the zero value, and refuses an unknown mode, where the third major authorized such a token with the impersonated user's roles; [`JwtConfig`](../security/jwt_token_validator.go) gains `RevocationEpochStore`, under which a future `iat` is refused, a typed nil refused. A negative `JwtConfig.Leeway` is refused naming the field, as a negative `RevocationEpochSkew` was; the third major narrowed every time window by it. `NewActorWithImpersonator`, `NewAuthenticatedTokenWithActor`, `NewBearerTokenSourceWithEnricher`, `NewImpersonationTokenWithRoleMode` and `NewJwtTokenValidatorWithRevocationEpoch` are removed.
+**What changed.** [`NewActor`](../security/actor.go) takes the impersonator as `ActorConfig.Impersonator` and [`NewBearerTokenSource`](../security/bearer_token_source.go) the enricher as `BearerTokenSourceConfig.Enricher`, left out for none and a typed nil refused naming the field, and [`NewAuthenticatedToken`](../security/authenticated_token.go) the actor it carries as its third argument, nil for none and a typed nil refused naming the argument; [`NewImpersonationToken`](../security/impersonation_token.go) takes the role mode as its third, `RoleModeImpersonated` the zero value, and refuses an unknown mode, where the third major authorized such a token with the impersonated user's roles; [`JwtConfig`](../security/jwt_token_validator.go) gains `RevocationEpochStore`, under which a future `iat` is refused, a typed nil refused. A negative `JwtConfig.Leeway` is refused naming the field, as a negative `RevocationEpochSkew` was; the third major narrowed every time window by it. `NewActorWithImpersonator`, `NewAuthenticatedTokenWithActor`, `NewBearerTokenSourceWithEnricher`, `NewImpersonationTokenWithRoleMode` and `NewJwtTokenValidatorWithRevocationEpoch` are removed.
 
 **Symptom.** `NewActor(identifier, type, roles, attributes)`, `NewAuthenticatedToken(user, roles)`, `NewBearerTokenSource(validator)`, `NewImpersonationToken(impersonated, impersonator)` and the five removed doors no longer compile; a validator built with a negative leeway panics.
 
-**Remedy.** Add `nil`, or the impersonator, actor, enricher, as the last argument; `security.RoleModeImpersonated` for the two-argument impersonation token; `security.NewJwtTokenValidator(security.JwtConfig{..., RevocationEpochStore: store})` for `NewJwtTokenValidatorWithRevocationEpoch(config, store)`.
+**Remedy.** `security.NewActor(identifier, type, security.ActorConfig{Roles: roles, Attributes: attributes, Impersonator: impersonator})` and `security.NewBearerTokenSource(validator, security.BearerTokenSourceConfig{Enricher: enricher})`, a field left out for none; add `nil`, or the actor, as the last argument of `NewAuthenticatedToken`; `security.RoleModeImpersonated` for the two-argument impersonation token; `security.NewJwtTokenValidator(security.JwtConfig{..., RevocationEpochStore: store})` for `NewJwtTokenValidatorWithRevocationEpoch(config, store)`.
 
 ### Security: a token store's doors take the runtime and answer an error
 
@@ -1766,7 +1819,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **Symptom.** A call to the constructor with the five arguments no longer compiles. The framework's listener is its only caller; an application reading the record through its accessors is unaffected.
 
-**Remedy.** Pass the rule.
+**Remedy.** None outside the framework: the constructor is unexported, see "Framework-only constructors left the surface".
 
 ### Bound: a rule may carry a maximum
 
@@ -1846,7 +1899,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **Symptom.** `NewRequiredListenerSkippedError(eventName, listenerName)` and the removed door no longer compile.
 
-**Remedy.** `NewRequiredListenerSkippedError(eventName, listenerName, nil)`, or the failure in place of nil.
+**Remedy.** None outside the framework: the constructor is unexported, see "Framework-only constructors left the surface".
 
 ### Logging: the json and default loggers are built from one struct each, an empty min level is info, and the depths are configurable
 
@@ -2973,7 +3026,7 @@ debug.NewMiddlewareCommand(
 
 **Symptom.** A boot that registered the same route twice — usually a module wired twice, or a copy-pasted registration — now panics naming the pattern, the methods and the route name. An out-of-tree `http/contract.Kernel` no longer compiles until it declares `SetMethodPolicy(policy MethodPolicy)`.
 
-**Remedy.** Remove the duplicate registration; a route that must coexist differs in at least one discriminator. An application aggregating boot collisions arms `RouteRegistry.SetBootCollisionRecorder` for the boot window. To change the method policy on a kernel held as `http/contract.Kernel`, call its `SetMethodPolicy`; a kernel of your own declares it.
+**Remedy.** Remove the duplicate registration; a route that must coexist differs in at least one discriminator. The application aggregates the boot collisions of its own registrations itself. To change the method policy on a kernel held as `http/contract.Kernel`, call its `SetMethodPolicy`; a kernel of your own declares it.
 
 ### Http: every framework error goes through one renderer and answers the error envelope, and the validation detail is under `validationErrors`
 
@@ -2983,7 +3036,7 @@ The body is also negotiated: a client that prefers html gets the html error page
 
 **Symptom.** A client that reads `error` as a string finds an object; a client that reads the debug `context` or `cause` at the top level finds them inside `error`; a body carries `status` where it did not. A call to `NewErrorResponsePayload(message, time)` and a read of `ErrorResponsePayload.Error` as a string no longer compile. A reader of the debug-only exception context keyed on `errors` finds `validationErrors`; a client that negotiated html, `text/plain` or another serializer's type for an error receives that type instead of json.
 
-**Remedy.** Read the message at `error.message`, the debug detail at `error.context` and `error.cause`, and the validation detail at `validationErrors`; branch on `error.code` where the exception declares one. Build a payload with `NewErrorResponsePayload(statusCode, message, time)` and read `payload.Error.Message`.
+**Remedy.** Read the message at `error.message`, the debug detail at `error.context` and `error.cause`, and the validation detail at `validationErrors`; branch on `error.code` where the exception declares one. Read `payload.Error.Message`; the payload's constructor is unexported, see "Framework-only constructors left the surface".
 
 ### Exception: an http exception declares its client-facing code, key and parameters
 

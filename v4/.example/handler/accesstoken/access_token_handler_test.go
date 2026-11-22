@@ -90,7 +90,7 @@ func callAccessTokenDoor(t *testing.T, call accessTokenDoorCall) int {
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, call.path, strings.NewReader(call.body))
     httpRequest.Header.Set("Content-Type", "application/json")
-    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("access-token-test", time.Now()))
+    request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("access-token-test", time.Now())})
 
     firewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
         Name:               "main",

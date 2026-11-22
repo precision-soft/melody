@@ -4,7 +4,7 @@ import (
     "github.com/precision-soft/melody/v4/security/accesscontrol"
 )
 
-func NewMatchedAccessControlRule(
+func newMatchedAccessControlRule(
     rule accesscontrol.Rule,
     source Source,
     ruleIndex int,

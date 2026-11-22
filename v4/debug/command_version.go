@@ -36,11 +36,11 @@ func (instance *VersionCommand) Run(
 
     meta := output.NewMeta(
         instance.Name(),
-        commandContext.Args().Slice(),
-        option,
-        startedAt,
-        time.Duration(0),
-        output.Version{},
+        output.MetaConfig{
+            Arguments: commandContext.Args().Slice(),
+            Option:    option,
+            StartedAt: startedAt,
+        },
     )
 
     envelope := output.NewEnvelope(meta)

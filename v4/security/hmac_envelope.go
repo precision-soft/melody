@@ -124,7 +124,7 @@ func decodeHmacHeaderValue(
     }
 
     if minimumSecretLength > len(secret) {
-        shortSecret := shortSecretContext("HmacTokenSourceConfig.Secrets", len(secret), minimumSecretLength)
+        shortSecret := shortSecretContext("NewHmacTokenSource.secrets", len(secret), minimumSecretLength)
         shortSecret["keyId"] = internal.BoundDiagnosticText(header.KeyId)
 
         return hmacEnvelope{}, "", exception.MarkInfrastructureFailure(

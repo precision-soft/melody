@@ -118,9 +118,10 @@ func streamRequestOnContainer(t *testing.T, target string, cancelled bool, withH
 
     request := melodyhttp.NewRequest(
         httpRequest,
-        nil,
         runtimeInstance,
-        melodyhttp.NewRequestContext("stream-test", time.Now()),
+        melodyhttp.RequestConfig{
+            RequestContext: melodyhttp.NewRequestContext("stream-test", time.Now()),
+        },
     )
 
     return request, runtimeInstance
@@ -322,7 +323,7 @@ func streamServer(t *testing.T, writeTimeout time.Duration) (*httptest.Server, *
     authenticateOnRuntime(runtimeInstance, "reader", []string{entity.RoleUser})
 
     server := httptest.NewUnstartedServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, httpRequest *nethttp.Request) {
-        request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("stream-test", time.Now()))
+        request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("stream-test", time.Now())})
         _, _ = StreamHandler(NewStreamSlots(StreamCapPerUser, StreamCapPerProcess))(runtimeInstance, writer, request)
     }))
     server.Config.WriteTimeout = writeTimeout

@@ -5,6 +5,7 @@ import (
     "sync/atomic"
 
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/internal/openapiseam"
 )
 
 func TypeOf[T any]() reflect.Type {
@@ -81,7 +82,7 @@ func copyDescriptor(descriptor Descriptor) Descriptor {
 }
 
 /* MarkServing ends the wiring phase: the application calls it from Run, and from then on Describe is refused. A registry never marked keeps admitting descriptions. */
-func (instance *Registry) MarkServing() {
+func (instance *Registry) MarkServing(token openapiseam.Token) {
     instance.serving.Store(true)
 }
 

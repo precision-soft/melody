@@ -354,7 +354,7 @@ type Cache interface {
 - `cache.NewInMemoryBackend(config) *cache.InMemoryBackend` ([`cache/in_memory.go`](../../cache/in_memory.go))
 - `cache.NewDeserializationError(keys, causeErr) *cache.DeserializationError` ([`cache/deserialization_error.go`](../../cache/deserialization_error.go))
 - `cache.NewJsonSerializer() cachecontract.Serializer` ([`cache/json_serializer.go`](../../cache/json_serializer.go))
-- `cache.NewItem(key string, payload []byte, createdAt time.Time, expiresAt *time.Time) *cache.Item` ([`cache/item.go`](../../cache/item.go))
+- `cache.NewItem(key string, payload []byte, config cache.ItemConfig) *cache.Item` ([`cache/item.go`](../../cache/item.go)) — `CreatedAt` and `ExpiresAt`, nil for an item that does not expire, for a `Backend` of the application's own
 
 ### Retrieval helpers
 

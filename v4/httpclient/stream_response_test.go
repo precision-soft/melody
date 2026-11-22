@@ -12,7 +12,7 @@ import (
 )
 
 func TestStreamResponse_BodyAfterCloseReadsAsAFailureNotAsNil(t *testing.T) {
-    streamResponse := NewStreamResponse(200, http.Header{}, io.NopCloser(strings.NewReader("payload")))
+    streamResponse := NewStreamResponse(200, io.NopCloser(strings.NewReader("payload")), StreamResponseConfig{Headers: http.Header{}})
 
     if err := streamResponse.Close(); nil != err {
         t.Fatalf("unexpected close error: %v", err)
@@ -37,7 +37,7 @@ func TestStreamResponse_BodyAfterCloseReadsAsAFailureNotAsNil(t *testing.T) {
 }
 
 func TestStreamResponse_BodyOfAnEmptyStreamIsNotNil(t *testing.T) {
-    streamResponse := NewStreamResponse(204, http.Header{}, nil)
+    streamResponse := NewStreamResponse(204, nil, StreamResponseConfig{Headers: http.Header{}})
 
     if nil == streamResponse.Body() {
         t.Fatalf("Body must not hand back a nil reader")
@@ -50,7 +50,7 @@ func TestStreamResponse_BodyOfAnEmptyStreamIsNotNil(t *testing.T) {
 
 func TestStreamResponse_ConcurrentCloseAndBodyDoesNotRace(t *testing.T) {
     for iteration := 0; iteration < 200; iteration++ {
-        streamResponse := NewStreamResponse(200, http.Header{}, io.NopCloser(strings.NewReader("payload")))
+        streamResponse := NewStreamResponse(200, io.NopCloser(strings.NewReader("payload")), StreamResponseConfig{Headers: http.Header{}})
 
         var waiter sync.WaitGroup
         waiter.Add(2)
@@ -111,7 +111,7 @@ func TestStreamResponse_HeadersCarryWhatTheServerSent(t *testing.T) {
 func TestStreamResponse_ATypedNilBodyAnswersTheFailingReaderRatherThanItself(t *testing.T) {
     var absentBody *os.File
 
-    response := NewStreamResponse(200, nil, absentBody)
+    response := NewStreamResponse(200, absentBody, StreamResponseConfig{})
 
     body := response.Body()
     if _, isClosed := body.(closedStreamBody); false == isClosed {

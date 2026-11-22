@@ -21,34 +21,34 @@ import (
 )
 
 func TestSmtpConfig_CarriesTheCredentialsAndRequiresAuthentication(t *testing.T) {
-    smtpConfig := moduleWithEnvironment(t, map[string]string{
+    smtpAddress, smtpConfig := moduleWithEnvironment(t, map[string]string{
         environmentKeySmtpAddress:  "relay.example.test:587",
         environmentKeySmtpUsername: "mailer",
         environmentKeySmtpPassword: "relay-password",
     }).smtpConfig()
 
-    if "relay.example.test:587" != smtpConfig.Address || "mailer" != smtpConfig.Username || "relay-password" != smtpConfig.Password || false == smtpConfig.RequireAuthentication {
+    if "relay.example.test:587" != smtpAddress || "mailer" != smtpConfig.Username || "relay-password" != smtpConfig.Password || false == smtpConfig.RequireAuthentication {
         t.Fatalf("expected the relay's credentials and authentication required, got %+v", smtpConfig)
     }
 
-    anonymous := moduleWithEnvironment(t, map[string]string{environmentKeySmtpAddress: "mailpit:1025"}).smtpConfig()
+    _, anonymous := moduleWithEnvironment(t, map[string]string{environmentKeySmtpAddress: "mailpit:1025"}).smtpConfig()
     if true == anonymous.RequireAuthentication || "" != anonymous.Username {
         t.Fatalf("expected a relay without a username to authenticate nothing, got %+v", anonymous)
     }
 }
 
 func TestSmtpConfig_ReadsThePlaintextDoorAndTheImplicitTlsSwitch(t *testing.T) {
-    allowPlaintext := moduleWithEnvironment(t, map[string]string{environmentKeySmtpAddress: "relay.example.test:587", environmentKeySmtpAllowPlaintext: "true"}).smtpConfig()
+    _, allowPlaintext := moduleWithEnvironment(t, map[string]string{environmentKeySmtpAddress: "relay.example.test:587", environmentKeySmtpAllowPlaintext: "true"}).smtpConfig()
     if false == allowPlaintext.AllowPlaintext || true == allowPlaintext.ImplicitTls {
         t.Fatalf("expected the plaintext door open alone, got %+v", allowPlaintext)
     }
 
-    implicitTls := moduleWithEnvironment(t, map[string]string{environmentKeySmtpAddress: "relay.example.test:465", environmentKeySmtpImplicitTls: "true", environmentKeySmtpAllowPlaintext: "false"}).smtpConfig()
+    _, implicitTls := moduleWithEnvironment(t, map[string]string{environmentKeySmtpAddress: "relay.example.test:465", environmentKeySmtpImplicitTls: "true", environmentKeySmtpAllowPlaintext: "false"}).smtpConfig()
     if true == implicitTls.AllowPlaintext || false == implicitTls.ImplicitTls {
         t.Fatalf("expected implicit tls alone, got %+v", implicitTls)
     }
 
-    neither := moduleWithEnvironment(t, map[string]string{}).smtpConfig()
+    _, neither := moduleWithEnvironment(t, map[string]string{}).smtpConfig()
     if true == neither.AllowPlaintext || true == neither.ImplicitTls {
         t.Fatalf("expected STARTTLS required and implicit tls off when both keys are empty, got %+v", neither)
     }

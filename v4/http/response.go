@@ -105,7 +105,7 @@ type ErrorResponsePayload struct {
     Error  ErrorResponsePayloadDetail `json:"error"`
 }
 
-func NewErrorResponsePayload(statusCode int, message string, timeString string) *ErrorResponsePayload {
+func newErrorResponsePayload(statusCode int, message string, timeString string) *ErrorResponsePayload {
     return &ErrorResponsePayload{
         Status: statusCode,
         Time:   timeString,
@@ -206,7 +206,7 @@ func JsonResponse(statusCode int, payload any) (*Response, error) {
 
 /* JsonErrorResponse answers the error envelope under the status, unnegotiated; a status and two strings always marshal, so the text answer is the one a failure of the encoder would get. */
 func JsonErrorResponse(statusCode int, message string) *Response {
-    response, jsonResponseErr := JsonResponse(statusCode, NewErrorResponsePayload(statusCode, message, time.Now().Format(time.RFC3339)))
+    response, jsonResponseErr := JsonResponse(statusCode, newErrorResponsePayload(statusCode, message, time.Now().Format(time.RFC3339)))
     if nil != jsonResponseErr {
         return TextResponse(statusCode, "internal server error")
     }

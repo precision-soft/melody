@@ -76,11 +76,11 @@ func (instance *ContainerCommand) Run(
 
     meta := output.NewMeta(
         instance.Name(),
-        commandContext.Args().Slice(),
-        option,
-        startedAt,
-        time.Duration(0),
-        output.Version{},
+        output.MetaConfig{
+            Arguments: commandContext.Args().Slice(),
+            Option:    option,
+            StartedAt: startedAt,
+        },
     )
 
     envelope := output.NewEnvelope(meta)
@@ -273,9 +273,11 @@ func (instance *ContainerCommand) describeServiceList(
 
     envelope.Data = output.NewListPayload(
         items,
-        total,
-        option.Limit,
-        option.Offset,
+        output.ListPayloadConfig{
+            Total:  total,
+            Limit:  option.Limit,
+            Offset: option.Offset,
+        },
     )
 }
 
@@ -827,9 +829,11 @@ func (instance *ContainerCommand) populateServiceList(
 
     envelope.Data = output.NewListPayload(
         combined,
-        total,
-        option.Limit,
-        option.Offset,
+        output.ListPayloadConfig{
+            Total:  total,
+            Limit:  option.Limit,
+            Offset: option.Offset,
+        },
     )
 }
 

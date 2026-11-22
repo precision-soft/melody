@@ -47,7 +47,7 @@ func serveGreeting(t *testing.T, translator melodytranslationcontract.Translator
     runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/"+routeLocale+"/i18n/greeting/?"+query, nil)
-    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("greeting-test", time.Now()))
+    request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("greeting-test", time.Now())})
     request.Attributes().Set(melodyhttp.RouteAttributeLocale, routeLocale)
 
     return GreetingHandler()(runtimeInstance, httptest.NewRecorder(), request)

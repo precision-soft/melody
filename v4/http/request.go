@@ -23,17 +23,28 @@ const RequestAttributeScheme = "_scheme"
 
 const requestAttributeSession = "_session"
 
+/* RequestConfig is what a request is built with beyond its http request and its runtime; every zero value is the default. */
+type RequestConfig struct {
+    /* RouteParameters are the parameters the matched route extracted from the path; nil is no parameter. */
+    RouteParameters map[string]string
+
+    /* RequestContext is the identity the kernel minted for the request; nil leaves Request.RequestContext answering nil. */
+    RequestContext httpcontract.RequestContext
+}
+
 func NewRequest(
     httpRequest *nethttp.Request,
-    routeParameters map[string]string,
     runtimeInstance containercontract.Runtime,
-    requestContext httpcontract.RequestContext,
+    config RequestConfig,
 ) *Request {
     if nil == httpRequest {
         exception.Panic(
             exception.NewError("the http request is nil", nil, nil),
         )
     }
+
+    routeParameters := config.RouteParameters
+    requestContext := config.RequestContext
 
     if nil == routeParameters {
         routeParameters = map[string]string{}

@@ -8,7 +8,7 @@ import (
 )
 
 func impersonationProbeTokens() (securitycontract.Token, securitycontract.Token) {
-    impersonated := NewAuthenticatedTokenFromClaims(securitycontract.Claims{
+    impersonated := newAuthenticatedTokenFromClaims(securitycontract.Claims{
         UserIdentifier: "target",
         Roles:          []string{"ROLE_USER"},
         Scope:          map[string]any{"tenant": "acme"},
@@ -210,7 +210,7 @@ func TestImpersonationToken_ASingleImpersonationCarriesTheAdminAlone(t *testing.
 
 /* an impersonator whose originating actor names somebody else, the user an upstream service acts for, is carried under its own identity */
 func TestImpersonationToken_AnImpersonatorActingForAnotherUserIsCarriedUnderItsOwnIdentity(t *testing.T) {
-    service := NewAuthenticatedToken("service", []string{"ROLE_ADMIN"}, NewActor("upstream-user", securitycontract.ActorTypeUser, nil, nil, nil))
+    service := NewAuthenticatedToken("service", []string{"ROLE_ADMIN"}, NewActor("upstream-user", securitycontract.ActorTypeUser, ActorConfig{}))
     token := NewImpersonationToken(NewAuthenticatedToken("a", []string{"ROLE_A"}, nil), service, RoleModeImpersonated)
 
     actor, _ := token.OnBehalfOf()

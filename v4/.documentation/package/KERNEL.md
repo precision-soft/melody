@@ -13,8 +13,7 @@ This is an internal integration package. Userland code should not construct a ke
 
 ## Responsibilities
 
-- Construct a kernel instance and validate constructor invariants:
-    - [`NewKernel`](../../kernel/kernel.go)
+- Construct a kernel instance and validate constructor invariants: `kernel.NewKernel` takes a token only the framework can spell, so the application builds its kernel and userland never does
 - Expose core infrastructure to framework subsystems through the `kernelcontract.Kernel` interface:
     - configuration access
     - container access
@@ -34,9 +33,5 @@ This is an internal integration package. Userland code should not construct a ke
     - [`EventKernelTerminate`](../../kernel/contract/event.go)
     - [`EventKernelException`](../../kernel/contract/event.go)
     - [`ListenerTagKernelAccessLog`](../../kernel/contract/event.go), [`ListenerTagKernelCors`](../../kernel/contract/event.go) — the tags the access log and the cors response listener carry, which the application declares on `kernel.terminate` and `kernel.response`
-
-### Constructors (`kernel`)
-
-- [`NewKernel(...) kernelcontract.Kernel`](../../kernel/kernel.go)
 
 `Kernel.BootRuntime()` answers the runtime of the application's boot, installed by `Boot` before its first step: a module hook resolves and calls its doors under it. Once `Boot` returned its context is done with `containercontract.ErrBootFinished` as its cause and its scope is closed; before `Boot` it is nil.

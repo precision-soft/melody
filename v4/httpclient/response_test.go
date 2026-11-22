@@ -8,7 +8,7 @@ import (
 )
 
 func TestResponseHelpers_StatusClassificationAndString(t *testing.T) {
-    response := NewResponse(201, "201 Created", http.Header{}, []byte("ok"), nil)
+    response := NewResponse(201, ResponseConfig{Status: "201 Created", Headers: http.Header{}, Body: []byte("ok")})
 
     if false == response.IsSuccess() {
         t.Fatalf("expected success")
@@ -23,7 +23,7 @@ func TestResponseHelpers_StatusClassificationAndString(t *testing.T) {
         t.Fatalf("unexpected string")
     }
 
-    response = NewResponse(404, "404 Not Found", http.Header{}, []byte("no"), nil)
+    response = NewResponse(404, ResponseConfig{Status: "404 Not Found", Headers: http.Header{}, Body: []byte("no")})
     if true == response.IsSuccess() {
         t.Fatalf("expected not success")
     }
@@ -31,7 +31,7 @@ func TestResponseHelpers_StatusClassificationAndString(t *testing.T) {
         t.Fatalf("expected client error")
     }
 
-    response = NewResponse(500, "500 Internal Server Error", http.Header{}, []byte("error"), nil)
+    response = NewResponse(500, ResponseConfig{Status: "500 Internal Server Error", Headers: http.Header{}, Body: []byte("error")})
     if false == response.IsServerError() {
         t.Fatalf("expected server error")
     }
@@ -84,7 +84,7 @@ func TestResponse_HeadersHandsBackTheLiveMapWhereTheStreamingSiblingClones(t *te
     headers := http.Header{}
     headers.Set("X-Budget", "17")
 
-    response := NewResponse(200, "200 OK", headers, []byte("ok"), nil)
+    response := NewResponse(200, ResponseConfig{Status: "200 OK", Headers: headers, Body: []byte("ok")})
 
     response.Headers().Set("X-Budget", "mutated")
 
@@ -95,7 +95,7 @@ func TestResponse_HeadersHandsBackTheLiveMapWhereTheStreamingSiblingClones(t *te
     streamHeaders := http.Header{}
     streamHeaders.Set("X-Budget", "17")
 
-    streamResponse := NewStreamResponse(200, streamHeaders.Clone(), nil)
+    streamResponse := NewStreamResponse(200, nil, StreamResponseConfig{Headers: streamHeaders.Clone()})
 
     streamResponse.Headers().Set("X-Budget", "mutated")
 

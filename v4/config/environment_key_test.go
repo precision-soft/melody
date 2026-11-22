@@ -11,6 +11,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/internal/configseam"
 )
 
 var countKeyRule = bound.Rule[int]{Name: "ignored", Default: 3, Minimum: 1}
@@ -372,7 +373,7 @@ func TestDeclareEnvironmentKey_RefusedAfterTheBootResolve(t *testing.T) {
     declarationRefusal(t, resolved.DeclareEnvironmentKey("x", textKey("")), "an environment key is declared after the configuration resolved")
 
     serving := mustConfigurationFromValues(t, map[string]string{})
-    serving.MarkServing()
+    serving.MarkServing(configseam.Token{})
     declarationRefusal(t, serving.DeclareEnvironmentKey("x", textKey("")), "an environment key is declared after the configuration resolved")
 }
 

@@ -17,14 +17,12 @@ import (
 
 func newTestTransportConfig() TransportConfig {
     return TransportConfig{
-        Dialer:   func() (*amqp091.Connection, error) { return nil, nil },
-        Queue:    "orders",
-        Registry: NewMessageRegistry(),
+        Dialer: func() (*amqp091.Connection, error) { return nil, nil },
     }
 }
 
 func TestNewTransport_DefaultReconnectAndBuffer(t *testing.T) {
-    instance := NewTransport(newTestTransportConfig())
+    instance := NewTransport("orders", NewMessageRegistry(), newTestTransportConfig())
 
     if defaultReconnect != instance.reconnect {
         t.Fatalf("expected the default reconnect, got %+v", instance.reconnect)
@@ -47,7 +45,7 @@ func TestNewTransport_PerTransportOverride(t *testing.T) {
     config.CallTimeout = bound.Of(3 * time.Second)
     config.CloseTimeout = bound.Of(4 * time.Second)
 
-    instance := NewTransport(config)
+    instance := NewTransport("orders", NewMessageRegistry(), config)
 
     if 5*time.Second != instance.reconnect.Initial {
         t.Fatalf("expected overridden initial backoff 5s, got %s", instance.reconnect.Initial)
@@ -85,7 +83,7 @@ func TestNewTransport_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T) {
             testCase.mutate(&config)
 
             expectPanicNamingField(t, testCase.field, func() {
-                NewTransport(config)
+                NewTransport("orders", NewMessageRegistry(), config)
             })
         })
     }
@@ -93,23 +91,35 @@ func TestNewTransport_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T) {
 
 func TestNewTransport_AMissingDependencyIsRefusedNamingTheField(t *testing.T) {
     expectPanicNamingField(t, "TransportConfig.Connection", func() {
-        NewTransport(TransportConfig{Queue: "orders", Registry: NewMessageRegistry()})
+        NewTransport("orders", NewMessageRegistry(), TransportConfig{})
     })
+}
 
-    expectPanicNamingField(t, "TransportConfig.Queue", func() {
-        NewTransport(TransportConfig{Dialer: refusingDialer, Registry: NewMessageRegistry()})
-    })
+func TestNewTransport_RefusesAMissingRequiredArgumentByName(t *testing.T) {
+    cases := []struct {
+        name     string
+        queue    string
+        registry *MessageRegistry
+        argument string
+    }{
+        {"an empty queue", "", NewMessageRegistry(), "queue"},
+        {"a nil registry", "orders", nil, "registry"},
+    }
 
-    expectPanicNamingField(t, "TransportConfig.Registry", func() {
-        NewTransport(TransportConfig{Dialer: refusingDialer, Queue: "orders"})
-    })
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            expectPanicNamingTheArgument(t, testCase.argument, func() {
+                NewTransport(testCase.queue, testCase.registry, TransportConfig{Dialer: refusingDialer})
+            })
+        })
+    }
 }
 
 func TestNewTransport_APrefetchAtTheWireLimitIsAdmitted(t *testing.T) {
     config := newTestTransportConfig()
     config.Prefetch = bound.Of(maxPrefetch)
 
-    if instance := NewTransport(config); maxPrefetch != instance.prefetch {
+    if instance := NewTransport("orders", NewMessageRegistry(), config); maxPrefetch != instance.prefetch {
         t.Fatalf("expected prefetch %d, got %d", maxPrefetch, instance.prefetch)
     }
 }
@@ -168,7 +178,7 @@ func TestNewProvider_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T) {
 func TestProviderNewTransport_GeneralLayerInherited(t *testing.T) {
     provider := NewProvider(ProviderConfig{Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(2 * time.Second), Max: bound.Of(time.Minute)}}, CloseTimeout: bound.Of(7 * time.Second)})
 
-    instance := provider.NewTransport(newTestTransportConfig())
+    instance := provider.NewTransport("orders", NewMessageRegistry(), newTestTransportConfig())
 
     if 2*time.Second != instance.reconnect.Initial {
         t.Fatalf("expected general initial backoff 2s, got %s", instance.reconnect.Initial)
@@ -194,7 +204,7 @@ func TestProviderNewTransport_TransportOverridesGeneral(t *testing.T) {
     config.Reconnect = ReconnectConfig{Backoff: bound.Backoff{Max: bound.Of(10 * time.Second)}}
     config.CloseTimeout = bound.Of(3 * time.Second)
 
-    instance := provider.NewTransport(config)
+    instance := provider.NewTransport("orders", NewMessageRegistry(), config)
 
     if 2*time.Second != instance.reconnect.Initial {
         t.Fatalf("expected inherited initial backoff 2s, got %s", instance.reconnect.Initial)
@@ -216,7 +226,7 @@ func TestProviderNewTransport_ACapLoweredUnderTheProvidersInitialIsRefusedNaming
     config.Reconnect = ReconnectConfig{Backoff: bound.Backoff{Max: bound.Of(500 * time.Millisecond)}}
 
     expectPanicNamingField(t, "ReconnectConfig.Backoff.Initial", func() {
-        provider.NewTransport(config)
+        provider.NewTransport("orders", NewMessageRegistry(), config)
     })
 }
 

@@ -2,7 +2,7 @@ package http
 
 import "time"
 
-func NewHttpRequestProfile(
+func newHttpRequestProfile(
     requestId string,
     method string,
     path string,

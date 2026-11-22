@@ -6,25 +6,63 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
 )
 
-func NewInMemoryLocker(clockInstance clockcontract.Clock) *InMemoryLocker {
-    if true == internal.IsNilInterface(clockInstance) {
-        exception.Panic(exception.NewError("lock clock is nil", nil, nil))
+/* InMemoryLockerConfig is what an in-memory locker is built with; every zero value is the default. */
+type InMemoryLockerConfig struct {
+    /* Clock reads the time a lease is judged against: nil is the system clock. */
+    Clock clockcontract.Clock
+
+    /* PurgeInterval is how many acquisitions pass between two sweeps of the expired holders: 512 by default, at least 1, unlimited leaving the sweep to PurgeExpired. */
+    PurgeInterval bound.Count
+}
+
+/* DefaultInMemoryLockerPurgeInterval is the PurgeInterval an InMemoryLockerConfig that leaves it out takes. */
+const DefaultInMemoryLockerPurgeInterval = 512
+
+var inMemoryLockerPurgeIntervalRule = bound.Rule[int]{
+    Name:              "InMemoryLockerConfig.PurgeInterval",
+    Default:           DefaultInMemoryLockerPurgeInterval,
+    Minimum:           1,
+    UnlimitedAdmitted: true,
+}
+
+/* NewInMemoryLocker answers a locker holding its leases in the process; a typed nil clock and a PurgeInterval its rule does not admit panic naming the field. */
+func NewInMemoryLocker(config InMemoryLockerConfig) *InMemoryLocker {
+    var clockInstance clockcontract.Clock = clock.NewSystemClock()
+    if nil != config.Clock {
+        if true == internal.IsNilInterface(config.Clock) {
+            exception.Panic(
+                exception.NewError(
+                    "lock clock is nil",
+                    exceptioncontract.Context{"field": "InMemoryLockerConfig.Clock"},
+                    nil,
+                ),
+            )
+        }
+
+        clockInstance = config.Clock
+    }
+
+    purgeInterval, purgeIntervalErr := bound.Resolve(config.PurgeInterval, inMemoryLockerPurgeIntervalRule)
+    if nil != purgeIntervalErr {
+        exception.Panic(exception.FromError(purgeIntervalErr))
     }
 
     return &InMemoryLocker{
-        clock:   clockInstance,
-        holders: make(map[string]inMemoryHolder),
+        clock:              clockInstance,
+        holders:            make(map[string]inMemoryHolder),
+        purgeInterval:      purgeInterval.Value,
+        purgeIntervalUnlimited: purgeInterval.Unlimited,
     }
 }
-
-const inMemoryPurgeInterval = 512
 
 type InMemoryLocker struct {
     clock   clockcontract.Clock
@@ -34,6 +72,9 @@ type InMemoryLocker struct {
     /* atomic.Uint64 rather than a bare uint64: this field is not 8-byte aligned on a 32-bit build, where atomic.AddUint64 on a bare field panics, and the wrapper type carries its own alignment */
     counter    atomic.Uint64
     purgeTicks int
+
+    purgeInterval      int
+    purgeIntervalUnlimited bool
 }
 
 type inMemoryHolder struct {
@@ -121,8 +162,12 @@ func (instance *InMemoryLocker) refresh(name string, token uint64, ttl time.Dura
 }
 
 func (instance *InMemoryLocker) maybePurgeLocked() {
+    if true == instance.purgeIntervalUnlimited {
+        return
+    }
+
     instance.purgeTicks++
-    if instance.purgeTicks < inMemoryPurgeInterval {
+    if instance.purgeTicks < instance.purgeInterval {
         return
     }
 

@@ -181,7 +181,7 @@ func TestJsonPrinter_SpellsTheC1BlockAsJsonEscapes(t *testing.T) {
 
 /* the class the table printer closed — a sink that accepts fewer bytes than it is handed, with no error — reaches the json door through the one write of the whole document, and a truncated document is what a machine consumer cannot parse */
 func TestJsonPrinter_ReportsAShortWriteAsAFailure(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
 
     writer := &shortTableWriter{}
 

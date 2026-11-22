@@ -10,7 +10,7 @@ func TestNewItem_CopiesThePayloadAndTheExpiryAtBothEnds(t *testing.T) {
     expiresAt := time.Unix(200, 0)
     callerPayload := []byte("payload")
 
-    item := NewItem("app.key", callerPayload, createdAt, &expiresAt)
+    item := NewItem("app.key", callerPayload, ItemConfig{CreatedAt: createdAt, ExpiresAt: &expiresAt})
 
     callerPayload[0] = 'X'
     expiresAt = time.Unix(999, 0)
@@ -43,7 +43,7 @@ func TestNewItem_CopiesThePayloadAndTheExpiryAtBothEnds(t *testing.T) {
 }
 
 func TestNewItem_AnItemWithoutAnExpiryCarriesNoneRatherThanAZeroTime(t *testing.T) {
-    item := NewItem("app.key", nil, time.Unix(100, 0), nil)
+    item := NewItem("app.key", nil, ItemConfig{CreatedAt: time.Unix(100, 0)})
 
     if nil != item.ExpiresAt() {
         t.Fatalf("expected no expiry, got %v", item.ExpiresAt())
@@ -57,7 +57,7 @@ func TestNewItem_AnItemWithoutAnExpiryCarriesNoneRatherThanAZeroTime(t *testing.
 func TestItem_TouchAdvancesTheAccessMarkAndCountsTheHit(t *testing.T) {
     createdAt := time.Unix(100, 0)
 
-    item := NewItem("app.key", []byte("payload"), createdAt, nil)
+    item := NewItem("app.key", []byte("payload"), ItemConfig{CreatedAt: createdAt})
 
     if false == item.LastAccessedAt().Equal(createdAt) {
         t.Fatalf("expected the access mark to be seeded with the creation time, got %v", item.LastAccessedAt())

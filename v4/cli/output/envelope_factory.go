@@ -7,14 +7,18 @@ import (
     melodyversion "github.com/precision-soft/melody/v4/version"
 )
 
-func NewMeta(
-    command string,
-    arguments []string,
-    option Option,
-    startedAt time.Time,
-    duration time.Duration,
-    version Version,
-) Meta {
+/* MetaConfig is what an envelope's meta is built from beside the command; a field left out is empty, and an empty Melody or Go version is the running binary's. */
+type MetaConfig struct {
+    Arguments []string
+    Option    Option
+    StartedAt time.Time
+    Duration  time.Duration
+    Version   Version
+}
+
+func NewMeta(command string, config MetaConfig) Meta {
+    option := config.Option
+    version := config.Version
     normalized := normalizeOptionChoices(option)
 
     if "" == version.Melody {
@@ -31,7 +35,7 @@ func NewMeta(
 
     return Meta{
         Command:   command,
-        Arguments: copyStringSlice(arguments),
+        Arguments: copyStringSlice(config.Arguments),
         Flags: Flags{
             Format:  normalized.Format,
             NoColor: normalized.NoColor,
@@ -41,8 +45,8 @@ func NewMeta(
             Limit:   normalized.Limit,
             Offset:  normalized.Offset,
         },
-        StartedAt:            startedAt,
-        DurationMilliseconds: duration.Milliseconds(),
+        StartedAt:            config.StartedAt,
+        DurationMilliseconds: config.Duration.Milliseconds(),
         Version: Version{
             Application: version.Application,
             Melody:      version.Melody,
@@ -71,12 +75,18 @@ func NewWarning(code string, message string, details map[string]any) Warning {
     }
 }
 
-func NewError(code string, message string, details map[string]any, cause *ErrorCause) *Error {
+/* ErrorConfig is what an envelope error carries beside its code and message; a field left out is empty. */
+type ErrorConfig struct {
+    Details map[string]any
+    Cause   *ErrorCause
+}
+
+func NewError(code string, message string, config ErrorConfig) *Error {
     return &Error{
         Code:    code,
         Message: message,
-        Details: details,
-        Cause:   cause,
+        Details: config.Details,
+        Cause:   config.Cause,
     }
 }
 

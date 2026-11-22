@@ -38,7 +38,9 @@ type moduleBootWarningRegistrar struct {
     moduleName  string
 }
 
-func (instance *moduleBootWarningRegistrar) DeclareBootWarning(name string, writtenInCli bool) {
+func (instance *moduleBootWarningRegistrar) DeclareBootWarning(name string, config applicationcontract.BootWarningConfig) {
+    writtenInCli := config.WrittenInCli
+
     if "" == name {
         exception.Panic(exception.NewError(
             "a module declared a boot warning with an empty name",

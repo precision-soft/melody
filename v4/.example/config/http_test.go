@@ -76,7 +76,7 @@ func TestBuildInProcessCatalogWriteThrottle_RefusesTheThirtyFirstWriteOfAnAddres
     statusFrom := func(peer string) int {
         httpRequest := httptest.NewRequest(nethttp.MethodPost, "/products/api/create/", nil)
         httpRequest.RemoteAddr = peer + ":41234"
-        request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("budget-test", time.Now()))
+        request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("budget-test", time.Now())})
 
         response, handlerErr := throttled(runtimeInstance, httptest.NewRecorder(), request)
         if nil != handlerErr {
@@ -120,7 +120,7 @@ func TestBuildInProcessCatalogWriteThrottle_GivesTheSlotOfTheAddressSeenLongestA
     writeFrom := func(peer string) error {
         httpRequest := httptest.NewRequest(nethttp.MethodPost, "/products/api/create/", nil)
         httpRequest.RemoteAddr = peer + ":41234"
-        request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("ceiling-test", time.Now()))
+        request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("ceiling-test", time.Now())})
 
         _, handlerErr := throttled(runtimeInstance, httptest.NewRecorder(), request)
 
@@ -207,7 +207,7 @@ func TestRegisterHttpRoutes_PutsTheBackendSpendingDoorsBehindTheWriteBudget(t *t
         httpRequest := httptest.NewRequest(nethttp.MethodPost, path, nil)
         httpRequest.RemoteAddr = "203.0.113.7:41234"
 
-        return melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("budget-test", time.Now()))
+        return melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("budget-test", time.Now())})
     }
 
     for attempt := 0; attempt < 30; attempt++ {
@@ -233,7 +233,7 @@ func TestRegisterHttpRoutes_PutsTheBackendSpendingDoorsBehindTheWriteBudget(t *t
     matched, _ := router.Match(nethttp.MethodPost, "/messagebus/dispatch", "", "http")
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/messagebus/dispatch", nil)
     httpRequest.RemoteAddr = "203.0.113.8:41234"
-    response, handlerErr := matched.Handler(runtimeInstance, httptest.NewRecorder(), melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("budget-test", time.Now())))
+    response, handlerErr := matched.Handler(runtimeInstance, httptest.NewRecorder(), melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("budget-test", time.Now())}))
     if nil != handlerErr || nethttp.StatusServiceUnavailable != response.StatusCode() {
         t.Fatalf("expected the dispatch door answered 503 without AMQP_DSN, got %v (%v)", response, handlerErr)
     }
@@ -366,7 +366,7 @@ func TestRegisterHttpRoutes_HoldsTheIssueDoorToTheConfiguredBoundAndTheRevokeDoo
         httpRequest := httptest.NewRequest(nethttp.MethodPost, pattern, strings.NewReader(fmt.Sprintf(`{"deviceIdentifier":%q}`, deviceIdentifier)))
         httpRequest.Header.Set("Content-Type", "application/json")
 
-        response, handlerErr := matched.Handler(runtimeInstance, httptest.NewRecorder(), melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("device-bound-test", time.Now())))
+        response, handlerErr := matched.Handler(runtimeInstance, httptest.NewRecorder(), melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("device-bound-test", time.Now())}))
         if nil != handlerErr || nil == response {
             t.Fatalf("%s: expected the door to answer, got %v", pattern, handlerErr)
         }

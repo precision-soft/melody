@@ -102,7 +102,7 @@ func TestJsonHandler_DecodesValidBodyAndCallsHandle(t *testing.T) {
     }, JsonHandlerConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{"name":"abc"}`))
-    request := NewRequest(httpRequest, nil, runtimeInstance, nil)
+    request := NewRequest(httpRequest, runtimeInstance, RequestConfig{})
 
     response, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handleErr {
@@ -126,7 +126,7 @@ func TestJsonHandler_RejectsInvalidBody(t *testing.T) {
     }, JsonHandlerConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{"name":""}`))
-    request := NewRequest(httpRequest, nil, runtimeInstance, nil)
+    request := NewRequest(httpRequest, runtimeInstance, RequestConfig{})
 
     _, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
     if nil == handleErr {
@@ -147,7 +147,7 @@ func TestJsonHandler_RejectsTrailingData(t *testing.T) {
     }, JsonHandlerConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{"name":"abc"} garbage`))
-    request := NewRequest(httpRequest, nil, runtimeInstance, nil)
+    request := NewRequest(httpRequest, runtimeInstance, RequestConfig{})
 
     _, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
     if nil == handleErr {
@@ -173,7 +173,7 @@ func TestJsonHandler_RejectsANullBodyForAPointerRequest(t *testing.T) {
     }, JsonHandlerConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`null`))
-    request := NewRequest(httpRequest, nil, runtimeInstance, nil)
+    request := NewRequest(httpRequest, runtimeInstance, RequestConfig{})
 
     _, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
     if nil == handleErr {
@@ -198,7 +198,7 @@ func TestJsonHandler_AcceptsAPointerRequestBody(t *testing.T) {
     }, JsonHandlerConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{"name":"abc"}`))
-    request := NewRequest(httpRequest, nil, runtimeInstance, nil)
+    request := NewRequest(httpRequest, runtimeInstance, RequestConfig{})
 
     _, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handleErr {
@@ -221,7 +221,7 @@ func TestJsonHandler_RejectsAnEmptyObjectThatFailsValidation(t *testing.T) {
     }, JsonHandlerConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{}`))
-    request := NewRequest(httpRequest, nil, runtimeInstance, nil)
+    request := NewRequest(httpRequest, runtimeInstance, RequestConfig{})
 
     _, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
     if nil == handleErr {
@@ -243,7 +243,7 @@ func TestJsonHandler_AnswersAnOversizedBodyWith413RatherThanInvalidJson(t *testi
     }, JsonHandlerConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{"name":"a much longer name than the limit"}`))
-    request := NewRequest(httpRequest, nil, runtimeInstance, nil)
+    request := NewRequest(httpRequest, runtimeInstance, RequestConfig{})
 
     _, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
 
@@ -265,7 +265,7 @@ func TestJsonHandler_CarriesTheDecoderDiagnosisAsTheRefusalCause(t *testing.T) {
     }, JsonHandlerConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{"name": 42}`))
-    request := NewRequest(httpRequest, nil, runtimeInstance, nil)
+    request := NewRequest(httpRequest, runtimeInstance, RequestConfig{})
 
     _, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
 
@@ -287,7 +287,7 @@ func TestJsonHandler_ServesValidationDetailUnderTheValidationErrorsKey(t *testin
     }, JsonHandlerConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{"name":""}`))
-    request := NewRequest(httpRequest, nil, runtimeInstance, nil)
+    request := NewRequest(httpRequest, runtimeInstance, RequestConfig{})
 
     _, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
 
@@ -313,7 +313,7 @@ func TestJsonHandler_RefusesANullBodyBoundToASlice(t *testing.T) {
     }, JsonHandlerConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`null`))
-    request := NewRequest(httpRequest, nil, runtimeInstance, nil)
+    request := NewRequest(httpRequest, runtimeInstance, RequestConfig{})
 
     _, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
 
@@ -343,7 +343,7 @@ func jsonHandlerOutcome[T any](t *testing.T, body string) (bool, error) {
         return TextResponse(nethttp.StatusOK, "ok"), nil
     }, JsonHandlerConfig{})
 
-    request := NewRequest(httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(body)), nil, runtimeInstance, nil)
+    request := NewRequest(httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(body)), runtimeInstance, RequestConfig{})
 
     _, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
 
@@ -404,7 +404,7 @@ func TestJsonHandler_KeepsTheRefusalWhenTheResponderAnswersNothing(t *testing.T)
     )
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{`))
-    request := NewRequest(httpRequest, nil, runtimeInstance, nil)
+    request := NewRequest(httpRequest, runtimeInstance, RequestConfig{})
 
     response, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
 
@@ -435,7 +435,7 @@ func TestJsonHandler_ContainsAPanickingResponder(t *testing.T) {
     )
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{`))
-    request := NewRequest(httpRequest, nil, runtimeInstance, nil)
+    request := NewRequest(httpRequest, runtimeInstance, RequestConfig{})
 
     response, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request)
     if nil != response {
@@ -486,7 +486,7 @@ func TestJsonHandler_HandsTheResponderTheCauseItNeedsToRenderTheDetail(t *testin
     )
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/x", strings.NewReader(`{"name":""}`))
-    request := NewRequest(httpRequest, nil, runtimeInstance, nil)
+    request := NewRequest(httpRequest, runtimeInstance, RequestConfig{})
 
     if _, handleErr := handler(runtimeInstance, httptest.NewRecorder(), request); nil != handleErr {
         t.Fatalf("expected the responder's response to be served, got %v", handleErr)

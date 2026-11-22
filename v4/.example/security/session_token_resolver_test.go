@@ -60,7 +60,7 @@ func TestSessionTokenResolverAnswersTheSignedInIdentity(t *testing.T) {
 func TestSessionTokenResolverKeepsAnIdentityAcrossARestart(t *testing.T) {
     path := filepath.Join(t.TempDir(), "sessions.json")
 
-    storage, err := melodysession.NewFileStorage(melodysession.FileStorageConfig{Path: path})
+    storage, err := melodysession.NewFileStorage(path, melodysession.FileStorageConfig{})
     if nil != err {
         t.Fatalf("the file storage was not built: %v", err)
     }
@@ -81,7 +81,7 @@ func TestSessionTokenResolverKeepsAnIdentityAcrossARestart(t *testing.T) {
         t.Fatalf("the storage did not close: %v", err)
     }
 
-    restartedStorage, err := melodysession.NewFileStorage(melodysession.FileStorageConfig{Path: path})
+    restartedStorage, err := melodysession.NewFileStorage(path, melodysession.FileStorageConfig{})
     if nil != err {
         t.Fatalf("the restarted file storage was not built: %v", err)
     }
@@ -347,7 +347,7 @@ func requestCarryingSessionAndJournal(t *testing.T) (melodyhttpcontract.Request,
     )
 
     runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
-    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/products/", nil), nil, runtimeInstance, nil)
+    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/products/", nil), runtimeInstance, melodyhttp.RequestConfig{})
 
     manager := melodysession.NewManager(melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{}), melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
     sessionInstance := mustSession(manager.NewSession(exampleTestRuntime()))
@@ -465,7 +465,7 @@ func TestSessionTokenResolver_AnUnavailableSessionAnswersTheUnavailableToken(t *
     outage := exception.MarkInfrastructureFailure(errors.New("session store is down"))
     unavailableSession := melodysession.NewUnavailableSession(outage)
 
-    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/", nil), nil, nil, nil)
+    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/", nil), nil, melodyhttp.RequestConfig{})
     if publishErr := melodyhttp.SetRequestSession(request, unavailableSession); nil != publishErr {
         t.Fatalf("unexpected publish error: %v", publishErr)
     }

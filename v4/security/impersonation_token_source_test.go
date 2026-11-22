@@ -64,12 +64,9 @@ func switchRequest(target string) httpcontract.Request {
 }
 
 func impersonationSource(adminToken securitycontract.Token) *ImpersonationTokenSource {
-    return NewImpersonationTokenSource(ImpersonationTokenSourceConfig{
-        Inner: &fixedTokenSource{token: adminToken},
-        Users: &mapUserResolver{usersById: map[string]securitycontract.Token{
+    return NewImpersonationTokenSource(&fixedTokenSource{token: adminToken}, &mapUserResolver{usersById: map[string]securitycontract.Token{
             "user-7": NewAuthenticatedToken("user-7", []string{"ROLE_BUYER"}, nil),
-        }},
-    })
+        }}, ImpersonationTokenSourceConfig{})
 }
 
 func TestImpersonation_AdminWithSwitchRoleImpersonates(t *testing.T) {
@@ -138,11 +135,9 @@ func TestImpersonation_UnknownTargetFailsClosedToAnonymous(t *testing.T) {
 func TestImpersonation_RoleModeImpersonatorKeepsAdminRoles(t *testing.T) {
     admin := NewAuthenticatedToken("admin-1", []string{"ROLE_ADMIN", securitycontract.RoleAllowedToSwitch}, nil)
 
-    source := NewImpersonationTokenSource(ImpersonationTokenSourceConfig{
-        Inner: &fixedTokenSource{token: admin},
-        Users: &mapUserResolver{usersById: map[string]securitycontract.Token{
+    source := NewImpersonationTokenSource(&fixedTokenSource{token: admin}, &mapUserResolver{usersById: map[string]securitycontract.Token{
             "user-7": NewAuthenticatedToken("user-7", []string{"ROLE_BUYER"}, nil),
-        }},
+        }}, ImpersonationTokenSourceConfig{
         RoleMode: RoleModeImpersonator,
     })
 
@@ -242,10 +237,7 @@ func TestImpersonation_AnonymousCanNotSwitch(t *testing.T) {
 /* the resolver's error travels as the cause into the journal */
 func TestImpersonation_ResolverErrorCarriesItsCauseIntoTheJournal(t *testing.T) {
     admin := NewAuthenticatedToken("admin-1", []string{securitycontract.RoleAllowedToSwitch}, nil)
-    source := NewImpersonationTokenSource(ImpersonationTokenSourceConfig{
-        Inner: &fixedTokenSource{token: admin},
-        Users: &mapUserResolver{usersById: map[string]securitycontract.Token{}},
-    })
+    source := NewImpersonationTokenSource(&fixedTokenSource{token: admin}, &mapUserResolver{usersById: map[string]securitycontract.Token{}}, ImpersonationTokenSourceConfig{})
 
     runtimeInstance, logger := runtimeWithRecordingLogger()
 
@@ -281,10 +273,7 @@ func (instance *failingUserResolver) ResolveImpersonatedUser(
 
 func TestImpersonation_AMarkedResolverFailureIsUnavailable(t *testing.T) {
     admin := NewAuthenticatedToken("admin-1", []string{securitycontract.RoleAllowedToSwitch}, nil)
-    source := NewImpersonationTokenSource(ImpersonationTokenSourceConfig{
-        Inner: &fixedTokenSource{token: admin},
-        Users: &failingUserResolver{},
-    })
+    source := NewImpersonationTokenSource(&fixedTokenSource{token: admin}, &failingUserResolver{}, ImpersonationTokenSourceConfig{})
 
     runtimeInstance, logger := runtimeWithRecordingLogger()
 
@@ -309,10 +298,7 @@ func TestImpersonation_AMarkedResolverFailureIsUnavailable(t *testing.T) {
 
 func TestImpersonation_AnUnavailableInnerTokenPassesThroughUntouched(t *testing.T) {
     inner := NewUnavailableToken(exception.MarkInfrastructureFailure(errors.New("redis is down")))
-    source := NewImpersonationTokenSource(ImpersonationTokenSourceConfig{
-        Inner: &fixedTokenSource{token: inner},
-        Users: &failingUserResolver{},
-    })
+    source := NewImpersonationTokenSource(&fixedTokenSource{token: inner}, &failingUserResolver{}, ImpersonationTokenSourceConfig{})
 
     for _, request := range []httpcontract.Request{switchRequest("anyone"), switchRequest("")} {
         token, resolveErr := source.Resolve(testRuntime(), request)
@@ -363,11 +349,9 @@ func managerSwitchesThrough(t *testing.T, source *ImpersonationTokenSource) bool
 }
 
 func managerSource(hierarchy *RoleHierarchy) *ImpersonationTokenSource {
-    return NewImpersonationTokenSource(ImpersonationTokenSourceConfig{
-        Inner: &fixedTokenSource{token: NewAuthenticatedToken("manager-1", []string{"ROLE_MANAGER"}, nil)},
-        Users: &mapUserResolver{usersById: map[string]securitycontract.Token{
+    return NewImpersonationTokenSource(&fixedTokenSource{token: NewAuthenticatedToken("manager-1", []string{"ROLE_MANAGER"}, nil)}, &mapUserResolver{usersById: map[string]securitycontract.Token{
             "user-7": NewAuthenticatedToken("user-7", []string{"ROLE_BUYER"}, nil),
-        }},
+        }}, ImpersonationTokenSourceConfig{
         RoleHierarchy: hierarchy,
     })
 }
@@ -528,9 +512,7 @@ func TestImpersonation_TheBindReachesABinderInner(t *testing.T) {
     inner := &bindingTokenSource{}
     hierarchy := hierarchyGrantingSwitch()
 
-    explicit := NewImpersonationTokenSource(ImpersonationTokenSourceConfig{
-        Inner:         inner,
-        Users:         &mapUserResolver{},
+    explicit := NewImpersonationTokenSource(inner, &mapUserResolver{}, ImpersonationTokenSourceConfig{
         RoleHierarchy: NewRoleHierarchy(nil),
     })
 
@@ -578,9 +560,7 @@ func TestImpersonation_ConcurrentBindsAgreeOnOneWinner(t *testing.T) {
 
 func TestNewImpersonationTokenSource_RefusesAnUnknownRoleMode(t *testing.T) {
     expectPanicNamingField(t, "ImpersonationTokenSourceConfig.RoleMode", func() {
-        NewImpersonationTokenSource(ImpersonationTokenSourceConfig{
-            Inner:    &fixedTokenSource{token: NewAnonymousToken()},
-            Users:    &mapUserResolver{},
+        NewImpersonationTokenSource(&fixedTokenSource{token: NewAnonymousToken()}, &mapUserResolver{}, ImpersonationTokenSourceConfig{
             RoleMode: ImpersonationRoleMode(7),
         })
     })
@@ -588,13 +568,30 @@ func TestNewImpersonationTokenSource_RefusesAnUnknownRoleMode(t *testing.T) {
 
 func TestImpersonationTokenSource_AnswersItsInnersStatelessness(t *testing.T) {
     for _, stateless := range []bool{true, false} {
-        source := NewImpersonationTokenSource(ImpersonationTokenSourceConfig{
-            Inner: &fixedTokenSource{stateless: stateless},
-            Users: &mapUserResolver{usersById: map[string]securitycontract.Token{}},
-        })
+        source := NewImpersonationTokenSource(&fixedTokenSource{stateless: stateless}, &mapUserResolver{usersById: map[string]securitycontract.Token{}}, ImpersonationTokenSourceConfig{})
 
         if stateless != source.Stateless() {
             t.Fatalf("expected the impersonation source to answer its inner's %v", stateless)
         }
+    }
+}
+
+func TestNewImpersonationTokenSource_RefusesANilRequiredArgumentByName(t *testing.T) {
+    cases := []struct {
+        name     string
+        inner    securitycontract.TokenSource
+        users    securitycontract.ImpersonatedUserResolver
+        argument string
+    }{
+        {"a nil inner source", nil, &mapUserResolver{}, "inner"},
+        {"a nil user resolver", &fixedTokenSource{token: NewAnonymousToken()}, nil, "users"},
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            expectPanicNamingTheArgument(t, testCase.argument, func() {
+                NewImpersonationTokenSource(testCase.inner, testCase.users, ImpersonationTokenSourceConfig{})
+            })
+        })
     }
 }

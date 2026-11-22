@@ -400,9 +400,10 @@ func TestTrustedProxyResolver_ReportsAnEntryThatNamesNothingToTheRequestsLogger(
     httpRequest.RemoteAddr = balancerAddress + ":41234"
     request := melodyhttp.NewRequest(
         httpRequest,
-        nil,
         melodyruntime.NewRun(context.Background(), containerInstance.NewScope()),
-        melodyhttp.NewRequestContext("budget-test", time.Now()),
+        melodyhttp.RequestConfig{
+            RequestContext: melodyhttp.NewRequestContext("budget-test", time.Now()),
+        },
     )
 
     resolver := resolverOver(t, "load-balancer", time.Now)

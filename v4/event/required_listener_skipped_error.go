@@ -5,8 +5,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
-/* NewRequiredListenerSkippedError reports that a dispatch ended, by a stop or by a listener's failure, while a listener declared Required was still behind it. Its type lets a caller refuse the dispatch outright, as the http kernel does for kernel.request. Type-assert the error a dispatch returns directly rather than through errors.As: a nested dispatch's refusal travels up as the cause of an ordinary listener error. The cause is the failure that ended the dispatch, nil when a stop ended it. */
-func NewRequiredListenerSkippedError(eventName string, stoppedByListenerName string, cause error) *RequiredListenerSkippedError {
+func newRequiredListenerSkippedError(eventName string, stoppedByListenerName string, cause error) *RequiredListenerSkippedError {
     return &RequiredListenerSkippedError{
         exceptionErr: exception.NewError(
             "event propagation stopped before a required listener ran",
@@ -19,6 +18,7 @@ func NewRequiredListenerSkippedError(eventName string, stoppedByListenerName str
     }
 }
 
+/* RequiredListenerSkippedError reports that a dispatch ended, by a stop or by a listener's failure, while a listener declared Required was still behind it. Its type lets a caller refuse the dispatch outright, as the http kernel does for kernel.request. Type-assert the error a dispatch returns directly rather than through errors.As: a nested dispatch's refusal travels up as the cause of an ordinary listener error. The cause is the failure that ended the dispatch, nil when a stop ended it. */
 type RequiredListenerSkippedError struct {
     exceptionErr *exception.Error
 }

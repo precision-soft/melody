@@ -25,7 +25,7 @@ func TestParameter_Duration_ParsesStringAndNativeValues(t *testing.T) {
 
     for _, testCase := range cases {
         t.Run(testCase.name, func(t *testing.T) {
-            parameter := NewParameter("SESSION_TTL", testCase.value, testCase.value, false)
+            parameter := newParameter("SESSION_TTL", testCase.value, testCase.value, false)
 
             durationValue, durationErr := parameter.Duration()
             if nil != durationErr {
@@ -55,7 +55,7 @@ func TestParameter_Duration_RejectsUnparsableAndUnsetValues(t *testing.T) {
 
     for _, testCase := range cases {
         t.Run(testCase.name, func(t *testing.T) {
-            parameter := NewParameter("SESSION_TTL", testCase.value, testCase.value, false)
+            parameter := newParameter("SESSION_TTL", testCase.value, testCase.value, false)
 
             _, durationErr := parameter.Duration()
             if nil == durationErr {
@@ -79,7 +79,7 @@ func TestParameter_Float_ParsesStringAndNativeValues(t *testing.T) {
 
     for _, testCase := range cases {
         t.Run(testCase.name, func(t *testing.T) {
-            parameter := NewParameter("SAMPLE_RATE", testCase.value, testCase.value, false)
+            parameter := newParameter("SAMPLE_RATE", testCase.value, testCase.value, false)
 
             floatValue, floatErr := parameter.Float()
             if nil != floatErr {
@@ -105,7 +105,7 @@ func TestParameter_Float_RejectsUnparsableAndUnsetValues(t *testing.T) {
 
     for _, testCase := range cases {
         t.Run(testCase.name, func(t *testing.T) {
-            parameter := NewParameter("SAMPLE_RATE", testCase.value, testCase.value, false)
+            parameter := newParameter("SAMPLE_RATE", testCase.value, testCase.value, false)
 
             _, floatErr := parameter.Float()
             if nil == floatErr {
@@ -119,7 +119,7 @@ func TestParameter_Float_RejectsUnparsableAndUnsetValues(t *testing.T) {
 func TestParameter_ConversionErrorsOmitTheRawValue(t *testing.T) {
     secretValue := "P4ssPhrase"
 
-    parameter := NewParameter("AIRBNB_CLIENT_SECRET", secretValue, secretValue, false)
+    parameter := newParameter("AIRBNB_CLIENT_SECRET", secretValue, secretValue, false)
 
     _, durationErr := parameter.Duration()
     if nil == durationErr {
@@ -200,7 +200,7 @@ func TestParameter_ValueDoesNotRaceResolve(t *testing.T) {
 
 /* a secret parameter's conversion failure withholds the cause: the strconv text quotes the value it refused, which is the right diagnostic for a pool size and the wrong log line for a credential; an ordinary parameter keeps the full cause */
 func TestParameter_SecretConversionWithholdsTheValue(t *testing.T) {
-    secretParameter := NewParameter("APP_TOKEN", "sk_live_51H", "sk_live_51H", false)
+    secretParameter := newParameter("APP_TOKEN", "sk_live_51H", "sk_live_51H", false)
     secretParameter.isSecret.Store(true)
 
     _, intErr := secretParameter.Int()
@@ -219,7 +219,7 @@ func TestParameter_SecretConversionWithholdsTheValue(t *testing.T) {
         t.Fatalf("expected the quoting cause to be withheld for a secret")
     }
 
-    ordinaryParameter := NewParameter("APP_POOL", "1O0", "1O0", false)
+    ordinaryParameter := newParameter("APP_POOL", "1O0", "1O0", false)
 
     _, ordinaryErr := ordinaryParameter.Int()
     if nil == ordinaryErr {
@@ -232,7 +232,7 @@ func TestParameter_SecretConversionWithholdsTheValue(t *testing.T) {
 
 /* a deferred parameter still holds its raw template, and every accessor funnels through loadValue: the read refuses loudly instead of serving %app.user% as though it were the value, and the refusal names the parameter the way every diagnostic here does */
 func TestParameter_ReadingADeferredParameterRefusesLoudly(t *testing.T) {
-    parameter := NewParameter("APP_GREETING", "%app.user%", "%app.user%", false)
+    parameter := newParameter("APP_GREETING", "%app.user%", "%app.user%", false)
     parameter.deferred.Store(true)
 
     defer func() {
@@ -260,7 +260,7 @@ func TestParameter_ReadingADeferredParameterRefusesLoudly(t *testing.T) {
 
 /* the settled side of the deferral: once the boot resolution stores a value and clears the flag, the accessors answer as they always did */
 func TestParameter_ASettledDeferredParameterReadsNormally(t *testing.T) {
-    parameter := NewParameter("APP_GREETING", "%app.user%", "%app.user%", false)
+    parameter := newParameter("APP_GREETING", "%app.user%", "%app.user%", false)
     parameter.deferred.Store(true)
 
     parameter.storeValue("hello operator")
@@ -273,7 +273,7 @@ func TestParameter_ASettledDeferredParameterReadsNormally(t *testing.T) {
 
 /* MustString is the accessor wiring code reaches for when a missing string is a boot failure, so its refusal has to name what it refused: the environment key, the registration name of a runtime parameter that has no key, and the type it actually found — the value itself stays out, the way every other conversion diagnostic here does. */
 func TestParameter_MustString_PanicRefusalNamesTheParameterAndTheTypeItFound(t *testing.T) {
-    parameter := NewParameter("APP_POOL_SIZE", 12, 12, false)
+    parameter := newParameter("APP_POOL_SIZE", 12, 12, false)
     parameter.name = "app.pool.size"
 
     defer func() {
@@ -315,7 +315,7 @@ func TestParameter_MustString_PanicRefusalNamesTheParameterAndTheTypeItFound(t *
 
 /* a parameter that really holds a string is handed back by MustString without any refusal — the panic above is the refusal path, not the ordinary one */
 func TestParameter_MustString_ReturnsTheStoredString(t *testing.T) {
-    parameter := NewParameter("APP_NAME", "melody", "melody", false)
+    parameter := newParameter("APP_NAME", "melody", "melody", false)
 
     if "melody" != parameter.MustString() {
         t.Fatalf("expected the stored string, got %q", parameter.MustString())
@@ -324,7 +324,7 @@ func TestParameter_MustString_ReturnsTheStoredString(t *testing.T) {
 
 /* a runtime parameter has no environment key, and passing the empty key into the shared parsers put a nameless parameterName inside the cause of an error whose outer context names the parameter — the operator reading the cause chain concluded the parameter was anonymous */
 func TestParameter_ConversionCauseNamesTheRuntimeParameter(t *testing.T) {
-    parameter := NewParameter("", "not-a-duration", "not-a-duration", false)
+    parameter := newParameter("", "not-a-duration", "not-a-duration", false)
     parameter.name = "app.timeout"
 
     _, durationErr := parameter.Duration()
@@ -349,7 +349,7 @@ func TestParameter_ConversionCauseNamesTheRuntimeParameter(t *testing.T) {
 
 /* Bool reads a native bool as itself and a string through the shared parser, and refuses everything else by name: a parameter that decides whether a feature is on must never answer false because it happened to hold a number, and the value of a secret never reaches the diagnostic */
 func TestParameter_Bool_ReadsBothShapesAndRefusesTheRest(t *testing.T) {
-    nativeParameter := NewParameter("APP_FEATURE", true, true, false)
+    nativeParameter := newParameter("APP_FEATURE", true, true, false)
 
     nativeValue, nativeErr := nativeParameter.Bool()
     if nil != nativeErr {
@@ -360,7 +360,7 @@ func TestParameter_Bool_ReadsBothShapesAndRefusesTheRest(t *testing.T) {
     }
 
     for _, textualValue := range []string{"true", "1", "false", "0"} {
-        textualParameter := NewParameter("APP_FEATURE", textualValue, textualValue, false)
+        textualParameter := newParameter("APP_FEATURE", textualValue, textualValue, false)
 
         parsedValue, parsedErr := textualParameter.Bool()
         if nil != parsedErr {
@@ -373,13 +373,13 @@ func TestParameter_Bool_ReadsBothShapesAndRefusesTheRest(t *testing.T) {
         }
     }
 
-    unparsableParameter := NewParameter("APP_FEATURE", "yes-please", "yes-please", false)
+    unparsableParameter := newParameter("APP_FEATURE", "yes-please", "yes-please", false)
     _, unparsableErr := unparsableParameter.Bool()
     if nil == unparsableErr || "cannot convert parameter value to bool" != unparsableErr.Error() {
         t.Fatalf("expected the conversion refusal, got %v", unparsableErr)
     }
 
-    foreignParameter := NewParameter("APP_FEATURE", 12, 12, false)
+    foreignParameter := newParameter("APP_FEATURE", 12, 12, false)
     _, foreignErr := foreignParameter.Bool()
     if nil == foreignErr || "cannot convert parameter value to bool" != foreignErr.Error() {
         t.Fatalf("expected a value of another type to be refused, got %v", foreignErr)
@@ -415,7 +415,7 @@ func TestParameter_Bool_ReadsBothShapesAndRefusesTheRest(t *testing.T) {
 
 /* a secret keeps its value out of the diagnostic on this door too: the shared parser stamps the value it refused into the cause context, and delegating to it would have published a secret's contents through the very chain that exists to explain the refusal */
 func TestParameter_Bool_KeepsASecretValueOutOfTheCause(t *testing.T) {
-    secretParameter := NewParameter("APP_SECRET", 12, 12, false)
+    secretParameter := newParameter("APP_SECRET", 12, 12, false)
     secretParameter.isSecret.Store(true)
 
     _, secretErr := secretParameter.Bool()

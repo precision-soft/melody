@@ -423,7 +423,7 @@ func TestRequest_BindJsonOverANilRuntimeIsRefusedNamingTheRuntime(t *testing.T) 
         t.Run(name, func(t *testing.T) {
             httpRequest := httptest.NewRequest(nethttp.MethodPost, "/bind", strings.NewReader(`{"name":"value"}`))
             httpRequest.Header.Set("Content-Type", "application/json")
-            request := NewRequest(httpRequest, nil, nil, nil)
+            request := NewRequest(httpRequest, nil, RequestConfig{})
 
             defer func() {
                 recoveredErr, isError := recover().(error)

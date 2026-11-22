@@ -376,7 +376,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             }
         }
 
-        melodyRequest := NewRequest(request, parameters, runtimeInstance, requestContext)
+        melodyRequest := NewRequest(request, runtimeInstance, RequestConfig{RouteParameters: parameters, RequestContext: requestContext})
 
         for key, value := range routeAttributes {
             melodyRequest.Attributes().Set(key, value)

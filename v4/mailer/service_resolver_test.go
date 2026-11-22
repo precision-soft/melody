@@ -18,7 +18,7 @@ func TestMailerServiceName_IsTheRegisteredName(t *testing.T) {
 func TestMailerMustFromResolver_AnswerTheRegisteredService(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    expected := NewManager(NewInMemoryTransport())
+    expected := NewManager(NewInMemoryTransport(), ManagerConfig{})
 
     serviceContainer.MustRegister(
         ServiceMailer,

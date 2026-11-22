@@ -84,7 +84,7 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
 
 /* the code is declared whether or not a client is handed, so a command's MELODY_CLI_BOOT_WARNINGS_IGNORED may name it in every environment the module is registered in */
 func (instance *Module) RegisterBootWarnings(registrar applicationcontract.BootWarningRegistrar) {
-    registrar.DeclareBootWarning(PlaintextEndpointBootWarningName, true)
+    registrar.DeclareBootWarning(PlaintextEndpointBootWarningName, applicationcontract.BootWarningConfig{WrittenInCli: true})
 
     if nil == instance.config.Client {
         return

@@ -76,7 +76,6 @@ func TestNewStaticFileServerConfig_ExcludedPrefixReachesTheMiddlewareRegisteredW
 
     httpMiddleware := NewHttpMiddleware(
         newStaticFileServerConfig(newStaticExclusionTestEmbeddedFiles(), configuration),
-        configuration,
     )
 
     reached := false
@@ -130,7 +129,6 @@ func TestNewStaticFileServerConfig_PathOutsideTheExclusionIsStillServedFromTheBi
 
     httpMiddleware := NewHttpMiddleware(
         newStaticFileServerConfig(newStaticExclusionTestEmbeddedFiles(), configuration),
-        configuration,
     )
 
     reached := false

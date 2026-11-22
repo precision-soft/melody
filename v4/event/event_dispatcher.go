@@ -760,7 +760,7 @@ func refuseSkippedRequiredListeners(
 
     for _, skippedEntry := range skippedListenerList {
         if true == skippedEntry.required {
-            return NewRequiredListenerSkippedError(
+            return newRequiredListenerSkippedError(
                 eventName,
                 stoppedByListenerName,
                 cause,

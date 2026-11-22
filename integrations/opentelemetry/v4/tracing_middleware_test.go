@@ -322,7 +322,7 @@ func TestTracingMiddleware_ASpanAlreadyInTheContextStaysTheParentOverATraceparen
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/orders/42", nil)
     httpRequest.Header.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
-    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, nil)
+    request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{})
 
     if _, handlerErr := mustTracingMiddleware(tracer)(okHandler())(runtimeInstance, httptest.NewRecorder(), request); nil != handlerErr {
         t.Fatalf("handler: %v", handlerErr)

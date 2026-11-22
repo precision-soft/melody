@@ -20,6 +20,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/internal/kernelseam"
     "github.com/precision-soft/melody/v4/kernel"
     "github.com/precision-soft/melody/v4/logging"
     "github.com/precision-soft/melody/v4/messagebus"
@@ -162,6 +163,7 @@ func NewApplication(
     }
 
     kernelInstance := kernel.NewKernel(
+        kernelseam.Token{},
         configuration,
         container.NewContainer(container.ContainerConfig{
             ScopeTeardownTimeout: scopeTeardownTimeout.Limit(),
@@ -178,7 +180,6 @@ func NewApplication(
 
     httpMiddleware := NewHttpMiddleware(
         newStaticFileServerConfig(embeddedPublicFiles, configuration),
-        configuration,
     )
 
     /* built here, so a retry policy outside its rule refuses the application before anything boots */

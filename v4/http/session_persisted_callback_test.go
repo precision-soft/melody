@@ -37,7 +37,7 @@ func newSessionPersistedProbe(t *testing.T, sessionInstance contract.Session) *s
     netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/logout", nil)
     netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionInstance.Id()})
 
-    request := NewRequest(netRequest, nil, nil, nil)
+    request := NewRequest(netRequest, nil, RequestConfig{})
     request.Attributes().Set(requestAttributeSession, sessionInstance)
 
     return &sessionPersistedProbe{
@@ -91,7 +91,7 @@ func TestOnSessionPersisted_RefusesARequestWithoutAttributes(t *testing.T) {
 }
 
 func TestOnSessionPersisted_RefusesANilCallback(t *testing.T) {
-    request := NewRequest(httptest.NewRequest(nethttp.MethodPost, "/", nil), nil, nil, nil)
+    request := NewRequest(httptest.NewRequest(nethttp.MethodPost, "/", nil), nil, RequestConfig{})
 
     if registerErr := OnSessionPersisted(request, nil); nil == registerErr {
         t.Fatal("expected a nil callback refused")

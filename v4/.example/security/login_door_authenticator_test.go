@@ -133,9 +133,10 @@ func loginResponseBody(t *testing.T, runtimeInstance melodycontainercontract.Run
 
     request := melodyhttp.NewRequest(
         httpRequest,
-        nil,
         runtimeInstance,
-        melodyhttp.NewRequestContext("login-test", time.Now()),
+        melodyhttp.RequestConfig{
+            RequestContext: melodyhttp.NewRequestContext("login-test", time.Now()),
+        },
     )
     publishSignInSession(t, request)
 
@@ -234,7 +235,7 @@ func TestLoginHandler_ReadsTheJsonCredentialsFromTheBodyAndRefusesAnyOtherBody(t
         httpRequest := httptest.NewRequest(nethttp.MethodPost, target, bytes.NewBufferString(body))
         httpRequest.Header.Set("Content-Type", contentType)
 
-        request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-form-test", time.Now()))
+        request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("login-form-test", time.Now())})
         publishSignInSession(t, request)
 
         response, handlerErr := serveLoginDoor(t, runtimeInstance, request, passwordOnlyLogin(), nil)
@@ -365,7 +366,7 @@ func TestLoginHandler_RaisesTheLoginFailureOnRefusedCredentials(t *testing.T) {
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", bytes.NewBufferString(`{"username":"nobody","password":"wrong"}`))
     httpRequest.Header.Set("Content-Type", "application/json")
 
-    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-failure-test", time.Now()))
+    request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("login-failure-test", time.Now())})
     publishSignInSession(t, request)
 
     response, handlerErr := serveLoginDoor(t, runtimeInstance, request, passwordOnlyLogin(), nil)
@@ -492,7 +493,7 @@ func TestLoginHandler_AMissingSessionRefusesTheSignInBeforeTheCredentials(t *tes
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", loginJsonBody(t, "admin", "secret"))
     httpRequest.Header.Set("Content-Type", "application/json")
 
-    response, handlerErr := serveLoginDoor(t, runtimeInstance, melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-no-session-test", time.Now())), passwordOnlyLogin(), nil)
+    response, handlerErr := serveLoginDoor(t, runtimeInstance, melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("login-no-session-test", time.Now())}), passwordOnlyLogin(), nil)
     if nil != handlerErr {
         t.Fatalf("login handler: %v", handlerErr)
     }
@@ -525,7 +526,7 @@ func postLoginCredentials(t *testing.T, runtimeInstance melodycontainercontract.
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", loginJsonBody(t, username, password))
     httpRequest.Header.Set("Content-Type", "application/json")
 
-    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-dispatch-test", time.Now()))
+    request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("login-dispatch-test", time.Now())})
     publishSignInSession(t, request)
 
     response, handlerErr := serveLoginDoor(t, runtimeInstance, request, passwordOnlyLogin(), nil)
@@ -803,9 +804,7 @@ func newSecondFactorLoginWith(t *testing.T, options secondFactorLoginOptions) *s
     )
 
     secondFactor := melodysecurity.NewTotpSecondFactorAuthenticator(
-        melodysecurity.TotpSecondFactorAuthenticatorConfig{
-            Primary:     budget,
-            Enrollments: enrollments,
+        budget, enrollments, melodysecurity.TotpSecondFactorAuthenticatorConfig{
             ReplayGuard: melodysecurity.NewMemoryNonceGuard(melodysecurity.MemoryNonceGuardConfig{Clock: clockInstance}),
             Clock:       clockInstance,
         },
@@ -831,7 +830,7 @@ func (instance *secondFactorLogin) post(t *testing.T, username string, password 
         httpRequest.Header.Set(name, value)
     }
 
-    request := melodyhttp.NewRequest(httpRequest, nil, instance.runtimeInstance, melodyhttp.NewRequestContext("login-second-factor-test", time.Now()))
+    request := melodyhttp.NewRequest(httpRequest, instance.runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("login-second-factor-test", time.Now())})
     _ = melodyhttp.SetRequestSession(request, mustSession(instance.sessionManager.NewSession(exampleTestRuntime())))
 
     response, handlerErr := serveLoginDoor(t, instance.runtimeInstance, request, instance.authentication, instance.sessionIndexLookup)
@@ -1068,7 +1067,7 @@ func TestLogoutHandler_TheSignOutGivesTheSessionsPlaceBack(t *testing.T) {
 
     signedOutSessionId := sessionIdList[len(sessionIdList)-1]
 
-    logoutRequest := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/logout/", nil), nil, login.runtimeInstance, melodyhttp.NewRequestContext("logout-test", time.Now()))
+    logoutRequest := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/logout/", nil), login.runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("logout-test", time.Now())})
     _ = melodyhttp.SetRequestSession(logoutRequest, mustSession(login.sessionManager.Session(exampleTestRuntime(), signedOutSessionId)))
 
     if _, logoutErr := security.NewSessionLogoutHandler(login.sessionIndexLookup).Logout(login.runtimeInstance, logoutRequest, melodysecuritycontract.LogoutInput{}); nil != logoutErr {
@@ -1094,7 +1093,7 @@ func TestLoginHandler_SigningInAgainRetiresThePlaceOfTheRotatedSession(t *testin
         httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", bytes.NewBufferString(`{"username":"user","password":"user"}`))
         httpRequest.Header.Set("Content-Type", "application/json")
 
-        request := melodyhttp.NewRequest(httpRequest, nil, login.runtimeInstance, melodyhttp.NewRequestContext("login-again-test", time.Now()))
+        request := melodyhttp.NewRequest(httpRequest, login.runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("login-again-test", time.Now())})
         _ = melodyhttp.SetRequestSession(request, sessionInstance)
 
         response, handlerErr := serveLoginDoor(t, login.runtimeInstance, request, login.authentication, login.sessionIndexLookup)
@@ -1263,7 +1262,7 @@ func TestLoginHandler_RefusesAFormBodyWithoutAnnouncingAFailedSignIn(t *testing.
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", bytes.NewBufferString("username=nobody&password=wrong"))
     httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-form-refused-test", time.Now()))
+    request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("login-form-refused-test", time.Now())})
     publishSignInSession(t, request)
 
     response, handlerErr := serveLoginDoor(t, runtimeInstance, request, passwordOnlyLogin(), nil)
@@ -1293,7 +1292,7 @@ func TestLoginHandler_RotatesTheSessionIdAndRetiresThePreLoginOne(t *testing.T) 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", loginJsonBody(t, "user", "user"))
     httpRequest.Header.Set("Content-Type", "application/json")
 
-    request := melodyhttp.NewRequest(httpRequest, nil, login.runtimeInstance, melodyhttp.NewRequestContext("login-rotation-test", time.Now()))
+    request := melodyhttp.NewRequest(httpRequest, login.runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("login-rotation-test", time.Now())})
     _ = melodyhttp.SetRequestSession(request, mustSession(login.sessionManager.Session(exampleTestRuntime(), preLoginId)))
 
     response, handlerErr := serveLoginDoor(t, login.runtimeInstance, request, login.authentication, login.sessionIndexLookup)
@@ -1323,7 +1322,7 @@ func TestLoginHandler_AnswersABodyPastTheLimit413(t *testing.T) {
     httpRequest.Header.Set("Content-Type", "application/json")
     httpRequest.Body = nethttp.MaxBytesReader(recorder, httpRequest.Body, 8)
 
-    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-body-limit-test", time.Now()))
+    request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("login-body-limit-test", time.Now())})
     publishSignInSession(t, request)
 
     response, handlerErr := serveLoginDoor(t, runtimeInstance, request, passwordOnlyLogin(), nil)

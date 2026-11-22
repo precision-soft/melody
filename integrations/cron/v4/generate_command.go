@@ -694,7 +694,7 @@ func (instance *GenerateCommand) reportWrites(
     runErr error,
 ) error {
     if true == output.IsJsonFormat(option.Format) {
-        meta := output.NewMeta(instance.Name(), nil, option, startedAt, time.Since(startedAt), output.Version{})
+        meta := output.NewMeta(instance.Name(), output.MetaConfig{Option: option, StartedAt: startedAt, Duration: time.Since(startedAt)})
         envelope := output.NewEnvelope(meta)
 
         if nil == writes {

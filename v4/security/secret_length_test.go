@@ -183,7 +183,7 @@ func TestHmacTokenSource_AShortSecretOfACustomProviderVerifiesNothing(t *testing
         t.Fatalf("encode: %v", encodeErr)
     }
 
-    source := NewHmacTokenSource(HmacTokenSourceConfig{Secrets: &customHmacSecretProvider{secret: shortSecret}, Applications: hmacTestApplications()})
+    source := NewHmacTokenSource(&customHmacSecretProvider{secret: shortSecret}, hmacTestApplications(), HmacTokenSourceConfig{})
 
     token, resolveErr := source.Resolve(testRuntime(), hmacRequest("GET", "/internal", nil, DefaultHmacHeaderName, headerValue))
     if nil != resolveErr {
@@ -194,7 +194,7 @@ func TestHmacTokenSource_AShortSecretOfACustomProviderVerifiesNothing(t *testing
 
     context := exception.LogContext(cause, exception.LogContextConfig{})
     rendered := fmt.Sprintf("%v", context)
-    for _, expected := range []string{"HmacTokenSourceConfig.Secrets", "key-custom", "secretLength:19", "minimumLength:32"} {
+    for _, expected := range []string{"NewHmacTokenSource.secrets", "key-custom", "secretLength:19", "minimumLength:32"} {
         if false == strings.Contains(rendered, expected) {
             t.Fatalf("expected the short secret named by field, key id and length in the cause, missing %q in %s", expected, rendered)
         }
@@ -207,14 +207,14 @@ func TestHmacTokenSource_AShortSecretOfACustomProviderVerifiesNothing(t *testing
     longSecret := []byte(thirtyTwoByteSecret)
     envelope.Nonce = "nonce-long"
     longHeaderValue, _ := encodeHmacHeaderValue("key-custom", envelope, longSecret)
-    longSource := NewHmacTokenSource(HmacTokenSourceConfig{Secrets: &customHmacSecretProvider{secret: longSecret}, Applications: hmacTestApplications()})
+    longSource := NewHmacTokenSource(&customHmacSecretProvider{secret: longSecret}, hmacTestApplications(), HmacTokenSourceConfig{})
 
     longToken, _ := longSource.Resolve(testRuntime(), hmacRequest("GET", "/internal", nil, DefaultHmacHeaderName, longHeaderValue))
     if false == longToken.IsAuthenticated() {
         t.Fatalf("expected a 32-byte custom secret to verify")
     }
 
-    raisedSource := NewHmacTokenSource(HmacTokenSourceConfig{Secrets: &customHmacSecretProvider{secret: longSecret}, Applications: hmacTestApplications(), MinimumSecretLength: bound.Of(33)})
+    raisedSource := NewHmacTokenSource(&customHmacSecretProvider{secret: longSecret}, hmacTestApplications(), HmacTokenSourceConfig{MinimumSecretLength: bound.Of(33)})
     envelope.Nonce = "nonce-raised"
     raisedHeaderValue, _ := encodeHmacHeaderValue("key-custom", envelope, longSecret)
     if raisedToken, _ := raisedSource.Resolve(testRuntime(), hmacRequest("GET", "/internal", nil, DefaultHmacHeaderName, raisedHeaderValue)); true == raisedToken.IsAuthenticated() {
@@ -222,7 +222,7 @@ func TestHmacTokenSource_AShortSecretOfACustomProviderVerifiesNothing(t *testing
     }
 
     expectPanicNamingField(t, "HmacTokenSourceConfig.MinimumSecretLength", func() {
-        NewHmacTokenSource(HmacTokenSourceConfig{Secrets: hmacTestSecrets(), Applications: hmacTestApplications(), MinimumSecretLength: bound.Of(31)})
+        NewHmacTokenSource(hmacTestSecrets(), hmacTestApplications(), HmacTokenSourceConfig{MinimumSecretLength: bound.Of(31)})
     })
 }
 

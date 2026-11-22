@@ -1,11 +1,13 @@
 package openapi
 
 import (
+    "strings"
     nethttp "net/http"
     "reflect"
     "testing"
 
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/internal/openapiseam"
     "github.com/precision-soft/melody/v4/internal/testhelper"
 )
 
@@ -92,7 +94,7 @@ func TestRegistry_DescribeChainsAndTheLastDescriptionWins(t *testing.T) {
 func TestRegistry_DescribeIsRefusedOnceTheRegistryIsMarkedServing(t *testing.T) {
     registry := NewRegistry().Describe("example.one", Descriptor{Summary: "first"})
 
-    registry.MarkServing()
+    registry.MarkServing(openapiseam.Token{})
 
     testhelper.AssertPanicsWithError(
         t,
@@ -115,7 +117,7 @@ func TestRegistry_DescribeIsRefusedOnceTheRegistryIsMarkedServing(t *testing.T) 
 /* the refusal carries the route under routeName, which is what an operator reads to find the module describing too late */
 func TestRegistry_ALateDescribeNamesTheRouteInItsRefusal(t *testing.T) {
     registry := NewRegistry()
-    registry.MarkServing()
+    registry.MarkServing(openapiseam.Token{})
 
     defer func() {
         recoveredValue := recover()
@@ -194,5 +196,30 @@ func TestResponse_AnswersTheStatusAndTheElementType(t *testing.T) {
 
     if nethttp.StatusCreated != response.Status || TypeOf[registryProbePayload]() != response.Type {
         t.Fatalf("unexpected response description %+v", response)
+    }
+}
+
+func TestMarkServing_IsNotCallableWithoutTheSeamToken(t *testing.T) {
+    ownerType := reflect.TypeOf(NewRegistry())
+
+    method, hasMethod := ownerType.MethodByName("MarkServing")
+    if false == hasMethod {
+        t.Fatal("expected Registry.MarkServing")
+    }
+
+    if 2 != method.Type.NumIn() || reflect.TypeOf(openapiseam.Token{}) != method.Type.In(1) {
+        t.Fatalf("expected MarkServing to take the seam token and nothing else, got %s", method.Type)
+    }
+
+    /* a second door answering nothing would freeze the boot as MarkServing does, so every one takes the token */
+    for index := 0; index < ownerType.NumMethod(); index++ {
+        candidate := ownerType.Method(index)
+        if false == strings.Contains(candidate.Name, "Serving") || 0 != candidate.Type.NumOut() {
+            continue
+        }
+
+        if 2 > candidate.Type.NumIn() || reflect.TypeOf(openapiseam.Token{}) != candidate.Type.In(1) {
+            t.Errorf("Registry.%s reaches the serving state without the seam token", candidate.Name)
+        }
     }
 }

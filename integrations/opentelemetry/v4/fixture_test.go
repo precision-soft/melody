@@ -27,7 +27,7 @@ func testRequestAndRuntime() (httpcontract.Request, containercontract.Runtime) {
     runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/orders/42", nil)
-    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, nil)
+    request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{})
 
     return request, runtimeInstance
 }

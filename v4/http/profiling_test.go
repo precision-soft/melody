@@ -10,7 +10,7 @@ func TestNewHttpRequestProfile_ReportsEveryFieldItWasGiven(t *testing.T) {
     startedAt := time.Date(2026, time.August, 1, 10, 0, 0, 0, time.UTC)
     finishedAt := startedAt.Add(250 * time.Millisecond)
 
-    profile := NewHttpRequestProfile(
+    profile := newHttpRequestProfile(
         "request-1",
         nethttp.MethodPost,
         "/articles",
@@ -64,7 +64,7 @@ func TestNewHttpRequestProfile_ReportsEveryFieldItWasGiven(t *testing.T) {
 }
 
 func TestNewHttpRequestProfile_KeepsThePathOfAnUnmatchedRequest(t *testing.T) {
-    profile := NewHttpRequestProfile(
+    profile := newHttpRequestProfile(
         "request-2",
         nethttp.MethodGet,
         "/nothing-here",

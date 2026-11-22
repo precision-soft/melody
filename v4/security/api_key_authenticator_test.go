@@ -12,18 +12,16 @@ func TestNewApiKeyHeaderAuthenticator_EmptyExpectedValuePanics(t *testing.T) {
         }
     }()
 
-    _ = NewApiKeyHeaderAuthenticator(ApiKeyHeaderAuthenticatorConfig{
+    _ = NewApiKeyHeaderAuthenticator("", ApiKeyHeaderAuthenticatorConfig{
         HeaderName:     "X-Api-Key",
-        ExpectedValue:  "",
         UserIdentifier: "u1",
         Roles:          []string{"ROLE_API"},
     })
 }
 
 func TestApiKeyHeaderAuthenticator_SupportsReturnsFalseWhenHeaderMissing(t *testing.T) {
-    auth := NewApiKeyHeaderAuthenticator(ApiKeyHeaderAuthenticatorConfig{
+    auth := NewApiKeyHeaderAuthenticator("expected", ApiKeyHeaderAuthenticatorConfig{
         HeaderName:     "X-Api-Key",
-        ExpectedValue:  "expected",
         UserIdentifier: "u1",
         Roles:          []string{"ROLE_API"},
     })
@@ -36,9 +34,8 @@ func TestApiKeyHeaderAuthenticator_SupportsReturnsFalseWhenHeaderMissing(t *test
 }
 
 func TestApiKeyHeaderAuthenticator_SupportsReturnsTrueWhenHeaderPresent(t *testing.T) {
-    auth := NewApiKeyHeaderAuthenticator(ApiKeyHeaderAuthenticatorConfig{
+    auth := NewApiKeyHeaderAuthenticator("expected", ApiKeyHeaderAuthenticatorConfig{
         HeaderName:     "X-Api-Key",
-        ExpectedValue:  "expected",
         UserIdentifier: "u1",
         Roles:          []string{"ROLE_API"},
     })
@@ -56,9 +53,8 @@ func TestApiKeyHeaderAuthenticator_SupportsReturnsTrueWhenHeaderPresent(t *testi
 }
 
 func TestApiKeyHeaderAuthenticator_AuthenticateReturnsAnonymousOnMismatch(t *testing.T) {
-    auth := NewApiKeyHeaderAuthenticator(ApiKeyHeaderAuthenticatorConfig{
+    auth := NewApiKeyHeaderAuthenticator("expected", ApiKeyHeaderAuthenticatorConfig{
         HeaderName:     "X-Api-Key",
-        ExpectedValue:  "expected",
         UserIdentifier: "u1",
         Roles:          []string{"ROLE_API"},
     })
@@ -80,9 +76,8 @@ func TestApiKeyHeaderAuthenticator_AuthenticateReturnsAnonymousOnMismatch(t *tes
 }
 
 func TestApiKeyHeaderAuthenticator_AuthenticateReturnsAuthenticatedOnMatch(t *testing.T) {
-    auth := NewApiKeyHeaderAuthenticator(ApiKeyHeaderAuthenticatorConfig{
+    auth := NewApiKeyHeaderAuthenticator("expected", ApiKeyHeaderAuthenticatorConfig{
         HeaderName:     "X-Api-Key",
-        ExpectedValue:  "expected",
         UserIdentifier: "u1",
         Roles:          []string{"ROLE_API"},
     })
@@ -112,12 +107,32 @@ func TestApiKeyHeaderAuthenticator_AuthenticateReturnsAuthenticatedOnMatch(t *te
     }
 }
 
-func TestNewApiKeyHeaderAuthenticator_RefusesAnEmptyRequiredFieldByName(t *testing.T) {
-    expectPanicNamingField(t, "ApiKeyHeaderAuthenticatorConfig.HeaderName", func() {
-        NewApiKeyHeaderAuthenticator(ApiKeyHeaderAuthenticatorConfig{ExpectedValue: "secret"})
-    })
+func TestNewApiKeyHeaderAuthenticator_RefusesAnEmptyExpectedValueAndDefaultsTheHeaderName(t *testing.T) {
+    cases := []struct {
+        name               string
+        expectedValue      string
+        config             ApiKeyHeaderAuthenticatorConfig
+        expectedArgument   string
+        expectedHeaderName string
+    }{
+        {"an empty expected value", "", ApiKeyHeaderAuthenticatorConfig{HeaderName: "X-Api-Key"}, "expectedValue", ""},
+        {"an empty header name", "secret", ApiKeyHeaderAuthenticatorConfig{}, "", DefaultApiKeyHeaderName},
+        {"a declared header name", "secret", ApiKeyHeaderAuthenticatorConfig{HeaderName: "X-Service-Key"}, "", "X-Service-Key"},
+    }
 
-    expectPanicNamingField(t, "ApiKeyHeaderAuthenticatorConfig.ExpectedValue", func() {
-        NewApiKeyHeaderAuthenticator(ApiKeyHeaderAuthenticatorConfig{HeaderName: "X-Api-Key"})
-    })
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            if "" != testCase.expectedArgument {
+                expectPanicNamingTheArgument(t, testCase.expectedArgument, func() {
+                    NewApiKeyHeaderAuthenticator(testCase.expectedValue, testCase.config)
+                })
+
+                return
+            }
+
+            if authenticator := NewApiKeyHeaderAuthenticator(testCase.expectedValue, testCase.config); testCase.expectedHeaderName != authenticator.headerName {
+                t.Fatalf("expected the header %q, got %q", testCase.expectedHeaderName, authenticator.headerName)
+            }
+        })
+    }
 }

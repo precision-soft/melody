@@ -184,8 +184,7 @@ A listener receives the event and writes to its payload, and the payload has no 
     - [`(*EventDispatcher).DeclareEvent(eventName string, config eventcontract.EventConfig)`](../../event/event_dispatcher.go)
 - [`type EventDispatcherAdapter`](../../event/event_dispatcher_adapter.go)
     - [`NewEventDispatcherAdapter(eventcontract.EventDispatcher) *EventDispatcherAdapter`](../../event/event_dispatcher_adapter.go) — a nil dispatcher is refused
-- [`type RequiredListenerSkippedError`](../../event/required_listener_skipped_error.go)
-    - [`NewRequiredListenerSkippedError(eventName string, stoppedByListenerName string, cause error) *RequiredListenerSkippedError`](../../event/required_listener_skipped_error.go) — the cause joins the dispatch's failures, nil when none failed
+- [`type RequiredListenerSkippedError`](../../event/required_listener_skipped_error.go) — built by the dispatcher alone; the cause joins the dispatch's failures, nil when none failed
 
 ### Container helpers (`event`)
 

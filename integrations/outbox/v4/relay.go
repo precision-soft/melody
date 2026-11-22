@@ -27,13 +27,6 @@ import (
 
 /* RelayConfig configures the outbox relay — the loop that drains pending rows to the message transport with retry, exponential backoff and a dead-letter terminal state. Every batch is claimed atomically (FOR UPDATE SKIP LOCKED), so two instances do not claim the same row while its VisibilityTimeout holds, even without a Locker; the relay stays at-least-once — a send still running when the timeout lapses, or a crash between the send and MarkSent, lets the row be claimed and published again —, and this requires a backend that supports SELECT … FOR UPDATE SKIP LOCKED (PostgreSQL, or MySQL 8+). A Locker is still useful as an additional optimization: supply one (for example the Redis locker) so only one instance does any work at a time in a multi-instance deployment. */
 type RelayConfig struct {
-    Repository Repository
-
-    /* Transport is what every row is published through. The relay only sends through it and never closes it: on the module's prebuilt path the composition root registers the transport with the container — through messagebus.RegisterTransports, or as a service of its own — so the container's ordered teardown closes it, and on the factory path the factory resolves a container-owned one, as ModuleConfig says. A transport that is neither closes with the process, abruptly. */
-    Transport messagebuscontract.Transport
-
-    Codec MessageCodec
-
     Locker lockcontract.Locker
 
     /* LockName names the single-drainer lock: melody:outbox:relay when empty. */
@@ -64,24 +57,28 @@ type RelayConfig struct {
     UnavailableBackoff bound.Backoff
 }
 
-/* NewRelay builds the relay; a nil Repository, Transport or Codec and a limit outside its rule are refused naming the field. */
-func NewRelay(config RelayConfig) *Relay {
-    if nil == config.Repository {
-        exception.Panic(exception.NewError("outbox relay repository is nil", exceptioncontract.Context{"field": "RelayConfig.Repository"}, nil))
+/* NewRelay drains repository's rows, decoded through codec, to transport, which it only sends through and never closes (the container that registered it does); a nil repository, transport or codec panics naming the argument, a limit outside its rule naming the field. */
+func NewRelay(repository Repository, transport messagebuscontract.Transport, codec MessageCodec, config RelayConfig) *Relay {
+    if nil == repository {
+        exception.Panic(exception.NewError("outbox relay repository is nil", exceptioncontract.Context{"argument": "repository"}, nil))
     }
 
-    if nil == config.Transport {
-        exception.Panic(exception.NewError("outbox relay transport is nil", exceptioncontract.Context{"field": "RelayConfig.Transport"}, nil))
+    if nil == transport {
+        exception.Panic(exception.NewError("outbox relay transport is nil", exceptioncontract.Context{"argument": "transport"}, nil))
     }
 
-    if nil == config.Codec {
-        exception.Panic(exception.NewError("outbox relay codec is nil", exceptioncontract.Context{"field": "RelayConfig.Codec"}, nil))
+    if nil == codec {
+        exception.Panic(exception.NewError("outbox relay codec is nil", exceptioncontract.Context{"argument": "codec"}, nil))
     }
 
     resolved, resolveErr := resolveRelayConfig(config)
     if nil != resolveErr {
         exception.Panic(exception.FromError(resolveErr))
     }
+
+    resolved.Repository = repository
+    resolved.Transport = transport
+    resolved.Codec = codec
 
     return &Relay{config: resolved}
 }

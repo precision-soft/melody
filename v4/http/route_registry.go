@@ -8,6 +8,7 @@ import (
 
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/internal/routeseam"
 )
 
 func NewRouteRegistry() *RouteRegistry {
@@ -37,8 +38,8 @@ type RouteRegistry struct {
     bootCollisionRecorder func(kind string, name string)
 }
 
-/* SetBootCollisionRecorder arms the aggregated collision channel: a dispatch duplicate is recorded, the first registration winning, instead of panicking, so a boot reports every collision at once. A nil recorder restores the immediate refusal. */
-func (instance *RouteRegistry) SetBootCollisionRecorder(recorder func(kind string, name string)) {
+/* InstallBootCollisionRecorder arms the aggregated collision channel: a dispatch duplicate is recorded, the first registration winning, instead of panicking, so a boot reports every collision at once. A nil recorder restores the immediate refusal. */
+func (instance *RouteRegistry) InstallBootCollisionRecorder(token routeseam.Token, recorder func(kind string, name string)) {
     instance.bootCollisionRecorder = recorder
 }
 
@@ -68,7 +69,7 @@ func (instance *RouteRegistry) RouteDefinitionForUrlGeneration(routeName string)
         return nil, false
     }
 
-    return NewUrlGenerationRouteDefinition(routeValue), true
+    return newUrlGenerationRouteDefinition(routeValue), true
 }
 
 /* registerRoute answers whether the route was stored, since the caller puts the index of the last stored route in the matching tree. */

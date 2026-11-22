@@ -98,10 +98,10 @@ func crashAt(t *testing.T, storage *FileStorage, point journalPoint, callback fu
     callback()
 }
 
-func newJournalStorage(t *testing.T, config FileStorageConfig) *FileStorage {
+func newJournalStorage(t *testing.T, path string, config FileStorageConfig) *FileStorage {
     t.Helper()
 
-    storage, storageErr := NewFileStorage(config)
+    storage, storageErr := NewFileStorage(path, config)
     if nil != storageErr {
         t.Fatalf("unexpected storage error: %v", storageErr)
     }
@@ -154,7 +154,7 @@ func TestFileStorage_Journal_ASaveAppendsOneRecordAndLeavesTheSnapshotUntouched(
 
     before, _ := os.ReadFile(path)
 
-    storage := newJournalStorage(t, FileStorageConfig{Path: path})
+    storage := newJournalStorage(t, path, FileStorageConfig{})
     defer storage.CloseWithContext(context.Background())
 
     if _, exists, _ := storage.Load(sessionRuntime(), "third"); false == exists {
@@ -177,7 +177,7 @@ func TestFileStorage_Journal_ASaveAppendsOneRecordAndLeavesTheSnapshotUntouched(
 func TestFileStorage_Journal_EveryRecordIsSyncedBeforeTheWriteAnswers(t *testing.T) {
     path := filepath.Join(t.TempDir(), "sessions.json")
 
-    storage := newJournalStorage(t, FileStorageConfig{Path: path})
+    storage := newJournalStorage(t, path, FileStorageConfig{})
     defer storage.CloseWithContext(context.Background())
 
     reached := make([]journalPoint, 0)
@@ -201,14 +201,14 @@ func TestFileStorage_Journal_ARecordWrittenBeforeACrashIsReplayed(t *testing.T) 
     path := filepath.Join(t.TempDir(), "sessions.json")
     logger := &recordingJournalLogger{}
 
-    storage := newJournalStorage(t, FileStorageConfig{Path: path})
+    storage := newJournalStorage(t, path, FileStorageConfig{})
     mustSave(t, storage, "kept", map[string]any{"k": "kept"})
 
     crashAt(t, storage, journalPointRecordWritten, func() {
         _ = storage.Save(sessionRuntime(), "last", map[string]any{"k": "last"}, bound.Of(time.Hour))
     })
 
-    reopened := newJournalStorage(t, FileStorageConfig{Path: path, Logger: logger})
+    reopened := newJournalStorage(t, path, FileStorageConfig{Logger: logger})
     defer reopened.CloseWithContext(context.Background())
 
     for _, sessionId := range []string{"kept", "last"} {
@@ -230,7 +230,7 @@ func TestFileStorage_Journal_ATornLastRecordIsCutAndReported(t *testing.T) {
     path := filepath.Join(t.TempDir(), "sessions.json")
     logger := &recordingJournalLogger{}
 
-    storage := newJournalStorage(t, FileStorageConfig{Path: path})
+    storage := newJournalStorage(t, path, FileStorageConfig{})
     mustSave(t, storage, "whole", map[string]any{"k": "whole"})
     _ = storage.journal.Close()
 
@@ -242,7 +242,7 @@ func TestFileStorage_Journal_ATornLastRecordIsCutAndReported(t *testing.T) {
     _, _ = journalFile.WriteString("{\"operation\":\"save\",\"id\":\"torn\",\"da")
     _ = journalFile.Close()
 
-    reopened := newJournalStorage(t, FileStorageConfig{Path: path, Logger: logger})
+    reopened := newJournalStorage(t, path, FileStorageConfig{Logger: logger})
     defer reopened.CloseWithContext(context.Background())
 
     if _, exists, _ := reopened.Load(sessionRuntime(), "whole"); false == exists {
@@ -333,7 +333,7 @@ func TestReplaySessionJournal_AppliesDeletesAndIsIdempotent(t *testing.T) {
 func TestFileStorage_Journal_ACrashBetweenTheSnapshotRenameAndTheJournalCutReplaysToTheSameMap(t *testing.T) {
     path := filepath.Join(t.TempDir(), "sessions.json")
 
-    storage := newJournalStorage(t, FileStorageConfig{Path: path})
+    storage := newJournalStorage(t, path, FileStorageConfig{})
     mustSave(t, storage, "a", map[string]any{"k": "a"})
     mustSave(t, storage, "b", map[string]any{"k": "b"})
 
@@ -349,7 +349,7 @@ func TestFileStorage_Journal_ACrashBetweenTheSnapshotRenameAndTheJournalCutRepla
         t.Fatalf("expected the crash to leave the new snapshot beside the whole journal")
     }
 
-    reopened := newJournalStorage(t, FileStorageConfig{Path: path})
+    reopened := newJournalStorage(t, path, FileStorageConfig{})
     defer reopened.CloseWithContext(context.Background())
 
     if _, exists, _ := reopened.Load(sessionRuntime(), "a"); true == exists {
@@ -364,7 +364,7 @@ func TestFileStorage_Journal_ACrashBetweenTheSnapshotRenameAndTheJournalCutRepla
 func TestFileStorage_Journal_TheCloseCompactsSoTheSnapshotAloneHoldsEveryWrite(t *testing.T) {
     path := filepath.Join(t.TempDir(), "sessions.json")
 
-    storage := newJournalStorage(t, FileStorageConfig{Path: path})
+    storage := newJournalStorage(t, path, FileStorageConfig{})
     mustSave(t, storage, "a", map[string]any{"k": "a"})
     mustSave(t, storage, "b", map[string]any{"k": "b"})
 
@@ -385,7 +385,7 @@ func TestFileStorage_Journal_TheCloseCompactsSoTheSnapshotAloneHoldsEveryWrite(t
 func TestFileStorage_Journal_PastTheThresholdAWriteCompacts(t *testing.T) {
     path := filepath.Join(t.TempDir(), "sessions.json")
 
-    storage := newJournalStorage(t, FileStorageConfig{Path: path, JournalMaxBytes: bound.Of(64 << 10)})
+    storage := newJournalStorage(t, path, FileStorageConfig{JournalMaxBytes: bound.Of(64 << 10)})
     defer storage.CloseWithContext(context.Background())
 
     payload := strings.Repeat("x", 1024)
@@ -411,14 +411,14 @@ func TestFileStorage_Journal_PastTheThresholdAWriteCompacts(t *testing.T) {
 func TestNewFileStorage_JournalMaxBytesResolves(t *testing.T) {
     path := filepath.Join(t.TempDir(), "sessions.json")
 
-    storage := newJournalStorage(t, FileStorageConfig{Path: path})
+    storage := newJournalStorage(t, path, FileStorageConfig{})
     if DefaultJournalMaxBytes != storage.journalMaxBytes.Value {
         t.Fatalf("expected the default of %d, got %d", DefaultJournalMaxBytes, storage.journalMaxBytes.Value)
     }
     _ = storage.CloseWithContext(context.Background())
 
     for _, refused := range []bound.Count{bound.Of(64<<10 - 1), bound.UnlimitedCount()} {
-        if _, storageErr := NewFileStorage(FileStorageConfig{Path: path, JournalMaxBytes: refused}); nil == storageErr || false == strings.Contains(fmt.Sprint(exception.LogContext(storageErr, exception.LogContextConfig{})), "FileStorageConfig.JournalMaxBytes") {
+        if _, storageErr := NewFileStorage(path, FileStorageConfig{JournalMaxBytes: refused}); nil == storageErr || false == strings.Contains(fmt.Sprint(exception.LogContext(storageErr, exception.LogContextConfig{})), "FileStorageConfig.JournalMaxBytes") {
             t.Fatalf("expected %v refused naming the field, got %v", refused, storageErr)
         }
     }
@@ -427,7 +427,7 @@ func TestNewFileStorage_JournalMaxBytesResolves(t *testing.T) {
 func TestNewFileStorage_RefusesATypedNilLogger(t *testing.T) {
     var typedNil *recordingJournalLogger
 
-    _, storageErr := NewFileStorage(FileStorageConfig{Path: filepath.Join(t.TempDir(), "sessions.json"), Logger: typedNil})
+    _, storageErr := NewFileStorage(filepath.Join(t.TempDir(), "sessions.json"), FileStorageConfig{Logger: typedNil})
     if nil == storageErr || "session file storage logger is a typed nil" != storageErr.Error() {
         t.Fatalf("expected the typed nil refused, got %v", storageErr)
     }
@@ -442,7 +442,10 @@ func TestFileStorage_Journal_TheHandleFormWritesNoJournal(t *testing.T) {
     }
     defer fileInstance.Close()
 
-    storage := newJournalStorage(t, FileStorageConfig{File: fileInstance})
+    storage, storageErr := NewFileStorageOverFile(fileInstance, FileStorageConfig{})
+    if nil != storageErr {
+        t.Fatalf("unexpected storage error: %v", storageErr)
+    }
     mustSave(t, storage, "a", map[string]any{"k": "a"})
     _ = storage.CloseWithContext(context.Background())
 
@@ -455,11 +458,11 @@ func TestFileStorage_Journal_TheHandleFormWritesNoJournal(t *testing.T) {
 func TestFileStorage_Journal_TheDoorOffWritesTheSnapshotAndRetiresALeftJournal(t *testing.T) {
     path := filepath.Join(t.TempDir(), "sessions.json")
 
-    journaled := newJournalStorage(t, FileStorageConfig{Path: path})
+    journaled := newJournalStorage(t, path, FileStorageConfig{})
     mustSave(t, journaled, "left", map[string]any{"k": "left"})
     _ = journaled.journal.Close()
 
-    storage := newJournalStorage(t, FileStorageConfig{Path: path, JournalDisabled: true})
+    storage := newJournalStorage(t, path, FileStorageConfig{JournalDisabled: true})
     defer storage.CloseWithContext(context.Background())
 
     if _, statErr := os.Stat(sessionJournalPath(path)); false == os.IsNotExist(statErr) {
@@ -480,7 +483,7 @@ func TestFileStorage_Journal_TheDoorOffWritesTheSnapshotAndRetiresALeftJournal(t
 func TestFileStorage_Journal_AFailedAppendRollsBackAndAFailedCutCompactsBeforeTheNextWrite(t *testing.T) {
     path := filepath.Join(t.TempDir(), "sessions.json")
 
-    storage := newJournalStorage(t, FileStorageConfig{Path: path})
+    storage := newJournalStorage(t, path, FileStorageConfig{})
     defer storage.CloseWithContext(context.Background())
 
     mustSave(t, storage, "kept", map[string]any{"k": "old"})
@@ -523,7 +526,7 @@ func TestFileStorage_Journal_AFailedAppendRollsBackAndAFailedCutCompactsBeforeTh
 func TestFileStorage_Journal_ARecordWhoseSyncFailsIsReportedAndRolledBack(t *testing.T) {
     path := filepath.Join(t.TempDir(), "sessions.json")
 
-    storage := newJournalStorage(t, FileStorageConfig{Path: path})
+    storage := newJournalStorage(t, path, FileStorageConfig{})
     defer storage.CloseWithContext(context.Background())
 
     writable := storage.journal
@@ -563,7 +566,7 @@ func TestFileStorage_Journal_ALapsedSessionIsDroppedWithoutARecordAndAtTheReplay
     path := filepath.Join(t.TempDir(), "sessions.json")
     frozenClock := clock.NewFrozenClock(time.Unix(1_000_000, 0))
 
-    storage := newJournalStorage(t, FileStorageConfig{Path: path, Clock: frozenClock})
+    storage := newJournalStorage(t, path, FileStorageConfig{Clock: frozenClock})
     if saveErr := storage.Save(sessionRuntime(), "lapsing", map[string]any{"k": "v"}, bound.Of(time.Minute)); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
@@ -598,7 +601,7 @@ func TestFileStorage_Journal_ALapsedSessionIsDroppedWithoutARecordAndAtTheReplay
 
     _ = storage.journal.Close()
 
-    reopened := newJournalStorage(t, FileStorageConfig{Path: path, Clock: frozenClock})
+    reopened := newJournalStorage(t, path, FileStorageConfig{Clock: frozenClock})
     defer reopened.CloseWithContext(context.Background())
 
     if _, exists := reopened.sessionById["lapsing"]; true == exists {
@@ -609,7 +612,7 @@ func TestFileStorage_Journal_ALapsedSessionIsDroppedWithoutARecordAndAtTheReplay
 func TestFileStorage_Journal_ConcurrentWritesReplayWhole(t *testing.T) {
     path := filepath.Join(t.TempDir(), "sessions.json")
 
-    storage := newJournalStorage(t, FileStorageConfig{Path: path})
+    storage := newJournalStorage(t, path, FileStorageConfig{})
 
     var waitGroup sync.WaitGroup
     for worker := 0; worker < 8; worker++ {
@@ -630,7 +633,7 @@ func TestFileStorage_Journal_ConcurrentWritesReplayWhole(t *testing.T) {
     waitGroup.Wait()
     _ = storage.journal.Close()
 
-    reopened := newJournalStorage(t, FileStorageConfig{Path: path})
+    reopened := newJournalStorage(t, path, FileStorageConfig{})
     defer reopened.CloseWithContext(context.Background())
 
     if 200 != len(reopened.sessionById) {
@@ -641,7 +644,7 @@ func TestFileStorage_Journal_ConcurrentWritesReplayWhole(t *testing.T) {
 func TestFileStorage_Journal_AWriteRefusedByAPendingCompactionLeavesTheDiskAsTheMap(t *testing.T) {
     path := filepath.Join(t.TempDir(), "sessions.json")
 
-    storage := newJournalStorage(t, FileStorageConfig{Path: path})
+    storage := newJournalStorage(t, path, FileStorageConfig{})
     defer storage.CloseWithContext(context.Background())
 
     mustSave(t, storage, "kept", map[string]any{"k": "old"})
@@ -680,7 +683,7 @@ func TestFileStorage_Journal_AJournalBehindASnapshotAnotherBuildRewroteIsDiscard
     path := filepath.Join(t.TempDir(), "sessions.json")
     logger := &recordingJournalLogger{}
 
-    storage := newJournalStorage(t, FileStorageConfig{Path: path})
+    storage := newJournalStorage(t, path, FileStorageConfig{})
     mustSave(t, storage, "resurrected", map[string]any{"user": "admin"})
     _ = storage.journal.Close()
 
@@ -688,7 +691,7 @@ func TestFileStorage_Journal_AJournalBehindASnapshotAnotherBuildRewroteIsDiscard
         t.Fatalf("could not stand in for the other build: %v", writeErr)
     }
 
-    reopened := newJournalStorage(t, FileStorageConfig{Path: path, Logger: logger})
+    reopened := newJournalStorage(t, path, FileStorageConfig{Logger: logger})
     defer reopened.CloseWithContext(context.Background())
 
     if _, exists, _ := reopened.Load(sessionRuntime(), "resurrected"); true == exists {
@@ -711,7 +714,7 @@ func TestNewFileStorage_RefusesAJournalOfAFormatItDoesNotRead(t *testing.T) {
         t.Fatalf("could not seed the journal: %v", writeErr)
     }
 
-    if _, storageErr := NewFileStorage(FileStorageConfig{Path: path}); nil == storageErr || "session storage journal has a format this build does not read" != storageErr.Error() {
+    if _, storageErr := NewFileStorage(path, FileStorageConfig{}); nil == storageErr || "session storage journal has a format this build does not read" != storageErr.Error() {
         t.Fatalf("expected the newer format refused, got %v", storageErr)
     }
 }
@@ -724,7 +727,7 @@ func TestFileStorage_Journal_AJournalWithoutItsHeaderIsCutWhole(t *testing.T) {
         t.Fatalf("could not seed the journal: %v", writeErr)
     }
 
-    storage := newJournalStorage(t, FileStorageConfig{Path: path, Logger: logger})
+    storage := newJournalStorage(t, path, FileStorageConfig{Logger: logger})
     defer storage.CloseWithContext(context.Background())
 
     if _, exists, _ := storage.Load(sessionRuntime(), "headless"); true == exists {
@@ -766,7 +769,7 @@ func TestFileStorage_Journal_ADeleteAlsoPurgesTheLapsedAndCompactsPastTheThresho
     path := filepath.Join(t.TempDir(), "sessions.json")
     frozenClock := clock.NewFrozenClock(time.Unix(1_000_000, 0))
 
-    storage := newJournalStorage(t, FileStorageConfig{Path: path, Clock: frozenClock})
+    storage := newJournalStorage(t, path, FileStorageConfig{Clock: frozenClock})
     defer storage.CloseWithContext(context.Background())
 
     if saveErr := storage.Save(sessionRuntime(), "lapsing", map[string]any{"k": "v"}, bound.Of(time.Minute)); nil != saveErr {
@@ -793,7 +796,7 @@ func TestFileStorage_Journal_ADeleteAlsoPurgesTheLapsedAndCompactsPastTheThresho
 func TestFileStorage_Journal_TheThresholdIsExclusive(t *testing.T) {
     path := filepath.Join(t.TempDir(), "sessions.json")
 
-    storage := newJournalStorage(t, FileStorageConfig{Path: path})
+    storage := newJournalStorage(t, path, FileStorageConfig{})
     defer storage.CloseWithContext(context.Background())
 
     mustSave(t, storage, "a", map[string]any{"k": "a"})
@@ -816,7 +819,7 @@ func TestFileStorage_Journal_TheThresholdIsExclusive(t *testing.T) {
 func TestFileStorage_Journal_TheCloseRunsAPendingCompactionAndClosesTheJournal(t *testing.T) {
     path := filepath.Join(t.TempDir(), "sessions.json")
 
-    storage := newJournalStorage(t, FileStorageConfig{Path: path})
+    storage := newJournalStorage(t, path, FileStorageConfig{})
     storage.sessionById["unjournaled"] = fileSessionEntry{Data: map[string]any{"k": "v"}}
     storage.journalNeedsCompaction = true
 
@@ -838,7 +841,7 @@ func TestFileStorage_Journal_TheCloseRunsAPendingCompactionAndClosesTheJournal(t
 func TestFileStorage_Journal_AFailedResetAfterTheSnapshotAsksForACompaction(t *testing.T) {
     path := filepath.Join(t.TempDir(), "sessions.json")
 
-    storage := newJournalStorage(t, FileStorageConfig{Path: path})
+    storage := newJournalStorage(t, path, FileStorageConfig{})
     defer storage.CloseWithContext(context.Background())
 
     writable := storage.journal
@@ -859,7 +862,7 @@ func TestFileStorage_Journal_AThresholdCompactionThatFailsIsLoggedAndTheWriteSta
     path := filepath.Join(directory, "sessions.json")
     logger := &recordingJournalLogger{}
 
-    storage := newJournalStorage(t, FileStorageConfig{Path: path, Logger: logger})
+    storage := newJournalStorage(t, path, FileStorageConfig{Logger: logger})
     defer storage.CloseWithContext(context.Background())
 
     if mkdirErr := os.MkdirAll(filepath.Join(path, "blocks-the-rename"), 0755); nil != mkdirErr {
@@ -885,7 +888,7 @@ func TestFileStorage_Journal_ANewJournalIsPrivateAndAQuietOpenLogsNothing(t *tes
     path := filepath.Join(t.TempDir(), "sessions.json")
     logger := &recordingJournalLogger{}
 
-    storage := newJournalStorage(t, FileStorageConfig{Path: path, Logger: logger})
+    storage := newJournalStorage(t, path, FileStorageConfig{Logger: logger})
     _ = storage.CloseWithContext(context.Background())
 
     stat, _ := os.Stat(sessionJournalPath(path))
@@ -893,7 +896,7 @@ func TestFileStorage_Journal_ANewJournalIsPrivateAndAQuietOpenLogsNothing(t *tes
         t.Fatalf("expected the journal created 0600, got %v", stat.Mode().Perm())
     }
 
-    reopened := newJournalStorage(t, FileStorageConfig{Path: path, Logger: logger})
+    reopened := newJournalStorage(t, path, FileStorageConfig{Logger: logger})
     _ = reopened.CloseWithContext(context.Background())
 
     if 0 != len(logger.records) {
@@ -905,7 +908,7 @@ func TestFileStorage_Journal_AWriteAfterAFailedResetLandsUnderTheNewSnapshotsHea
     for _, operation := range []string{"save", "delete"} {
         path := filepath.Join(t.TempDir(), "sessions.json")
 
-        storage := newJournalStorage(t, FileStorageConfig{Path: path})
+        storage := newJournalStorage(t, path, FileStorageConfig{})
         mustSave(t, storage, "target", map[string]any{"k": "old"})
 
         writable := storage.journal
@@ -928,7 +931,7 @@ func TestFileStorage_Journal_AWriteAfterAFailedResetLandsUnderTheNewSnapshotsHea
 
         _ = storage.journal.Close()
 
-        reopened := newJournalStorage(t, FileStorageConfig{Path: path})
+        reopened := newJournalStorage(t, path, FileStorageConfig{})
         data, exists, _ := reopened.Load(sessionRuntime(), "target")
         _ = reopened.CloseWithContext(context.Background())
 

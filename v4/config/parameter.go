@@ -13,7 +13,7 @@ import (
 
 type ParameterMap map[string]*Parameter
 
-func NewParameter(environmentKey string, template any, value any, isDefault bool) *Parameter {
+func newParameter(environmentKey string, template any, value any, isDefault bool) *Parameter {
     return &Parameter{
         environmentKey: environmentKey,
         template:       template,

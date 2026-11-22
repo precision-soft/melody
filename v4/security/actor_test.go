@@ -10,9 +10,10 @@ func TestAuthenticatedTokenWithActorExposesActor(t *testing.T) {
     actor := NewActor(
         "user-7",
         securitycontract.ActorTypeUser,
-        []string{"ROLE_BUYER"},
-        map[string]string{"tenant": "acme"},
-        nil,
+        ActorConfig{
+            Roles:      []string{"ROLE_BUYER"},
+            Attributes: map[string]string{"tenant": "acme"},
+        },
     )
 
     token := NewAuthenticatedToken("wms-service", []string{"ROLE_SERVICE"}, actor)
@@ -49,7 +50,7 @@ func TestAuthenticatedTokenWithoutActorReportsAbsent(t *testing.T) {
     }
 }
 
-func TestNewAuthenticatedTokenFromClaimsRebuildsActor(t *testing.T) {
+func TestAuthenticatedTokenFromClaimsRebuildsActor(t *testing.T) {
     claims := securitycontract.Claims{
         UserIdentifier: "billing-service",
         Roles:          []string{"ROLE_SERVICE"},
@@ -61,7 +62,7 @@ func TestNewAuthenticatedTokenFromClaimsRebuildsActor(t *testing.T) {
         },
     }
 
-    token := NewAuthenticatedTokenFromClaims(claims)
+    token := newAuthenticatedTokenFromClaims(claims)
 
     actor, present := token.OnBehalfOf()
     if false == present {
@@ -77,10 +78,10 @@ func TestNewAuthenticatedTokenFromClaimsRebuildsActor(t *testing.T) {
     }
 }
 
-func TestNewAuthenticatedTokenFromClaimsWithoutActor(t *testing.T) {
+func TestAuthenticatedTokenFromClaimsWithoutActor(t *testing.T) {
     claims := securitycontract.Claims{UserIdentifier: "u", Roles: []string{"ROLE_USER"}}
 
-    token := NewAuthenticatedTokenFromClaims(claims)
+    token := newAuthenticatedTokenFromClaims(claims)
 
     if _, present := token.OnBehalfOf(); false != present {
         t.Fatal("expected no actor when claims omit one")
@@ -88,7 +89,7 @@ func TestNewAuthenticatedTokenFromClaimsWithoutActor(t *testing.T) {
 }
 
 func TestActorFromTokenReadsActorAwareTokens(t *testing.T) {
-    actor := NewActor("user-9", securitycontract.ActorTypeUser, nil, nil, nil)
+    actor := NewActor("user-9", securitycontract.ActorTypeUser, ActorConfig{})
     token := NewAuthenticatedToken("svc", nil, actor)
 
     resolved, present := ActorFromToken(NewToken(token))
@@ -160,7 +161,7 @@ func TestActorDefensiveCopies(t *testing.T) {
     roles := []string{"ROLE_A"}
     attributes := map[string]string{"k": "v"}
 
-    actor := NewActor("a", securitycontract.ActorTypeSystem, roles, attributes, nil)
+    actor := NewActor("a", securitycontract.ActorTypeSystem, ActorConfig{Roles: roles, Attributes: attributes})
 
     roles[0] = "ROLE_MUTATED"
     attributes["k"] = "mutated"
@@ -182,13 +183,33 @@ func TestActorDefensiveCopies(t *testing.T) {
 }
 
 func TestNewActor_ANilImpersonatorIsNoneAndATypedNilIsRefused(t *testing.T) {
-    if impersonator, present := NewActor("user-17", securitycontract.ActorTypeUser, nil, nil, nil).Impersonator(); true == present || nil != impersonator {
+    if impersonator, present := NewActor("user-17", securitycontract.ActorTypeUser, ActorConfig{}).Impersonator(); true == present || nil != impersonator {
         t.Fatalf("expected a nil impersonator to read as none, got %v", impersonator)
     }
 
     var unassignedActor *Actor
 
-    expectPanicNamingArgument(t, "NewActor", "impersonator", func() {
-        NewActor("user-17", securitycontract.ActorTypeUser, nil, nil, unassignedActor)
+    expectPanicNamingField(t, "ActorConfig.Impersonator", func() {
+        NewActor("user-17", securitycontract.ActorTypeUser, ActorConfig{Impersonator: unassignedActor})
     })
+}
+
+func TestNewActor_ZeroConfigHasNoRolesNoAttributesAndNoImpersonator(t *testing.T) {
+    actor := NewActor("user-21", securitycontract.ActorTypeUser, ActorConfig{})
+
+    if "user-21" != actor.Identifier() || securitycontract.ActorTypeUser != actor.Type() {
+        t.Fatalf("expected the identifier and the type as given, got %q and %q", actor.Identifier(), actor.Type())
+    }
+
+    if 0 != len(actor.Roles()) {
+        t.Fatalf("expected no roles, got %v", actor.Roles())
+    }
+
+    if 0 != len(actor.Attributes()) {
+        t.Fatalf("expected no attributes, got %v", actor.Attributes())
+    }
+
+    if impersonator, present := actor.Impersonator(); true == present || nil != impersonator {
+        t.Fatalf("expected no impersonator, got %v", impersonator)
+    }
 }

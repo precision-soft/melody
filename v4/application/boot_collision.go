@@ -8,6 +8,7 @@ import (
 
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    "github.com/precision-soft/melody/v4/internal/routeseam"
 )
 
 const (
@@ -94,28 +95,23 @@ func (instance *Application) refuseDuplicateModules() {
     }
 }
 
-/* routeCollisionRecorderSetter is the part of a route registry that can defer its duplicate refusals to the aggregated boot report; a registry without it keeps its immediate panic. */
-type routeCollisionRecorderSetter interface {
-    SetBootCollisionRecorder(recorder func(kind string, name string))
-}
-
 /* armRouteCollisionRecorder points the route registry's duplicate refusals at the aggregated report for the boot window; the registry hands over its own kind constants, so the report distinguishes a dispatch-identical route from a name claimed twice. */
 func (instance *Application) armRouteCollisionRecorder() {
-    setter, isSetter := instance.routeRegistry.(routeCollisionRecorderSetter)
-    if false == isSetter {
+    installer, isInstaller := instance.routeRegistry.(routeseam.BootCollisionRecorderInstaller)
+    if false == isInstaller {
         return
     }
 
-    setter.SetBootCollisionRecorder(instance.recordBootCollision)
+    installer.InstallBootCollisionRecorder(routeseam.Token{}, instance.recordBootCollision)
 }
 
 func (instance *Application) disarmRouteCollisionRecorder() {
-    setter, isSetter := instance.routeRegistry.(routeCollisionRecorderSetter)
-    if false == isSetter {
+    installer, isInstaller := instance.routeRegistry.(routeseam.BootCollisionRecorderInstaller)
+    if false == isInstaller {
         return
     }
 
-    setter.SetBootCollisionRecorder(nil)
+    installer.InstallBootCollisionRecorder(routeseam.Token{}, nil)
 }
 
 /* callerOrigin names the first stack frame outside the framework's own registration plumbing; a fixed frame count would name whichever delegation layer sits in between. */

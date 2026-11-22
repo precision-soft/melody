@@ -26,7 +26,7 @@ func TestHealthHandler_ReportsTheVersionItWasBuiltWith(t *testing.T) {
     }, melodycontainer.RegisterOptions{})
     runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
-    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/health", nil), nil, runtimeInstance, melodyhttp.NewRequestContext("health-test", time.Now()))
+    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/health", nil), runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("health-test", time.Now())})
 
     response, handlerErr := HealthHandler("2026.10.08-test")(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr || nethttp.StatusOK != response.StatusCode() {

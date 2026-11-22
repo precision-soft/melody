@@ -817,8 +817,10 @@ func (instance *InMemoryBackend) saveItemLocked(
     item := NewItem(
         key,
         payload,
-        now,
-        expiresAt,
+        ItemConfig{
+            CreatedAt: now,
+            ExpiresAt: expiresAt,
+        },
     )
 
     if true == exists && nil != entry {

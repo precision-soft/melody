@@ -19,18 +19,18 @@ import (
     mailercontract "github.com/precision-soft/melody/v4/mailer/contract"
 )
 
-/* NewSmtpTransport builds the transport, refusing an Address that is empty, not host:port with both halves written, padded, or naming a port the dial cannot read, and a timeout below its minimum or unlimited, by name. */
-func NewSmtpTransport(config SmtpConfig) *SmtpTransport {
-    if "" == config.Address {
-        exception.Panic(exception.NewError("smtp address is empty", exceptioncontract.Context{"field": "SmtpConfig.Address"}, nil))
+/* NewSmtpTransport sends through the relay at address, refusing an address that is empty, not host:port with both halves written, padded, or naming a port the dial cannot read, and a timeout below its minimum or unlimited, by name. */
+func NewSmtpTransport(address string, config SmtpConfig) *SmtpTransport {
+    if "" == address {
+        exception.Panic(exception.NewError("smtp address is empty", exceptioncontract.Context{"argument": "address"}, nil))
     }
 
-    addressHost, addressPort, splitErr := net.SplitHostPort(config.Address)
-    if nil != splitErr || "" == addressHost || "" == addressPort || strings.TrimSpace(config.Address) != config.Address {
+    addressHost, addressPort, splitErr := net.SplitHostPort(address)
+    if nil != splitErr || "" == addressHost || "" == addressPort || strings.TrimSpace(address) != address {
         exception.Panic(
             exception.NewError(
                 "smtp address is not host:port",
-                exceptioncontract.Context{"field": "SmtpConfig.Address", "address": config.Address},
+                exceptioncontract.Context{"argument": "address", "address": address},
                 splitErr,
             ),
         )
@@ -40,7 +40,7 @@ func NewSmtpTransport(config SmtpConfig) *SmtpTransport {
         exception.Panic(
             exception.NewError(
                 "smtp address names a port the dial cannot read",
-                exceptioncontract.Context{"field": "SmtpConfig.Address", "address": config.Address},
+                exceptioncontract.Context{"argument": "address", "address": address},
                 portErr,
             ),
         )
@@ -48,7 +48,7 @@ func NewSmtpTransport(config SmtpConfig) *SmtpTransport {
 
     host := config.Host
     if "" == host {
-        host = hostFromAddress(config.Address)
+        host = hostFromAddress(address)
     }
 
     localName := config.LocalName
@@ -94,7 +94,7 @@ func NewSmtpTransport(config SmtpConfig) *SmtpTransport {
     }
 
     return &SmtpTransport{
-        address:                config.Address,
+        address:                address,
         host:                   host,
         username:               config.Username,
         password:               config.Password,
@@ -110,7 +110,6 @@ func NewSmtpTransport(config SmtpConfig) *SmtpTransport {
 }
 
 type SmtpConfig struct {
-    Address               string
     Host                  string
     Username              string
     Password              string
@@ -416,7 +415,7 @@ func (instance *SmtpTransport) connect(ctx context.Context) (net.Conn, error) {
         return tlsDialer.DialContext(ctx, "tcp", instance.address)
     }
 
-    /* the client is built with instance.host rather than smtp.Dial(address), since startTls uses instance.host for SNI and PlainAuth was built with it, and a Host differing from the Address host would fail with "wrong host name"; the implicit-TLS branch does the same */
+    /* the client is built with instance.host rather than smtp.Dial(address), since startTls uses instance.host for SNI and PlainAuth was built with it, and a Host differing from the address host would fail with "wrong host name"; the implicit-TLS branch does the same */
     return dialer.DialContext(ctx, "tcp", instance.address)
 }
 

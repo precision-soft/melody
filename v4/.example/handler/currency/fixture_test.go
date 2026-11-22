@@ -169,9 +169,11 @@ func (instance *currencyDoorFixture) call(
 
     request := melodyhttp.NewRequest(
         httpRequest,
-        parameters,
         runtimeInstance,
-        melodyhttp.NewRequestContext("currency-door-test", time.Now()),
+        melodyhttp.RequestConfig{
+            RouteParameters: parameters,
+            RequestContext:  melodyhttp.NewRequestContext("currency-door-test", time.Now()),
+        },
     )
 
     response, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request)

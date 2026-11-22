@@ -250,7 +250,7 @@ func TestWriteResponse_SetsSessionCookieWithSecureAndSameSite(t *testing.T) {
     netRequest.RemoteAddr = "127.0.0.1:1234"
     netRequest.TLS = &tls.ConnectionState{}
 
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
 
     response := EmptyResponse(nethttp.StatusOK)
 
@@ -323,7 +323,7 @@ func TestWriteResponse_ClearsSessionCookieWithMaxAgeNegative(t *testing.T) {
     netRequest.RemoteAddr = "127.0.0.1:1234"
     netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: "session-123"})
 
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
 
     response := EmptyResponse(nethttp.StatusOK)
 
@@ -383,7 +383,7 @@ func TestWriteResponse_ForcesTheSecureSessionCookieWhenThePolicyDemandsIt(t *tes
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
 
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
 
     writer := httptest.NewRecorder()
 
@@ -431,7 +431,7 @@ func TestWriteResponse_SessionCookieSecureNeverOverridesTheDetectedScheme(t *tes
     netRequest.RemoteAddr = "127.0.0.1:1234"
     netRequest.TLS = &tls.ConnectionState{}
 
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
 
     writer := httptest.NewRecorder()
 
@@ -478,7 +478,7 @@ func TestWriteResponse_DoesNotStoreASessionTheDiscardedResponseCannotAdvertise(t
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/events", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
 
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
 
     writer := newRecordingResponseWriter(httptest.NewRecorder())
     writer.WriteHeader(nethttp.StatusOK)
@@ -530,7 +530,7 @@ func TestWriteResponse_StillStoresASessionTheClientAlreadyHoldsOnADiscardedRespo
         },
     )
 
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
 
     writer := newRecordingResponseWriter(httptest.NewRecorder())
     writer.WriteHeader(nethttp.StatusOK)
@@ -573,7 +573,7 @@ func TestWriteResponse_StillDeletesAClearedSessionOnADiscardedResponse(t *testin
     netRequest.RemoteAddr = "127.0.0.1:1234"
     netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: "0123456789abcdef0123456789abcdef"})
 
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
 
     writer := newRecordingResponseWriter(httptest.NewRecorder())
     writer.WriteHeader(nethttp.StatusOK)
@@ -730,7 +730,7 @@ func TestControllerHandler_ResolvesTheControllersArgumentsFromTheContainer(t *te
     handler := ControllerHandler(controller)
 
     netRequest := httptest.NewRequest("GET", "http://example.com/", nil)
-    request := NewRequest(netRequest, nil, runtimeInstance, nil)
+    request := NewRequest(netRequest, runtimeInstance, RequestConfig{})
 
     response, err := handler(runtimeInstance, httptest.NewRecorder(), request)
     if nil != err {
@@ -778,7 +778,7 @@ func TestControllerHandler_InsertsRuntimeWhenControllerRequestsRuntimeParameter(
     handler := ControllerHandler(controller)
 
     netRequest := httptest.NewRequest("GET", "http://example.com/", nil)
-    request := NewRequest(netRequest, nil, runtimeInstance, nil)
+    request := NewRequest(netRequest, runtimeInstance, RequestConfig{})
 
     response, err := handler(runtimeInstance, httptest.NewRecorder(), request)
     if nil != err {
@@ -814,7 +814,7 @@ func TestControllerHandler_ReturnsErrorWhenRuntimeIsNil(t *testing.T) {
     handler := ControllerHandler(controller)
 
     netRequest := httptest.NewRequest("GET", "http://example.com/", nil)
-    request := NewRequest(netRequest, nil, nil, nil)
+    request := NewRequest(netRequest, nil, RequestConfig{})
 
     _, err := handler(nil, httptest.NewRecorder(), request)
     if nil == err {
@@ -842,7 +842,7 @@ func TestControllerHandler_PropagatesScopeGetByTypeError(t *testing.T) {
     handler := ControllerHandler(controller)
 
     netRequest := httptest.NewRequest("GET", "http://example.com/", nil)
-    request := NewRequest(netRequest, nil, runtimeInstance, nil)
+    request := NewRequest(netRequest, runtimeInstance, RequestConfig{})
 
     _, err := handler(runtimeInstance, httptest.NewRecorder(), request)
     if expectedErr != err {
@@ -866,7 +866,7 @@ func TestControllerHandler_ReturnsControllerErrorAndNilResponse(t *testing.T) {
     runtimeInstance := &testRuntime{scope: &testScope{}}
 
     netRequest := httptest.NewRequest("GET", "http://example.com/", nil)
-    request := NewRequest(netRequest, nil, runtimeInstance, nil)
+    request := NewRequest(netRequest, runtimeInstance, RequestConfig{})
 
     response, err := handler(runtimeInstance, httptest.NewRecorder(), request)
     if expectedErr != err {
@@ -888,7 +888,7 @@ func TestControllerHandler_ReturnsNilResponseWhenControllerReturnsNilResponseAnd
     runtimeInstance := &testRuntime{scope: &testScope{}}
 
     netRequest := httptest.NewRequest("GET", "http://example.com/", nil)
-    request := NewRequest(netRequest, nil, runtimeInstance, nil)
+    request := NewRequest(netRequest, runtimeInstance, RequestConfig{})
 
     response, err := handler(runtimeInstance, httptest.NewRecorder(), request)
     if nil != err {
@@ -1088,7 +1088,7 @@ func TestControllerHandler_PanicsWhenDependencyIsNilFromScope(t *testing.T) {
     handler := ControllerHandler(controller)
 
     netRequest := httptest.NewRequest("GET", "http://example.com/", nil)
-    request := NewRequest(netRequest, nil, runtimeInstance, nil)
+    request := NewRequest(netRequest, runtimeInstance, RequestConfig{})
 
     defer func() {
         recoveredValue := recover()
@@ -1125,7 +1125,7 @@ func TestWriteResponse_NilResponsePersistsSessionAndWritesNoContent(t *testing.T
     netRequest.RemoteAddr = "127.0.0.1:1234"
     netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: "session-123"})
 
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
 
     writer := httptest.NewRecorder()
 
@@ -1181,7 +1181,7 @@ func TestWriteResponse_SkipsPersistenceForATypedNilSession(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
 
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
 
     response := EmptyResponse(nethttp.StatusOK)
     writer := httptest.NewRecorder()
@@ -1223,7 +1223,7 @@ func TestWriteResponse_SkipsPersistenceForATypedNilManager(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
 
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
 
     response := EmptyResponse(nethttp.StatusOK)
     writer := httptest.NewRecorder()
@@ -1261,7 +1261,7 @@ func TestWriteResponse_ADeletedSessionExpiresTheCookieAndKeepsTheResponse(t *tes
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
 
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
 
     response := TextResponse(nethttp.StatusOK, "handler body")
     writer := httptest.NewRecorder()
@@ -1323,7 +1323,7 @@ func TestWriteResponse_AnExpiringSessionCookieMarksTheResponsePrivate(t *testing
         netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
         netRequest.RemoteAddr = "127.0.0.1:1234"
 
-        melodyRequest := NewRequest(netRequest, nil, nil, nil)
+        melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
 
         response := TextResponse(nethttp.StatusOK, "handler body")
         response.Headers().Set("Cache-Control", "public, max-age=60")
@@ -1361,7 +1361,7 @@ func TestWriteResponse_ARotatedAwaySessionKeepsTheCookieAndTheResponse(t *testin
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
 
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
 
     response := TextResponse(nethttp.StatusOK, "handler body")
     writer := httptest.NewRecorder()
@@ -1404,7 +1404,7 @@ func TestWriteResponse_ASaveOutageAnswersServiceUnavailableWithoutACookie(t *tes
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
 
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
 
     response := TextResponse(nethttp.StatusOK, "welcome")
     writer := httptest.NewRecorder()
@@ -1471,7 +1471,7 @@ func TestWriteResponse_ReturnsTheReplacedServiceUnavailableOnASaveOutage(t *test
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
 
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
 
     response := TextResponse(nethttp.StatusOK, "welcome")
     writer := httptest.NewRecorder()
@@ -1508,7 +1508,7 @@ func TestWriteResponse_ReturnsTheCallersResponseWhenNothingReplacedIt(t *testing
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
 
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
 
     response := TextResponse(nethttp.StatusOK, "welcome")
     writer := httptest.NewRecorder()
@@ -1543,7 +1543,7 @@ func TestWriteResponse_TheBranchDecisionFollowsTheSnapshotNotTheAccessors(t *tes
     netRequest.RemoteAddr = "127.0.0.1:1234"
     netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: "1234567890abcdef1234567890abcdef"})
 
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
 
     writer := httptest.NewRecorder()
 
@@ -1611,7 +1611,7 @@ func TestWriteResponse_AnOutOfRangeStatusCodeAnswersTheRenderedServerError(t *te
 
 func TestWriteResponse_RefusesTheOutOfRangeCodeBeforeTheDelegate(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
 
     recorder := httptest.NewRecorder()
 
@@ -1637,7 +1637,7 @@ func TestWriteResponse_RefusesTheOutOfRangeCodeBeforeTheDelegate(t *testing.T) {
 }
 
 func TestIsClientAbortWriteError_ClassifiesTheBrokenPipeAndTheCancelledRequest(t *testing.T) {
-    liveRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil), nil, nil, nil)
+    liveRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil), nil, RequestConfig{})
 
     if false == isClientAbortWriteError(liveRequest, syscall.EPIPE) {
         t.Fatal("expected a broken pipe to classify as the client's abort")
@@ -1653,7 +1653,7 @@ func TestIsClientAbortWriteError_ClassifiesTheBrokenPipeAndTheCancelledRequest(t
 
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
-    cancelledRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil).WithContext(cancelledContext), nil, nil, nil)
+    cancelledRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil).WithContext(cancelledContext), nil, RequestConfig{})
 
     if false == isClientAbortWriteError(cancelledRequest, errors.New("any write failure")) {
         t.Fatal("expected a cancelled request context to classify the write failure as the client's abort")
@@ -1663,7 +1663,7 @@ func TestIsClientAbortWriteError_ClassifiesTheBrokenPipeAndTheCancelledRequest(t
 func TestIsClientAbortWriteError_KeepsAFailureUnderAnApplicationDeadlineOrCauseServerSide(t *testing.T) {
     expiredContext, cancelExpired := context.WithDeadline(context.Background(), time.Unix(0, 0))
     defer cancelExpired()
-    expiredRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil).WithContext(expiredContext), nil, nil, nil)
+    expiredRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil).WithContext(expiredContext), nil, RequestConfig{})
 
     if true == isClientAbortWriteError(expiredRequest, errors.New("disk full")) {
         t.Fatal("expected a write failure under an expired application deadline to stay a server-side failure")
@@ -1675,7 +1675,7 @@ func TestIsClientAbortWriteError_KeepsAFailureUnderAnApplicationDeadlineOrCauseS
 
     causedContext, cancelCaused := context.WithCancelCause(context.Background())
     cancelCaused(errors.New("request budget spent"))
-    causedRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil).WithContext(causedContext), nil, nil, nil)
+    causedRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil).WithContext(causedContext), nil, RequestConfig{})
 
     if true == isClientAbortWriteError(causedRequest, errors.New("disk full")) {
         t.Fatal("expected a write failure under an application cancellation with a cause to stay a server-side failure")
@@ -1701,7 +1701,7 @@ func (instance *panickingCloser) Close() error {
 
 func TestWriteResponse_ADiscardedResponseReportsTheCommittedStatus(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/stream", nil)
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
 
     writer := newRecordingResponseWriter(httptest.NewRecorder())
     writer.WriteHeader(nethttp.StatusOK)
@@ -1726,7 +1726,7 @@ func TestWriteResponse_ADiscardedResponseReportsTheCommittedStatus(t *testing.T)
 
 func TestWriteResponse_AHijackedConnectionKeepsTheSubstituteStatus(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/upgrade", nil)
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
 
     writer := newRecordingResponseWriter(&hijackableResponseWriter{ResponseWriter: httptest.NewRecorder()})
     _, _, hijackErr := writer.Hijack()
@@ -1812,7 +1812,7 @@ func writeResponseWithSessionOutcome(
     netRequest.RemoteAddr = "127.0.0.1:1234"
     netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionInstance.Id()})
 
-    sessionRequest := NewRequest(netRequest, nil, nil, nil)
+    sessionRequest := NewRequest(netRequest, nil, RequestConfig{})
     sessionRequest.Attributes().Set(requestAttributeSession, sessionInstance)
 
     writeResponse(
@@ -2227,7 +2227,7 @@ func TestWriteResponse_ClosesTheBodyItDiscardsForAnOutOfRangeStatus(t *testing.T
     response.SetBodyReader(bodyReader)
     response.SetStatusCode(1200)
 
-    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil), nil, nil, nil)
+    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil), nil, RequestConfig{})
 
     written := writeResponse(nil, request, httptest.NewRecorder(), response, nil, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{}, 0, nil)
 
@@ -2282,7 +2282,7 @@ func TestWriteResponse_AnEarlyHintLeavesTheReturnedResponseToBeWritten(t *testin
 
         writeResponse(
             newTestRuntime(),
-            NewRequest(rawRequest, nil, nil, nil),
+            NewRequest(rawRequest, nil, RequestConfig{}),
             writer,
             EmptyResponse(nethttp.StatusCreated),
             nil,
@@ -2319,7 +2319,7 @@ func TestWriteResponse_AClearedSessionTheRequestDoesNotNameIsNotDeleted(t *testi
     sessionManager := &stubSessionManager{}
     writer := httptest.NewRecorder()
 
-    sessionRequest := NewRequest(netRequest, nil, nil, nil)
+    sessionRequest := NewRequest(netRequest, nil, RequestConfig{})
     sessionRequest.Attributes().Set(requestAttributeSession, &stubSession{id: "0123456789abcdef0123456789abcdef", isCleared: true})
 
     writeResponse(
@@ -2435,7 +2435,7 @@ func sessionCookieWrittenOverPlainHttp(t *testing.T, sameSite nethttp.SameSite, 
 
     writer := httptest.NewRecorder()
 
-    sessionRequest := NewRequest(netRequest, nil, nil, nil)
+    sessionRequest := NewRequest(netRequest, nil, RequestConfig{})
     sessionRequest.Attributes().Set(requestAttributeSession, &stubSession{id: "0123456789abcdef0123456789abcdef", isModified: true})
 
     writeResponse(
@@ -2569,7 +2569,7 @@ func (instance *cyclicClosingBody) Close() error {
 }
 
 func TestIsClientAbortWriteError_ReturnsOnACyclicChain(t *testing.T) {
-    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil), nil, nil, nil)
+    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil), nil, RequestConfig{})
 
     assertReturnsOnACyclicChain(t, func() {
         if true == isClientAbortWriteError(request, newCyclicChainError()) {
@@ -2591,7 +2591,7 @@ func TestWriteResponse_AnUnmarkedCyclicChainFromTheSessionSaveIsAnsweredWithAnIn
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
 
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
     writer := httptest.NewRecorder()
 
     assertReturnsOnACyclicChain(t, func() {
@@ -2616,7 +2616,7 @@ func TestWriteResponse_AnUnmarkedCyclicChainFromTheSessionSaveIsAnsweredWithAnIn
 }
 
 func TestWriteResponse_AnInformationalStatusIsAnsweredAsTheRenderedInternalServerError(t *testing.T) {
-    melodyRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, nil, nil)
+    melodyRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, RequestConfig{})
 
     body := &closeTrackingReader{}
     response := &Response{statusCode: nethttp.StatusEarlyHints, headers: make(nethttp.Header), bodyReader: body}
@@ -2635,7 +2635,7 @@ func TestWriteResponse_AnInformationalStatusIsAnsweredAsTheRenderedInternalServe
 }
 
 func TestKernel_AResponseObjectWithSwitchingProtocolsIsAnsweredAsTheRendered500(t *testing.T) {
-    melodyRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, nil, nil)
+    melodyRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, RequestConfig{})
 
     recordingLogger := &recordsCaptureLogger{}
     serviceContainer := container.NewContainer(container.ContainerConfig{})
@@ -2685,7 +2685,7 @@ func writeResponseUnderRequestContext(
     netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/account", nil).WithContext(requestContext)
     netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionInstance.Id()})
 
-    sessionRequest := NewRequest(netRequest, nil, nil, nil)
+    sessionRequest := NewRequest(netRequest, nil, RequestConfig{})
     sessionRequest.Attributes().Set(requestAttributeSession, sessionInstance)
 
     return writeResponse(
@@ -2738,7 +2738,7 @@ func TestWriteResponse_PersistsUnderTheRuntimesContextOverTheNetRequests(t *test
     netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/account", nil)
     netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionInstance.Id()})
 
-    sessionRequest := NewRequest(netRequest, nil, nil, nil)
+    sessionRequest := NewRequest(netRequest, nil, RequestConfig{})
     sessionRequest.Attributes().Set(requestAttributeSession, sessionInstance)
 
     writeResponse(runtimeInstance, sessionRequest, httptest.NewRecorder(), TextResponse(nethttp.StatusOK, "handler body"), sessionManager, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{Path: "/"}, 0, nil)
@@ -2917,7 +2917,7 @@ func TestWriteResponse_AnUnmodifiedSessionBuildsNoPersistenceContext(t *testing.
 }
 
 func TestWriteResponse_ASaveOutageAnswersTheKernelsRetryAfter(t *testing.T) {
-    sessionRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, nil, nil)
+    sessionRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, RequestConfig{})
     sessionRequest.Attributes().Set(requestAttributeSession, &stubSession{id: "session-1", isModified: true})
 
     writer := httptest.NewRecorder()
@@ -2972,7 +2972,7 @@ func writeResponseRecorded(
     netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/account", nil)
     netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionInstance.Id()})
 
-    sessionRequest := NewRequest(netRequest, nil, nil, nil)
+    sessionRequest := NewRequest(netRequest, nil, RequestConfig{})
     sessionRequest.Attributes().Set(requestAttributeSession, sessionInstance)
 
     response := writeResponse(
@@ -3103,7 +3103,7 @@ func TestWriteResponse_ADeleteOutageOnAHijackedConnectionKeepsTheHandlersRespons
 func TestWriteResponse_ThePersistenceRuntimeKeepsTheRequestsScopeAndKind(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
     melodyRequest.Attributes().Set(requestAttributeSession, &stubSession{id: "session-123", isModified: true})
 
     requestScope := container.NewContainer(container.ContainerConfig{}).NewScope()
@@ -3134,7 +3134,7 @@ func TestWriteResponse_ThePersistenceRuntimeKeepsTheRequestsScopeAndKind(t *test
 func TestWriteResponse_AnAbsentRuntimeRefusesThePersistenceWithoutAPanic(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
     melodyRequest.Attributes().Set(requestAttributeSession, &stubSession{id: "session-123", isModified: true})
 
     sessionManager := &stubSessionManager{}
@@ -3150,7 +3150,7 @@ func TestWriteResponse_AnAbsentRuntimeRefusesThePersistenceWithoutAPanic(t *test
 func TestWriteResponse_ARefusedStorageTimeoutIsNotNamedTheBoundUnderAnExpiredRequest(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
-    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    melodyRequest := NewRequest(netRequest, nil, RequestConfig{})
     melodyRequest.Attributes().Set(requestAttributeSession, &stubSession{id: "session-123", isModified: true})
 
     expiredContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))

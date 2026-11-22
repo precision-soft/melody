@@ -26,15 +26,9 @@ import (
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
-/* FileStorageConfig names the file the storage persists to: exactly one of Path and File. */
+/* FileStorageConfig tunes the storage NewFileStorage builds over a path or NewFileStorageOverFile over an open handle. */
 type FileStorageConfig struct {
-    /* Path is a file the storage owns, snapshotted through a temporary file and a rename; each write appends a synced record to <path>.journal, compacted into the snapshot at construction, past JournalMaxBytes and at close. */
-    Path string
-
-    /* File is an open handle the caller keeps owning; every write rewrites the whole snapshot through it, never journaled, and a crash mid-write can leave a torn document. */
-    File *os.File
-
-    /* JournalDisabled writes the whole snapshot on every Save and Delete in Path mode; a journal left at the path is replayed and compacted at construction, then removed. */
+    /* JournalDisabled writes the whole snapshot on every Save and Delete over a path; a journal left at the path is replayed and compacted at construction, then removed. */
     JournalDisabled bool
 
     /* JournalMaxBytes is the journal size past which a write compacts it into the snapshot: 8 MiB when left out, at least 64 KiB, unlimited refused. */
@@ -57,19 +51,25 @@ var fileStorageMaxSessionsRule = bound.Rule[int]{
     UnlimitedAdmitted: true,
 }
 
-/* NewFileStorage builds the storage over the configured path or handle and loads the sessions the file holds. */
-func NewFileStorage(config FileStorageConfig) (*FileStorage, error) {
-    if "" != config.Path && nil != config.File {
-        return nil, exception.NewError(
-            "session file storage declares both a path and a file",
-            exceptioncontract.Context{
-                "path": config.Path,
-                "file": config.File.Name(),
-            },
-            nil,
-        )
+/* NewFileStorage persists to path, a file the storage owns, snapshotted through a temporary file and a rename, each write appending a synced record to <path>.journal compacted into the snapshot at construction, past JournalMaxBytes and at close; an empty path is refused naming the argument. */
+func NewFileStorage(path string, config FileStorageConfig) (*FileStorage, error) {
+    if "" == path {
+        return nil, exception.NewError("session file storage path is empty", exceptioncontract.Context{"argument": "path"}, nil)
     }
 
+    return newFileStorage(path, nil, config)
+}
+
+/* NewFileStorageOverFile persists through file, an open handle the caller keeps owning, every write rewriting the whole snapshot, never journaled, so a crash mid-write can leave a torn document; a nil file is refused naming the argument. */
+func NewFileStorageOverFile(file *os.File, config FileStorageConfig) (*FileStorage, error) {
+    if nil == file {
+        return nil, exception.NewError("session file storage file is nil", exceptioncontract.Context{"argument": "file"}, nil)
+    }
+
+    return newFileStorage("", file, config)
+}
+
+func newFileStorage(path string, file *os.File, config FileStorageConfig) (*FileStorage, error) {
     maxSessions, maxSessionsErr := bound.Resolve(config.MaxSessions, fileStorageMaxSessionsRule)
     if nil != maxSessionsErr {
         return nil, maxSessionsErr
@@ -98,12 +98,10 @@ func NewFileStorage(config FileStorageConfig) (*FileStorage, error) {
     var storage *FileStorage
     var storageErr error
 
-    if nil != config.File {
-        storage, storageErr = newFileStorageFromFile(config.File, clockInstance)
-    } else if "" == config.Path {
-        return nil, exception.NewError("session file storage declares neither a path nor a file", nil, nil)
+    if nil != file {
+        storage, storageErr = newFileStorageFromFile(file, clockInstance)
     } else {
-        storage, storageErr = newFileStorageFromPath(config.Path, clockInstance, false == config.JournalDisabled, journalMaxBytes, config.Logger)
+        storage, storageErr = newFileStorageFromPath(path, clockInstance, false == config.JournalDisabled, journalMaxBytes, config.Logger)
     }
 
     if nil != storageErr {

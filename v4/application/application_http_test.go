@@ -352,7 +352,7 @@ func newCacheWarningTestApplicationOver(t *testing.T, mode string, extraValues m
         configuration:        configuration,
         runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: mode}),
         kernel:               newTestKernel(),
-        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration)),
         moduleConfigurations: make(map[string]any),
     }
 
@@ -425,7 +425,7 @@ func newSessionBoundTestApplication(t *testing.T, mode string, sessionValues map
         configuration:        configuration,
         runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: mode}),
         kernel:               newTestKernel(),
-        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration)),
         moduleConfigurations: make(map[string]any),
     }
 
@@ -650,7 +650,7 @@ func assertRunHttpCutsTheShutdownAtTheBudget(t *testing.T, address string, value
         configuration:        configuration,
         runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
         kernel:               newTestKernel(),
-        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration)),
         moduleConfigurations: make(map[string]any),
     }
 
@@ -1031,7 +1031,7 @@ func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *
         configuration:        configuration,
         runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
         kernel:               kernelInstance,
-        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration)),
         moduleConfigurations: make(map[string]any),
     }
 
@@ -1507,7 +1507,7 @@ func TestRunHttp_ServesThroughTheRegisteredDecorators(t *testing.T) {
         configuration:        configuration,
         runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
         kernel:               newTestKernel(),
-        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration)),
         moduleConfigurations: make(map[string]any),
     }
 
@@ -1855,7 +1855,7 @@ func TestRunHttp_RefusesAScopeTeardownTimeoutOutlastingTheShutdownBeforeServing(
         configuration:        configuration,
         runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
         kernel:               newTestKernel(),
-        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration)),
         moduleConfigurations: make(map[string]any),
     }
 
@@ -1891,7 +1891,7 @@ func TestBootHttpPipeline_RefusesAManagerDeclaringAStorageTimeoutTheRuleRefusesI
         configuration:        configuration,
         runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
         kernel:               newTestKernel(),
-        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration)),
         moduleConfigurations: make(map[string]any),
     }
 

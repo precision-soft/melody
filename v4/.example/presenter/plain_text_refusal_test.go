@@ -38,7 +38,7 @@ func textNegotiatingRequest(t *testing.T) (melodycontainercontract.Runtime, melo
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/missing", nil)
     httpRequest.Header.Set("Accept", "text/plain")
 
-    return runtimeInstance, melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("refusal-test", time.Now()))
+    return runtimeInstance, melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("refusal-test", time.Now())})
 }
 
 func TestApiErrorAnswersATextPlainClientWithReadableLines(t *testing.T) {

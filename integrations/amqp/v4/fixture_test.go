@@ -35,6 +35,25 @@ func expectErrorNamingField(t *testing.T, err error, field string) {
     }
 }
 
+func expectPanicNamingTheArgument(t *testing.T, argument string, callback func()) {
+    t.Helper()
+
+    defer func() {
+        t.Helper()
+
+        recoveredErr, isError := recover().(error)
+        if false == isError {
+            t.Fatalf("expected a refusal naming the %s argument, got no error panic", argument)
+        }
+
+        if context := exception.LogContext(recoveredErr, exception.LogContextConfig{}); argument != context["argument"] {
+            t.Fatalf("expected a refusal naming the %s argument, got %v: %v", argument, context, recoveredErr)
+        }
+    }()
+
+    callback()
+}
+
 func expectPanicNamingField(t *testing.T, field string, callback func()) {
     t.Helper()
 

@@ -168,9 +168,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
     builder.AddFirewall(
         "internal",
         melodysecurity.NewSegmentPrefixMatcher(route.InternalPrefix),
-        melodysecurity.NewHmacTokenSource(melodysecurity.HmacTokenSourceConfig{
-            Secrets:         instance.hmacSecrets,
-            Applications:    instance.hmacApplications,
+        melodysecurity.NewHmacTokenSource(instance.hmacSecrets, instance.hmacApplications, melodysecurity.HmacTokenSourceConfig{
             MaxFutureExpiry: bound.Of(internalEnvelopeMaxFutureExpiry),
             NonceGuard:      instance.internalNonceGuard(),
         }),
@@ -182,7 +180,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
                         Attributes: []string{internalCallerRole},
                     }),
                 }),
-                EntryPoint:          melodysecurity.NewJsonEntryPoint(),
+                EntryPoint:          melodysecurity.NewJsonEntryPoint(melodysecurity.JsonEntryPointConfig{}),
                 AccessDeniedHandler: melodysecurity.NewJsonAccessDeniedHandler(),
             },
         },
@@ -192,13 +190,10 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
     builder.AddFirewall(
         "token",
         melodysecurity.NewSegmentPrefixMatcher(route.SecurePrefix),
-        melodysecurity.NewImpersonationTokenSource(melodysecurity.ImpersonationTokenSourceConfig{
-            Inner: melodysecurity.NewBearerTokenSource(instance.tokenValidator, newScopeRoleEnricher()),
-            Users: instance.impersonatedUsers,
-        }),
+        melodysecurity.NewImpersonationTokenSource(melodysecurity.NewBearerTokenSource(instance.tokenValidator, melodysecurity.BearerTokenSourceConfig{Enricher: newScopeRoleEnricher()}), instance.impersonatedUsers, melodysecurity.ImpersonationTokenSourceConfig{}),
         melodysecurityconfig.FirewallConfig{
             Override: melodysecurityconfig.FirewallOverride{
-                EntryPoint:          melodysecurity.NewJsonEntryPoint(),
+                EntryPoint:          melodysecurity.NewJsonEntryPoint(melodysecurity.JsonEntryPointConfig{}),
                 AccessDeniedHandler: melodysecurity.NewJsonAccessDeniedHandler(),
             },
         },
@@ -208,10 +203,10 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
     builder.AddFirewall(
         "deviceToken",
         melodysecurity.NewSegmentPrefixMatcher(route.DevicePrefix),
-        melodysecurity.NewBearerTokenSource(instance.opaqueTokenValidator, newDeviceAccountEnricher(repositoryDeviceAccountLookup)),
+        melodysecurity.NewBearerTokenSource(instance.opaqueTokenValidator, melodysecurity.BearerTokenSourceConfig{Enricher: newDeviceAccountEnricher(repositoryDeviceAccountLookup)}),
         melodysecurityconfig.FirewallConfig{
             Override: melodysecurityconfig.FirewallOverride{
-                EntryPoint:          melodysecurity.NewJsonEntryPoint(),
+                EntryPoint:          melodysecurity.NewJsonEntryPoint(melodysecurity.JsonEntryPointConfig{}),
                 AccessDeniedHandler: melodysecurity.NewJsonAccessDeniedHandler(),
             },
         },
@@ -302,9 +297,8 @@ func (instance *Module) registerMetricsFirewall(builder *melodysecurityconfig.Bu
         melodysecurity.NewSegmentPrefixMatcher(metricsPath),
         melodysecurity.NewAuthenticatorTokenSource(
             melodysecurity.NewAuthenticatorManager([]melodysecuritycontract.Authenticator{
-                melodysecurity.NewApiKeyHeaderAuthenticator(melodysecurity.ApiKeyHeaderAuthenticatorConfig{
+                melodysecurity.NewApiKeyHeaderAuthenticator("Bearer " + instance.metricsToken, melodysecurity.ApiKeyHeaderAuthenticatorConfig{
                     HeaderName:     "Authorization",
-                    ExpectedValue:  "Bearer " + instance.metricsToken,
                     UserIdentifier: "prometheus",
                     Roles:          []string{metricsScraperRole},
                 }),
@@ -313,7 +307,7 @@ func (instance *Module) registerMetricsFirewall(builder *melodysecurityconfig.Bu
         ),
         melodysecurityconfig.FirewallConfig{
             Override: melodysecurityconfig.FirewallOverride{
-                EntryPoint:          melodysecurity.NewJsonEntryPoint(),
+                EntryPoint:          melodysecurity.NewJsonEntryPoint(melodysecurity.JsonEntryPointConfig{}),
                 AccessDeniedHandler: melodysecurity.NewJsonAccessDeniedHandler(),
             },
         },

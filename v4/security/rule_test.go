@@ -12,19 +12,13 @@ import (
 /* the matcher is real because the constructor checks it FIRST: passing nil made both of these observe the matcher's panic instead of their own, and the guard each is named for could be deleted with the suite still green. The empty expected value is the one that matters — it makes constantTimeSecretEquals("", "") accept a request that carries no header at all. */
 func TestNewApiKeyHeaderRule_EmptyExpectedValuePanics(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewApiKeyHeaderRule(&alwaysApplyingMatcher{}, ApiKeyHeaderRuleConfig{HeaderName: "X-Api-Key", ExpectedValue: ""})
+        _ = NewApiKeyHeaderRule(&alwaysApplyingMatcher{}, "", ApiKeyHeaderRuleConfig{HeaderName: "X-Api-Key"})
     }, "api key header rule expected value is empty")
-}
-
-func TestNewApiKeyHeaderRule_EmptyHeaderNamePanics(t *testing.T) {
-    testhelper.AssertPanicsWithError(t, func() {
-        _ = NewApiKeyHeaderRule(&alwaysApplyingMatcher{}, ApiKeyHeaderRuleConfig{HeaderName: "", ExpectedValue: "expected-secret"})
-    }, "api key header rule header name is empty")
 }
 
 func TestNewApiKeyHeaderRule_NilMatcherPanics(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewApiKeyHeaderRule(nil, ApiKeyHeaderRuleConfig{HeaderName: "X-Api-Key", ExpectedValue: "secret"})
+        _ = NewApiKeyHeaderRule(nil, "secret", ApiKeyHeaderRuleConfig{HeaderName: "X-Api-Key"})
     }, "api key header rule matcher is nil")
 }
 
@@ -32,7 +26,7 @@ func TestNewApiKeyHeaderRule_TypedNilMatcherPanics(t *testing.T) {
     var typedNilMatcher *PathPrefixMatcher
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewApiKeyHeaderRule(typedNilMatcher, ApiKeyHeaderRuleConfig{HeaderName: "X-Api-Key", ExpectedValue: "secret"})
+        _ = NewApiKeyHeaderRule(typedNilMatcher, "secret", ApiKeyHeaderRuleConfig{HeaderName: "X-Api-Key"})
     }, "api key header rule matcher is nil")
 }
 
@@ -50,7 +44,7 @@ var _ securitycontract.Matcher = (*alwaysApplyingMatcher)(nil)
 /* A nil pointer of a request type is a non-nil interface, so a bare comparison would carry it
 to the header read, which dereferences it. The rule must refuse a request it cannot read, not crash on it. */
 func TestApiKeyHeaderRule_Check_ATypedNilRequestIsForbidden(t *testing.T) {
-    rule := NewApiKeyHeaderRule(&alwaysApplyingMatcher{}, ApiKeyHeaderRuleConfig{HeaderName: "X-Api-Key", ExpectedValue: "secret"})
+    rule := NewApiKeyHeaderRule(&alwaysApplyingMatcher{}, "secret", ApiKeyHeaderRuleConfig{HeaderName: "X-Api-Key"})
 
     var unassignedRequest *http.Request
 
@@ -60,14 +54,36 @@ func TestApiKeyHeaderRule_Check_ATypedNilRequestIsForbidden(t *testing.T) {
     }
 }
 
-func TestNewApiKeyHeaderRule_RefusesAnEmptyRequiredFieldByName(t *testing.T) {
+func TestNewApiKeyHeaderRule_RefusesAMissingArgumentAndDefaultsTheHeaderName(t *testing.T) {
     matcher := NewPathPrefixMatcher("/api")
 
-    expectPanicNamingField(t, "ApiKeyHeaderRuleConfig.HeaderName", func() {
-        NewApiKeyHeaderRule(matcher, ApiKeyHeaderRuleConfig{ExpectedValue: "secret"})
-    })
+    cases := []struct {
+        name               string
+        matcher            securitycontract.Matcher
+        expectedValue      string
+        config             ApiKeyHeaderRuleConfig
+        expectedArgument   string
+        expectedHeaderName string
+    }{
+        {"a nil matcher", nil, "secret", ApiKeyHeaderRuleConfig{}, "matcher", ""},
+        {"an empty expected value", matcher, "", ApiKeyHeaderRuleConfig{HeaderName: "X-Api-Key"}, "expectedValue", ""},
+        {"an empty header name", matcher, "secret", ApiKeyHeaderRuleConfig{}, "", DefaultApiKeyHeaderName},
+        {"a declared header name", matcher, "secret", ApiKeyHeaderRuleConfig{HeaderName: "X-Service-Key"}, "", "X-Service-Key"},
+    }
 
-    expectPanicNamingField(t, "ApiKeyHeaderRuleConfig.ExpectedValue", func() {
-        NewApiKeyHeaderRule(matcher, ApiKeyHeaderRuleConfig{HeaderName: "X-Api-Key"})
-    })
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            if "" != testCase.expectedArgument {
+                expectPanicNamingTheArgument(t, testCase.expectedArgument, func() {
+                    NewApiKeyHeaderRule(testCase.matcher, testCase.expectedValue, testCase.config)
+                })
+
+                return
+            }
+
+            if rule := NewApiKeyHeaderRule(testCase.matcher, testCase.expectedValue, testCase.config); testCase.expectedHeaderName != rule.headerName {
+                t.Fatalf("expected the header %q, got %q", testCase.expectedHeaderName, rule.headerName)
+            }
+        })
+    }
 }

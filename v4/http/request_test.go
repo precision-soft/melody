@@ -8,6 +8,7 @@ import (
     "strconv"
     "strings"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v4/bag"
     "github.com/precision-soft/melody/v4/config"
@@ -31,7 +32,7 @@ func TestRequestAttributes_TheSessionAndTheSchemeCarryTheFrameworkPrefix(t *test
 func TestNewRequest_ValidHttpRequest(t *testing.T) {
     httpRequest := httptest.NewRequest("GET", "/test?foo=bar&baz=qux", nil)
 
-    request := NewRequest(httpRequest, map[string]string{"id": "42"}, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{RouteParameters: map[string]string{"id": "42"}})
 
     if nil == request {
         t.Fatalf("expected non-nil request")
@@ -74,7 +75,7 @@ func TestNewRequest_ValidHttpRequest(t *testing.T) {
 func TestNewRequest_NilRouteParameters(t *testing.T) {
     httpRequest := httptest.NewRequest("GET", "/test", nil)
 
-    request := NewRequest(httpRequest, nil, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{})
 
     parameters := request.Parameters()
     if nil == parameters {
@@ -93,7 +94,7 @@ func TestNewRequest_NilHttpRequest_Panics(t *testing.T) {
         }
     }()
 
-    NewRequest(nil, nil, nil, nil)
+    NewRequest(nil, nil, RequestConfig{})
 }
 
 func TestNewRequest_PostFormParsing(t *testing.T) {
@@ -101,7 +102,7 @@ func TestNewRequest_PostFormParsing(t *testing.T) {
     httpRequest := httptest.NewRequest("POST", "/login", body)
     httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    request := NewRequest(httpRequest, nil, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{})
 
     postBag := request.Post()
     if nil == postBag {
@@ -130,7 +131,7 @@ func TestNewRequest_PutFormParsing(t *testing.T) {
     httpRequest := httptest.NewRequest("PUT", "/resource/1", body)
     httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    request := NewRequest(httpRequest, nil, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{})
 
     postBag := request.Post()
     if nil == postBag {
@@ -151,7 +152,7 @@ func TestNewRequest_PatchFormParsing(t *testing.T) {
     httpRequest := httptest.NewRequest("PATCH", "/resource/1", body)
     httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    request := NewRequest(httpRequest, nil, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{})
 
     postBag := request.Post()
     if nil == postBag {
@@ -170,7 +171,7 @@ func TestNewRequest_PatchFormParsing(t *testing.T) {
 func TestNewRequest_GetDoesNotParseForm(t *testing.T) {
     httpRequest := httptest.NewRequest("GET", "/test?key=value", nil)
 
-    request := NewRequest(httpRequest, nil, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{})
 
     postBag := request.Post()
     if nil == postBag {
@@ -185,7 +186,7 @@ func TestNewRequest_GetDoesNotParseForm(t *testing.T) {
 func TestRequest_Input_FallsBackToParameters(t *testing.T) {
     httpRequest := httptest.NewRequest("GET", "/test", nil)
 
-    request := NewRequest(httpRequest, map[string]string{"pkey": "pval"}, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{RouteParameters: map[string]string{"pkey": "pval"}})
 
     pval := request.Input("pkey")
     if "pval" != pval {
@@ -202,7 +203,7 @@ func TestRequest_ParametersCopied(t *testing.T) {
     httpRequest := httptest.NewRequest("GET", "/test", nil)
     originalParameters := map[string]string{"id": "1"}
 
-    request := NewRequest(httpRequest, originalParameters, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{RouteParameters: originalParameters})
 
     parameters := request.Parameters()
     parameters["id"] = "modified"
@@ -216,7 +217,7 @@ func TestRequest_ParametersCopied(t *testing.T) {
 func TestRequest_Path(t *testing.T) {
     httpRequest := httptest.NewRequest("GET", "/api/v1/users", nil)
 
-    request := NewRequest(httpRequest, nil, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{})
 
     if "/api/v1/users" != request.Path() {
         t.Fatalf("unexpected path: %s", request.Path())
@@ -226,7 +227,7 @@ func TestRequest_Path(t *testing.T) {
 func TestRequest_Method(t *testing.T) {
     httpRequest := httptest.NewRequest("DELETE", "/resource", nil)
 
-    request := NewRequest(httpRequest, nil, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{})
 
     if "DELETE" != request.Method() {
         t.Fatalf("unexpected method: %s", request.Method())
@@ -237,7 +238,7 @@ func TestRequest_Header(t *testing.T) {
     httpRequest := httptest.NewRequest("GET", "/test", nil)
     httpRequest.Header.Set("X-Custom-Header", "custom-value")
 
-    request := NewRequest(httpRequest, nil, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{})
 
     if "custom-value" != request.Header("X-Custom-Header") {
         t.Fatalf("unexpected header value: %s", request.Header("X-Custom-Header"))
@@ -249,7 +250,7 @@ func TestNewRequest_DoesNotParseFormForJsonContentType(t *testing.T) {
     httpRequest := httptest.NewRequest("POST", "/", body)
     httpRequest.Header.Set("Content-Type", "application/json")
 
-    request := NewRequest(httpRequest, nil, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{})
 
     if true == request.Post().Has("name") {
         t.Fatalf("JSON body must not be parsed as form")
@@ -269,7 +270,7 @@ func TestNewRequest_DoesNotParseFormWhenContentTypeMissing(t *testing.T) {
     body := strings.NewReader("username=alice")
     httpRequest := httptest.NewRequest("POST", "/", body)
 
-    request := NewRequest(httpRequest, nil, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{})
 
     if true == request.Post().Has("username") {
         t.Fatalf("body without Content-Type must not be parsed as form")
@@ -280,7 +281,7 @@ func TestRequest_ContentType(t *testing.T) {
     httpRequest := httptest.NewRequest("POST", "/test", nil)
     httpRequest.Header.Set("Content-Type", "application/json; charset=utf-8")
 
-    request := NewRequest(httpRequest, nil, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{})
 
     if "application/json" != request.ContentType() {
         t.Fatalf("unexpected content type: %s", request.ContentType())
@@ -290,7 +291,7 @@ func TestRequest_ContentType(t *testing.T) {
 func TestRequest_ContentType_Empty(t *testing.T) {
     httpRequest := httptest.NewRequest("GET", "/test", nil)
 
-    request := NewRequest(httpRequest, nil, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{})
 
     if "" != request.ContentType() {
         t.Fatalf("expected empty content type, got: %s", request.ContentType())
@@ -300,7 +301,7 @@ func TestRequest_ContentType_Empty(t *testing.T) {
 func TestRequest_RequestContext(t *testing.T) {
     httpRequest := httptest.NewRequest("GET", "/test", nil)
 
-    request := NewRequest(httpRequest, nil, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{})
 
     if nil != request.RequestContext() {
         t.Fatalf("expected nil request context when none provided")
@@ -310,7 +311,7 @@ func TestRequest_RequestContext(t *testing.T) {
 func TestRequest_RuntimeInstance(t *testing.T) {
     httpRequest := httptest.NewRequest("GET", "/test", nil)
 
-    request := NewRequest(httpRequest, nil, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{})
 
     if nil != request.RuntimeInstance() {
         t.Fatalf("expected nil runtime instance when none provided")
@@ -322,7 +323,7 @@ func TestRequest_ParseFormBody(t *testing.T) {
     httpRequest := httptest.NewRequest("POST", "/test", body)
     httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    request := NewRequest(httpRequest, nil, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{})
 
     err := request.ParseFormBody()
     if nil != err {
@@ -345,7 +346,7 @@ func TestRequest_FormValue(t *testing.T) {
     httpRequest := httptest.NewRequest("POST", "/test", body)
     httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    request := NewRequest(httpRequest, nil, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{})
 
     value := request.FormValue("field")
     if "formval" != value {
@@ -358,7 +359,7 @@ func TestNewRequest_ParseFormError_PostBagIsEmpty(t *testing.T) {
     httpRequest.Header.Set("Content-Type", "multipart/form-data; boundary=invalid")
     httpRequest.Body = io.NopCloser(strings.NewReader("not valid multipart"))
 
-    request := NewRequest(httpRequest, nil, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{})
 
     postBag := request.Post()
     if nil == postBag {
@@ -375,7 +376,7 @@ func TestNewRequest_ParseFormError_NilRuntime_NoPanic(t *testing.T) {
     httpRequest.Header.Set("Content-Type", "multipart/form-data; boundary=invalid")
     httpRequest.Body = io.NopCloser(strings.NewReader("not valid multipart"))
 
-    request := NewRequest(httpRequest, nil, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{})
 
     if nil == request {
         t.Fatalf("expected non-nil request even when form parsing fails with nil runtime")
@@ -384,7 +385,7 @@ func TestNewRequest_ParseFormError_NilRuntime_NoPanic(t *testing.T) {
 
 func TestRequest_Input_DeliversQueryAndPostValues(t *testing.T) {
     queryRequest := httptest.NewRequest("GET", "/search?term=melody", nil)
-    request := NewRequest(queryRequest, nil, nil, nil)
+    request := NewRequest(queryRequest, nil, RequestConfig{})
 
     if "melody" != request.Input("term") {
         t.Fatalf("expected the query value, got %q", request.Input("term"))
@@ -393,7 +394,7 @@ func TestRequest_Input_DeliversQueryAndPostValues(t *testing.T) {
     formBody := strings.NewReader("field=abc")
     postRequest := httptest.NewRequest("POST", "/submit", formBody)
     postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-    postingRequest := NewRequest(postRequest, nil, nil, nil)
+    postingRequest := NewRequest(postRequest, nil, RequestConfig{})
 
     if "abc" != postingRequest.Input("field") {
         t.Fatalf("expected the post value, got %q", postingRequest.Input("field"))
@@ -403,7 +404,7 @@ func TestRequest_Input_DeliversQueryAndPostValues(t *testing.T) {
 /* The shape of a request parameter is the client's to choose, so repeating one is not a programming error to refuse loudly: the refusal was a 500 with a full stack record that any client could raise at will. The whole array is still reachable, through bag.StringSlice. */
 func TestRequest_Input_AnswersTheFirstValueOfARepeatedKey(t *testing.T) {
     repeatedRequest := httptest.NewRequest("GET", "/search?a=1&a=2", nil)
-    request := NewRequest(repeatedRequest, nil, nil, nil)
+    request := NewRequest(repeatedRequest, nil, RequestConfig{})
 
     if "1" != request.Input("a") {
         t.Fatalf("expected the first value of the repeated key, got %q", request.Input("a"))
@@ -420,7 +421,7 @@ func TestRequest_Input_AnswersTheFirstValueOfARepeatedFormKey(t *testing.T) {
     postRequest := httptest.NewRequest("POST", "/submit", formBody)
     postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    request := NewRequest(postRequest, nil, nil, nil)
+    request := NewRequest(postRequest, nil, RequestConfig{})
 
     if "1" != request.Input("a") {
         t.Fatalf("expected the first value of the repeated form key, got %q", request.Input("a"))
@@ -433,7 +434,7 @@ func TestNewRequest_UnparsableFormIsRecordedForRefusal(t *testing.T) {
     postRequest := httptest.NewRequest("POST", "/submit", formBody)
     postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    request := NewRequest(postRequest, nil, nil, nil)
+    request := NewRequest(postRequest, nil, RequestConfig{})
 
     if nil == request.bodyReadErr {
         t.Fatalf("expected the unparsable form to be recorded for the kernel's refusal")
@@ -448,7 +449,7 @@ func TestNewRequest_AnUnparsableFormRefusalBoundsThePathItCarries(t *testing.T) 
     postRequest := httptest.NewRequest("POST", "/"+strings.Repeat("a", 600*1024), strings.NewReader("a=%zz"))
     postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    request := NewRequest(postRequest, nil, nil, nil)
+    request := NewRequest(postRequest, nil, RequestConfig{})
 
     refusal, isExceptionError := request.bodyReadErr.(*exception.Error)
     if false == isExceptionError {
@@ -468,7 +469,7 @@ func TestNewRequest_ARawBodyReadFailureIsRecordedItself(t *testing.T) {
     postRequest := httptest.NewRequest("POST", "/submit", &failingBodyReader{err: readErr})
     postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    request := NewRequest(postRequest, nil, nil, nil)
+    request := NewRequest(postRequest, nil, RequestConfig{})
 
     if readErr != request.bodyReadErr {
         t.Fatalf("expected the read error to travel unwrapped, got %v", request.bodyReadErr)
@@ -490,7 +491,7 @@ func TestRequest_CookieAccessorsReadWhatTheClientSent(t *testing.T) {
     httpRequest.AddCookie(&nethttp.Cookie{Name: "session", Value: "abc"})
     httpRequest.AddCookie(&nethttp.Cookie{Name: "locale", Value: "de"})
 
-    request := NewRequest(httpRequest, nil, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{})
 
     sessionCookie, cookieErr := request.Cookie("session")
     if nil != cookieErr {
@@ -513,7 +514,7 @@ func TestRequest_CookieAccessorsReadWhatTheClientSent(t *testing.T) {
 /* the locale and the route pattern are read off the route attributes the router published, not off the url — the pattern is what an application groups metrics and audit records by, and reading the concrete path instead would make every identifier its own route. */
 
 func TestRequest_LocaleAndRoutePatternComeFromTheRouteAttributes(t *testing.T) {
-    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/articles/42", nil), nil, nil, nil)
+    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/articles/42", nil), nil, RequestConfig{})
 
     if "" != request.Locale() {
         t.Fatalf("expected no locale before the router publishes one, got: %q", request.Locale())
@@ -549,7 +550,7 @@ func TestRequest_Input_PrefersThePostBodyOverTheQuery(t *testing.T) {
     httpRequest := httptest.NewRequest("POST", "/submit?field=fromQuery", strings.NewReader("field=fromBody"))
     httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    request := NewRequest(httpRequest, nil, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{})
 
     if "fromBody" != request.Input("field") {
         t.Fatalf("expected the post body to win over the query, got %q", request.Input("field"))
@@ -559,7 +560,7 @@ func TestRequest_Input_PrefersThePostBodyOverTheQuery(t *testing.T) {
 func TestRequest_Input_PrefersTheQueryOverTheRouteParameters(t *testing.T) {
     httpRequest := httptest.NewRequest("GET", "/articles/fromParameters?id=fromQuery", nil)
 
-    request := NewRequest(httpRequest, map[string]string{"id": "fromParameters"}, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{RouteParameters: map[string]string{"id": "fromParameters"}})
 
     if "fromQuery" != request.Input("id") {
         t.Fatalf("expected the query to win over the route parameters, got %q", request.Input("id"))
@@ -569,7 +570,7 @@ func TestRequest_Input_PrefersTheQueryOverTheRouteParameters(t *testing.T) {
 func TestRequest_Input_FallsThroughToTheRouteParametersOnly(t *testing.T) {
     httpRequest := httptest.NewRequest("GET", "/articles/fromParameters", nil)
 
-    request := NewRequest(httpRequest, map[string]string{"id": "fromParameters"}, nil, nil)
+    request := NewRequest(httpRequest, nil, RequestConfig{RouteParameters: map[string]string{"id": "fromParameters"}})
 
     if "fromParameters" != request.Input("id") {
         t.Fatalf("expected the route parameter when no other source carries the key, got %q", request.Input("id"))
@@ -582,7 +583,7 @@ func TestNewRequest_AMalformedQueryDoesNotRefuseAValidForm(t *testing.T) {
     postRequest := httptest.NewRequest("POST", "/submit?a=b;c=d", formBody)
     postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    request := NewRequest(postRequest, nil, nil, nil)
+    request := NewRequest(postRequest, nil, RequestConfig{})
 
     if nil != request.bodyReadErr {
         t.Fatalf("expected the request to be served, got the refusal %v", request.bodyReadErr)
@@ -653,5 +654,36 @@ func TestRequest_AUrlencodedBodyUnderTheNetHttpCeilingIsParsedByNetHttp(t *testi
 
     if nethttp.StatusOK != statusCode || 9<<20 != postedValueBytes {
         t.Fatalf("expected the form parsed, got %d with %d bytes posted", statusCode, postedValueBytes)
+    }
+}
+
+func TestNewRequest_ZeroConfigHasNoRouteParametersAndNoRequestContext(t *testing.T) {
+    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/", nil), nil, RequestConfig{})
+
+    if parameters := request.Parameters(); nil == parameters || 0 != len(parameters) {
+        t.Fatalf("expected no route parameter as an empty map, got %#v", parameters)
+    }
+
+    if _, exists := request.Parameter("id"); true == exists {
+        t.Fatalf("expected no route parameter to be found")
+    }
+
+    if nil != request.RequestContext() {
+        t.Fatalf("expected no request context, got %v", request.RequestContext())
+    }
+
+    requestContext := NewRequestContext("minted", time.Unix(0, 0))
+    configured := NewRequest(
+        httptest.NewRequest(nethttp.MethodGet, "/", nil),
+        nil,
+        RequestConfig{RouteParameters: map[string]string{"id": "7"}, RequestContext: requestContext},
+    )
+
+    if value, exists := configured.Parameter("id"); false == exists || "7" != value {
+        t.Fatalf("expected the configured route parameter, got %q %v", value, exists)
+    }
+
+    if requestContext != configured.RequestContext() {
+        t.Fatalf("expected the configured request context")
     }
 }

@@ -19,7 +19,7 @@ func TestWelcomeEmailDispatchHandler_AnswersWithoutATransport503NamingTheKey(t *
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
-    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodPost, "/messagebus/dispatch", nil), nil, runtimeInstance, melodyhttp.NewRequestContext("dispatch-test", time.Now()))
+    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodPost, "/messagebus/dispatch", nil), runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("dispatch-test", time.Now())})
 
     response, handlerErr := WelcomeEmailDispatchHandler(false)(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr || nethttp.StatusServiceUnavailable != response.StatusCode() {

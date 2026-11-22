@@ -483,10 +483,12 @@ func (instance *HttpClient) exchange(contextInstance context.Context, method str
 
     return NewResponse(
         response.StatusCode,
-        response.Status,
-        response.Header,
-        body,
-        request,
+        ResponseConfig{
+            Status:  response.Status,
+            Headers: response.Header,
+            Body:    body,
+            Request: request,
+        },
     ), nil
 }
 
@@ -527,8 +529,8 @@ func (instance *HttpClient) RequestStream(
 
     return NewStreamResponse(
         response.StatusCode,
-        response.Header.Clone(),
         body,
+        StreamResponseConfig{Headers: response.Header.Clone()},
     ), nil
 }
 

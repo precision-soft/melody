@@ -11,7 +11,7 @@ import (
 
 func TestManager_SendValidatesAndDelegates(t *testing.T) {
     transport := NewInMemoryTransport()
-    manager := NewManager(transport)
+    manager := NewManager(transport, ManagerConfig{})
     runtimeInstance := testRuntime()
 
     _, missingRecipients := manager.Send(runtimeInstance, mailercontract.Message{
@@ -40,7 +40,7 @@ func TestManager_SendValidatesAndDelegates(t *testing.T) {
 
 func TestManager_RejectsMalformedAddress(t *testing.T) {
     transport := NewInMemoryTransport()
-    manager := NewManager(transport)
+    manager := NewManager(transport, ManagerConfig{})
 
     _, sendErr := manager.Send(testRuntime(), mailercontract.Message{
         From: mailercontract.Address{Email: "shop@example.com"},
@@ -60,7 +60,7 @@ func TestManager_RejectsMalformedAddress(t *testing.T) {
 func TestManager_RejectsAnEmailThatIsNotABareAddrSpec(t *testing.T) {
     for _, email := range []string{"Bob <bob@example.com>", "<bob@example.com>", " bob@example.com ", "bob@example.com (Bob)"} {
         transport := NewInMemoryTransport()
-        manager := NewManager(transport)
+        manager := NewManager(transport, ManagerConfig{})
 
         _, sendErr := manager.Send(testRuntime(), mailercontract.Message{
             From: mailercontract.Address{Email: "shop@example.com"},
@@ -80,7 +80,7 @@ func TestManager_RejectsAnEmailThatIsNotABareAddrSpec(t *testing.T) {
 /* an addr-spec with a quoted local part is a bare addr-spec too, and is accepted as before */
 func TestManager_AcceptsAQuotedLocalPart(t *testing.T) {
     transport := NewInMemoryTransport()
-    manager := NewManager(transport)
+    manager := NewManager(transport, ManagerConfig{})
 
     _, sendErr := manager.Send(testRuntime(), mailercontract.Message{
         From: mailercontract.Address{Email: "shop@example.com"},
@@ -94,7 +94,7 @@ func TestManager_AcceptsAQuotedLocalPart(t *testing.T) {
 
 func TestManager_RejectsRecipientsWithOnlyEmptyEmails(t *testing.T) {
     transport := NewInMemoryTransport()
-    manager := NewManager(transport)
+    manager := NewManager(transport, ManagerConfig{})
 
     _, sendErr := manager.Send(testRuntime(), mailercontract.Message{
         From: mailercontract.Address{Email: "shop@example.com"},
@@ -122,12 +122,12 @@ func (instance *receiptTransport) Send(runtimeInstance containercontract.Runtime
 func TestManager_AnswersItsTransportsReceiptAndTheZeroOneBesideAnError(t *testing.T) {
     message := mailercontract.Message{From: mailercontract.Address{Email: "shop@example.com"}, To: []mailercontract.Address{{Email: "ada@example.com"}}}
 
-    receipt, sendErr := NewManager(&receiptTransport{receipt: mailercontract.Receipt{MessageId: "<id@x>"}}).Send(testRuntime(), message)
+    receipt, sendErr := NewManager(&receiptTransport{receipt: mailercontract.Receipt{MessageId: "<id@x>"}}, ManagerConfig{}).Send(testRuntime(), message)
     if nil != sendErr || "<id@x>" != receipt.MessageId {
         t.Fatalf("expected the transport's receipt, got %+v %v", receipt, sendErr)
     }
 
-    receipt, sendErr = NewManager(&receiptTransport{receipt: mailercontract.Receipt{MessageId: "<half@x>"}, sendErr: errors.New("relay down")}).Send(testRuntime(), message)
+    receipt, sendErr = NewManager(&receiptTransport{receipt: mailercontract.Receipt{MessageId: "<half@x>"}, sendErr: errors.New("relay down")}, ManagerConfig{}).Send(testRuntime(), message)
     if nil == sendErr || "" != receipt.MessageId {
         t.Fatalf("expected the zero receipt beside the error, got %+v %v", receipt, sendErr)
     }

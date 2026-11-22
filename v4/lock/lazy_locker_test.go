@@ -8,7 +8,6 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
-    "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
@@ -19,7 +18,7 @@ func TestLazyLocker_DefersResolutionToTheFirstLockMethodThenDelegates(t *testing
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     resolved := false
-    inMemoryLocker := NewInMemoryLocker(clock.NewSystemClock())
+    inMemoryLocker := NewInMemoryLocker(InMemoryLockerConfig{})
 
     container.MustRegister[lockcontract.Locker](
         serviceContainer,
@@ -74,7 +73,7 @@ func TestLazyLocker_ReportsResolutionFailureThroughTheLockContractAndRetries(t *
                 return nil, errors.New("lock store not reachable yet")
             }
 
-            return NewInMemoryLocker(clock.NewSystemClock()), nil
+            return NewInMemoryLocker(InMemoryLockerConfig{}), nil
         },
         container.RegisterOptions{},
     )
@@ -127,7 +126,7 @@ func TestLazyLocker_TheRunContextBoundsTheWaitOnALockerAnotherGoroutineBuilds(t 
             close(providerEntered)
             <-providerGate
 
-            return NewInMemoryLocker(clock.NewSystemClock()), nil
+            return NewInMemoryLocker(InMemoryLockerConfig{}), nil
         },
         container.RegisterOptions{},
     )
@@ -181,7 +180,7 @@ func (instance *countingLocker) CreateLock(name string, ttl bound.Duration) (loc
 func TestLazyLocker_ADeferredLockCreatesItsRealLockOnce(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    locker := &countingLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+    locker := &countingLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})}
     container.MustRegister[lockcontract.Locker](
         serviceContainer,
         ServiceLocker,
@@ -230,7 +229,7 @@ func TestLazyLocker_TheLockerIsCreatedUnderTheFirstMethodsRuntime(t *testing.T) 
                 func(resolver containercontract.Resolver) (lockcontract.Locker, error) {
                     seenKind = resolver.Runtime().Kind()
 
-                    return NewInMemoryLocker(clock.NewSystemClock()), nil
+                    return NewInMemoryLocker(InMemoryLockerConfig{}), nil
                 },
                 container.RegisterOptions{},
             )
@@ -253,7 +252,7 @@ func TestLazyLocker_TheInnerLockersRefusalIsTheErrorOfTheFirstAcquire(t *testing
         serviceContainer,
         ServiceLocker,
         func(resolver containercontract.Resolver) (lockcontract.Locker, error) {
-            return NewInMemoryLocker(clock.NewSystemClock()), nil
+            return NewInMemoryLocker(InMemoryLockerConfig{}), nil
         },
         container.RegisterOptions{},
     )

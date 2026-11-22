@@ -14,7 +14,7 @@ func TestUrlGenerationRouteDefinition_Defaults_ReturnsCopy(t *testing.T) {
         requirements: map[string]*regexp.Regexp{},
     }
 
-    definition := NewUrlGenerationRouteDefinition(routeValue)
+    definition := newUrlGenerationRouteDefinition(routeValue)
 
     defaults := definition.Defaults()
     defaults["id"] = "modified"
@@ -36,7 +36,7 @@ func TestUrlGenerationRouteDefinition_Requirements_ReturnsCopy(t *testing.T) {
         },
     }
 
-    definition := NewUrlGenerationRouteDefinition(routeValue)
+    definition := newUrlGenerationRouteDefinition(routeValue)
 
     requirements := definition.Requirements()
     requirements["id"] = regexp.MustCompile(`\w+`)
@@ -54,7 +54,7 @@ func TestUrlGenerationRouteDefinition_Defaults_EmptyMap(t *testing.T) {
         requirements: map[string]*regexp.Regexp{},
     }
 
-    definition := NewUrlGenerationRouteDefinition(routeValue)
+    definition := newUrlGenerationRouteDefinition(routeValue)
 
     defaults := definition.Defaults()
     if 0 != len(defaults) {
@@ -69,7 +69,7 @@ func TestUrlGenerationRouteDefinition_Pattern(t *testing.T) {
         requirements: map[string]*regexp.Regexp{},
     }
 
-    definition := NewUrlGenerationRouteDefinition(routeValue)
+    definition := newUrlGenerationRouteDefinition(routeValue)
 
     if "/test/:id" != definition.Pattern() {
         t.Fatalf("expected pattern '/test/:id', got: %s", definition.Pattern())

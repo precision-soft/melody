@@ -22,7 +22,9 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
+    "github.com/precision-soft/melody/v4/internal/configseam"
     "github.com/precision-soft/melody/v4/internal/kernelseam"
+    "github.com/precision-soft/melody/v4/internal/openapiseam"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -708,18 +710,13 @@ type environmentKeyCounter interface {
     EnvironmentKeyCount() int
 }
 
-/* servingMarker is the part of a configuration that can be told the wiring phase is over; it is asked for rather than demanded, so a configuration double need not carry it. */
-type servingMarker interface {
-    MarkServing()
-}
-
 func markConfigurationServing(configuration configcontract.Configuration) {
-    marker, isMarker := configuration.(servingMarker)
+    marker, isMarker := configuration.(configseam.ServingMarker)
     if false == isMarker {
         return
     }
 
-    marker.MarkServing()
+    marker.MarkServing(configseam.Token{})
 }
 
 /* markOpenApiRegistryServing tells the openapi registry the wiring phase is over, so a later Describe is refused at its door instead of writing under the spec handler's readers. The registry is looked up by its published name, which runs its provider in every mode; a registry without the marker, or none, is left alone, and a failing provider leaves its failure to the first consumer. */
@@ -733,12 +730,12 @@ func markOpenApiRegistryServing(ctx context.Context, serviceContainer containerc
         return
     }
 
-    marker, isMarker := registry.(servingMarker)
+    marker, isMarker := registry.(openapiseam.ServingMarker)
     if false == isMarker {
         return
     }
 
-    marker.MarkServing()
+    marker.MarkServing(openapiseam.Token{})
 }
 
 var _ applicationcontract.ParameterRegistrar = (*Application)(nil)

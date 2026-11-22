@@ -9,7 +9,9 @@ import (
     "strings"
     "sync"
     "testing"
+    "time"
 
+    "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/config"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -330,10 +332,45 @@ func (instance unavailableRefusal) Error() string {
     return "the store is down"
 }
 
+/* dispatchSkippingARequiredListener answers the refusal of a kernel.request dispatch that a listener named listenerName ended ahead of a required one, by failing with listenerErr or, when it is nil, by a stop */
+func dispatchSkippingARequiredListener(t *testing.T, listenerName string, listenerErr error) error {
+    t.Helper()
+
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+
+    dispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+            if nil == listenerErr {
+                eventValue.StopPropagation()
+            }
+
+            return listenerErr
+        },
+        eventcontract.ListenerConfig{Priority: 100, Name: listenerName},
+    )
+    dispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+            return nil
+        },
+        eventcontract.ListenerConfig{Failure: eventcontract.ListenerFailureConfig{Required: true}},
+    )
+
+    _, dispatchErr := dispatcher.Dispatch(newTestRuntime(), event.NewEvent(kernelcontract.EventKernelRequest, nil, time.Now()))
+
+    var skippedErr *event.RequiredListenerSkippedError
+    if false == errors.As(dispatchErr, &skippedErr) {
+        t.Fatalf("expected the dispatch to refuse with a skipped required listener, got %T (%v)", dispatchErr, dispatchErr)
+    }
+
+    return skippedErr
+}
+
 func TestDebugKernelRequestFailureMessage(t *testing.T) {
     plainErr := errors.New("plain failure")
-    skippedWithCause := event.NewRequiredListenerSkippedError("kernel.request", "failing", errors.New("the cause"))
-    skippedByStop := event.NewRequiredListenerSkippedError("kernel.request", "stopping", nil)
+    skippedWithCause := dispatchSkippingARequiredListener(t, "failing", errors.New("the cause"))
+    skippedByStop := dispatchSkippingARequiredListener(t, "stopping", nil)
 
     for _, testCase := range []struct {
         name     string
@@ -342,7 +379,7 @@ func TestDebugKernelRequestFailureMessage(t *testing.T) {
         expected string
     }{
         {"no refusal, a plain failure", nil, plainErr, "plain failure"},
-        {"no refusal, a skipped listener with a cause", nil, skippedWithCause, "event propagation stopped before a required listener ran (stopped by failing): the cause"},
+        {"no refusal, a skipped listener with a cause", nil, skippedWithCause, "event propagation stopped before a required listener ran (stopped by failing): event listener returned error: the cause"},
         {"no refusal, a skipped listener by a stop", nil, skippedByStop, "event propagation stopped before a required listener ran (stopped by stopping)"},
         {"a plain refusal", errors.New("plain refusal"), plainErr, "refused: plain refusal; then: plain failure"},
         {"an unavailable refusal", exception.MarkInfrastructureFailure(unavailableRefusal{}), plainErr, "refused: 503 service unavailable; then: plain failure"},

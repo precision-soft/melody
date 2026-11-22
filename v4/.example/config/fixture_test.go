@@ -35,7 +35,7 @@ func requestForwardedBy(t *testing.T, peer string, forwardedFor string) melodyht
         httpRequest.Header.Set("X-Forwarded-For", forwardedFor)
     }
 
-    return melodyhttp.NewRequest(httpRequest, nil, nil, melodyhttp.NewRequestContext("budget-test", time.Now()))
+    return melodyhttp.NewRequest(httpRequest, nil, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("budget-test", time.Now())})
 }
 
 /* resolvedBudgetKey reads the key the budget charges, over a resolver whose entries are the given list — addresses and prefixes taken as written, so no name is looked up here; what these tests assert is what the resolver does with a peer and a header, not how a name resolves */

@@ -483,7 +483,7 @@ func TestBootModulesPreConfigurationResolve_RunsTheConfigurationAndParameterHook
 /* everything a module wires against resolved configuration runs in the second phase, and each hook is optional: a module implementing all of them must see all of them called, or one silently-missing hook means an unwired subsystem with a green boot. */
 func TestBootModulesPostConfigurationResolve_RunsEveryLaterHook(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
-    applicationInstance.httpMiddlewares = NewHttpMiddleware(static.Config{}, applicationInstance.configuration)
+    applicationInstance.httpMiddlewares = NewHttpMiddleware(static.Config{})
 
     moduleInstance := &hookRecordingModule{fakeModule: fakeModule{name: "recording"}}
     applicationInstance.RegisterModule(moduleInstance)

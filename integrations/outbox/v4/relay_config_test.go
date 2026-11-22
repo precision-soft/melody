@@ -33,10 +33,7 @@ func TestResolveRelayConfig_AnEmptyConfigIsEveryRuleDefault(t *testing.T) {
 }
 
 func TestResolveRelayConfig_AGivenConfigReachesTheRelay(t *testing.T) {
-    relay := NewRelay(RelayConfig{
-        Repository:          &fakeRepository{},
-        Transport:           &fakeTransport{},
-        Codec:               &stringCodec{},
+    relay := NewRelay(&fakeRepository{}, &fakeTransport{}, &stringCodec{}, RelayConfig{
         LockName:            "melody:outbox:custom",
         LockTtl:             bound.Of(time.Second),
         VisibilityTimeout:   bound.Of(2 * time.Second),
@@ -144,18 +141,33 @@ func TestResolveRelayConfig_AMaxDeliveryAttemptsBesideTheLargestMaxAttemptsNames
     }
 }
 
-func TestNewRelay_ANilDependencyIsRefusedNamingTheField(t *testing.T) {
-    expectPanicNamingField(t, "RelayConfig.Repository", func() {
-        NewRelay(RelayConfig{Transport: &fakeTransport{}, Codec: &stringCodec{}})
-    })
+func TestNewRelay_RefusesANilRequiredArgumentByName(t *testing.T) {
+    cases := []struct {
+        name     string
+        build    func()
+        argument string
+    }{
+        {"a nil repository", func() { NewRelay(nil, &fakeTransport{}, &stringCodec{}, RelayConfig{}) }, "repository"},
+        {"a nil transport", func() { NewRelay(&fakeRepository{}, nil, &stringCodec{}, RelayConfig{}) }, "transport"},
+        {"a nil codec", func() { NewRelay(&fakeRepository{}, &fakeTransport{}, nil, RelayConfig{}) }, "codec"},
+    }
 
-    expectPanicNamingField(t, "RelayConfig.Transport", func() {
-        NewRelay(RelayConfig{Repository: &fakeRepository{}, Codec: &stringCodec{}})
-    })
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            defer func() {
+                recoveredErr, isError := recover().(error)
+                if false == isError {
+                    t.Fatalf("expected a refusal naming the %s argument, got no error panic", testCase.argument)
+                }
 
-    expectPanicNamingField(t, "RelayConfig.Codec", func() {
-        NewRelay(RelayConfig{Repository: &fakeRepository{}, Transport: &fakeTransport{}})
-    })
+                if context := exception.LogContext(recoveredErr, exception.LogContextConfig{}); testCase.argument != context["argument"] {
+                    t.Fatalf("expected a refusal naming the %s argument, got %v", testCase.argument, context)
+                }
+            }()
+
+            testCase.build()
+        })
+    }
 }
 
 func TestResolveRelayConfig_TheDefaultRetryAndOutageWaitsDoubleToTheirCaps(t *testing.T) {

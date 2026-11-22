@@ -21,6 +21,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
+    "github.com/precision-soft/melody/v4/internal/openapiseam"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/lock"
@@ -130,7 +131,7 @@ type openApiRegistryServingProbe struct {
     marked bool
 }
 
-func (instance *openApiRegistryServingProbe) MarkServing() {
+func (instance *openApiRegistryServingProbe) MarkServing(token openapiseam.Token) {
     instance.marked = true
 }
 
@@ -1066,7 +1067,7 @@ func TestBoot_RefusesAnHttpBootOverAnUnboundedSessionPairOrACliBootWarningKey(t 
             configuration:        configuration,
             runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
             kernel:               newTestKernel(),
-            httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+            httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration)),
             cliCommands:          make([]clicontract.Command, 0),
             moduleConfigurations: make(map[string]any),
         }

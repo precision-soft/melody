@@ -42,7 +42,7 @@ func putStatusFor(t *testing.T, body func(httpRequest *nethttp.Request)) int {
     httpRequest := httptest.NewRequest(nethttp.MethodPut, "/storage/object?key=probe", nil)
     body(httpRequest)
 
-    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("storage-test", time.Now()))
+    request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("storage-test", time.Now())})
 
     response, handlerErr := PutHandler(nil)(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr {
@@ -89,7 +89,7 @@ func (instance readCloser) Close() error {
 func linkRequest(t *testing.T, target string) *melodyhttp.Request {
     t.Helper()
 
-    return melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, target, nil), nil, nil, melodyhttp.NewRequestContext("storage-link-test", time.Now()))
+    return melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, target, nil), nil, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("storage-link-test", time.Now())})
 }
 
 func TestLinkTtlOf_AnswersFiveMinutesWhenTheCallerAskedForNone(t *testing.T) {
@@ -132,7 +132,7 @@ func TestHandlers_AnswerAKeyWithAParentSegmentWith400BeforeTheStore(t *testing.T
     for name, handler := range map[string]melodyhttpcontract.Handler{"put": PutHandler(nil), "get": GetHandler(nil), "link": LinkHandler(nil)} {
         for _, key := range []string{"tenant-b/../tenant-a/secret.txt", "..", "a\\..\\b"} {
             httpRequest := httptest.NewRequest(nethttp.MethodGet, "/storage/object?key="+url.QueryEscape(key), nil)
-            request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("storage-test", time.Now()))
+            request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("storage-test", time.Now())})
 
             response, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request)
             if nil != handlerErr || nethttp.StatusBadRequest != response.StatusCode() {
@@ -257,7 +257,7 @@ func answerOf(t *testing.T, handler melodyhttpcontract.Handler, target string) (
     }, melodycontainer.RegisterOptions{})
     runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
-    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, target, nil), nil, runtimeInstance, melodyhttp.NewRequestContext("storage-get-test", time.Now()))
+    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, target, nil), runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("storage-get-test", time.Now())})
 
     response, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr {

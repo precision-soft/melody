@@ -14,12 +14,12 @@ func TestIntWithDefault_DefaultOnlyOnAbsence(t *testing.T) {
         t.Fatalf("expected the default for a typed-nil parameter")
     }
 
-    presentParameter := NewParameter("APP_POOL", "42", "42", false)
+    presentParameter := newParameter("APP_POOL", "42", "42", false)
     if 42 != IntWithDefault(presentParameter, 10) {
         t.Fatalf("expected the parsed value for a present parameter")
     }
 
-    malformedParameter := NewParameter("APP_POOL", "1O0", "1O0", false)
+    malformedParameter := newParameter("APP_POOL", "1O0", "1O0", false)
 
     defer func() {
         if recoveredValue := recover(); nil == recoveredValue {

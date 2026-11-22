@@ -19,7 +19,7 @@ import (
 func TestReopenableFileWriter_WritesToTheFileItOpened(t *testing.T) {
     logPath := filepath.Join(t.TempDir(), "application.log")
 
-    writer, newErr := NewReopenableFileWriter(logPath)
+    writer, newErr := NewReopenableFileWriter(logPath, ReopenableFileWriterConfig{})
     if nil != newErr {
         t.Fatalf("unexpected constructor error: %v", newErr)
     }
@@ -44,7 +44,7 @@ func TestReopenableFileWriter_ReopenFollowsARenameToTheFreshFile(t *testing.T) {
     logPath := filepath.Join(directory, "application.log")
     rotatedPath := filepath.Join(directory, "application.log.1")
 
-    writer, newErr := NewReopenableFileWriter(logPath)
+    writer, newErr := NewReopenableFileWriter(logPath, ReopenableFileWriterConfig{})
     if nil != newErr {
         t.Fatalf("unexpected constructor error: %v", newErr)
     }
@@ -87,7 +87,7 @@ func TestReopenableFileWriter_AFailedReopenKeepsTheCurrentDescriptorWriting(t *t
     logPath := filepath.Join(directory, "application.log")
     rotatedPath := filepath.Join(directory, "application.log.1")
 
-    writer, newErr := NewReopenableFileWriter(logPath)
+    writer, newErr := NewReopenableFileWriter(logPath, ReopenableFileWriterConfig{})
     if nil != newErr {
         t.Fatalf("unexpected constructor error: %v", newErr)
     }
@@ -123,7 +123,7 @@ func TestReopenableFileWriter_AFailedReopenKeepsTheCurrentDescriptorWriting(t *t
 func TestReopenableFileWriter_CloseRefusesLaterWritesAndStaysIdempotent(t *testing.T) {
     logPath := filepath.Join(t.TempDir(), "application.log")
 
-    writer, newErr := NewReopenableFileWriter(logPath)
+    writer, newErr := NewReopenableFileWriter(logPath, ReopenableFileWriterConfig{})
     if nil != newErr {
         t.Fatalf("unexpected constructor error: %v", newErr)
     }
@@ -152,7 +152,7 @@ func TestReopenableFileWriter_CloseRefusesLaterWritesAndStaysIdempotent(t *testi
 func TestReopenableFileWriter_ArmRefusesADoubleArmAndAnEmptySignalSet(t *testing.T) {
     logPath := filepath.Join(t.TempDir(), "application.log")
 
-    writer, newErr := NewReopenableFileWriter(logPath)
+    writer, newErr := NewReopenableFileWriter(logPath, ReopenableFileWriterConfig{})
     if nil != newErr {
         t.Fatalf("unexpected constructor error: %v", newErr)
     }
@@ -181,7 +181,7 @@ func TestReopenableFileWriter_ASighupReopensTheJournalWhileArmed(t *testing.T) {
     logPath := filepath.Join(directory, "application.log")
     rotatedPath := filepath.Join(directory, "application.log.1")
 
-    writer, newErr := NewReopenableFileWriter(logPath)
+    writer, newErr := NewReopenableFileWriter(logPath, ReopenableFileWriterConfig{})
     if nil != newErr {
         t.Fatalf("unexpected constructor error: %v", newErr)
     }
@@ -227,7 +227,7 @@ func TestReopenableFileWriter_ARefusedCloseOfTheReplacedDescriptorIsStillARotati
     logPath := filepath.Join(directory, "application.log")
     rotatedPath := filepath.Join(directory, "application.log.1")
 
-    writer, newErr := NewReopenableFileWriter(logPath)
+    writer, newErr := NewReopenableFileWriter(logPath, ReopenableFileWriterConfig{})
     if nil != newErr {
         t.Fatalf("unexpected constructor error: %v", newErr)
     }
@@ -280,7 +280,7 @@ func TestReopenableFileWriter_AFailedOpenDoesNotCarryTheRotatedDescriptorSentine
     logPath := filepath.Join(directory, "application.log")
     rotatedPath := filepath.Join(directory, "application.log.1")
 
-    writer, newErr := NewReopenableFileWriter(logPath)
+    writer, newErr := NewReopenableFileWriter(logPath, ReopenableFileWriterConfig{})
     if nil != newErr {
         t.Fatalf("unexpected constructor error: %v", newErr)
     }
@@ -306,7 +306,7 @@ func TestReopenableFileWriter_AFailedOpenDoesNotCarryTheRotatedDescriptorSentine
         t.Fatalf("expected a failed open to stay a failed rotation, got %v", reopenErr)
     }
 
-    closedWriter, closedWriterErr := NewReopenableFileWriter(filepath.Join(directory, "other.log"))
+    closedWriter, closedWriterErr := NewReopenableFileWriter(filepath.Join(directory, "other.log"), ReopenableFileWriterConfig{})
     if nil != closedWriterErr {
         t.Fatalf("unexpected constructor error: %v", closedWriterErr)
     }
@@ -326,7 +326,7 @@ func TestReopenableFileWriter_WritesStayWholeWhileReopenSwapsTheDescriptor(t *te
 
     logPath := filepath.Join(t.TempDir(), "application.log")
 
-    writer, newErr := NewReopenableFileWriter(logPath)
+    writer, newErr := NewReopenableFileWriter(logPath, ReopenableFileWriterConfig{})
     if nil != newErr {
         t.Fatalf("unexpected constructor error: %v", newErr)
     }
@@ -390,7 +390,7 @@ func TestReopenableFileWriter_WritesStayWholeWhileReopenSwapsTheDescriptor(t *te
 }
 
 func TestReopenableFileWriter_TheContainerClosesItThroughItsContextDoor(t *testing.T) {
-    writer, writerErr := NewReopenableFileWriter(filepath.Join(t.TempDir(), "app.log"))
+    writer, writerErr := NewReopenableFileWriter(filepath.Join(t.TempDir(), "app.log"), ReopenableFileWriterConfig{})
     if nil != writerErr {
         t.Fatalf("unexpected writer error: %v", writerErr)
     }
@@ -417,7 +417,7 @@ func TestReopenableFileWriter_TheContainerClosesItThroughItsContextDoor(t *testi
 }
 
 func TestReopenableFileWriter_CloseWithContextEndsAtItsDeadlineWhenTheCloseIsStuck(t *testing.T) {
-    writer, writerErr := NewReopenableFileWriter(filepath.Join(t.TempDir(), "app.log"))
+    writer, writerErr := NewReopenableFileWriter(filepath.Join(t.TempDir(), "app.log"), ReopenableFileWriterConfig{})
     if nil != writerErr {
         t.Fatalf("unexpected writer error: %v", writerErr)
     }
@@ -438,7 +438,7 @@ func TestReopenableFileWriter_CloseWithContextEndsAtItsDeadlineWhenTheCloseIsStu
 }
 
 func TestReopenableFileWriter_CloseWithContextRefusesANilContext(t *testing.T) {
-    writer, writerErr := NewReopenableFileWriter(filepath.Join(t.TempDir(), "app.log"))
+    writer, writerErr := NewReopenableFileWriter(filepath.Join(t.TempDir(), "app.log"), ReopenableFileWriterConfig{})
     if nil != writerErr {
         t.Fatalf("unexpected writer error: %v", writerErr)
     }
@@ -447,5 +447,24 @@ func TestReopenableFileWriter_CloseWithContextRefusesANilContext(t *testing.T) {
     //nolint:staticcheck // the nil context is the input under test
     if closeErr := writer.CloseWithContext(nil); nil == closeErr || "the close context is nil" != closeErr.Error() {
         t.Fatalf("expected the nil context refused, got %v", closeErr)
+    }
+}
+
+func TestNewReopenableFileWriter_ZeroConfigOpensWithTodaysMode(t *testing.T) {
+    logPath := filepath.Join(t.TempDir(), "application.log")
+
+    writer, newErr := NewReopenableFileWriter(logPath, ReopenableFileWriterConfig{})
+    if nil != newErr {
+        t.Fatalf("unexpected constructor error: %v", newErr)
+    }
+    defer func() { _ = writer.Close() }()
+
+    information, statErr := os.Stat(logPath)
+    if nil != statErr {
+        t.Fatalf("unexpected stat error: %v", statErr)
+    }
+
+    if os.FileMode(0o644) != information.Mode().Perm() {
+        t.Fatalf("expected the file opened with mode 0644, got %o", information.Mode().Perm())
     }
 }

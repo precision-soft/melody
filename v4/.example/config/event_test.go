@@ -203,7 +203,7 @@ func TestRegisterRateLimitRequestListener_TheArmedDoorRefusesTheRequestPastTheSw
     for request := 1; request <= 3; request++ {
         httpRequest := httptest.NewRequest(nethttp.MethodGet, "/", nil)
         httpRequest.RemoteAddr = "203.0.113.7:41234"
-        requestEvent := melodyhttp.NewKernelRequestEvent(runtimeInstance, melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("budget-test", time.Now())))
+        requestEvent := melodyhttp.NewKernelRequestEvent(runtimeInstance, melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("budget-test", time.Now())}))
 
         if _, dispatchErr := eventDispatcher.DispatchName(runtimeInstance, melodykernelcontract.EventKernelRequest, requestEvent); nil != dispatchErr {
             t.Fatalf("unexpected dispatch error on request %d: %v", request, dispatchErr)
@@ -288,7 +288,7 @@ func TestRegisterApiExceptionListener_AnswersTheApiPathsAndLeavesTheOthersToTheB
     runtimeInstance := melodyruntime.NewRun(context.Background(), scope)
 
     dispatchRefusal := func(path string, refusal error) *melodyhttp.KernelExceptionEvent {
-        request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, path, nil), nil, runtimeInstance, melodyhttp.NewRequestContext("api-test", time.Now()))
+        request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, path, nil), runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("api-test", time.Now())})
         exceptionEvent := melodyhttp.NewKernelExceptionEvent(runtimeInstance, request, refusal, melodyhttp.KernelExceptionEventConfig{})
 
         if _, dispatchErr := eventDispatcher.DispatchName(runtimeInstance, melodykernelcontract.EventKernelException, exceptionEvent); nil != dispatchErr {

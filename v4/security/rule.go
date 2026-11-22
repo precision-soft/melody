@@ -9,30 +9,30 @@ import (
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-/* ApiKeyHeaderRuleConfig names the header the rule checks and the value it must carry; both are required. */
+/* ApiKeyHeaderRuleConfig names the header the rule checks, DefaultApiKeyHeaderName when empty. */
 type ApiKeyHeaderRuleConfig struct {
-    HeaderName    string
-    ExpectedValue string
+    HeaderName string
 }
 
-/* NewApiKeyHeaderRule checks the header on the requests the matcher claims; the matcher is required, as are both fields, each refused by name. */
-func NewApiKeyHeaderRule(matcher securitycontract.Matcher, config ApiKeyHeaderRuleConfig) *ApiKeyHeaderRule {
+/* NewApiKeyHeaderRule checks that the header carries expectedValue on the requests the matcher claims; a nil matcher or an empty expectedValue panics naming the argument. */
+func NewApiKeyHeaderRule(matcher securitycontract.Matcher, expectedValue string, config ApiKeyHeaderRuleConfig) *ApiKeyHeaderRule {
     if true == internal.IsNilInterface(matcher) {
-        exception.Panic(exception.NewError("api key header rule matcher is nil", nil, nil))
+        exception.Panic(exception.NewError("api key header rule matcher is nil", exceptioncontract.Context{"argument": "matcher"}, nil))
     }
 
-    if "" == config.HeaderName {
-        exception.Panic(exception.NewError("api key header rule header name is empty", exceptioncontract.Context{"field": "ApiKeyHeaderRuleConfig.HeaderName"}, nil))
+    if "" == expectedValue {
+        exception.Panic(exception.NewError("api key header rule expected value is empty", exceptioncontract.Context{"argument": "expectedValue"}, nil))
     }
 
-    if "" == config.ExpectedValue {
-        exception.Panic(exception.NewError("api key header rule expected value is empty", exceptioncontract.Context{"field": "ApiKeyHeaderRuleConfig.ExpectedValue"}, nil))
+    headerName := config.HeaderName
+    if "" == headerName {
+        headerName = DefaultApiKeyHeaderName
     }
 
     return &ApiKeyHeaderRule{
         matcher:       matcher,
-        headerName:    config.HeaderName,
-        expectedValue: config.ExpectedValue,
+        headerName:    headerName,
+        expectedValue: expectedValue,
     }
 }
 

@@ -13,6 +13,7 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/internal/routeseam"
     "github.com/precision-soft/melody/v4/internal/testhelper"
 )
 
@@ -907,7 +908,7 @@ func TestRouterAddRoute_ADeclinedDuplicateDoesNotEnterTheMatchingTree(t *testing
     }
 
     recordedCollisions := []string{}
-    router.routeRegistry.SetBootCollisionRecorder(func(kind string, name string) {
+    router.routeRegistry.InstallBootCollisionRecorder(routeseam.Token{}, func(kind string, name string) {
         recordedCollisions = append(recordedCollisions, name)
     })
 

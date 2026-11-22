@@ -9,7 +9,10 @@ import (
     mailercontract "github.com/precision-soft/melody/v4/mailer/contract"
 )
 
-func NewManager(transport mailercontract.Transport) *Manager {
+/* ManagerConfig is what a mailer manager is built with beyond its transport; it holds no field yet, every one it gains defaulting at its zero value. */
+type ManagerConfig struct{}
+
+func NewManager(transport mailercontract.Transport, config ManagerConfig) *Manager {
     if true == internal.IsNilInterface(transport) {
         exception.Panic(exception.NewError("mailer transport is nil", nil, nil))
     }

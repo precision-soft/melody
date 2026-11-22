@@ -416,7 +416,7 @@ func TestBoot_AMiddlewareFactoryOverAWarnedServiceFailsTheBootAfterTheWarningIsW
     if projectDirectory := os.Getenv(builtAtBootFactoryProbeMarker); "" != projectDirectory {
         applicationInstance := newEnvironmentKeyBootApplicationIn(t, map[string]string{config.HttpAddressKey: "127.0.0.1:34527"}, projectDirectory)
         applicationInstance.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
-        applicationInstance.httpMiddlewares = NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), applicationInstance.configuration), applicationInstance.configuration)
+        applicationInstance.httpMiddlewares = NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), applicationInstance.configuration))
         applicationInstance.RegisterService("app.built.factory", func(resolver containercontract.Resolver) (*warnedBootProbe, error) {
             return nil, errors.New("the factory's service is down")
         }, containercontract.RegisterOptions{BuiltAtBoot: true})

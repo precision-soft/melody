@@ -278,11 +278,11 @@ func suggestCliCommand(
 
     meta := output.NewMeta(
         "cli:suggest",
-        []string{commandName},
-        option,
-        startedAt,
-        time.Duration(0),
-        output.Version{},
+        output.MetaConfig{
+            Arguments: []string{commandName},
+            Option:    option,
+            StartedAt: startedAt,
+        },
     )
 
     envelope := output.NewEnvelope(meta)

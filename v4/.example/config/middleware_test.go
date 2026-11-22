@@ -127,7 +127,7 @@ func runFlushMiddleware(
     t.Helper()
 
     httpRequest := httptest.NewRequest("POST", "/products/api/create/", nil)
-    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("request", time.Unix(0, 0)))
+    request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("request", time.Unix(0, 0))})
 
     return NewCatalogJournalFlushMiddleware()(next)(runtimeInstance, httptest.NewRecorder(), request)
 }

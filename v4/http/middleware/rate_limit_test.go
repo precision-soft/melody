@@ -851,7 +851,7 @@ func allowingNext() httpcontract.Handler {
 /* IpRateLimit builds its config internally and hands back only the middleware, so the resolver the documentation prescribes for a deployment behind a reverse proxy could never be reached: every client shared the proxy's single budget. The additive variant takes the resolver up front. */
 func TestIpRateLimit_ChargesTheForwardedClient(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
-    handler := IpRateLimit(QuickLimitConfig{RequestsPerMinute: 1, ClientIpResolver: resolver})(allowingNext())
+    handler := IpRateLimit(1, QuickLimitConfig{ClientIpResolver: resolver})(allowingNext())
 
     _, firstErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
     if nil != firstErr {
@@ -871,7 +871,7 @@ func TestIpRateLimit_ChargesTheForwardedClient(t *testing.T) {
 
 /* The direct-peer behaviour of the helper without a resolver is correct without a proxy in front, so an application that upgrades keeps compiling and keeps its semantics. */
 func TestIpRateLimit_StillChargesTheDirectPeer(t *testing.T) {
-    handler := IpRateLimit(QuickLimitConfig{RequestsPerMinute: 1})(allowingNext())
+    handler := IpRateLimit(1, QuickLimitConfig{})(allowingNext())
 
     _, firstErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
     if nil != firstErr {
@@ -886,7 +886,7 @@ func TestIpRateLimit_StillChargesTheDirectPeer(t *testing.T) {
 
 func TestSimpleRateLimit_ChargesTheForwardedClient(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
-    handler := SimpleRateLimit(QuickLimitConfig{RequestsPerMinute: 1, ClientIpResolver: resolver})(allowingNext())
+    handler := SimpleRateLimit(1, QuickLimitConfig{ClientIpResolver: resolver})(allowingNext())
 
     _, firstErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
     if nil != firstErr {
@@ -908,7 +908,7 @@ func TestSimpleRateLimit_ChargesTheForwardedClient(t *testing.T) {
 func TestUserRateLimit_ChargesTheForwardedClientWhenAnonymous(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
     anonymous := func(request httpcontract.Request) string { return "" }
-    handler := UserRateLimit(UserLimitConfig{RequestsPerMinute: 1, UserId: anonymous, ClientIpResolver: resolver})(allowingNext())
+    handler := UserRateLimit(1, anonymous, UserLimitConfig{ClientIpResolver: resolver})(allowingNext())
 
     _, firstErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
     if nil != firstErr {
@@ -930,7 +930,7 @@ func TestUserRateLimit_ChargesTheForwardedClientWhenAnonymous(t *testing.T) {
 func TestUserRateLimit_KeepsKeyingIdentifiedUsersById(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
     identified := func(request httpcontract.Request) string { return "user-1" }
-    handler := UserRateLimit(UserLimitConfig{RequestsPerMinute: 1, UserId: identified, ClientIpResolver: resolver})(allowingNext())
+    handler := UserRateLimit(1, identified, UserLimitConfig{ClientIpResolver: resolver})(allowingNext())
 
     _, firstErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
     if nil != firstErr {
@@ -945,7 +945,7 @@ func TestUserRateLimit_KeepsKeyingIdentifiedUsersById(t *testing.T) {
 
 /* A nil resolver is the documented way to ask for the direct peer, so the additive variants must behave exactly like the originals when given one. */
 func TestQuickRateLimits_NilResolverKeepsTheDirectPeer(t *testing.T) {
-    handler := IpRateLimit(QuickLimitConfig{RequestsPerMinute: 1})(allowingNext())
+    handler := IpRateLimit(1, QuickLimitConfig{})(allowingNext())
 
     _, firstErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
     if nil != firstErr {
@@ -993,7 +993,7 @@ func TestSlidingWindowLimiter_MaxDurationWindowSurvivesIdlePrune(t *testing.T) {
 /* SimpleRateLimit is one of the three helpers an application actually calls. Its documented semantics are the direct peer — the resolver cannot be set afterwards because the helper builds its config internally — so two clients behind one proxy sharing a budget is the correct behaviour here, and this test fails if the helper starts reading a forwarded header. */
 
 func TestSimpleRateLimit_ChargesTheDirectPeer(t *testing.T) {
-    handler := SimpleRateLimit(QuickLimitConfig{RequestsPerMinute: 1})(allowingNext())
+    handler := SimpleRateLimit(1, QuickLimitConfig{})(allowingNext())
 
     _, firstErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
     if nil != firstErr {
@@ -1009,7 +1009,7 @@ func TestSimpleRateLimit_ChargesTheDirectPeer(t *testing.T) {
 /* a budget the helper hands out has to be a budget: the refusal is the 429 the framework spells as TooManyRequests, not a bare error a handler might mistake for a store failure. */
 
 func TestSimpleRateLimit_RefusesWithTooManyRequests(t *testing.T) {
-    handler := SimpleRateLimit(QuickLimitConfig{RequestsPerMinute: 1})(allowingNext())
+    handler := SimpleRateLimit(1, QuickLimitConfig{})(allowingNext())
 
     peer := func() httpcontract.Request {
         request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
@@ -1037,17 +1037,37 @@ func TestSimpleRateLimit_RefusesWithTooManyRequests(t *testing.T) {
     }
 }
 
-func TestUserRateLimit_RefusesANilUserIdCallbackAtConstruction(t *testing.T) {
-    assertPanicsNamingField(t, func() { UserRateLimit(UserLimitConfig{RequestsPerMinute: 1}) }, "get user id callback is required for user rate limit middleware", "UserLimitConfig.UserId")
-}
-
-func TestQuickRateLimits_RefuseABudgetBelowOne(t *testing.T) {
+func TestQuickRateLimits_RefuseAMissingRequiredArgumentByName(t *testing.T) {
     userId := func(request httpcontract.Request) string { return "" }
 
-    for _, requestsPerMinute := range []int{0, -1} {
-        assertPanicsNamingField(t, func() { SimpleRateLimit(QuickLimitConfig{RequestsPerMinute: requestsPerMinute}) }, "the limit is below its minimum", "QuickLimitConfig.RequestsPerMinute")
-        assertPanicsNamingField(t, func() { IpRateLimit(QuickLimitConfig{RequestsPerMinute: requestsPerMinute}) }, "the limit is below its minimum", "QuickLimitConfig.RequestsPerMinute")
-        assertPanicsNamingField(t, func() { UserRateLimit(UserLimitConfig{RequestsPerMinute: requestsPerMinute, UserId: userId}) }, "the limit is below its minimum", "UserLimitConfig.RequestsPerMinute")
+    cases := []struct {
+        name     string
+        callback func()
+        message  string
+        argument string
+    }{
+        {"simple budget of zero", func() { SimpleRateLimit(0, QuickLimitConfig{}) }, "the limit is below its minimum", "requestsPerMinute"},
+        {"ip budget below zero", func() { IpRateLimit(-1, QuickLimitConfig{}) }, "the limit is below its minimum", "requestsPerMinute"},
+        {"user budget of zero", func() { UserRateLimit(0, userId, UserLimitConfig{}) }, "the limit is below its minimum", "requestsPerMinute"},
+        {"nil user id callback", func() { UserRateLimit(1, nil, UserLimitConfig{}) }, "get user id callback is required for user rate limit middleware", "userId"},
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            defer func() {
+                var refusal *exception.Error
+                recoveredErr, isError := recover().(error)
+                if false == isError || false == errors.As(recoveredErr, &refusal) {
+                    t.Fatalf("expected the refusal %q, got %v", testCase.message, recoveredErr)
+                }
+
+                if testCase.message != refusal.Message() || testCase.argument != refusal.Context()["argument"] {
+                    t.Fatalf("expected %q naming the %s argument, got %q %v", testCase.message, testCase.argument, refusal.Message(), refusal.Context())
+                }
+            }()
+
+            testCase.callback()
+        })
     }
 }
 
@@ -1095,7 +1115,7 @@ func TestUserRateLimit_KeysOnTheIdentityRatherThanTheAddress(t *testing.T) {
     identity := "alice"
     getUserId := func(request httpcontract.Request) string { return identity }
 
-    handler := UserRateLimit(UserLimitConfig{RequestsPerMinute: 1, UserId: getUserId})(allowingNext())
+    handler := UserRateLimit(1, getUserId, UserLimitConfig{})(allowingNext())
 
     _, firstErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", ""))
     if nil != firstErr {
@@ -1120,7 +1140,7 @@ func TestUserRateLimit_KeysOnTheIdentityRatherThanTheAddress(t *testing.T) {
 func TestUserRateLimit_FallsBackToTheAddressWhenAnonymous(t *testing.T) {
     anonymous := func(request httpcontract.Request) string { return "" }
 
-    handler := UserRateLimit(UserLimitConfig{RequestsPerMinute: 1, UserId: anonymous})(allowingNext())
+    handler := UserRateLimit(1, anonymous, UserLimitConfig{})(allowingNext())
 
     _, firstErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", ""))
     if nil != firstErr {
@@ -1397,7 +1417,7 @@ func TestLimiters_ResolveTheMaxKeys(t *testing.T) {
 
 func TestUserRateLimit_AdmitsTheBudgetPerUser(t *testing.T) {
     identified := func(request httpcontract.Request) string { return "42" }
-    handler := UserRateLimit(UserLimitConfig{RequestsPerMinute: 2, UserId: identified})(allowingNext())
+    handler := UserRateLimit(2, identified, UserLimitConfig{})(allowingNext())
 
     for attempt := 1; attempt <= 3; attempt++ {
         request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)

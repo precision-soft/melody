@@ -6,10 +6,10 @@ import (
 
 func TestNewMiddlewareBuildReport_CarriesEveryFieldItWasGiven(t *testing.T) {
     inactive := []*InactiveMiddleware{
-        NewInactiveMiddleware("compression", "not enabled in this environment"),
+        newInactiveMiddleware("compression", "not enabled in this environment"),
     }
 
-    report := NewMiddlewareBuildReport(
+    report := newMiddlewareBuildReport(
         "web",
         "prod",
         []string{"security", "rate_limit"},
@@ -52,19 +52,19 @@ func TestNewMiddlewareBuildReport_CarriesEveryFieldItWasGiven(t *testing.T) {
 }
 
 func TestMiddlewareBuildReport_CycleDetectedSurvivesBothWaysOfSettingIt(t *testing.T) {
-    report := NewMiddlewareBuildReport("web", "dev", nil, nil, nil, false)
+    report := newMiddlewareBuildReport("web", "dev", nil, nil, nil, false)
 
     if true == report.CycleDetected() {
         t.Fatalf("expected a report built without a cycle to report none")
     }
 
-    report.SetCycleDetected(true)
+    report.setCycleDetected(true)
 
     if false == report.CycleDetected() {
         t.Fatalf("expected the setter to reach the accessor")
     }
 
-    report.SetCycleDetected(false)
+    report.setCycleDetected(false)
 
     if true == report.CycleDetected() {
         t.Fatalf("expected the flag to be clearable")
@@ -75,7 +75,7 @@ func TestMiddlewareBuildReport_StringSlicesAreCopiedInBothDirections(t *testing.
     selected := []string{"security"}
     missing := []string{"audit"}
 
-    report := NewMiddlewareBuildReport("web", "prod", selected, nil, missing, false)
+    report := newMiddlewareBuildReport("web", "prod", selected, nil, missing, false)
 
     selected[0] = "rewritten"
     missing[0] = "rewritten"
@@ -100,24 +100,24 @@ func TestMiddlewareBuildReport_StringSlicesAreCopiedInBothDirections(t *testing.
     }
 
     setterSelected := []string{"rate_limit"}
-    report.SetSelectedNames(setterSelected)
+    report.setSelectedNames(setterSelected)
     setterSelected[0] = "rewritten"
 
     if "rate_limit" != report.SelectedNames()[0] {
-        t.Fatalf("expected SetSelectedNames to copy the caller's slice")
+        t.Fatalf("expected setSelectedNames to copy the caller's slice")
     }
 
     setterMissing := []string{"tracing"}
-    report.SetMissingReference(setterMissing)
+    report.setMissingReference(setterMissing)
     setterMissing[0] = "rewritten"
 
     if "tracing" != report.MissingReference()[0] {
-        t.Fatalf("expected SetMissingReference to copy the caller's slice")
+        t.Fatalf("expected setMissingReference to copy the caller's slice")
     }
 }
 
 func TestMiddlewareBuildReport_NilListsStayNil(t *testing.T) {
-    report := NewMiddlewareBuildReport("web", "dev", nil, nil, nil, false)
+    report := newMiddlewareBuildReport("web", "dev", nil, nil, nil, false)
 
     if nil != report.SelectedNames() {
         t.Fatalf("expected a nil selected list to stay nil, got: %v", report.SelectedNames())
@@ -133,17 +133,17 @@ func TestMiddlewareBuildReport_NilListsStayNil(t *testing.T) {
 }
 
 func TestMiddlewareBuildReport_SetInactiveCopiesTheCallersSlice(t *testing.T) {
-    report := NewMiddlewareBuildReport("web", "dev", nil, nil, nil, false)
+    report := newMiddlewareBuildReport("web", "dev", nil, nil, nil, false)
 
     supplied := []*InactiveMiddleware{
-        NewInactiveMiddleware("compression", "not enabled in this environment"),
+        newInactiveMiddleware("compression", "not enabled in this environment"),
     }
 
-    report.SetInactive(supplied)
+    report.setInactive(supplied)
 
-    supplied[0] = NewInactiveMiddleware("rewritten", "rewritten")
+    supplied[0] = newInactiveMiddleware("rewritten", "rewritten")
 
     if "compression" != report.Inactive()[0].Name() {
-        t.Fatalf("expected SetInactive to copy the caller's slice, got %q", report.Inactive()[0].Name())
+        t.Fatalf("expected setInactive to copy the caller's slice, got %q", report.Inactive()[0].Name())
     }
 }

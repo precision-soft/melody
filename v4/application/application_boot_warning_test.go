@@ -40,7 +40,7 @@ func (instance *bootWarningTestModule) Description() string {
 
 func (instance *bootWarningTestModule) RegisterBootWarnings(registrar applicationcontract.BootWarningRegistrar) {
     for _, declaration := range instance.declarations {
-        registrar.DeclareBootWarning(declaration.name, declaration.writtenInCli)
+        registrar.DeclareBootWarning(declaration.name, applicationcontract.BootWarningConfig{WrittenInCli: declaration.writtenInCli})
     }
 
     for _, warning := range instance.warnings {
@@ -122,6 +122,24 @@ func TestBootModuleBootWarnings_AModuleCodeIsWrittenWithTheBootWarningsAndHonour
 
         if warnings := cliLogger.warningsContaining(moduleHazardMessage); testCase.expected != len(warnings) {
             t.Fatalf("%s: expected the module's warning written %d times on a cli run, got %v", testCase.name, testCase.expected, warnings)
+        }
+    }
+
+    for _, writtenInCli := range []bool{true, false} {
+        hazardModule := newModuleHazardModule("storage")
+        hazardModule.declarations = []bootWarningDeclaration{{name: "test.module.hazard", writtenInCli: writtenInCli}}
+
+        cliApplication := newCacheWarningTestApplicationOver(t, config.ModeCli, map[string]string{config.CliBootWarningsIgnoredKey: "test.module.hazard"}, &warningRecordingLogger{})
+        cliApplication.modules = []applicationcontract.Module{hazardModule}
+        cliApplication.bootModuleBootWarnings()
+
+        if writtenInCli != cliApplication.bootWarningRegistryOf().WrittenInCli("test.module.hazard") {
+            t.Fatalf("expected the declared code to carry BootWarningConfig.WrittenInCli %v", writtenInCli)
+        }
+
+        refusal := refusalOf(t, cliApplication.refuseUnknownCliBootWarningCodes)
+        if writtenInCli != (nil == refusal) {
+            t.Fatalf("expected a code declared with WrittenInCli %v admitted in the cli ignore list %v, got %v", writtenInCli, writtenInCli, refusal)
         }
     }
 }
@@ -310,7 +328,7 @@ func TestBoot_JudgesTheCliCodesAfterTheModulesDeclaredTheirs(t *testing.T) {
             configuration:        configuration,
             runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli}),
             kernel:               newTestKernel(),
-            httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+            httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration)),
             cliCommands:          make([]clicontract.Command, 0),
             moduleConfigurations: make(map[string]any),
             modules:              []applicationcontract.Module{newModuleHazardModule("storage")},
@@ -529,7 +547,7 @@ func TestRun_AnHttpRunRefusedBeforeItsWriterWritesTheBootWarningsBeforeItsExitRe
             configuration:        configuration,
             runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
             kernel:               newTestKernel(),
-            httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+            httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration)),
             cliCommands:          make([]clicontract.Command, 0),
             moduleConfigurations: make(map[string]any),
         }

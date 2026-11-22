@@ -215,7 +215,7 @@ func (instance *Module) registerSessionStorage(registrar melodyapplicationcontra
                 return nil, loggerErr
             }
 
-            return melodysession.NewFileStorage(melodysession.FileStorageConfig{Path: sessionFilePath, Logger: logger})
+            return melodysession.NewFileStorage(sessionFilePath, melodysession.FileStorageConfig{Logger: logger})
         },
         melodycontainer.RegisterOptions{},
     )

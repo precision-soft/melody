@@ -450,7 +450,7 @@ func example() configcontract.Configuration {
     - `RegisterRuntimeSecret(name string, value any)`
     - `MarkSecret(name string) bool`
     - `Resolve() error`
-    - [`MarkServing()`](../../config/configuration.go) — records that the wiring phase is over, after which `Resolve` is refused: services built during boot hold the values they read, so re-resolving reconfigures nothing and only rewrites the parameter store under readers that expect it settled. Registering a parameter still works, since a registration resolves itself
+    - [`MarkServing(token)`](../../config/configuration.go) — called by `Application.Run` alone, the token one only the framework can spell: records that the wiring phase is over, after which `Resolve` is refused: services built during boot hold the values they read, so re-resolving reconfigures nothing and only rewrites the parameter store under readers that expect it settled. Registering a parameter still works, since a registration resolves itself
     - `Names() []string`
     - `Kernel() configcontract.KernelConfiguration`
     - `Http() configcontract.HttpConfiguration`
@@ -464,8 +464,7 @@ func example() configcontract.Configuration {
     - [`All() map[string]string` / `Get(key string) (string, bool)`](../../config/environment.go) — the loaded `.env` keys, and one of them with the presence flag that tells an empty value apart from an absent one
 - [`type EnvironmentSource`](../../config/environment_source.go)
     - [`NewEnvironmentSource(EnvironmentSourceConfig) *EnvironmentSource`](../../config/environment_source.go) — `FileSystem` and `BaseDirectory`, the directory inside it, an empty one reading as its root
-- [`type Parameter`](../../config/parameter.go), [`type ParameterMap`](../../config/parameter.go)
-    - [`NewParameter(environmentKey string, template any, value any, isDefault bool) *Parameter`](../../config/parameter.go)
+- [`type Parameter`](../../config/parameter.go), [`type ParameterMap`](../../config/parameter.go) — built by the configuration alone; a parameter of the application's own is registered through `RegisterRuntime` and read back through `Get`
 - [`IntWithDefault(configParameter configcontract.Parameter, defaultValue int) int`](../../config/utility.go) — answers the default only for a parameter that is **absent**: one that exists and does not parse panics, because a mistyped value that quietly becomes a number nobody wrote is a misconfiguration running in disguise
 
 ### Container helpers (`config`)

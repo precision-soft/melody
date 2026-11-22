@@ -110,9 +110,10 @@ func (instance *InternalSignCommand) Run(
         actor = melodysecurity.NewActor(
             actorId,
             melodysecuritycontract.ActorTypeUser,
-            roleList,
-            attributes,
-            nil,
+            melodysecurity.ActorConfig{
+                Roles:      roleList,
+                Attributes: attributes,
+            },
         )
     }
 

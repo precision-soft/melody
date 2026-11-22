@@ -76,5 +76,5 @@ func (instance *Envelope) SetError(
     details map[string]any,
     cause *ErrorCause,
 ) {
-    instance.Error = NewError(code, message, details, cause)
+    instance.Error = NewError(code, message, ErrorConfig{Details: details, Cause: cause})
 }

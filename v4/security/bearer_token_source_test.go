@@ -18,7 +18,7 @@ func TestBearerTokenSource_OpaqueValidTokenAuthenticates(t *testing.T) {
     store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
     store.Put(newTestRuntime(), "opaque-123", securitycontract.Claims{UserIdentifier: "user-9", Roles: []string{"ROLE_ADMIN"}}, bound.UnlimitedDuration())
 
-    source := NewBearerTokenSource(NewOpaqueTokenValidator(store), nil)
+    source := NewBearerTokenSource(NewOpaqueTokenValidator(store), BearerTokenSourceConfig{})
 
     token, resolveErr := source.Resolve(testRuntime(), bearerRequest("opaque-123"))
     if nil != resolveErr {
@@ -42,7 +42,7 @@ func TestBearerTokenSource_AcceptsCaseInsensitiveScheme(t *testing.T) {
     store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
     store.Put(newTestRuntime(), "opaque-123", securitycontract.Claims{UserIdentifier: "user-9", Roles: []string{"ROLE_ADMIN"}}, bound.UnlimitedDuration())
 
-    source := NewBearerTokenSource(NewOpaqueTokenValidator(store), nil)
+    source := NewBearerTokenSource(NewOpaqueTokenValidator(store), BearerTokenSourceConfig{})
 
     request := httptest.NewRequest("GET", "/api/resource", nil)
     request.Header.Set("Authorization", "bearer opaque-123")
@@ -58,7 +58,7 @@ func TestBearerTokenSource_AcceptsCaseInsensitiveScheme(t *testing.T) {
 }
 
 func TestBearerTokenSource_MissingHeaderIsAnonymous(t *testing.T) {
-    source := NewBearerTokenSource(NewOpaqueTokenValidator(NewInMemoryTokenStore(InMemoryTokenStoreConfig{})), nil)
+    source := NewBearerTokenSource(NewOpaqueTokenValidator(NewInMemoryTokenStore(InMemoryTokenStoreConfig{})), BearerTokenSourceConfig{})
 
     token, resolveErr := source.Resolve(testRuntime(), bearerRequest(""))
     if nil != resolveErr {
@@ -71,7 +71,7 @@ func TestBearerTokenSource_MissingHeaderIsAnonymous(t *testing.T) {
 }
 
 func TestBearerTokenSource_UnknownOpaqueTokenIsAnonymous(t *testing.T) {
-    source := NewBearerTokenSource(NewOpaqueTokenValidator(NewInMemoryTokenStore(InMemoryTokenStoreConfig{})), nil)
+    source := NewBearerTokenSource(NewOpaqueTokenValidator(NewInMemoryTokenStore(InMemoryTokenStoreConfig{})), BearerTokenSourceConfig{})
 
     token, resolveErr := source.Resolve(testRuntime(), bearerRequest("missing"))
     if nil != resolveErr {
@@ -87,7 +87,7 @@ func TestBearerTokenSource_RejectsEmptySubjectOpaqueToken(t *testing.T) {
     store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
     store.Put(newTestRuntime(), "opaque-empty", securitycontract.Claims{Roles: []string{"ROLE_USER"}}, bound.UnlimitedDuration())
 
-    source := NewBearerTokenSource(NewOpaqueTokenValidator(store), nil)
+    source := NewBearerTokenSource(NewOpaqueTokenValidator(store), BearerTokenSourceConfig{})
 
     token, resolveErr := source.Resolve(testRuntime(), bearerRequest("opaque-empty"))
     if nil != resolveErr {
@@ -115,7 +115,7 @@ func (instance scopeRoleEnricher) Enrich(runtimeInstance containercontract.Runti
 func TestBearerTokenSource_EnricherResolvesRolesFromScope(t *testing.T) {
     secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, ScopeClaim: "scope"})
-    source := NewBearerTokenSource(validator, scopeRoleEnricher{})
+    source := NewBearerTokenSource(validator, BearerTokenSourceConfig{Enricher: scopeRoleEnricher{}})
 
     tokenString := signJwtHs256(secret, map[string]any{
         "sub":   "user-1",
@@ -141,7 +141,7 @@ func TestBearerTokenSource_EnricherResolvesRolesFromScope(t *testing.T) {
 func TestBearerTokenSource_EnrichmentFailureFallsBackToAnonymous(t *testing.T) {
     secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, ScopeClaim: "scope"})
-    source := NewBearerTokenSource(validator, scopeRoleEnricher{})
+    source := NewBearerTokenSource(validator, BearerTokenSourceConfig{Enricher: scopeRoleEnricher{}})
 
     tokenString := signJwtHs256(secret, map[string]any{
         "sub":   "user-1",
@@ -173,7 +173,7 @@ func (instance *failingTokenStore) Lookup(
 
 func TestBearerTokenSource_AStoreThatCannotAnswerIsUnavailable(t *testing.T) {
     storeErr := errors.New("redis is down")
-    source := NewBearerTokenSource(NewOpaqueTokenValidator(&failingTokenStore{failure: storeErr}), nil)
+    source := NewBearerTokenSource(NewOpaqueTokenValidator(&failingTokenStore{failure: storeErr}), BearerTokenSourceConfig{})
     runtimeInstance, logger := runtimeWithRecordingLogger()
 
     token, resolveErr := source.Resolve(runtimeInstance, bearerRequest("opaque-123"))
@@ -190,7 +190,7 @@ func TestBearerTokenSource_AStoreThatCannotAnswerIsUnavailable(t *testing.T) {
         t.Fatalf("expected no record from the source, the resolution listener files the one record, got %v", logger.records)
     }
 
-    unknown, _ := NewBearerTokenSource(NewOpaqueTokenValidator(NewInMemoryTokenStore(InMemoryTokenStoreConfig{})), nil).Resolve(testRuntime(), bearerRequest("opaque-unknown"))
+    unknown, _ := NewBearerTokenSource(NewOpaqueTokenValidator(NewInMemoryTokenStore(InMemoryTokenStoreConfig{})), BearerTokenSourceConfig{}).Resolve(testRuntime(), bearerRequest("opaque-unknown"))
     expectAnonymousToken(t, unknown)
 
     missing, _ := source.Resolve(testRuntime(), newSecurityTestRequest("GET", "/", nil, testRuntime()))
@@ -199,7 +199,7 @@ func TestBearerTokenSource_AStoreThatCannotAnswerIsUnavailable(t *testing.T) {
 
 func TestBearerTokenSource_BadCredentialStaysAtInfo(t *testing.T) {
     store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
-    source := NewBearerTokenSource(NewOpaqueTokenValidator(store), nil)
+    source := NewBearerTokenSource(NewOpaqueTokenValidator(store), BearerTokenSourceConfig{})
     runtimeInstance, logger := runtimeWithRecordingLogger()
 
     token, resolveErr := source.Resolve(runtimeInstance, bearerRequest("token-nobody-stored"))
@@ -230,7 +230,7 @@ func TestBearerTokenSource_AMarkedEnrichmentFailureIsUnavailable(t *testing.T) {
     store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
     store.Put(newTestRuntime(), "opaque-1", securitycontract.Claims{UserIdentifier: "user-9"}, bound.UnlimitedDuration())
 
-    source := NewBearerTokenSource(NewOpaqueTokenValidator(store), &markingEnricher{})
+    source := NewBearerTokenSource(NewOpaqueTokenValidator(store), BearerTokenSourceConfig{Enricher: &markingEnricher{}})
     runtimeInstance, logger := runtimeWithRecordingLogger()
 
     token, resolveErr := source.Resolve(runtimeInstance, bearerRequest("opaque-1"))
@@ -256,16 +256,24 @@ func TestExtractBearerToken_TrimsTheSpaceAroundTheCredential(t *testing.T) {
     }
 }
 
-func TestNewBearerTokenSource_ATypedNilEnricherIsRefused(t *testing.T) {
+func TestNewBearerTokenSource_ZeroConfigIsTheSourceWithoutAnEnricher(t *testing.T) {
+    source := NewBearerTokenSource(NewOpaqueTokenValidator(NewInMemoryTokenStore(InMemoryTokenStoreConfig{})), BearerTokenSourceConfig{})
+
+    if nil != source.enricher {
+        t.Fatalf("expected no enricher, got %T", source.enricher)
+    }
+}
+
+func TestNewBearerTokenSource_RefusesATypedNilEnricherNamingTheField(t *testing.T) {
     var unassignedEnricher *markingEnricher
 
-    expectPanicNamingArgument(t, "NewBearerTokenSource", "enricher", func() {
-        NewBearerTokenSource(NewOpaqueTokenValidator(NewInMemoryTokenStore(InMemoryTokenStoreConfig{})), unassignedEnricher)
+    expectPanicNamingField(t, "BearerTokenSourceConfig.Enricher", func() {
+        NewBearerTokenSource(NewOpaqueTokenValidator(NewInMemoryTokenStore(InMemoryTokenStoreConfig{})), BearerTokenSourceConfig{Enricher: unassignedEnricher})
     })
 }
 
 func TestBearerTokenSource_IsStateless(t *testing.T) {
-    source := NewBearerTokenSource(NewOpaqueTokenValidator(NewInMemoryTokenStore(InMemoryTokenStoreConfig{})), nil)
+    source := NewBearerTokenSource(NewOpaqueTokenValidator(NewInMemoryTokenStore(InMemoryTokenStoreConfig{})), BearerTokenSourceConfig{})
 
     if false == source.Stateless() {
         t.Fatalf("expected the bearer source to answer stateless")

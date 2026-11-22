@@ -216,9 +216,11 @@ func (instance *productDoorFixture) callAt(t *testing.T, handler melodyhttpcontr
 
     request := melodyhttp.NewRequest(
         httpRequest,
-        parameters,
         runtimeInstance,
-        melodyhttp.NewRequestContext("product-door-test", time.Now()),
+        melodyhttp.RequestConfig{
+            RouteParameters: parameters,
+            RequestContext:  melodyhttp.NewRequestContext("product-door-test", time.Now()),
+        },
     )
 
     response, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request)

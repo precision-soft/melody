@@ -3,7 +3,6 @@ package lock
 import (
     "testing"
 
-    "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
@@ -19,7 +18,7 @@ func TestLockerServiceName_IsTheRegisteredName(t *testing.T) {
 func TestLockerMustFromResolver_AnswerTheRegisteredService(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    expected := NewInMemoryLocker(clock.NewSystemClock())
+    expected := NewInMemoryLocker(InMemoryLockerConfig{})
 
     serviceContainer.MustRegister(
         ServiceLocker,

@@ -9,7 +9,6 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
-    "github.com/precision-soft/melody/v4/clock"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
 )
@@ -47,7 +46,7 @@ func TestExclusiveCommand_DelegatesMetadata(t *testing.T) {
         flags: []clicontract.Flag{&clicontract.StringFlag{Name: "limit"}},
     }
 
-    command := NewExclusiveCommand(inner, NewInMemoryLocker(clock.NewSystemClock()), ExclusiveCommandConfig{Ttl: bound.Of(time.Minute)})
+    command := NewExclusiveCommand(inner, NewInMemoryLocker(InMemoryLockerConfig{}), ExclusiveCommandConfig{Ttl: bound.Of(time.Minute)})
 
     if "outbox:dispatch" != command.Name() {
         t.Fatalf("expected the name to delegate, got: %s", command.Name())
@@ -64,7 +63,7 @@ func TestExclusiveCommand_DelegatesMetadata(t *testing.T) {
 
 func TestExclusiveCommand_RunsWhenFree(t *testing.T) {
     inner := &recordingCommand{name: "outbox:dispatch"}
-    command := NewExclusiveCommand(inner, NewInMemoryLocker(clock.NewSystemClock()), ExclusiveCommandConfig{Ttl: bound.Of(time.Minute)})
+    command := NewExclusiveCommand(inner, NewInMemoryLocker(InMemoryLockerConfig{}), ExclusiveCommandConfig{Ttl: bound.Of(time.Minute)})
 
     if runErr := command.Run(testRuntime(), nil); nil != runErr {
         t.Fatalf("unexpected run error: %v", runErr)
@@ -76,7 +75,7 @@ func TestExclusiveCommand_RunsWhenFree(t *testing.T) {
 }
 
 func TestExclusiveCommand_SkipsQuietlyWhenHeld(t *testing.T) {
-    locker := NewInMemoryLocker(clock.NewSystemClock())
+    locker := NewInMemoryLocker(InMemoryLockerConfig{})
     runtimeInstance := testRuntime()
 
     holder := mustCreateLock(locker.CreateLock(exclusiveCommandLockNamePrefix+"outbox:dispatch", bound.Of(time.Minute)))
@@ -100,7 +99,7 @@ func TestExclusiveCommand_SkipsQuietlyWhenHeld(t *testing.T) {
 func TestExclusiveCommand_PropagatesInnerError(t *testing.T) {
     expected := exception.NewError("dispatch failed", nil, nil)
     inner := &recordingCommand{name: "outbox:dispatch", result: expected}
-    command := NewExclusiveCommand(inner, NewInMemoryLocker(clock.NewSystemClock()), ExclusiveCommandConfig{Ttl: bound.Of(time.Minute)})
+    command := NewExclusiveCommand(inner, NewInMemoryLocker(InMemoryLockerConfig{}), ExclusiveCommandConfig{Ttl: bound.Of(time.Minute)})
 
     if runErr := command.Run(testRuntime(), nil); expected != runErr {
         t.Fatalf("expected the inner error to propagate, got: %v", runErr)
@@ -108,7 +107,7 @@ func TestExclusiveCommand_PropagatesInnerError(t *testing.T) {
 }
 
 func TestExclusiveCommand_CustomLockNameSharesTheLock(t *testing.T) {
-    locker := NewInMemoryLocker(clock.NewSystemClock())
+    locker := NewInMemoryLocker(InMemoryLockerConfig{})
     runtimeInstance := testRuntime()
 
     holder := mustCreateLock(locker.CreateLock("custom:lease", bound.Of(time.Minute)))
@@ -157,7 +156,7 @@ func TestExclusiveCommand_ShutdownSkipNamesTheShutdownNotAPhantomPeer(t *testing
 }
 
 func TestExclusiveCommand_ContentionSkipNamesThePeerInstance(t *testing.T) {
-    locker := NewInMemoryLocker(clock.NewSystemClock())
+    locker := NewInMemoryLocker(InMemoryLockerConfig{})
     runtimeInstance, logger := runtimeWithRecordingLogger(context.Background())
 
     holder := mustCreateLock(locker.CreateLock(exclusiveCommandLockNamePrefix+"outbox:dispatch", bound.Of(time.Minute)))
@@ -187,7 +186,7 @@ func TestExclusiveCommand_HandsItsResolvedTtlToTheLocker(t *testing.T) {
         {"set", bound.Of(2 * time.Minute), 2 * time.Minute},
     } {
         t.Run(testCase.name, func(t *testing.T) {
-            locker := &ttlRecordingLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+            locker := &ttlRecordingLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})}
             inner := &recordingCommand{name: "report:build"}
 
             if runErr := NewExclusiveCommand(inner, locker, ExclusiveCommandConfig{Ttl: testCase.ttl}).Run(testRuntime(), nil); nil != runErr {
@@ -212,7 +211,7 @@ func TestNewExclusiveCommand_RefusesAConfigurationTheRulesRefuseNamingTheField(t
         func() {
             defer func() { recovered = recover() }()
 
-            NewExclusiveCommand(&recordingCommand{name: "report:build"}, NewInMemoryLocker(clock.NewSystemClock()), testCase.config)
+            NewExclusiveCommand(&recordingCommand{name: "report:build"}, NewInMemoryLocker(InMemoryLockerConfig{}), testCase.config)
         }()
 
         refusal, isMelodyErr := recovered.(*exception.Error)
@@ -223,7 +222,7 @@ func TestNewExclusiveCommand_RefusesAConfigurationTheRulesRefuseNamingTheField(t
 }
 
 func TestExclusiveCommand_AnUnlimitedTtlHandsTheLockerASessionLock(t *testing.T) {
-    locker := &ttlRecordingLocker{inner: &sessionStyleLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}}
+    locker := &ttlRecordingLocker{inner: &sessionStyleLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})}}
     inner := &recordingCommand{name: "report:build"}
 
     if runErr := NewExclusiveCommand(inner, locker, ExclusiveCommandConfig{Ttl: bound.UnlimitedDuration()}).Run(testRuntime(), nil); nil != runErr || 1 != inner.calls {
@@ -243,11 +242,11 @@ func TestNewExclusiveCommand_RefusesAStopRenewalLimitBelowTheRefreshInterval(t *
         }
     }()
 
-    NewExclusiveCommand(&recordingCommand{name: "job"}, NewInMemoryLocker(clock.NewSystemClock()), ExclusiveCommandConfig{Ttl: bound.Of(time.Minute), StopRenewalLimit: bound.Of(time.Second)})
+    NewExclusiveCommand(&recordingCommand{name: "job"}, NewInMemoryLocker(InMemoryLockerConfig{}), ExclusiveCommandConfig{Ttl: bound.Of(time.Minute), StopRenewalLimit: bound.Of(time.Second)})
 }
 
 func TestNewExclusiveCommand_HandsItsStopRenewalLimitToTheRun(t *testing.T) {
-    command := NewExclusiveCommand(&recordingCommand{name: "job"}, NewInMemoryLocker(clock.NewSystemClock()), ExclusiveCommandConfig{Ttl: bound.Of(time.Minute), StopRenewalLimit: bound.Of(5 * time.Minute)})
+    command := NewExclusiveCommand(&recordingCommand{name: "job"}, NewInMemoryLocker(InMemoryLockerConfig{}), ExclusiveCommandConfig{Ttl: bound.Of(time.Minute), StopRenewalLimit: bound.Of(5 * time.Minute)})
 
     if bound.Of(5*time.Minute) != command.exclusiveConfig.StopRenewalLimit {
         t.Fatalf("expected the limit handed to the run, got %v", command.exclusiveConfig.StopRenewalLimit)

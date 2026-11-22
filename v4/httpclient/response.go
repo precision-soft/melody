@@ -7,19 +7,21 @@ import (
     httpclientcontract "github.com/precision-soft/melody/v4/httpclient/contract"
 )
 
-func NewResponse(
-    statusCode int,
-    status string,
-    headers nethttp.Header,
-    body []byte,
-    request *nethttp.Request,
-) *Response {
+/* ResponseConfig is what a response carries beside its status code; a field left out is empty. */
+type ResponseConfig struct {
+    Status  string
+    Headers nethttp.Header
+    Body    []byte
+    Request *nethttp.Request
+}
+
+func NewResponse(statusCode int, config ResponseConfig) *Response {
     return &Response{
         statusCode: statusCode,
-        status:     status,
-        headers:    headers,
-        body:       body,
-        request:    request,
+        status:     config.Status,
+        headers:    config.Headers,
+        body:       config.Body,
+        request:    config.Request,
     }
 }
 

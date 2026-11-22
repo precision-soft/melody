@@ -87,9 +87,9 @@ func (instance *Module) buildLoginAuthentication(
     )
 
     secondFactor := melodysecurity.NewTotpSecondFactorAuthenticator(
+        budget,
+        twofactor.NewEnrollments(twofactor.StoreFromRuntime),
         melodysecurity.TotpSecondFactorAuthenticatorConfig{
-            Primary:     budget,
-            Enrollments: twofactor.NewEnrollments(twofactor.StoreFromRuntime),
             ReplayGuard: replayGuard,
             Clock:       clockInstance,
         },

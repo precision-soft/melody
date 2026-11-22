@@ -6,7 +6,7 @@ import (
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-func TestNewAuthenticatedTokenFromClaims_CarriesScopeAndAttributes(t *testing.T) {
+func TestAuthenticatedTokenFromClaims_CarriesScopeAndAttributes(t *testing.T) {
     claims := securitycontract.Claims{
         UserIdentifier: "alice",
         Roles:          []string{"ROLE_USER"},
@@ -14,7 +14,7 @@ func TestNewAuthenticatedTokenFromClaims_CarriesScopeAndAttributes(t *testing.T)
         Attributes:     map[string]any{"department": "wms"},
     }
 
-    token := NewAuthenticatedTokenFromClaims(claims)
+    token := newAuthenticatedTokenFromClaims(claims)
 
     if "acme" != token.Scope()["tenant"] {
         t.Fatalf("expected the scope to be carried onto the token, got %+v", token.Scope())

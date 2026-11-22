@@ -228,7 +228,7 @@ func TestRegisterSecurity_TheMetricsTokenPutsTheExpositionBehindTheScraperRole(t
     for credential, authenticated := range map[string]bool{"Bearer scrape-secret": true, "Bearer wrong": false, "scrape-secret": false} {
         httpRequest := httptest.NewRequest(nethttp.MethodGet, "/metrics", nil)
         httpRequest.Header.Set("Authorization", credential)
-        request := melodyhttp.NewRequest(httpRequest, nil, nil, melodyhttp.NewRequestContext("metrics-test", time.Now()))
+        request := melodyhttp.NewRequest(httpRequest, nil, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("metrics-test", time.Now())})
 
         containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
         melodycontainer.MustRegister[melodyeventcontract.EventDispatcher](
@@ -308,7 +308,7 @@ func TestRegisterSecurity_TheDeviceFirewallHonoursATokenOnlyWhileItsAccountExist
 
         httpRequest := httptest.NewRequest(nethttp.MethodGet, route.DeviceIdentityPattern, nil)
         httpRequest.Header.Set("Authorization", "Bearer device-token")
-        request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("device-test", time.Now()))
+        request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("device-test", time.Now())})
 
         token, _ := deviceFirewall.TokenSource().Resolve(runtimeInstance, request)
         authenticated := nil != token && true == token.IsAuthenticated()
@@ -365,9 +365,7 @@ func TestRegisterSecurity_TheInternalFirewallAnswersAGuardOutageWith503AndRetryA
     outageFirewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
         Name:    internalFirewall.Name(),
         Matcher: internalFirewall.Matcher(),
-        TokenSource: melodysecurity.NewHmacTokenSource(melodysecurity.HmacTokenSourceConfig{
-            Secrets:         moduleInstance.hmacSecrets,
-            Applications:    moduleInstance.hmacApplications,
+        TokenSource: melodysecurity.NewHmacTokenSource(moduleInstance.hmacSecrets, moduleInstance.hmacApplications, melodysecurity.HmacTokenSourceConfig{
             MaxFutureExpiry: bound.Of(internalEnvelopeMaxFutureExpiry),
             NonceGuard:      &failingInternalNonceGuard{},
         }),
@@ -410,7 +408,7 @@ func TestRegisterSecurity_TheInternalFirewallAnswersAGuardOutageWith503AndRetryA
             for headerName, headerValue := range testCase.headers {
                 httpRequest.Header.Set(headerName, headerValue)
             }
-            request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("internal-outage", time.Now()))
+            request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("internal-outage", time.Now())})
 
             requestEvent := melodyhttp.NewKernelRequestEvent(runtimeInstance, request)
             if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, melodykernelcontract.EventKernelRequest, requestEvent); nil != dispatchErr {
@@ -531,7 +529,7 @@ func TestRegisterSecurity_TheMainFirewallAnswersAnAccountLookupOutageWith503AndR
             sessionInstance.Set(security.SessionKeySecurityCredentialVersion, security.SessionCredentialVersion("original-hash"))
 
             httpRequest := httptest.NewRequest(nethttp.MethodGet, testCase.path, nil)
-            request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("main-outage", time.Now()))
+            request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("main-outage", time.Now())})
             _ = melodyhttp.SetRequestSession(request, sessionInstance)
 
             requestEvent := melodyhttp.NewKernelRequestEvent(runtimeInstance, request)

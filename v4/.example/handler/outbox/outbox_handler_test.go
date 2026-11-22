@@ -29,7 +29,7 @@ func relayStatusOver(t *testing.T, relayErr error) (int, string) {
     }, melodycontainer.RegisterOptions{})
     runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
-    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodPost, "/outbox/relay", nil), nil, runtimeInstance, melodyhttp.NewRequestContext("relay-test", time.Now()))
+    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodPost, "/outbox/relay", nil), runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("relay-test", time.Now())})
     relay := melodycontainer.Lazy[*outboxintegration.Relay](containerInstance, outboxintegration.ServiceRelay)
 
     response, handlerErr := RelayHandler(relay)(runtimeInstance, httptest.NewRecorder(), request)

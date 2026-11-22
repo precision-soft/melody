@@ -511,9 +511,8 @@ func TestAuthenticatorTokenSource_AWrongApiKeyIsAnnouncedAsALoginFailure(t *test
 
     tokenSource := NewAuthenticatorTokenSource(
         NewAuthenticatorManager([]securitycontract.Authenticator{
-            NewApiKeyHeaderAuthenticator(ApiKeyHeaderAuthenticatorConfig{
+            NewApiKeyHeaderAuthenticator("right", ApiKeyHeaderAuthenticatorConfig{
                 HeaderName:     "X-Api-Key",
-                ExpectedValue:  "right",
                 UserIdentifier: "service",
                 Roles:          []string{"ROLE_SERVICE"},
             }),
@@ -546,9 +545,8 @@ func TestAuthenticatorTokenSource_TheFirstSupportingAuthenticatorDecides(t *test
 
     tokenSource := NewAuthenticatorTokenSource(
         NewAuthenticatorManager([]securitycontract.Authenticator{
-            NewApiKeyHeaderAuthenticator(ApiKeyHeaderAuthenticatorConfig{
+            NewApiKeyHeaderAuthenticator("right", ApiKeyHeaderAuthenticatorConfig{
                 HeaderName:     "X-Api-Key",
-                ExpectedValue:  "right",
                 UserIdentifier: "service",
                 Roles:          []string{"ROLE_SERVICE"},
             }),
@@ -591,9 +589,8 @@ func TestAuthenticatorTokenSource_ResolveFailsWhenTheRejectedCredentialsDispatch
 
     tokenSource := NewAuthenticatorTokenSource(
         NewAuthenticatorManager([]securitycontract.Authenticator{
-            NewApiKeyHeaderAuthenticator(ApiKeyHeaderAuthenticatorConfig{
+            NewApiKeyHeaderAuthenticator("right", ApiKeyHeaderAuthenticatorConfig{
                 HeaderName:     "X-Api-Key",
-                ExpectedValue:  "right",
                 UserIdentifier: "service",
                 Roles:          []string{"ROLE_SERVICE"},
             }),
@@ -666,9 +663,8 @@ func TestAuthenticatorTokenSource_AFailedRejectedCredentialsDispatchKeepsTheReje
 
     tokenSource := NewAuthenticatorTokenSource(
         NewAuthenticatorManager([]securitycontract.Authenticator{
-            NewApiKeyHeaderAuthenticator(ApiKeyHeaderAuthenticatorConfig{
+            NewApiKeyHeaderAuthenticator("right", ApiKeyHeaderAuthenticatorConfig{
                 HeaderName:     "X-Api-Key",
-                ExpectedValue:  "right",
                 UserIdentifier: "service",
                 Roles:          []string{"ROLE_SERVICE"},
             }),

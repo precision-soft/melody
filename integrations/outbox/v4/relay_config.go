@@ -89,9 +89,6 @@ type resolvedRelay struct {
 
 func resolveRelayConfig(config RelayConfig) (resolvedRelay, error) {
     resolved := resolvedRelay{
-        Repository: config.Repository,
-        Transport:  config.Transport,
-        Codec:      config.Codec,
         Locker:     config.Locker,
         LockName:   config.LockName,
     }

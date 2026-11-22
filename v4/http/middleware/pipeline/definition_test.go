@@ -4,8 +4,8 @@ import (
     "testing"
 )
 
-func TestNewInactiveMiddleware_CarriesBothHalvesOfTheExplanation(t *testing.T) {
-    inactive := NewInactiveMiddleware("compression", "not enabled in this environment")
+func TestInactiveMiddleware_CarriesBothHalvesOfTheExplanation(t *testing.T) {
+    inactive := newInactiveMiddleware("compression", "not enabled in this environment")
 
     if "compression" != inactive.Name() {
         t.Fatalf("unexpected name: %q", inactive.Name())

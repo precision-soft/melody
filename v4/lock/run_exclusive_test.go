@@ -9,7 +9,6 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
-    "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
@@ -89,7 +88,7 @@ func (instance *contextCancelledAcquireLock) Refresh(runtimeInstance containerco
 }
 
 func TestRunExclusive_RunsAndReleases(t *testing.T) {
-    locker := NewInMemoryLocker(clock.NewSystemClock())
+    locker := NewInMemoryLocker(InMemoryLockerConfig{})
     runtimeInstance := testRuntime()
 
     ranFirst := false
@@ -113,7 +112,7 @@ func TestRunExclusive_RunsAndReleases(t *testing.T) {
 }
 
 func TestRunExclusive_SkipsWhenHeldByAnotherHolder(t *testing.T) {
-    locker := NewInMemoryLocker(clock.NewSystemClock())
+    locker := NewInMemoryLocker(InMemoryLockerConfig{})
     runtimeInstance := testRuntime()
 
     holder := mustCreateLock(locker.CreateLock("cron:held", bound.Of(time.Minute)))
@@ -175,7 +174,7 @@ func TestRunExclusive_AcquireCancellationIsShutdownNotError(t *testing.T) {
 }
 
 func TestRunExclusive_PropagatesFnError(t *testing.T) {
-    locker := NewInMemoryLocker(clock.NewSystemClock())
+    locker := NewInMemoryLocker(InMemoryLockerConfig{})
     runtimeInstance := testRuntime()
 
     expected := exception.NewError("work failed", nil, nil)
@@ -192,7 +191,7 @@ func TestRunExclusive_PropagatesFnError(t *testing.T) {
 }
 
 func TestRunExclusive_RefreshFailureCancelsChildRuntime(t *testing.T) {
-    locker := &refreshFailingLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+    locker := &refreshFailingLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})}
     runtimeInstance := testRuntime()
 
     cancelled := false
@@ -219,7 +218,7 @@ func TestRunExclusive_RefreshFailureCancelsChildRuntime(t *testing.T) {
 }
 
 func TestRunExclusive_ReleasesEvenWhenCallerContextIsCancelled(t *testing.T) {
-    locker := NewInMemoryLocker(clock.NewSystemClock())
+    locker := NewInMemoryLocker(InMemoryLockerConfig{})
 
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -477,7 +476,7 @@ func TestRunExclusive_ContextCancellationIsShutdownNotLostLease(t *testing.T) {
 
 /* The holder has the same shape as the leader gate: a renewal that never answers returns no error, so nothing cancels the child runtime and the callback keeps working while the lease lapses and another instance acquires — two runs of the same exclusive work at once. The renewal deadline is what turns the silence into the cancellation the callback is written to obey. */
 func TestRunExclusive_ARenewalThatNeverAnswersStopsTheCallback(t *testing.T) {
-    locker := &hangingRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+    locker := &hangingRefreshLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})}
 
     runContext, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -611,7 +610,7 @@ func TestRunExclusive_ARenewalThatCannotLandBeforeTheDemotionInstantLosesTheLeas
 /* the other half of the invariant: a renewal that keeps failing must still demote, and must do so before the lease it last wrote can be acquired by anyone else rather than after. */
 func TestRunExclusive_APersistentlyFailingRenewalStillLosesTheLease(t *testing.T) {
     ttl := 200 * time.Millisecond
-    locker := &refreshFailingLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+    locker := &refreshFailingLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})}
 
     completed := false
 
@@ -814,7 +813,7 @@ func TestRunExclusive_LostLeaseKeepsTheCallbackErrorInTheChain(t *testing.T) {
 
     _, runErr := RunExclusive(
         testRuntimeWithContext(context.Background()),
-        &refreshFailingLocker{inner: NewInMemoryLocker(clock.NewSystemClock())},
+        &refreshFailingLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})},
         "job:joined-cause",
         ExclusiveConfig{Ttl: bound.Of(100 * time.Millisecond)},
         func(childRuntime containercontract.Runtime) error {
@@ -1060,7 +1059,7 @@ func (instance *typedNilScopeExclusiveRuntime) Kind() containercontract.Kind {
 
 /* runtime.WithContext refuses a typed-nil scope, and the run re-wraps its runtime through it three times — once inside the deferred release, where the refusal was a second panic in the unwind of the first and the lock stayed held for its ttl; refused at the entry, nothing is held */
 func TestRunExclusive_RefusesATypedNilScopeBeforeAcquiring(t *testing.T) {
-    locker := NewInMemoryLocker(clock.NewSystemClock())
+    locker := NewInMemoryLocker(InMemoryLockerConfig{})
 
     testhelper.AssertPanicsWithError(t, func() {
         _, _ = RunExclusive(
@@ -1122,7 +1121,7 @@ func (instance *refreshHoldingLocker) CreateLock(name string, ttl bound.Duration
 }
 
 func TestRunExclusive_ACallbackPanicJoinsTheRefreshBeforeReleasing(t *testing.T) {
-    locker := &refreshHoldingLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+    locker := &refreshHoldingLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})}
     runtimeInstance := testRuntimeWithContext(context.Background())
 
     var recovered any
@@ -1232,7 +1231,7 @@ func TestRunExclusive_AHungRenewalCancelsTheCallbackBeforeTheLeaseLapses(t *test
 func TestRunExclusive_AFailingRenewalCancelsTheCallbackBeforeTheLeaseLapses(t *testing.T) {
     ttl := 400 * time.Millisecond
 
-    if cancelledAfter := cancellationDelayUnder(t, &refreshFailingLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}, ttl); cancelledAfter > ttl-ttl/8 {
+    if cancelledAfter := cancellationDelayUnder(t, &refreshFailingLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})}, ttl); cancelledAfter > ttl-ttl/8 {
         t.Fatalf("expected the callback cancelled at least an eighth of the ttl before the lapse, cancelled after %v", cancelledAfter)
     }
 }
@@ -1269,7 +1268,7 @@ func (instance *contextIgnoringRefreshLock) Refresh(runtimeInstance containercon
 /* the renewal issued at half the ttl ignores its context and answers success only after the demotion instant: the callback is still told to stop at the instant, and the late success does not save the lease */
 func TestRunExclusive_ARenewalIgnoringItsContextCancelsTheCallbackAtTheDemotionInstant(t *testing.T) {
     ttl := 400 * time.Millisecond
-    locker := &contextIgnoringRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock()), delay: 180 * time.Millisecond}
+    locker := &contextIgnoringRefreshLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{}), delay: 180 * time.Millisecond}
 
     if cancelledAfter := cancellationDelayUnder(t, locker, ttl); cancelledAfter > ttl-ttl/8 {
         t.Fatalf("expected the callback cancelled at least an eighth of the ttl before the lapse, cancelled after %v", cancelledAfter)
@@ -1279,7 +1278,7 @@ func TestRunExclusive_ARenewalIgnoringItsContextCancelsTheCallbackAtTheDemotionI
 /* the callback returns before the demotion instant while a renewal ignoring its context is still on the wire and answers after it: the run ended with its lease, so it is reported clean rather than as a lost lease. The renewal goes out at 1s and answers at 1.9s, past the 1.5s instant; the callback returns at 1.25s, a quarter of a second from each, where a 50ms margin before the instant lost the race to a loaded runner */
 func TestRunExclusive_ACallbackThatReturnedBeforeTheInstantIsACleanRunWhateverTheRenewalAnswersLate(t *testing.T) {
     ttl := 2 * time.Second
-    locker := &contextIgnoringRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock()), delay: 900 * time.Millisecond}
+    locker := &contextIgnoringRefreshLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{}), delay: 900 * time.Millisecond}
 
     ran, runErr := RunExclusive(
         testRuntimeWithContext(context.Background()),
@@ -1299,7 +1298,7 @@ func TestRunExclusive_ACallbackThatReturnedBeforeTheInstantIsACleanRunWhateverTh
 }
 
 func TestRunExclusive_TheZeroConfigurationHandsTheLockerAThirtySecondLease(t *testing.T) {
-    locker := &ttlRecordingLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+    locker := &ttlRecordingLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})}
 
     ran, runErr := RunExclusive(testRuntime(), locker, "zero-config", ExclusiveConfig{}, func(containercontract.Runtime) error {
         return nil
@@ -1314,7 +1313,7 @@ func TestRunExclusive_TheZeroConfigurationHandsTheLockerAThirtySecondLease(t *te
 }
 
 func TestRunExclusive_AnUnlimitedTtlHandsTheLockerASessionLock(t *testing.T) {
-    locker := &ttlRecordingLocker{inner: &sessionStyleLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}}
+    locker := &ttlRecordingLocker{inner: &sessionStyleLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})}}
 
     ran, runErr := RunExclusive(testRuntime(), locker, "session-config", ExclusiveConfig{Ttl: bound.UnlimitedDuration()}, func(containercontract.Runtime) error {
         return nil
@@ -1396,7 +1395,7 @@ func TestRunExclusive_RenewsTheLeaseWhileTheCallbackWindsDownAfterAStop(t *testi
     parentContext, cancelParent := context.WithCancel(context.Background())
     defer cancelParent()
 
-    inner := NewInMemoryLocker(clock.NewSystemClock())
+    inner := NewInMemoryLocker(InMemoryLockerConfig{})
     locker := &countingRefreshLocker{inner: inner}
 
     var atStop int64
@@ -1426,7 +1425,7 @@ func TestRunExclusive_StopsRenewingPastTheStopRenewalLimit(t *testing.T) {
     parentContext, cancelParent := context.WithCancel(context.Background())
     defer cancelParent()
 
-    locker := &countingRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+    locker := &countingRefreshLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})}
 
     var pastLimit int64
     _, err := RunExclusive(testRuntimeWithContext(parentContext), locker, "job:past-limit", ExclusiveConfig{Ttl: bound.Of(40 * time.Millisecond), StopRenewalLimit: bound.Of(60 * time.Millisecond)}, func(childRuntime containercontract.Runtime) error {
@@ -1452,7 +1451,7 @@ func TestRunExclusive_ALeaseLostDuringTheWindDownIsReported(t *testing.T) {
     parentContext, cancelParent := context.WithCancel(context.Background())
     defer cancelParent()
 
-    locker := &switchableRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+    locker := &switchableRefreshLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})}
 
     _, err := RunExclusive(testRuntimeWithContext(parentContext), locker, "job:lost-in-wind-down", ExclusiveConfig{Ttl: bound.Of(40 * time.Millisecond)}, func(childRuntime containercontract.Runtime) error {
         locker.fail.Store(true)
@@ -1469,7 +1468,7 @@ func TestRunExclusive_ALeaseLostDuringTheWindDownIsReported(t *testing.T) {
 }
 
 func TestRunExclusive_RefusesAStopRenewalLimitBelowTheRefreshInterval(t *testing.T) {
-    _, err := RunExclusive(testRuntimeWithContext(context.Background()), NewInMemoryLocker(clock.NewSystemClock()), "job:limit", ExclusiveConfig{Ttl: bound.Of(time.Second), StopRenewalLimit: bound.Of(100 * time.Millisecond)}, func(containercontract.Runtime) error {
+    _, err := RunExclusive(testRuntimeWithContext(context.Background()), NewInMemoryLocker(InMemoryLockerConfig{}), "job:limit", ExclusiveConfig{Ttl: bound.Of(time.Second), StopRenewalLimit: bound.Of(100 * time.Millisecond)}, func(containercontract.Runtime) error {
         t.Fatal("expected the callback not run")
 
         return nil
@@ -1522,7 +1521,7 @@ func TestRunExclusive_TheStopRenewalLimitRunsFromTheStopAndWarnsAtOnce(t *testin
     defer cancelParent()
 
     runtimeInstance, logger := runtimeWithRecordingLogger(parentContext)
-    locker := &countingRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+    locker := &countingRefreshLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})}
 
     var atStop, beforeLimit int64
     warnedBeforeReturn := false
@@ -1556,7 +1555,7 @@ func TestRunExclusive_TheStopRenewalLimitRunsFromTheStopAndWarnsAtOnce(t *testin
 func TestRunExclusive_ALockersRefusalIsTheRunsErrorAndTheCallbackDoesNotRun(t *testing.T) {
     called := false
 
-    ran, runErr := RunExclusive(testRuntime(), NewInMemoryLocker(clock.NewSystemClock()), "job:unlimited", ExclusiveConfig{Ttl: bound.UnlimitedDuration()}, func(runtimeInstance containercontract.Runtime) error {
+    ran, runErr := RunExclusive(testRuntime(), NewInMemoryLocker(InMemoryLockerConfig{}), "job:unlimited", ExclusiveConfig{Ttl: bound.UnlimitedDuration()}, func(runtimeInstance containercontract.Runtime) error {
         called = true
 
         return nil

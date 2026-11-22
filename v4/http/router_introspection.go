@@ -6,7 +6,7 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
 )
 
-func NewRouteDefinition(
+func newRouteDefinition(
     name string,
     pattern string,
     methods []string,
@@ -226,7 +226,7 @@ func mapRouteToDefinition(routeValue route) *RouteDefinition {
         attributes[key] = value
     }
 
-    return NewRouteDefinition(
+    return newRouteDefinition(
         routeValue.name,
         routeValue.pattern,
         routeValue.methods,

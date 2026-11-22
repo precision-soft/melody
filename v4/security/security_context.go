@@ -63,7 +63,7 @@ func (instance *SecurityContext) MatchedRule() *MatchedAccessControlRule {
     return instance.matchedRule
 }
 
-func (instance *SecurityContext) SetMatchedRule(matchedRule *MatchedAccessControlRule) {
+func (instance *SecurityContext) setMatchedRule(matchedRule *MatchedAccessControlRule) {
     instance.matchedRule = matchedRule
 }
 

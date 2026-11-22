@@ -8,31 +8,32 @@ import (
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-/* ApiKeyHeaderAuthenticatorConfig names the header, the secret it must carry and the principal a match authenticates as; HeaderName and ExpectedValue are required. */
+/* DefaultApiKeyHeaderName is the header an api key authenticator or rule reads when its HeaderName is left empty. */
+const DefaultApiKeyHeaderName = "X-Api-Key"
+
+/* ApiKeyHeaderAuthenticatorConfig names the header (DefaultApiKeyHeaderName when empty) and the principal a match authenticates as. */
 type ApiKeyHeaderAuthenticatorConfig struct {
     HeaderName     string
-    ExpectedValue  string
     UserIdentifier string
     Roles          []string
 }
 
-/* NewApiKeyHeaderAuthenticator builds the authenticator, panicking on an empty HeaderName or ExpectedValue by the field's name; the roles are copied. */
-func NewApiKeyHeaderAuthenticator(config ApiKeyHeaderAuthenticatorConfig) *ApiKeyHeaderAuthenticator {
-    if "" == config.HeaderName {
+/* NewApiKeyHeaderAuthenticator authenticates a request whose header carries expectedValue, panicking on an empty expectedValue naming the argument; the roles are copied. */
+func NewApiKeyHeaderAuthenticator(expectedValue string, config ApiKeyHeaderAuthenticatorConfig) *ApiKeyHeaderAuthenticator {
+    if "" == expectedValue {
         exception.Panic(
-            exception.NewError("the header name is empty in api key header authenticator", exceptioncontract.Context{"field": "ApiKeyHeaderAuthenticatorConfig.HeaderName"}, nil),
+            exception.NewError("the expected value is empty in api key header authenticator", exceptioncontract.Context{"argument": "expectedValue"}, nil),
         )
     }
 
-    if "" == config.ExpectedValue {
-        exception.Panic(
-            exception.NewError("the expected value is empty in api key header authenticator", exceptioncontract.Context{"field": "ApiKeyHeaderAuthenticatorConfig.ExpectedValue"}, nil),
-        )
+    headerName := config.HeaderName
+    if "" == headerName {
+        headerName = DefaultApiKeyHeaderName
     }
 
     return &ApiKeyHeaderAuthenticator{
-        headerName:    config.HeaderName,
-        expectedValue: config.ExpectedValue,
+        headerName:    headerName,
+        expectedValue: expectedValue,
         userId:        config.UserIdentifier,
         roles:         append([]string{}, config.Roles...),
     }

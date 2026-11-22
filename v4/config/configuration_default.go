@@ -22,7 +22,7 @@ func (instance *Configuration) registerDefaultParameters(
 func (instance *Configuration) registerKeylessParameter(name string, template string) {
     instance.refuseDuplicateDefault(name, name)
 
-    instance.parameters[name] = NewParameter(name, template, template, true)
+    instance.parameters[name] = newParameter(name, template, template, true)
 }
 
 func (instance *Configuration) registerFrameworkEnvironmentKey(key configcontract.EnvironmentKey) {
@@ -30,7 +30,7 @@ func (instance *Configuration) registerFrameworkEnvironmentKey(key configcontrac
 
     _, isSet := instance.environment.Get(key.Key)
 
-    instance.parameters[key.Parameter] = NewParameter(key.Key, environmentPlaceholder(key.Key), nil, false == isSet)
+    instance.parameters[key.Parameter] = newParameter(key.Key, environmentPlaceholder(key.Key), nil, false == isSet)
 
     instance.recordEnvironmentKeyDeclarationLocked(frameworkEnvironmentKeyOwner, key)
 }

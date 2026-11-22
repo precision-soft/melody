@@ -167,7 +167,7 @@ func (instance *commandOutput) finish(command string, startedAt time.Time, runEr
         return nil
     }
 
-    meta := output.NewMeta(command, instance.arguments, instance.option, startedAt, time.Since(startedAt), output.Version{})
+    meta := output.NewMeta(command, output.MetaConfig{Arguments: instance.arguments, Option: instance.option, StartedAt: startedAt, Duration: time.Since(startedAt)})
     envelope := output.NewEnvelope(meta)
 
     data := map[string]any{}
@@ -208,8 +208,10 @@ func (instance *commandOutput) finish(command string, startedAt time.Time, runEr
         envelope.Error = output.NewError(
             "migrate.failed",
             runErr.Error(),
-            errorDetailsOf(runErr),
-            errorCauseOf(runErr),
+            output.ErrorConfig{
+                Details: errorDetailsOf(runErr),
+                Cause:   errorCauseOf(runErr),
+            },
         )
     }
 

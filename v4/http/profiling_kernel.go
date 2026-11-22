@@ -71,7 +71,7 @@ func RegisterKernelHttpProfilerListener(eventDispatcher eventcontract.EventDispa
                 }
             }
 
-            profile := NewHttpRequestProfile(
+            profile := newHttpRequestProfile(
                 requestContext.RequestId(),
                 method,
                 path,

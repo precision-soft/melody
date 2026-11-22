@@ -65,7 +65,7 @@ func runFileStorageWriteWindowChild() {
 
     path := filepath.Join(directory, "sessions.json")
 
-    seed, seedErr := NewFileStorage(FileStorageConfig{Path: path})
+    seed, seedErr := NewFileStorage(path, FileStorageConfig{})
     if nil != seedErr {
         _, _ = os.Stdout.WriteString("seed-failed\n")
 
@@ -88,7 +88,7 @@ func runFileStorageWriteWindowChild() {
     }
     defer fileInstance.Close()
 
-    storage, storageErr := NewFileStorage(FileStorageConfig{File: fileInstance})
+    storage, storageErr := NewFileStorageOverFile(fileInstance, FileStorageConfig{})
     if nil != storageErr {
         _, _ = os.Stdout.WriteString("storage-failed\n")
 

@@ -71,10 +71,10 @@ func (instance *Builder) Build(
 
         /* a factory that succeeds and returns nothing is recorded as inactive with its reason */
         if nil == middlewareValue {
-            report.SetInactive(
+            report.setInactive(
                 append(
                     report.Inactive(),
-                    NewInactiveMiddleware(definition.Name, "factory returned no middleware"),
+                    newInactiveMiddleware(definition.Name, "factory returned no middleware"),
                 ),
             )
 
@@ -82,7 +82,7 @@ func (instance *Builder) Build(
         }
 
         middlewares = append(middlewares, middlewareValue)
-        report.SetSelectedNames(append(report.SelectedNames(), definition.Name))
+        report.setSelectedNames(append(report.SelectedNames(), definition.Name))
     }
 
     return middlewares, report, nil
@@ -133,7 +133,7 @@ func (instance *Builder) Describe(
         selectedNames = append(selectedNames, definition.Name)
     }
 
-    report.SetSelectedNames(selectedNames)
+    report.setSelectedNames(selectedNames)
 
     return descriptions, report, nil
 }
@@ -161,8 +161,8 @@ func (instance *Builder) selectAndOrder(
     }
 
     ordered, missingReferences, cycleDetected := orderDefinitions(selected)
-    report.SetMissingReference(missingReferences)
-    report.SetCycleDetected(cycleDetected)
+    report.setMissingReference(missingReferences)
+    report.setCycleDetected(cycleDetected)
 
     if true == cycleDetected {
         return nil, report, exception.NewError(
@@ -202,10 +202,10 @@ func (instance *Builder) selectDefinitions(
 
     for position, definition := range instance.definitions {
         if "" == definition.Name {
-            report.SetInactive(
+            report.setInactive(
                 append(
                     report.Inactive(),
-                    NewInactiveMiddleware("", "skipped: empty name"),
+                    newInactiveMiddleware("", "skipped: empty name"),
                 ),
             )
             continue
@@ -223,20 +223,20 @@ func (instance *Builder) selectDefinitions(
         }
 
         if false == isEnabledForEnvironment(definition, environment) {
-            report.SetInactive(
+            report.setInactive(
                 append(
                     report.Inactive(),
-                    NewInactiveMiddleware(definition.Name, "disabled: environment mismatch"),
+                    newInactiveMiddleware(definition.Name, "disabled: environment mismatch"),
                 ),
             )
             continue
         }
 
         if false == isEnabledForGroup(definition, group) {
-            report.SetInactive(
+            report.setInactive(
                 append(
                     report.Inactive(),
-                    NewInactiveMiddleware(definition.Name, "disabled: group mismatch"),
+                    newInactiveMiddleware(definition.Name, "disabled: group mismatch"),
                 ),
             )
             continue
@@ -293,10 +293,10 @@ func (instance *Builder) selectDefinitions(
             continue
         }
 
-        report.SetInactive(
+        report.setInactive(
             append(
                 report.Inactive(),
-                NewInactiveMiddleware(definition.Name, "skipped: duplicate definition"),
+                newInactiveMiddleware(definition.Name, "skipped: duplicate definition"),
             ),
         )
     }

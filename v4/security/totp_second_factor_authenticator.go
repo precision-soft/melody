@@ -21,16 +21,12 @@ const DefaultTotpCodeHeaderName = "X-2FA-Code"
 /* DefaultTotpRecoveryHeaderName is the request header a single-use recovery code is read from unless overridden; it is distinct from the TOTP code header so the two never collide. */
 const DefaultTotpRecoveryHeaderName = "X-2FA-Recovery-Code"
 
-/* TotpSecondFactorAuthenticatorConfig composes a primary authenticator with a TOTP second factor into one Authenticator. When the primary credential is accepted and the user has a TOTP enrollment, a valid code header is also required; otherwise the result is a non-authenticated TwoFactorPendingToken the application uses to prompt for a code. When Enrollments also implements TwoFactorRecoveryStore, a single-use recovery code on RecoveryHeaderName is accepted instead of a TOTP code. The ReplayGuard blocks reuse of an accepted code, but failed attempts are NOT rate-limited: throttling and per-user lockout are the application's and MUST front this authenticator, or a 6-digit code can be brute-forced once the primary credential is known. An enrollment lookup, a recovery redemption or a replay guard that fails returns its error marked with exception.MarkInfrastructureFailure, so the firewall answers it as a credential nobody could check rather than a failed sign-in. */
+/* TotpSecondFactorAuthenticatorConfig tunes how NewTotpSecondFactorAuthenticator composes its primary authenticator with a TOTP second factor into one Authenticator. When the primary credential is accepted and the user has a TOTP enrollment, a valid code header is also required; otherwise the result is a non-authenticated TwoFactorPendingToken the application uses to prompt for a code. When the enrollments store also implements TwoFactorRecoveryStore, a single-use recovery code on RecoveryHeaderName is accepted instead of a TOTP code. The ReplayGuard blocks reuse of an accepted code, but failed attempts are NOT rate-limited: throttling and per-user lockout are the application's and MUST front this authenticator, or a 6-digit code can be brute-forced once the primary credential is known. An enrollment lookup, a recovery redemption or a replay guard that fails returns its error marked with exception.MarkInfrastructureFailure, so the firewall answers it as a credential nobody could check rather than a failed sign-in. */
 type TotpSecondFactorAuthenticatorConfig struct {
-    Primary securitycontract.Authenticator
-
-    Enrollments securitycontract.TwoFactorEnrollmentStore
-
     /* CodeHeaderName overrides the header the TOTP code is read from; defaults to DefaultTotpCodeHeaderName. */
     CodeHeaderName string
 
-    /* RecoveryHeaderName overrides the header a single-use recovery code is read from; defaults to DefaultTotpRecoveryHeaderName. It only takes effect when Enrollments also implements TwoFactorRecoveryStore. */
+    /* RecoveryHeaderName overrides the header a single-use recovery code is read from; defaults to DefaultTotpRecoveryHeaderName. It only takes effect when the enrollments store also implements TwoFactorRecoveryStore. */
     RecoveryHeaderName string
 
     /* Totp tunes the algorithm; a config outside its ranges is refused at construction naming the field. Its Clock is refused: the authenticator's Clock is the clock the code is verified against. */
@@ -43,13 +39,14 @@ type TotpSecondFactorAuthenticatorConfig struct {
     Clock clockcontract.Clock
 }
 
-func NewTotpSecondFactorAuthenticator(config TotpSecondFactorAuthenticatorConfig) *TotpSecondFactorAuthenticator {
-    if true == internal.IsNilInterface(config.Primary) {
-        exception.Panic(exception.NewError("totp second factor primary authenticator is nil", nil, nil))
+/* NewTotpSecondFactorAuthenticator requires a TOTP code from the users enrollments holds once primary accepted them; a nil primary or enrollments panics naming the argument. */
+func NewTotpSecondFactorAuthenticator(primary securitycontract.Authenticator, enrollments securitycontract.TwoFactorEnrollmentStore, config TotpSecondFactorAuthenticatorConfig) *TotpSecondFactorAuthenticator {
+    if true == internal.IsNilInterface(primary) {
+        exception.Panic(exception.NewError("totp second factor primary authenticator is nil", exceptioncontract.Context{"argument": "primary"}, nil))
     }
 
-    if true == internal.IsNilInterface(config.Enrollments) {
-        exception.Panic(exception.NewError("totp second factor enrollment store is nil", nil, nil))
+    if true == internal.IsNilInterface(enrollments) {
+        exception.Panic(exception.NewError("totp second factor enrollment store is nil", exceptioncontract.Context{"argument": "enrollments"}, nil))
     }
 
     codeHeaderName := config.CodeHeaderName
@@ -93,8 +90,8 @@ func NewTotpSecondFactorAuthenticator(config TotpSecondFactorAuthenticatorConfig
     }
 
     return &TotpSecondFactorAuthenticator{
-        primary:            config.Primary,
-        enrollments:        config.Enrollments,
+        primary:            primary,
+        enrollments:        enrollments,
         codeHeaderName:     codeHeaderName,
         recoveryHeaderName: recoveryHeaderName,
         totpConfig:         totpConfig,

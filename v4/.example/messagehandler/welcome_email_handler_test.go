@@ -36,7 +36,7 @@ func runtimeWithMailer(t *testing.T, transport melodymailercontract.Transport) m
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
 
     if nil != transport {
-        mailer := melodymailer.NewManager(transport)
+        mailer := melodymailer.NewManager(transport, melodymailer.ManagerConfig{})
         melodycontainer.MustRegister[melodymailercontract.Mailer](containerInstance, melodymailer.ServiceMailer, func(melodycontainercontract.Resolver) (melodymailercontract.Mailer, error) {
             return mailer, nil
         }, melodycontainer.RegisterOptions{})

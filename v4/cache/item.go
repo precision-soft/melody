@@ -5,15 +5,16 @@ import (
     "time"
 )
 
-func NewItem(
-    key string,
-    payload []byte,
-    createdAt time.Time,
-    expiresAt *time.Time,
-) *Item {
+/* ItemConfig is what an item carries beside its key and payload; no ExpiresAt is an item that does not expire. */
+type ItemConfig struct {
+    CreatedAt time.Time
+    ExpiresAt *time.Time
+}
+
+func NewItem(key string, payload []byte, config ItemConfig) *Item {
     var expiresAtCopy *time.Time
-    if nil != expiresAt {
-        value := *expiresAt
+    if nil != config.ExpiresAt {
+        value := *config.ExpiresAt
         expiresAtCopy = &value
     }
 
@@ -25,11 +26,11 @@ func NewItem(
     item := &Item{
         key:       key,
         payload:   payloadCopy,
-        createdAt: createdAt,
+        createdAt: config.CreatedAt,
         expiresAt: expiresAtCopy,
     }
 
-    item.lastAccessedAtNano.Store(createdAt.UnixNano())
+    item.lastAccessedAtNano.Store(config.CreatedAt.UnixNano())
 
     return item
 }

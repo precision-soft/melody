@@ -6,7 +6,6 @@ import (
     "runtime"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
-    configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
@@ -37,22 +36,11 @@ type HttpMiddleware struct {
 
 type httpMiddlewareChain = []httpcontract.Middleware
 
-func NewHttpMiddleware(
-    staticConfig static.Config,
-    configuration configcontract.Configuration,
-) *HttpMiddleware {
+func NewHttpMiddleware(staticConfig static.Config) *HttpMiddleware {
     return &HttpMiddleware{
         definitions:  make([]middlewarepipeline.HttpMiddlewareDefinition, 0),
         staticConfig: staticConfig,
         customIndex:  0,
-        lastBuildReport: middlewarepipeline.NewMiddlewareBuildReport(
-            "",
-            configuration.Kernel().Environment(),
-            make([]string, 0),
-            make([]*middlewarepipeline.InactiveMiddleware, 0),
-            nil,
-            false,
-        ),
     }
 }
 
@@ -173,7 +161,12 @@ func (instance *HttpMiddleware) useFactories(moduleName string, priority int, fa
     }
 }
 
+/* LastBuildReport answers the report of the last pipeline build, an empty report before the first. */
 func (instance *HttpMiddleware) LastBuildReport() *middlewarepipeline.MiddlewareBuildReport {
+    if nil == instance.lastBuildReport {
+        return &middlewarepipeline.MiddlewareBuildReport{}
+    }
+
     return instance.lastBuildReport
 }
 

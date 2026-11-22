@@ -64,7 +64,7 @@ func TestSessionLogoutHandlerReleasesTheSessionsRowThroughTheRuntimeItWasHanded(
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     handedRuntime := melodyruntime.NewRequest(context.WithValue(context.Background(), logoutRuntimeMarkerKey{}, "handed"), containerInstance.NewScope())
     otherRuntime := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
-    request = melodyhttp.NewRequest(request.HttpRequest(), nil, otherRuntime, nil)
+    request = melodyhttp.NewRequest(request.HttpRequest(), otherRuntime, melodyhttp.RequestConfig{})
     _ = melodyhttp.SetRequestSession(request, sessionInstance)
 
     index := &runtimeRecordingSessionIndex{}

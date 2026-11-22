@@ -91,7 +91,7 @@ func resolveLimiterConfig(name string, limit int, window time.Duration, config L
 }
 
 /* the context keys are bound.Resolve's, so a required value is refused in the form a bound is */
-func refuseBelowMinimum(isBelow bool, field string, value string, minimum string) {
+func refuseBelowMinimum(isBelow bool, argument string, value string, minimum string) {
     if false == isBelow {
         return
     }
@@ -100,9 +100,9 @@ func refuseBelowMinimum(isBelow bool, field string, value string, minimum string
         exception.NewError(
             "the limit is below its minimum",
             exceptioncontract.Context{
-                "field":   field,
-                "value":   value,
-                "minimum": minimum,
+                "argument": argument,
+                "value":    value,
+                "minimum":  minimum,
             },
             nil,
         ),
@@ -628,66 +628,56 @@ func RateLimitMiddleware(limiter httpcontract.RateLimiter, config RateLimitConfi
     }
 }
 
-/* QuickLimitConfig is what the two address-keyed quick doors declare: a budget per client address per minute. */
+/* QuickLimitConfig is what the two address-keyed quick doors declare beside their per-minute budget. */
 type QuickLimitConfig struct {
-    /* RequestsPerMinute is the budget per client address, at least 1; 0 or below is refused. */
-    RequestsPerMinute int
-
     /* ClientIpResolver reads the address the budget is charged to, an IPv6 one on its /64; nil reads the direct peer, so behind a reverse proxy every client shares the proxy's budget: pass NewForwardedClientIpResolver with the kernel's policy there. */
     ClientIpResolver ClientIpResolver
 }
 
-/* UserLimitConfig is what the user-keyed quick door declares: the budget, the user id a request carries, and the address an anonymous request falls back to. */
+/* UserLimitConfig is what the user-keyed quick door declares beside its budget and user id callback: the address an anonymous request falls back to. */
 type UserLimitConfig struct {
-    /* RequestsPerMinute is the budget per user, or per client address for a request with no user id, at least 1; 0 or below is refused. */
-    RequestsPerMinute int
-
-    /* UserId reads the user id a request is charged to; required, an empty id charges the address. */
-    UserId KeyExtractor
-
     /* ClientIpResolver reads the address an anonymous request is charged to, as QuickLimitConfig.ClientIpResolver does. */
     ClientIpResolver ClientIpResolver
 }
 
-/* SimpleRateLimit charges each client address a fixed-window budget per minute. */
-func SimpleRateLimit(config QuickLimitConfig) httpcontract.Middleware {
-    refuseBelowMinimum(1 > config.RequestsPerMinute, "QuickLimitConfig.RequestsPerMinute", strconv.Itoa(config.RequestsPerMinute), "1")
+/* SimpleRateLimit charges each client address a fixed-window budget of requestsPerMinute, at least 1, refused below naming the argument. */
+func SimpleRateLimit(requestsPerMinute int, config QuickLimitConfig) httpcontract.Middleware {
+    refuseBelowMinimum(1 > requestsPerMinute, "requestsPerMinute", strconv.Itoa(requestsPerMinute), "1")
 
-    return RateLimitMiddleware(NewFixedWindowLimiter("simple", config.RequestsPerMinute, time.Minute, LimiterConfig{}), RateLimitConfig{
+    return RateLimitMiddleware(NewFixedWindowLimiter("simple", requestsPerMinute, time.Minute, LimiterConfig{}), RateLimitConfig{
         ClientIpResolver: config.ClientIpResolver,
     })
 }
 
-/* IpRateLimit charges each client address a sliding-window budget per minute. */
-func IpRateLimit(config QuickLimitConfig) httpcontract.Middleware {
-    refuseBelowMinimum(1 > config.RequestsPerMinute, "QuickLimitConfig.RequestsPerMinute", strconv.Itoa(config.RequestsPerMinute), "1")
+/* IpRateLimit charges each client address a sliding-window budget of requestsPerMinute, at least 1, refused below naming the argument. */
+func IpRateLimit(requestsPerMinute int, config QuickLimitConfig) httpcontract.Middleware {
+    refuseBelowMinimum(1 > requestsPerMinute, "requestsPerMinute", strconv.Itoa(requestsPerMinute), "1")
 
-    return RateLimitMiddleware(NewSlidingWindowLimiter("ip", config.RequestsPerMinute, time.Minute, LimiterConfig{}), RateLimitConfig{
+    return RateLimitMiddleware(NewSlidingWindowLimiter("ip", requestsPerMinute, time.Minute, LimiterConfig{}), RateLimitConfig{
         ClientIpResolver: config.ClientIpResolver,
     })
 }
 
-/* UserRateLimit charges each user a sliding-window budget per minute, under the key "user:<id>"; a request with no user id is charged to its client address. */
-func UserRateLimit(config UserLimitConfig) httpcontract.Middleware {
-    refuseBelowMinimum(1 > config.RequestsPerMinute, "UserLimitConfig.RequestsPerMinute", strconv.Itoa(config.RequestsPerMinute), "1")
+/* UserRateLimit charges each user userId reads a sliding-window budget of requestsPerMinute, under the key "user:<id>"; a request with an empty id is charged to its client address, and a budget below 1 or a nil userId is refused naming the argument. */
+func UserRateLimit(requestsPerMinute int, userId KeyExtractor, config UserLimitConfig) httpcontract.Middleware {
+    refuseBelowMinimum(1 > requestsPerMinute, "requestsPerMinute", strconv.Itoa(requestsPerMinute), "1")
 
-    /* a nil callback is refused at construction, as the middleware constructor refuses a missing limiter */
-    if nil == config.UserId {
+    if nil == userId {
         exception.Panic(
             exception.NewError(
                 "get user id callback is required for user rate limit middleware",
                 exceptioncontract.Context{
-                    "field": "UserLimitConfig.UserId",
+                    "argument": "userId",
                 },
                 nil,
             ),
         )
     }
 
-    getUserId := config.UserId
+    getUserId := userId
     clientIpResolver := config.ClientIpResolver
 
-    return RateLimitMiddleware(NewSlidingWindowLimiter("user", config.RequestsPerMinute, time.Minute, LimiterConfig{}), RateLimitConfig{
+    return RateLimitMiddleware(NewSlidingWindowLimiter("user", requestsPerMinute, time.Minute, LimiterConfig{}), RateLimitConfig{
         KeyExtractor: func(request httpcontract.Request) string {
             userId := getUserId(request)
 

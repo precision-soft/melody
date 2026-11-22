@@ -12,7 +12,7 @@ func TestLoginRedirectEntryPointRedirectsABrowserToTheLoginPage(t *testing.T) {
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/products/", nil)
     httpRequest.Header.Set("Accept", "text/html")
 
-    response, startErr := NewLoginRedirectEntryPoint("/login").Start(nil, melodyhttp.NewRequest(httpRequest, nil, nil, nil))
+    response, startErr := NewLoginRedirectEntryPoint("/login").Start(nil, melodyhttp.NewRequest(httpRequest, nil, melodyhttp.RequestConfig{}))
     if nil != startErr {
         t.Fatalf("the entry point failed: %v", startErr)
     }

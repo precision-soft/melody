@@ -9,7 +9,7 @@ type InactiveMiddleware struct {
     reason string
 }
 
-func NewInactiveMiddleware(name string, reason string) *InactiveMiddleware {
+func newInactiveMiddleware(name string, reason string) *InactiveMiddleware {
     return &InactiveMiddleware{name: name, reason: reason}
 }
 
@@ -17,7 +17,7 @@ func (instance *InactiveMiddleware) Name() string { return instance.name }
 
 func (instance *InactiveMiddleware) Reason() string { return instance.reason }
 
-func NewMiddlewareBuildReport(
+func newMiddlewareBuildReport(
     requestedGroup string,
     kernelEnvironment string,
     selectedNames []string,
@@ -56,7 +56,7 @@ func (instance *MiddlewareBuildReport) SelectedNames() []string {
     return slices.Clone(instance.selectedNames)
 }
 
-func (instance *MiddlewareBuildReport) SetSelectedNames(selectedNames []string) {
+func (instance *MiddlewareBuildReport) setSelectedNames(selectedNames []string) {
     instance.selectedNames = slices.Clone(selectedNames)
 }
 
@@ -64,8 +64,8 @@ func (instance *MiddlewareBuildReport) Inactive() []*InactiveMiddleware {
     return copyInactiveMiddlewareSlice(instance.inactive)
 }
 
-/* SetInactive stores a copy of the list, like every sibling accessor of this report. */
-func (instance *MiddlewareBuildReport) SetInactive(inactive []*InactiveMiddleware) {
+/* setInactive stores a copy of the list, like every sibling accessor of this report. */
+func (instance *MiddlewareBuildReport) setInactive(inactive []*InactiveMiddleware) {
     instance.inactive = copyInactiveMiddlewareSlice(inactive)
 }
 
@@ -73,7 +73,7 @@ func (instance *MiddlewareBuildReport) MissingReference() []string {
     return slices.Clone(instance.missingReference)
 }
 
-func (instance *MiddlewareBuildReport) SetMissingReference(missingReference []string) {
+func (instance *MiddlewareBuildReport) setMissingReference(missingReference []string) {
     instance.missingReference = slices.Clone(missingReference)
 }
 
@@ -81,7 +81,7 @@ func (instance *MiddlewareBuildReport) CycleDetected() bool {
     return instance.cycleDetected
 }
 
-func (instance *MiddlewareBuildReport) SetCycleDetected(cycleDetected bool) {
+func (instance *MiddlewareBuildReport) setCycleDetected(cycleDetected bool) {
     instance.cycleDetected = cycleDetected
 }
 

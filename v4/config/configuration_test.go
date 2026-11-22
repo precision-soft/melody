@@ -17,6 +17,8 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/internal/configseam"
+    "reflect"
 )
 
 func TestConfigurationDefaultsAndTemplateResolution(t *testing.T) {
@@ -1366,5 +1368,30 @@ func TestNewConfiguration_ThePublicUrlKeyWinsOverTheFieldAndTheFieldIsJudged(t *
     _, configurationErr = newConfiguration(map[string]string{}, "https://x?a=1")
     if nil == configurationErr || "ApplicationConfig.HttpPublicUrl" != exception.FromError(configurationErr).Context()["field"] {
         t.Fatalf("expected the field refused naming it, got %v", configurationErr)
+    }
+}
+
+func TestMarkServing_IsNotCallableWithoutTheSeamToken(t *testing.T) {
+    ownerType := reflect.TypeOf(&Configuration{})
+
+    method, hasMethod := ownerType.MethodByName("MarkServing")
+    if false == hasMethod {
+        t.Fatal("expected Configuration.MarkServing")
+    }
+
+    if 2 != method.Type.NumIn() || reflect.TypeOf(configseam.Token{}) != method.Type.In(1) {
+        t.Fatalf("expected MarkServing to take the seam token and nothing else, got %s", method.Type)
+    }
+
+    /* a second door answering nothing would freeze the boot as MarkServing does, so every one takes the token */
+    for index := 0; index < ownerType.NumMethod(); index++ {
+        candidate := ownerType.Method(index)
+        if false == strings.Contains(candidate.Name, "Serving") || 0 != candidate.Type.NumOut() {
+            continue
+        }
+
+        if 2 > candidate.Type.NumIn() || reflect.TypeOf(configseam.Token{}) != candidate.Type.In(1) {
+            t.Errorf("Configuration.%s reaches the serving state without the seam token", candidate.Name)
+        }
     }
 }

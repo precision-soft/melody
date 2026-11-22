@@ -419,7 +419,7 @@ func (instance *RunnerCommand) renderRunReport(
         return runErr
     }
 
-    meta := output.NewMeta(instance.Name(), nil, option, startedAt, time.Since(startedAt), output.Version{})
+    meta := output.NewMeta(instance.Name(), output.MetaConfig{Option: option, StartedAt: startedAt, Duration: time.Since(startedAt)})
     envelope := output.NewEnvelope(meta)
 
     envelope.Data = report

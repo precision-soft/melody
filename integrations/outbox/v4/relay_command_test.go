@@ -68,11 +68,7 @@ func TestRelayCommand_DrainsOneBatchWithLimit(t *testing.T) {
     }
     transport := &fakeTransport{}
 
-    relay := NewRelay(RelayConfig{
-        Repository: repository,
-        Transport:  transport,
-        Codec:      &stringCodec{},
-    })
+    relay := NewRelay(repository, transport, &stringCodec{}, RelayConfig{})
 
     runErr := runRelayCommand(t, relayTestRuntime(), relay, []string{"--limit", "1", "--interval", "1ms"})
     if nil != runErr {
@@ -87,11 +83,7 @@ func TestRelayCommand_DrainsOneBatchWithLimit(t *testing.T) {
 func TestRelayCommand_ReturnsErrorAtLimitWhenBatchFails(t *testing.T) {
     repository := &failingClaimRepository{failuresLeft: 1}
 
-    relay := NewRelay(RelayConfig{
-        Repository: repository,
-        Transport:  &fakeTransport{},
-        Codec:      &stringCodec{},
-    })
+    relay := NewRelay(repository, &fakeTransport{}, &stringCodec{}, RelayConfig{})
 
     runErr := runRelayCommand(t, relayTestRuntime(), relay, []string{"--limit", "1", "--interval", "1ms"})
     if nil == runErr {
@@ -102,11 +94,7 @@ func TestRelayCommand_ReturnsErrorAtLimitWhenBatchFails(t *testing.T) {
 func TestRelayCommand_BacksOffAfterFailureAndRecovers(t *testing.T) {
     repository := &failingClaimRepository{failuresLeft: 1}
 
-    relay := NewRelay(RelayConfig{
-        Repository: repository,
-        Transport:  &fakeTransport{},
-        Codec:      &stringCodec{},
-    })
+    relay := NewRelay(repository, &fakeTransport{}, &stringCodec{}, RelayConfig{})
 
     runErr := runRelayCommand(t, relayTestRuntime(), relay, []string{"--limit", "2", "--interval", "1ms"})
     if nil != runErr {
@@ -136,7 +124,7 @@ func TestNewRelayCommand_ResolvesTheErrorBackoff(t *testing.T) {
 
 func TestRelayCommand_TheErrorBackoffMaxCapsTheDoublingDelay(t *testing.T) {
     repository := &failingClaimRepository{failuresLeft: 3}
-    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{}, Codec: &stringCodec{}})
+    relay := NewRelay(repository, &fakeTransport{}, &stringCodec{}, RelayConfig{})
 
     command := NewRelayCommand(RelayCommandConfig{ErrorBackoff: bound.Backoff{Max: bound.Of(10 * time.Millisecond)}})
 
@@ -178,11 +166,7 @@ func TestRelayCommand_RetriesRelayResolutionWithBackoff(t *testing.T) {
             return nil, errors.New("database not reachable yet")
         }
 
-        return NewRelay(RelayConfig{
-            Repository: repository,
-            Transport:  transport,
-            Codec:      &stringCodec{},
-        }), nil
+        return NewRelay(repository, transport, &stringCodec{}, RelayConfig{}), nil
     }, container.RegisterOptions{})
 
     runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
@@ -215,11 +199,7 @@ func TestRelayCommand_StopsOnContextCancellation(t *testing.T) {
     cancellableContext, cancel := context.WithCancel(context.Background())
     runtimeInstance := runtime.NewRun(cancellableContext, serviceContainer.NewScope())
 
-    relay := NewRelay(RelayConfig{
-        Repository: &fakeRepository{},
-        Transport:  &fakeTransport{},
-        Codec:      &stringCodec{},
-    })
+    relay := NewRelay(&fakeRepository{}, &fakeTransport{}, &stringCodec{}, RelayConfig{})
 
     done := make(chan error, 1)
     go func() {
@@ -240,11 +220,7 @@ func TestRelayCommand_StopsOnContextCancellation(t *testing.T) {
 }
 
 func TestRelayCommand_RejectsMalformedInterval(t *testing.T) {
-    relay := NewRelay(RelayConfig{
-        Repository: &fakeRepository{},
-        Transport:  &fakeTransport{},
-        Codec:      &stringCodec{},
-    })
+    relay := NewRelay(&fakeRepository{}, &fakeTransport{}, &stringCodec{}, RelayConfig{})
 
     runErr := runRelayCommand(t, relayTestRuntime(), relay, []string{"--interval", "not-a-duration"})
     if nil == runErr {
@@ -309,7 +285,7 @@ func TestRelayCommand_AGenuineFailureCoincidingWithAParentDeadlineIsNotSwallowed
     runtimeInstance := runtime.NewRun(parentContext, serviceContainer.NewScope())
 
     repository := &failingClaimRepository{failuresLeft: 1}
-    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{}, Codec: &stringCodec{}})
+    relay := NewRelay(repository, &fakeTransport{}, &stringCodec{}, RelayConfig{})
 
     runErr := runRelayCommand(t, runtimeInstance, relay, []string{"--limit", "1"})
 
@@ -326,7 +302,7 @@ func TestRelayCommand_ACancellationExplainedErrorStillExitsClean(t *testing.T) {
     runtimeInstance := runtime.NewRun(parentContext, serviceContainer.NewScope())
 
     repository := &cancellationEchoRepository{}
-    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{}, Codec: &stringCodec{}})
+    relay := NewRelay(repository, &fakeTransport{}, &stringCodec{}, RelayConfig{})
 
     if runErr := runRelayCommand(t, runtimeInstance, relay, []string{"--limit", "1"}); nil != runErr {
         t.Fatalf("expected the cancellation-explained failure to exit clean, got %v", runErr)
@@ -372,7 +348,7 @@ func TestRelayCommand_ADeadlineExplainedErrorStillExitsClean(t *testing.T) {
     runtimeInstance := runtime.NewRun(parentContext, serviceContainer.NewScope())
 
     repository := &cancellationEchoRepository{}
-    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{}, Codec: &stringCodec{}})
+    relay := NewRelay(repository, &fakeTransport{}, &stringCodec{}, RelayConfig{})
 
     if runErr := runRelayCommand(t, runtimeInstance, relay, []string{"--limit", "1"}); nil != runErr {
         t.Fatalf("expected the deadline-explained failure to exit clean, got %v", runErr)
@@ -458,7 +434,7 @@ func TestRelayCommand_ReturnsOnACyclicChainFromTheRepository(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.NewRun(parentContext, serviceContainer.NewScope())
 
-    relay := NewRelay(RelayConfig{Repository: &cyclicClaimRepository{}, Transport: &fakeTransport{}, Codec: &stringCodec{}})
+    relay := NewRelay(&cyclicClaimRepository{}, &fakeTransport{}, &stringCodec{}, RelayConfig{})
 
     assertReturnsOnACyclicChain(t, func() {
         _ = runRelayCommand(t, runtimeInstance, relay, []string{"--limit", "1"})
@@ -476,11 +452,7 @@ func TestRelayCommand_ResolvesTheLazyRelayUnderTheRelayRuntime(t *testing.T) {
         seenKind = resolver.Runtime().Kind()
         seenValue = resolver.Runtime().Context().Value(relayRuntimeKey{})
 
-        return NewRelay(RelayConfig{
-            Repository: &fakeRepository{},
-            Transport:  &fakeTransport{},
-            Codec:      &stringCodec{},
-        }), nil
+        return NewRelay(&fakeRepository{}, &fakeTransport{}, &stringCodec{}, RelayConfig{}), nil
     }, container.RegisterOptions{})
 
     runtimeInstance := runtime.NewRun(context.WithValue(context.Background(), relayRuntimeKey{}, "run"), serviceContainer.NewScope())
@@ -535,7 +507,7 @@ func (instance *scriptedClaimRepository) ClaimDueMessages(runtimeInstance contai
 
 func TestRelayCommand_TheErrorBackoffGrowsOverConsecutiveFailuresAndASuccessResetsIt(t *testing.T) {
     repository := &scriptedClaimRepository{failures: []bool{true, true, false, true, false}}
-    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{}, Codec: &stringCodec{}})
+    relay := NewRelay(repository, &fakeTransport{}, &stringCodec{}, RelayConfig{})
 
     command := NewRelayCommand(RelayCommandConfig{ErrorBackoff: bound.Backoff{Initial: bound.Of(40 * time.Millisecond), Max: bound.Of(10 * time.Second)}})
     if runErr := runRelayCommandWith(t, relayTestRuntime(), relay, command, []string{"--limit", "5", "--interval", "1ms"}); nil != runErr {

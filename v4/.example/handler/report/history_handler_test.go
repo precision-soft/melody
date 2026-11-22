@@ -34,9 +34,11 @@ func historyRequest(t *testing.T, target string) melodyhttpcontract.Request {
 
     return melodyhttp.NewRequest(
         httptest.NewRequest(nethttp.MethodGet, target, nil),
-        map[string]string{},
         nil,
-        melodyhttp.NewRequestContext("history-door-test", time.Unix(0, 0).UTC()),
+        melodyhttp.RequestConfig{
+            RouteParameters: map[string]string{},
+            RequestContext:  melodyhttp.NewRequestContext("history-door-test", time.Unix(0, 0).UTC()),
+        },
     )
 }
 
@@ -130,9 +132,11 @@ func TestApiHistoryHandler_RendersAnArchiveFailureThroughThePresenter(t *testing
 
     request := melodyhttp.NewRequest(
         httptest.NewRequest(nethttp.MethodGet, "/reports/api/history/", nil),
-        map[string]string{},
         runtimeInstance,
-        melodyhttp.NewRequestContext("history-door-test", time.Unix(0, 0).UTC()),
+        melodyhttp.RequestConfig{
+            RouteParameters: map[string]string{},
+            RequestContext:  melodyhttp.NewRequestContext("history-door-test", time.Unix(0, 0).UTC()),
+        },
     )
 
     response, handlerErr := ApiHistoryHandler()(runtimeInstance, httptest.NewRecorder(), request)
@@ -191,7 +195,7 @@ func historyDoorOver(t *testing.T, cacheInstance melodycachecontract.Cache) map[
     }, melodycontainer.RegisterOptions{})
     runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
-    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/reports/api/history/", nil), map[string]string{}, runtimeInstance, melodyhttp.NewRequestContext("history-current-test", time.Unix(0, 0).UTC()))
+    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/reports/api/history/", nil), runtimeInstance, melodyhttp.RequestConfig{RouteParameters: map[string]string{}, RequestContext: melodyhttp.NewRequestContext("history-current-test", time.Unix(0, 0).UTC())})
 
     response, handlerErr := ApiHistoryHandler()(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr || nethttp.StatusOK != response.StatusCode() {

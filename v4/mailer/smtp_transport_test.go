@@ -34,9 +34,8 @@ func TestSmtpTransport_RequireAuthenticationFailsWhenServerHasNoAuthExtension(t 
 
     go serveAuthlessSmtp(listener)
 
-    transport := NewSmtpTransport(SmtpConfig{
+    transport := NewSmtpTransport(listener.Addr().String(), SmtpConfig{
         AllowPlaintext: true,
-        Address:               listener.Addr().String(),
         Username:              "user",
         Password:              "pass",
         RequireAuthentication: true,
@@ -66,9 +65,8 @@ func TestSmtpTransport_RequireAuthenticationFailsWhenNoUsernameConfigured(t *tes
 
     go serveAuthlessSmtp(listener)
 
-    transport := NewSmtpTransport(SmtpConfig{
+    transport := NewSmtpTransport(listener.Addr().String(), SmtpConfig{
         AllowPlaintext: true,
-        Address:               listener.Addr().String(),
         RequireAuthentication: true,
     })
 
@@ -134,8 +132,7 @@ func TestSmtpTransport_AuthSucceedsWhenHostDiffersFromAddress(t *testing.T) {
     go serveStartTlsAuthSmtp(listener, serverCertificate, authResult)
 
     /* Address is an IP:port while Host is a different name (the TLS SNI / auth identity used when dialing by IP, through a tunnel, or a CNAME). smtp.PlainAuth rejects a mismatch between the client's server name and its host with "wrong host name", so the plain/STARTTLS dial path must build the client with instance.host — not derive the server name from the address, as smtp.Dial does. */
-    transport := NewSmtpTransport(SmtpConfig{
-        Address:               listener.Addr().String(),
+    transport := NewSmtpTransport(listener.Addr().String(), SmtpConfig{
         Host:                  "smtp.internal.example",
         Username:              "user",
         Password:              "pass",
@@ -284,8 +281,7 @@ func TestSmtpTransport_DialTimesOutWhenTheServerNeverGreets(t *testing.T) {
         connection.Close()
     }()
 
-    transport := NewSmtpTransport(SmtpConfig{
-        Address:     listener.Addr().String(),
+    transport := NewSmtpTransport(listener.Addr().String(), SmtpConfig{
         Host:        "127.0.0.1",
         DialTimeout: bound.Of(150 * time.Millisecond),
     })
@@ -336,8 +332,7 @@ func TestSmtpTransport_CancellationInterruptsTheGreetingRead(t *testing.T) {
     }()
 
     /* the dial timeout is long, so only the cancellation can end this send */
-    transport := NewSmtpTransport(SmtpConfig{
-        Address:     listener.Addr().String(),
+    transport := NewSmtpTransport(listener.Addr().String(), SmtpConfig{
         Host:        "127.0.0.1",
         DialTimeout: bound.Of(10 * time.Second),
     })
@@ -385,8 +380,7 @@ func TestSmtpTransport_TimesOutWhenServerStallsMidSession(t *testing.T) {
 
     go serveStallOnDataSmtp(listener, released)
 
-    transport := NewSmtpTransport(SmtpConfig{
-        Address: listener.Addr().String(),
+    transport := NewSmtpTransport(listener.Addr().String(), SmtpConfig{
         Host:    "127.0.0.1",
         Timeout: bound.Of(150 * time.Millisecond),
     })
@@ -424,8 +418,7 @@ func TestSmtpTransport_ContextCancellationAbortsSession(t *testing.T) {
 
     go serveStallOnDataSmtp(listener, released)
 
-    transport := NewSmtpTransport(SmtpConfig{
-        Address: listener.Addr().String(),
+    transport := NewSmtpTransport(listener.Addr().String(), SmtpConfig{
         Host:    "127.0.0.1",
         Timeout: bound.Of(10 * time.Second),
     })
@@ -472,8 +465,7 @@ func TestSmtpTransport_ImplicitTlsTimesOutWhenServerStallsAfterGreeting(t *testi
     serverCertificate := generateSelfSignedCertificate(t)
     go serveImplicitTlsGreetThenStallSmtp(listener, serverCertificate, released)
 
-    transport := NewSmtpTransport(SmtpConfig{
-        Address:     listener.Addr().String(),
+    transport := NewSmtpTransport(listener.Addr().String(), SmtpConfig{
         Host:        "127.0.0.1",
         Username:    "user",
         Password:    "pass",
@@ -534,9 +526,7 @@ func TestSmtpTransport_SendWithNilRuntimeReturnsError(t *testing.T) {
 
     go serveAuthlessSmtp(listener)
 
-    transport := NewSmtpTransport(SmtpConfig{
-        Address: listener.Addr().String(),
-    })
+    transport := NewSmtpTransport(listener.Addr().String(), SmtpConfig{})
 
     _, sendErr := transport.Send(nil, mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
@@ -557,8 +547,7 @@ func TestSmtpTransport_SendWithNilRuntimeReturnsError(t *testing.T) {
 func TestSmtpTransport_ResolveTlsConfigDefaultsServerNameOnUserConfig(t *testing.T) {
     userConfig := &tls.Config{RootCAs: x509.NewCertPool()}
 
-    transport := NewSmtpTransport(SmtpConfig{
-        Address:   "203.0.113.10:465",
+    transport := NewSmtpTransport("203.0.113.10:465", SmtpConfig{
         Host:      "smtp.internal.example",
         TlsConfig: userConfig,
     })
@@ -582,8 +571,7 @@ func TestSmtpTransport_ResolveTlsConfigDefaultsServerNameOnUserConfig(t *testing
 func TestSmtpTransport_ResolveTlsConfigKeepsInsecureSkipVerifyConfigVerbatim(t *testing.T) {
     userConfig := &tls.Config{InsecureSkipVerify: true}
 
-    transport := NewSmtpTransport(SmtpConfig{
-        Address:   "203.0.113.10:465",
+    transport := NewSmtpTransport("203.0.113.10:465", SmtpConfig{
         TlsConfig: userConfig,
     })
 
@@ -599,9 +587,8 @@ func TestSmtpTransport_SendsLargePayloadToSlowButSteadyReader(t *testing.T) {
 
     go serveSlowSteadyDataSmtp(listener)
 
-    transport := NewSmtpTransport(SmtpConfig{
+    transport := NewSmtpTransport(listener.Addr().String(), SmtpConfig{
         AllowPlaintext: true,
-        Address: listener.Addr().String(),
         Host:    "127.0.0.1",
         Timeout: bound.Of(500 * time.Millisecond),
     })
@@ -640,9 +627,8 @@ func TestSmtpTransport_TimesOutWhenServerStopsReadingMidPayload(t *testing.T) {
 
     const sessionTimeout = 500 * time.Millisecond
 
-    transport := NewSmtpTransport(SmtpConfig{
+    transport := NewSmtpTransport(listener.Addr().String(), SmtpConfig{
         AllowPlaintext: true,
-        Address: listener.Addr().String(),
         Host:    "127.0.0.1",
         Timeout: bound.Of(sessionTimeout),
     })
@@ -898,24 +884,24 @@ func TestSmtpTransport_DataTerminationTimeoutDerivation(t *testing.T) {
     }{
         {
             name:     "tight per-step timeout is floored at two minutes",
-            config:   SmtpConfig{Address: "smtp:25", Timeout: bound.Of(5 * time.Second)},
+            config:   SmtpConfig{Timeout: bound.Of(5 * time.Second)},
             expected: 2 * time.Minute,
         },
         {
             name:     "wide per-step timeout derives four steps",
-            config:   SmtpConfig{Address: "smtp:25", Timeout: bound.Of(40 * time.Second)},
+            config:   SmtpConfig{Timeout: bound.Of(40 * time.Second)},
             expected: 160 * time.Second,
         },
         {
             name:     "explicit value wins over the derivation",
-            config:   SmtpConfig{Address: "smtp:25", Timeout: bound.Of(40 * time.Second), DataTerminationTimeout: bound.Of(90 * time.Second)},
+            config:   SmtpConfig{Timeout: bound.Of(40 * time.Second), DataTerminationTimeout: bound.Of(90 * time.Second)},
             expected: 90 * time.Second,
         },
     }
 
     for _, testCase := range cases {
         t.Run(testCase.name, func(t *testing.T) {
-            transport := NewSmtpTransport(testCase.config)
+            transport := NewSmtpTransport("smtp:25", testCase.config)
             if testCase.expected != transport.dataTerminationTimeout {
                 t.Fatalf("expected the dot-acknowledgment ceiling %v, got %v", testCase.expected, transport.dataTerminationTimeout)
             }
@@ -924,12 +910,12 @@ func TestSmtpTransport_DataTerminationTimeoutDerivation(t *testing.T) {
 }
 
 func TestNewSmtpTransport_ResolvesTheAbsentTimeouts(t *testing.T) {
-    transport := NewSmtpTransport(SmtpConfig{Address: "smtp:25"})
+    transport := NewSmtpTransport("smtp:25", SmtpConfig{})
     if 30*time.Second != transport.dialTimeout || 30*time.Second != transport.commandTimeout || 2*time.Minute != transport.dataTerminationTimeout {
         t.Fatalf("expected 30s / 30s / 2m, got %v / %v / %v", transport.dialTimeout, transport.commandTimeout, transport.dataTerminationTimeout)
     }
 
-    derived := NewSmtpTransport(SmtpConfig{Address: "smtp:25", DialTimeout: bound.Of(45 * time.Second)})
+    derived := NewSmtpTransport("smtp:25", SmtpConfig{DialTimeout: bound.Of(45 * time.Second)})
     if 45*time.Second != derived.dialTimeout || 45*time.Second != derived.commandTimeout || 3*time.Minute != derived.dataTerminationTimeout {
         t.Fatalf("expected the dial timeout kept, the command timeout following it and the dot ceiling four of it, got %v / %v / %v", derived.dialTimeout, derived.commandTimeout, derived.dataTerminationTimeout)
     }
@@ -951,17 +937,17 @@ func TestNewSmtpTransport_RefusesAnAddressThatIsEmptyOrNotHostAndPort(t *testing
         func() {
             defer func() {
                 refusal, isRefusal := recover().(*exception.Error)
-                if false == isRefusal || message != refusal.Message() || "SmtpConfig.Address" != refusal.Context()["field"] {
-                    t.Fatalf("%q: expected %q naming SmtpConfig.Address, got %v", address, message, refusal)
+                if false == isRefusal || message != refusal.Message() || "address" != refusal.Context()["argument"] {
+                    t.Fatalf("%q: expected %q naming the address argument, got %v", address, message, refusal)
                 }
             }()
 
-            NewSmtpTransport(SmtpConfig{Address: address, DialTimeout: bound.Of(time.Microsecond)})
+            NewSmtpTransport(address, SmtpConfig{DialTimeout: bound.Of(time.Microsecond)})
         }()
     }
 
     for _, address := range []string{"smtp:25", "smtp.example.com:587", "[::1]:25"} {
-        NewSmtpTransport(SmtpConfig{Address: address})
+        NewSmtpTransport(address, SmtpConfig{})
     }
 }
 
@@ -971,19 +957,19 @@ func TestNewSmtpTransport_RefusesATimeoutOutsideItsRuleByName(t *testing.T) {
         message string
         field   string
     }{
-        "dial timeout below 1ms":             {SmtpConfig{Address: "smtp:25", DialTimeout: bound.Of(time.Microsecond)}, "the limit is below its minimum", "SmtpConfig.DialTimeout"},
-        "dial timeout unlimited":             {SmtpConfig{Address: "smtp:25", DialTimeout: bound.UnlimitedDuration()}, "the limit does not admit unlimited", "SmtpConfig.DialTimeout"},
-        "timeout below 1ms":                  {SmtpConfig{Address: "smtp:25", Timeout: bound.Of(time.Microsecond)}, "the limit is below its minimum", "SmtpConfig.Timeout"},
-        "timeout negative":                   {SmtpConfig{Address: "smtp:25", Timeout: bound.Of(-time.Second)}, "the limit is below its minimum", "SmtpConfig.Timeout"},
-        "timeout unlimited":                  {SmtpConfig{Address: "smtp:25", Timeout: bound.UnlimitedDuration()}, "the limit does not admit unlimited", "SmtpConfig.Timeout"},
-        "data termination timeout below 1ms": {SmtpConfig{Address: "smtp:25", DataTerminationTimeout: bound.Of(time.Microsecond)}, "the limit is below its minimum", "SmtpConfig.DataTerminationTimeout"},
-        "data termination timeout unlimited": {SmtpConfig{Address: "smtp:25", DataTerminationTimeout: bound.UnlimitedDuration()}, "the limit does not admit unlimited", "SmtpConfig.DataTerminationTimeout"},
+        "dial timeout below 1ms":             {SmtpConfig{DialTimeout: bound.Of(time.Microsecond)}, "the limit is below its minimum", "SmtpConfig.DialTimeout"},
+        "dial timeout unlimited":             {SmtpConfig{DialTimeout: bound.UnlimitedDuration()}, "the limit does not admit unlimited", "SmtpConfig.DialTimeout"},
+        "timeout below 1ms":                  {SmtpConfig{Timeout: bound.Of(time.Microsecond)}, "the limit is below its minimum", "SmtpConfig.Timeout"},
+        "timeout negative":                   {SmtpConfig{Timeout: bound.Of(-time.Second)}, "the limit is below its minimum", "SmtpConfig.Timeout"},
+        "timeout unlimited":                  {SmtpConfig{Timeout: bound.UnlimitedDuration()}, "the limit does not admit unlimited", "SmtpConfig.Timeout"},
+        "data termination timeout below 1ms": {SmtpConfig{DataTerminationTimeout: bound.Of(time.Microsecond)}, "the limit is below its minimum", "SmtpConfig.DataTerminationTimeout"},
+        "data termination timeout unlimited": {SmtpConfig{DataTerminationTimeout: bound.UnlimitedDuration()}, "the limit does not admit unlimited", "SmtpConfig.DataTerminationTimeout"},
     }
 
     for name, testCase := range cases {
         t.Run(name, func(t *testing.T) {
             testhelper.AssertPanicsWithError(t, func() {
-                NewSmtpTransport(testCase.config)
+                NewSmtpTransport("smtp:25", testCase.config)
             }, testCase.message)
 
             var context map[string]any
@@ -994,7 +980,7 @@ func TestNewSmtpTransport_RefusesATimeoutOutsideItsRuleByName(t *testing.T) {
                     }
                 }()
 
-                NewSmtpTransport(testCase.config)
+                NewSmtpTransport("smtp:25", testCase.config)
             }()
             if testCase.field != context["field"] {
                 t.Fatalf("expected the refusal to name %s, got %v", testCase.field, context)
@@ -1013,9 +999,8 @@ func TestSmtpTransport_SlowDotAcknowledgmentSucceedsWithinItsOwnCeiling(t *testi
 
     go serveDelayedDotAcknowledgmentSmtp(listener, 700*time.Millisecond)
 
-    transport := NewSmtpTransport(SmtpConfig{
+    transport := NewSmtpTransport(listener.Addr().String(), SmtpConfig{
         AllowPlaintext: true,
-        Address:                listener.Addr().String(),
         Host:                   "127.0.0.1",
         Timeout:                bound.Of(200 * time.Millisecond),
         DataTerminationTimeout: bound.Of(5 * time.Second),
@@ -1097,8 +1082,7 @@ func TestSmtpTransport_CancelledContextAbortsDial(t *testing.T) {
     cancel()
 
     /* TEST-NET-3 is reserved and unroutable, so an uncancelled connect would hang until the dial timeout */
-    transport := NewSmtpTransport(SmtpConfig{
-        Address:     "203.0.113.1:25",
+    transport := NewSmtpTransport("203.0.113.1:25", SmtpConfig{
         Host:        "203.0.113.1",
         DialTimeout: bound.Of(5 * time.Second),
     })
@@ -1133,9 +1117,8 @@ func TestSmtpTransport_ConfiguredCredentialsFailClosedWhenAuthIsNotAdvertised(t 
     go serveAuthlessSmtp(listener)
 
     /* RequireAuthentication deliberately left false — the zero-value default: before the guard, this exact configuration skipped the whole auth branch and delivered the message as anonymous submission while reporting success, the operator's configured identity quietly unused; configured credentials that cannot be applied must refuse, not degrade */
-    transport := NewSmtpTransport(SmtpConfig{
+    transport := NewSmtpTransport(listener.Addr().String(), SmtpConfig{
         AllowPlaintext: true,
-        Address:  listener.Addr().String(),
         Username: "user",
         Password: "pass",
     })
@@ -1156,7 +1139,7 @@ func TestSmtpTransport_ConfiguredCredentialsFailClosedWhenAuthIsNotAdvertised(t 
 }
 
 func TestSmtpTransport_SendWithTypedNilRuntimeReturnsError(t *testing.T) {
-    transport := NewSmtpTransport(SmtpConfig{Address: "127.0.0.1:0"})
+    transport := NewSmtpTransport("127.0.0.1:0", SmtpConfig{})
 
     /* a typed-nil runtime walks straight through a plain == nil comparison and dereferences at the dial; the IsNilInterface guard must answer the same clean refusal the untyped nil gets */
     var typedNil *nilRuntime
@@ -1216,7 +1199,7 @@ func TestSmtpTransport_MailCommandFailureNamesTheCommandNotAVerdict(t *testing.T
 
     go serveMailRejectingSmtp(listener)
 
-    transport := NewSmtpTransport(SmtpConfig{AllowPlaintext: true, Address: listener.Addr().String()})
+    transport := NewSmtpTransport(listener.Addr().String(), SmtpConfig{AllowPlaintext: true})
 
     _, sendErr := transport.Send(testRuntime(), mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
@@ -1329,7 +1312,7 @@ func TestSmtpTransport_QuitFailureWarningCarriesTheCause(t *testing.T) {
 
     runtimeInstance, logger := testRuntimeWithRecordingLogger()
 
-    transport := NewSmtpTransport(SmtpConfig{AllowPlaintext: true, Address: listener.Addr().String()})
+    transport := NewSmtpTransport(listener.Addr().String(), SmtpConfig{AllowPlaintext: true})
 
     _, sendErr := transport.Send(runtimeInstance, mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
@@ -1411,7 +1394,7 @@ func TestSmtpTransport_EnvelopeRefusalsCarryTheAddressAndTheDotVerdictIsNamed(t 
 
         go serveMailRejectingSmtp(listener)
 
-        transport := NewSmtpTransport(SmtpConfig{AllowPlaintext: true, Address: listener.Addr().String()})
+        transport := NewSmtpTransport(listener.Addr().String(), SmtpConfig{AllowPlaintext: true})
         _, sendErr := transport.Send(testRuntime(), mailercontract.Message{
             From:    mailercontract.Address{Email: "shop@example.com"},
             To:      []mailercontract.Address{{Email: "ada@example.com"}},
@@ -1438,7 +1421,7 @@ func TestSmtpTransport_EnvelopeRefusalsCarryTheAddressAndTheDotVerdictIsNamed(t 
 
         go serveRcptRejectingSmtp(listener)
 
-        transport := NewSmtpTransport(SmtpConfig{AllowPlaintext: true, Address: listener.Addr().String()})
+        transport := NewSmtpTransport(listener.Addr().String(), SmtpConfig{AllowPlaintext: true})
         _, sendErr := transport.Send(testRuntime(), mailercontract.Message{
             From:    mailercontract.Address{Email: "shop@example.com"},
             To:      []mailercontract.Address{{Email: "ada@example.com"}},
@@ -1465,7 +1448,7 @@ func TestSmtpTransport_EnvelopeRefusalsCarryTheAddressAndTheDotVerdictIsNamed(t 
 
         go serveDotRejectingSmtp(listener)
 
-        transport := NewSmtpTransport(SmtpConfig{AllowPlaintext: true, Address: listener.Addr().String()})
+        transport := NewSmtpTransport(listener.Addr().String(), SmtpConfig{AllowPlaintext: true})
         _, sendErr := transport.Send(testRuntime(), mailercontract.Message{
             From:    mailercontract.Address{Email: "shop@example.com"},
             To:      []mailercontract.Address{{Email: "ada@example.com"}},
@@ -1481,13 +1464,13 @@ func TestSmtpTransport_EnvelopeRefusalsCarryTheAddressAndTheDotVerdictIsNamed(t 
 }
 
 func TestNewSmtpTransport_LocalNameDefaultsToLocalhostAndRefusesWhitespace(t *testing.T) {
-    if "localhost" != NewSmtpTransport(SmtpConfig{Address: "smtp:25"}).localName {
+    if "localhost" != NewSmtpTransport("smtp:25", SmtpConfig{}).localName {
         t.Fatal("expected the hello name to default to localhost")
     }
 
     for _, localName := range []string{"mail example", "mail\r\nMAIL FROM:<a@b>", " "} {
         testhelper.AssertPanicsWithError(t, func() {
-            NewSmtpTransport(SmtpConfig{Address: "smtp:25", LocalName: localName})
+            NewSmtpTransport("smtp:25", SmtpConfig{LocalName: localName})
         }, "smtp local name holds whitespace or a control character")
     }
 }
@@ -1514,7 +1497,7 @@ func TestSmtpTransport_SendsTheConfiguredLocalNameInTheHello(t *testing.T) {
         hello <- strings.TrimSpace(line)
     }()
 
-    _, _ = NewSmtpTransport(SmtpConfig{Address: listener.Addr().String(), LocalName: "mail.example.com", Timeout: bound.Of(time.Second)}).Send(testRuntime(), mailercontract.Message{
+    _, _ = NewSmtpTransport(listener.Addr().String(), SmtpConfig{LocalName: "mail.example.com", Timeout: bound.Of(time.Second)}).Send(testRuntime(), mailercontract.Message{
         From: mailercontract.Address{Email: "shop@example.com"},
         To:   []mailercontract.Address{{Email: "ada@example.com"}},
         Text: "body",
@@ -1531,7 +1514,7 @@ func TestSmtpTransport_SendsTheConfiguredLocalNameInTheHello(t *testing.T) {
 }
 
 func TestSmtpTransport_RefusesAnAddressThatIsNotABareAddrSpecBeforeTheDial(t *testing.T) {
-    _, sendErr := NewSmtpTransport(SmtpConfig{Address: "127.0.0.1:1"}).Send(testRuntime(), mailercontract.Message{
+    _, sendErr := NewSmtpTransport("127.0.0.1:1", SmtpConfig{}).Send(testRuntime(), mailercontract.Message{
         From: mailercontract.Address{Email: "shop@example.com"},
         To:   []mailercontract.Address{{Email: "a@x.com>, <b@y.com"}},
         Text: "body",
@@ -1606,7 +1589,7 @@ func TestSmtpTransport_TheReceiptCarriesTheMessageIdTheServerReceived(t *testing
         captured := make(chan string, 1)
         go serveCapturingSmtp(listener, captured)
 
-        receipt, sendErr := NewSmtpTransport(SmtpConfig{AllowPlaintext: true, Address: listener.Addr().String(), Host: "127.0.0.1", Timeout: bound.Of(2 * time.Second)}).Send(testRuntime(), mailercontract.Message{
+        receipt, sendErr := NewSmtpTransport(listener.Addr().String(), SmtpConfig{AllowPlaintext: true, Host: "127.0.0.1", Timeout: bound.Of(2 * time.Second)}).Send(testRuntime(), mailercontract.Message{
             From:    mailercontract.Address{Email: "shop@example.com"},
             To:      []mailercontract.Address{{Email: "ada@example.com"}},
             Subject: "Hello",
@@ -1639,7 +1622,7 @@ func TestSmtpTransport_ZeroConfigRefusesARelayWithoutStartTls(t *testing.T) {
     captured := make(chan string, 1)
     go serveCapturingSmtp(listener, captured)
 
-    _, sendErr := NewSmtpTransport(SmtpConfig{Address: listener.Addr().String(), Host: "127.0.0.1", Timeout: bound.Of(2 * time.Second)}).Send(testRuntime(), mailercontract.Message{
+    _, sendErr := NewSmtpTransport(listener.Addr().String(), SmtpConfig{Host: "127.0.0.1", Timeout: bound.Of(2 * time.Second)}).Send(testRuntime(), mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
         To:      []mailercontract.Address{{Email: "ada@example.com"}},
         Subject: "Hello",
@@ -1668,7 +1651,7 @@ func TestSmtpTransport_AllowPlaintextSendsToARelayWithoutStartTls(t *testing.T) 
     captured := make(chan string, 1)
     go serveCapturingSmtp(listener, captured)
 
-    _, sendErr := NewSmtpTransport(SmtpConfig{Address: listener.Addr().String(), Host: "127.0.0.1", AllowPlaintext: true, Timeout: bound.Of(2 * time.Second)}).Send(testRuntime(), mailercontract.Message{
+    _, sendErr := NewSmtpTransport(listener.Addr().String(), SmtpConfig{Host: "127.0.0.1", AllowPlaintext: true, Timeout: bound.Of(2 * time.Second)}).Send(testRuntime(), mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},
         To:      []mailercontract.Address{{Email: "ada@example.com"}},
         Subject: "Hello",
@@ -1694,8 +1677,7 @@ func TestSmtpTransport_AllowPlaintextStillUpgradesWhenStartTlsIsOffered(t *testi
     go serveStartTlsAuthSmtp(listener, generateSelfSignedCertificate(t), authResult)
 
     /* smtp.PlainAuth refuses a host other than localhost over a connection that is not tls, so the accepted AUTH proves the session was upgraded */
-    _, sendErr := NewSmtpTransport(SmtpConfig{
-        Address:               listener.Addr().String(),
+    _, sendErr := NewSmtpTransport(listener.Addr().String(), SmtpConfig{
         Host:                  "smtp.internal.example",
         Username:              "user",
         Password:              "pass",
@@ -1725,5 +1707,5 @@ func TestNewSmtpTransport_RefusesAllowPlaintextUnderImplicitTls(t *testing.T) {
         }
     }()
 
-    NewSmtpTransport(SmtpConfig{Address: "smtp.example.com:465", AllowPlaintext: true, ImplicitTls: true})
+    NewSmtpTransport("smtp.example.com:465", SmtpConfig{AllowPlaintext: true, ImplicitTls: true})
 }

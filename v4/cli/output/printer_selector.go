@@ -17,9 +17,5 @@ func SelectPrinter(option Option) (Printer, error) {
         return &JsonPrinter{}, nil
     }
 
-    if true == tableMaxWidth.Unlimited {
-        return NewUnboundedTablePrinter(), nil
-    }
-
-    return NewTablePrinter(tableMaxWidth.Value), nil
+    return NewTablePrinter(TablePrinterConfig{MaxWidth: tableMaxWidth.Limit()}), nil
 }

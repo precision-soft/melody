@@ -6,7 +6,7 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
 )
 
-func NewUrlGenerationRouteDefinition(routeValue route) *UrlGenerationRouteDefinition {
+func newUrlGenerationRouteDefinition(routeValue route) *UrlGenerationRouteDefinition {
     return &UrlGenerationRouteDefinition{
         pattern:      routeValue.pattern,
         defaults:     routeValue.defaults,

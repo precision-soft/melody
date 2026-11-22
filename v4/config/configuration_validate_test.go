@@ -8,7 +8,7 @@ func TestValidate_PassesAfterResolution(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{values: map[string]string{}},
         parameters: ParameterMap{
-            "app.progress": NewParameter("", "50%% done", "", false),
+            "app.progress": newParameter("", "50%% done", "", false),
         },
     }
 

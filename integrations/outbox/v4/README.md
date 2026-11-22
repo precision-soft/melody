@@ -81,10 +81,7 @@ app.RegisterModule(
                 return nil, resolveErr
             }
 
-            return outbox.NewRelay(outbox.RelayConfig{
-                Repository: store,
-                Transport:  amqpTransport,
-                Codec:      Codec{},
+            return outbox.NewRelay(store, amqpTransport, Codec{}, outbox.RelayConfig{
                 /* optional: Locker (e.g. the rueidis locker) as a single-drainer optimization; SKIP LOCKED already makes concurrent relays safe */
                 /* optional overrides: BatchSize, MaxAttempts, Backoff, VisibilityTimeout, MaxDeliveryAttempts, LockName, LockTtl, ResolutionTimeout, UnavailableBackoff */
             }), nil
@@ -99,7 +96,7 @@ The relay sends through its transport and never closes it, and the registered `*
 
 ### Relay defaults
 
-Every [`RelayConfig`](./relay.go) tunable is optional; a field left out takes the default below, and a value outside its rule, a zero or an unlimited one included, panics at `NewRelay` naming the field:
+The repository, the transport and the codec are `NewRelay`'s arguments, a nil one refused naming the argument. Every [`RelayConfig`](./relay.go) tunable is optional; a field left out takes the default below, and a value outside its rule, a zero or an unlimited one included, panics at `NewRelay` naming the field:
 
 | Field                   | Default                  | Meaning                                                                                                                                                                                                                                                                                                |
 |-------------------------|--------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|

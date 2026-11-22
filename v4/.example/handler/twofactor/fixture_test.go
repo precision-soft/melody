@@ -282,9 +282,10 @@ func twoFactorRequest(t *testing.T, target string) (*melodyhttp.Request, melodyc
 
     request := melodyhttp.NewRequest(
         httptest.NewRequest(nethttp.MethodPost, target, nil),
-        nil,
         runtimeInstance,
-        melodyhttp.NewRequestContext("two-factor-test", time.Now()),
+        melodyhttp.RequestConfig{
+            RequestContext: melodyhttp.NewRequestContext("two-factor-test", time.Now()),
+        },
     )
 
     return request, runtimeInstance

@@ -9,10 +9,11 @@ import (
 
 /* without SMTP_ADDRESS the example wires the LogTransport, which writes every send to the request logger instead of delivering it; set SMTP_ADDRESS to deliver through a real server. The nil logger makes the transport resolve the request-scoped logger at send time. */
 func (instance *Module) buildMailer() {
-    smtpConfig := instance.smtpConfig()
-    if "" != smtpConfig.Address {
+    smtpAddress, smtpConfig := instance.smtpConfig()
+    if "" != smtpAddress {
         instance.mailer = melodymailer.NewManager(
-            melodymailer.NewSmtpTransport(smtpConfig),
+            melodymailer.NewSmtpTransport(smtpAddress, smtpConfig),
+            melodymailer.ManagerConfig{},
         )
 
         return
@@ -20,11 +21,12 @@ func (instance *Module) buildMailer() {
 
     instance.mailer = melodymailer.NewManager(
         melodymailer.NewLogTransport(nil),
+        melodymailer.ManagerConfig{},
     )
 }
 
 /* smtpConfig reads the relay's address, its credentials, the plaintext door and the implicit tls switch; a combination the transport would not honour as written refuses the boot naming its keys */
-func (instance *Module) smtpConfig() melodymailer.SmtpConfig {
+func (instance *Module) smtpConfig() (string, melodymailer.SmtpConfig) {
     address := instance.parameterValue(parameterSmtpAddress)
     username := instance.parameterValue(parameterSmtpUsername)
     password := instance.parameterValue(parameterSmtpPassword)
@@ -58,8 +60,7 @@ func (instance *Module) smtpConfig() melodymailer.SmtpConfig {
         }
     }
 
-    return melodymailer.SmtpConfig{
-        Address:               address,
+    return address, melodymailer.SmtpConfig{
         Username:              username,
         Password:              password,
         RequireAuthentication: "" != username,

@@ -302,9 +302,9 @@ func run(ctx context.Context, embeddedEnvironmentFiles fs.FS, embeddedPublicFile
 - [`ScopedServiceRegistrar`](../../application/contract/scoped_service_module.go)\
   Shares no method with `ServiceRegistrar`: calling `RegisterService` on the scoped hook's registrar, or `RegisterScopedService` in `RegisterServices`, does not compile. Both take the provider as `any`, so matching a provider to the lifetime it was written for stays the caller's. See [CONTAINER](CONTAINER.md) for what the two lifetimes may read.
 - [`BootWarningModule`](../../application/contract/boot_warning_module.go)\
-  `RegisterBootWarnings(registrar)` runs after the parameters are registered, before the configuration resolves. A declared code is one a command may list in `MELODY_CLI_BOOT_WARNINGS_IGNORED` when it is written in cli; a warning added under it is written once with the framework's [boot warnings](SECURITY.md#boot-warnings) and honours the cli keys. The code is declared even when the module's configuration calls for no warning, so the cli keys may name it in every environment the module is registered in.
+  `RegisterBootWarnings(registrar)` runs after the parameters are registered, before the configuration resolves. A declared code is one a command may list in `MELODY_CLI_BOOT_WARNINGS_IGNORED` when its `BootWarningConfig.WrittenInCli` is true; a warning added under it is written once with the framework's [boot warnings](SECURITY.md#boot-warnings) and honours the cli keys. The code is declared even when the module's configuration calls for no warning, so the cli keys may name it in every environment the module is registered in.
 - [`BootWarningRegistrar`](../../application/contract/boot_warning_module.go)\
-  `DeclareBootWarning(name, writtenInCli)` and `AddBootWarning(warning)`. A name the framework or another module holds, a warning under a name the module did not declare and an empty message fail the boot, naming the module.
+  `DeclareBootWarning(name, config)`, [`BootWarningConfig`](../../application/contract/boot_warning_module.go) holding `WrittenInCli`, and `AddBootWarning(warning)`. A name the framework or another module holds, a warning under a name the module did not declare and an empty message fail the boot, naming the module.
 - [`BootWarning`](../../application/contract/boot_warning_module.go)\
   `Name`, `Message` and `Context`; the context names the configuration and never a value that may be a secret.
 - [`EnvironmentKeyModule`](../../application/contract/environment_key_module.go)\
@@ -349,7 +349,7 @@ func run(ctx context.Context, embeddedEnvironmentFiles fs.FS, embeddedPublicFile
 - [`NewRuntimeFlags(RuntimeFlagsConfig)`](../../application/cli.go) — the flags as given, an empty `Role` reading as `all`
 - [`ParseRuntimeFlags(RuntimeFlagsConfig)`](../../application/cli.go) — the mode and the role resolved from `os.Args` against the defaults given. An explicit `--role`/`-role` placed before the command name wins over `Role`; the flag exists because melody reads configuration only from `.env` artifacts and never from the process environment
 - [`NewSignalContext()`](../../application/signal_context.go) — the context to hand `Run`: cancelled by the first `SIGINT` or `SIGTERM`, giving the application its shutdown window, while a second one, arriving more than half a second after the first, prints a line to stderr and forces the conventional `128+signal` exit, so an operator facing a hung shutdown is never reduced to `SIGKILL`. The returned stop function unregisters the notifications and is safe to call more than once and concurrently. Call it whenever the process outlives the application: a watcher left armed makes the next application cycle in the same process run under two watchers, and the older one reads that cycle's first `SIGTERM` as its own escalation — a forced exit 143 where a graceful shutdown was owed
-- [`NewHttpMiddleware(staticOptions, configuration)`](../../application/http_middleware.go)
+- [`NewHttpMiddleware(staticConfig)`](../../application/http_middleware.go)
 
 ### Application lifecycle
 
@@ -411,4 +411,4 @@ The container's teardown order is a switch beside them, decided the same way: `C
 ### Middleware helpers
 
 - [`(*HttpMiddleware).Use(registration applicationcontract.MiddlewareRegistration)`](../../application/http_middleware.go)
-- [`(*HttpMiddleware).LastBuildReport()`](../../application/http_middleware.go)
+- [`(*HttpMiddleware).LastBuildReport()`](../../application/http_middleware.go) — an empty report before the first build

@@ -504,9 +504,11 @@ func callDoorBoundedTo(
 
     request := melodyhttp.NewRequest(
         httpRequest,
-        routeParameters,
         runtimeInstance,
-        melodyhttp.NewRequestContext("user-door-test", time.Now()),
+        melodyhttp.RequestConfig{
+            RouteParameters: routeParameters,
+            RequestContext:  melodyhttp.NewRequestContext("user-door-test", time.Now()),
+        },
     )
 
     response, handlerErr := door(runtimeInstance, recorder, request)

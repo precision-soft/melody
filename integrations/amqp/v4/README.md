@@ -52,15 +52,13 @@ Register the same value type your handlers are registered for (the message bus l
 ### Build a transport
 
 ```go
-transport := amqp.NewTransport(amqp.TransportConfig{
+transport := amqp.NewTransport("welcome_email", registry, amqp.TransportConfig{
     Connection: connection,
-    Queue:      "welcome_email",
     Prefetch:   bound.Of(10),
-    Registry:   registry,
 })
 ```
 
-`Prefetch` is the unacknowledged deliveries the broker hands the consumer at once: 10 when left out, at least 1 and at most 65535, the wire's limit, refused above it since `channel.Qos` would wrap 65536 onto 0, which RabbitMQ reads as unlimited. `PublishReturnBuffer` buffers the broker's returns, 16 when left out, at least 1. A limit outside its rule panics at construction naming the field.
+The queue and the registry are the constructor's arguments, an empty queue or a nil registry refused naming the argument. `Prefetch` is the unacknowledged deliveries the broker hands the consumer at once: 10 when left out, at least 1 and at most 65535, the wire's limit, refused above it since `channel.Qos` would wrap 65536 onto 0, which RabbitMQ reads as unlimited. `PublishReturnBuffer` buffers the broker's returns, 16 when left out, at least 1. A limit outside its rule panics at construction naming the field.
 
 ### Configure a publisher
 
@@ -160,12 +158,10 @@ By default a dropped broker connection stops the consumer (run it under a proces
 provider := amqp.NewProvider(amqp.ProviderConfig{})
 connection, _ := provider.Open(dsn)
 
-transport := amqp.NewTransport(amqp.TransportConfig{
+transport := amqp.NewTransport("welcome_email", registry, amqp.TransportConfig{
     Connection: connection,
     Dialer:     provider.Dialer(dsn),
-    Queue:      "welcome_email",
     Prefetch:   bound.Of(10),
-    Registry:   registry,
 })
 ```
 
@@ -178,11 +174,9 @@ provider := amqp.NewProvider(amqp.ProviderConfig{
     Reconnect: amqp.ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(2 * time.Second), Max: bound.Of(time.Minute), Factor: 1.5}},
 })
 
-transport := provider.NewTransport(amqp.TransportConfig{
+transport := provider.NewTransport("welcome_email", registry, amqp.TransportConfig{
     Connection: connection,
     Dialer:     provider.Dialer(dsn),
-    Queue:      "welcome_email",
-    Registry:   registry,
     Reconnect:  amqp.ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(500 * time.Millisecond), Max: bound.Of(10 * time.Second)}},
 })
 ```
@@ -225,16 +219,15 @@ A delay **below the smallest bucket** keeps the legacy `<queue>.delay` queue wit
 
 ## Server-Sent Events backplane
 
-`NewServerSentEventBackplane(ServerSentEventBackplaneConfig{...})` makes the core `http.ServerSentEventHub` fan its broadcasts out across every application instance behind a load balancer over a fanout exchange — without it, a `Broadcast` reaches only the clients connected to the instance that emitted it. Each instance binds its own exclusive, auto-deleted queue to the exchange (default `melody.sse`), so a published broadcast reaches every instance; the events of other instances are forwarded into the hub via `DeliverLocal`, and a tagged per-instance origin makes each instance skip the echo of its own broadcasts. Replication is best-effort in BOTH directions by design: the consumer runs auto-ack over a transient queue, and `Publish` runs no confirm mode — an event the broker discards after accepting the frame is gone with no error, so the hub's backplane-failure counter counts local publish refusals, not broker-side outcomes (the redis backplane behaves identically over pub/sub). A
+`NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{...})` makes the core `http.ServerSentEventHub` fan its broadcasts out across every application instance behind a load balancer over a fanout exchange — without it, a `Broadcast` reaches only the clients connected to the instance that emitted it. Each instance binds its own exclusive, auto-deleted queue to the exchange (default `melody.sse`), so a published broadcast reaches every instance; the events of other instances are forwarded into the hub via `DeliverLocal`, and a tagged per-instance origin makes each instance skip the echo of its own broadcasts. Replication is best-effort in BOTH directions by design: the consumer runs auto-ack over a transient queue, and `Publish` runs no confirm mode — an event the broker discards after accepting the frame is gone with no error, so the hub's backplane-failure counter counts local publish refusals, not broker-side outcomes (the redis backplane behaves identically over pub/sub). A
 server-sent event is ephemeral fan-out state; the next event or a client refresh corrects a missed one. With a `Dialer` the subscription and publisher re-establish after a broker restart; without one, a lost connection stops the receive half permanently, and that terminal stop is reported through the configured `Logger` — or on the emergency stderr channel when none was configured. Each of the two stretches a publish spends time in — the wait for its turn behind the broadcasts ahead of it, and the write — is bounded by `ServerSentEventBackplaneConfig.CallTimeout` (1s when left out, the same budget the redis backplane gives one round trip, at least 1ms, unlimited refused), so one attempt over an open channel costs at most two of these budgets — a `Publish` that opens or reopens its channel first, or retries once, pays the channel round trips beyond them, which the amqp client bounds by nothing but the socket: the amqp client discards the context a publish is handed and a broker that
 stops reading its socket would otherwise hold the write — and with it every later broadcast and the hub's shutdown, which waits for the publishes in flight — for good. A broadcast that runs out of budget waiting for its turn is told so and marks nothing; a write that outlives the timeout fails and is not retried; on a connection the backplane dialed itself the connection is cut and redialed on the next publish, on a connection you passed in publishes are refused until that write returns. The backplane carries `CloseWithContext(context.Context) error` and no module registration door, and needs none: the hub owns it — `ServerSentEventHub.Shutdown`, which the container reaches through the hub's `CloseWithContext`, closes the backplane it carries — so register the hub, or call `hub.Shutdown()` at shutdown; closing the backplane directly is allowed and idempotent.
 
 ```go
 hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-backplane := amqp.NewServerSentEventBackplane(amqp.ServerSentEventBackplaneConfig{
+backplane := amqp.NewServerSentEventBackplane(hub, amqp.ServerSentEventBackplaneConfig{
     Connection:  connection,
     Dialer:      provider.Dialer(dsn),
-    Hub:         hub,
     CallTimeout: bound.Of(2 * time.Second),
 })
 defer func() {
@@ -242,7 +235,7 @@ defer func() {
 }()
 ```
 
-`NewServerSentEventBackplane` calls `hub.SetBackplane` itself, so after construction `hub.Broadcast(...)` replicates automatically; a limit outside its rule panics naming the field before the backplane is installed on the hub, so a refused config leaves the hub without one. Its `Reconnect` and `CloseTimeout` are inherited from the provider as a transport's are; `ServerSentEventBackplaneConfig.CloseTimeout` bounds each stretch of `CloseWithContext` that cannot observe its signal, the provider's when built through one and 30s otherwise, at least 1ms, unlimited refused. A nil or typed-nil `Logger` records nothing. `CloseWithContext` tears the subscription down and closes only a connection the backplane itself dialed (never the one you passed in). The same hub backs the WebSocket integration, so both transports fan out cluster-wide.
+`NewServerSentEventBackplane` calls `hub.SetBackplane` itself, a nil hub refused naming the argument, so after construction `hub.Broadcast(...)` replicates automatically; a limit outside its rule panics naming the field before the backplane is installed on the hub, so a refused config leaves the hub without one. Its `Reconnect` and `CloseTimeout` are inherited from the provider as a transport's are; `ServerSentEventBackplaneConfig.CloseTimeout` bounds each stretch of `CloseWithContext` that cannot observe its signal, the provider's when built through one and 30s otherwise, at least 1ms, unlimited refused. A nil or typed-nil `Logger` records nothing. `CloseWithContext` tears the subscription down and closes only a connection the backplane itself dialed (never the one you passed in). The same hub backs the WebSocket integration, so both transports fan out cluster-wide.
 
 ## Footguns & caveats
 

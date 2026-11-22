@@ -7,7 +7,9 @@ import (
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/internal/routeseam"
     "github.com/precision-soft/melody/v4/internal/testhelper"
+    "reflect"
 )
 
 /* registration was the single channel with no duplicate handling: two unnamed routes on one method and pattern were both stored and the later one could never be dispatched — the tie falls to the first registered — so the shadowing was invisible everywhere. */
@@ -48,7 +50,7 @@ func TestRouteRegistry_ARecorderDefersTheDispatchDuplicateAndTheFirstRegistratio
     router := NewRouterWithRouteRegistry(registry)
 
     recorded := make([][2]string, 0, 1)
-    registry.SetBootCollisionRecorder(func(kind string, name string) {
+    registry.InstallBootCollisionRecorder(routeseam.Token{}, func(kind string, name string) {
         recorded = append(recorded, [2]string{kind, name})
     })
 
@@ -71,7 +73,7 @@ func TestRouteRegistry_ARecorderDefersTheDispatchDuplicateAndTheFirstRegistratio
         t.Fatalf("expected the first registration to win, got %d routes", len(registry.RouteDefinitions()))
     }
 
-    registry.SetBootCollisionRecorder(nil)
+    registry.InstallBootCollisionRecorder(routeseam.Token{}, nil)
 
     testhelper.AssertPanicsWithError(t, func() {
         router.Handle("/health", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
@@ -84,7 +86,7 @@ func TestRouteRegistry_ARecorderDefersTheNameDuplicateAndBothRoutesStayDispatcha
     router := NewRouterWithRouteRegistry(registry)
 
     recorded := make([][2]string, 0, 1)
-    registry.SetBootCollisionRecorder(func(kind string, name string) {
+    registry.InstallBootCollisionRecorder(routeseam.Token{}, func(kind string, name string) {
         recorded = append(recorded, [2]string{kind, name})
     })
 
@@ -370,5 +372,25 @@ func TestRoutesClaimingPath_AnswersEveryRouteThatMatchesWhateverItsMethodHostOrS
 
     if 3 != len(names) || false == names["literal"] || false == names["parameter"] || false == names["catchAll"] {
         t.Fatalf("expected the literal, the parameter and the catch-all, got %v", names)
+    }
+}
+
+func TestRouteRegistry_TheCollisionRecorderIsInstalledThroughTheSeamOnly(t *testing.T) {
+    registryType := reflect.TypeOf(NewRouteRegistry())
+
+    for index := 0; index < registryType.NumMethod(); index++ {
+        method := registryType.Method(index)
+        if 2 == method.Type.NumIn() && reflect.Func == method.Type.In(1).Kind() {
+            t.Errorf("RouteRegistry.%s takes only a func: the collision recorder is installed through the seam token", method.Name)
+        }
+    }
+
+    installer, hasInstaller := registryType.MethodByName("InstallBootCollisionRecorder")
+    if false == hasInstaller {
+        t.Fatal("expected RouteRegistry.InstallBootCollisionRecorder")
+    }
+
+    if 3 != installer.Type.NumIn() || reflect.TypeOf(routeseam.Token{}) != installer.Type.In(1) {
+        t.Fatalf("expected InstallBootCollisionRecorder to take the routeseam token first, got %s", installer.Type)
     }
 }

@@ -260,7 +260,7 @@ func (instance *lateBootRuntimeFactoryModule) RegisterHttpMiddlewares(kernelInst
 func TestBuildForInspection_AFactoryResolvingUnderTheBootRuntimeAfterBootReadsErrBootFinished(t *testing.T) {
     applicationInstance := newEnvironmentKeyBootApplication(t, nil)
     applicationInstance.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli})
-    applicationInstance.httpMiddlewares = NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), applicationInstance.configuration), applicationInstance.configuration)
+    applicationInstance.httpMiddlewares = NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), applicationInstance.configuration))
 
     probe := &lateBootRuntimeFactoryModule{fakeModule: fakeModule{name: "late-boot-runtime-factory"}}
     applicationInstance.RegisterModule(probe)

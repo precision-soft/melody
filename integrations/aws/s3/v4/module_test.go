@@ -35,12 +35,12 @@ type spyBootWarningRegistrar struct {
     warnings []applicationcontract.BootWarning
 }
 
-func (instance *spyBootWarningRegistrar) DeclareBootWarning(name string, writtenInCli bool) {
+func (instance *spyBootWarningRegistrar) DeclareBootWarning(name string, config applicationcontract.BootWarningConfig) {
     if nil == instance.declared {
         instance.declared = make(map[string]bool)
     }
 
-    instance.declared[name] = writtenInCli
+    instance.declared[name] = config.WrittenInCli
 }
 
 func (instance *spyBootWarningRegistrar) AddBootWarning(warning applicationcontract.BootWarning) {

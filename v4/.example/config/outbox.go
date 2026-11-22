@@ -68,10 +68,7 @@ func (instance *Module) outboxRelayFactory(resolver melodycontainercontract.Reso
         return nil, lockerErr
     }
 
-    return outbox.NewRelay(outbox.RelayConfig{
-        Repository: store,
-        Transport:  transport,
-        Codec:      &outboxNoticeCodec{},
+    return outbox.NewRelay(store, transport, &outboxNoticeCodec{}, outbox.RelayConfig{
         BatchSize:  bound.Of(50),
         Locker:     locker,
         LockName:   outboxRelayLockName,
@@ -97,10 +94,8 @@ func (instance *Module) buildOutboxTransport() (melodymessagebuscontract.Transpo
     registry := amqp.NewMessageRegistry()
     amqp.RegisterMessage[message.OutboxNotice](registry, outboxNoticeType)
 
-    return amqp.NewTransport(amqp.TransportConfig{
+    return amqp.NewTransport("outbox_notice", registry, amqp.TransportConfig{
         Dialer:     amqp.NewProvider(amqp.ProviderConfig{}).Dialer(dsn),
-        Queue:      "outbox_notice",
-        Registry:   registry,
     }), nil
 }
 

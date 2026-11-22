@@ -9,11 +9,12 @@ import (
     "time"
     "unicode/utf8"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/internal"
 )
 
 func TestTablePrinter_WrapsMultibyteRunesWithoutSplitting(t *testing.T) {
-    printer := NewDefaultTablePrinter()
+    printer := NewTablePrinter(TablePrinterConfig{})
 
     /* "ăăăăă" is 5 runes but 10 bytes; at width 3 a byte slice cuts a codepoint in half */
     lines := printer.wrapCellValue("ăăăăă", 3)
@@ -38,7 +39,7 @@ func TestTablePrinter_WrapsMultibyteRunesWithoutSplitting(t *testing.T) {
 }
 
 func TestTablePrinter_PadsMultibyteCellsByRune(t *testing.T) {
-    printer := NewDefaultTablePrinter()
+    printer := NewTablePrinter(TablePrinterConfig{})
 
     envelope := Envelope{
         Table: &TableData{
@@ -80,7 +81,7 @@ func TestTablePrinter_PadsMultibyteCellsByRune(t *testing.T) {
 }
 
 func TestTablePrinter_RendersTheEnvelopeErrorUnderQuiet(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
     envelope.SetError(
         "cmd.failed",
         "the command failed",
@@ -95,7 +96,7 @@ func TestTablePrinter_RendersTheEnvelopeErrorUnderQuiet(t *testing.T) {
     option := Option{}
     option.Quiet = true
 
-    printErr := NewDefaultTablePrinter().Print(buffer, envelope, option)
+    printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, option)
     if nil != printErr {
         t.Fatalf("expected no error, got %v", printErr)
     }
@@ -109,7 +110,7 @@ func TestTablePrinter_RendersTheEnvelopeErrorUnderQuiet(t *testing.T) {
 }
 
 func TestTablePrinter_RendersTheWarningsUnderQuiet(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
     envelope.AddWarning("cmd.checksum", "checksum mismatch", map[string]any{"file": "a.txt"})
 
     buffer := &bytes.Buffer{}
@@ -117,7 +118,7 @@ func TestTablePrinter_RendersTheWarningsUnderQuiet(t *testing.T) {
     option := Option{}
     option.Quiet = true
 
-    printErr := NewDefaultTablePrinter().Print(buffer, envelope, option)
+    printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, option)
     if nil != printErr {
         t.Fatalf("expected no error, got %v", printErr)
     }
@@ -134,23 +135,38 @@ func TestTablePrinter_RendersTheWarningsUnderQuiet(t *testing.T) {
     }
 }
 
-func TestNewTablePrinter_FloorsAnUnusableWidthAtTheDefault(t *testing.T) {
-    for _, requestedWidth := range []int{0, -1, -120} {
-        printer := NewTablePrinter(requestedWidth)
-
-        if defaultTableMaxWidth != printer.tableMaxWidth {
-            t.Fatalf("expected width %d to be floored at %d, got %d", requestedWidth, defaultTableMaxWidth, printer.tableMaxWidth)
-        }
+func TestNewTablePrinter_TheWidthFieldSelectsTodaysThreePrinters(t *testing.T) {
+    if defaultTableMaxWidth != NewTablePrinter(TablePrinterConfig{}).tableMaxWidth {
+        t.Fatalf("expected a width left out to cap the table at %d", defaultTableMaxWidth)
     }
 
-    printer := NewTablePrinter(40)
-    if 40 != printer.tableMaxWidth {
-        t.Fatalf("expected a usable width to be kept, got %d", printer.tableMaxWidth)
+    if 0 != NewTablePrinter(TablePrinterConfig{MaxWidth: bound.UnlimitedCount()}).tableMaxWidth {
+        t.Fatalf("expected an unlimited width to leave the table uncapped")
+    }
+
+    if 40 != NewTablePrinter(TablePrinterConfig{MaxWidth: bound.Of(40)}).tableMaxWidth {
+        t.Fatalf("expected an explicit width to be kept")
+    }
+
+    for _, requestedWidth := range []int{0, -1} {
+        func() {
+            defer func() {
+                recovered := recover()
+                recoveredErr, isError := recovered.(error)
+                if false == isError {
+                    t.Fatalf("expected width %d to be refused, got %v", requestedWidth, recovered)
+                }
+
+                assertRefusedOptionField(t, recoveredErr, "TablePrinterConfig.MaxWidth")
+            }()
+
+            NewTablePrinter(TablePrinterConfig{MaxWidth: bound.Of(requestedWidth)})
+        }()
     }
 }
 
 func TestTablePrinter_RendersTheWarningDetailsSortedUnderVerbose(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
     envelope.AddWarning(
         "cmd.checksum",
         "checksum mismatch",
@@ -166,7 +182,7 @@ func TestTablePrinter_RendersTheWarningDetailsSortedUnderVerbose(t *testing.T) {
     option := Option{}
     option.Verbose = true
 
-    printErr := NewDefaultTablePrinter().Print(buffer, envelope, option)
+    printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, option)
     if nil != printErr {
         t.Fatalf("expected no error, got %v", printErr)
     }
@@ -186,7 +202,7 @@ func TestTablePrinter_RendersTheWarningDetailsSortedUnderVerbose(t *testing.T) {
 }
 
 func TestTablePrinter_SkipsAnUnnamedErrorDetail(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
     envelope.SetError(
         "cmd.failed",
         "the command failed",
@@ -199,7 +215,7 @@ func TestTablePrinter_SkipsAnUnnamedErrorDetail(t *testing.T) {
 
     buffer := &bytes.Buffer{}
 
-    printErr := NewDefaultTablePrinter().Print(buffer, envelope, Option{})
+    printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, Option{})
     if nil != printErr {
         t.Fatalf("expected no error, got %v", printErr)
     }
@@ -215,7 +231,7 @@ func TestTablePrinter_SkipsAnUnnamedErrorDetail(t *testing.T) {
 
 /* the builder refuses a row shorter than the declared columns, so this state is reachable only through a TableData assembled by hand — which the printer also serves, and the sizing pass runs before anything renders */
 func TestTablePrinter_MeasuresARowShorterThanTheColumns(t *testing.T) {
-    printer := NewDefaultTablePrinter()
+    printer := NewTablePrinter(TablePrinterConfig{})
 
     block := TableBlock{
         Columns: []string{"name", "description"},
@@ -240,9 +256,9 @@ func TestTablePrinter_MeasuresARowShorterThanTheColumns(t *testing.T) {
 func TestTablePrinter_ShrinksTheWidestColumnAndWrapsTheSurplus(t *testing.T) {
     const tableMaxWidth = 30
 
-    printer := NewTablePrinter(tableMaxWidth)
+    printer := NewTablePrinter(TablePrinterConfig{MaxWidth: bound.Of(tableMaxWidth)})
 
-    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
     envelope.Table = &TableData{
         Blocks: []TableBlock{
             {
@@ -296,9 +312,9 @@ func TestTablePrinter_ShrinksTheWidestColumnAndWrapsTheSurplus(t *testing.T) {
 }
 
 func TestTablePrinter_StopsShrinkingWhenEveryColumnIsAtItsMinimum(t *testing.T) {
-    printer := NewTablePrinter(1)
+    printer := NewTablePrinter(TablePrinterConfig{MaxWidth: bound.Of(1)})
 
-    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
     envelope.Table = &TableData{
         Blocks: []TableBlock{
             {
@@ -343,7 +359,7 @@ func TestTablePrinter_StopsShrinkingWhenEveryColumnIsAtItsMinimum(t *testing.T) 
 
 /* the two floors of the shrink pass are reached only from code, never through the printer's own doors, so the state is built here directly. */
 func TestTablePrinter_ShrinkPassFloors(t *testing.T) {
-    printer := NewDefaultTablePrinter()
+    printer := NewTablePrinter(TablePrinterConfig{})
 
     emptyWidths := []int{}
     printer.shrinkWidthsToFitMaxWidth(TableBlock{}, emptyWidths, defaultTableMaxWidth)
@@ -366,7 +382,7 @@ func TestTablePrinter_ShrinkPassFloors(t *testing.T) {
 }
 
 func TestTablePrinter_AnswersTheCellWholeWhenThereIsNoRoomToWrap(t *testing.T) {
-    printer := NewDefaultTablePrinter()
+    printer := NewTablePrinter(TablePrinterConfig{})
 
     for _, width := range []int{1, 0, -1} {
         lines := printer.wrapCellValue("value", width)
@@ -378,7 +394,7 @@ func TestTablePrinter_AnswersTheCellWholeWhenThereIsNoRoomToWrap(t *testing.T) {
 }
 
 func TestTablePrinter_KeepsTheBlankLinesInsideAMultiLineCell(t *testing.T) {
-    printer := NewDefaultTablePrinter()
+    printer := NewTablePrinter(TablePrinterConfig{})
 
     lines := printer.wrapCellValue("first\n\nthird", 10)
 
@@ -391,7 +407,7 @@ func TestTablePrinter_KeepsTheBlankLinesInsideAMultiLineCell(t *testing.T) {
 }
 
 func TestTablePrinter_NormalizesTheLineEndingsAndAlwaysAnswersALine(t *testing.T) {
-    printer := NewDefaultTablePrinter()
+    printer := NewTablePrinter(TablePrinterConfig{})
 
     for _, value := range []string{"first\r\nsecond", "first\rsecond"} {
         lines := printer.wrapCellValue(value, 10)
@@ -438,7 +454,7 @@ func (instance *shortTableWriter) Write(payload []byte) (int, error) {
 }
 
 func TestTablePrinter_ReportsAShortWriteAsAFailure(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
 
     builder := NewTableBuilder()
     builder.AddBlock("BLOCK", []string{"name"}).AddRow("value")
@@ -446,7 +462,7 @@ func TestTablePrinter_ReportsAShortWriteAsAFailure(t *testing.T) {
 
     writer := &shortTableWriter{}
 
-    printErr := NewDefaultTablePrinter().Print(writer, envelope, Option{})
+    printErr := NewTablePrinter(TablePrinterConfig{}).Print(writer, envelope, Option{})
     if nil == printErr {
         t.Fatalf("expected the short write to be reported after %d truncated writes", writer.dropped)
     }
@@ -456,13 +472,13 @@ func TestTablePrinter_ReportsAShortWriteAsAFailure(t *testing.T) {
 }
 
 func TestTablePrinter_ReturnsTheFirstWriteFailure(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
 
     builder := NewTableBuilder()
     builder.AddBlock("BLOCK", []string{"name"}).AddRow("value")
     envelope.Table = builder.Build()
 
-    printErr := NewDefaultTablePrinter().Print(&failingTableWriter{failAfter: 1}, envelope, Option{})
+    printErr := NewTablePrinter(TablePrinterConfig{}).Print(&failingTableWriter{failAfter: 1}, envelope, Option{})
     if nil == printErr {
         t.Fatalf("expected the write failure to be returned")
     }
@@ -473,7 +489,7 @@ func TestTablePrinter_ReturnsTheFirstWriteFailure(t *testing.T) {
 
 /* the negative assertions are the proof: a raw escape byte or carriage return in the output would be obeyed by the terminal, and both render identically to the eye in a green test that only checks the positive spelling. */
 func TestTablePrinter_EscapesControlCharactersInTheTextChannels(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
     envelope.SetError(
         "cmd.failed",
         "open failed: file\rERROR: disk gone\x1b[2J",
@@ -487,7 +503,7 @@ func TestTablePrinter_EscapesControlCharactersInTheTextChannels(t *testing.T) {
 
     buffer := &bytes.Buffer{}
 
-    printErr := NewDefaultTablePrinter().Print(buffer, envelope, Option{})
+    printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, Option{})
     if nil != printErr {
         t.Fatalf("expected no error, got %v", printErr)
     }
@@ -509,7 +525,7 @@ func TestTablePrinter_EscapesControlCharactersInTheTextChannels(t *testing.T) {
 
 /* the escaping runs before the widths are computed, so the escaped spelling is what the alignment counts */
 func TestTablePrinter_EscapedCellsStayAligned(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
     envelope.Table = &TableData{
         Blocks: []TableBlock{
             {
@@ -527,7 +543,7 @@ func TestTablePrinter_EscapedCellsStayAligned(t *testing.T) {
     option := Option{}
     option.Quiet = true
 
-    printErr := NewDefaultTablePrinter().Print(buffer, envelope, option)
+    printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, option)
     if nil != printErr {
         t.Fatalf("expected no error, got %v", printErr)
     }
@@ -562,7 +578,7 @@ func TestTablePrinter_EscapedCellsStayAligned(t *testing.T) {
 
 /* the alignment oracle is display cells, not runes: a CJK ideogram occupies two cells */
 func TestTablePrinter_CjkCellsStayAlignedInDisplayCells(t *testing.T) {
-    envelope := NewEnvelope(NewMeta("cmd", nil, Option{}, time.Now(), 0, Version{}))
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
     envelope.Table = &TableData{
         Blocks: []TableBlock{
             {
@@ -580,7 +596,7 @@ func TestTablePrinter_CjkCellsStayAlignedInDisplayCells(t *testing.T) {
     option := Option{}
     option.Quiet = true
 
-    printErr := NewDefaultTablePrinter().Print(buffer, envelope, option)
+    printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, option)
     if nil != printErr {
         t.Fatalf("expected no error, got %v", printErr)
     }
@@ -609,7 +625,7 @@ func TestTablePrinter_CjkCellsStayAlignedInDisplayCells(t *testing.T) {
 
 /* the wrap slices by the same display-cell measure the widths are computed in: sliced by rune count, a line of two ideograms and a line of four ascii letters both "fit" a width of four while rendering four and eight cells */
 func TestTablePrinter_WrapsByDisplayCellsNotRunes(t *testing.T) {
-    printer := NewDefaultTablePrinter()
+    printer := NewTablePrinter(TablePrinterConfig{})
 
     lines := printer.wrapCellValue("世界世", 4)
 
@@ -623,7 +639,7 @@ func TestTablePrinter_WrapsByDisplayCellsNotRunes(t *testing.T) {
 
 /* a cell's width is the width of its widest line: taken whole, "12345\n67890" would read eleven cells wide */
 func TestTablePrinter_MeasuresAMultiLineCellByItsWidestLine(t *testing.T) {
-    printer := NewDefaultTablePrinter()
+    printer := NewTablePrinter(TablePrinterConfig{})
 
     envelope := Envelope{
         Table: &TableData{
@@ -660,7 +676,7 @@ func TestTablePrinter_MeasuresAMultiLineCellByItsWidestLine(t *testing.T) {
 
 /* the phantom width a whole-string measure invents is counted into the maximum-width arithmetic, so the sibling columns are shrunk to pay for it */
 func TestTablePrinter_DoesNotShrinkASiblingColumnForAMultiLineCellsPhantomWidth(t *testing.T) {
-    printer := NewTablePrinter(30)
+    printer := NewTablePrinter(TablePrinterConfig{MaxWidth: bound.Of(30)})
 
     tallCell := strings.TrimSuffix(strings.Repeat("abc\n", 10), "\n")
 
@@ -727,7 +743,7 @@ func TestCellDisplayWidth_AnswersTheWidestLine(t *testing.T) {
 
 /* a column header is sanitized keeping its newlines and wrapped by the same renderer, so it is sized by its widest line as a cell is, on both the width pass and the minimum the shrink pass floors it at */
 func TestTablePrinter_MeasuresAMultiLineColumnHeaderByItsWidestLine(t *testing.T) {
-    printer := NewDefaultTablePrinter()
+    printer := NewTablePrinter(TablePrinterConfig{})
 
     envelope := Envelope{
         Table: &TableData{

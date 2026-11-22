@@ -11,7 +11,7 @@ import (
 func TestNewFileStorage_RefusesAReadOnlyHandle(t *testing.T) {
     fileInstance := openSeededSessionFile(t, os.O_RDONLY)
 
-    storage, storageErr := NewFileStorage(FileStorageConfig{File: fileInstance})
+    storage, storageErr := NewFileStorageOverFile(fileInstance, FileStorageConfig{})
     if nil == storageErr {
         t.Fatalf("expected a read-only handle to be refused")
     }

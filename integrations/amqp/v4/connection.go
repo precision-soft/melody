@@ -9,6 +9,7 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
     amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
@@ -90,12 +91,12 @@ var defaultComponentParent = componentParent{
     closeTimeout: closeJoinTimeout,
 }
 
-func (instance *Provider) NewTransport(config TransportConfig) *Transport {
-    return newTransport(config, instance.parent)
+func (instance *Provider) NewTransport(queue string, registry *MessageRegistry, config TransportConfig) *Transport {
+    return newTransport(queue, registry, config, instance.parent)
 }
 
-func (instance *Provider) NewServerSentEventBackplane(config ServerSentEventBackplaneConfig) *ServerSentEventBackplane {
-    return newServerSentEventBackplane(config, instance.parent)
+func (instance *Provider) NewServerSentEventBackplane(hub *melodyhttp.ServerSentEventHub, config ServerSentEventBackplaneConfig) *ServerSentEventBackplane {
+    return newServerSentEventBackplane(hub, config, instance.parent)
 }
 
 func (instance *Provider) Open(dsn string) (*amqp091.Connection, error) {

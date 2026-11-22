@@ -23,7 +23,6 @@ func newHttpMiddlewareUnderTest(t *testing.T) *HttpMiddleware {
 
     return NewHttpMiddleware(
         newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration),
-        configuration,
     )
 }
 
@@ -127,7 +126,7 @@ func TestHttpMiddlewareDescribe_RunsNoFactoryAndNamesTheRegisteredFunction(t *te
 
     applicationInstance.Boot()
 
-    reportBefore := applicationInstance.httpMiddlewares.LastBuildReport()
+    reportBefore := applicationInstance.httpMiddlewares.lastBuildReport
 
     descriptions, _, describeErr := applicationInstance.httpMiddlewares.describe(applicationInstance.kernel)
     if nil != describeErr {
@@ -138,7 +137,7 @@ func TestHttpMiddlewareDescribe_RunsNoFactoryAndNamesTheRegisteredFunction(t *te
         t.Fatalf("expected the description to run no factory, ran %d times", factoryRuns)
     }
 
-    if reportBefore != applicationInstance.httpMiddlewares.LastBuildReport() {
+    if reportBefore != applicationInstance.httpMiddlewares.lastBuildReport {
         t.Fatal("expected the description to leave the last build report alone")
     }
 
@@ -347,7 +346,7 @@ func (instance *failingFactoryModule) RegisterHttpMiddlewares(kernelInstance ker
 func TestBoot_AModulesFailingMiddlewareFactoryIsRefusedNamingTheModule(t *testing.T) {
     applicationInstance := newEnvironmentKeyBootApplication(t, nil)
     applicationInstance.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli})
-    applicationInstance.httpMiddlewares = NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), applicationInstance.configuration), applicationInstance.configuration)
+    applicationInstance.httpMiddlewares = NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), applicationInstance.configuration))
 
     applicationInstance.RegisterModule(&failingFactoryModule{fakeModule: fakeModule{name: "billing"}})
 
@@ -372,7 +371,7 @@ func TestBoot_AModulesFailingMiddlewareFactoryIsRefusedNamingTheModule(t *testin
 
 func TestHttpMiddleware_AnApplicationFactoryIsRefusedNamingTheApplication(t *testing.T) {
     applicationInstance := newEnvironmentKeyBootApplication(t, nil)
-    applicationInstance.httpMiddlewares = NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), applicationInstance.configuration), applicationInstance.configuration)
+    applicationInstance.httpMiddlewares = NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), applicationInstance.configuration))
 
     applicationInstance.RegisterHttpMiddlewareFactories([]middlewarepipeline.MiddlewareFactory{moduleNameTestFailingFactory})
 

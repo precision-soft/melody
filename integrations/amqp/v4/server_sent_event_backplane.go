@@ -75,11 +75,10 @@ type ServerSentEventBackplane struct {
     wait   sync.WaitGroup
 }
 
-/* ServerSentEventBackplaneConfig declares the backplane: Connection or Dialer is required, Hub is required, Exchange is melody.sse when empty, and a nil or typed-nil Logger records nothing. A limit outside its rule is refused before the backplane is installed on the hub or its listener starts, naming the field. */
+/* ServerSentEventBackplaneConfig declares the backplane: Connection or Dialer is required, Exchange is melody.sse when empty, and a nil or typed-nil Logger records nothing. A limit outside its rule is refused before the backplane is installed on the hub or its listener starts, naming the field. */
 type ServerSentEventBackplaneConfig struct {
     Connection *amqp091.Connection
     Dialer     func() (*amqp091.Connection, error)
-    Hub        *melodyhttp.ServerSentEventHub
     Exchange   string
     Logger     loggingcontract.Logger
     /* Reconnect is the re-subscribe backoff, each field left out inherited from the provider that built the backplane, or the package default. */
@@ -90,17 +89,18 @@ type ServerSentEventBackplaneConfig struct {
     CloseTimeout bound.Duration
 }
 
-func NewServerSentEventBackplane(config ServerSentEventBackplaneConfig) *ServerSentEventBackplane {
-    return newServerSentEventBackplane(config, defaultComponentParent)
+/* NewServerSentEventBackplane fans hub's broadcasts out across instances; a nil hub panics naming the argument. */
+func NewServerSentEventBackplane(hub *melodyhttp.ServerSentEventHub, config ServerSentEventBackplaneConfig) *ServerSentEventBackplane {
+    return newServerSentEventBackplane(hub, config, defaultComponentParent)
 }
 
-func newServerSentEventBackplane(config ServerSentEventBackplaneConfig, parent componentParent) *ServerSentEventBackplane {
+func newServerSentEventBackplane(hub *melodyhttp.ServerSentEventHub, config ServerSentEventBackplaneConfig, parent componentParent) *ServerSentEventBackplane {
     if nil == config.Connection && nil == config.Dialer {
         exception.Panic(exception.NewError("amqp sse backplane needs a connection or a dialer", exceptioncontract.Context{"field": "ServerSentEventBackplaneConfig.Connection", "alternative": "ServerSentEventBackplaneConfig.Dialer"}, nil))
     }
 
-    if nil == config.Hub {
-        exception.Panic(exception.NewError("amqp sse backplane hub is nil", exceptioncontract.Context{"field": "ServerSentEventBackplaneConfig.Hub"}, nil))
+    if nil == hub {
+        exception.Panic(exception.NewError("amqp sse backplane hub is nil", exceptioncontract.Context{"argument": "hub"}, nil))
     }
 
     exchange := config.Exchange
@@ -134,7 +134,7 @@ func newServerSentEventBackplane(config ServerSentEventBackplaneConfig, parent c
         connection:    config.Connection,
         dialer:        config.Dialer,
         connectedOnce: nil != config.Connection,
-        hub:           config.Hub,
+        hub:           hub,
         exchange:      exchange,
         origin:        newServerSentEventBackplaneOrigin(),
         logger:        logger,
@@ -145,7 +145,7 @@ func newServerSentEventBackplane(config ServerSentEventBackplaneConfig, parent c
         cancel:        cancel,
     }
 
-    config.Hub.SetBackplane(backplane)
+    hub.SetBackplane(backplane)
 
     backplane.wait.Add(1)
     go backplane.listen()

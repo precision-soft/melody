@@ -156,7 +156,7 @@ func TestBoot_AnHttpBootBuildsThePipelineOnceAndACliBootBuildsNone(t *testing.T)
     } {
         applicationInstance := newEnvironmentKeyBootApplication(t, map[string]string{config.HttpAddressKey: "127.0.0.1:34526"})
         applicationInstance.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: testCase.mode})
-        applicationInstance.httpMiddlewares = NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), applicationInstance.configuration), applicationInstance.configuration)
+        applicationInstance.httpMiddlewares = NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), applicationInstance.configuration))
 
         built := 0
         applicationInstance.RegisterModule(&factoryCountingModule{fakeModule: fakeModule{name: "factory-counting"}, built: &built})

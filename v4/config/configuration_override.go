@@ -63,7 +63,7 @@ func (instance *Configuration) applyParameterOverrides(overrides map[string]stri
 
 /* it keeps the key it stopped reading, which debug:parameters and the refusals name */
 func newOverriddenParameter(environmentKey string, name string, template string) *Parameter {
-    parameter := NewParameter(environmentKey, template, nil, false)
+    parameter := newParameter(environmentKey, template, nil, false)
     parameter.name = name
     parameter.overridden = true
 

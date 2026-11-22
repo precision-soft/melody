@@ -114,7 +114,7 @@ func (instance *Configuration) DeclareEnvironmentKey(owner string, key configcon
     speaksDefault := false == isSet || (false == internal.IsNilInterface(key.Rule) && "" == strings.TrimSpace(line))
 
     template := environmentPlaceholder(key.Key)
-    parameter := NewParameter(key.Key, template, nil, speaksDefault)
+    parameter := newParameter(key.Key, template, nil, speaksDefault)
 
     /* an override held since construction becomes the parameter's template */
     override, isOverridden := instance.pendingParameterOverrides[key.Parameter]

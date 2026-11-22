@@ -12,6 +12,7 @@ import (
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
@@ -24,12 +25,10 @@ const hmacTokenSourceName = "hmacInternal"
 /* HmacVerifyBodyBeforeNonceAttribute is the request attribute (settable per route or, on demand, through SetHmacVerifyBodyBeforeNonce) that overrides the source's VerifyBodyBeforeNonce default for a single request. Its value must be a bool; a value of any other type is ignored and the source's default applies. */
 const HmacVerifyBodyBeforeNonceAttribute = "security.hmac.verifyBodyBeforeNonce"
 
-/* HmacTokenSourceConfig configures the verifying side of the internal-auth scheme. Secrets resolves the shared key (supporting rotation through multiple resolvable key ids); Applications maps a verified caller to the roles its service principal receives; NonceGuard rejects replayed envelopes (defaults to an in-process guard — supply a shared one for multi-instance deployments); MaxFutureExpiry bounds how far ahead an envelope's expiry may sit. */
+/* HmacTokenSourceConfig configures the verifying side of the internal-auth scheme, whose secrets provider and application registry are NewHmacTokenSource's arguments. NonceGuard rejects replayed envelopes (defaults to an in-process guard — supply a shared one for multi-instance deployments); MaxFutureExpiry bounds how far ahead an envelope's expiry may sit. */
 type HmacTokenSourceConfig struct {
-    Secrets      HmacSecretProvider
-    Applications HmacApplicationRegistry
-    NonceGuard   securitycontract.NonceGuard
-    HeaderName   string
+    NonceGuard securitycontract.NonceGuard
+    HeaderName string
 
     /* Leeway tolerates clock skew on the issued and expiry checks, and the issued check one second more, the resolution of the IssuedAt claim: 5s when left out, bound.Of(time.Duration(0)) for strict, at most 5m, unlimited refused. The nonce guard remembers a nonce for the leeway too, since an envelope past its expiry by less than the leeway is still honoured and must still be refused as a replay. */
     Leeway bound.Duration
@@ -62,13 +61,14 @@ var hmacTokenSourceMaxFutureExpiryRule = bound.Rule[time.Duration]{
     Minimum: bound.TtlMinimum,
 }
 
-func NewHmacTokenSource(config HmacTokenSourceConfig) *HmacTokenSource {
-    if true == internal.IsNilInterface(config.Secrets) {
-        exception.Panic(exception.NewError("hmac token source secrets provider is nil", nil, nil))
+/* NewHmacTokenSource verifies envelopes signed with a key secrets resolves, granting the roles applications maps to the caller; a nil secrets or applications panics naming the argument. */
+func NewHmacTokenSource(secrets HmacSecretProvider, applications HmacApplicationRegistry, config HmacTokenSourceConfig) *HmacTokenSource {
+    if true == internal.IsNilInterface(secrets) {
+        exception.Panic(exception.NewError("hmac token source secrets provider is nil", exceptioncontract.Context{"argument": "secrets"}, nil))
     }
 
-    if true == internal.IsNilInterface(config.Applications) {
-        exception.Panic(exception.NewError("hmac token source application registry is nil", nil, nil))
+    if true == internal.IsNilInterface(applications) {
+        exception.Panic(exception.NewError("hmac token source application registry is nil", exceptioncontract.Context{"argument": "applications"}, nil))
     }
 
     headerName := config.HeaderName
@@ -99,8 +99,8 @@ func NewHmacTokenSource(config HmacTokenSourceConfig) *HmacTokenSource {
     }
 
     return &HmacTokenSource{
-        secrets:               config.Secrets,
-        applications:          config.Applications,
+        secrets:               secrets,
+        applications:          applications,
         nonceGuard:            nonceGuard,
         headerName:            headerName,
         leeway:                leeway.Value,

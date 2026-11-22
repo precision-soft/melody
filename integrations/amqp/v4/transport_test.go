@@ -234,11 +234,9 @@ func TestTransport_SendReceiveAck(t *testing.T) {
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "amqp.test.message")
 
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport("melody.amqp.v4.test", registry, TransportConfig{
         Connection: connection,
-        Queue:      "melody.amqp.v4.test",
         Prefetch:   bound.Of(10),
-        Registry:   registry,
     })
 
     ctx, cancel := context.WithCancel(context.Background())
@@ -312,11 +310,9 @@ func TestTransport_RequeuePersistsRedeliveryCountThenDeadLetters(t *testing.T) {
     RegisterMessage[testMessage](registry, "amqp.test.retry")
 
     queueName := "melody.amqp.v4.retry"
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport(queueName, registry, TransportConfig{
         Connection: connection,
-        Queue:      queueName,
         Prefetch:   bound.Of(1),
-        Registry:   registry,
     })
 
     ctx, cancel := context.WithCancel(context.Background())
@@ -378,11 +374,9 @@ func TestTransport_DelayStampRoutesThroughDelayQueue(t *testing.T) {
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "amqp.test.delay")
 
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport("melody.amqp.v4.delay", registry, TransportConfig{
         Connection: connection,
-        Queue:      "melody.amqp.v4.delay",
         Prefetch:   bound.Of(1),
-        Registry:   registry,
     })
 
     ctx, cancel := context.WithCancel(context.Background())
@@ -451,12 +445,10 @@ func TestTransport_ReconnectsAfterConnectionDrop(t *testing.T) {
     RegisterMessage[testMessage](registry, "amqp.test.reconnect")
 
     queueName := "melody.amqp.v4.reconnect"
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport(queueName, registry, TransportConfig{
         Connection: connection,
         Dialer:     provider.Dialer(dsn),
-        Queue:      queueName,
         Prefetch:   bound.Of(1),
-        Registry:   registry,
     })
 
     ctx, cancel := context.WithCancel(context.Background())
@@ -484,10 +476,8 @@ func TestTransport_ReconnectsAfterConnectionDrop(t *testing.T) {
     }
     defer provider.Close(publisherConnection)
 
-    publisher := NewTransport(TransportConfig{
+    publisher := NewTransport(queueName, registry, TransportConfig{
         Connection: publisherConnection,
-        Queue:      queueName,
-        Registry:   registry,
     })
     defer publisher.CloseWithContext(context.Background())
 
@@ -1138,10 +1128,8 @@ func TestForwardDeliveries_CloseUnblocksGoroutineParkedOnOutput(t *testing.T) {
     registry := NewMessageRegistry()
     RegisterMessage[closeUnblockMessage](registry, "amqp.test.close-unblock")
 
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport("melody.amqp.v4.close-unblock", registry, TransportConfig{
         Dialer:   func() (*amqp091.Connection, error) { return nil, nil },
-        Queue:    "melody.amqp.v4.close-unblock",
-        Registry: registry,
     })
 
     ctx, cancel := context.WithCancel(context.Background())
@@ -1184,10 +1172,8 @@ func TestForwardDeliveries_CloseUnblocksGoroutineParkedOnOutput(t *testing.T) {
 }
 
 func TestReopenConsume_CloseUnblocksGoroutineParkedOnBackoff(t *testing.T) {
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport("melody.amqp.v4.reopen-backoff", NewMessageRegistry(), TransportConfig{
         Dialer:   func() (*amqp091.Connection, error) { return nil, errors.New("broker down") },
-        Queue:    "melody.amqp.v4.reopen-backoff",
-        Registry: NewMessageRegistry(),
     })
 
     ctx, cancel := context.WithCancel(context.Background())
@@ -1359,11 +1345,9 @@ func TestTransport_CloseJoinsTheConsumerStartedByReceive(t *testing.T) {
     queueName := "melody.amqp.v4.close-join"
     serializer := newBlockingDeserializer()
 
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport(queueName, registry, TransportConfig{
         Connection: connection,
-        Queue:      queueName,
         Prefetch:   bound.Of(1),
-        Registry:   registry,
         Serializer: serializer,
     })
 
@@ -1447,10 +1431,8 @@ func TestTransport_SendSurfacesUnroutablePublishAfterQueueDelete(t *testing.T) {
 
     queueName := "melody.amqp.v4.confirm-unroutable"
 
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport(queueName, registry, TransportConfig{
         Connection: connection,
-        Queue:      queueName,
-        Registry:   registry,
     })
 
     ctx, cancel := context.WithCancel(context.Background())
@@ -1498,10 +1480,8 @@ func TestEnsurePublishChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
     }
     defer provider.Close(connection)
 
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport("melody.amqp.v4.reopen-publish", NewMessageRegistry(), TransportConfig{
         Connection: connection,
-        Queue:      "melody.amqp.v4.reopen-publish",
-        Registry:   NewMessageRegistry(),
     })
 
     first, _, _, firstErr := transport.ensurePublishChannel()
@@ -1539,10 +1519,8 @@ func TestEnsureConsumeChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
     }
     defer provider.Close(connection)
 
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport("melody.amqp.v4.reopen-consume", NewMessageRegistry(), TransportConfig{
         Connection: connection,
-        Queue:      "melody.amqp.v4.reopen-consume",
-        Registry:   NewMessageRegistry(),
     })
 
     first, firstGeneration, firstErr := transport.ensureConsumeChannel()
@@ -1651,11 +1629,9 @@ func TestRedeliveryCountFromHeader(t *testing.T) {
 
 func TestNewTransport_RefusesAPrefetchAboveTheWireMaximum(t *testing.T) {
     newInstance := func(prefetch int) *Transport {
-        return newTransport(TransportConfig{
+        return newTransport("orders", NewMessageRegistry(), TransportConfig{
             Dialer:   func() (*amqp091.Connection, error) { return nil, nil },
-            Queue:    "orders",
             Prefetch: bound.Of(prefetch),
-            Registry: NewMessageRegistry(),
         }, defaultComponentParent)
     }
 
@@ -1778,11 +1754,9 @@ func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "amqp.test.delay.bucket")
 
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport("melody.amqp.v4.delay.bucket", registry, TransportConfig{
         Connection:   connection,
-        Queue:        "melody.amqp.v4.delay.bucket",
         Prefetch:     bound.Of(2),
-        Registry:     registry,
         DelayBuckets: []time.Duration{2 * time.Second, 8 * time.Second},
     })
 
@@ -1972,11 +1946,9 @@ func TestTransport_RequeueThatCannotCarryItsCountersDeadLettersInsteadOfLooping(
     RegisterMessage[testMessage](registry, "amqp.test.uncounted")
 
     queueName := "melody.amqp.v4.uncounted"
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport(queueName, registry, TransportConfig{
         Connection: connection,
-        Queue:      queueName,
         Prefetch:   bound.Of(1),
-        Registry:   registry,
     })
 
     ctx, cancel := context.WithCancel(context.Background())
@@ -2221,10 +2193,8 @@ func TestForwardDeliveries_StampsTheGenerationOfItsOwnChannelNotTheTransportCoun
 
     serializer := melodyserializer.NewJsonSerializer()
 
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport("melody.amqp.v4.paired-generation", registry, TransportConfig{
         Dialer:     func() (*amqp091.Connection, error) { return nil, errors.New("no broker in this test") },
-        Queue:      "melody.amqp.v4.paired-generation",
-        Registry:   registry,
         Serializer: serializer,
     })
 
@@ -2289,10 +2259,8 @@ func TestForwardDeliveries_StampsTheGenerationOfItsOwnChannelNotTheTransportCoun
 }
 
 func TestEnsureConsumeChannel_AnswersTheCachedChannelWithItsOwnGeneration(t *testing.T) {
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport("melody.amqp.v4.cached-generation", NewMessageRegistry(), TransportConfig{
         Dialer:   func() (*amqp091.Connection, error) { return nil, errors.New("no broker in this test") },
-        Queue:    "melody.amqp.v4.cached-generation",
-        Registry: NewMessageRegistry(),
     })
 
     cachedChannel := &amqp091.Channel{}
@@ -2327,11 +2295,9 @@ func newWedgeTestTransport(t *testing.T, connection *amqp091.Connection, dialer 
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "amqp.test.wedge.message")
 
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport("melody.amqp.v4.test.wedge", registry, TransportConfig{
         Connection:     connection,
         Dialer:         dialer,
-        Queue:          "melody.amqp.v4.test.wedge",
-        Registry:       registry,
         CallTimeout:    bound.Of(wedgeWarmupCallTimeout),
     })
 
@@ -2921,10 +2887,8 @@ func TestTransport_CloseChannelsWithinAnswersNothingToCloseAtAZeroBound(t *testi
 func TestTransport_CloseWithContextClosesAnOwnedConnectionUnderACancelledContext(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
 
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport("melody.amqp.v4.test.spent.teardown", NewMessageRegistry(), TransportConfig{
         Dialer:   func() (*amqp091.Connection, error) { return amqp091.Dial(dsn) },
-        Queue:    "melody.amqp.v4.test.spent.teardown",
-        Registry: NewMessageRegistry(),
     })
 
     if _, connectErr := transport.connect(); nil != connectErr {
@@ -2950,10 +2914,8 @@ func TestTransport_CloseWithContextClosesAnOwnedConnectionUnderACancelledContext
 func TestTransport_CloseWithContextClosesAnOwnedConnectionUnderASpentDeadline(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
 
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport("melody.amqp.v4.test.spent.teardown.deadline", NewMessageRegistry(), TransportConfig{
         Dialer:   func() (*amqp091.Connection, error) { return amqp091.Dial(dsn) },
-        Queue:    "melody.amqp.v4.test.spent.teardown.deadline",
-        Registry: NewMessageRegistry(),
     })
 
     if _, connectErr := transport.connect(); nil != connectErr {
@@ -3119,12 +3081,10 @@ func TestTransport_SendRoutesThroughTheConfiguredExchangeAndRoutingKey(t *testin
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "amqp.test.message")
 
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport(queueName, registry, TransportConfig{
         Connection: connection,
-        Queue:      queueName,
         Exchange:   exchangeName,
         RoutingKey: "orders",
-        Registry:   registry,
     })
     defer transport.CloseWithContext(context.Background())
 
@@ -3197,10 +3157,8 @@ func TestTransport_CloseWithContextReturnsWithinTheDeadlineWhileTheClientShutdow
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginClientShutdown(t)
 
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport("melody.amqp.v4.test.fake.broker", NewMessageRegistry(), TransportConfig{
         Dialer:   func() (*amqp091.Connection, error) { return nil, errors.New("the fake broker is dialed once, by the test") },
-        Queue:    "melody.amqp.v4.test.fake.broker",
-        Registry: NewMessageRegistry(),
     })
 
     transport.mutex.Lock()
@@ -3336,10 +3294,8 @@ func TestTransport_CloseNamesTheWriteLeftBlockedOnAConnectionAnEarlierAbandonCut
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginClientShutdown(t)
 
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport("melody.amqp.v4.test.fake.broker", NewMessageRegistry(), TransportConfig{
         Dialer:         func() (*amqp091.Connection, error) { return nil, errors.New("the fake broker is dialed once, by the test") },
-        Queue:          "melody.amqp.v4.test.fake.broker",
-        Registry:       NewMessageRegistry(),
         CallTimeout:    bound.Of(200 * time.Millisecond),
         CloseTimeout:   bound.Of(300 * time.Millisecond),
     })
@@ -3433,10 +3389,8 @@ func TestTransport_CloseWithContextReturnsWithinTheDeadlineWhenAnEarlierCutHasNo
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginUnfreedCut(t, 4*time.Second)
 
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport("melody.amqp.v4.test.fake.broker", NewMessageRegistry(), TransportConfig{
         Dialer:         func() (*amqp091.Connection, error) { return nil, errors.New("the fake broker is dialed once, by the test") },
-        Queue:          "melody.amqp.v4.test.fake.broker",
-        Registry:       NewMessageRegistry(),
         CallTimeout:    bound.Of(200 * time.Millisecond),
     })
 
@@ -3694,9 +3648,7 @@ func TestTransport_SendReturnsOnACyclicChainFromTheDialer(t *testing.T) {
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "test")
 
-    transport := NewTransport(TransportConfig{
-        Queue:    "q",
-        Registry: registry,
+    transport := NewTransport("q", registry, TransportConfig{
         Dialer: func() (*amqp091.Connection, error) {
             return nil, newCyclicChainError()
         },
@@ -3874,10 +3826,8 @@ func TestTransport_SendOverAConnectionThatIsGoneIsMarkedUnavailable(t *testing.T
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "amqp.unavailable.message")
 
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport("melody.amqp.v4.unavailable-mark", registry, TransportConfig{
         Connection: connection,
-        Queue:      "melody.amqp.v4.unavailable-mark",
-        Registry:   registry,
     })
     defer transport.CloseWithContext(context.Background())
 
@@ -4002,16 +3952,14 @@ func TestConsumeLoop_AChannelLostAfterLivingTheInitialBackoffReopensAtOnce(t *te
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "amqp.test.reconnect.reset")
 
-    transport := NewTransport(TransportConfig{
+    transport := NewTransport("melody.amqp.v4.reconnect.reset", registry, TransportConfig{
         Connection: connection,
         Dialer: func() (*amqp091.Connection, error) {
             dialedAt <- time.Now()
 
             return providerDialer()
         },
-        Queue:     "melody.amqp.v4.reconnect.reset",
         Prefetch:  bound.Of(1),
-        Registry:  registry,
         Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(400 * time.Millisecond), Max: bound.Of(10 * time.Second)}},
     })
     defer transport.CloseWithContext(context.Background())
@@ -4047,7 +3995,7 @@ func openTopologyFor(t *testing.T, connection *amqp091.Connection, queueName str
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "amqp.test.message")
 
-    transport := NewTransport(TransportConfig{Connection: connection, Queue: queueName, Registry: registry, DeadLetterDisabled: deadLetterDisabled})
+    transport := NewTransport(queueName, registry, TransportConfig{Connection: connection, DeadLetterDisabled: deadLetterDisabled})
     defer transport.CloseWithContext(context.Background())
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
@@ -4155,11 +4103,11 @@ func TestTransport_AQueueDeclaredWithoutTheDeadLetterArgumentNamesTheDoor(t *tes
 func TestNewTransport_DeadLetterIsOnUnlessItsDoorIsSet(t *testing.T) {
     registry := NewMessageRegistry()
 
-    if false == NewTransport(TransportConfig{Dialer: func() (*amqp091.Connection, error) { return nil, nil }, Queue: "orders", Registry: registry}).deadLetter {
+    if false == NewTransport("orders", registry, TransportConfig{Dialer: func() (*amqp091.Connection, error) { return nil, nil }}).deadLetter {
         t.Fatal("expected the dead-letter topology on with the field left out")
     }
 
-    disabled := NewTransport(TransportConfig{Dialer: func() (*amqp091.Connection, error) { return nil, nil }, Queue: "orders", Registry: registry, DeadLetterDisabled: true})
+    disabled := NewTransport("orders", registry, TransportConfig{Dialer: func() (*amqp091.Connection, error) { return nil, nil }, DeadLetterDisabled: true})
     if true == disabled.deadLetter || false == requeueOnRejectedRepublish(disabled.deadLetter) {
         t.Fatal("expected the off door to drop the topology and requeue a rejected republish")
     }

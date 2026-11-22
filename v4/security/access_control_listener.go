@@ -135,7 +135,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
             }
 
             if true == exists && nil != securityContext {
-                securityContext.SetMatchedRule(matchedRule)
+                securityContext.setMatchedRule(matchedRule)
             }
 
             if true == containsPublicAccessAttribute(attributes) {
@@ -401,7 +401,7 @@ func matchAccessControlRule(accessControl *AccessControl, path string, source So
         return nil, nil, false
     }
 
-    matchedRule := NewMatchedAccessControlRule(
+    matchedRule := newMatchedAccessControlRule(
         matchedRuleValue,
         source,
         matchedIndex,

@@ -34,6 +34,25 @@ import (
 
 var strictLeeway = bound.Of(time.Duration(0))
 
+func expectPanicNamingTheArgument(t *testing.T, argument string, callback func()) {
+    t.Helper()
+
+    defer func() {
+        t.Helper()
+
+        recoveredErr, isError := recover().(error)
+        if false == isError {
+            t.Fatalf("expected a refusal naming the %s argument, got no error panic", argument)
+        }
+
+        if context := exception.LogContext(recoveredErr, exception.LogContextConfig{}); argument != context["argument"] {
+            t.Fatalf("expected a refusal naming the %s argument, got %v: %v", argument, context, recoveredErr)
+        }
+    }()
+
+    callback()
+}
+
 func expectPanicNamingField(t *testing.T, field string, callback func()) {
     t.Helper()
 
@@ -176,11 +195,12 @@ func newSecurityTestRequest(method string, path string, headers map[string]strin
 
     return http.NewRequest(
         request,
-        nil,
         runtimeInstance,
-        &securityTestRequestContext{
+        http.RequestConfig{
+            RequestContext: &securityTestRequestContext{
             requestIdValue: "test",
             startedAtValue: time.Now(),
+        },
         },
     )
 }
@@ -199,10 +219,11 @@ func newFirewallTestRequest(path string) httpcontract.Request {
     return http.NewRequest(
         request,
         nil,
-        nil,
-        &firewallTestRequestContext{
+        http.RequestConfig{
+            RequestContext: &firewallTestRequestContext{
             requestIdValue: "test",
             startedAtValue: time.Now(),
+        },
         },
     )
 }

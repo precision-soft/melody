@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewListPayload_KeepsTheReportedTotalIndependentOfTheItems(t *testing.T) {
-    payload := NewListPayload([]string{"a", "b"}, 47, bound.Of(2), bound.Of(10))
+    payload := NewListPayload([]string{"a", "b"}, ListPayloadConfig{Total: 47, Limit: bound.Of(2), Offset: bound.Of(10)})
 
     if 2 != len(payload.Items) {
         t.Fatalf("expected 2 items, got %d", len(payload.Items))

@@ -14,7 +14,9 @@ import (
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
 )
 
+/* NewKernel is called by the application alone: the token cannot be spelled outside v4. */
 func NewKernel(
+    token kernelseam.Token,
     applicationConfiguration configcontract.Configuration,
     serviceContainer containercontract.Container,
     httpRouter httpcontract.Router,

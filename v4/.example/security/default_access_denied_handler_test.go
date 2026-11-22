@@ -15,7 +15,7 @@ func TestDefaultAccessDeniedHandlerAnswersABrowserWithAnHtmlForbidden(t *testing
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/admin/", nil)
     httpRequest.Header.Set("Accept", "text/html")
 
-    response, handleErr := NewDefaultAccessDeniedHandler("/catalogue/", "/logout/").Handle(nil, melodyhttp.NewRequest(httpRequest, nil, nil, nil), errors.New("denied"))
+    response, handleErr := NewDefaultAccessDeniedHandler("/catalogue/", "/logout/").Handle(nil, melodyhttp.NewRequest(httpRequest, nil, melodyhttp.RequestConfig{}), errors.New("denied"))
     if nil != handleErr {
         t.Fatalf("the handler failed: %v", handleErr)
     }

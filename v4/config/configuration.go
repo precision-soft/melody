@@ -13,6 +13,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
+    "github.com/precision-soft/melody/v4/internal/configseam"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
@@ -134,7 +135,7 @@ type Configuration struct {
 }
 
 /* MarkServing ends the wiring phase: Resolve is refused from then on, and a parameter registered later resolves on registration. */
-func (instance *Configuration) MarkServing() {
+func (instance *Configuration) MarkServing(token configseam.Token) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -257,7 +258,7 @@ func (instance *Configuration) registerRuntimeParameter(name string, value any, 
         )
     }
 
-    parameter := NewParameter("", value, value, false)
+    parameter := newParameter("", value, value, false)
     parameter.name = name
     parameter.isSecret.Store(isSecret)
 

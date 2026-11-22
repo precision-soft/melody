@@ -545,11 +545,10 @@ func newEnvelopeErrorCommand() *testCommand {
             envelope := output.NewEnvelope(
                 output.NewMeta(
                     "hello",
-                    nil,
-                    option,
-                    time.Now(),
-                    time.Duration(0),
-                    output.Version{},
+                    output.MetaConfig{
+                        Option:    option,
+                        StartedAt: time.Now(),
+                    },
                 ),
             )
 

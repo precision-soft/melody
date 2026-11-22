@@ -14,8 +14,12 @@ import (
 /* ErrRotatedDescriptorNotClosed marks the failure Reopen reports after the rotation happened: the fresh descriptor takes the writes, and only the replaced one refused to close. A caller reading it must not report a failed rotation. */
 var ErrRotatedDescriptorNotClosed = errors.New("the descriptor replaced by the rotation could not be closed")
 
+/* ReopenableFileWriterConfig is what a reopenable file writer is built from beside its path; it holds no field yet, and its zero value opens the file with mode 0o644. */
+type ReopenableFileWriterConfig struct {
+}
+
 /* NewReopenableFileWriter opens the file for appending and answers a writer that can reopen it under the same path, which rename-based rotation needs. Every write, the reopen and the close serialize on one lock, so a record is never torn across the swap nor written to a closed descriptor. */
-func NewReopenableFileWriter(path string) (*ReopenableFileWriter, error) {
+func NewReopenableFileWriter(path string, config ReopenableFileWriterConfig) (*ReopenableFileWriter, error) {
     file, openErr := openReopenableFile(path)
     if nil != openErr {
         return nil, openErr

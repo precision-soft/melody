@@ -30,7 +30,7 @@ func plainRequest(t *testing.T) melodyhttpcontract.Request {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
-    return melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/products/", nil), nil, runtimeInstance, nil)
+    return melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/products/", nil), runtimeInstance, melodyhttp.RequestConfig{})
 }
 
 func requestCarryingSession(t *testing.T) (melodyhttpcontract.Request, melodysessioncontract.Session) {

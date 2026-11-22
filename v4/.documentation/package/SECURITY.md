@@ -208,9 +208,7 @@ func (instance *adminSecurityModule) RegisterHttpRoutes(kernelInstance kernelcon
 func (instance *adminSecurityModule) RegisterSecurity(builder *securityconfig.Builder) {
     matcher := security.NewSegmentPrefixMatcher("/admin")
 
-    authenticator := security.NewApiKeyHeaderAuthenticator(security.ApiKeyHeaderAuthenticatorConfig{
-        HeaderName:     "X-Api-Key",
-        ExpectedValue:  "secret",
+    authenticator := security.NewApiKeyHeaderAuthenticator("secret", security.ApiKeyHeaderAuthenticatorConfig{
         UserIdentifier: "system",
         Roles:          []string{"ROLE_ADMIN"},
     })
@@ -302,14 +300,14 @@ func (instance *apiSecurityModule) RegisterSecurity(builder *securityconfig.Buil
         AccessControl:         accessControl,
         RoleHierarchy:         roleHierarchy,
         AccessDecisionManager: accessDecisionManager,
-        EntryPoint:            security.NewJsonEntryPoint(),
+        EntryPoint:            security.NewJsonEntryPoint(security.JsonEntryPointConfig{}),
         AccessDeniedHandler:   security.NewJsonAccessDeniedHandler(),
     })
 
     builder.AddFirewall(
         "api",
         security.NewSegmentPrefixMatcher("/api"),
-        security.NewBearerTokenSource(validator, nil),
+        security.NewBearerTokenSource(validator, security.BearerTokenSourceConfig{}),
         securityconfig.FirewallConfig{},
     )
 }
@@ -336,7 +334,7 @@ deleteErr := security.TokenStoreFor(detachedRuntime, boundStore.TokenStore()).De
 
 #### Resolving roles after validation (enrichment hook)
 
-When the token only carries an opaque scope (e.g. a tenant/application identifier) and the real roles live in a database, implement the generic [`TokenEnricher`](../../security/contract/token_enricher.go) and hand it to [`NewBearerTokenSource`](../../security/bearer_token_source.go) as its second argument, nil for none. It runs **after** the signature is validated and turns the token's `Claims.Scope` into the final roles/attributes. The library ships only the interface and the wiring — any tenant- or product-specific resolution lives in your enricher, keeping the security package generic. An enrichment error is not propagated to the handler: it falls back to an anonymous token (the firewall then decides the response), logged at Info as a routine rejection, or, when its cause chain carries the package's infrastructure mark, answers the unavailable token, `503` with `Retry-After` on a protected route — mark a directory that could not answer, which is the failure that degrades every bearer at once.
+When the token only carries an opaque scope (e.g. a tenant/application identifier) and the real roles live in a database, implement the generic [`TokenEnricher`](../../security/contract/token_enricher.go) and hand it to [`NewBearerTokenSource`](../../security/bearer_token_source.go) as `BearerTokenSourceConfig.Enricher`, left out for none. It runs **after** the signature is validated and turns the token's `Claims.Scope` into the final roles/attributes. The library ships only the interface and the wiring — any tenant- or product-specific resolution lives in your enricher, keeping the security package generic. An enrichment error is not propagated to the handler: it falls back to an anonymous token (the firewall then decides the response), logged at Info as a routine rejection, or, when its cause chain carries the package's infrastructure mark, answers the unavailable token, `503` with `Retry-After` on a protected route — mark a directory that could not answer, which is the failure that degrades every bearer at once.
 
 The enriched [`AuthenticatedToken`](../../security/authenticated_token.go) carries the resolved `Scope()` and `Attributes()` alongside `Roles()` (both accessors return defensive copies), so attribute-based access control downstream can read the tenant/attribute data the enricher attached — not only the roles.
 
@@ -350,7 +348,7 @@ validator := security.NewJwtTokenValidator(security.JwtConfig{
 
 // scopeRoleEnricher resolves roles from the token scope (here, a static map;
 // in a real app this would be a database lookup keyed by Claims.Scope).
-source := security.NewBearerTokenSource(validator, scopeRoleEnricher{})
+source := security.NewBearerTokenSource(validator, security.BearerTokenSourceConfig{Enricher: scopeRoleEnricher{}})
 ```
 
 `Claims` exposes generic `Scope` and `Attributes` maps for this purpose; the library assigns no meaning to their keys.
@@ -382,11 +380,9 @@ in-process guard — supply a shared one for multi-instance deployments). The au
 A **single-use recovery code** can stand in for a TOTP code when the enrollment store also implements the optional [`TwoFactorRecoveryStore`](../../security/contract/two_factor.go) (`RedeemRecoveryCode`): a code supplied on the `X-2FA-Recovery-Code` header (configurable via `RecoveryHeaderName`, deliberately distinct from the TOTP header) is redeemed and **atomically consumed by the store**, so each recovery code authenticates at most once. The store owns the atomicity of the check-and-consume (a transaction or a conditional update) — the authenticator records no replay-guard entry for a recovery code, relying on consumption for single use. A store that does not implement the interface simply leaves recovery unavailable; TOTP verification is unaffected. As with TOTP codes, this authenticator does **not** throttle wrong recovery guesses — front it with the same rate-limiting/lockout layer that protects the primary credential.
 
 ```go
-secondFactor := security.NewTotpSecondFactorAuthenticator(security.TotpSecondFactorAuthenticatorConfig{
-    Primary:     primaryAuthenticator,
-    Enrollments: enrollmentStore, // application-owned: FindTotpSecret(runtime, userIdentifier)
-                                  // also implement TwoFactorRecoveryStore to accept recovery codes
-})
+// enrollmentStore is application-owned: FindTotpSecret(runtime, userIdentifier);
+// it also implements TwoFactorRecoveryStore to accept recovery codes
+secondFactor := security.NewTotpSecondFactorAuthenticator(primaryAuthenticator, enrollmentStore, security.TotpSecondFactorAuthenticatorConfig{})
 
 token, authenticateErr := secondFactor.Authenticate(runtimeInstance, request)
 
@@ -404,9 +400,8 @@ The switch role is read through the hierarchy of the firewall holding the source
 [`ImpersonationRoleMode`](../../security/impersonation_token.go) selects whose roles the token authorizes with: `RoleModeImpersonated` (the default, zero value) takes on the target's roles for their full context; `RoleModeImpersonator` keeps the admin's own rights while acting in the target's context. In either mode the admin stays readable through [`ImpersonatorFromToken`](../../security/impersonation_token.go) for auditing, and the token's `OnBehalfOf()` encodes both identities into the originating actor — the impersonated user (with the effective roles of the active mode) carrying the admin as its `Impersonator` — so an impersonation started in one service stays auditable in the next (transports round-trip it via `ActorData.Impersonator`). A nested impersonation keeps its chain: the admin who impersonated `a`, then as `a` impersonated `b`, is carried as `b` behind `a` behind the admin.
 
 ```go
-source := security.NewImpersonationTokenSource(security.ImpersonationTokenSourceConfig{
-    Inner:    innerTokenSource,
-    Users:    userResolver, // application-owned: ResolveImpersonatedUser(runtime, identifier)
+// userResolver is application-owned: ResolveImpersonatedUser(runtime, identifier)
+source := security.NewImpersonationTokenSource(innerTokenSource, userResolver, security.ImpersonationTokenSourceConfig{
     RoleMode: security.RoleModeImpersonated,
 })
 
@@ -422,7 +417,7 @@ An [`Actor`](../../security/contract/actor.go) is the originating principal that
 The `Actor` interface does not round-trip through JSON, so transports (JWT claims, the HMAC envelope) encode the serializable [`ActorData`](../../security/contract/actor.go) carrier ([`ActorToData`](../../security/actor.go) / [`NewActorFromData`](../../security/actor.go), also available as `Claims.OriginatingActor`). A nested `ActorData.Impersonator` is rebuilt too, so a propagated impersonation stays readable through [`ActorImpersonating`](../../security/contract/actor.go).
 
 ```go
-actor := security.NewActor("user-17", securitycontract.ActorTypeUser, []string{"ROLE_USER"}, nil, nil)
+actor := security.NewActor("user-17", securitycontract.ActorTypeUser, security.ActorConfig{Roles: []string{"ROLE_USER"}})
 
 token := security.NewAuthenticatedToken("service-a", []string{"ROLE_INTERNAL"}, actor)
 
@@ -494,7 +489,7 @@ A configuration whose hazard has no legitimate reading is refused where it is co
 | `cors.Config.AllowOrigins`                                                                   | a credentialed service holds an origin without a scheme (`entry`)                                                                                                                                                                            |
 | `cors.Config.AllowOrigins`                                                                   | an entry is blank, or `"*"` stands beside other entries (`index`), or the list stands beside `AllowOrigin`                                                                                                                               |
 | `SessionCookiePolicy.Secure`                                                                 | the policy sets `SameSite=None` with `SessionCookieSecureNever`, at `NewKernel` and `SetSessionCookiePolicy`                                                                                                                                 |
-| `SmtpConfig.Address`                                                                         | the address is empty, padded, not `host:port` with both halves, or names a port the dial cannot read                                                                                                                                         |
+| `NewSmtpTransport` argument `address`                                                        | the address is empty, padded, not `host:port` with both halves, or names a port the dial cannot read                                                                                                                                         |
 
 ## Footguns & caveats
 
@@ -583,11 +578,14 @@ A configuration whose hazard has no legitimate reading is refused where it is co
 - [`NewToken(user securitycontract.Token)`](../../security/token.go)
 - [`NewSegmentPrefixMatcher(prefix string)`](../../security/matcher.go) — the prefix and its tree under a `/` boundary; an empty, relative or non-canonical prefix is refused
 - [`NewPathPrefixMatcher(prefix string)`](../../security/matcher.go) — a string prefix; a prefix no canonical request path can carry is refused
-- [`NewApiKeyHeaderRule(matcher securitycontract.Matcher, config ApiKeyHeaderRuleConfig)`](../../security/rule.go)
-- [`NewApiKeyHeaderAuthenticator(config ApiKeyHeaderAuthenticatorConfig)`](../../security/api_key_authenticator.go)
+- [`NewApiKeyHeaderRule(matcher securitycontract.Matcher, expectedValue string, config ApiKeyHeaderRuleConfig)`](../../security/rule.go) — `HeaderName` is [`DefaultApiKeyHeaderName`](../../security/api_key_authenticator.go) (`X-Api-Key`) when empty; a nil matcher or an empty expected value refused naming the argument
+- [`NewApiKeyHeaderAuthenticator(expectedValue string, config ApiKeyHeaderAuthenticatorConfig)`](../../security/api_key_authenticator.go) — `HeaderName` is `DefaultApiKeyHeaderName` when empty; an empty expected value refused naming the argument
+- [`NewHmacTokenSource(secrets HmacSecretProvider, applications HmacApplicationRegistry, config HmacTokenSourceConfig)`](../../security/hmac_token_source.go) — a nil secrets provider or application registry refused naming the argument
+- [`NewTotpSecondFactorAuthenticator(primary securitycontract.Authenticator, enrollments securitycontract.TwoFactorEnrollmentStore, config TotpSecondFactorAuthenticatorConfig)`](../../security/totp_second_factor_authenticator.go) — a nil primary or enrollment store refused naming the argument
+- [`NewImpersonationTokenSource(inner securitycontract.TokenSource, users securitycontract.ImpersonatedUserResolver, config ImpersonationTokenSourceConfig)`](../../security/impersonation_token_source.go) — a nil inner source or user resolver refused naming the argument
 - [`NewAuthenticatorManager(authenticators []securitycontract.Authenticator)`](../../security/authenticator_manager.go)
 - [`NewAuthenticatorTokenSource(authenticatorManager *AuthenticatorManager, config AuthenticatorTokenSourceConfig)`](../../security/token_source.go) — `Stateless` declares that every authenticator reads only what the caller presents on every request, false by default
-- [`NewBearerTokenSource(validator securitycontract.TokenValidator, enricher securitycontract.TokenEnricher)`](../../security/bearer_token_source.go) — enricher nil for none
+- [`NewBearerTokenSource(validator securitycontract.TokenValidator, config BearerTokenSourceConfig)`](../../security/bearer_token_source.go) — `Enricher`, left out for none, a typed nil refused naming `BearerTokenSourceConfig.Enricher`
 - [`NewJwtTokenValidator(config JwtConfig)`](../../security/jwt_token_validator.go)
 - [`NewOpaqueTokenValidator(store securitycontract.TokenStore)`](../../security/opaque_token_validator.go)
 - [`NewInMemoryTokenStore(config InMemoryTokenStoreConfig)`](../../security/in_memory_token_store.go)
@@ -595,10 +593,10 @@ A configuration whose hazard has no legitimate reading is refused where it is co
 - [`TokenStoreFromRuntime(runtimeInstance containercontract.Runtime, serviceName string)`](../../security/bound_token_store.go)
 - [`NewMemoryNonceGuard(config MemoryNonceGuardConfig)`](../../security/memory_nonce_guard.go)
 - [`NewStaticHmacSecretProvider(ring HmacKeyRing)`](../../security/hmac_secret_provider.go)
-- [`NewActor(identifier string, actorType string, roles []string, attributes map[string]string, impersonator securitycontract.Actor)`](../../security/actor.go) — impersonator nil for none
+- [`NewActor(identifier string, actorType string, config ActorConfig)`](../../security/actor.go) — `Roles`, `Attributes` and `Impersonator`, left out for none, a typed-nil impersonator refused naming `ActorConfig.Impersonator`
 - [`NewImpersonationToken(impersonated securitycontract.Token, impersonator securitycontract.Token, roleMode ImpersonationRoleMode)`](../../security/impersonation_token.go)
 - [`NewResolverTokenSource(resolver securitycontract.TokenResolver, config ResolverTokenSourceConfig)`](../../security/token_source.go) — `Stateless` declares that the resolver reads only what the caller presents on every request, false by default
-- [`NewJsonEntryPoint()`](../../security/json_entry_point.go)
+- [`NewJsonEntryPoint(config JsonEntryPointConfig)`](../../security/json_entry_point.go) — `Challenge`, the `WWW-Authenticate` value of the 401, [`DefaultJsonEntryPointChallenge`](../../security/json_entry_point.go) (`Bearer`) when left out; a control character or a line break refused naming `JsonEntryPointConfig.Challenge`
 - [`NewJsonAccessDeniedHandler()`](../../security/json_access_denied_handler.go)
 - [`NewAccessDecisionManager(strategy securitycontract.DecisionStrategy, voters []securitycontract.Voter, config AccessDecisionManagerConfig)`](../../security/access_decision_manager.go) — `DecisionStrategyUnspecified`, the zero value, refused; `AccessDecisionManagerConfig{AllowIfAllAbstain, AllowIfTied}`, the zero value refusing where no vote decided; `WithVoters(voters)` answers a copy under the same strategy and config
 - [`NewRoleVoter()`](../../security/voter.go)

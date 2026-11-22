@@ -4,6 +4,7 @@ import (
     "context"
     "database/sql/driver"
     "errors"
+    "os"
     "strings"
     "testing"
 
@@ -36,10 +37,28 @@ func (instance *parameterConfiguration) Get(name string) configcontract.Paramete
     return instance.parameters[name]
 }
 
+type emptyEnvironmentSource struct{}
+
+func (instance emptyEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
+    return map[string]string{}, nil
+}
+
+/* newParameterConfiguration answers each value as the parameter a real configuration registers under its name */
 func newParameterConfiguration(values map[string]string) *parameterConfiguration {
+    environment, environmentErr := melodyconfig.NewEnvironment(context.Background(), emptyEnvironmentSource{})
+    if nil != environmentErr {
+        panic(environmentErr)
+    }
+
+    configuration, configurationErr := melodyconfig.NewConfiguration(environment, os.TempDir(), melodyconfig.ConfigurationConfig{})
+    if nil != configurationErr {
+        panic(configurationErr)
+    }
+
     parameters := make(map[string]configcontract.Parameter, len(values))
     for name, value := range values {
-        parameters[name] = melodyconfig.NewParameter(name, value, value, false)
+        configuration.RegisterRuntime(name, value)
+        parameters[name] = configuration.Get(name)
     }
 
     return &parameterConfiguration{parameters: parameters}

@@ -7,25 +7,27 @@ import (
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-/* NewActor builds the originating principal; impersonator, nil for none, is the accountable actor acting behind it, so the admin and its roles travel with the actor. A typed-nil impersonator is refused. */
-func NewActor(
-    identifier string,
-    actorType string,
-    roles []string,
-    attributes map[string]string,
-    impersonator securitycontract.Actor,
-) *Actor {
-    refuseTypedNilDependency("actor impersonator is a typed nil", "impersonator", "NewActor", impersonator)
+/* ActorConfig is what an actor carries beside its identifier and type; a field left out is empty, and no Impersonator is an actor acting for itself. */
+type ActorConfig struct {
+    Roles      []string
+    Attributes map[string]string
+
+    /* Impersonator is the accountable actor acting behind this one, so the admin and its roles travel with the actor; a typed nil is refused. */
+    Impersonator securitycontract.Actor
+}
+
+func NewActor(identifier string, actorType string, config ActorConfig) *Actor {
+    refuseTypedNilField("actor impersonator is a typed nil", "ActorConfig.Impersonator", "NewActor", config.Impersonator)
 
     actor := &Actor{
         identifier: identifier,
         actorType:  actorType,
-        roles:      copyRoles(roles),
-        attributes: internal.CopyStringMap(attributes),
+        roles:      copyRoles(config.Roles),
+        attributes: internal.CopyStringMap(config.Attributes),
     }
 
-    if nil != impersonator {
-        actor.impersonator = impersonator
+    if nil != config.Impersonator {
+        actor.impersonator = config.Impersonator
     }
 
     return actor
@@ -41,7 +43,7 @@ func newActorFromDataAtDepth(data *securitycontract.ActorData, depth int) *Actor
         return nil
     }
 
-    actor := NewActor(data.Identifier, data.Type, data.Roles, data.Attributes, nil)
+    actor := NewActor(data.Identifier, data.Type, ActorConfig{Roles: data.Roles, Attributes: data.Attributes})
     if nil != data.Impersonator && depth < maxActorImpersonationDepth {
         actor.impersonator = newActorFromDataAtDepth(data.Impersonator, depth+1)
     }
@@ -128,6 +130,23 @@ var _ securitycontract.Actor = (*Actor)(nil)
 var _ securitycontract.ActorImpersonating = (*Actor)(nil)
 
 /* refuseTypedNilDependency refuses an optional dependency that holds a typed nil, naming the argument and the door; a plain nil is the ordinary "none". */
+func refuseTypedNilField(message string, field string, door string, dependency any) {
+    if nil == dependency || false == internal.IsNilInterface(dependency) {
+        return
+    }
+
+    exception.Panic(
+        exception.NewError(
+            message,
+            exceptioncontract.Context{
+                "field": field,
+                "door":  door,
+            },
+            nil,
+        ),
+    )
+}
+
 func refuseTypedNilDependency(message string, argument string, door string, dependency any) {
     if nil == dependency || false == internal.IsNilInterface(dependency) {
         return

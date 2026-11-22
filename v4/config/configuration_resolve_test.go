@@ -11,6 +11,7 @@ import (
 
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/internal/configseam"
 )
 
 /* a self-referential env value expands to itself plus extra characters on every pass; the env-substitution branch is not covered by the parameter-recursion cycle guard, so without the pass bound the fixed-point loop never terminates */
@@ -103,7 +104,7 @@ func TestResolveTemplate_UndefinedParameterKeyErrorOmitsRawValue(t *testing.T) {
 }
 
 func TestResolveTemplate_AnUndefinedReferenceInsideASecretParameterIsLocatedNotSpelled(t *testing.T) {
-    passwordParameter := NewParameter("APP_PASSWORD", "pa%ss%word", "pa%ss%word", false)
+    passwordParameter := newParameter("APP_PASSWORD", "pa%ss%word", "pa%ss%word", false)
     passwordParameter.isSecret.Store(true)
 
     configuration := &Configuration{
@@ -343,7 +344,7 @@ func TestResolveAll_TheTolerantPassDoesNotDeferAReservedParameter(t *testing.T) 
             values: map[string]string{},
         },
         parameters: ParameterMap{
-            "kernel.probe": NewParameter("KERNEL_PROBE", "%missing.parameter%", nil, false),
+            "kernel.probe": newParameter("KERNEL_PROBE", "%missing.parameter%", nil, false),
         },
     }
 
@@ -388,7 +389,7 @@ func TestResolveTemplate_ReferencedValueWithLiteralPercentSplicesAsData(t *testi
     configuration := &Configuration{
         environment: &Environment{values: map[string]string{}},
         parameters: ParameterMap{
-            "app.password": NewParameter("APP_PASSWORD", "pa%%ss%%word", "pa%%ss%%word", false),
+            "app.password": newParameter("APP_PASSWORD", "pa%%ss%%word", "pa%%ss%%word", false),
         },
     }
 
@@ -409,7 +410,7 @@ func TestResolveTemplate_ReferencedValueWithLiteralPercentSplicesAsData(t *testi
 
 /* a secret key marks its reader exactly as a secret parameter does on the parameter branch */
 func TestResolveTemplate_SecretTravelsThroughAnEnvPlaceholder(t *testing.T) {
-    databaseUrlParameter := NewParameter("", "root:%env(MYSQL_PASSWORD)%@db", "", false)
+    databaseUrlParameter := newParameter("", "root:%env(MYSQL_PASSWORD)%@db", "", false)
 
     configuration := &Configuration{
         environment: &Environment{
@@ -473,8 +474,8 @@ func TestResolveTemplate_SelfReferenceIsACircularReference(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{values: map[string]string{}},
         parameters: ParameterMap{
-            "app.a": NewParameter("", "%app.b%_%app.a%", "", false),
-            "app.b": NewParameter("", "pa%%ss", "", false),
+            "app.a": newParameter("", "%app.b%_%app.a%", "", false),
+            "app.b": newParameter("", "pa%%ss", "", false),
         },
     }
 
@@ -502,9 +503,9 @@ func TestResolveTemplate_SplicedLiteralsAndAdjacentReferencesResolve(t *testing.
     configuration := &Configuration{
         environment: &Environment{values: map[string]string{}},
         parameters: ParameterMap{
-            "app.a": NewParameter("", "x_%app.b%", "", false),
-            "app.b": NewParameter("", "pa%%ss%%word", "", false),
-            "app.c": NewParameter("", "%app.a%%app.b%", "", false),
+            "app.a": newParameter("", "x_%app.b%", "", false),
+            "app.b": newParameter("", "pa%%ss%%word", "", false),
+            "app.c": newParameter("", "%app.a%%app.b%", "", false),
         },
     }
 
@@ -528,7 +529,7 @@ func TestResolveTemplate_SingleCharacterParameterReferenceResolves(t *testing.T)
     configuration := &Configuration{
         environment: &Environment{values: map[string]string{}},
         parameters: ParameterMap{
-            "a": NewParameter("", "short", "", false),
+            "a": newParameter("", "short", "", false),
         },
     }
 
@@ -575,13 +576,13 @@ func TestResolveTemplate_LiteralEnvPrefixBesideARealPlaceholderIsData(t *testing
 
 /* the project directory is a filesystem path, not a template: a literal percent in it survives a reference and the parameter itself is never overwritten */
 func TestResolveTemplate_ProjectDirectoryReferenceIsData(t *testing.T) {
-    projectDirectoryParameter := NewParameter("", "/srv/app%1", "/srv/app%1", true)
+    projectDirectoryParameter := newParameter("", "/srv/app%1", "/srv/app%1", true)
 
     configuration := &Configuration{
         environment: &Environment{values: map[string]string{}},
         parameters: ParameterMap{
             KernelProjectDirectory:  projectDirectoryParameter,
-            "kernel.logs_directory": NewParameter("", "%kernel.project_directory%/var/log", "", true),
+            "kernel.logs_directory": newParameter("", "%kernel.project_directory%/var/log", "", true),
         },
     }
 
@@ -678,7 +679,7 @@ func TestConfiguration_ResolveIsRefusedOnceServing(t *testing.T) {
         t.Fatalf("expected the pre-serving resolve to succeed, got %v", resolveErr)
     }
 
-    configuration.MarkServing()
+    configuration.MarkServing(configseam.Token{})
 
     resolveErr := configuration.Resolve()
     if nil == resolveErr {
@@ -713,7 +714,7 @@ func TestConfiguration_RegisterRuntimeStillResolvesOnceServing(t *testing.T) {
         t.Fatalf("expected the pre-serving resolve to succeed, got %v", resolveErr)
     }
 
-    configuration.MarkServing()
+    configuration.MarkServing(configseam.Token{})
 
     configuration.RegisterRuntime("app.late", "%env(APP_TAG)%")
 
@@ -769,7 +770,7 @@ func TestResolveTemplate_UnclosedParameterReferenceIsRefused(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{values: map[string]string{}},
         parameters: ParameterMap{
-            "app.name": NewParameter("", "melody", "melody", false),
+            "app.name": newParameter("", "melody", "melody", false),
         },
     }
 
@@ -877,7 +878,7 @@ func TestResolveTemplate_NonStringReferenceErrorOmitsTheValue(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{values: map[string]string{}},
         parameters: ParameterMap{
-            "app.signing_key": NewParameter("", []byte(secretBytes), []byte(secretBytes), false),
+            "app.signing_key": newParameter("", []byte(secretBytes), []byte(secretBytes), false),
         },
     }
 
@@ -913,8 +914,8 @@ func TestResolveAll_TwoBrokenTemplatesFailOnTheSortedFirstParameterEveryTime(t *
                 values: map[string]string{},
             },
             parameters: ParameterMap{
-                "zulu.broken":  NewParameter("ZULU_BROKEN", "%missing.one%", nil, false),
-                "alpha.broken": NewParameter("ALPHA_BROKEN", "%missing.two%", nil, false),
+                "zulu.broken":  newParameter("ZULU_BROKEN", "%missing.one%", nil, false),
+                "alpha.broken": newParameter("ALPHA_BROKEN", "%missing.two%", nil, false),
             },
         }
 
@@ -1030,7 +1031,7 @@ func TestResolveTemplate_ARefusalInsideAParameterReferencedFromAnEnvironmentValu
             "REFS_PARAM": "x-%app.inner%",
         }},
         parameters: ParameterMap{
-            "app.inner": NewParameter("APP_INNER", "Pa%SSword", nil, false),
+            "app.inner": newParameter("APP_INNER", "Pa%SSword", nil, false),
         },
     }
 

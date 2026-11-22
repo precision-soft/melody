@@ -12,17 +12,19 @@ type ListPayload[T any] struct {
     Offset bound.Count `json:"offset"`
 }
 
-func NewListPayload[T any](
-    items []T,
-    total int,
-    limit bound.Count,
-    offset bound.Count,
-) ListPayload[T] {
+/* ListPayloadConfig is the window a list payload reports beside its items; a limit or an offset left out is null. */
+type ListPayloadConfig struct {
+    Total  int
+    Limit  bound.Count
+    Offset bound.Count
+}
+
+func NewListPayload[T any](items []T, config ListPayloadConfig) ListPayload[T] {
     return ListPayload[T]{
         Items:  items,
-        Total:  total,
-        Limit:  limit,
-        Offset: offset,
+        Total:  config.Total,
+        Limit:  config.Limit,
+        Offset: config.Offset,
     }
 }
 

@@ -14,8 +14,7 @@ func TestPathPrefixMatcher_Matches(t *testing.T) {
     request := http.NewRequest(
         httpRequest,
         nil,
-        nil,
-        nil,
+        http.RequestConfig{},
     )
 
     matcher := NewPathPrefixMatcher("/admin")
@@ -31,8 +30,7 @@ func TestPathPrefixMatcher_DoesNotMatch(t *testing.T) {
     request := http.NewRequest(
         httpRequest,
         nil,
-        nil,
-        nil,
+        http.RequestConfig{},
     )
 
     matcher := NewPathPrefixMatcher("/admin")
@@ -57,7 +55,7 @@ func TestPathPrefixMatcher_ATrailingSlashPrefixClaimsTheBareSpelling(t *testing.
     matching := []string{"/admin", "/admin/", "/admin/products"}
     for _, path := range matching {
         httpRequest, _ := nethttp.NewRequest("GET", "http://localhost"+path, nil)
-        request := http.NewRequest(httpRequest, nil, nil, nil)
+        request := http.NewRequest(httpRequest, nil, http.RequestConfig{})
 
         if false == matcher.Matches(request) {
             t.Fatalf("expected the trailing-slash prefix to match %q", path)
@@ -67,7 +65,7 @@ func TestPathPrefixMatcher_ATrailingSlashPrefixClaimsTheBareSpelling(t *testing.
     notMatching := []string{"/administrator", "/admi", "/"}
     for _, path := range notMatching {
         httpRequest, _ := nethttp.NewRequest("GET", "http://localhost"+path, nil)
-        request := http.NewRequest(httpRequest, nil, nil, nil)
+        request := http.NewRequest(httpRequest, nil, http.RequestConfig{})
 
         if true == matcher.Matches(request) {
             t.Fatalf("expected the trailing-slash prefix not to match %q", path)
@@ -86,7 +84,7 @@ func TestPathPrefixMatcher_ReadsThePathTheRouterRoutes(t *testing.T) {
         "/admin/users":     true,
     } {
         httpRequest, _ := nethttp.NewRequest("GET", "http://localhost"+path, nil)
-        request := http.NewRequest(httpRequest, nil, nil, nil)
+        request := http.NewRequest(httpRequest, nil, http.RequestConfig{})
 
         if claimed != matcher.Matches(request) {
             t.Fatalf("expected the prefix to claim %q: %v", path, claimed)
@@ -125,8 +123,7 @@ func TestPathPrefixMatcher_AnEmptyPathIsTheRoot(t *testing.T) {
         request := http.NewRequest(
             httpRequest,
             nil,
-            nil,
-            nil,
+            http.RequestConfig{},
         )
 
         if false == NewPathPrefixMatcher("/").Matches(request) {
@@ -148,8 +145,7 @@ func TestPathPrefixMatcher_TheAsteriskFormIsTheRoot(t *testing.T) {
     request := http.NewRequest(
         httpRequest,
         nil,
-        nil,
-        nil,
+        http.RequestConfig{},
     )
 
     if false == NewPathPrefixMatcher("/").Matches(request) {
@@ -168,8 +164,7 @@ func TestPathPrefixMatcher_APathWithoutItsLeadingSlashIsReadWithIt(t *testing.T)
     request := http.NewRequest(
         httpRequest,
         nil,
-        nil,
-        nil,
+        http.RequestConfig{},
     )
 
     if false == NewPathPrefixMatcher("/users").Matches(request) {
@@ -200,7 +195,7 @@ func TestNewPathPrefixMatcher_RefusesAPrefixNoRequestPathCanCarry(t *testing.T) 
 func segmentPrefixMatches(matcher *SegmentPrefixMatcher, path string) bool {
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "http://localhost"+path, nil)
 
-    return matcher.Matches(http.NewRequest(httpRequest, nil, nil, nil))
+    return matcher.Matches(http.NewRequest(httpRequest, nil, http.RequestConfig{}))
 }
 
 func TestSegmentPrefixMatcher_ClaimsItsTreeAtASegmentBoundary(t *testing.T) {
