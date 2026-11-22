@@ -371,9 +371,9 @@ A lock store closed by the teardown while the work still winds down now reads as
 
 **Remedy.** Re-key the query on `sessionReference` and match "with environment".
 
-### Http, openapi: the type parameters are `RequestBody` and `ResponseBody`
+### Http: the type parameter is `RequestBody`
 
-**What changed.** The type parameter of [`JsonHandler`](../http/typed_handler.go) is `RequestBody` and those of [`DescribeTyped`](../openapi/describe_typed.go) are `RequestBody` and `ResponseBody`; `NewRequest` names its route parameter map `routeParameters`. The example's frontend helper `melody-routes.ts` exports `RouteParameters` and reads `data-route-parameters`.
+**What changed.** The type parameter of [`JsonHandler`](../http/typed_handler.go) is `RequestBody`; `NewRequest` names its route parameter map `routeParameters`. The example's frontend helper `melody-routes.ts` exports `RouteParameters` and reads `data-route-parameters`.
 
 **Symptom.** None for Go code: a type parameter's name is not part of a call. A frontend that vendored the helper and imports `RouteParams`, or writes `data-route-params`, no longer type checks or is no longer read.
 
@@ -1826,13 +1826,21 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **Remedy.** `message, translateErr := translator.Translate("greeting", translationcontract.TranslateConfig{Parameters: map[string]any{"name": name}, Locale: locale})`; where the third major printed the id of a missing message, keep `message` when `errors.Is(translateErr, translation.ErrMessageNotFound)` and treat any other error as a failure. `NewManager([]translationcontract.Catalog{english, romanian}, translation.ManagerConfig{DefaultLocale: "en", FallbackLocales: fallbacks})`, and `loader.Load(ctx)`.
 
-### Openapi: `DescribeTyped` takes one struct, and a response is a value
+### Openapi: a route is described through `Describe` alone, and a response is a value
 
-**What changed.** [`DescribeTyped`](../openapi/describe_typed.go) takes a `DescribeConfig{Summary, Description, Tags, Responses}` after the status, the zero value adding nothing; `Response[T](status)` builds a `ResponseDescription`, an entry of `Responses`. `DescribeOption`, `WithSummary`, `WithDescription`, `WithTags` and `WithResponse` are removed.
+**What changed.** [`Descriptor.Responses`](../openapi/registry.go) is a `[]ResponseDescription`, each entry built by `Response[T](status)`, an entry repeating a status replacing the earlier one, where it was a `map[int]reflect.Type`. `DescribeTyped`, `DescribeOption`, `WithSummary`, `WithDescription`, `WithTags` and `WithResponse` are removed: `Registry.Describe` is the one door, a typed route naming its request through `TypeOf[T]()`. The generated document is unchanged.
 
-**Symptom.** `DescribeTyped[RequestBody, ResponseBody](registry, name, 201, openapi.WithSummary(...), openapi.WithTags(...))` no longer compiles.
+**Symptom.** `DescribeTyped[RequestBody, ResponseBody](registry, name, 201, openapi.WithSummary(...), openapi.WithTags(...))` and a `Responses: map[int]reflect.Type{…}` literal no longer compile.
 
-**Remedy.** `DescribeTyped[RequestBody, ResponseBody](registry, name, 201, openapi.DescribeConfig{Summary: "...", Tags: []string{"..."}, Responses: []openapi.ResponseDescription{openapi.Response[NotFound](404)}})`.
+**Remedy.** `registry.Describe(name, openapi.Descriptor{Summary: "...", Tags: []string{"..."}, RequestType: openapi.TypeOf[RequestBody](), Responses: []openapi.ResponseDescription{openapi.Response[ResponseBody](201), openapi.Response[NotFound](404)}})`; a response with no body is `openapi.ResponseDescription{Status: 204}`.
+
+### Openapi: `SpecificationHandler` resolves the registry and the info from the container
+
+**What changed.** [`SpecificationHandler()`](../openapi/spec_handler.go) takes no argument: at each request it resolves the `Registry` registered as `ServiceOpenApiRegistry` and the `Info` registered as `ServiceOpenApiInfo` from the request's scope, as `melody:openapi:generate` does. An absent info service serves an empty info block; an absent registry fails the request.
+
+**Symptom.** `openapi.SpecificationHandler(info, registry)` no longer compiles.
+
+**Remedy.** Register the registry and the info as the generate command already needs them, and mount `openapi.SpecificationHandler()`.
 
 ### Storage: the local storage declares its temp sweep in one struct
 

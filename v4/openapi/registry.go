@@ -11,12 +11,28 @@ func TypeOf[T any]() reflect.Type {
     return reflect.TypeOf((*T)(nil)).Elem()
 }
 
+/* ResponseDescription names one response of a described route under its status, built by Response. */
+type ResponseDescription struct {
+    Status int
+    Type   reflect.Type
+}
+
+/* Response answers the description of a response of type T under status, for Descriptor.Responses. */
+func Response[T any](status int) ResponseDescription {
+    return ResponseDescription{
+        Status: status,
+        Type:   TypeOf[T](),
+    }
+}
+
 type Descriptor struct {
     Summary     string
     Description string
     Tags        []string
     RequestType reflect.Type
-    Responses   map[int]reflect.Type
+
+    /* Responses holds one entry per status, each built by Response; an entry repeating a status replaces the earlier one. */
+    Responses []ResponseDescription
 }
 
 func NewRegistry() *Registry {
@@ -39,7 +55,7 @@ func (instance *Registry) Describe(routeName string, descriptor Descriptor) *Reg
     return instance
 }
 
-/* copyDescriptor detaches Tags and Responses, so neither a later write by the caller nor a reader of Get reaches the stored descriptor. */
+/* copyDescriptor detaches Tags and Responses, so neither a later write by the caller nor a reader of Get reaches the stored descriptor; a repeated status keeps the place of its first entry and the type of its last. */
 func copyDescriptor(descriptor Descriptor) Descriptor {
     copied := descriptor
 
@@ -48,9 +64,16 @@ func copyDescriptor(descriptor Descriptor) Descriptor {
     }
 
     if nil != descriptor.Responses {
-        copied.Responses = make(map[int]reflect.Type, len(descriptor.Responses))
-        for status, responseType := range descriptor.Responses {
-            copied.Responses[status] = responseType
+        copied.Responses = make([]ResponseDescription, 0, len(descriptor.Responses))
+        positionByStatus := make(map[int]int, len(descriptor.Responses))
+        for _, response := range descriptor.Responses {
+            if position, seen := positionByStatus[response.Status]; true == seen {
+                copied.Responses[position] = response
+                continue
+            }
+
+            positionByStatus[response.Status] = len(copied.Responses)
+            copied.Responses = append(copied.Responses, response)
         }
     }
 

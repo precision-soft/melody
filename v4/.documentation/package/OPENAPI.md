@@ -13,7 +13,7 @@ OpenAPI generation is opt-in. The generator reads route metadata from the [`http
     - [`NewRegistry`](../../openapi/registry.go)
     - [`Descriptor`](../../openapi/registry.go)
     - [`TypeOf`](../../openapi/registry.go)
-    - [`DescribeTyped[RequestBody, ResponseBody]`](../../openapi/describe_typed.go) with [`DescribeConfig`, `Response[T]`](../../openapi/describe_typed.go)
+    - [`Response[T]`, `ResponseDescription`](../../openapi/registry.go)
 - Generate the document:
     - [`Generate`](../../openapi/generator.go)
     - [`Document`](../../openapi/document.go) and the OpenAPI 3.0 object model (`Document`/`Schema` carry `servers`/`security`/`tags`/`externalDocs` and `description`/`maximum`/`exclusiveMaximum`)
@@ -23,7 +23,7 @@ OpenAPI generation is opt-in. The generator reads route metadata from the [`http
     - [`GenerateCommand`](../../openapi/generate_command.go)
     - [`NewGenerateCommand`](../../openapi/generate_command.go)
 - Serve the document from a live route (e.g. `GET /openapi.json`):
-    - [`SpecificationHandler`](../../openapi/spec_handler.go) (reuses `Generate` against the running router, so every load-balanced instance serves the same spec)
+    - [`SpecificationHandler`](../../openapi/spec_handler.go) (reuses `Generate` against the running router and the registry and info of the request's scope, so every load-balanced instance serves the same spec)
 - Resolve the registry as a container service:
     - [`ServiceOpenApiRegistry`, `RegistryMustFromResolver`](../../openapi/service_resolver.go)
 
@@ -113,32 +113,18 @@ registry.Describe("products.create", openapi.Descriptor{
     Summary:     "Create a product",
     Tags:        []string{"products"},
     RequestType: openapi.TypeOf[ProductCreateRequest](),
-    Responses: map[int]reflect.Type{
-        201: openapi.TypeOf[ProductView](),
+    Responses: []openapi.ResponseDescription{
+        openapi.Response[ProductView](201),
+        openapi.Response[ProductConflict](409),
     },
 })
-
-command := openapi.NewGenerateCommand(
-    openapi.Info{Title: "Example API", Version: "1.0.0"},
-    registry,
-)
 ```
 
-`Describe` stores a copy of the descriptor's `Tags` and `Responses` and `Get` answers a copy, so a tag list built once and appended to between routes describes each route with the tags it had at that moment, and a reader of `Get` cannot write into the registry from the request path.
+Register the registry as `ServiceOpenApiRegistry` and the `Info` as `ServiceOpenApiInfo`; the generate command and the spec handler both resolve them from the container.
 
-For the common single-request / single-response route, [`DescribeTyped[RequestBody, ResponseBody]`](../../openapi/describe_typed.go) takes the types as parameters instead of a `Descriptor` literal:
+`Describe` stores a copy of the descriptor's `Tags` and `Responses` and `Get` answers a copy, an entry of `Responses` repeating a status replacing the earlier one in its place, so a tag list built once and appended to between routes describes each route with the tags it had at that moment, and a reader of `Get` cannot write into the registry from the request path.
 
-```go
-openapi.DescribeTyped[ProductCreateRequest, ProductView](
-    registry, "products.create", 201,
-    openapi.DescribeConfig{
-        Summary: "Create a product",
-        Tags:    []string{"products"},
-    },
-)
-```
-
-Use `Describe` directly for no-body routes; add extra responses with `DescribeConfig.Responses`, each built by `Response[T](status)`.
+A response with no body is `openapi.ResponseDescription{Status: 204}`; a route with no response at all is documented with a single `default` response.
 
 Run it to emit the document:
 
@@ -170,7 +156,7 @@ The example application registers a registry (`config/openapi.go`) and the comma
 
 - [`Document`, `Info`, `Components`, `PathItem`, `Operation`, `Parameter`, `RequestBody`, `ResponseObject`, `MediaType`, `Schema`](../../openapi/document.go)
 - [`Registry`](../../openapi/registry.go)
-- [`Descriptor`](../../openapi/registry.go)
+- [`Descriptor`](../../openapi/registry.go), [`ResponseDescription`](../../openapi/registry.go)
 - [`GenerateCommand`](../../openapi/generate_command.go)
 
 ### Functions (`openapi`)
@@ -179,9 +165,9 @@ The example application registers a registry (`config/openapi.go`) and the comma
 - [`(*Registry).Describe(routeName string, descriptor Descriptor) *Registry`](../../openapi/registry.go)
 - [`(*Registry).MarkServing()`](../../openapi/registry.go)
 - [`TypeOf[T any]() reflect.Type`](../../openapi/registry.go)
-- [`DescribeTyped[RequestBody, ResponseBody any](registry *Registry, routeName string, status int, config DescribeConfig)`](../../openapi/describe_typed.go) — [`DescribeConfig`](../../openapi/describe_typed.go) holds `Summary`, `Description`, `Tags` and `Responses`, the zero value adding nothing, and [`Response[T any](status int) ResponseDescription`](../../openapi/describe_typed.go) builds one entry of `Responses`, a status repeating another replacing it
+- [`Response[T any](status int) ResponseDescription`](../../openapi/registry.go) — builds one entry of `Descriptor.Responses`, a status repeating another replacing it
 - [`Generate(info Info, routeDefinitions []httpcontract.RouteDefinition, registry *Registry) *Document`](../../openapi/generator.go)
 - [`NewGenerateCommand() *GenerateCommand`](../../openapi/generate_command.go) — resolves the `Info` and the `Registry` from the run's scope at run time; the framework registers it when the registry is registered
-- [`SpecificationHandler(info Info, registry *Registry) httpcontract.Handler`](../../openapi/spec_handler.go)
+- [`SpecificationHandler() httpcontract.Handler`](../../openapi/spec_handler.go) — resolves the `Registry` and the `Info` from the request's scope at each request, an absent info serving an empty info block
 - [`RegistryMustFromResolver(...)`](../../openapi/service_resolver.go) — resolve the registry registered under `ServiceOpenApiRegistry`
 - [`InfoFromResolver(ctx context.Context, resolver containercontract.Resolver) Info`](../../openapi/service_resolver.go) — the tolerant reader of `ServiceOpenApiInfo`, answering an empty `Info` when none is registered

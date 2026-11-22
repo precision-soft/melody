@@ -5,7 +5,7 @@ import (
     "encoding/json"
     "io"
     nethttp "net/http"
-    "reflect"
+    "strings"
     "testing"
 
     "github.com/precision-soft/melody/v4/container"
@@ -38,14 +38,13 @@ func TestSpecificationHandler_ServesDocumentFromLiveRoutes(t *testing.T) {
     registry.Describe("products.create", Descriptor{
         Summary:     "Create a product",
         RequestType: TypeOf[createProductRequest](),
-        Responses: map[int]reflect.Type{
-            201: TypeOf[productResponse](),
-        },
+        Responses:   []ResponseDescription{Response[productResponse](201)},
     })
+    registerSpecificationServices(serviceContainer, registry, &Info{Title: "Example", Version: "1.0.0"})
 
     runtimeInstance := runtime.NewRequest(context.Background(), serviceContainer.NewScope())
 
-    handler := SpecificationHandler(Info{Title: "Example", Version: "1.0.0"}, registry)
+    handler := SpecificationHandler()
 
     response, handlerErr := handler(runtimeInstance, nil, nil)
     if nil != handlerErr {
@@ -63,6 +62,7 @@ func TestSpecificationHandler_ServesDocumentFromLiveRoutes(t *testing.T) {
 
     document := struct {
         OpenApi string                     `json:"openapi"`
+        Info    Info                       `json:"info"`
         Paths   map[string]json.RawMessage `json:"paths"`
     }{}
     if unmarshalErr := json.Unmarshal(body, &document); nil != unmarshalErr {
@@ -76,4 +76,72 @@ func TestSpecificationHandler_ServesDocumentFromLiveRoutes(t *testing.T) {
     if _, exists := document.Paths["/products/api/create"]; false == exists {
         t.Fatalf("expected the live route to appear in the served document, got paths %v", document.Paths)
     }
+
+    if "Example" != document.Info.Title || "1.0.0" != document.Info.Version {
+        t.Fatalf("expected the info of the container's info service, got %+v", document.Info)
+    }
+
+    if false == jsonContains(document.Paths["/products/api/create"], "201") {
+        t.Fatalf("expected the registry's 201 response in the served document, got %s", document.Paths["/products/api/create"])
+    }
+}
+
+/* a container with the registry and no info service serves the document with an empty info block, as the generate command writes it */
+func TestSpecificationHandler_ServesAnEmptyInfoWhenNoInfoServiceIsRegistered(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    serviceContainer.MustRegister(
+        melodyhttp.ServiceRouter,
+        func(resolver containercontract.Resolver) (httpcontract.Router, error) {
+            return melodyhttp.NewRouter(), nil
+        },
+        container.RegisterOptions{},
+    )
+    registerSpecificationServices(serviceContainer, NewRegistry(), nil)
+
+    response, handlerErr := SpecificationHandler()(runtime.NewRequest(context.Background(), serviceContainer.NewScope()), nil, nil)
+    if nil != handlerErr {
+        t.Fatalf("handler: %v", handlerErr)
+    }
+
+    body, readErr := io.ReadAll(response.BodyReader())
+    if nil != readErr {
+        t.Fatalf("read body: %v", readErr)
+    }
+
+    document := struct {
+        Info Info `json:"info"`
+    }{}
+    if unmarshalErr := json.Unmarshal(body, &document); nil != unmarshalErr {
+        t.Fatalf("unmarshal: %v", unmarshalErr)
+    }
+
+    if (Info{}) != document.Info {
+        t.Fatalf("expected an empty info block, got %+v", document.Info)
+    }
+}
+
+func registerSpecificationServices(serviceContainer containercontract.Container, registry *Registry, info *Info) {
+    serviceContainer.MustRegister(
+        ServiceOpenApiRegistry,
+        func(resolver containercontract.Resolver) (*Registry, error) {
+            return registry, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    if nil == info {
+        return
+    }
+
+    serviceContainer.MustRegister(
+        ServiceOpenApiInfo,
+        func(resolver containercontract.Resolver) (Info, error) {
+            return *info, nil
+        },
+        container.RegisterOptions{},
+    )
+}
+
+func jsonContains(raw json.RawMessage, fragment string) bool {
+    return true == strings.Contains(string(raw), "\""+fragment+"\"")
 }

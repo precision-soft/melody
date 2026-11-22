@@ -51,7 +51,7 @@ func TestRegistry_DescribeRecordsTheDescriptorUnderItsRouteName(t *testing.T) {
         Summary:     "Create",
         Tags:        []string{"example"},
         RequestType: TypeOf[registryProbePayload](),
-        Responses:   map[int]reflect.Type{nethttp.StatusCreated: TypeOf[registryProbePayload]()},
+        Responses:   []ResponseDescription{Response[registryProbePayload](nethttp.StatusCreated)},
     })
 
     descriptor, exists := registry.Get("example.create")
@@ -67,8 +67,8 @@ func TestRegistry_DescribeRecordsTheDescriptorUnderItsRouteName(t *testing.T) {
         t.Fatalf("expected the recorded request type, got %v", descriptor.RequestType)
     }
 
-    if TypeOf[registryProbePayload]() != descriptor.Responses[nethttp.StatusCreated] {
-        t.Fatalf("expected the recorded response type, got %v", descriptor.Responses[nethttp.StatusCreated])
+    if 1 != len(descriptor.Responses) || nethttp.StatusCreated != descriptor.Responses[0].Status || TypeOf[registryProbePayload]() != descriptor.Responses[0].Type {
+        t.Fatalf("expected the recorded response, got %v", descriptor.Responses)
     }
 }
 
@@ -138,27 +138,61 @@ func TestRegistry_ALateDescribeNamesTheRouteInItsRefusal(t *testing.T) {
 
 type descriptorCopyBody struct{}
 
-/* Describe stored the caller's Tags slice and Responses map by reference and Get handed them back the same way, so a tag list reused across routes rewrote every earlier description and a reader of Get could write into the registry; both doors copy. The double hands over its own slice and map deliberately — nothing in the package copies on the way in. */
+/* Describe stored the caller's Tags and Responses slices by reference and Get handed them back the same way, so a tag list reused across routes rewrote every earlier description and a reader of Get could write into the registry; both doors copy. The double hands over its own slices deliberately — nothing in the package copies on the way in. */
 func TestRegistry_DescribeAndGetKeepNoReferenceToTheCallersTagsAndResponses(t *testing.T) {
     registry := NewRegistry()
 
     tags := []string{"catalogue"}
-    responses := map[int]reflect.Type{200: TypeOf[descriptorCopyBody]()}
+    responses := []ResponseDescription{Response[descriptorCopyBody](200)}
     registry.Describe("products.list", Descriptor{Tags: tags, Responses: responses})
 
     tags[0] = "rewritten"
-    responses[500] = TypeOf[descriptorCopyBody]()
+    responses[0].Status = 500
 
     stored, _ := registry.Get("products.list")
-    if "catalogue" != stored.Tags[0] || 1 != len(stored.Responses) {
+    if "catalogue" != stored.Tags[0] || 200 != stored.Responses[0].Status {
         t.Fatalf("expected the registry to keep its own copy of the description, got tags %v responses %v", stored.Tags, stored.Responses)
     }
 
     stored.Tags[0] = "rewritten"
-    stored.Responses[404] = TypeOf[descriptorCopyBody]()
+    stored.Responses[0].Status = 404
 
     again, _ := registry.Get("products.list")
-    if "catalogue" != again.Tags[0] || 1 != len(again.Responses) {
+    if "catalogue" != again.Tags[0] || 200 != again.Responses[0].Status {
         t.Fatalf("expected Get to answer a copy, got tags %v responses %v", again.Tags, again.Responses)
+    }
+}
+
+type describeNotFoundBody struct {
+    Reason string `json:"reason"`
+}
+
+/* a status listed twice keeps the place of its first entry and the type of its last, so the later description replaces the earlier one rather than adding a second response under the same status */
+func TestRegistry_DescribeALaterResponseReplacesAnEarlierOneOfTheSameStatus(t *testing.T) {
+    registry := NewRegistry()
+
+    registry.Describe("products.read", Descriptor{
+        Responses: []ResponseDescription{
+            Response[registryProbePayload](nethttp.StatusOK),
+            Response[describeNotFoundBody](nethttp.StatusNotFound),
+            Response[descriptorCopyBody](nethttp.StatusOK),
+        },
+    })
+
+    descriptor, _ := registry.Get("products.read")
+    expected := []ResponseDescription{
+        {Status: nethttp.StatusOK, Type: TypeOf[descriptorCopyBody]()},
+        {Status: nethttp.StatusNotFound, Type: TypeOf[describeNotFoundBody]()},
+    }
+    if false == reflect.DeepEqual(expected, descriptor.Responses) {
+        t.Fatalf("expected the later 200 to replace the earlier one in its place, got %v", descriptor.Responses)
+    }
+}
+
+func TestResponse_AnswersTheStatusAndTheElementType(t *testing.T) {
+    response := Response[registryProbePayload](nethttp.StatusCreated)
+
+    if nethttp.StatusCreated != response.Status || TypeOf[registryProbePayload]() != response.Type {
+        t.Fatalf("unexpected response description %+v", response)
     }
 }

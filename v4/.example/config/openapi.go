@@ -1,8 +1,6 @@
 package config
 
 import (
-    "reflect"
-
     handlercurrency "github.com/precision-soft/melody/v4/.example/handler/currency"
     handleri18n "github.com/precision-soft/melody/v4/.example/handler/i18n"
     handlerproduct "github.com/precision-soft/melody/v4/.example/handler/product"
@@ -22,32 +20,24 @@ func (instance *Module) openApiDocumentInfo() melodyopenapi.Info {
 func (instance *Module) buildOpenApi() {
     instance.openApiRegistry = melodyopenapi.NewRegistry()
 
-    melodyopenapi.DescribeTyped[handlerproduct.CreateRequest, handlerproduct.ProductResponse](
-        instance.openApiRegistry,
-        route.ProductsApiCreateName,
-        201,
-        melodyopenapi.DescribeConfig{
-            Summary: "Create a product",
-            Tags:    []string{"products"},
-        },
-    )
+    instance.openApiRegistry.Describe(route.ProductsApiCreateName, melodyopenapi.Descriptor{
+        Summary:     "Create a product",
+        Tags:        []string{"products"},
+        RequestType: melodyopenapi.TypeOf[handlerproduct.CreateRequest](),
+        Responses:   []melodyopenapi.ResponseDescription{melodyopenapi.Response[handlerproduct.ProductResponse](201)},
+    })
 
-    melodyopenapi.DescribeTyped[handlercurrency.CreateRequest, handlercurrency.CurrencyResponse](
-        instance.openApiRegistry,
-        route.CurrenciesApiCreateName,
-        201,
-        melodyopenapi.DescribeConfig{
-            Summary: "Create a currency",
-            Tags:    []string{"currencies"},
-        },
-    )
+    instance.openApiRegistry.Describe(route.CurrenciesApiCreateName, melodyopenapi.Descriptor{
+        Summary:     "Create a currency",
+        Tags:        []string{"currencies"},
+        RequestType: melodyopenapi.TypeOf[handlercurrency.CreateRequest](),
+        Responses:   []melodyopenapi.ResponseDescription{melodyopenapi.Response[handlercurrency.CurrencyResponse](201)},
+    })
 
     instance.openApiRegistry.Describe(route.I18nGreetingName, melodyopenapi.Descriptor{
-        Summary: "Translated greeting",
-        Tags:    []string{"i18n"},
-        Responses: map[int]reflect.Type{
-            200: melodyopenapi.TypeOf[handleri18n.GreetingResponse](),
-        },
+        Summary:   "Translated greeting",
+        Tags:      []string{"i18n"},
+        Responses: []melodyopenapi.ResponseDescription{melodyopenapi.Response[handleri18n.GreetingResponse](200)},
     })
 
     /* the export answers a csv attachment, which no json schema describes, so its descriptor names the representation in words and binds no response type */

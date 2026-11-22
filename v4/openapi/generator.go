@@ -183,14 +183,15 @@ func buildOperation(
             }
         }
 
-        /* the statuses are visited in sorted order: the first touch names a colliding component, and map order would make two runs disagree on every $ref */
-        statuses := make([]int, 0, len(descriptor.Responses))
-        for status := range descriptor.Responses {
-            statuses = append(statuses, status)
-        }
-        sort.Ints(statuses)
+        /* the statuses are visited in sorted order: the first touch names a colliding component, so the order a descriptor lists its responses in never decides which type takes the bare name */
+        responses := append([]ResponseDescription(nil), descriptor.Responses...)
+        sort.SliceStable(responses, func(left int, right int) bool {
+            return responses[left].Status < responses[right].Status
+        })
 
-        for _, status := range statuses {
+        for _, response := range responses {
+            status := response.Status
+
             /* the response description is required by the format, and a code outside the table answers an empty status text */
             description := nethttp.StatusText(status)
             if "" == description {
@@ -200,7 +201,7 @@ func buildOperation(
             operation.Responses[strconv.Itoa(status)] = ResponseObject{
                 Description: description,
                 Content: map[string]MediaType{
-                    "application/json": {Schema: schemaFromType(descriptor.Responses[status], components, names)},
+                    "application/json": {Schema: schemaFromType(response.Type, components, names)},
                 },
             }
         }

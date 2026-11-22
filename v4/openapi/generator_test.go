@@ -119,9 +119,7 @@ func TestGenerate_BuildsPathsParametersAndSchemas(t *testing.T) {
         Summary:     "Create a product",
         Tags:        []string{"products"},
         RequestType: TypeOf[createProductRequest](),
-        Responses: map[int]reflect.Type{
-            201: TypeOf[productResponse](),
-        },
+        Responses: []ResponseDescription{Response[productResponse](201)},
     })
 
     routes := []httpcontract.RouteDefinition{
@@ -668,9 +666,7 @@ func TestGenerate_PointerNumericWithBoundIsNotNullable(t *testing.T) {
 func TestGenerate_ResponseWithoutBodyTypeIsDescribed(t *testing.T) {
     registry := NewRegistry()
     registry.Describe("products.delete", Descriptor{
-        Responses: map[int]reflect.Type{
-            204: nil,
-        },
+        Responses: []ResponseDescription{{Status: 204}},
     })
 
     routes := []httpcontract.RouteDefinition{
@@ -811,14 +807,14 @@ func TestGenerate_AMirrorAndARouteOfEqualPriorityAtOnePathGoToTheEarlierRegistra
     }
 }
 
-/* the range over descriptor.Responses is the one unordered driver of first-touch component naming: iterated directly, whichever type a run visits first takes the bare name and the other takes the numbered sibling, so two runs over one registry disagree on every $ref to a colliding name — the statuses are visited sorted, and thirty-two fresh generations pin the order because a surviving inversion would have to win a coin flip every time. */
+/* the first response visited names a colliding component, so the statuses are visited sorted: the 409 is listed before the 200 and the 200 must still take the bare name. */
 func TestGenerate_ResponsesAreVisitedInStatusOrder(t *testing.T) {
     for iteration := 0; iteration < 32; iteration++ {
         registry := NewRegistry()
         registry.Describe("pages.read", Descriptor{
-            Responses: map[int]reflect.Type{
-                200: TypeOf[genericPage[genericPageUser]](),
-                409: TypeOf[genericPage[*genericPageUser]](),
+            Responses: []ResponseDescription{
+                Response[genericPage[*genericPageUser]](409),
+                Response[genericPage[genericPageUser]](200),
             },
         })
 
@@ -928,9 +924,7 @@ func TestGenerate_ALaterRouteDoesNotDisplaceAnEarlierRoutesOperation(t *testing.
 func TestGenerate_AnUnregisteredStatusCodeKeepsADescription(t *testing.T) {
     registry := NewRegistry()
     registry.Describe("things.read", Descriptor{
-        Responses: map[int]reflect.Type{
-            599: TypeOf[productResponse](),
-        },
+        Responses: []ResponseDescription{Response[productResponse](599)},
     })
 
     routes := []httpcontract.RouteDefinition{
@@ -950,9 +944,7 @@ func TestGenerate_TheDocumentDoesNotAliasTheRegistryTags(t *testing.T) {
     registry := NewRegistry()
     registry.Describe("products.read", Descriptor{
         Tags: []string{"products"},
-        Responses: map[int]reflect.Type{
-            200: TypeOf[productResponse](),
-        },
+        Responses: []ResponseDescription{Response[productResponse](200)},
     })
 
     routes := []httpcontract.RouteDefinition{

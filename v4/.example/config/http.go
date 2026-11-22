@@ -48,7 +48,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.Handle(
         "/openapi.json",
-        melodyopenapi.SpecificationHandler(instance.openApiDocumentInfo(), instance.openApiRegistry),
+        melodyopenapi.SpecificationHandler(),
         melodyhttp.RouteOptions{Name: "example.openapi", Methods: []string{"GET"}, Attributes: melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)},
     )
 
