@@ -14,9 +14,11 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    melodycache "github.com/precision-soft/melody/v4/cache"
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
+    melodysecurity "github.com/precision-soft/melody/v4/security"
     "github.com/redis/rueidis"
 )
 
@@ -1824,5 +1826,40 @@ func TestBackend_ACounterRefusesAnAbsentTtlBeforeACancelledContext(t *testing.T)
 
     if _, ttlErr := backend.Increment(testRuntimeUnder(cancelled), "refused", 1, cachecontract.CounterOptions{}); nil == ttlErr || false == strings.Contains(ttlErr.Error(), "ttl is required") {
         t.Fatalf("expected the absent ttl refused before the cancelled context, got %v", ttlErr)
+    }
+}
+
+func TestFailedAttemptStore_TwoInstancesOverOneRedisShareOneCount(t *testing.T) {
+    backend, client := liveBackend(t)
+
+    sibling, siblingErr := NewBackend(client, BackendConfig{Prefix: "melody:test:" + t.Name() + ":"})
+    if nil != siblingErr {
+        t.Fatalf("could not build the sibling backend: %v", siblingErr)
+    }
+
+    first := melodysecurity.NewCacheFailedAttemptStore(melodysecurity.CacheFailedAttemptStoreConfig{Cache: melodycache.NewManager(backend, melodycache.NewJsonSerializer(), melodycache.ManagerConfig{})})
+    second := melodysecurity.NewCacheFailedAttemptStore(melodysecurity.CacheFailedAttemptStoreConfig{Cache: melodycache.NewManager(sibling, melodycache.NewJsonSerializer(), melodycache.ManagerConfig{})})
+
+    for attempt := 1; attempt <= 3; attempt++ {
+        if _, incrementErr := first.Increment(testRuntime(), "2fa:user-1", bound.Of(time.Minute)); nil != incrementErr {
+            t.Fatalf("increment: %v", incrementErr)
+        }
+    }
+
+    count, incrementErr := second.Increment(testRuntime(), "2fa:user-1", bound.Of(time.Minute))
+    if nil != incrementErr {
+        t.Fatalf("increment: %v", incrementErr)
+    }
+
+    if 4 != count.Count || 0 >= count.WindowRemaining || time.Minute < count.WindowRemaining {
+        t.Fatalf("expected the fourth count of one shared window with its remainder, got %+v", count)
+    }
+
+    if resetErr := second.Reset(testRuntime(), "2fa:user-1"); nil != resetErr {
+        t.Fatalf("reset: %v", resetErr)
+    }
+
+    if count, _ := first.Increment(testRuntime(), "2fa:user-1", bound.Of(time.Minute)); 1 != count.Count {
+        t.Fatalf("expected the reset seen by the other instance, got %+v", count)
     }
 }

@@ -17,6 +17,7 @@ import (
     "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
@@ -801,5 +802,67 @@ func TestAuthenticatorTokenSource_IsStatefulUnlessItsConfigDeclaresOtherwise(t *
 
     if false == NewAuthenticatorTokenSource(NewAuthenticatorManager(nil), AuthenticatorTokenSourceConfig{Stateless: true}).Stateless() {
         t.Fatalf("expected the declared authenticator source to answer stateless")
+    }
+}
+
+func lockedTokenSource() *AuthenticatorTokenSource {
+    return NewAuthenticatorTokenSource(
+        NewAuthenticatorManager([]securitycontract.Authenticator{
+            &testAuthenticator{
+                supportsCallback: func(request httpcontract.Request) bool { return true },
+                authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
+                    return NewTwoFactorLockedToken(NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil), 9*time.Second), nil
+                },
+            },
+        }),
+        AuthenticatorTokenSourceConfig{},
+    )
+}
+
+func TestAuthenticatorTokenSource_LockedSecondFactor_Answers429OnEveryRoute(t *testing.T) {
+    runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
+    dispatchedNameList := recordSecurityLoginEvents(dispatcher)
+
+    failureErrors := []error{}
+    dispatcher.AddListener(
+        securitycontract.EventSecurityLoginFailure,
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+            if failureEvent, isFailureEvent := eventValue.Payload().(*LoginFailureEvent); true == isFailureEvent {
+                failureErrors = append(failureErrors, failureEvent.Error())
+            }
+
+            return nil
+        },
+        eventcontract.ListenerConfig{},
+    )
+
+    token, err := lockedTokenSource().Resolve(runtimeInstance, newFirewallTestRequest("/"))
+    if nil != token || false == errors.Is(err, ErrSecondFactorLocked) {
+        t.Fatalf("expected the locked refusal and no token, got %v, %v", token, err)
+    }
+
+    refusal := exception.AsHttpException(err)
+    if nil == refusal || nethttp.StatusTooManyRequests != refusal.StatusCode() || 9*time.Second != refusal.RetryAfter() || "authenticatorManager" != exception.LogContext(err, exception.LogContextConfig{})["tokenSourceName"] {
+        t.Fatalf("expected 429 with the lockout's remainder naming the source, got %v", err)
+    }
+
+    if 1 != len(*dispatchedNameList) || securitycontract.EventSecurityLoginFailure != (*dispatchedNameList)[0] {
+        t.Fatalf("expected one failure event before the refusal, got %v", *dispatchedNameList)
+    }
+
+    if 1 != len(failureErrors) || false == errors.Is(failureErrors[0], ErrSecondFactorLocked) {
+        t.Fatalf("expected the failure event carrying the lockout, got %v", failureErrors)
+    }
+
+    fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
+        config.TokenSource = lockedTokenSource()
+    })
+    fixture.kernel.httpRouter.Handle("/public", func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return http.TextResponse(nethttp.StatusOK, "public"), nil
+    }, http.RouteOptions{Methods: []string{nethttp.MethodGet}})
+
+    recorder := fixture.serve(t, nethttp.MethodGet, "/public", nil)
+    if nethttp.StatusTooManyRequests != recorder.Code || "9" != recorder.Header().Get("Retry-After") {
+        t.Fatalf("expected a public route refused 429 with Retry-After 9, got %d %q", recorder.Code, recorder.Header().Get("Retry-After"))
     }
 }

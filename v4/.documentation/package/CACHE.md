@@ -101,6 +101,8 @@ The cache package exposes retrieval helpers for the three services (see [`cache/
 
 Code holding a runtime, a handler, a command, a listener or a message handler, binds the cache to it instead: `cache.FromRuntime(runtimeInstance)` resolves the application's cache through the runtime's scope and answers a `cache.Bound`.
 
+The framework writes into the application's cache itself in one place: the TOTP second factor's failed attempt counters, under `melody:2fa:failed:` (`security.DefaultFailedAttemptKeyPrefix`), each beside a `:until` key holding its window's deadline, so a `Clear` unlocks every account the throttle locked ([SECURITY.md](SECURITY.md#two-factor-authentication-totp)).
+
 ## The bound view
 
 Every door of `cachecontract.Cache` takes the runtime it runs under first; that is the contract a manager, a decorator or a fake implements. Userland calls it through `cache.Bound`, a view bound once to its request, run or delivery, whose methods take no runtime:

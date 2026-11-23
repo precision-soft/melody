@@ -14,6 +14,8 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/cache"
+    cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/config"
@@ -813,4 +815,103 @@ func (instance *csrfFixture) refusals() *[]error {
     )
 
     return &recorded
+}
+
+/* recordingFailedAttemptStore counts in a map, answering the remainder it is told to and recording each call, so the throttle is read without a cache */
+type recordingFailedAttemptStore struct {
+    mutex           sync.Mutex
+    countByKey      map[string]int
+    windowRemaining time.Duration
+    increments      []string
+    resets          []string
+    windows         []bound.Duration
+    runtimes        []containercontract.Runtime
+    resetErr        error
+}
+
+func newRecordingFailedAttemptStore() *recordingFailedAttemptStore {
+    return &recordingFailedAttemptStore{countByKey: map[string]int{}}
+}
+
+func (instance *recordingFailedAttemptStore) Increment(runtimeInstance containercontract.Runtime, key string, window bound.Duration) (securitycontract.FailedAttemptCount, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.increments = append(instance.increments, key)
+    instance.windows = append(instance.windows, window)
+    instance.runtimes = append(instance.runtimes, runtimeInstance)
+    instance.countByKey[key]++
+
+    return securitycontract.FailedAttemptCount{Count: instance.countByKey[key], WindowRemaining: instance.windowRemaining}, nil
+}
+
+func (instance *recordingFailedAttemptStore) Reset(runtimeInstance containercontract.Runtime, key string) error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.resets = append(instance.resets, key)
+    instance.runtimes = append(instance.runtimes, runtimeInstance)
+    if nil != instance.resetErr {
+        return instance.resetErr
+    }
+
+    delete(instance.countByKey, key)
+
+    return nil
+}
+
+func (instance *recordingFailedAttemptStore) incrementCount() int {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return len(instance.increments)
+}
+
+type failingFailedAttemptStore struct {
+    failure error
+}
+
+func (instance *failingFailedAttemptStore) Increment(_ containercontract.Runtime, _ string, _ bound.Duration) (securitycontract.FailedAttemptCount, error) {
+    return securitycontract.FailedAttemptCount{}, instance.failure
+}
+
+func (instance *failingFailedAttemptStore) Reset(_ containercontract.Runtime, _ string) error {
+    return instance.failure
+}
+
+/* newTestCache is the application's default cache over a backend reading the clock, closed with the test */
+func newTestCache(t *testing.T, clockInstance clockcontract.Clock) cachecontract.Cache {
+    t.Helper()
+
+    manager := cache.NewManager(
+        cache.NewInMemoryBackend(cache.InMemoryBackendConfig{Clock: clockInstance}),
+        cache.NewJsonSerializer(),
+        cache.ManagerConfig{OwnsBackend: true},
+    )
+    t.Cleanup(func() {
+        _ = manager.CloseWithContext(context.Background())
+    })
+
+    return manager
+}
+
+/* runtimeWithCache is a request runtime whose scope resolves the cache as the application's */
+func runtimeWithCache(t *testing.T, cacheInstance cachecontract.Cache) (containercontract.Runtime, *recordingLogger) {
+    t.Helper()
+
+    logger := &recordingLogger{}
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    serviceContainer.MustRegister(
+        cache.ServiceCache,
+        func(resolver containercontract.Resolver) (cachecontract.Cache, error) {
+            return cacheInstance, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    scope := serviceContainer.NewScope()
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
+
+    return runtime.NewRequest(context.Background(), scope), logger
 }

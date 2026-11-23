@@ -1,6 +1,8 @@
 package contract
 
 import (
+    "time"
+
     containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
@@ -9,9 +11,13 @@ type TwoFactorPending interface {
     PendingUserIdentifier() string
 }
 
-/* TwoFactorRejection is an optional companion to TwoFactorPending: a pending token that implements it tells a challenge the request never answered from a second factor it answered and had refused. AuthenticatorTokenSource dispatches security.login.failure only for a refused one, so a correct primary credential waiting for its code is not announced as a failure. */
+/* TwoFactorRejection is an optional companion to TwoFactorPending: a pending token that implements it tells a challenge the request never answered from a second factor it answered and had refused. AuthenticatorTokenSource dispatches security.login.failure only for a refused one, so a correct primary credential waiting for its code is not announced as a failure. A refused factor is locked when its account was past the allowance of refused factors, the factor unread: the login door and AuthenticatorTokenSource answer it 429 with SecondFactorRetryAfter as Retry-After. */
 type TwoFactorRejection interface {
     SecondFactorRejected() bool
+
+    SecondFactorLocked() bool
+
+    SecondFactorRetryAfter() time.Duration
 }
 
 /* TwoFactorEnrollmentStore reports whether a user has a second factor configured and, if so, returns the TOTP secret to verify against. It is supplied by the application because only the application knows where enrollments live (typically an encrypted column). Returning enrolled=false means the user has no second factor and primary authentication stands on its own. */

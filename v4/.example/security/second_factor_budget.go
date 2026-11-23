@@ -31,7 +31,7 @@ func (instance *SecondFactorBudgetSpentError) Is(target error) bool {
 /* ErrSecondFactorBudgetUnavailable is the refusal of a sign-in whose second-factor budget could not be read: Authenticate returns it marked with exception.MarkInfrastructureFailure, so the door answers it 503 with Retry-After, the limiter's failure carried beside it. */
 var ErrSecondFactorBudgetUnavailable = errors.New("second factor budget unavailable")
 
-/* NewSecondFactorBudget fronts the second factor with a budget per account, which the TOTP authenticator requires of its application: it limits neither failed codes nor accounts, so a six-digit code could be guessed from as many addresses as the per-address budget allows each.
+/* NewSecondFactorBudget fronts the second factor with a budget per account on the factors it PRESENTS, right ones included: the TOTP authenticator locks an account after five refused factors in five minutes, and this budget, five presented factors in fifteen minutes, is the example's tighter cap in front of that lockout.
 
    The budget wraps the FIRST factor, since only there is the account known before a code is verified: a sign-in whose password is accepted and which carries a code or a recovery code spends one unit of that account's budget, and once the budget is spent the sign-in is refused before the code is read. A caller without the password spends nothing, so nobody can lock an account out without knowing its password; a sign-in carrying no code spends nothing either, since it only asks for the challenge.
 

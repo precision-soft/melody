@@ -112,6 +112,30 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** Build requests through `http.NewRequest`, with `RequestConfig.MaxBodyBytes` when no runtime carries the configuration.
 
+### Security: the TOTP second factor locks an account after five refused factors in five minutes
+
+**What changed.** `TotpSecondFactorAuthenticator` counts every presented factor, a TOTP code or a recovery code, per account before it verifies it; past `TotpSecondFactorAuthenticatorConfig.MaxFailedAttempts` (5) inside `LockoutWindow` (5m, a fixed window opened by the first factor) the factor is refused unread, a right one included, and the login door and `AuthenticatorTokenSource` answer `429 too many attempts` with the window's remainder as `Retry-After`, after `security.login.failure`. An accepted factor resets the count. See [Two-factor authentication](package/SECURITY.md#two-factor-authentication-totp).
+
+**Symptom.** The sixth factor inside the window is answered `429`; a test presenting more than five wrong codes for one account turns red; on a firewall whose source is `AuthenticatorTokenSource`, every route of that request, a public one included, answers `429`.
+
+**Remedy.** Tune `MaxFailedAttempts` and `LockoutWindow`; `MaxFailedAttempts: bound.UnlimitedCount()` keeps an application's own throttle as the only one; `(*TotpSecondFactorAuthenticator).ResetFailedAttempts(runtime, userIdentifier)` unlocks an account.
+
+### Security: the second factor's count lives in the application's cache
+
+**What changed.** `TotpSecondFactorAuthenticatorConfig.FailedAttemptStore` nil is a `security.CacheFailedAttemptStore` over `service.cache`, read from the runtime of each call, under `security.DefaultFailedAttemptKeyPrefix` (`melody:2fa:failed:`). A store that fails refuses the factor `503` with the firewall's `Retry-After`, where nothing was read before.
+
+**Symptom.** An authenticator handed a runtime without `service.cache`, a hand-built test runtime, panics at the first presented factor naming the service; a cache `Clear` forgets every count; the in-memory backend may evict a counter past its `MaxItems` (10,000); a cache outage refuses the second factor `503`.
+
+**Remedy.** Hand `FailedAttemptStore`, a `security.NewCacheFailedAttemptStore(security.CacheFailedAttemptStoreConfig{Cache: …})` over a cache of its own or an implementation of `securitycontract.FailedAttemptStore`.
+
+### Security: `TwoFactorRejection` gains `SecondFactorLocked` and `SecondFactorRetryAfter`
+
+**What changed.** The framework-implemented [`securitycontract.TwoFactorRejection`](../security/contract/two_factor.go) gains `SecondFactorLocked() bool` and `SecondFactorRetryAfter() time.Duration`; `security.NewTwoFactorLockedToken(pending, retryAfter)` builds the locked form.
+
+**Symptom.** A type of the application's that implements `TwoFactorRejection` no longer satisfies it.
+
+**Remedy.** Return the framework's token, `NewTwoFactorRejectedToken` or `NewTwoFactorLockedToken`, or embed `*security.TwoFactorPendingToken`.
+
 ### Constructors: a value object takes a config
 
 **What changed.** A constructor of a value object keeps the values that name it positional and takes the rest in a config struct whose zero value is the empty or default value, and the doors over a fixed value or a positional optional gain one:

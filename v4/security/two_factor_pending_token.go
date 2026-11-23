@@ -1,7 +1,10 @@
 package security
 
 import (
+    "time"
+
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -23,9 +26,24 @@ func NewTwoFactorRejectedToken(pending securitycontract.Token) *TwoFactorPending
     return token
 }
 
+/* NewTwoFactorLockedToken wraps the principal whose account presented more refused second factors than its authenticator admits inside the lockout window: the factor of this request was not verified. It is the rejected token of NewTwoFactorRejectedToken and reports SecondFactorLocked()=true with the time until the window lapses, which the login door and AuthenticatorTokenSource answer as 429 with Retry-After. A negative retryAfter panics naming the argument. */
+func NewTwoFactorLockedToken(pending securitycontract.Token, retryAfter time.Duration) *TwoFactorPendingToken {
+    if 0 > retryAfter {
+        exception.Panic(exception.NewError("a two-factor lockout can not end in the past", exceptioncontract.Context{"argument": "retryAfter"}, nil))
+    }
+
+    token := NewTwoFactorRejectedToken(pending)
+    token.locked = true
+    token.retryAfter = retryAfter
+
+    return token
+}
+
 type TwoFactorPendingToken struct {
-    pending  securitycontract.Token
-    rejected bool
+    pending    securitycontract.Token
+    rejected   bool
+    locked     bool
+    retryAfter time.Duration
 }
 
 func (instance *TwoFactorPendingToken) IsAuthenticated() bool {
@@ -55,6 +73,16 @@ func (instance *TwoFactorPendingToken) PendingUserIdentifier() string {
 /* SecondFactorRejected reports whether the request supplied a second factor and had it refused, as opposed to a challenge it has not answered yet. */
 func (instance *TwoFactorPendingToken) SecondFactorRejected() bool {
     return instance.rejected
+}
+
+/* SecondFactorLocked reports whether the account is past its allowance of refused factors, its factor refused unread. */
+func (instance *TwoFactorPendingToken) SecondFactorLocked() bool {
+    return instance.locked
+}
+
+/* SecondFactorRetryAfter answers how long until a locked account may present a factor again; zero when not locked. */
+func (instance *TwoFactorPendingToken) SecondFactorRetryAfter() time.Duration {
+    return instance.retryAfter
 }
 
 /* PendingUserFromToken reports the user awaiting a second factor, returning (\"\", false) for a nil token or one that is not a two-factor challenge. */

@@ -123,6 +123,7 @@ Every module below has one section, headed by its directory, and one row per exp
 | [`security/contract.Authenticator`](../security/contract/authenticator.go) | application | every authenticator of an application implements it |
 | [`security/contract.EntryPoint`](../security/contract/entry_point.go) | application | an application writes the answer an unauthenticated request receives |
 | [`security/contract.EpochRevocableTokenStore`](../security/contract/token_store.go) | application | a token store is written by the application or an integration |
+| [`security/contract.FailedAttemptStore`](../security/contract/failed_attempt_store.go) | application | a shared failed-attempt store is written by the application or an integration |
 | [`security/contract.Firewall`](../security/contract/firewall.go) | framework | the framework builds every firewall from its configuration |
 | [`security/contract.FirewallManager`](../security/contract/firewall_manager.go) | framework | the framework's firewall manager |
 | [`security/contract.ImpersonatedUserResolver`](../security/contract/impersonation.go) | application | the application resolves the user it impersonates |

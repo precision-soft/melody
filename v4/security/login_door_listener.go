@@ -25,6 +25,38 @@ const (
 /* ErrSecondFactorRequired is the cause of the 401 a login door answers to accepted credentials whose second factor was not presented, so an application's kernel.exception listener can render the challenge. */
 var ErrSecondFactorRequired = errors.New("second factor required")
 
+/* ErrSecondFactorLocked is the cause of the 429 answered to a second factor presented for an account past its allowance of refused factors. */
+var ErrSecondFactorLocked = errors.New("second factor locked")
+
+/* ReasonSecondFactorLocked is the reason the 429 of a locked second factor carries in its context. */
+const ReasonSecondFactorLocked = "second_factor_locked"
+
+/* secondFactorLock answers the rejection of a locked second factor, nil for any other token */
+func secondFactorLock(token securitycontract.Token) securitycontract.TwoFactorRejection {
+    rejection, reportsRejection := token.(securitycontract.TwoFactorRejection)
+    if false == reportsRejection || false == rejection.SecondFactorLocked() {
+        return nil
+    }
+
+    return rejection
+}
+
+/* newSecondFactorLockedRefusal is the 429 of a locked second factor, carrying the lockout's remainder as Retry-After */
+func newSecondFactorLockedRefusal(rejection securitycontract.TwoFactorRejection, contextKey string, contextValue string) *exception.HttpException {
+    refusal := exception.NewHttpError(
+        nethttp.StatusTooManyRequests,
+        exception.HttpErrorConfig{
+            Message:    "too many attempts",
+            Cause:      ErrSecondFactorLocked,
+            RetryAfter: rejection.SecondFactorRetryAfter(),
+        },
+    )
+    refusal.SetContextValue("reason", ReasonSecondFactorLocked)
+    refusal.SetContextValue(contextKey, contextValue)
+
+    return refusal
+}
+
 /* DefaultFirewallDoorMethods answers the methods a door serves when it declares none. */
 func DefaultFirewallDoorMethods() []string {
     return []string{nethttp.MethodPost}
@@ -337,6 +369,19 @@ func authenticateAtLoginDoor(
                 exception.HttpErrorConfig{Message: ErrSecondFactorRequired.Error(), Cause: ErrSecondFactorRequired},
             )
         }
+    }
+
+    if rejection := secondFactorLock(token); nil != rejection {
+        refusal := newSecondFactorLockedRefusal(rejection, "firewallName", firewall.Name())
+
+        fileLoginFailureDispatchError(
+            runtimeInstance,
+            firewall.dispatchLoginFailure(runtimeInstance, request, refusal),
+            nethttp.StatusTooManyRequests,
+            exceptioncontract.Context{"firewallName": firewall.Name()},
+        )
+
+        return nil, refusal
     }
 
     failureErr := errors.New("invalid credentials")

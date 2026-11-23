@@ -125,7 +125,14 @@ func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance containercontr
             failureMessage = "security second factor rejected"
         }
 
-        failureErr := exception.NewError(failureMessage, nil, nil)
+        var failureErr error = exception.NewError(failureMessage, nil, nil)
+
+        /* a locked account is refused on every route, a public one included, since the request carried a factor for it */
+        var lockedRefusal error
+        if rejection := secondFactorLock(token); nil != rejection {
+            lockedRefusal = newSecondFactorLockedRefusal(rejection, "tokenSourceName", instance.Name())
+            failureErr = lockedRefusal
+        }
 
         eventDispatcher := event.EventDispatcherMustFromRuntime(runtimeInstance)
         _, eventSecurityLoginFailureErr := eventDispatcher.DispatchName(
@@ -142,6 +149,10 @@ func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance containercontr
                 },
                 errors.Join(failureErr, eventSecurityLoginFailureErr),
             )
+        }
+
+        if nil != lockedRefusal {
+            return nil, lockedRefusal
         }
 
         return token, nil

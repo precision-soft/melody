@@ -11,6 +11,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
+    "github.com/precision-soft/melody/v4/logging"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
     "github.com/precision-soft/melody/v4/security/totp"
 )
@@ -21,7 +22,7 @@ const DefaultTotpCodeHeaderName = "X-2FA-Code"
 /* DefaultTotpRecoveryHeaderName is the request header a single-use recovery code is read from unless overridden; it is distinct from the TOTP code header so the two never collide. */
 const DefaultTotpRecoveryHeaderName = "X-2FA-Recovery-Code"
 
-/* TotpSecondFactorAuthenticatorConfig tunes how NewTotpSecondFactorAuthenticator composes its primary authenticator with a TOTP second factor into one Authenticator. When the primary credential is accepted and the user has a TOTP enrollment, a valid code header is also required; otherwise the result is a non-authenticated TwoFactorPendingToken the application uses to prompt for a code. When the enrollments store also implements TwoFactorRecoveryStore, a single-use recovery code on RecoveryHeaderName is accepted instead of a TOTP code. The ReplayGuard blocks reuse of an accepted code, but failed attempts are NOT rate-limited: throttling and per-user lockout are the application's and MUST front this authenticator, or a 6-digit code can be brute-forced once the primary credential is known. An enrollment lookup, a recovery redemption or a replay guard that fails returns its error marked with exception.MarkInfrastructureFailure, so the firewall answers it as a credential nobody could check rather than a failed sign-in. */
+/* TotpSecondFactorAuthenticatorConfig tunes how NewTotpSecondFactorAuthenticator composes its primary authenticator with a TOTP second factor into one Authenticator. When the primary credential is accepted and the user has a TOTP enrollment, a valid code header is also required; otherwise the result is a non-authenticated TwoFactorPendingToken the application uses to prompt for a code. When the enrollments store also implements TwoFactorRecoveryStore, a single-use recovery code on RecoveryHeaderName is accepted instead of a TOTP code. The ReplayGuard blocks reuse of an accepted code. Every presented factor, a TOTP code or a recovery code, is counted per account before it is verified, and past MaxFailedAttempts inside LockoutWindow the factor is refused unread as the locked token of NewTwoFactorLockedToken, answered 429 with Retry-After; an accepted factor resets the count. Whoever holds the password can keep the account's owner out for the window; ResetFailedAttempts unlocks it. An enrollment lookup, a recovery redemption, a replay guard or a failed attempt store that fails returns its error marked with exception.MarkInfrastructureFailure, so the firewall answers it as a credential nobody could check rather than a failed sign-in. */
 type TotpSecondFactorAuthenticatorConfig struct {
     /* CodeHeaderName overrides the header the TOTP code is read from; defaults to DefaultTotpCodeHeaderName. */
     CodeHeaderName string
@@ -37,9 +38,31 @@ type TotpSecondFactorAuthenticatorConfig struct {
 
     /* Clock is the clock the code is verified against; nil uses the system clock. Inject a frozen clock for deterministic tests. */
     Clock clockcontract.Clock
+
+    /* MaxFailedAttempts is how many presented factors, TOTP codes and recovery codes together, an account may have refused inside LockoutWindow before the authenticator stops verifying: 5 by default, at least 1. bound.UnlimitedCount() turns the throttle off and nothing is counted, for an application whose own throttle fronts this authenticator. */
+    MaxFailedAttempts bound.Count
+
+    /* LockoutWindow is the span the presented factors are counted over, opened by the first one and never extended: 5m by default, at least 1s. Unlimited is refused, since a count that never lapses locks its account for good: a long window is the door. */
+    LockoutWindow bound.Duration
+
+    /* FailedAttemptStore is where the count lives; nil is a CacheFailedAttemptStore over the application's cache, shared between replicas exactly when that cache is. */
+    FailedAttemptStore securitycontract.FailedAttemptStore
 }
 
-/* NewTotpSecondFactorAuthenticator requires a TOTP code from the users enrollments holds once primary accepted them; a nil primary or enrollments panics naming the argument. */
+var totpMaxFailedAttemptsRule = bound.Rule[int]{
+    Name:              "TotpSecondFactorAuthenticatorConfig.MaxFailedAttempts",
+    Default:           5,
+    Minimum:           1,
+    UnlimitedAdmitted: true,
+}
+
+var totpLockoutWindowRule = bound.Rule[time.Duration]{
+    Name:    "TotpSecondFactorAuthenticatorConfig.LockoutWindow",
+    Default: 5 * time.Minute,
+    Minimum: bound.TtlMinimum,
+}
+
+/* NewTotpSecondFactorAuthenticator requires a TOTP code from the users enrollments holds once primary accepted them; a nil primary or enrollments panics naming the argument, a limit outside its rule or a typed nil FailedAttemptStore naming the field. */
 func NewTotpSecondFactorAuthenticator(primary securitycontract.Authenticator, enrollments securitycontract.TwoFactorEnrollmentStore, config TotpSecondFactorAuthenticatorConfig) *TotpSecondFactorAuthenticator {
     if true == internal.IsNilInterface(primary) {
         exception.Panic(exception.NewError("totp second factor primary authenticator is nil", exceptioncontract.Context{"argument": "primary"}, nil))
@@ -89,6 +112,31 @@ func NewTotpSecondFactorAuthenticator(primary securitycontract.Authenticator, en
         replayGuard = NewMemoryNonceGuard(MemoryNonceGuardConfig{Clock: clockInstance})
     }
 
+    maxFailedAttempts, maxFailedAttemptsErr := bound.Resolve(config.MaxFailedAttempts, totpMaxFailedAttemptsRule)
+    if nil != maxFailedAttemptsErr {
+        exception.Panic(exception.FromError(maxFailedAttemptsErr))
+    }
+
+    lockoutWindow, lockoutWindowErr := bound.Resolve(config.LockoutWindow, totpLockoutWindowRule)
+    if nil != lockoutWindowErr {
+        exception.Panic(exception.FromError(lockoutWindowErr))
+    }
+
+    refuseTypedNilField(
+        "totp second factor failed attempt store is a typed nil",
+        "TotpSecondFactorAuthenticatorConfig.FailedAttemptStore",
+        "NewTotpSecondFactorAuthenticator",
+        config.FailedAttemptStore,
+    )
+
+    var failedAttemptStore securitycontract.FailedAttemptStore
+    if false == maxFailedAttempts.Unlimited {
+        failedAttemptStore = config.FailedAttemptStore
+        if nil == failedAttemptStore {
+            failedAttemptStore = NewCacheFailedAttemptStore(CacheFailedAttemptStoreConfig{Clock: clockInstance})
+        }
+    }
+
     return &TotpSecondFactorAuthenticator{
         primary:            primary,
         enrollments:        enrollments,
@@ -97,6 +145,9 @@ func NewTotpSecondFactorAuthenticator(primary securitycontract.Authenticator, en
         totpConfig:         totpConfig,
         codeValidityWindow: time.Duration(2*totpResolved.Skew+1) * totpResolved.Period,
         replayGuard:        replayGuard,
+        maxFailedAttempts:  maxFailedAttempts.Value,
+        lockoutWindow:      lockoutWindow.Value,
+        failedAttemptStore: failedAttemptStore,
     }
 }
 
@@ -108,6 +159,11 @@ type TotpSecondFactorAuthenticator struct {
     totpConfig         totp.Config
     codeValidityWindow time.Duration
     replayGuard        securitycontract.NonceGuard
+    maxFailedAttempts  int
+    lockoutWindow      time.Duration
+
+    /* nil when the throttle is off */
+    failedAttemptStore securitycontract.FailedAttemptStore
 }
 
 func (instance *TotpSecondFactorAuthenticator) Supports(request httpcontract.Request) bool {
@@ -138,21 +194,130 @@ func (instance *TotpSecondFactorAuthenticator) Authenticate(runtimeInstance cont
         return token, nil
     }
 
+    if false == instance.presentsFactor(request) {
+        /* no TOTP code and no recovery code: the second factor is outstanding, so the primary credential does not stand on its own */
+        return NewTwoFactorPendingToken(token), nil
+    }
+
+    /* counted before it is verified, in one step, so concurrent guesses can not all read a count below the allowance */
+    if lockedToken, countErr := instance.countPresentedFactor(runtimeInstance, token); nil != countErr {
+        return nil, countErr
+    } else if nil != lockedToken {
+        return lockedToken, nil
+    }
+
+    verifiedToken, verifyErr := instance.verifyPresentedFactor(runtimeInstance, request, token, secret)
+    if nil != verifyErr {
+        return nil, verifyErr
+    }
+
+    if true == verifiedToken.IsAuthenticated() {
+        instance.forgetFailedAttempts(runtimeInstance, token.UserIdentifier())
+    }
+
+    return verifiedToken, nil
+}
+
+/* ResetFailedAttempts forgets the refused factors counted for the user, unlocking an account the throttle locked; with the throttle off there is nothing to forget. */
+func (instance *TotpSecondFactorAuthenticator) ResetFailedAttempts(runtimeInstance containercontract.Runtime, userIdentifier string) error {
+    if nil == instance.failedAttemptStore {
+        return nil
+    }
+
+    return instance.failedAttemptStore.Reset(runtimeInstance, failedAttemptKey(userIdentifier))
+}
+
+func (instance *TotpSecondFactorAuthenticator) verifyPresentedFactor(
+    runtimeInstance containercontract.Runtime,
+    request httpcontract.Request,
+    token securitycontract.Token,
+    secret string,
+) (securitycontract.Token, error) {
     code := request.Header(instance.codeHeaderName)
     if "" != code {
         return instance.authenticateWithTotpCode(runtimeInstance, request, token, secret, code)
     }
 
-    if redeemed, supplied, recoveryErr := instance.tryRecoveryCode(runtimeInstance, request, token); nil != recoveryErr {
+    redeemed, _, recoveryErr := instance.tryRecoveryCode(runtimeInstance, request, token)
+    if nil != recoveryErr {
         return nil, recoveryErr
-    } else if true == redeemed {
-        return token, nil
-    } else if true == supplied {
-        return NewTwoFactorRejectedToken(token), nil
     }
 
-    /* no TOTP code and no recovery code: the second factor is outstanding, so the primary credential does not stand on its own */
-    return NewTwoFactorPendingToken(token), nil
+    if true == redeemed {
+        return token, nil
+    }
+
+    return NewTwoFactorRejectedToken(token), nil
+}
+
+/* presentsFactor reports a TOTP code, or a recovery code on a store that redeems one; a recovery header the store can not read is no factor */
+func (instance *TotpSecondFactorAuthenticator) presentsFactor(request httpcontract.Request) bool {
+    if "" != request.Header(instance.codeHeaderName) {
+        return true
+    }
+
+    if _, supportsRecovery := instance.enrollments.(securitycontract.TwoFactorRecoveryStore); false == supportsRecovery {
+        return false
+    }
+
+    return "" != request.Header(instance.recoveryHeaderName)
+}
+
+/* countPresentedFactor answers the locked token once the account is past its allowance, nil while the factor may be verified */
+func (instance *TotpSecondFactorAuthenticator) countPresentedFactor(
+    runtimeInstance containercontract.Runtime,
+    token securitycontract.Token,
+) (securitycontract.Token, error) {
+    if nil == instance.failedAttemptStore {
+        return nil, nil
+    }
+
+    count, incrementErr := instance.failedAttemptStore.Increment(
+        runtimeInstance,
+        failedAttemptKey(token.UserIdentifier()),
+        bound.Of(instance.lockoutWindow),
+    )
+    if nil != incrementErr {
+        return nil, storeFailure("two-factor failed attempt store failed", incrementErr)
+    }
+
+    if count.Count <= instance.maxFailedAttempts {
+        return nil, nil
+    }
+
+    return NewTwoFactorLockedToken(token, lockoutRetryAfter(count.WindowRemaining, instance.lockoutWindow)), nil
+}
+
+/* forgetFailedAttempts never undoes the sign-in it follows: a count it could not reset lapses with its window */
+func (instance *TotpSecondFactorAuthenticator) forgetFailedAttempts(runtimeInstance containercontract.Runtime, userIdentifier string) {
+    if nil == instance.failedAttemptStore {
+        return
+    }
+
+    resetErr := instance.failedAttemptStore.Reset(runtimeInstance, failedAttemptKey(userIdentifier))
+    if nil == resetErr {
+        return
+    }
+
+    if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
+        logger.Warning(
+            "two-factor failed attempt reset failed",
+            exception.LogContext(resetErr, exception.LogContextConfig{}),
+        )
+    }
+}
+
+func failedAttemptKey(userIdentifier string) string {
+    return "2fa:" + userIdentifier
+}
+
+/* lockoutRetryAfter rounds the remainder up to a whole second, and answers the whole window when the store could not say */
+func lockoutRetryAfter(windowRemaining time.Duration, lockoutWindow time.Duration) time.Duration {
+    if 0 >= windowRemaining {
+        return lockoutWindow
+    }
+
+    return (windowRemaining + time.Second - 1) / time.Second * time.Second
 }
 
 /* authenticateWithTotpCode verifies a supplied TOTP code and, on success, enforces single use through the replay guard before authenticating. A wrong or replayed code yields a rejected pending token so the caller re-prompts and the refusal is announced as a login failure. */

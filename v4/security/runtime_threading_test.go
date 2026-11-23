@@ -97,7 +97,8 @@ func TestTotpSecondFactorAuthenticator_ReadsItsStoresThroughTheRuntimeItWasHande
     store := &runtimeRecordingEnrollmentStore{secret: secret}
     guard := &runtimeRecordingNonceGuard{}
     primary := &runtimeRecordingAuthenticator{}
-    authenticator := NewTotpSecondFactorAuthenticator(primary, store, TotpSecondFactorAuthenticatorConfig{ReplayGuard: guard})
+    failedAttempts := newRecordingFailedAttemptStore()
+    authenticator := NewTotpSecondFactorAuthenticator(primary, store, TotpSecondFactorAuthenticatorConfig{ReplayGuard: guard, FailedAttemptStore: failedAttempts})
 
     runtimeInstance := newTestRuntime()
     token, err := authenticator.Authenticate(runtimeInstance, totpRequest(code))
@@ -109,6 +110,10 @@ func TestTotpSecondFactorAuthenticator_ReadsItsStoresThroughTheRuntimeItWasHande
         if 1 != len(runtimes) || runtimeInstance != runtimes[0] {
             t.Fatalf("expected the %s handed the runtime the authenticator was handed, on a request that carries none, got %v", name, runtimes)
         }
+    }
+
+    if 2 != len(failedAttempts.runtimes) || runtimeInstance != failedAttempts.runtimes[0] || runtimeInstance != failedAttempts.runtimes[1] {
+        t.Fatalf("expected the failed attempt store's count and reset handed the runtime the authenticator was handed, got %v", failedAttempts.runtimes)
     }
 }
 

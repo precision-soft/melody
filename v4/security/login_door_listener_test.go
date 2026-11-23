@@ -1859,3 +1859,71 @@ func TestCsrfTokenDoor_SessionUnavailable_503(t *testing.T) {
         t.Fatalf("expected 503 with Retry-After, got %d", recorder.Code)
     }
 }
+
+func lockedDoorFixture(t *testing.T) (*doorFixture, *[]error) {
+    t.Helper()
+
+    fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
+        config.LoginAuthenticator = &doorAuthenticator{token: NewTwoFactorLockedToken(NewAuthenticatedToken("u1", nil, nil), 7*time.Second)}
+    })
+
+    failureErrors := []error{}
+    fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLoginFailure, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+        if failureEvent, isFailureEvent := eventValue.Payload().(*LoginFailureEvent); true == isFailureEvent {
+            failureErrors = append(failureErrors, failureEvent.Error())
+        }
+
+        return nil
+    }, eventcontract.ListenerConfig{})
+
+    return fixture, &failureErrors
+}
+
+func TestLoginDoor_LockedSecondFactor_429WithRetryAfter(t *testing.T) {
+    fixture, _ := lockedDoorFixture(t)
+
+    var refusal error
+    fixture.kernel.eventDispatcher.AddListener(
+        "kernel.exception",
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+            if exceptionEvent, ok := eventValue.Payload().(*http.KernelExceptionEvent); true == ok {
+                refusal = exceptionEvent.Err()
+            }
+
+            return nil
+        },
+        eventcontract.ListenerConfig{Priority: 100},
+    )
+
+    recorder := fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil)
+
+    if nethttp.StatusTooManyRequests != recorder.Code || "7" != recorder.Header().Get("Retry-After") || 0 != fixture.login.calls {
+        t.Fatalf("expected 429 with Retry-After 7 and no handler call, got %d %q and %d", recorder.Code, recorder.Header().Get("Retry-After"), fixture.login.calls)
+    }
+
+    context := exception.LogContext(refusal, exception.LogContextConfig{})
+    if false == errors.Is(refusal, ErrSecondFactorLocked) || ReasonSecondFactorLocked != context["reason"] || "main" != context["firewallName"] {
+        t.Fatalf("expected the locked refusal naming its reason and firewall, got %v: %v", context, refusal)
+    }
+}
+
+func TestLoginDoor_LockedSecondFactor_DispatchesLoginFailure(t *testing.T) {
+    fixture, failureErrors := lockedDoorFixture(t)
+
+    fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil)
+
+    if 1 != *fixture.failures || 1 != len(*failureErrors) || false == errors.Is((*failureErrors)[0], ErrSecondFactorLocked) {
+        t.Fatalf("expected one failure event carrying the lockout, got %d %v", *fixture.failures, *failureErrors)
+    }
+}
+
+func TestLoginDoor_RejectedSecondFactor_Still401(t *testing.T) {
+    fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
+        config.LoginAuthenticator = &doorAuthenticator{token: NewTwoFactorRejectedToken(NewAuthenticatedToken("u1", nil, nil))}
+    })
+
+    recorder := fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil)
+    if nethttp.StatusUnauthorized != recorder.Code || "" != recorder.Header().Get("Retry-After") {
+        t.Fatalf("expected a plain 401 for a rejected, unlocked factor, got %d %q", recorder.Code, recorder.Header().Get("Retry-After"))
+    }
+}

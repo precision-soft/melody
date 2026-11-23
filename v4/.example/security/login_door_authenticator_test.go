@@ -23,6 +23,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/service"
     "github.com/precision-soft/melody/v4/.example/twofactor"
     "github.com/precision-soft/melody/v4/bound"
+    melodycache "github.com/precision-soft/melody/v4/cache"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
     melodyconfig "github.com/precision-soft/melody/v4/config"
@@ -803,10 +804,20 @@ func newSecondFactorLoginWith(t *testing.T, options secondFactorLoginOptions) *s
         melodysecurity.DefaultTotpRecoveryHeaderName,
     )
 
+    failedAttemptCache := melodycache.NewManager(
+        melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{Clock: clockInstance}),
+        melodycache.NewJsonSerializer(),
+        melodycache.ManagerConfig{OwnsBackend: true},
+    )
+    t.Cleanup(func() {
+        _ = failedAttemptCache.CloseWithContext(context.Background())
+    })
+
     secondFactor := melodysecurity.NewTotpSecondFactorAuthenticator(
         budget, enrollments, melodysecurity.TotpSecondFactorAuthenticatorConfig{
-            ReplayGuard: melodysecurity.NewMemoryNonceGuard(melodysecurity.MemoryNonceGuardConfig{Clock: clockInstance}),
-            Clock:       clockInstance,
+            ReplayGuard:        melodysecurity.NewMemoryNonceGuard(melodysecurity.MemoryNonceGuardConfig{Clock: clockInstance}),
+            Clock:              clockInstance,
+            FailedAttemptStore: melodysecurity.NewCacheFailedAttemptStore(melodysecurity.CacheFailedAttemptStoreConfig{Cache: failedAttemptCache, Clock: clockInstance}),
         },
     )
 
