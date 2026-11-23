@@ -1,7 +1,6 @@
 package config
 
 import (
-    nethttp "net/http"
     stdpath "path"
     "strings"
     "unicode"
@@ -39,8 +38,8 @@ type LoginConfig struct {
     /* TargetPath is where an html client is redirected when Handler answers no response, "/" when left out; a path within the application. */
     TargetPath string
 
-    /* CrossSite is what a request a browser marks as cross-site meets, CrossSiteRefuse when left out. */
-    CrossSite security.CrossSitePolicy
+    /* CsrfDisabled turns the door's forgery check off, the stated other origin refused without a session cookie included; a trusted origin in FirewallConfig.Csrf.TrustedOrigins is the narrower door. */
+    CsrfDisabled bool
 
     /* Limiter meters the door's own requests before they authenticate; nil meters none. */
     Limiter httpcontract.RateLimiter
@@ -64,7 +63,7 @@ type LogoutConfig struct {
 
     TargetPath string
 
-    CrossSite security.CrossSitePolicy
+    CsrfDisabled bool
 }
 
 /* firewallDoorPathClaimer is the part of a matcher that can say at boot which paths it selects. */
@@ -80,7 +79,6 @@ type firewallDoorDeclaration struct {
     handlerAbsent     bool
     methods           []string
     targetPath        string
-    crossSite         security.CrossSitePolicy
     authenticatorNil  bool
     limiterAbsent     bool
     limiterConfigured bool
@@ -92,13 +90,12 @@ func loginDoorDeclaration(config LoginConfig) firewallDoorDeclaration {
     return firewallDoorDeclaration{
         label: "Login",
         /* a typed-nil handler counts as declared, so the check names it instead of the door vanishing */
-        declared:          "" != config.Path || nil != config.Handler || "" != config.Name || 0 != len(config.Attributes) || nil != config.Authenticator || 0 != len(config.Methods) || "" != config.TargetPath || "" != config.CrossSite || nil != config.Limiter || true == limiterConfigured,
+        declared:          "" != config.Path || nil != config.Handler || "" != config.Name || 0 != len(config.Attributes) || nil != config.Authenticator || 0 != len(config.Methods) || "" != config.TargetPath || true == config.CsrfDisabled || nil != config.Limiter || true == limiterConfigured,
         path:              config.Path,
         attributes:        config.Attributes,
         handlerAbsent:     true == internal.IsNilInterface(config.Handler),
         methods:           config.Methods,
         targetPath:        config.TargetPath,
-        crossSite:         config.CrossSite,
         authenticatorNil:  nil != config.Authenticator && true == internal.IsNilInterface(config.Authenticator),
         limiterAbsent:     true == internal.IsNilInterface(config.Limiter),
         limiterConfigured: limiterConfigured || (nil != config.Limiter && true == internal.IsNilInterface(config.Limiter)),
@@ -108,13 +105,12 @@ func loginDoorDeclaration(config LoginConfig) firewallDoorDeclaration {
 func logoutDoorDeclaration(config LogoutConfig) firewallDoorDeclaration {
     return firewallDoorDeclaration{
         label:         "Logout",
-        declared:      "" != config.Path || nil != config.Handler || "" != config.Name || 0 != len(config.Attributes) || 0 != len(config.Methods) || "" != config.TargetPath || "" != config.CrossSite,
+        declared:      "" != config.Path || nil != config.Handler || "" != config.Name || 0 != len(config.Attributes) || 0 != len(config.Methods) || "" != config.TargetPath || true == config.CsrfDisabled,
         path:          config.Path,
         attributes:    config.Attributes,
         handlerAbsent: true == internal.IsNilInterface(config.Handler),
         methods:       config.Methods,
         targetPath:    config.TargetPath,
-        crossSite:     config.CrossSite,
         limiterAbsent: true,
     }
 }
@@ -148,7 +144,7 @@ func validateFirewallDoor(firewallName string, door firewallDoorDeclaration) err
     }
 
     if false == firewallDoorPathIsLiteral(door.path) {
-        return firewallDoorRefusal("a security firewall door path must be literal and canonical: \"/\" first, no empty, . or .. segment, no parameter, whitespace, percent, query, fragment or backslash", firewallName, field+"Path", door.path)
+        return firewallDoorRefusal(firewallDoorPathNotLiteralMessage, firewallName, field+"Path", door.path)
     }
 
     if true == door.handlerAbsent {
@@ -170,8 +166,8 @@ func validateFirewallDoor(firewallName string, door firewallDoorDeclaration) err
     }
 
     for _, method := range door.methods {
-        switch strings.ToUpper(strings.TrimSpace(method)) {
-        case "", nethttp.MethodGet, nethttp.MethodHead, nethttp.MethodOptions, nethttp.MethodTrace:
+        normalizedMethod := strings.ToUpper(strings.TrimSpace(method))
+        if "" == normalizedMethod || true == http.IsSafeMethod(normalizedMethod) {
             return firewallDoorRefusal("a security firewall door may not serve a safe or empty method: a state change on one is forgeable by a link", firewallName, field+"Methods", method)
         }
     }
@@ -180,12 +176,10 @@ func validateFirewallDoor(firewallName string, door firewallDoorDeclaration) err
         return firewallDoorRefusal("a security firewall door target path must be a path within the application", firewallName, field+"TargetPath", door.targetPath)
     }
 
-    if "" != door.crossSite && security.CrossSiteRefuse != door.crossSite && security.CrossSiteAdmit != door.crossSite {
-        return firewallDoorRefusal("unknown security firewall door cross-site policy", firewallName, field+"CrossSite", string(door.crossSite))
-    }
-
     return nil
 }
+
+const firewallDoorPathNotLiteralMessage = "a security firewall door path must be literal and canonical: \"/\" first, no empty, . or .. segment, no parameter, whitespace, percent, query, fragment or backslash"
 
 func firewallDoorRefusal(message string, firewallName string, field string, value string) error {
     return exception.NewError(

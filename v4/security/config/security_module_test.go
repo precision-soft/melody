@@ -407,3 +407,54 @@ func TestBuilder_RefusesAnUnavailableRetryAfterOutsideItsRule(t *testing.T) {
             BuildAndCompile()
     }
 }
+
+func TestSetGlobal_Csrf_UnknownMode_Refused(t *testing.T) {
+    expectRefusalNamingField(t, "unknown security csrf mode", "GlobalConfig.Csrf.Mode", func() {
+        NewBuilder().SetGlobal(GlobalConfig{Csrf: security.CsrfConfig{Mode: "strict"}})
+    })
+}
+
+func TestAddFirewall_Csrf_UnknownMode_Refused(t *testing.T) {
+    expectRefusalField(t, "FirewallConfig.Csrf.Mode", "main", func() {
+        NewBuilder().AddFirewall("main", security.NewPathPrefixMatcher("/"), &anonymousTokenSource{}, FirewallConfig{Csrf: FirewallCsrfConfig{Mode: "Origin"}})
+    })
+}
+
+func TestAddFirewall_Csrf_MalformedTrustedOrigin_Refused(t *testing.T) {
+    for _, origin := range []string{"https://app.example/", "https://app.example?x", "https://*.example", " ", "app.example", "https://user@app.example"} {
+        expectRefusalField(t, "FirewallConfig.Csrf.TrustedOrigins", "main", func() {
+            NewBuilder().AddFirewall("main", security.NewPathPrefixMatcher("/"), &anonymousTokenSource{}, FirewallConfig{Csrf: FirewallCsrfConfig{TrustedOrigins: []string{"https://ok.example", origin}}})
+        })
+    }
+}
+
+func TestAddFirewall_Csrf_InvalidHeaderName_Refused(t *testing.T) {
+    expectRefusalField(t, "FirewallConfig.Csrf.HeaderName", "main", func() {
+        NewBuilder().AddFirewall("main", security.NewPathPrefixMatcher("/"), &anonymousTokenSource{}, FirewallConfig{Csrf: FirewallCsrfConfig{HeaderName: "X Csrf"}})
+    })
+
+    expectRefusalField(t, "FirewallConfig.Csrf.FieldName", "main", func() {
+        NewBuilder().AddFirewall("main", security.NewPathPrefixMatcher("/"), &anonymousTokenSource{}, FirewallConfig{Csrf: FirewallCsrfConfig{FieldName: "token\t"}})
+    })
+}
+
+func TestAddFirewall_Csrf_TokenPathNotLiteral_Refused(t *testing.T) {
+    for _, path := range []string{"csrf", "/csrf/:id", "/csrf?x", "/a/../csrf"} {
+        expectRefusalField(t, "FirewallConfig.Csrf.TokenPath", "main", func() {
+            NewBuilder().AddFirewall("main", security.NewPathPrefixMatcher("/"), &anonymousTokenSource{}, FirewallConfig{Csrf: FirewallCsrfConfig{TokenPath: path}})
+        })
+    }
+}
+
+func TestAddFirewall_Csrf_TokenPathOnADoorPath_Refused(t *testing.T) {
+    expectRefusalNamingField(t, "the csrf token path of a firewall may not coincide with a door's", "FirewallConfig.Csrf.TokenPath", func() {
+        NewBuilder().AddFirewall("main", security.NewPathPrefixMatcher("/"), &anonymousTokenSource{}, csrfLoginFirewallConfig(FirewallCsrfConfig{TokenPath: "/login/"}))
+    })
+
+    expectRefusalNamingField(t, "the csrf token path of a firewall may not coincide with a door's", "FirewallConfig.Csrf.TokenPath", func() {
+        config := openFirewallConfig()
+        config.Logout = LogoutConfig{Path: "/logout", Handler: &noopLogoutHandler{}}
+        config.Csrf = FirewallCsrfConfig{TokenPath: "/logout"}
+        NewBuilder().AddFirewall("main", security.NewPathPrefixMatcher("/"), &anonymousTokenSource{}, config)
+    })
+}

@@ -501,6 +501,8 @@ A policy that leaves `SameSite` at its zero value gets `SameSiteLaxMode`. `net/h
 
 `SameSite=None` is written `Secure` under `SessionCookieSecureFromScheme` whatever the scheme, since every current browser drops a `None` cookie without it. `SessionCookieSecureNever` with `None` would be written as asked and dropped, so no session would stick: [`SetSessionCookiePolicy`](../../http/kernel.go), the setter `NewKernel` and a module both go through, refuses the pair naming `SessionCookiePolicy.Secure`. Either half alone is admitted.
 
+`Lax` keeps the cookie off a cross-site subrequest, but a page on a sibling subdomain is the same site, and its write carries the cookie: the firewall's [forgery check](SECURITY.md#cross-site-request-forgery) refuses it through `Sec-Fetch-Site`.
+
 ### Rotating the session id
 
 The response path saves and advertises the session published with [`http.SetRequestSession`](../../http/request_session.go) at the moment the response is written, else the one a read loaded, so a handler can replace it. [`RegenerateRequestSession`](../../http/session.go) is that operation done whole: it rotates the id of the session the request carries — the defence against **session fixation** — and republishes the rotated session on the request, so one call is all a login handler needs.
@@ -620,6 +622,7 @@ Where the list itself comes from is the application's business — a constant as
   put a content hash in the url instead of trusting the tag. The tag, `Last-Modified` and `Cache-Control` are only emitted at all when static caching is enabled.
 - The kernel publishes the scheme it resolved through the configured forwarded-headers policy on the request as [`RequestAttributeScheme`](../../http/request.go). A listener has no access to that policy, so re-detecting the scheme without it reports `http` for every request a trusted proxy terminated as `https`.
 - `RouteOptions.Attributes` refuses a key beginning with `_` at registration, naming it.
+- `RouteOptions.Protection` ([`RouteProtectionConfig`](../../http/contract/route_option.go)) turns a framework protection off for one route; its zero value keeps every one. `CsrfDisabled` exempts the route from its firewall's [forgery check](SECURITY.md#cross-site-request-forgery) and is refused on a route that serves only safe methods. The router keeps a protection that turns something off under `RouteAttributeProtection` (`_protection`); read it through [`RouteProtection(request)`](../../http/route.go).
 - The request attributes the kernel owns are the scheme, reserved under the framework's underscore prefix as `_scheme`, and the session, under the private `_session` (the third major keeps its released name `session`), and both are set **after** the route attributes, so a route attribute cannot replace the session or the resolved scheme. Read the scheme through [`RequestAttributeScheme`](../../http/request.go), never through the literal key, and the session through [`RequestSession`](../../http/request_session.go), published with [`SetRequestSession`](../../http/request_session.go). The session is the one place the kernel reads back what a handler wrote: the response path saves and advertises whatever session is published when the response is written, which is what makes [`RegenerateRequestSession`](../../http/session.go) work.
 - A handler that panics with `net/http`'s `ErrAbortHandler` aborts the connection silently, as that sentinel documents, instead of being turned into a `500` plus an error log line. The check is on identity, so an application error merely wrapping the sentinel is unaffected.
 
@@ -662,13 +665,14 @@ Where the list itself comes from is the application's business — a constant as
 - [`CloseDiscardedResponseBody(response, logger)`](../../http/router_utility.go)
 - [`(*KernelRequestEvent).Refuse(err error)`](../../http/kernel_event.go)
 - [`(*KernelRequestEvent).Refusal() error`](../../http/kernel_event.go)
+- Cross-site request forgery ([`csrf.go`](../../http/csrf.go)): `CsrfToken(request) (string, error)`, a masked token of the session's secret, issued under `SessionKeyCsrf` (`_csrf`) on the first call; `VerifyCsrfToken(request, presented) (bool, error)`; `RotateCsrfToken(request) error`; `IsSafeMethod(method) bool`, exactly `GET`, `HEAD`, `OPTIONS` and `TRACE`; `DefaultCsrfHeaderName` (`X-CSRF-Token`), `DefaultCsrfFieldName` (`_csrf_token`); [`RequestCarriesSessionCookie(request) bool`](../../http/request_session.go); [`RouteProtection(request)`](../../http/route.go) and `RouteAttributeProtection`
 - Router and registry:
     - [`NewRouter()`](../../http/router.go)
     - [`NewRouterWithRouteRegistry(httpcontract.RouteRegistry)`](../../http/router.go)
     - [`ControllerHandler(controller any) httpcontract.Handler`](../../http/router_utility.go) — a controller function as a handler, its first argument the request, every later one resolved by its type from the runtime scope at each request; a function of another shape is refused with a panic where it is built
     - [`NewRouteRegistry()`](../../http/route_registry.go)
     - [`NewRouteGroup(router httpcontract.Router, groupConfig httpcontract.GroupConfig) httpcontract.RouteGroup`](../../http/router_group.go) — `Router.Group(groupConfig)` is the same door on a router; `PathPrefix`, `NamePrefix`, `Requirements` and `Defaults`, the maps copied, and the group takes no setting once built
-    - [`type RouteOptions`](../../http/contract/route_option.go) — `Name`, `Methods`, `Host`, `Schemes`, `Requirements`, `Defaults`, `Locales`, `Priority` and `Attributes`, the zero value a route under no name for every method, host and scheme; `Handle` takes it by value and copies its lists and maps
+    - [`type RouteOptions`](../../http/contract/route_option.go) — `Name`, `Methods`, `Host`, `Schemes`, `Requirements`, `Defaults`, `Locales`, `Priority`, `Attributes` and `Protection`, the zero value a route under no name for every method, host and scheme; `Handle` takes it by value and copies its lists and maps
 
 - URL generator:
     - [`NewUrlGenerator(httpcontract.RouteRegistry, UrlGeneratorConfig)`](../../http/url_generator.go) — `UrlGeneratorConfig{PublicUrl}`, the base `GenerateUrl` answers behind, a base that is no clean http or https url refused with a panic naming the field

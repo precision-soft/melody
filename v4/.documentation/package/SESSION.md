@@ -186,6 +186,7 @@ The returned session is a **new object marked modified**, and the one passed in 
 - [`DefaultMaxSessions`](../../session/in_memory_storage.go) — 100,000, the sessions a storage holds when its `MaxSessions` is left out
 - [`DefaultJournalMaxBytes`](../../session/file_storage_journal.go) — 8 MiB, the journal size past which a write compacts it into the snapshot when `JournalMaxBytes` is left out
 - [`SessionCookieName`](../../session/const.go) — `MELODYSESSID`, the name of the browser cookie every passage below calls "the session cookie"
+- [`http.SessionKeyCsrf`](../../http/csrf.go) — `_csrf`, the first session key the framework owns: the csrf secret [`http.CsrfToken`](../../http/csrf.go) issues, dropped by [`http.RegenerateRequestSession`](../../http/session.go); a session holding no other key reads as empty to the forgery check
 
 ### Constructors
 

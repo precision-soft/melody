@@ -114,6 +114,13 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
 
             serveFirewallDoor(runtimeInstance, requestEvent, firewall, token)
 
+            /* checked here and not in access control, so a public route and one no rule matches are checked too */
+            if false == requestEvent.IsPropagationStopped() {
+                if forgeryErr := refuseForgedRequest(runtimeInstance, requestEvent, firewall); nil != forgeryErr {
+                    requestEvent.Refuse(forgeryErr)
+                }
+            }
+
             return nil
         },
         eventcontract.ListenerConfig{Priority: KernelFirewallListenerPriority, Failure: eventcontract.ListenerFailureConfig{MaySkipRequiredListeners: true}},

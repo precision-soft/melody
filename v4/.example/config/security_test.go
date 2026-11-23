@@ -452,8 +452,8 @@ func TestRegisterSecurity_DeclaresWhichFirewallsAreStateless(t *testing.T) {
             t.Fatalf("firewall %q has no expected statelessness; name it here", firewall.Name())
         }
 
-        if expectedStateless != firewall.TokenSource().Stateless() {
-            t.Fatalf("expected firewall %q to answer Stateless() %v", firewall.Name(), expectedStateless)
+        if expectedStateless != firewall.TokenSource().Stateless() || expectedStateless != firewall.CsrfExempt() {
+            t.Fatalf("expected firewall %q to answer Stateless() and CsrfExempt() %v", firewall.Name(), expectedStateless)
         }
 
         seen[firewall.Name()] = true
@@ -555,4 +555,35 @@ func TestRegisterSecurity_TheMainFirewallAnswersAnAccountLookupOutageWith503AndR
             }
         })
     }
+}
+
+func TestRegisterSecurity_MainFirewall_CsrfOriginModeWithTheTokenRoute(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.metricsToken = "scrape-secret"
+    moduleInstance.buildInternalAuth()
+    moduleInstance.buildTokenAuth()
+    moduleInstance.buildImpersonation()
+
+    builder := melodysecurityconfig.NewBuilder()
+    moduleInstance.RegisterSecurity(builder)
+
+    for _, firewall := range builder.BuildAndCompile().Firewalls() {
+        if "main" != firewall.Name() {
+            continue
+        }
+
+        if melodysecurity.CsrfModeOrigin != firewall.Csrf().Mode || true == firewall.CsrfExempt() {
+            t.Fatalf("expected the main firewall checked in the origin mode, got %+v", firewall.Csrf())
+        }
+
+        for _, door := range firewall.Doors() {
+            if route.CsrfTokenName == door.Name && route.CsrfTokenPattern == door.Path {
+                return
+            }
+        }
+
+        t.Fatalf("expected the token route among the main firewall's doors, got %+v", firewall.Doors())
+    }
+
+    t.Fatal("expected the main firewall declared")
 }

@@ -4,11 +4,13 @@ import (
     middlewarepipeline "github.com/precision-soft/melody/v4/http/middleware/pipeline"
     "context"
     nethttp "net/http"
+    "net/http/httptest"
     "os"
     "os/exec"
     "strings"
     "testing"
 
+    "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/http"
@@ -18,6 +20,7 @@ import (
     "github.com/precision-soft/melody/v4/security"
     securityconfig "github.com/precision-soft/melody/v4/security/config"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
+    "github.com/precision-soft/melody/v4/session"
 )
 
 type firewallDoorTestLoginHandler struct{}
@@ -193,4 +196,95 @@ func TestInstallHttpMiddlewares_RefusesARouteAFactoryPutOnADoorsPath(t *testing.
     }()
 
     application.installHttpMiddlewares(kernelInstance.HttpKernel())
+}
+
+func TestFirewallDoor_ARouteOnTheCsrfTokenPathIsReported(t *testing.T) {
+    application, router := newFirewallDoorTestApplication(t)
+    application.securityConfiguration = security.NewCompiledConfiguration(
+        []*security.CompiledFirewall{
+            security.NewCompiledFirewall(security.CompiledFirewallConfig{
+                Name:          "main",
+                Matcher:       security.NewPathPrefixMatcher("/"),
+                CsrfTokenPath: "/csrf-token",
+                CsrfTokenName: "door.csrfToken",
+            }),
+        },
+        nil,
+    )
+
+    application.declareFirewallDoorRoutes()
+    router.Handle("/csrf-token", bootCollisionTestHandler(), http.RouteOptions{Name: "colliding", Methods: []string{nethttp.MethodPost}})
+    application.recordFirewallDoorRouteCollisions()
+
+    if 1 != len(application.bootCollisions) || false == strings.Contains(application.bootCollisions[0].name, `"door.csrfToken"`) {
+        t.Fatalf("expected the route on the token path reported against the token door, got %+v", application.bootCollisions)
+    }
+}
+
+type csrfApplicationTestModule struct {
+    fakeModule
+    csrf security.CsrfConfig
+}
+
+func (instance *csrfApplicationTestModule) RegisterSecurity(builder *securityconfig.Builder) {
+    builder.SetGlobal(securityconfig.GlobalConfig{AccessControl: security.NewAccessControl(nil), Csrf: instance.csrf})
+    builder.AddFirewall(
+        "main",
+        security.NewPathPrefixMatcher("/"),
+        security.NewResolverTokenSource(func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+            return security.NewAnonymousToken(), nil
+        }, security.ResolverTokenSourceConfig{}),
+        securityconfig.FirewallConfig{},
+    )
+}
+
+func (instance *csrfApplicationTestModule) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
+    kernelInstance.HttpRouter().Handle("/account", bootCollisionTestHandler(), http.RouteOptions{Name: "account", Methods: []string{nethttp.MethodPost}})
+}
+
+/* serveCsrfApplicationWrite boots an application over one session firewall and posts to its route with a session holding an identity */
+func serveCsrfApplicationWrite(t *testing.T, csrf security.CsrfConfig, headers map[string]string) int {
+    t.Helper()
+
+    application := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    application.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
+    application.RegisterModule(&csrfApplicationTestModule{fakeModule: fakeModule{name: "csrf"}, csrf: csrf})
+    kernelInstance := application.Boot()
+    serviceContainer := kernelInstance.ServiceContainer()
+
+    manager := session.SessionMustFromResolver(t.Context(), serviceContainer)
+    sessionInstance := mustSession(manager.NewSession(sessionRuntime()))
+    sessionInstance.Set("identity", "u1")
+    if saveErr := manager.SaveSession(sessionRuntime(), sessionInstance); nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+
+    request := httptest.NewRequest(nethttp.MethodPost, "http://app.example.com/account", nil)
+    request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionInstance.Id()})
+    for name, value := range headers {
+        request.Header.Set(name, value)
+    }
+
+    recorder := httptest.NewRecorder()
+    kernelInstance.HttpKernel().ServeHttp(serviceContainer).ServeHTTP(recorder, request)
+
+    return recorder.Code
+}
+
+func TestApplication_SiblingSubdomainWrite_OnASessionRoute_Refused403(t *testing.T) {
+    sibling := map[string]string{"Sec-Fetch-Site": "same-site", "Origin": "http://evil.example.com"}
+
+    if status := serveCsrfApplicationWrite(t, security.CsrfConfig{}, sibling); nethttp.StatusForbidden != status {
+        t.Fatalf("expected a sibling subdomain's write refused 403, got %d", status)
+    }
+
+    if status := serveCsrfApplicationWrite(t, security.CsrfConfig{}, map[string]string{"Sec-Fetch-Site": "same-origin"}); nethttp.StatusForbidden == status {
+        t.Fatalf("expected a same-origin write served, got %d", status)
+    }
+}
+
+func TestApplication_GlobalCsrfDisabled_ForgedRequestServed(t *testing.T) {
+    if status := serveCsrfApplicationWrite(t, security.CsrfConfig{Mode: security.CsrfModeDisabled}, map[string]string{"Sec-Fetch-Site": "cross-site"}); nethttp.StatusForbidden == status {
+        t.Fatalf("expected the global door to serve a forged write, got %d", status)
+    }
 }

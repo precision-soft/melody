@@ -6,6 +6,7 @@ import (
     nethttp "net/http"
     "net/http/httptest"
     "reflect"
+    "strings"
     "sync"
     "testing"
     "time"
@@ -631,4 +632,161 @@ func assertRefusedAsNilRuntime(t *testing.T, err error) {
     if nil == err || "the runtime is nil or carries no context" != err.Error() {
         t.Fatalf("expected the nil runtime refusal, got %v", err)
     }
+}
+
+const (
+    csrfAccountPath = "/account"
+    csrfUploadPath  = "/upload"
+    csrfTokenPath   = "/csrf-token"
+)
+
+type csrfStatelessTokenSource struct{}
+
+func (instance *csrfStatelessTokenSource) Name() string { return "stateless" }
+
+func (instance *csrfStatelessTokenSource) Stateless() bool { return true }
+
+func (instance *csrfStatelessTokenSource) Resolve(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+    return NewAnonymousToken(), nil
+}
+
+/* csrfFixture serves a session firewall over a route of every method and a route that turned the check off */
+type csrfFixture struct {
+    registry  *FirewallRegistry
+    kernel    *testKernel
+    container containercontract.Container
+    manager   sessioncontract.Manager
+    logger    *recordingLogger
+    served    *int
+}
+
+type csrfProbe struct {
+    method      string
+    path        string
+    sessionId   string
+    headers     map[string]string
+    body        string
+    contentType string
+}
+
+func newCsrfFixture(t *testing.T, mutate func(*CompiledFirewallConfig)) *csrfFixture {
+    t.Helper()
+
+    served := 0
+    handler := func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        served++
+
+        return http.TextResponse(nethttp.StatusOK, "served"), nil
+    }
+
+    kernel := newTestKernel()
+    kernel.httpRouter.Handle(csrfAccountPath, handler, http.RouteOptions{})
+    kernel.httpRouter.Handle(csrfUploadPath, handler, http.RouteOptions{Methods: []string{nethttp.MethodPost}, Protection: http.RouteProtectionConfig{CsrfDisabled: true}})
+
+    config := CompiledFirewallConfig{
+        Name:          "main",
+        Matcher:       NewPathPrefixMatcher("/"),
+        TokenSource:   &doorTokenSource{},
+        LoginPath:     doorLoginPath,
+        LoginHandler:  &doorLoginHandler{},
+        LogoutPath:    doorLogoutPath,
+        LogoutHandler: &doorLogoutHandler{},
+    }
+
+    if nil != mutate {
+        mutate(&config)
+    }
+
+    registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{NewCompiledFirewall(config)}, nil))
+    RegisterKernelSecurityResolutionListener(kernel, registry)
+
+    logger := &recordingLogger{}
+    serviceContainer := servedSecurityContainer(t, kernel, logger)
+
+    return &csrfFixture{
+        registry:  registry,
+        kernel:    kernel,
+        container: serviceContainer,
+        manager:   session.SessionMustFromResolver(t.Context(), serviceContainer),
+        logger:    logger,
+        served:    &served,
+    }
+}
+
+/* storedSession saves a session holding the values and a csrf secret, and answers its id and a token of the secret */
+func (instance *csrfFixture) storedSession(t *testing.T, values map[string]any) (string, string) {
+    t.Helper()
+
+    sessionInstance := mustSession(instance.manager.NewSession(sessionRuntime()))
+    for key, value := range values {
+        sessionInstance.Set(key, value)
+    }
+
+    issuer := http.NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, http.RequestConfig{})
+    if setErr := http.SetRequestSession(issuer, sessionInstance); nil != setErr {
+        t.Fatalf("unexpected error: %v", setErr)
+    }
+
+    token, tokenErr := http.CsrfToken(issuer)
+    if nil != tokenErr {
+        t.Fatalf("unexpected error: %v", tokenErr)
+    }
+
+    if saveErr := instance.manager.SaveSession(sessionRuntime(), sessionInstance); nil != saveErr {
+        t.Fatalf("unexpected error: %v", saveErr)
+    }
+
+    return sessionInstance.Id(), token
+}
+
+func (instance *csrfFixture) serve(t *testing.T, probe csrfProbe) *httptest.ResponseRecorder {
+    t.Helper()
+
+    method := probe.method
+    if "" == method {
+        method = nethttp.MethodPost
+    }
+
+    path := probe.path
+    if "" == path {
+        path = csrfAccountPath
+    }
+
+    request := httptest.NewRequest(method, path, strings.NewReader(probe.body))
+    request.Header.Set("Accept", "application/json")
+    if "" != probe.contentType {
+        request.Header.Set("Content-Type", probe.contentType)
+    }
+
+    for name, value := range probe.headers {
+        request.Header.Set(name, value)
+    }
+
+    if "" != probe.sessionId {
+        request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: probe.sessionId})
+    }
+
+    recorder := httptest.NewRecorder()
+    instance.kernel.httpKernel.ServeHttp(instance.container).ServeHTTP(recorder, request)
+
+    return recorder
+}
+
+/* csrfRefusals collects the refusals the kernel.exception path sees */
+func (instance *csrfFixture) refusals() *[]error {
+    recorded := make([]error, 0)
+
+    instance.kernel.eventDispatcher.AddListener(
+        kernelcontract.EventKernelException,
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+            if exceptionEvent, isExceptionEvent := eventValue.Payload().(*http.KernelExceptionEvent); true == isExceptionEvent {
+                recorded = append(recorded, exceptionEvent.Err())
+            }
+
+            return nil
+        },
+        eventcontract.ListenerConfig{Priority: 100},
+    )
+
+    return &recorded
 }

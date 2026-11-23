@@ -5,6 +5,7 @@ import (
 
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/internal"
 )
 
 const (
@@ -17,6 +18,9 @@ const (
     RouteAttributeSchemes = "_schemes"
     RouteAttributeLocales = "_locales"
     RouteAttributeLocale  = "_locale"
+
+    /* RouteAttributeProtection carries the route's RouteOptions.Protection, written only when it turns something off; read it through RouteProtection. */
+    RouteAttributeProtection = "_protection"
 
     /* RouteAttributeExpose, set to the bool true in a route's options attributes, opts the route into the frontend route manifest. RouteAttributeZone tags it with one of the RouteZone* values. */
     RouteAttributeExpose = "expose"
@@ -49,6 +53,27 @@ func ExposedRouteAttributes(zone string) map[string]any {
     }
 
     return attributes
+}
+
+/* RouteProtection answers the protections the matched route turned off, the zero value when it turned none off or no route matched. */
+func RouteProtection(request httpcontract.Request) httpcontract.RouteProtectionConfig {
+    if true == internal.IsNilInterface(request) || true == internal.IsNilInterface(request.Attributes()) {
+        return httpcontract.RouteProtectionConfig{}
+    }
+
+    value, exists := request.Attributes().Get(RouteAttributeProtection)
+    if false == exists {
+        return httpcontract.RouteProtectionConfig{}
+    }
+
+    /* a value of another type answers the zero value the failed assertion yields */
+    protection, _ := value.(httpcontract.RouteProtectionConfig)
+
+    return protection
+}
+
+func routeProtectionTurnsNothingOff(protection httpcontract.RouteProtectionConfig) bool {
+    return false == protection.CsrfDisabled
 }
 
 /* RouteZones answers the declared zones in declaration order. */

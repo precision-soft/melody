@@ -31,6 +31,8 @@ var ErrPageNotFound = errors.New("page not found")
 //go:embed *.html
 var pages embed.FS
 
+const csrfTokenPlaceholder = "{{csrf_token}}"
+
 func Load(fileName string) (string, error) {
     content, err := pages.ReadFile(fileName)
     if nil != err {
@@ -65,6 +67,20 @@ func Html(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcon
     }
 
     htmlString = strings.ReplaceAll(htmlString, "{{viewer_json}}", escapeForSingleQuotedScript(string(viewerJson)))
+
+    /* only a page that carries the placeholder issues the secret: the login page must not write one into an anonymous session */
+    if true == strings.Contains(htmlString, csrfTokenPlaceholder) {
+        csrfToken, csrfTokenErr := melodyhttp.CsrfToken(request)
+        if nil != csrfTokenErr {
+            csrfToken = ""
+            examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
+                "page rendered without its csrf token",
+                melodyexception.LogContext(csrfTokenErr, melodyexception.LogContextConfig{Extra: melodyloggingcontract.Context{"page": fileName}}),
+            )
+        }
+
+        htmlString = strings.ReplaceAll(htmlString, csrfTokenPlaceholder, csrfToken)
+    }
 
     return melodyhttp.HtmlResponse(statusCode, htmlString)
 }

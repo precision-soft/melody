@@ -2,6 +2,7 @@ package security
 
 import (
     "errors"
+    nethttp "net/http"
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
@@ -42,14 +43,21 @@ type CompiledFirewallConfig struct {
     LoginAuthenticator securitycontract.Authenticator
     LoginMethods       []string
     LoginTargetPath    string
-    LoginCrossSite     CrossSitePolicy
+    LoginCsrfDisabled  bool
     LoginRateLimit     *httpmiddleware.RateLimitGate
 
     LogoutName       string
     LogoutAttributes map[string]any
     LogoutMethods    []string
-    LogoutTargetPath string
-    LogoutCrossSite  CrossSitePolicy
+    LogoutTargetPath   string
+    LogoutCsrfDisabled bool
+
+    /* Csrf is how the firewall checks an unsafe request riding its session; the zero value checks in CsrfModeOrigin. A firewall whose token source answers Stateless checks none of its routes. */
+    Csrf CsrfConfig
+
+    /* CsrfTokenPath is the literal path the firewall answers its session's csrf token on, to GET; "" serves none, and a path on a firewall that checks nothing is refused. */
+    CsrfTokenPath string
+    CsrfTokenName string
 
     RoleHierarchySource         Source
     AccessDecisionManagerSource Source
@@ -102,6 +110,36 @@ func NewCompiledFirewall(config CompiledFirewallConfig) *CompiledFirewall {
         exception.Panic(refusal)
     }
 
+    csrf, csrfErr := ResolveCsrfConfig(config.Csrf, "CompiledFirewallConfig.Csrf")
+    if nil != csrfErr {
+        refusal := exception.FromError(csrfErr)
+        refusal.SetContextValue("firewallName", config.Name)
+
+        exception.Panic(refusal)
+    }
+
+    stateless := false == internal.IsNilInterface(config.TokenSource) && true == config.TokenSource.Stateless()
+
+    if "" != config.CsrfTokenPath && (CsrfModeDisabled == csrf.Mode || true == stateless) {
+        cause := "stateless"
+        if CsrfModeDisabled == csrf.Mode {
+            cause = "mode"
+        }
+
+        exception.Panic(
+            exception.NewError(
+                "a security csrf token path is declared on a firewall that checks no request",
+                exceptioncontract.Context{
+                    "firewallName": config.Name,
+                    "field":        "FirewallConfig.Csrf.TokenPath",
+                    "value":        config.CsrfTokenPath,
+                    "cause":        cause,
+                },
+                nil,
+            ),
+        )
+    }
+
     var firewall *Firewall
     if 0 != len(config.Rules) {
         firewall = NewFirewall(config.Rules)
@@ -128,15 +166,22 @@ func NewCompiledFirewall(config CompiledFirewallConfig) *CompiledFirewall {
             attributes: internal.CopyAnyMap(config.LoginAttributes),
             methods:    doorMethodsOrDefault(config.LoginMethods),
             targetPath: doorTargetPathOrDefault(config.LoginTargetPath),
-            crossSite:  config.LoginCrossSite,
+            csrfDisabled: config.LoginCsrfDisabled,
         },
         logoutDoor: firewallDoorSettings{
             name:       config.LogoutName,
             attributes: internal.CopyAnyMap(config.LogoutAttributes),
             methods:    doorMethodsOrDefault(config.LogoutMethods),
             targetPath: doorTargetPathOrDefault(config.LogoutTargetPath),
-            crossSite:  config.LogoutCrossSite,
+            csrfDisabled: config.LogoutCsrfDisabled,
         },
+        csrfTokenDoor: firewallDoorSettings{
+            name:    config.CsrfTokenName,
+            methods: []string{nethttp.MethodGet},
+        },
+        csrf:          csrf,
+        csrfTokenPath: config.CsrfTokenPath,
+        stateless:     stateless,
         loginAuthenticator: config.LoginAuthenticator,
         loginRateLimit:     config.LoginRateLimit,
         roleHierarchySource:         sourceOrNone(config.RoleHierarchySource),
@@ -173,6 +218,10 @@ type CompiledFirewall struct {
     loginRateLimit        *httpmiddleware.RateLimitGate
     loginDoor             firewallDoorSettings
     logoutDoor            firewallDoorSettings
+    csrfTokenDoor         firewallDoorSettings
+    csrf                  CsrfConfig
+    csrfTokenPath         string
+    stateless             bool
 
     rules                       []securitycontract.Rule
     firewall                    *Firewall
@@ -184,6 +233,19 @@ type CompiledFirewall struct {
     entryPointSource            Source
     accessDeniedHandlerSource   Source
     unavailableRetryAfter       time.Duration
+}
+
+/* Csrf answers the firewall's resolved csrf configuration. */
+func (instance *CompiledFirewall) Csrf() CsrfConfig {
+    csrf := instance.csrf
+    csrf.TrustedOrigins = append([]string{}, instance.csrf.TrustedOrigins...)
+
+    return csrf
+}
+
+/* CsrfExempt answers whether the firewall checks none of its routes for forgery: its mode is CsrfModeDisabled or its token source answers Stateless. Its doors still refuse a stated other origin unless the mode is disabled. */
+func (instance *CompiledFirewall) CsrfExempt() bool {
+    return CsrfModeDisabled == instance.csrf.Mode || true == instance.stateless
 }
 
 func (instance *CompiledFirewall) Name() string {

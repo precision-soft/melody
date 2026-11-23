@@ -1,6 +1,8 @@
 package http
 
 import (
+    nethttp "net/http"
+    "net/http/httptest"
     "testing"
 
     "github.com/precision-soft/melody/v4/internal/testhelper"
@@ -71,5 +73,23 @@ func TestExposedRouteAttributes_RefusesAZoneThatIsNotDeclared(t *testing.T) {
         testhelper.AssertPanicsWithError(t, func() {
             _ = ExposedRouteAttributes(zone)
         }, "route zone is not one of the declared zones")
+    }
+}
+
+func TestRouteProtection_AttributeOfAnotherType_AnswersTheZeroValue(t *testing.T) {
+    request := NewRequest(httptest.NewRequest(nethttp.MethodPost, "http://example.com/", nil), nil, RequestConfig{})
+
+    if true == RouteProtection(request).CsrfDisabled || true == RouteProtection(nil).CsrfDisabled {
+        t.Fatalf("expected the zero value without the attribute")
+    }
+
+    request.Attributes().Set(RouteAttributeProtection, map[string]any{"CsrfDisabled": true})
+    if true == RouteProtection(request).CsrfDisabled {
+        t.Fatalf("expected a value of another type read as the zero value")
+    }
+
+    request.Attributes().Set(RouteAttributeProtection, RouteProtectionConfig{CsrfDisabled: true})
+    if false == RouteProtection(request).CsrfDisabled {
+        t.Fatalf("expected the carried protection read")
     }
 }

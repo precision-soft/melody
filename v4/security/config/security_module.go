@@ -31,6 +31,20 @@ type GlobalConfig struct {
 
     /* UnavailableRetryAfter is the Retry-After of the 503 an unavailable token earns on a protected route: absent is 5s, 1s to 1h in whole seconds, unlimited refused. */
     UnavailableRetryAfter bound.Duration
+
+    /* Csrf is how every firewall checks an unsafe request riding its session for forgery, unless its own Csrf says otherwise; the zero value checks in security.CsrfModeOrigin. */
+    Csrf security.CsrfConfig
+}
+
+/* FirewallCsrfConfig is how one firewall checks for forgery: Mode, HeaderName and FieldName left empty and TrustedOrigins left nil inherit GlobalConfig.Csrf field by field, an empty non-nil TrustedOrigins trusting none. TokenPath is the literal path the firewall answers its session's csrf token on, to GET, "" serving none; TokenName is its route name, security.<firewall>.csrfToken when left out. */
+type FirewallCsrfConfig struct {
+    Mode           security.CsrfMode
+    HeaderName     string
+    FieldName      string
+    TrustedOrigins []string
+
+    TokenPath string
+    TokenName string
 }
 
 /* FirewallOverride is what one firewall declares against the global configuration; the zero value inherits the global access control, local rules first, and overrides nothing. A typed nil among the dependencies is refused naming the field. */
@@ -57,6 +71,8 @@ type FirewallConfig struct {
 
     Login  LoginConfig
     Logout LogoutConfig
+
+    Csrf FirewallCsrfConfig
 
     Override FirewallOverride
 }
@@ -108,6 +124,12 @@ func (instance *Builder) SetGlobal(config GlobalConfig) *Builder {
         exception.Panic(exception.FromError(retryAfterErr))
     }
 
+    if _, csrfErr := security.ResolveCsrfConfig(config.Csrf, "GlobalConfig.Csrf"); nil != csrfErr {
+        exception.Panic(exception.FromError(csrfErr))
+    }
+
+    config.Csrf.TrustedOrigins = copyNilableStrings(config.Csrf.TrustedOrigins)
+
     instance.globalConfigured = true
     instance.global = config
 
@@ -128,6 +150,7 @@ func (instance *Builder) AddFirewall(
         config:      config,
     }
     declaration.config.Rules = append([]securitycontract.Rule{}, config.Rules...)
+    declaration.config.Csrf.TrustedOrigins = copyNilableStrings(config.Csrf.TrustedOrigins)
 
     if identityErr := validateFirewallIdentity(declaration); nil != identityErr {
         exception.Panic(exception.FromError(identityErr))
@@ -159,6 +182,10 @@ func (instance *Builder) AddFirewall(
         exception.Panic(exception.FromError(retryAfterErr))
     }
 
+    if csrfErr := validateFirewallCsrf(declaration); nil != csrfErr {
+        exception.Panic(exception.FromError(csrfErr))
+    }
+
     instance.firewalls = append(instance.firewalls, declaration)
 
     return instance
@@ -175,7 +202,7 @@ func (instance *Builder) BuildAndCompile() *security.CompiledConfiguration {
         exception.Panic(exception.FromError(err))
     }
 
-    instance.bootWarnings = compileBootWarnings(compiled)
+    instance.bootWarnings = compileBootWarnings(compiled, instance.global, instance.firewalls)
 
     return compiled
 }
@@ -201,6 +228,63 @@ func validateOverrideUnavailableRetryAfter(declaration firewallDeclaration) erro
     }
 
     return nil
+}
+
+func validateFirewallCsrf(declaration firewallDeclaration) error {
+    csrf := declaration.config.Csrf
+
+    _, csrfErr := security.ResolveCsrfConfig(
+        security.CsrfConfig{Mode: csrf.Mode, HeaderName: csrf.HeaderName, FieldName: csrf.FieldName, TrustedOrigins: csrf.TrustedOrigins},
+        "FirewallConfig.Csrf",
+    )
+    if nil != csrfErr {
+        refusal := exception.FromError(csrfErr)
+        refusal.SetContextValue("firewallName", declaration.name)
+
+        return refusal
+    }
+
+    if "" == csrf.TokenPath {
+        return nil
+    }
+
+    if false == firewallDoorPathIsLiteral(csrf.TokenPath) {
+        return firewallDoorRefusal(firewallDoorPathNotLiteralMessage, declaration.name, "FirewallConfig.Csrf.TokenPath", csrf.TokenPath)
+    }
+
+    tokenPath := security.FirewallDoorPathForm(csrf.TokenPath)
+    for _, doorPath := range []string{declaration.config.Login.Path, declaration.config.Logout.Path} {
+        if "" != doorPath && security.FirewallDoorPathForm(doorPath) == tokenPath {
+            return firewallDoorRefusal("the csrf token path of a firewall may not coincide with a door's", declaration.name, "FirewallConfig.Csrf.TokenPath", csrf.TokenPath)
+        }
+    }
+
+    return nil
+}
+
+/* effectiveCsrf inherits the global configuration field by field; a nil TrustedOrigins inherits, an empty one trusts none */
+func effectiveCsrf(global GlobalConfig, declaration firewallDeclaration) security.CsrfConfig {
+    effective := global.Csrf
+    effective.TrustedOrigins = copyNilableStrings(global.Csrf.TrustedOrigins)
+
+    firewallCsrf := declaration.config.Csrf
+    if "" != firewallCsrf.Mode {
+        effective.Mode = firewallCsrf.Mode
+    }
+
+    if "" != firewallCsrf.HeaderName {
+        effective.HeaderName = firewallCsrf.HeaderName
+    }
+
+    if "" != firewallCsrf.FieldName {
+        effective.FieldName = firewallCsrf.FieldName
+    }
+
+    if nil != firewallCsrf.TrustedOrigins {
+        effective.TrustedOrigins = append([]string{}, firewallCsrf.TrustedOrigins...)
+    }
+
+    return effective
 }
 
 func effectiveUnavailableRetryAfter(global GlobalConfig, declaration firewallDeclaration) bound.Duration {
@@ -314,4 +398,13 @@ func refuseTypedNilOverrideDependency(firewallName string, dependencyName string
             nil,
         ),
     )
+}
+
+/* copyNilableStrings keeps nil apart from empty, which inheritance reads differently */
+func copyNilableStrings(values []string) []string {
+    if nil == values {
+        return nil
+    }
+
+    return append([]string{}, values...)
 }

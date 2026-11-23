@@ -239,6 +239,11 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
                 Attributes: melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic),
                 Handler:    security.NewSessionLogoutHandler(sessionIndexLookup),
             },
+            /* the default origin mode checks every unsafe request riding the session; the token route serves a client that renders no page */
+            Csrf: melodysecurityconfig.FirewallCsrfConfig{
+                TokenPath: route.CsrfTokenPattern,
+                TokenName: route.CsrfTokenName,
+            },
         },
     )
 }

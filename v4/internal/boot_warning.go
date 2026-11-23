@@ -16,6 +16,7 @@ const (
     BootWarningNameStaticCacheMaxAgeIgnored                   = "http.static.cacheMaxAgeIgnored"
     BootWarningNameRetryPolicyServiceIgnored                  = "messagebus.retryPolicyServiceIgnored"
     BootWarningNameServiceBuiltAtBootFailed                   = "application.service.builtAtBootFailed"
+    BootWarningNameCsrfDisabledOnLoginFirewall                = "security.csrfDisabledOnLoginFirewall"
 )
 
 type bootWarningRegistration struct {
@@ -40,6 +41,7 @@ func NewBootWarningRegistry() *BootWarningRegistry {
             {name: BootWarningNameStaticCacheMaxAgeIgnored, writtenInCli: false},
             {name: BootWarningNameRetryPolicyServiceIgnored, writtenInCli: true},
             {name: BootWarningNameServiceBuiltAtBootFailed, writtenInCli: false},
+            {name: BootWarningNameCsrfDisabledOnLoginFirewall, writtenInCli: false},
         },
     }
 }

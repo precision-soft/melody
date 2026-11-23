@@ -67,6 +67,17 @@ const normalizeSuccessBodyOrThrow = (body: any): any => {
     return body;
 };
 
+let csrfToken: string | null = null;
+
+/* the page renders its session's token into the csrf-token meta; the firewall asks it of every unsafe request riding the session */
+const readCsrfToken = (): string => {
+    if (null === csrfToken) {
+        csrfToken = String(document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") ?? "").trim();
+    }
+
+    return csrfToken;
+};
+
 const requestJson = (method: string, url: string, data?: unknown, extraHeaders?: Record<string, string>): any => {
     requireJquery();
 
@@ -83,6 +94,10 @@ const requestJson = (method: string, url: string, data?: unknown, extraHeaders?:
     const hasBody = null != data && "GET" !== safeMethod && "HEAD" !== safeMethod;
     if (true === hasBody) {
         headers["Content-Type"] = "application/json";
+    }
+
+    if ("GET" !== safeMethod && "HEAD" !== safeMethod && "" !== readCsrfToken()) {
+        headers["X-CSRF-Token"] = readCsrfToken();
     }
 
     const requestOptions: Record<string, unknown> = {

@@ -3,7 +3,6 @@ package security
 import (
     "errors"
     nethttp "net/http"
-    "net/url"
     "strings"
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -18,16 +17,7 @@ import (
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
-/* CrossSitePolicy states what a firewall door does with a request a browser marks as coming from another site. */
-type CrossSitePolicy string
-
 const (
-    /* CrossSiteRefuse answers 403 to it, and is what a door left unset does. */
-    CrossSiteRefuse CrossSitePolicy = "refuse"
-
-    /* CrossSiteAdmit serves it, for a sign-in an api deliberately calls across origins under its CORS policy. */
-    CrossSiteAdmit CrossSitePolicy = "admit"
-
     /* DefaultFirewallDoorTargetPath is where an html client is redirected when a door's handler answers no response. */
     DefaultFirewallDoorTargetPath = "/"
 )
@@ -52,8 +42,8 @@ type firewallDoorSettings struct {
     name       string
     attributes map[string]any
     methods    []string
-    targetPath string
-    crossSite  CrossSitePolicy
+    targetPath   string
+    csrfDisabled bool
 }
 
 func doorMethodsOrDefault(methods []string) []string {
@@ -72,9 +62,9 @@ func doorTargetPathOrDefault(targetPath string) string {
     return targetPath
 }
 
-/* Doors answers the login and the logout door the firewall declares. */
+/* Doors answers the login, the logout and the csrf token door the firewall declares. */
 func (instance *CompiledFirewall) Doors() []FirewallDoor {
-    doors := make([]FirewallDoor, 0, 2)
+    doors := make([]FirewallDoor, 0, 3)
 
     if "" != instance.loginPath {
         doors = append(doors, instance.loginDoor.publicForm(instance.loginPath))
@@ -82,6 +72,10 @@ func (instance *CompiledFirewall) Doors() []FirewallDoor {
 
     if "" != instance.logoutPath {
         doors = append(doors, instance.logoutDoor.publicForm(instance.logoutPath))
+    }
+
+    if "" != instance.csrfTokenPath {
+        doors = append(doors, instance.csrfTokenDoor.publicForm(instance.csrfTokenPath))
     }
 
     return doors
@@ -127,7 +121,7 @@ func serveFirewallDoor(
     firewall *CompiledFirewall,
     token securitycontract.Token,
 ) {
-    if "" == firewall.loginPath && "" == firewall.logoutPath {
+    if "" == firewall.loginPath && "" == firewall.logoutPath && "" == firewall.csrfTokenPath {
         return
     }
 
@@ -147,7 +141,47 @@ func serveFirewallDoor(
 
     if "" != firewall.logoutPath && FirewallDoorPathForm(firewall.logoutPath) == path && true == firewall.logoutDoor.serves(httpRequest.Method) {
         serveLogoutDoor(runtimeInstance, requestEvent, firewall, token)
+
+        return
     }
+
+    /* HEAD rides the GET the door publishes, as the router's HEAD fallback does */
+    if "" != firewall.csrfTokenPath && FirewallDoorPathForm(firewall.csrfTokenPath) == path && (nethttp.MethodGet == httpRequest.Method || nethttp.MethodHead == httpRequest.Method) {
+        serveCsrfTokenDoor(runtimeInstance, requestEvent, firewall)
+    }
+}
+
+/* serveCsrfTokenDoor answers the session's masked token, issuing its secret, to a client that renders no page to carry it */
+func serveCsrfTokenDoor(
+    runtimeInstance containercontract.Runtime,
+    requestEvent *http.KernelRequestEvent,
+    firewall *CompiledFirewall,
+) {
+    request := requestEvent.Request()
+
+    if _, sessionErr := requestSessionAtFirewallDoor(request); nil != sessionErr {
+        requestEvent.Refuse(refuseSessionErrorAtFirewallDoor(runtimeInstance, requestEvent, firewall, firewall.csrfTokenDoor.name, sessionErr))
+
+        return
+    }
+
+    csrfToken, tokenErr := http.CsrfToken(request)
+    if nil != tokenErr {
+        requestEvent.Refuse(refuseSessionErrorAtFirewallDoor(runtimeInstance, requestEvent, firewall, firewall.csrfTokenDoor.name, tokenErr))
+
+        return
+    }
+
+    response, responseErr := http.JsonResponse(nethttp.StatusOK, map[string]any{"token": csrfToken})
+    if nil != responseErr {
+        requestEvent.Refuse(responseErr)
+
+        return
+    }
+
+    response.Headers().Set("Cache-Control", "no-store")
+
+    requestEvent.SetResponse(response)
 }
 
 func serveLoginDoor(
@@ -162,8 +196,8 @@ func serveLoginDoor(
         return
     }
 
-    if CrossSiteAdmit != firewall.loginDoor.crossSite && true == requestIsCrossSite(request) {
-        requestEvent.Refuse(exception.Forbidden("cross-site request refused"))
+    if forgeryErr := refuseForgedDoorRequest(runtimeInstance, requestEvent, firewall, firewall.loginDoor); nil != forgeryErr {
+        requestEvent.Refuse(forgeryErr)
 
         return
     }
@@ -404,8 +438,8 @@ func serveLogoutDoor(
 ) {
     request := requestEvent.Request()
 
-    if CrossSiteAdmit != firewall.logoutDoor.crossSite && true == requestIsCrossSite(request) {
-        requestEvent.Refuse(exception.Forbidden("cross-site request refused"))
+    if forgeryErr := refuseForgedDoorRequest(runtimeInstance, requestEvent, firewall, firewall.logoutDoor); nil != forgeryErr {
+        requestEvent.Refuse(forgeryErr)
 
         return
     }
@@ -512,33 +546,4 @@ func answerFirewallDoor(
     }
 
     requestEvent.SetResponse(answer)
-}
-
-/* requestIsCrossSite reads what a browser states about the request's origin: Sec-Fetch-Site when it sent one, where only same-origin and a user-initiated none pass, so a sibling subdomain is refused, else Origin against the request's scheme and host, so a plain http page cannot post to its https twin. A request with neither is no browser's cross-site form and is admitted. */
-func requestIsCrossSite(request httpcontract.Request) bool {
-    httpRequest := request.HttpRequest()
-
-    fetchSite := strings.ToLower(strings.TrimSpace(httpRequest.Header.Get("Sec-Fetch-Site")))
-    if "" != fetchSite {
-        return "same-origin" != fetchSite && "none" != fetchSite
-    }
-
-    origin := strings.TrimSpace(httpRequest.Header.Get("Origin"))
-    if "" == origin {
-        return false
-    }
-
-    /* "null", an opaque origin, parses to no host and is refused with any foreign one */
-    originUrl, parseErr := url.Parse(origin)
-    if nil != parseErr {
-        return true
-    }
-
-    if schemeValue, published := request.Attributes().Get(http.RequestAttributeScheme); true == published {
-        if scheme, isText := schemeValue.(string); true == isText && false == strings.EqualFold(originUrl.Scheme, scheme) {
-            return true
-        }
-    }
-
-    return false == strings.EqualFold(originUrl.Host, httpRequest.Host)
 }

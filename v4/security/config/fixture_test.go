@@ -116,3 +116,29 @@ func expectErrorField(t *testing.T, err error, field string, firewallName string
         t.Fatalf("expected the error to name firewall %s, got %v", firewallName, refusal.Context())
     }
 }
+
+type statelessTokenSource struct {
+    anonymousTokenSource
+}
+
+func (instance *statelessTokenSource) Stateless() bool {
+    return true
+}
+
+func csrfLoginFirewallConfig(csrf FirewallCsrfConfig) FirewallConfig {
+    config := openFirewallConfig()
+    config.Login = LoginConfig{Path: "/login", Handler: &noopLoginHandler{}}
+    config.Csrf = csrf
+
+    return config
+}
+
+func compileOneCsrfFirewall(t *testing.T, global security.CsrfConfig, tokenSource securitycontract.TokenSource, csrf FirewallCsrfConfig) *security.CompiledFirewall {
+    t.Helper()
+
+    builder := NewBuilder()
+    builder.SetGlobal(GlobalConfig{Csrf: global})
+    builder.AddFirewall("main", security.NewPathPrefixMatcher("/"), tokenSource, csrfLoginFirewallConfig(csrf))
+
+    return builder.BuildAndCompile().Firewalls()[0]
+}

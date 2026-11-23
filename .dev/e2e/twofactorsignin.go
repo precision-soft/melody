@@ -104,7 +104,7 @@ func twoFactorSignIn(baseUrl string, headerList map[string]string) twoFactorSign
 
     client := &liveExampleClient{
         baseUrl: strings.TrimRight(baseUrl, "/"),
-        client:  &http.Client{Jar: jar, Timeout: 15 * time.Second},
+        client:  &http.Client{Jar: jar, Timeout: 15 * time.Second, Transport: newOriginStatingTransport()},
     }
 
     requestHeaders := map[string]string{"Accept": "application/json"}

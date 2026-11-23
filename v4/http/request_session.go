@@ -230,6 +230,17 @@ func RequestSession(request httpcontract.Request) (sessioncontract.Session, erro
     return nil, exception.NewError("the request carries no session", nil, nil)
 }
 
+/* RequestCarriesSessionCookie answers whether the client presented the session cookie, whatever the storage holds under it. */
+func RequestCarriesSessionCookie(request httpcontract.Request) bool {
+    if true == internal.IsNilInterface(request) || nil == request.HttpRequest() {
+        return false
+    }
+
+    _, cookieErr := request.HttpRequest().Cookie(session.SessionCookieName)
+
+    return nil == cookieErr
+}
+
 /* SetRequestSession publishes a session on the request, saved and given its cookie by the response path; a nil session is refused. */
 func SetRequestSession(request httpcontract.Request, sessionInstance sessioncontract.Session) error {
     if true == internal.IsNilInterface(request) || true == internal.IsNilInterface(request.Attributes()) {

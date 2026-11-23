@@ -9,6 +9,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/security"
     "github.com/precision-soft/melody/v4/security/accesscontrol"
@@ -674,5 +675,94 @@ func TestCompile_TheRoleHierarchyUpgradeKeepsTheManagersStrategyAndConfig(t *tes
     token := security.NewAuthenticatedToken("u", []string{"ROLE_ADMIN"}, nil)
     if err := compiled.DecideAll(testRuntime(), token, []string{"ROLE_USER"}, nil); nil != err {
         t.Fatalf("expected the upgraded manager to keep AllowIfTied and grant the 1-1 tie, got %v", err)
+    }
+}
+
+func TestCompile_Csrf_ZeroValue_IsOriginModeUnderTheDefaultNames(t *testing.T) {
+    firewall := compileOneCsrfFirewall(t, security.CsrfConfig{}, &anonymousTokenSource{}, FirewallCsrfConfig{})
+    csrf := firewall.Csrf()
+
+    if security.CsrfModeOrigin != csrf.Mode || http.DefaultCsrfHeaderName != csrf.HeaderName || http.DefaultCsrfFieldName != csrf.FieldName || 0 != len(csrf.TrustedOrigins) || true == firewall.CsrfExempt() {
+        t.Fatalf("expected the origin mode under the default names, got %+v exempt %v", csrf, firewall.CsrfExempt())
+    }
+}
+
+func TestCompile_Csrf_FirewallInheritsTheGlobalFieldByField(t *testing.T) {
+    global := security.CsrfConfig{Mode: security.CsrfModeToken, HeaderName: "X-Global", FieldName: "global", TrustedOrigins: []string{"https://global.example"}}
+
+    inherited := compileOneCsrfFirewall(t, global, &anonymousTokenSource{}, FirewallCsrfConfig{HeaderName: "X-Local"}).Csrf()
+    if security.CsrfModeToken != inherited.Mode || "X-Local" != inherited.HeaderName || "global" != inherited.FieldName || 1 != len(inherited.TrustedOrigins) {
+        t.Fatalf("expected every field but the header inherited, got %+v", inherited)
+    }
+
+    overridden := compileOneCsrfFirewall(t, global, &anonymousTokenSource{}, FirewallCsrfConfig{Mode: security.CsrfModeOrigin, FieldName: "local"}).Csrf()
+    if security.CsrfModeOrigin != overridden.Mode || "X-Global" != overridden.HeaderName || "local" != overridden.FieldName {
+        t.Fatalf("expected the mode and the field overridden, got %+v", overridden)
+    }
+}
+
+func TestCompile_Csrf_NilTrustedOriginsInherit_EmptyReplaces(t *testing.T) {
+    global := security.CsrfConfig{TrustedOrigins: []string{"https://global.example"}}
+
+    if origins := compileOneCsrfFirewall(t, global, &anonymousTokenSource{}, FirewallCsrfConfig{TrustedOrigins: nil}).Csrf().TrustedOrigins; 1 != len(origins) || "https://global.example" != origins[0] {
+        t.Fatalf("expected nil to inherit, got %v", origins)
+    }
+
+    if origins := compileOneCsrfFirewall(t, global, &anonymousTokenSource{}, FirewallCsrfConfig{TrustedOrigins: []string{}}).Csrf().TrustedOrigins; 0 != len(origins) {
+        t.Fatalf("expected an empty list to trust none, got %v", origins)
+    }
+
+    if origins := compileOneCsrfFirewall(t, global, &anonymousTokenSource{}, FirewallCsrfConfig{TrustedOrigins: []string{"https://local.example"}}).Csrf().TrustedOrigins; 1 != len(origins) || "https://local.example" != origins[0] {
+        t.Fatalf("expected a list to replace, got %v", origins)
+    }
+}
+
+func TestCompile_Csrf_TokenPathOnADisabledFirewall_Refused(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        global security.CsrfConfig
+        local  security.CsrfMode
+    }{
+        "firewall": {security.CsrfConfig{}, security.CsrfModeDisabled},
+        "global":   {security.CsrfConfig{Mode: security.CsrfModeDisabled}, ""},
+    } {
+        t.Run(name, func(t *testing.T) {
+            expectRefusalNamingField(t, "a security csrf token path is declared on a firewall that checks no request", "FirewallConfig.Csrf.TokenPath", func() {
+                compileOneCsrfFirewall(t, testCase.global, &anonymousTokenSource{}, FirewallCsrfConfig{Mode: testCase.local, TokenPath: "/csrf-token"})
+            })
+        })
+    }
+}
+
+func TestCompile_Csrf_TokenPathOnAStatelessFirewall_Refused(t *testing.T) {
+    defer func() {
+        refusal, isRefusal := recover().(*exception.Error)
+        if false == isRefusal || "stateless" != refusal.Context()["cause"] || "FirewallConfig.Csrf.TokenPath" != refusal.Context()["field"] {
+            t.Fatalf("expected the stateless cause named, got %v", refusal)
+        }
+    }()
+
+    compileOneCsrfFirewall(t, security.CsrfConfig{}, &statelessTokenSource{}, FirewallCsrfConfig{TokenPath: "/csrf-token"})
+}
+
+func TestCompile_Csrf_StatelessSourceExemptsTheFirewall(t *testing.T) {
+    if false == compileOneCsrfFirewall(t, security.CsrfConfig{}, &statelessTokenSource{}, FirewallCsrfConfig{}).CsrfExempt() {
+        t.Fatalf("expected a stateless source to exempt its firewall")
+    }
+
+    if false == compileOneCsrfFirewall(t, security.CsrfConfig{}, &anonymousTokenSource{}, FirewallCsrfConfig{Mode: security.CsrfModeDisabled}).CsrfExempt() {
+        t.Fatalf("expected the disabled mode to exempt its firewall")
+    }
+}
+
+func TestCompile_Csrf_TokenDoorListedAmongTheDoors(t *testing.T) {
+    doors := compileOneCsrfFirewall(t, security.CsrfConfig{}, &anonymousTokenSource{}, FirewallCsrfConfig{TokenPath: "/csrf-token"}).Doors()
+
+    if 2 != len(doors) || "/csrf-token" != doors[1].Path || "security.main.csrfToken" != doors[1].Name || 1 != len(doors[1].Methods) || "GET" != doors[1].Methods[0] {
+        t.Fatalf("expected the token door named after the firewall, got %+v", doors)
+    }
+
+    named := compileOneCsrfFirewall(t, security.CsrfConfig{}, &anonymousTokenSource{}, FirewallCsrfConfig{TokenPath: "/csrf-token", TokenName: "app.csrf"}).Doors()
+    if "app.csrf" != named[1].Name {
+        t.Fatalf("expected the declared name, got %+v", named)
     }
 }

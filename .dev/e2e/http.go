@@ -184,6 +184,41 @@ func runExampleLoadBalancerCheck(client *http.Client, loadBalancerUrl string, re
 /* exampleHostHeader is the virtual host the load balancer serves the example under. */
 const exampleHostHeader = "example.melody.localhost.precision-soft.com"
 
+/* originStatingTransport states the request's own origin on an unsafe request, as a browser does, so a firewall's forgery check reads a same-origin write */
+type originStatingTransport struct {
+    next http.RoundTripper
+}
+
+func (instance *originStatingTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+    switch request.Method {
+    case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
+        return instance.next.RoundTrip(request)
+    }
+
+    if "" != request.Header.Get("Origin") || "" != request.Header.Get("Sec-Fetch-Site") {
+        return instance.next.RoundTrip(request)
+    }
+
+    scheme := request.URL.Scheme
+    if forwardedScheme := request.Header.Get("X-Forwarded-Proto"); "" != forwardedScheme {
+        scheme = forwardedScheme
+    }
+
+    host := request.Host
+    if "" == host {
+        host = request.URL.Host
+    }
+
+    stated := request.Clone(request.Context())
+    stated.Header.Set("Origin", scheme+"://"+host)
+
+    return instance.next.RoundTrip(stated)
+}
+
+func newOriginStatingTransport() http.RoundTripper {
+    return &originStatingTransport{next: http.DefaultTransport}
+}
+
 /* newExampleHttpClient keeps a cookie jar so the session the sign-in establishes travels on every following call, exactly as a browser would send it. Redirects are not followed: a redirect answer to a write would otherwise be read as a success. */
 func newExampleHttpClient() *http.Client {
     jar, jarErr := cookiejar.New(nil)
@@ -192,8 +227,9 @@ func newExampleHttpClient() *http.Client {
     }
 
     return &http.Client{
-        Timeout: 5 * time.Second,
-        Jar:     jar,
+        Timeout:   5 * time.Second,
+        Jar:       jar,
+        Transport: newOriginStatingTransport(),
         CheckRedirect: func(request *http.Request, previous []*http.Request) error {
             return http.ErrUseLastResponse
         },

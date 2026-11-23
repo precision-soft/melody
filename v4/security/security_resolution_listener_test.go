@@ -10,6 +10,7 @@ import (
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
+    eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpPkg "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
@@ -930,5 +931,75 @@ func TestSecurityResolutionListener_HandsItsRuntimeToTheFirewallRules(t *testing
 
     if 1 != len(rule.runtimes) || runtimeInstance != rule.runtimes[0] {
         t.Fatalf("expected the rule handed the listener's runtime, not the request's, got %v", rule.runtimes)
+    }
+}
+
+func forgedRouteFixture(t *testing.T, accessControl *AccessControl, decisionManager *countingDecisionManager) (*csrfFixture, *int) {
+    t.Helper()
+
+    fixture := newCsrfFixture(t, func(config *CompiledFirewallConfig) {
+        config.AccessControl = accessControl
+        config.AccessDecisionManager = decisionManager
+    })
+    RegisterKernelAccessControlListener(fixture.kernel, fixture.registry)
+
+    denied := 0
+    fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityAuthorizationDenied, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+        denied++
+
+        return nil
+    }, eventcontract.ListenerConfig{})
+
+    return fixture, &denied
+}
+
+func TestSecurityResolutionListener_ForgedRoute_RefusedBeforeAccessControl(t *testing.T) {
+    decisionManager := &countingDecisionManager{}
+    fixture, denied := forgedRouteFixture(t, NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule(csrfAccountPath, accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}), decisionManager)
+    sessionId, _ := fixture.storedSession(t, csrfSignedIn)
+
+    recorder := fixture.serve(t, csrfProbe{sessionId: sessionId, headers: map[string]string{"Sec-Fetch-Site": "cross-site"}})
+
+    if nethttp.StatusForbidden != recorder.Code || 0 != *denied || 0 != decisionManager.calls {
+        t.Fatalf("expected the forgery refused before any decision, got %d, %d denied, %d decisions", recorder.Code, *denied, decisionManager.calls)
+    }
+}
+
+func TestSecurityResolutionListener_ForgedPublicRoute_Refused(t *testing.T) {
+    fixture, _ := forgedRouteFixture(t, NewAccessControl([]AccessControlRule{accesscontrol.NewSegmentPrefixRule(csrfAccountPath, accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}})}), &countingDecisionManager{})
+    sessionId, _ := fixture.storedSession(t, csrfSignedIn)
+
+    if recorder := fixture.serve(t, csrfProbe{sessionId: sessionId}); nethttp.StatusForbidden != recorder.Code || 0 != *fixture.served {
+        t.Fatalf("expected a public route checked too, got %d", recorder.Code)
+    }
+}
+
+func TestSecurityResolutionListener_ForgedRouteNoRuleMatches_Refused(t *testing.T) {
+    fixture, _ := forgedRouteFixture(t, NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}), &countingDecisionManager{})
+    sessionId, _ := fixture.storedSession(t, csrfSignedIn)
+
+    if recorder := fixture.serve(t, csrfProbe{sessionId: sessionId}); nethttp.StatusForbidden != recorder.Code || 0 != *fixture.served {
+        t.Fatalf("expected a route no rule matches checked too, got %d", recorder.Code)
+    }
+}
+
+func TestSecurityResolutionListener_DoorPathOnAMethodTheDoorDeclines_CheckedAsARoute(t *testing.T) {
+    fixture := newCsrfFixture(t, nil)
+    sessionId, _ := fixture.storedSession(t, csrfSignedIn)
+
+    if recorder := fixture.serve(t, csrfProbe{method: nethttp.MethodPut, path: doorLoginPath, sessionId: sessionId}); nethttp.StatusForbidden != recorder.Code {
+        t.Fatalf("expected a PUT on the login path checked as a route, got %d", recorder.Code)
+    }
+}
+
+func TestSecurityResolutionListener_RuleCheckRefusal_ComesFirst(t *testing.T) {
+    ruleErr := exception.NewHttpError(nethttp.StatusTooManyRequests, exception.HttpErrorConfig{Message: "rule refused"})
+    fixture := newCsrfFixture(t, func(config *CompiledFirewallConfig) {
+        config.Rules = []securitycontract.Rule{&resolutionListenerTestRule{err: ruleErr}}
+    })
+    sessionId, _ := fixture.storedSession(t, csrfSignedIn)
+
+    if recorder := fixture.serve(t, csrfProbe{sessionId: sessionId, headers: map[string]string{"Sec-Fetch-Site": "cross-site"}}); nethttp.StatusTooManyRequests != recorder.Code {
+        t.Fatalf("expected the rule's refusal first, got %d", recorder.Code)
     }
 }

@@ -32,6 +32,38 @@ The fourth major starts from the third: the sections the third major shipped, in
 
 The fourth major takes the forms the third major kept compatible: a section that names a sibling interface, a deprecated door or a released signature on the third major describes here the form the fourth major carries instead, and this major's changelog marks each **Breaking**.
 
+### Security: an unsafe request that rides a session is checked for forgery
+
+**What changed.** Every firewall checks, on `kernel.request` before access control, an unsafe request (anything but `GET`, `HEAD`, `OPTIONS` and `TRACE`) that presents the session cookie: a browser stating another origin, through `Sec-Fetch-Site` or `Origin`, is refused `403`; one stating its own origin passes in the default [`security.CsrfModeOrigin`](../security/csrf.go); one stating nothing over a session holding more than the csrf secret must present a token of [`http.CsrfToken`](../http/csrf.go), in the header `X-CSRF-Token` or the urlencoded field `_csrf_token`. A session the storage cannot answer at that step is refused `503` with the firewall's `Retry-After`. See [Cross-site request forgery](package/SECURITY.md#cross-site-request-forgery).
+
+**Symptom.** A script, a test client or an old browser that holds the session cookie and states no origin gets `403 csrf token refused` on a write; a page on a sibling subdomain, or behind a proxy that rewrites `Host`, gets `403 cross-site request refused`.
+
+**Remedy.** In order: send the token, from [`http.CsrfToken`](../http/csrf.go) rendered into the page or from the firewall's opt-in token route `FirewallConfig.Csrf.TokenPath`; list the other origin in `TrustedOrigins` of `FirewallConfig.Csrf` or `GlobalConfig.Csrf`; turn the check off for one route with `RouteOptions.Protection.CsrfDisabled`; set the firewall's `Csrf.Mode` or the global one to `security.CsrfModeDisabled`. No `.env` key turns it off: the switch is Go.
+
+### Security: a firewall whose token source is stateless is not checked for forgery
+
+**What changed.** A firewall whose [`TokenSource`](../security/contract/token_source.go) answers `Stateless()` true checks none of its routes for forgery; its login and logout doors still refuse a request stating another origin.
+
+**Symptom.** None for the framework's bearer and HMAC sources. A bearer source of the application's own built through `NewResolverTokenSource` with the zero config is checked, and a write that also presents a session cookie and states nothing is asked the token.
+
+**Remedy.** Declare such a source `ResolverTokenSourceConfig{Stateless: true}`, or `AuthenticatorTokenSourceConfig{Stateless: true}`.
+
+### Security: the doors' `CrossSite` is `CsrfDisabled`
+
+**What changed.** `LoginConfig.CrossSite`, `LogoutConfig.CrossSite`, `security.CrossSitePolicy`, `CrossSiteRefuse`, `CrossSiteAdmit` and `CompiledFirewallConfig.LoginCrossSite` / `LogoutCrossSite` are gone; a door's check is the firewall's forgery check, turned off by `LoginConfig.CsrfDisabled` / `LogoutConfig.CsrfDisabled` and on a hand-built firewall by `CompiledFirewallConfig.LoginCsrfDisabled` / `LogoutCsrfDisabled`.
+
+**Symptom.** `unknown field CrossSite in struct literal of type LoginConfig`, `undefined: security.CrossSiteAdmit`.
+
+**Remedy.** `CrossSite: security.CrossSiteAdmit` is `CsrfDisabled: true`; a trusted origin in `FirewallConfig.Csrf.TrustedOrigins` is the narrower door.
+
+### Security: the sign-in drops the session's csrf secret
+
+**What changed.** [`http.RegenerateRequestSession`](../http/session.go) deletes `http.SessionKeyCsrf` from the rotated session, so a token rendered before the sign-in does not verify after it.
+
+**Symptom.** A page rendered before the sign-in and kept open posts a dead token and gets `403 csrf token refused`.
+
+**Remedy.** Render the page, or read the token route, again after the sign-in.
+
 ### Constructors: a value object takes a config
 
 **What changed.** A constructor of a value object keeps the values that name it positional and takes the rest in a config struct whose zero value is the empty or default value, and the doors over a fixed value or a positional optional gain one:
@@ -357,7 +389,7 @@ The consume command's retry grows exponentially: 1s, 2s, 4s… capped at 1h, whe
 
 ### Security: a firewall serves the sign-in and sign-out doors it declares
 
-**What changed.** The third major validated `LoginPath`, `LogoutPath`, `LoginHandler` and `LogoutHandler` and consumed none of them: a POST on the login path reached the router. A firewall now serves them on `kernel.request`, before access control. [`FirewallConfig`](../security/config/security_module.go) carries a [`LoginConfig`](../security/config/login_config.go) and a [`LogoutConfig`](../security/config/login_config.go), each declared by `Path` and `Handler` on its own, with `Methods` (`POST`), `TargetPath` (`/`), `CrossSite` (refused) and `Name`, `Attributes`; `LoginConfig` also has `Authenticator`, `Limiter`, `LimiterConfig`. `LoginInput` gains `PreviousSessionId`, `LogoutInput` gains `Token`. See [the doors](package/SECURITY.md#sign-in-and-sign-out-doors).
+**What changed.** The third major validated `LoginPath`, `LogoutPath`, `LoginHandler` and `LogoutHandler` and consumed none of them: a POST on the login path reached the router. A firewall now serves them on `kernel.request`, before access control. [`FirewallConfig`](../security/config/security_module.go) carries a [`LoginConfig`](../security/config/login_config.go) and a [`LogoutConfig`](../security/config/login_config.go), each declared by `Path` and `Handler` on its own, with `Methods` (`POST`), `TargetPath` (`/`), `CsrfDisabled` and `Name`, `Attributes`; `LoginConfig` also has `Authenticator`, `Limiter`, `LimiterConfig`. `LoginInput` gains `PreviousSessionId`, `LogoutInput` gains `Token`. See [the doors](package/SECURITY.md#sign-in-and-sign-out-doors).
 
 **Symptom.** `FirewallConfig{LoginPath: ...}` no longer compiles. Any route on a door's path, a `GET` page included, a parametrized or catch-all route too, fails the boot in the collision report, as a `firewallDoorRoute`, or as an `httpRoute` duplicate when the route has the door's very path and methods. A door outside its firewall's prefix, or inside an earlier firewall's, panics at boot. A `GET` on a door's path no longer reaches a handler, so a sign-out link answers 404 and a cross-site POST answers 403.
 
@@ -594,7 +626,7 @@ The six `service.<module>` names of a module's principal service, `service.cache
 
 ### Security: a token source declares whether it is stateless
 
-**What changed.** [`TokenSource`](../security/contract/token_source.go) gains `Stateless() bool`: true when the source reads only a credential the caller presents on every request (a bearer token, a signed envelope, an api key) and nothing a browser attaches by itself. The bearer and HMAC sources answer true; [`NewResolverTokenSource`](../security/token_source.go) and `NewAuthenticatorTokenSource` take `ResolverTokenSourceConfig{Stateless}` and `AuthenticatorTokenSourceConfig{Stateless}`, false by default; the impersonation source answers its inner one's. Nothing in the framework reads the answer yet; the cross-site check, which exempts a firewall whose source is stateless, reads it once it lands.
+**What changed.** [`TokenSource`](../security/contract/token_source.go) gains `Stateless() bool`: true when the source reads only a credential the caller presents on every request (a bearer token, a signed envelope, an api key) and nothing a browser attaches by itself. The bearer and HMAC sources answer true; [`NewResolverTokenSource`](../security/token_source.go) and `NewAuthenticatorTokenSource` take `ResolverTokenSourceConfig{Stateless}` and `AuthenticatorTokenSourceConfig{Stateless}`, false by default; the impersonation source answers its inner one's. The firewall's cross-site request forgery check reads the answer: a firewall whose source is stateless checks none of its routes, its doors still refusing a stated other origin.
 
 **Symptom.** A `TokenSource` of the application's own misses `Stateless`; `NewResolverTokenSource(resolver)` and `NewAuthenticatorTokenSource(manager)` report not enough arguments.
 

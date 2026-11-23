@@ -51,7 +51,6 @@ func TestBuilder_AddFirewall_RefusesAMalformedDoorNamingTheField(t *testing.T) {
         {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, TargetPath: "https://elsewhere.example/"}}, "FirewallConfig.Login.TargetPath"},
         {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, TargetPath: "//elsewhere.example/"}}, "FirewallConfig.Login.TargetPath"},
         {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, TargetPath: "relative"}}, "FirewallConfig.Login.TargetPath"},
-        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, CrossSite: "maybe"}}, "FirewallConfig.Login.CrossSite"},
         {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, LimiterConfig: httpmiddleware.RateLimitConfig{KeyExtractor: func(httpcontract.Request) string { return "" }}}}, "FirewallConfig.Login.Limiter"},
         {FirewallConfig{Login: LoginConfig{Path: "/door/", Handler: handler}, Logout: LogoutConfig{Path: "/door", Handler: &noopLogoutHandler{}}}, "FirewallConfig.Logout.Path"},
     } {
@@ -174,4 +173,62 @@ func TestBootWarnings_StaySilentOverPrefixMatchers(t *testing.T) {
             t.Fatalf("expected no door reach warning, got %+v", warning)
         }
     }
+}
+
+func TestRefuseUnreachableFirewallDoors_TokenPathOutsideThePrefix_Refused(t *testing.T) {
+    builder := NewBuilder()
+    builder.AddFirewall("main", security.NewPathPrefixMatcher("/app"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{AccessControl: security.NewAccessControl(nil)}, Csrf: FirewallCsrfConfig{TokenPath: "/csrf-token"}})
+
+    expectRefusalNamingField(t, "a security firewall door lies outside its firewall's prefix, so no request reaches it", "security.main.csrfToken", func() { builder.BuildAndCompile() })
+}
+
+func TestBootWarnings_Csrf_LoginFirewallDisabled_Named(t *testing.T) {
+    for declaredBy, testCase := range map[string]struct {
+        global security.CsrfConfig
+        local  security.CsrfMode
+    }{
+        "firewall": {security.CsrfConfig{}, security.CsrfModeDisabled},
+        "global":   {security.CsrfConfig{Mode: security.CsrfModeDisabled}, ""},
+    } {
+        builder := NewBuilder()
+        builder.SetGlobal(GlobalConfig{Csrf: testCase.global})
+        builder.AddFirewall("main", security.NewPathPrefixMatcher("/"), &anonymousTokenSource{}, csrfLoginFirewallConfig(FirewallCsrfConfig{Mode: testCase.local}))
+        builder.BuildAndCompile()
+
+        found := false
+        for _, warning := range builder.BootWarnings() {
+            if internal.BootWarningNameCsrfDisabledOnLoginFirewall == warning.Name && "main" == warning.Context["firewall"] && declaredBy == warning.Context["declaredBy"] {
+                found = true
+            }
+        }
+
+        if false == found {
+            t.Fatalf("%s: expected the warning naming the firewall, got %+v", declaredBy, builder.BootWarnings())
+        }
+    }
+}
+
+func TestBootWarnings_Csrf_Protected_None(t *testing.T) {
+    builder := NewBuilder()
+    builder.AddFirewall("main", security.NewPathPrefixMatcher("/"), &anonymousTokenSource{}, csrfLoginFirewallConfig(FirewallCsrfConfig{}))
+    builder.AddFirewall("api", security.NewPathPrefixMatcher("/api"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{AccessControl: security.NewAccessControl(nil)}, Csrf: FirewallCsrfConfig{Mode: security.CsrfModeDisabled}})
+
+    defer func() { _ = recover() }()
+    builder.BuildAndCompile()
+
+    for _, warning := range builder.BootWarnings() {
+        if internal.BootWarningNameCsrfDisabledOnLoginFirewall == warning.Name {
+            t.Fatalf("expected no csrf warning without a disabled sign-in firewall, got %+v", warning)
+        }
+    }
+}
+
+func TestLoginConfig_CsrfDisabledAlone_CountsAsADeclaredDoor(t *testing.T) {
+    expectRefusalNamingField(t, "a security firewall door declares a path", "FirewallConfig.Login.Path", func() {
+        NewBuilder().AddFirewall("main", security.NewPathPrefixMatcher("/"), &anonymousTokenSource{}, FirewallConfig{Login: LoginConfig{CsrfDisabled: true}})
+    })
+
+    expectRefusalNamingField(t, "a security firewall door declares a path", "FirewallConfig.Logout.Path", func() {
+        NewBuilder().AddFirewall("main", security.NewPathPrefixMatcher("/"), &anonymousTokenSource{}, FirewallConfig{Logout: LogoutConfig{CsrfDisabled: true}})
+    })
 }

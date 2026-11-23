@@ -182,6 +182,7 @@ func buildRouteValue(pattern string, handler httpcontract.Handler, options httpc
     rejectIncoherentLocaleDeclaration(parts, normalizedPattern, options.Locales, defaults)
     rejectMalformedExposureAttributes(options.Attributes, options.Name, normalizedPattern)
     rejectReservedAttributes(options.Attributes, normalizedPattern)
+    rejectCsrfDisabledOnSafeOnlyRoute(options.Protection, options.Methods, normalizedPattern)
 
     attributes := map[string]any{}
     for key, value := range options.Attributes {
@@ -208,6 +209,9 @@ func buildRouteValue(pattern string, handler httpcontract.Handler, options httpc
     }
     if 0 < len(options.Locales) {
         attributes[RouteAttributeLocales] = append([]string{}, options.Locales...)
+    }
+    if false == routeProtectionTurnsNothingOff(options.Protection) {
+        attributes[RouteAttributeProtection] = options.Protection
     }
 
     return route{
@@ -384,6 +388,32 @@ func rejectReservedAttributes(attributes map[string]any, normalizedPattern strin
             )
         }
     }
+}
+
+/* rejectCsrfDisabledOnSafeOnlyRoute refuses a switch that turns off a check the route's methods never meet. */
+func rejectCsrfDisabledOnSafeOnlyRoute(protection httpcontract.RouteProtectionConfig, declaredMethods []string, normalizedPattern string) {
+    if false == protection.CsrfDisabled || 0 == len(declaredMethods) {
+        return
+    }
+
+    methods := normalizeRouteMethods(declaredMethods)
+    for _, method := range methods {
+        if false == IsSafeMethod(method) {
+            return
+        }
+    }
+
+    exception.Panic(
+        exception.NewError(
+            "route turns the csrf check off but serves only safe methods",
+            map[string]any{
+                "field":   "RouteOptions.Protection.CsrfDisabled",
+                "pattern": normalizedPattern,
+                "methods": methods,
+            },
+            nil,
+        ),
+    )
 }
 
 /* rejectMalformedExposureAttributes refuses an exposure attribute that is not a bool, a zone that is not a string and an exposed route with no name, each of which would drop the route from the manifest it opted into. */

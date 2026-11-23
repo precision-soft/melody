@@ -11,6 +11,10 @@ const (
     LogoutName    = "example.logout"
     LogoutPattern = "/logout/"
 
+    /* the main firewall answers its session's csrf token here, to GET, for a client that renders no page to carry it */
+    CsrfTokenName    = "example.csrf.token"
+    CsrfTokenPattern = "/csrf/token/"
+
     RoutesName    = "example.routes"
     RoutesPattern = "/routes/"
 

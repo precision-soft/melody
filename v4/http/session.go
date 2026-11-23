@@ -9,7 +9,7 @@ import (
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
-/* RegenerateRequestSession rotates the id of the request's session and publishes the rotated session on the request; write the authenticated identity to the session it returns. */
+/* RegenerateRequestSession rotates the id of the request's session, drops its csrf secret and publishes the rotated session on the request; write the authenticated identity to the session it returns. */
 func RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Session, error) {
     if true == internal.IsNilInterface(request) {
         return nil, exception.NewError("request is nil in regenerate request session", nil, nil)
@@ -55,6 +55,9 @@ func RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Ses
     if nil != regenerateErr {
         return nil, markSessionUnavailable(namedStorageBound(runtimeInstance.Context(), rotationRuntime.Context(), regenerateErr))
     }
+
+    /* a token rendered before the sign-in must not verify after it */
+    rotatedSession.Delete(SessionKeyCsrf)
 
     if publishErr := SetRequestSession(request, rotatedSession); nil != publishErr {
         return nil, publishErr

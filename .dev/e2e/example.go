@@ -56,13 +56,15 @@ type exampleMajor struct {
     shutdownStreamProbe bool
     /* firewallDoors names the major whose firewall serves the sign-in and the sign-out on kernel.request: the sign-in posts to its own door, off the page's path, and the sign-out is a POST. */
     firewallDoors bool
+    /* csrfProbe names the major whose session firewall checks a write for forgery: the probes speak through a client that states no origin, as a script would */
+    csrfProbe bool
 }
 
 var exampleMajorCatalog = []exampleMajor{
     {number: 1, label: "v1", relativeDirectory: ".example", port: 18081, httpAddressKey: "MELODY_HTTP_ADDRESS", integrationDemos: true, showcaseProbes: exampleShowcaseProbesAll, sessionRestartProbe: true, loginThrottleProbe: true, journalOnPostgres: true},
     {number: 2, label: "v2", relativeDirectory: "v2/.example", port: 18082, httpAddressKey: "MELODY_HTTP_ADDRESS", integrationDemos: true, showcaseProbes: exampleShowcaseProbesAll, sessionRestartProbe: true, loginThrottleProbe: true},
     {number: 3, label: "v3", relativeDirectory: "v3/.example", port: 18083, httpAddressKey: "MELODY_HTTP_ADDRESS", integrationDemos: false, showcaseProbes: exampleShowcaseProbes{cors: true, gzip: true, validation: true, staticCache: true}, sessionRestartProbe: true, loginThrottleProbe: true, processServiceInventory: true, shutdownStreamProbe: true, requestSurfaceProbes: true},
-    {number: 4, label: "v4", relativeDirectory: "v4/.example", port: 18094, httpAddressKey: "APP_HTTP_ADDRESS", integrationDemos: false, showcaseProbes: exampleShowcaseProbes{cors: true, gzip: true, validation: true, staticCache: true}, sessionRestartProbe: true, loginThrottleProbe: true, processServiceInventory: true, shutdownStreamProbe: true, requestSurfaceProbes: true, firewallDoors: true},
+    {number: 4, label: "v4", relativeDirectory: "v4/.example", port: 18094, httpAddressKey: "APP_HTTP_ADDRESS", integrationDemos: false, showcaseProbes: exampleShowcaseProbes{cors: true, gzip: true, validation: true, staticCache: true}, sessionRestartProbe: true, loginThrottleProbe: true, processServiceInventory: true, shutdownStreamProbe: true, requestSurfaceProbes: true, firewallDoors: true, csrfProbe: true},
 }
 
 /* exampleMysqlDsn answers the dsn of one major's own database. The four examples share the development mysql but not a database in it — each holds its schema in melody_example_v<major> — so a harness section that reads what an application wrote has to ask the database that application writes to. MYSQL_DSN carries v3's, the one the supervised sections use, and this swaps the database segment of it for the major being driven.
@@ -503,8 +505,9 @@ func newExampleClient(major exampleMajor) *exampleClient {
         major: major,
         jar:   jar,
         client: &http.Client{
-            Timeout: 10 * time.Second,
-            Jar:     jar,
+            Timeout:   10 * time.Second,
+            Jar:       jar,
+            Transport: newOriginStatingTransport(),
             CheckRedirect: func(request *http.Request, previous []*http.Request) error {
                 return http.ErrUseLastResponse
             },
@@ -644,6 +647,10 @@ func runExampleHttpAssertions(major exampleMajor, application *exampleApplicatio
 
     if true == major.requestSurfaceProbes {
         runExampleRequestSurfaceAssertions(major, application)
+    }
+
+    if true == major.csrfProbe {
+        assertExampleCsrf(major)
     }
 
     assertExampleTextPlainErrorsAreReadable(major)

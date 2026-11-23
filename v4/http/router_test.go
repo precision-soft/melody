@@ -1092,3 +1092,67 @@ func TestRouteHandler_DeclaresOneRegistrationDoor(t *testing.T) {
         t.Fatalf("expected Handle(string, Handler, RouteOptions), got %s", method.Type)
     }
 }
+
+func csrfProtectionTestHandler(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    return TextResponse(nethttp.StatusOK, "ok"), nil
+}
+
+func TestRouter_Protection_StoresACopyUnderTheReservedAttribute(t *testing.T) {
+    router := NewRouter()
+    options := RouteOptions{Methods: []string{nethttp.MethodPost}, Protection: RouteProtectionConfig{CsrfDisabled: true}}
+    router.Handle("/upload", csrfProtectionTestHandler, options)
+
+    options.Protection.CsrfDisabled = false
+
+    matchResult, matched := router.Match(nethttp.MethodPost, "/upload", "", "http")
+    if false == matched {
+        t.Fatalf("expected a match")
+    }
+
+    protection, isProtection := matchResult.RouteAttributes[RouteAttributeProtection].(RouteProtectionConfig)
+    if false == isProtection || false == protection.CsrfDisabled {
+        t.Fatalf("expected the declared protection under %s, got %#v", RouteAttributeProtection, matchResult.RouteAttributes[RouteAttributeProtection])
+    }
+}
+
+func TestRouter_Protection_ZeroProtection_WritesNoAttribute(t *testing.T) {
+    router := NewRouter()
+    router.Handle("/plain", csrfProtectionTestHandler, RouteOptions{Methods: []string{nethttp.MethodPost}})
+
+    matchResult, _ := router.Match(nethttp.MethodPost, "/plain", "", "http")
+    if _, exists := matchResult.RouteAttributes[RouteAttributeProtection]; true == exists {
+        t.Fatalf("expected no protection attribute on a route that turns nothing off")
+    }
+}
+
+func TestRouter_Protection_CsrfDisabledOnASafeOnlyRoute_Refused(t *testing.T) {
+    defer func() {
+        refusal, isError := recover().(*exception.Error)
+        if false == isError || "route turns the csrf check off but serves only safe methods" != refusal.Error() || "RouteOptions.Protection.CsrfDisabled" != refusal.Context()["field"] {
+            t.Fatalf("expected the safe-only refusal naming the field, got %v", refusal)
+        }
+    }()
+
+    NewRouter().Handle("/read", csrfProtectionTestHandler, RouteOptions{Methods: []string{"get", nethttp.MethodHead}, Protection: RouteProtectionConfig{CsrfDisabled: true}})
+}
+
+func TestRouter_Protection_CsrfDisabledOnARouteOfEveryMethod_Admitted(t *testing.T) {
+    router := NewRouter()
+    router.Handle("/every", csrfProtectionTestHandler, RouteOptions{Protection: RouteProtectionConfig{CsrfDisabled: true}})
+    router.Handle("/mixed", csrfProtectionTestHandler, RouteOptions{Methods: []string{nethttp.MethodGet, nethttp.MethodPost}, Protection: RouteProtectionConfig{CsrfDisabled: true}})
+
+    if _, matched := router.Match(nethttp.MethodDelete, "/every", "", "http"); false == matched {
+        t.Fatalf("expected the route of every method registered")
+    }
+}
+
+func TestRouter_Protection_ReservedProtectionAttributeWrittenByHand_Refused(t *testing.T) {
+    defer func() {
+        refusal, isError := recover().(*exception.Error)
+        if false == isError || "route attribute key is reserved by the framework" != refusal.Error() {
+            t.Fatalf("expected the reserved-key refusal, got %v", refusal)
+        }
+    }()
+
+    NewRouter().Handle("/forged", csrfProtectionTestHandler, RouteOptions{Attributes: map[string]any{RouteAttributeProtection: RouteProtectionConfig{CsrfDisabled: true}}})
+}

@@ -28,4 +28,13 @@ type RouteOptions struct {
 
     /* Attributes travel with the match into the request; a key beginning with "_", the framework's prefix, is refused at registration. */
     Attributes map[string]any
+
+    /* Protection turns protections of the framework off for this route; the zero value keeps every one. */
+    Protection RouteProtectionConfig
+}
+
+/* RouteProtectionConfig is what a route turns off of the framework's per-request protections; each field's zero value keeps its protection. */
+type RouteProtectionConfig struct {
+    /* CsrfDisabled exempts the route from its firewall's cross-site request forgery check, for a handler that verifies the token itself; refused on a route that serves only safe methods, which the check never reads. */
+    CsrfDisabled bool
 }

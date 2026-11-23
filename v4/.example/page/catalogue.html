@@ -3,6 +3,7 @@
 <head>
     <meta charset="utf-8"/>
     <meta content="width=device-width, initial-scale=1" name="viewport"/>
+    <meta content="{{csrf_token}}" name="csrf-token"/>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous" rel="stylesheet"/>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha384-PPIZEGYM1v8zp5Py7UjFb79S58UeqCL9pYVnVPURKEqvioPROaVAJKKLzvH2rDnI" crossorigin="anonymous" rel="stylesheet"/>
     <link href="/assets/app.css" rel="stylesheet"/>
@@ -32,6 +33,7 @@
                 <i class="fa-solid fa-route me-1"></i>Routes (JSON)
             </a>
             <form class="d-inline" method="post" action="/logout/" data-route="example.logout">
+                <input name="_csrf_token" type="hidden" value="{{csrf_token}}"/>
                 <button class="btn btn-outline-secondary btn-sm" type="submit"><i class="fa-solid fa-right-from-bracket me-1"></i>Logout</button>
             </form>
         </div>

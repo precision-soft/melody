@@ -500,7 +500,7 @@ func TestLoginDoor_AnExhaustedLimiterAnswers429BeforeAuthenticating(t *testing.T
     }
 }
 
-func TestDoors_ACrossSiteRequestIsRefusedUnlessAdmitted(t *testing.T) {
+func TestDoors_ACrossSiteRequestIsRefusedUnlessTheCsrfCheckIsDisabled(t *testing.T) {
     for name, testCase := range map[string]struct {
         headers map[string]string
         status  int
@@ -536,8 +536,8 @@ func TestDoors_ACrossSiteRequestIsRefusedUnlessAdmitted(t *testing.T) {
     }
 
     fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
-        config.LoginCrossSite = CrossSiteAdmit
-        config.LogoutCrossSite = CrossSiteAdmit
+        config.LoginCsrfDisabled = true
+        config.LogoutCsrfDisabled = true
     })
 
     crossSite := map[string]string{"Sec-Fetch-Site": "cross-site"}
@@ -566,6 +566,8 @@ func TestLogoutDoor_EndsTheSessionEvenWhenTheHandlerDidNot(t *testing.T) {
     request := httptest.NewRequest(nethttp.MethodPost, doorLogoutPath, nil)
     request.Header.Set("Accept", "text/html")
     request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: live.Id()})
+    /* the browser states its own origin, so the forgery check passes the request in its default mode */
+    request.Header.Set("Sec-Fetch-Site", "same-origin")
 
     recorder := httptest.NewRecorder()
     fixture.kernel.httpKernel.ServeHttp(serviceContainer).ServeHTTP(recorder, request)
@@ -625,6 +627,8 @@ func TestLogoutDoor_AFailedSuccessListenerStillEndsTheSession(t *testing.T) {
     request := httptest.NewRequest(nethttp.MethodPost, doorLogoutPath, nil)
     request.Header.Set("Accept", "application/json")
     request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: live.Id()})
+    /* the browser states its own origin, so the forgery check passes the request in its default mode */
+    request.Header.Set("Sec-Fetch-Site", "same-origin")
 
     recorder := httptest.NewRecorder()
     fixture.kernel.httpKernel.ServeHttp(serviceContainer).ServeHTTP(recorder, request)
@@ -1302,6 +1306,8 @@ func TestLogoutDoor_EndsTheSessionItsHandlerRotated(t *testing.T) {
     request := httptest.NewRequest(nethttp.MethodPost, doorLogoutPath, strings.NewReader(""))
     request.Header.Set("Accept", "application/json")
     request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: stored.Id()})
+    /* the browser states its own origin, so the forgery check passes the request in its default mode */
+    request.Header.Set("Sec-Fetch-Site", "same-origin")
 
     recorder := httptest.NewRecorder()
     fixture.kernel.httpKernel.ServeHttp(serviceContainer).ServeHTTP(recorder, request)
@@ -1563,6 +1569,8 @@ func (instance *storedLogoutSession) serve(fixture *doorFixture) *httptest.Respo
     request := httptest.NewRequest(nethttp.MethodPost, doorLogoutPath, nil)
     request.Header.Set("Accept", "application/json")
     request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: instance.sessionId})
+    /* the browser states its own origin, so the forgery check passes the request in its default mode */
+    request.Header.Set("Sec-Fetch-Site", "same-origin")
 
     recorder := httptest.NewRecorder()
     fixture.kernel.httpKernel.ServeHttp(instance.container).ServeHTTP(recorder, request)
@@ -1693,5 +1701,161 @@ func TestLoginDoor_HandsItsRuntimeToTheAuthenticator(t *testing.T) {
 
     if 1 != len(authenticator.runtimes) || nil == authenticator.runtimes[0] {
         t.Fatalf("expected the authenticator handed the door's runtime, got %v", authenticator.runtimes)
+    }
+}
+
+func TestLoginDoor_StatedCrossSiteWithoutACookie_StillRefused(t *testing.T) {
+    fixture := newCsrfFixture(t, nil)
+
+    for _, path := range []string{doorLoginPath, doorLogoutPath} {
+        if recorder := fixture.serve(t, csrfProbe{path: path, headers: map[string]string{"Sec-Fetch-Site": "cross-site"}}); nethttp.StatusForbidden != recorder.Code {
+            t.Fatalf("expected the door at %s to refuse a stated other origin without a cookie, got %d", path, recorder.Code)
+        }
+    }
+}
+
+func TestLoginDoor_StatedCrossSiteOnAStatelessFirewall_StillRefused(t *testing.T) {
+    fixture := newCsrfFixture(t, func(config *CompiledFirewallConfig) {
+        config.TokenSource = &csrfStatelessTokenSource{}
+    })
+
+    for _, path := range []string{doorLoginPath, doorLogoutPath} {
+        if recorder := fixture.serve(t, csrfProbe{path: path, headers: map[string]string{"Origin": "https://evil.example"}}); nethttp.StatusForbidden != recorder.Code {
+            t.Fatalf("expected the door at %s of a stateless firewall to refuse a stated other origin, got %d", path, recorder.Code)
+        }
+    }
+
+    sessionId, _ := fixture.storedSession(t, csrfSignedIn)
+    if recorder := fixture.serve(t, csrfProbe{path: doorLogoutPath, sessionId: sessionId}); nethttp.StatusNoContent != recorder.Code {
+        t.Fatalf("expected a stateless firewall's door to ask no token of a request stating nothing, got %d", recorder.Code)
+    }
+}
+
+func TestLoginDoor_LimiterRunsBeforeTheCsrfCheck(t *testing.T) {
+    fixture := newCsrfFixture(t, func(config *CompiledFirewallConfig) {
+        config.LoginRateLimit = httpmiddleware.NewRateLimitGate(httpmiddleware.NewFixedWindowLimiter("test", 1, 60_000_000_000, httpmiddleware.LimiterConfig{}), httpmiddleware.RateLimitConfig{})
+    })
+    crossSite := csrfProbe{path: doorLoginPath, headers: map[string]string{"Sec-Fetch-Site": "cross-site"}}
+
+    if recorder := fixture.serve(t, crossSite); nethttp.StatusForbidden != recorder.Code {
+        t.Fatalf("expected the first forged sign-in refused 403, got %d", recorder.Code)
+    }
+
+    if recorder := fixture.serve(t, crossSite); nethttp.StatusTooManyRequests != recorder.Code {
+        t.Fatalf("expected the forged sign-in metered before it is checked, got %d", recorder.Code)
+    }
+}
+
+func TestLoginDoor_NothingStatedOverANonEmptySession_RequiresTheToken(t *testing.T) {
+    fixture := newCsrfFixture(t, nil)
+
+    for _, testCase := range []struct {
+        path   string
+        served int
+    }{
+        {doorLoginPath, nethttp.StatusOK},
+        {doorLogoutPath, nethttp.StatusNoContent},
+    } {
+        sessionId, token := fixture.storedSession(t, csrfSignedIn)
+
+        if recorder := fixture.serve(t, csrfProbe{path: testCase.path, sessionId: sessionId}); nethttp.StatusForbidden != recorder.Code {
+            t.Fatalf("expected %s to ask the token, got %d", testCase.path, recorder.Code)
+        }
+
+        if recorder := fixture.serve(t, csrfProbe{path: testCase.path, sessionId: sessionId, body: http.DefaultCsrfFieldName + "=" + token, contentType: "application/x-www-form-urlencoded"}); testCase.served != recorder.Code {
+            t.Fatalf("expected %s served with the token in the field, got %d", testCase.path, recorder.Code)
+        }
+    }
+}
+
+func TestLoginDoor_NothingStatedOverAStaleCookie_Served(t *testing.T) {
+    fixture := newCsrfFixture(t, nil)
+
+    if recorder := fixture.serve(t, csrfProbe{path: doorLoginPath, sessionId: "stale-cookie"}); nethttp.StatusOK != recorder.Code {
+        t.Fatalf("expected a sign-in over a stale cookie served, got %d", recorder.Code)
+    }
+
+    if recorder := fixture.serve(t, csrfProbe{path: doorLogoutPath, sessionId: "stale-cookie"}); nethttp.StatusNoContent != recorder.Code {
+        t.Fatalf("expected a sign-out over a stale cookie served, got %d", recorder.Code)
+    }
+}
+
+func TestLoginDoor_TrustedOrigin_Served(t *testing.T) {
+    fixture := newCsrfFixture(t, func(config *CompiledFirewallConfig) {
+        config.Csrf = CsrfConfig{TrustedOrigins: []string{"https://app.example.com"}}
+    })
+    trusted := map[string]string{"Origin": "https://app.example.com", "Sec-Fetch-Site": "same-site"}
+
+    if recorder := fixture.serve(t, csrfProbe{path: doorLoginPath, headers: trusted}); nethttp.StatusOK != recorder.Code {
+        t.Fatalf("expected a sign-in from a trusted origin served, got %d", recorder.Code)
+    }
+
+    if recorder := fixture.serve(t, csrfProbe{path: doorLogoutPath, headers: trusted}); nethttp.StatusNoContent != recorder.Code {
+        t.Fatalf("expected a sign-out from a trusted origin served, got %d", recorder.Code)
+    }
+}
+
+func TestLoginDoor_SignIn_RotatesTheCsrfToken(t *testing.T) {
+    fixture := newCsrfFixture(t, func(config *CompiledFirewallConfig) {
+        config.LoginAuthenticator = &doorAuthenticator{token: NewAuthenticatedToken("u1", nil, nil)}
+    })
+    sessionId, token := fixture.storedSession(t, nil)
+
+    signIn := fixture.serve(t, csrfProbe{path: doorLoginPath, sessionId: sessionId, headers: map[string]string{http.DefaultCsrfHeaderName: token}})
+    cookie := doorSessionCookie(signIn)
+    if nethttp.StatusOK != signIn.Code || nil == cookie || sessionId == cookie.Value {
+        t.Fatalf("expected the sign-in to rotate the session, got %d %+v", signIn.Code, cookie)
+    }
+
+    if stored := mustSession(fixture.manager.Session(sessionRuntime(), cookie.Value)); nil == stored || true == stored.Has(http.SessionKeyCsrf) {
+        t.Fatalf("expected the signed-in session to hold no csrf secret, got %+v", stored)
+    }
+
+    if recorder := fixture.serve(t, csrfProbe{sessionId: cookie.Value, headers: map[string]string{http.DefaultCsrfHeaderName: token}}); nethttp.StatusForbidden != recorder.Code {
+        t.Fatalf("expected the token rendered before the sign-in refused after it, got %d", recorder.Code)
+    }
+}
+
+func TestCsrfTokenDoor_AnswersAVerifyingTokenNoStore(t *testing.T) {
+    fixture := newCsrfFixture(t, func(config *CompiledFirewallConfig) {
+        config.CsrfTokenPath = csrfTokenPath
+        config.CsrfTokenName = "security.main.csrfToken"
+    })
+    sessionId, _ := fixture.storedSession(t, csrfSignedIn)
+
+    recorder := fixture.serve(t, csrfProbe{method: nethttp.MethodGet, path: csrfTokenPath, sessionId: sessionId})
+    if nethttp.StatusOK != recorder.Code || "no-store" != recorder.Header().Get("Cache-Control") || false == strings.HasPrefix(recorder.Header().Get("Content-Type"), "application/json") {
+        t.Fatalf("expected a json answer not stored, got %d %v", recorder.Code, recorder.Header())
+    }
+
+    token := strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(recorder.Body.String()), `{"token":"`), `"}`)
+    if write := fixture.serve(t, csrfProbe{sessionId: sessionId, headers: map[string]string{http.DefaultCsrfHeaderName: token}}); nethttp.StatusOK != write.Code {
+        t.Fatalf("expected the answered token to verify, got %d over %q", write.Code, recorder.Body.String())
+    }
+
+    doors := fixture.registry.compiledConfiguration.Firewalls()[0].Doors()
+    if 3 != len(doors) || csrfTokenPath != doors[2].Path || nethttp.MethodGet != doors[2].Methods[0] || "security.main.csrfToken" != doors[2].Name {
+        t.Fatalf("expected the token door published among the doors, got %+v", doors)
+    }
+}
+
+func TestCsrfTokenDoor_PostOnTheTokenPath_NotServedByTheDoor(t *testing.T) {
+    fixture := newCsrfFixture(t, func(config *CompiledFirewallConfig) {
+        config.CsrfTokenPath = csrfTokenPath
+    })
+
+    if recorder := fixture.serve(t, csrfProbe{path: csrfTokenPath}); nethttp.StatusNotFound != recorder.Code {
+        t.Fatalf("expected a POST on the token path left to the router, got %d", recorder.Code)
+    }
+}
+
+func TestCsrfTokenDoor_SessionUnavailable_503(t *testing.T) {
+    fixture := newCsrfFixture(t, func(config *CompiledFirewallConfig) {
+        config.CsrfTokenPath = csrfTokenPath
+    })
+    fixture.container.MustOverrideProtectedInstance(session.ServiceSessionManager, &loadFailingSessionManager{Manager: fixture.manager, err: exception.MarkInfrastructureFailure(errors.New("session store is down"))}, container.OverrideOptions{})
+
+    if recorder := fixture.serve(t, csrfProbe{method: nethttp.MethodGet, path: csrfTokenPath}); nethttp.StatusServiceUnavailable != recorder.Code || "" == recorder.Header().Get("Retry-After") {
+        t.Fatalf("expected 503 with Retry-After, got %d", recorder.Code)
     }
 }

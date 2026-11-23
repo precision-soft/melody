@@ -5,17 +5,21 @@ import (
     "errors"
     "io"
     nethttp "net/http"
+    "net/http/httptest"
     "os"
     "regexp"
     "strings"
     "testing"
+    "time"
 
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
+    melodysession "github.com/precision-soft/melody/v4/session"
 )
 
 func TestLoadAnswersAnEmbeddedPage(t *testing.T) {
@@ -309,5 +313,54 @@ func TestPages_OneDigestPerExternalAsset(t *testing.T) {
 
     if 4 != len(digestByUrl) {
         t.Fatalf("expected four external assets, found %d", len(digestByUrl))
+    }
+}
+
+func TestEverySessionPageCarriesTheCsrfPlaceholderAndTheLoginPageNone(t *testing.T) {
+    for _, fileName := range []string{CatalogueHtml, ProductsListHtml, ProductsDetailsHtml, ProfileHtml, UsersHtml, TwoFactorHtml} {
+        content, _ := Load(fileName)
+        if false == strings.Contains(content, `<meta content="{{csrf_token}}" name="csrf-token"/>`) {
+            t.Fatalf("%s does not carry the csrf meta", fileName)
+        }
+
+        if true == strings.Contains(content, `action="/logout/"`) && false == strings.Contains(content, `<input name="_csrf_token" type="hidden" value="{{csrf_token}}"/>`) {
+            t.Fatalf("%s signs out without the csrf field", fileName)
+        }
+    }
+
+    if login, _ := Load(LoginHtml); true == strings.Contains(login, csrfTokenPlaceholder) {
+        t.Fatalf("expected the login page to issue no csrf secret")
+    }
+}
+
+func TestHtmlPutsATokenOfTheSessionInThePage(t *testing.T) {
+    runtimeInstance := runtimeServingRoute(t, "example.catalogue.page", "/catalogue/")
+    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/catalogue/", nil), runtimeInstance, melodyhttp.RequestConfig{})
+    manager := melodysession.NewManager(melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{}), melodysession.ManagerConfig{Ttl: melodybound.Of(time.Minute)})
+    sessionInstance, sessionErr := manager.NewSession(runtimeInstance)
+    if nil != sessionErr {
+        t.Fatalf("unexpected error: %v", sessionErr)
+    }
+    _ = melodyhttp.SetRequestSession(request, sessionInstance)
+
+    tokenPattern := regexp.MustCompile(`<meta content="([A-Za-z0-9_-]{86})" name="csrf-token"/>`)
+    first := tokenPattern.FindStringSubmatch(bodyOf(t, Html(runtimeInstance, request, nethttp.StatusOK, CatalogueHtml)))
+    second := tokenPattern.FindStringSubmatch(bodyOf(t, Html(runtimeInstance, request, nethttp.StatusOK, CatalogueHtml)))
+    if 2 != len(first) || 2 != len(second) || first[1] == second[1] {
+        t.Fatalf("expected two different tokens rendered, got %v and %v", first, second)
+    }
+
+    for _, token := range []string{first[1], second[1]} {
+        if verified, verifyErr := melodyhttp.VerifyCsrfToken(request, token); false == verified || nil != verifyErr {
+            t.Fatalf("expected the rendered token to verify, got %v %v", verified, verifyErr)
+        }
+    }
+}
+
+func TestHtmlWithoutASessionRendersAnEmptyToken(t *testing.T) {
+    body := bodyOf(t, Html(runtimeServingRoute(t, "example.catalogue.page", "/catalogue/"), nil, nethttp.StatusOK, CatalogueHtml))
+
+    if false == strings.Contains(body, `<meta content="" name="csrf-token"/>`) {
+        t.Fatalf("expected the page rendered with an empty token")
     }
 }
