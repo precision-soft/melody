@@ -38,7 +38,7 @@ func PutHandler(storage *melodycontainer.LazyService[storagecontract.Storage]) m
         if httpRequest := request.HttpRequest(); nil != httpRequest && nil != httpRequest.Body {
             readBytes, readErr := io.ReadAll(httpRequest.Body)
             if nil != readErr {
-                /* the kernel bounds every body by MELODY_HTTP_MAX_REQUEST_BODY_BYTES; a body past it is the client's too large a payload, answered as the kernel answers it on a bind, not as an unreadable body */
+                /* the kernel bounds the body by the route's own cap; a body past it is the client's too large a payload, answered as the kernel answers it on a bind, not as an unreadable body */
                 var maxBytesErr *nethttp.MaxBytesError
                 if true == errors.As(readErr, &maxBytesErr) {
                     return presenter.ApiError(runtimeInstance, request, nethttp.StatusRequestEntityTooLarge, "payload too large"), nil

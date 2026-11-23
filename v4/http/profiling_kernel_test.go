@@ -70,7 +70,9 @@ func (instance *nilAttributesRequest) Parameters() map[string]string { return ni
 
 func (instance *nilAttributesRequest) Query() bagcontract.ParameterBag { return nil }
 
-func (instance *nilAttributesRequest) Post() bagcontract.ParameterBag { return nil }
+func (instance *nilAttributesRequest) Post() (bagcontract.ParameterBag, error) { return nil, nil }
+
+func (instance *nilAttributesRequest) MaxBodyBytes() int { return 0 }
 
 func (instance *nilAttributesRequest) Attributes() bagcontract.ParameterBag { return nil }
 

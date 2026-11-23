@@ -35,6 +35,9 @@ import (
     melodystoragecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
+/* StorageObjectMaxBodyBytes is the object upload's own body cap, 1 MiB, above the application's MELODY_HTTP_MAX_REQUEST_BODY_BYTES */
+const StorageObjectMaxBodyBytes = 1 << 20
+
 /* SecurityHeaders is the framework's default set with the pages' content security policy. */
 func SecurityHeaders() melodyhttpmiddleware.SecurityHeadersConfig {
     return melodyhttpmiddleware.SecurityHeadersConfig{ContentSecurityPolicy: page.ContentSecurityPolicy}
@@ -127,7 +130,8 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
         /* the storage the aws.s3 module registers, checking its bucket, resolved at each request rather than captured, so the first upload after an outage checks the bucket again */
         objectStorage := melodycontainer.Lazy[melodystoragecontract.Storage](kernelInstance.ServiceContainer(), melodystorage.ServiceStorage)
 
-        router.Handle("/storage/object", instance.throttledWrite(handlerstorage.PutHandler(objectStorage)), melodyhttp.RouteOptions{Name: "example.storage.put", Methods: []string{"POST"}})
+        /* the one route whose body may outgrow the application's cap carries its own, so no other door is raised with it */
+        router.Handle("/storage/object", instance.throttledWrite(handlerstorage.PutHandler(objectStorage)), melodyhttp.RouteOptions{Name: "example.storage.put", Methods: []string{"POST"}, Protection: melodyhttp.RouteProtectionConfig{MaxBodyBytes: melodybound.Of(StorageObjectMaxBodyBytes)}})
         router.Handle("/storage/object", handlerstorage.GetHandler(objectStorage), melodyhttp.RouteOptions{Name: "example.storage.get", Methods: []string{"GET"}})
         router.Handle("/storage/object/link", handlerstorage.LinkHandler(objectStorage), melodyhttp.RouteOptions{Name: "example.storage.link", Methods: []string{"GET"}})
     }

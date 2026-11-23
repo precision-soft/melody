@@ -3,11 +3,13 @@ package security
 import (
     "context"
     "errors"
+    "io"
     nethttp "net/http"
     "net/http/httptest"
     "reflect"
     "strings"
     "sync"
+    "sync/atomic"
     "testing"
     "time"
 
@@ -637,6 +639,7 @@ func assertRefusedAsNilRuntime(t *testing.T, err error) {
 const (
     csrfAccountPath = "/account"
     csrfUploadPath  = "/upload"
+    csrfCappedPath  = "/capped"
     csrfTokenPath   = "/csrf-token"
 )
 
@@ -667,6 +670,21 @@ type csrfProbe struct {
     headers     map[string]string
     body        string
     contentType string
+    /* bodyReads, when set, counts the reads the body answers */
+    bodyReads *atomic.Int64
+}
+
+const csrfCappedMaxBodyBytes = 128
+
+type csrfCountingBody struct {
+    reader io.Reader
+    reads  *atomic.Int64
+}
+
+func (instance *csrfCountingBody) Read(buffer []byte) (int, error) {
+    instance.reads.Add(1)
+
+    return instance.reader.Read(buffer)
 }
 
 func newCsrfFixture(t *testing.T, mutate func(*CompiledFirewallConfig)) *csrfFixture {
@@ -682,6 +700,7 @@ func newCsrfFixture(t *testing.T, mutate func(*CompiledFirewallConfig)) *csrfFix
     kernel := newTestKernel()
     kernel.httpRouter.Handle(csrfAccountPath, handler, http.RouteOptions{})
     kernel.httpRouter.Handle(csrfUploadPath, handler, http.RouteOptions{Methods: []string{nethttp.MethodPost}, Protection: http.RouteProtectionConfig{CsrfDisabled: true}})
+    kernel.httpRouter.Handle(csrfCappedPath, handler, http.RouteOptions{Methods: []string{nethttp.MethodPost}, Protection: http.RouteProtectionConfig{MaxBodyBytes: bound.Of(csrfCappedMaxBodyBytes)}})
 
     config := CompiledFirewallConfig{
         Name:          "main",
@@ -752,7 +771,12 @@ func (instance *csrfFixture) serve(t *testing.T, probe csrfProbe) *httptest.Resp
         path = csrfAccountPath
     }
 
-    request := httptest.NewRequest(method, path, strings.NewReader(probe.body))
+    var body io.Reader = strings.NewReader(probe.body)
+    if nil != probe.bodyReads {
+        body = &csrfCountingBody{reader: body, reads: probe.bodyReads}
+    }
+
+    request := httptest.NewRequest(method, path, body)
     request.Header.Set("Accept", "application/json")
     if "" != probe.contentType {
         request.Header.Set("Content-Type", probe.contentType)

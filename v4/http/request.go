@@ -6,17 +6,18 @@ import (
     "mime"
     nethttp "net/http"
     "net/url"
+    "sync"
+    "sync/atomic"
 
     "github.com/precision-soft/melody/v4/bag"
     bagcontract "github.com/precision-soft/melody/v4/bag/contract"
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
 )
-
-/* netHttpUrlEncodedFormCeiling is the size past which net/http's ParseForm refuses a urlencoded body, its unexported maxFormSize */
-const netHttpUrlEncodedFormCeiling = 10 << 20
 
 /* RequestAttributeScheme names the scheme the kernel publishes after the route's attributes, so a route attribute of the same name cannot replace it; it carries the framework's underscore prefix */
 const RequestAttributeScheme = "_scheme"
@@ -30,8 +31,14 @@ type RequestConfig struct {
 
     /* RequestContext is the identity the kernel minted for the request; nil leaves Request.RequestContext answering nil. */
     RequestContext httpcontract.RequestContext
+
+    /* MaxBodyBytes is the body cap the form read and BindJson apply; absent is the configuration's MELODY_HTTP_MAX_REQUEST_BODY_BYTES, read from the runtime at first need; unlimited and a value below 1 are refused. */
+    MaxBodyBytes bound.Count
 }
 
+var requestMaxBodyBytesRule = bound.Rule[int]{Name: "RequestConfig.MaxBodyBytes", Minimum: 1}
+
+/* NewRequest reads nothing of the body: the urlencoded form is parsed by its first reader. */
 func NewRequest(
     httpRequest *nethttp.Request,
     runtimeInstance containercontract.Runtime,
@@ -43,74 +50,30 @@ func NewRequest(
         )
     }
 
-    routeParameters := config.RouteParameters
-    requestContext := config.RequestContext
+    maxBodyBytes := 0
+    if false == config.MaxBodyBytes.IsAbsent() {
+        resolvedMaxBodyBytes, resolveErr := bound.Resolve(config.MaxBodyBytes, requestMaxBodyBytesRule)
+        if nil != resolveErr {
+            /* bound.Resolve refuses with an exception error */
+            exception.Panic(resolveErr.(*exception.Error))
+        }
 
+        maxBodyBytes = resolvedMaxBodyBytes.Value
+    }
+
+    routeParameters := config.RouteParameters
     if nil == routeParameters {
         routeParameters = map[string]string{}
     }
 
-    queryBag := bag.NewParameterBagFromValues(httpRequest.URL.Query())
-    postBag := bag.NewParameterBag()
-    var bodyReadErr error
-
-    if true == shouldAutoParseForm(httpRequest) {
-        /* a urlencoded body is buffered and restored around ParseForm, so a later reader, the HMAC internal-auth source among them, sees the raw bytes; a multipart body is left untouched, to keep its disk spooling */
-        var rawBody []byte
-        bufferedBody := false
-        if true == isUrlEncodedForm(httpRequest) {
-            rawBody, bufferedBody, bodyReadErr = readRequestBodyBytes(httpRequest)
-            if true == bufferedBody {
-                restoreRequestBody(httpRequest, rawBody)
-            }
-        }
-
-        /* a body whose read failed is not parsed; the read error is recorded and the kernel refuses the request */
-        /* ParseForm refuses a urlencoded body past net/http's own ceiling whatever the configured limit, so a larger body the configured limit admitted is parsed here and published as the PostForm ParseForm then merges into Form; a body that does not parse is left to ParseForm, whose failure refuses it below */
-        if nil == bodyReadErr && true == bufferedBody && netHttpUrlEncodedFormCeiling < len(rawBody) {
-            if postForm, postFormErr := url.ParseQuery(string(rawBody)); nil == postFormErr {
-                httpRequest.PostForm = postForm
-            }
-        }
-
-        if nil == bodyReadErr {
-            parseFormErr := httpRequest.ParseForm()
-
-            if true == bufferedBody {
-                restoreRequestBody(httpRequest, rawBody)
-            }
-
-            /* ParseForm reports the body's failure before the query's, so its error alone does not say which half broke */
-            if nil == parseFormErr {
-                postBag = bag.NewParameterBagFromValues(httpRequest.PostForm)
-            } else if bodyParseErr := urlEncodedBodyParseError(bufferedBody, rawBody); nil != bodyParseErr {
-                /* a form that does not parse is recorded, and the kernel refuses the request; the half it yielded is not published */
-                bodyReadErr = exception.NewError(
-                    "failed to parse form data",
-                    map[string]any{
-                        "method": internal.BoundDiagnosticText(httpRequest.Method),
-                        "path":   internal.BoundDiagnosticText(httpRequest.URL.Path),
-                    },
-                    bodyParseErr,
-                )
-            } else {
-                /* the body parsed and only the query did not: that is not the handler's form, and Request reads the query through URL.Query() */
-                postBag = bag.NewParameterBagFromValues(httpRequest.PostForm)
-            }
-        }
-    }
-
-    attributesBag := bag.NewParameterBag()
-
     return &Request{
         httpRequest:     httpRequest,
         parameters:      routeParameters,
-        query:           queryBag,
-        post:            postBag,
-        attributes:      attributesBag,
+        query:           bag.NewParameterBagFromValues(httpRequest.URL.Query()),
+        attributes:      bag.NewParameterBag(),
         runtimeInstance: runtimeInstance,
-        requestContext:  requestContext,
-        bodyReadErr:     bodyReadErr,
+        requestContext:  config.RequestContext,
+        maxBodyBytes:    maxBodyBytes,
     }
 }
 
@@ -118,12 +81,16 @@ type Request struct {
     httpRequest     *nethttp.Request
     parameters      map[string]string
     query           bagcontract.ParameterBag
-    post            bagcontract.ParameterBag
     attributes      bagcontract.ParameterBag
     runtimeInstance containercontract.Runtime
     requestContext  httpcontract.RequestContext
-    /* the error that stopped the urlencoded body from being buffered; the kernel refuses the request when it is set */
-    bodyReadErr error
+    /* zero reads the configuration's cap */
+    maxBodyBytes int
+
+    formOnce   sync.Once
+    formLoaded atomic.Bool
+    post       bagcontract.ParameterBag
+    formErr    error
 }
 
 func (instance *Request) HttpRequest() *nethttp.Request {
@@ -150,8 +117,91 @@ func (instance *Request) Query() bagcontract.ParameterBag {
     return instance.query
 }
 
-func (instance *Request) Post() bagcontract.ParameterBag {
-    return instance.post
+func (instance *Request) Post() (bagcontract.ParameterBag, error) {
+    instance.formOnce.Do(instance.loadForm)
+
+    return instance.post, instance.formErr
+}
+
+func (instance *Request) MaxBodyBytes() int {
+    if 0 < instance.maxBodyBytes {
+        return instance.maxBodyBytes
+    }
+
+    return config.ConfigMustFromRuntime(instance.runtimeInstance).Http().MaxRequestBodyBytes().Value
+}
+
+/* failedForm answers the error of a form read that ran, nil while no reader asked for the form */
+func (instance *Request) failedForm() error {
+    if false == instance.formLoaded.Load() {
+        return nil
+    }
+
+    return instance.formErr
+}
+
+/* loadForm buffers a urlencoded body under the cap, restores it so a later reader, the HMAC internal-auth source among them, sees the raw bytes, and parses it; a multipart body is never read, so an upload is not held in memory */
+func (instance *Request) loadForm() {
+    defer instance.formLoaded.Store(true)
+
+    instance.post = bag.NewParameterBag()
+
+    httpRequest := instance.httpRequest
+    if false == isUrlEncodedFormSubmission(httpRequest) || nil == httpRequest.Body {
+        return
+    }
+
+    maxBodyBytes := instance.MaxBodyBytes()
+
+    /* one byte past the cap tells an at-cap body from an oversized one */
+    rawBody, readErr := io.ReadAll(io.LimitReader(httpRequest.Body, int64(maxBodyBytes)+1))
+    if nil != readErr {
+        var maxBytesError *nethttp.MaxBytesError
+        if true == exception.ChainAs(readErr, &maxBytesError) {
+            instance.formErr = newRequestBodyTooLargeError(maxBodyBytes, readErr)
+
+            return
+        }
+
+        instance.formErr = exception.NewHttpError(nethttp.StatusBadRequest, exception.HttpErrorConfig{Message: "bad request", Cause: readErr})
+
+        return
+    }
+
+    _ = httpRequest.Body.Close()
+    restoreRequestBody(httpRequest, rawBody)
+
+    if maxBodyBytes < len(rawBody) {
+        instance.formErr = newRequestBodyTooLargeError(maxBodyBytes, nil)
+
+        return
+    }
+
+    /* parsed here and not by ParseForm, which refuses a body past net/http's own ceiling whatever the cap */
+    postForm, parseErr := url.ParseQuery(string(rawBody))
+    if nil != parseErr {
+        instance.formErr = exception.NewHttpError(
+            nethttp.StatusBadRequest,
+            exception.HttpErrorConfig{
+                Message: "bad request",
+                Cause: exception.NewError(
+                    "failed to parse form data",
+                    map[string]any{
+                        "method": internal.BoundDiagnosticText(httpRequest.Method),
+                        "path":   internal.BoundDiagnosticText(httpRequest.URL.Path),
+                    },
+                    parseErr,
+                ),
+            },
+        )
+
+        return
+    }
+
+    /* published as ParseForm would, so a reader of the net/http request finds the form the framework read; with PostForm set, ParseForm only merges the query into Form, and a malformed query is not the form's failure */
+    httpRequest.PostForm = postForm
+    _ = httpRequest.ParseForm()
+    instance.post = bag.NewParameterBagFromValues(postForm)
 }
 
 func (instance *Request) Attributes() bagcontract.ParameterBag {
@@ -162,60 +212,20 @@ func (instance *Request) Header(name string) string {
     return instance.httpRequest.Header.Get(name)
 }
 
-/* urlEncodedBodyParseError reports the failure of the body half of ParseForm, by parsing the buffered bytes as ParseForm does. A multipart body or a request with none has no body half. */
-func urlEncodedBodyParseError(bufferedBody bool, rawBody []byte) error {
-    if false == bufferedBody {
-        return nil
-    }
-
-    _, parseErr := url.ParseQuery(string(rawBody))
-
-    return parseErr
-}
-
-func shouldAutoParseForm(httpRequest *nethttp.Request) bool {
+/* isUrlEncodedFormSubmission reports a POST, PUT or PATCH carrying the urlencoded media type, the one body the form read parses */
+func isUrlEncodedFormSubmission(httpRequest *nethttp.Request) bool {
     if nethttp.MethodPost != httpRequest.Method &&
         nethttp.MethodPut != httpRequest.Method &&
         nethttp.MethodPatch != httpRequest.Method {
         return false
     }
 
-    contentType := httpRequest.Header.Get("Content-Type")
-    if "" == contentType {
-        return false
-    }
-
-    mediaType, _, parseErr := mime.ParseMediaType(contentType)
-    if nil != parseErr {
-        return false
-    }
-
-    return "application/x-www-form-urlencoded" == mediaType || "multipart/form-data" == mediaType
-}
-
-func isUrlEncodedForm(httpRequest *nethttp.Request) bool {
     mediaType, _, parseErr := mime.ParseMediaType(httpRequest.Header.Get("Content-Type"))
     if nil != parseErr {
         return false
     }
 
     return "application/x-www-form-urlencoded" == mediaType
-}
-
-/* readRequestBodyBytes reads the body into memory, reporting whether one was present and the error that interrupted the read; it does not restore the body. */
-func readRequestBodyBytes(httpRequest *nethttp.Request) ([]byte, bool, error) {
-    if nil == httpRequest.Body {
-        return nil, false, nil
-    }
-
-    bodyBytes, readErr := io.ReadAll(httpRequest.Body)
-    if nil != readErr {
-        return nil, false, readErr
-    }
-
-    _ = httpRequest.Body.Close()
-
-    return bodyBytes, true, nil
 }
 
 /* restoreRequestBody replaces Body and GetBody with fresh readers over the given bytes. */
@@ -240,39 +250,29 @@ func (instance *Request) ContentType() string {
     return mediaType
 }
 
-func (instance *Request) ParseFormBody() error {
-    err := instance.httpRequest.ParseForm()
-    if nil != err {
-        return err
+/* Input answers a request parameter by name from the urlencoded form of a POST, PUT or PATCH, then the query string, then the route parameters: the first source that has the key answers. A multipart or json body is not a source. The error is the failed form read's, answered before the query is consulted, so a broken submission is never read as a blank one. A handler that must have the value the router bound reads Parameters. A repeated key answers its first value; bag.StringSlice reads the whole array. */
+func (instance *Request) Input(key string) (string, error) {
+    postBag, formErr := instance.Post()
+    if nil != formErr {
+        return "", formErr
     }
 
-    instance.post = bag.NewParameterBagFromValues(instance.httpRequest.PostForm)
-
-    return nil
-}
-
-func (instance *Request) FormValue(key string) string {
-    return instance.httpRequest.FormValue(key)
-}
-
-/* Input answers a request parameter by name from the parsed form body — a POST, PUT or PATCH carrying a urlencoded media type; a multipart body is left unparsed to keep its disk spooling, and neither it nor a json body is a source —, then the query string, then the route parameters: the first source that has the key answers. A handler that must have the value the router bound reads Parameters. A repeated key answers its first value, as FormValue does; bag.StringSlice reads the whole array. */
-func (instance *Request) Input(key string) string {
-    if nil != instance.post && true == instance.post.Has(key) {
-        return firstStringValue(instance.post, key)
+    if true == postBag.Has(key) {
+        return firstStringValue(postBag, key), nil
     }
 
     if nil != instance.query && true == instance.query.Has(key) {
-        return firstStringValue(instance.query, key)
+        return firstStringValue(instance.query, key), nil
     }
 
     if nil != instance.parameters {
         value, exists := instance.parameters[key]
         if true == exists {
-            return value
+            return value, nil
         }
     }
 
-    return ""
+    return "", nil
 }
 
 func firstStringValue(parameterBag bagcontract.ParameterBag, key string) string {

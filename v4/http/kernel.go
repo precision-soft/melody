@@ -304,11 +304,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         defaultLocale := configuration.Http().DefaultLocale()
         debugMode := config.EnvironmentDevelopment == configuration.Kernel().Environment()
 
-        if nil != request.Body {
-            /* the raw writer: net/http detects its own writer through an unexported-method assertion, so a wrapper loses the connection-close signal */
-            request.Body = nethttp.MaxBytesReader(rawWriter, request.Body, int64(configuration.Http().MaxRequestBodyBytes().Value))
-        }
-
         scheme := detectSchemeWithForwardedHeadersPolicy(request, instance.policies.forwardedHeadersPolicy)
 
         /* matched on the path as the client spelled it, so an encoded separator stays inside its segment */
@@ -376,7 +371,14 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             }
         }
 
-        melodyRequest := NewRequest(request, runtimeInstance, RequestConfig{RouteParameters: parameters, RequestContext: requestContext})
+        /* resolved after the match, so a route's own cap bounds its body and an unmatched path or a firewall door takes the application's */
+        maxBodyBytes := routeMaxBodyBytes(routeAttributes, configuration.Http().MaxRequestBodyBytes().Value)
+        if nil != request.Body {
+            /* the raw writer: net/http detects its own writer through an unexported-method assertion, so a wrapper loses the connection-close signal */
+            request.Body = nethttp.MaxBytesReader(rawWriter, request.Body, int64(maxBodyBytes))
+        }
+
+        melodyRequest := NewRequest(request, runtimeInstance, RequestConfig{RouteParameters: parameters, RequestContext: requestContext, MaxBodyBytes: bound.Of(maxBodyBytes)})
 
         for key, value := range routeAttributes {
             melodyRequest.Attributes().Set(key, value)
@@ -570,37 +572,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             )
 
             finalResponse = renderErrorResponse(runtimeInstance, melodyRequest, nethttp.StatusBadRequest, "bad request", nil)
-
-            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, requestLogger, eventDispatcher, debugMode)
-
-            return
-        }
-
-        /* a failed urlencoded read never populated the form: 413 past the size limit, 400 otherwise */
-        if nil != melodyRequest.bodyReadErr {
-            requestLogger.Warning(
-                "request body was refused before the handler",
-                exception.LogContext(
-                    melodyRequest.bodyReadErr,
-                    exception.LogContextConfig{
-                        Extra: exceptioncontract.Context{
-                            "method": internal.BoundDiagnosticText(request.Method),
-                            "path":   internal.BoundDiagnosticText(request.URL.Path),
-                        },
-                    },
-                ),
-            )
-
-            statusCode := nethttp.StatusBadRequest
-            message := "bad request"
-
-            var maxBytesError *nethttp.MaxBytesError
-            if true == exception.ChainAs(melodyRequest.bodyReadErr, &maxBytesError) {
-                statusCode = nethttp.StatusRequestEntityTooLarge
-                message = "payload too large"
-            }
-
-            finalResponse = renderErrorResponse(runtimeInstance, melodyRequest, statusCode, message, nil)
 
             instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, requestLogger, eventDispatcher, debugMode)
 
@@ -802,7 +773,23 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         response, finalHandlerErr := finalHandler(runtimeInstance, writer, melodyRequest)
 
-        finalHandlerErr = normalizeBodyLimitError(finalHandlerErr)
+        finalHandlerErr = normalizeBodyLimitError(finalHandlerErr, melodyRequest.MaxBodyBytes())
+
+        /* the request keeps the failure, so a reader that dropped it is journaled; the response stands */
+        if formErr := melodyRequest.failedForm(); nil == finalHandlerErr && nil != formErr && false == internal.IsNilInterface(response) && 200 <= response.StatusCode() && 300 > response.StatusCode() {
+            requestLogger.Warning(
+                "a handler answered over a request form that failed to parse",
+                exception.LogContext(
+                    formErr,
+                    exception.LogContextConfig{
+                        Extra: exceptioncontract.Context{
+                            "method": internal.BoundDiagnosticText(request.Method),
+                            "path":   internal.BoundDiagnosticText(request.URL.Path),
+                        },
+                    },
+                ),
+            )
+        }
 
         /* published to the recovery defer first: everything until the assignment below can panic */
         finalResponse = response
@@ -1137,17 +1124,29 @@ func (instance *loggedOccurrence) MarkAsLogged() {}
 
 var _ exceptioncontract.AlreadyLogged = (*loggedOccurrence)(nil)
 
-func normalizeBodyLimitError(handlerErr error) error {
-    if nil == handlerErr {
+/* normalizeBodyLimitError answers the 413 for a handler that returned the MaxBytesError of its own read; a 413 the framework built is kept */
+func normalizeBodyLimitError(handlerErr error, maxBodyBytes int) error {
+    if nil == handlerErr || true == exception.ChainIs(handlerErr, ErrRequestBodyTooLarge) {
         return handlerErr
     }
 
     var maxBytesError *nethttp.MaxBytesError
     if true == exception.ChainAs(handlerErr, &maxBytesError) {
-        return exception.NewHttpError(nethttp.StatusRequestEntityTooLarge, exception.HttpErrorConfig{Message: "payload too large", Cause: handlerErr})
+        return newRequestBodyTooLargeError(maxBodyBytes, handlerErr)
     }
 
     return handlerErr
+}
+
+/* routeMaxBodyBytes answers the matched route's cap, else the application's */
+func routeMaxBodyBytes(routeAttributes map[string]any, applicationMaxBodyBytes int) int {
+    protection, _ := routeAttributes[RouteAttributeProtection].(httpcontract.RouteProtectionConfig)
+
+    if routeCap, isSet := protection.MaxBodyBytes.Value(); true == isSet {
+        return routeCap
+    }
+
+    return applicationMaxBodyBytes
 }
 
 func (instance *Kernel) buildHandler(

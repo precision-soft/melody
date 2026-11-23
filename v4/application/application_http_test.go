@@ -12,6 +12,7 @@ import (
     "os"
     "os/exec"
     "slices"
+    "strconv"
     "strings"
     "sync"
     "sync/atomic"
@@ -2403,5 +2404,44 @@ func TestApplicationRegisterHttpRoute_CopiesTheSecurityHeadersDisabled(t *testin
     header := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/copied", nil)).Result().Header
     if _, present := header[http.HeaderFrameOptions]; true == present || "strict-origin-when-cross-origin" != header.Get(http.HeaderReferrerPolicy) {
         t.Fatalf("expected the names as registered, got %v", header)
+    }
+}
+
+type bodyCapTestModule struct {
+    csrfApplicationTestModule
+}
+
+func (instance *bodyCapTestModule) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
+    formLength := func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        postBag, formErr := request.Post()
+        if nil != formErr {
+            return nil, formErr
+        }
+
+        return http.TextResponse(nethttp.StatusOK, strconv.Itoa(len(postBag.All()))), nil
+    }
+
+    kernelInstance.HttpRouter().Handle("/upload", formLength, http.RouteOptions{Methods: []string{nethttp.MethodPost}, Protection: http.RouteProtectionConfig{MaxBodyBytes: bound.Of(1024)}})
+    kernelInstance.HttpRouter().Handle("/account", formLength, http.RouteOptions{Methods: []string{nethttp.MethodPost}})
+}
+
+func TestApplication_UploadRouteCap_LeavesTheOtherRoutesAtTheApplicationCap(t *testing.T) {
+    kernelInstance := bootServingTestApplicationWithEnvironment(t, config.EnvironmentProduction, config.HttpMaxRequestBodyBytesKey+"=64\n", ApplicationConfig{}, func(applicationInstance *Application) {
+        applicationInstance.RegisterModule(&bodyCapTestModule{csrfApplicationTestModule: csrfApplicationTestModule{fakeModule: fakeModule{name: "cap"}}})
+    })
+
+    post := func(path string) int {
+        request := httptest.NewRequest(nethttp.MethodPost, path, strings.NewReader("value="+strings.Repeat("a", 512)))
+        request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+        return serveTestRequest(kernelInstance, request).Code
+    }
+
+    if status := post("/upload"); nethttp.StatusOK != status {
+        t.Fatalf("expected the upload route's own cap to admit the body, got %d", status)
+    }
+
+    if status := post("/account"); nethttp.StatusRequestEntityTooLarge != status {
+        t.Fatalf("expected the application's cap on another route, got %d", status)
     }
 }

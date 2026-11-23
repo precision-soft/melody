@@ -315,6 +315,12 @@ func TestRegisterHttpRoutes_RegistersEachNamedDoorUnderItsPatternAndMethod(t *te
         if 1 != len(definition.Methods()) || door.method != definition.Methods()[0] {
             t.Fatalf("%s: expected the one method %s, got %v", door.name, door.method, definition.Methods())
         }
+
+        protection, _ := definition.Attributes()[melodyhttp.RouteAttributeProtection].(melodyhttp.RouteProtectionConfig)
+        routeCap, capSet := protection.MaxBodyBytes.Value()
+        if expectsOwnCap := "example.storage.put" == door.name; expectsOwnCap != capSet || (true == capSet && StorageObjectMaxBodyBytes != routeCap) {
+            t.Fatalf("%s: expected an own body cap only on the object upload, got %v", door.name, protection.MaxBodyBytes)
+        }
     }
 }
 

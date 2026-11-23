@@ -4,6 +4,7 @@ import (
     "errors"
     nethttp "net/http"
     "strings"
+    "sync/atomic"
     "testing"
 
     "github.com/precision-soft/melody/v4/container"
@@ -189,7 +190,62 @@ func TestRefuseForgedRequest_MultipartField_NotRead(t *testing.T) {
     sessionId, token := fixture.storedSession(t, csrfSignedIn)
 
     body := "--boundary\r\nContent-Disposition: form-data; name=\"" + http.DefaultCsrfFieldName + "\"\r\n\r\n" + token + "\r\n--boundary--\r\n"
-    expectCsrfStatus(t, fixture.serve(t, csrfProbe{sessionId: sessionId, body: body, contentType: "multipart/form-data; boundary=boundary"}), nethttp.StatusForbidden, "multipart")
+    bodyReads := &atomic.Int64{}
+    expectCsrfStatus(t, fixture.serve(t, csrfProbe{sessionId: sessionId, body: body, contentType: "multipart/form-data; boundary=boundary", bodyReads: bodyReads}), nethttp.StatusForbidden, "multipart")
+
+    if 0 != bodyReads.Load() {
+        t.Fatalf("expected the multipart body never read, got %d reads", bodyReads.Load())
+    }
+}
+
+func TestRefuseForgedRequest_HeaderPresent_FormNeverParsed(t *testing.T) {
+    fixture := newCsrfFixture(t, nil)
+    sessionId, token := fixture.storedSession(t, csrfSignedIn)
+
+    bodyReads := &atomic.Int64{}
+    expectCsrfStatus(t, fixture.serve(t, csrfProbe{sessionId: sessionId, headers: map[string]string{http.DefaultCsrfHeaderName: token}, body: "value=a", contentType: "application/x-www-form-urlencoded", bodyReads: bodyReads}), nethttp.StatusOK, "header")
+
+    if 0 != bodyReads.Load() {
+        t.Fatalf("expected the form never read when the header carries the token, got %d reads", bodyReads.Load())
+    }
+}
+
+func TestRefuseForgedRequest_StatedSameOrigin_FormNeverParsed(t *testing.T) {
+    fixture := newCsrfFixture(t, nil)
+    sessionId, _ := fixture.storedSession(t, csrfSignedIn)
+
+    bodyReads := &atomic.Int64{}
+    expectCsrfStatus(t, fixture.serve(t, csrfProbe{sessionId: sessionId, headers: map[string]string{"Sec-Fetch-Site": "same-origin"}, body: "value=a", contentType: "application/x-www-form-urlencoded", bodyReads: bodyReads}), nethttp.StatusOK, "same origin")
+
+    if 0 != bodyReads.Load() {
+        t.Fatalf("expected the form never read for a stated same origin, got %d reads", bodyReads.Load())
+    }
+}
+
+func TestRefuseForgedRequest_FieldRead_ReadsTheForm(t *testing.T) {
+    fixture := newCsrfFixture(t, nil)
+    sessionId, token := fixture.storedSession(t, csrfSignedIn)
+
+    bodyReads := &atomic.Int64{}
+    expectCsrfStatus(t, fixture.serve(t, csrfProbe{path: csrfCappedPath, sessionId: sessionId, body: http.DefaultCsrfFieldName + "=" + token, contentType: "application/x-www-form-urlencoded", bodyReads: bodyReads}), nethttp.StatusOK, "field under the cap")
+
+    if 0 == bodyReads.Load() {
+        t.Fatalf("expected the field read from the form")
+    }
+}
+
+func TestRefuseForgedRequest_FieldRead_BoundedByTheRouteCap_413NotA403(t *testing.T) {
+    fixture := newCsrfFixture(t, nil)
+    sessionId, token := fixture.storedSession(t, csrfSignedIn)
+    form := "application/x-www-form-urlencoded"
+
+    oversized := http.DefaultCsrfFieldName + "=" + token + "&padding=" + strings.Repeat("a", csrfCappedMaxBodyBytes)
+    expectCsrfStatus(t, fixture.serve(t, csrfProbe{path: csrfCappedPath, sessionId: sessionId, body: oversized, contentType: form}), nethttp.StatusRequestEntityTooLarge, "past the route's cap")
+    expectCsrfStatus(t, fixture.serve(t, csrfProbe{path: csrfCappedPath, sessionId: sessionId, body: "value=%zz", contentType: form}), nethttp.StatusBadRequest, "malformed")
+
+    if 0 != *fixture.served {
+        t.Fatalf("expected the handler not to run, ran %d times", *fixture.served)
+    }
 }
 
 func TestRefuseForgedRequest_TrustedOrigin_ReadAsSameOrigin(t *testing.T) {

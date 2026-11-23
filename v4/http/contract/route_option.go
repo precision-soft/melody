@@ -1,5 +1,9 @@
 package contract
 
+import (
+    "github.com/precision-soft/melody/v4/bound"
+)
+
 /* RouteOptions is what a route declares beyond its pattern and its handler. The zero value registers the route under no name, for every method, host and scheme, with no requirement, default, locale or attribute, at priority zero; the lists and the maps are copied at registration, so the value can be reused. */
 type RouteOptions struct {
     /* Name is the route's name for the url generator and the manifest; "" leaves the route unnamed. */
@@ -29,15 +33,18 @@ type RouteOptions struct {
     /* Attributes travel with the match into the request; a key beginning with "_", the framework's prefix, is refused at registration. */
     Attributes map[string]any
 
-    /* Protection turns protections of the framework off for this route; the zero value keeps every one. */
+    /* Protection changes protections of the framework for this route; the zero value keeps every one. */
     Protection RouteProtectionConfig
 }
 
-/* RouteProtectionConfig is what a route turns off of the framework's per-request protections; each field's zero value keeps its protection. */
+/* RouteProtectionConfig is what a route changes of the framework's per-request protections; each field's zero value keeps its protection as the application set it. */
 type RouteProtectionConfig struct {
     /* CsrfDisabled exempts the route from its firewall's cross-site request forgery check, for a handler that verifies the token itself; refused on a route that serves only safe methods, which the check never reads. */
     CsrfDisabled bool
 
     /* SecurityHeadersDisabled names the security headers this route's responses go without, in any case; a name the framework does not send, or one named twice, is refused at registration. */
     SecurityHeadersDisabled []string
+
+    /* MaxBodyBytes is this route's request body cap, larger or smaller than the application's MELODY_HTTP_MAX_REQUEST_BODY_BYTES; absent keeps the application's, unlimited and a value below 1 are refused at registration. */
+    MaxBodyBytes bound.Count
 }

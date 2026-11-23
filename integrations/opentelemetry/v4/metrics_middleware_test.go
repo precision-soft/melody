@@ -16,6 +16,7 @@ import (
     "go.opentelemetry.io/otel/attribute"
     sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
+    "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
@@ -559,5 +560,19 @@ func TestNewMetricsMiddleware_AnEmptyDurationBoundariesListIsRefused(t *testing.
     _, middlewareErr := NewMetricsMiddleware(meter, MetricsMiddlewareConfig{DurationBoundaries: []float64{}})
     if nil == middlewareErr || false == strings.Contains(middlewareErr.Error(), "MetricsMiddlewareConfig.DurationBoundaries is empty") {
         t.Fatalf("expected an empty DurationBoundaries refused naming the field, got %v", middlewareErr)
+    }
+}
+
+func TestMetricsMiddleware_FormOverTheCap_CountedAs413(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodPost, "/form", strings.NewReader("value="+strings.Repeat("a", 64)))
+    netRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    netRequest.Body = nethttp.MaxBytesReader(httptest.NewRecorder(), netRequest.Body, 16)
+    request := melodyhttp.NewRequest(netRequest, nil, melodyhttp.RequestConfig{MaxBodyBytes: bound.Of(16)})
+
+    _, formErr := request.Post()
+
+    var maxBytesError *nethttp.MaxBytesError
+    if nethttp.StatusRequestEntityTooLarge != statusCodeForError(formErr) || false == exception.ChainAs(formErr, &maxBytesError) {
+        t.Fatalf("expected the form read's 413 counted as 413 with the max-bytes error in its chain, got %v", formErr)
     }
 }

@@ -11,10 +11,13 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bag"
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/session"
 )
 
@@ -102,9 +105,12 @@ func TestNewRequest_PostFormParsing(t *testing.T) {
     httpRequest := httptest.NewRequest("POST", "/login", body)
     httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    request := NewRequest(httpRequest, nil, RequestConfig{})
+    request := NewRequest(httpRequest, nil, formTestRequestConfig())
 
-    postBag := request.Post()
+    postBag, postErr := request.Post()
+    if nil != postErr {
+        t.Fatalf("unexpected form error: %v", postErr)
+    }
     if nil == postBag {
         t.Fatalf("expected non-nil post bag")
     }
@@ -115,12 +121,12 @@ func TestNewRequest_PostFormParsing(t *testing.T) {
         t.Fatalf("expected post param 'password' to exist")
     }
 
-    username := request.FormValue("username")
+    username, _ := request.Input("username")
     if "john" != username {
         t.Fatalf("expected username 'john', got: %s", username)
     }
 
-    password := request.FormValue("password")
+    password, _ := request.Input("password")
     if "secret" != password {
         t.Fatalf("expected password 'secret', got: %s", password)
     }
@@ -131,9 +137,12 @@ func TestNewRequest_PutFormParsing(t *testing.T) {
     httpRequest := httptest.NewRequest("PUT", "/resource/1", body)
     httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    request := NewRequest(httpRequest, nil, RequestConfig{})
+    request := NewRequest(httpRequest, nil, formTestRequestConfig())
 
-    postBag := request.Post()
+    postBag, postErr := request.Post()
+    if nil != postErr {
+        t.Fatalf("unexpected form error: %v", postErr)
+    }
     if nil == postBag {
         t.Fatalf("expected non-nil post bag")
     }
@@ -141,7 +150,7 @@ func TestNewRequest_PutFormParsing(t *testing.T) {
         t.Fatalf("expected post param 'name' to exist")
     }
 
-    name := request.FormValue("name")
+    name, _ := request.Input("name")
     if "updated" != name {
         t.Fatalf("expected name 'updated', got: %s", name)
     }
@@ -152,9 +161,12 @@ func TestNewRequest_PatchFormParsing(t *testing.T) {
     httpRequest := httptest.NewRequest("PATCH", "/resource/1", body)
     httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    request := NewRequest(httpRequest, nil, RequestConfig{})
+    request := NewRequest(httpRequest, nil, formTestRequestConfig())
 
-    postBag := request.Post()
+    postBag, postErr := request.Post()
+    if nil != postErr {
+        t.Fatalf("unexpected form error: %v", postErr)
+    }
     if nil == postBag {
         t.Fatalf("expected non-nil post bag")
     }
@@ -162,7 +174,7 @@ func TestNewRequest_PatchFormParsing(t *testing.T) {
         t.Fatalf("expected post param 'field' to exist")
     }
 
-    field := request.FormValue("field")
+    field, _ := request.Input("field")
     if "value" != field {
         t.Fatalf("expected field 'value', got: %s", field)
     }
@@ -173,7 +185,10 @@ func TestNewRequest_GetDoesNotParseForm(t *testing.T) {
 
     request := NewRequest(httpRequest, nil, RequestConfig{})
 
-    postBag := request.Post()
+    postBag, postErr := request.Post()
+    if nil != postErr {
+        t.Fatalf("unexpected form error: %v", postErr)
+    }
     if nil == postBag {
         t.Fatalf("expected non-nil post bag")
     }
@@ -188,12 +203,12 @@ func TestRequest_Input_FallsBackToParameters(t *testing.T) {
 
     request := NewRequest(httpRequest, nil, RequestConfig{RouteParameters: map[string]string{"pkey": "pval"}})
 
-    pval := request.Input("pkey")
+    pval, _ := request.Input("pkey")
     if "pval" != pval {
         t.Fatalf("expected param value, got: %s", pval)
     }
 
-    missing := request.Input("missing")
+    missing, _ := request.Input("missing")
     if "" != missing {
         t.Fatalf("expected empty string for missing key, got: %s", missing)
     }
@@ -252,7 +267,7 @@ func TestNewRequest_DoesNotParseFormForJsonContentType(t *testing.T) {
 
     request := NewRequest(httpRequest, nil, RequestConfig{})
 
-    if true == request.Post().Has("name") {
+    if postBag, _ := request.Post(); true == postBag.Has("name") {
         t.Fatalf("JSON body must not be parsed as form")
     }
 
@@ -272,7 +287,7 @@ func TestNewRequest_DoesNotParseFormWhenContentTypeMissing(t *testing.T) {
 
     request := NewRequest(httpRequest, nil, RequestConfig{})
 
-    if true == request.Post().Has("username") {
+    if postBag, _ := request.Post(); true == postBag.Has("username") {
         t.Fatalf("body without Content-Type must not be parsed as form")
     }
 }
@@ -318,86 +333,39 @@ func TestRequest_RuntimeInstance(t *testing.T) {
     }
 }
 
-func TestRequest_ParseFormBody(t *testing.T) {
-    body := strings.NewReader("key=value")
-    httpRequest := httptest.NewRequest("POST", "/test", body)
-    httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+func TestRequest_Post_Multipart_EmptyAndBodyUntouched(t *testing.T) {
+    multipartBody := "--boundary\r\nContent-Disposition: form-data; name=\"field\"\r\n\r\nvalue\r\n--boundary--\r\n"
+    httpRequest := httptest.NewRequest("POST", "/test", strings.NewReader(multipartBody))
+    httpRequest.Header.Set("Content-Type", "multipart/form-data; boundary=boundary")
 
     request := NewRequest(httpRequest, nil, RequestConfig{})
 
-    err := request.ParseFormBody()
-    if nil != err {
-        t.Fatalf("unexpected error: %v", err)
+    postBag, postErr := request.Post()
+    if nil != postErr || nil == postBag || true == postBag.Has("field") {
+        t.Fatalf("expected the empty form and no error for a multipart body, got %v %v", postBag, postErr)
     }
 
-    postBag := request.Post()
-    if false == postBag.Has("key") {
-        t.Fatalf("expected post param 'key' to exist after ParseFormBody")
-    }
-
-    value := request.FormValue("key")
-    if "value" != value {
-        t.Fatalf("expected 'value', got: %s", value)
-    }
-}
-
-func TestRequest_FormValue(t *testing.T) {
-    body := strings.NewReader("field=formval")
-    httpRequest := httptest.NewRequest("POST", "/test", body)
-    httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-    request := NewRequest(httpRequest, nil, RequestConfig{})
-
-    value := request.FormValue("field")
-    if "formval" != value {
-        t.Fatalf("expected 'formval', got: %s", value)
-    }
-}
-
-func TestNewRequest_ParseFormError_PostBagIsEmpty(t *testing.T) {
-    httpRequest := httptest.NewRequest("POST", "/test", nil)
-    httpRequest.Header.Set("Content-Type", "multipart/form-data; boundary=invalid")
-    httpRequest.Body = io.NopCloser(strings.NewReader("not valid multipart"))
-
-    request := NewRequest(httpRequest, nil, RequestConfig{})
-
-    postBag := request.Post()
-    if nil == postBag {
-        t.Fatalf("expected non-nil post bag")
-    }
-
-    if true == postBag.Has("anything") {
-        t.Fatalf("expected empty post bag when form parsing fails")
-    }
-}
-
-func TestNewRequest_ParseFormError_NilRuntime_NoPanic(t *testing.T) {
-    httpRequest := httptest.NewRequest("POST", "/test", nil)
-    httpRequest.Header.Set("Content-Type", "multipart/form-data; boundary=invalid")
-    httpRequest.Body = io.NopCloser(strings.NewReader("not valid multipart"))
-
-    request := NewRequest(httpRequest, nil, RequestConfig{})
-
-    if nil == request {
-        t.Fatalf("expected non-nil request even when form parsing fails with nil runtime")
+    remaining, _ := io.ReadAll(httpRequest.Body)
+    if multipartBody != string(remaining) {
+        t.Fatalf("expected the multipart body untouched, got %q", string(remaining))
     }
 }
 
 func TestRequest_Input_DeliversQueryAndPostValues(t *testing.T) {
     queryRequest := httptest.NewRequest("GET", "/search?term=melody", nil)
-    request := NewRequest(queryRequest, nil, RequestConfig{})
+    request := NewRequest(queryRequest, nil, formTestRequestConfig())
 
-    if "melody" != request.Input("term") {
-        t.Fatalf("expected the query value, got %q", request.Input("term"))
+    if term, _ := request.Input("term"); "melody" != term {
+        t.Fatalf("expected the query value, got %q", term)
     }
 
     formBody := strings.NewReader("field=abc")
     postRequest := httptest.NewRequest("POST", "/submit", formBody)
     postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-    postingRequest := NewRequest(postRequest, nil, RequestConfig{})
+    postingRequest := NewRequest(postRequest, nil, formTestRequestConfig())
 
-    if "abc" != postingRequest.Input("field") {
-        t.Fatalf("expected the post value, got %q", postingRequest.Input("field"))
+    if field, _ := postingRequest.Input("field"); "abc" != field {
+        t.Fatalf("expected the post value, got %q", field)
     }
 }
 
@@ -406,8 +374,8 @@ func TestRequest_Input_AnswersTheFirstValueOfARepeatedKey(t *testing.T) {
     repeatedRequest := httptest.NewRequest("GET", "/search?a=1&a=2", nil)
     request := NewRequest(repeatedRequest, nil, RequestConfig{})
 
-    if "1" != request.Input("a") {
-        t.Fatalf("expected the first value of the repeated key, got %q", request.Input("a"))
+    if value, _ := request.Input("a"); "1" != value {
+        t.Fatalf("expected the first value of the repeated key, got %q", value)
     }
 
     values, exists := bag.StringSlice(request.Query(), "a")
@@ -421,39 +389,47 @@ func TestRequest_Input_AnswersTheFirstValueOfARepeatedFormKey(t *testing.T) {
     postRequest := httptest.NewRequest("POST", "/submit", formBody)
     postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    request := NewRequest(postRequest, nil, RequestConfig{})
+    request := NewRequest(postRequest, nil, formTestRequestConfig())
 
-    if "1" != request.Input("a") {
-        t.Fatalf("expected the first value of the repeated form key, got %q", request.Input("a"))
+    if value, _ := request.Input("a"); "1" != value {
+        t.Fatalf("expected the first value of the repeated form key, got %q", value)
     }
 }
 
-/* a form that does not parse is refused the way a body that does not read is: a warning that let the request continue handed the handler an empty form for a real submission */
-func TestNewRequest_UnparsableFormIsRecordedForRefusal(t *testing.T) {
+/* a form that does not parse answers its error from every read: a handler handed an empty form for a real submission would process it as a blank one */
+func TestRequest_Post_MalformedBody_400AndTheSameErrorOnEveryRead(t *testing.T) {
     formBody := strings.NewReader("a=%zz&csrf=token")
     postRequest := httptest.NewRequest("POST", "/submit", formBody)
     postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    request := NewRequest(postRequest, nil, RequestConfig{})
+    request := NewRequest(postRequest, nil, formTestRequestConfig())
 
-    if nil == request.bodyReadErr {
-        t.Fatalf("expected the unparsable form to be recorded for the kernel's refusal")
+    postBag, firstErr := request.Post()
+    httpException := exception.AsHttpException(firstErr)
+    if nil == httpException || nethttp.StatusBadRequest != httpException.StatusCode() {
+        t.Fatalf("expected a 400 for the unparsable form, got %v", firstErr)
     }
 
-    if true == request.Post().Has("csrf") {
+    if true == postBag.Has("csrf") {
         t.Fatalf("expected no half-parsed form to reach the handler")
+    }
+
+    secondBag, secondErr := request.Post()
+    if firstErr != secondErr || true == secondBag.Has("csrf") {
+        t.Fatalf("expected the same error on the second read, got %v", secondErr)
     }
 }
 
-func TestNewRequest_AnUnparsableFormRefusalBoundsThePathItCarries(t *testing.T) {
+func TestRequest_Post_AnUnparsableFormRefusalBoundsThePathItCarries(t *testing.T) {
     postRequest := httptest.NewRequest("POST", "/"+strings.Repeat("a", 600*1024), strings.NewReader("a=%zz"))
     postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    request := NewRequest(postRequest, nil, RequestConfig{})
+    request := NewRequest(postRequest, nil, formTestRequestConfig())
 
-    refusal, isExceptionError := request.bodyReadErr.(*exception.Error)
-    if false == isExceptionError {
-        t.Fatalf("expected the refusal as an exception error, got %T", request.bodyReadErr)
+    _, postErr := request.Post()
+    var refusal *exception.Error
+    if false == exception.ChainAs(postErr, &refusal) {
+        t.Fatalf("expected the parse refusal as an exception error in the chain, got %T", postErr)
     }
 
     path, _ := refusal.Context()["path"].(string)
@@ -462,17 +438,19 @@ func TestNewRequest_AnUnparsableFormRefusalBoundsThePathItCarries(t *testing.T) 
     }
 }
 
-/* the read error is recorded ITSELF, not re-discovered through a second symptom: with the guard removed, ParseForm reads the poisoned body and reports its own failure, which the parse branch wraps — the refusal still fires, but the record blames the parse of a body that in truth never arrived. Identity is the observable that tells the two paths apart. */
-func TestNewRequest_ARawBodyReadFailureIsRecordedItself(t *testing.T) {
+/* the read error is the cause itself, not a parse failure of a body that never arrived */
+func TestRequest_Post_ARawBodyReadFailure_400CarryingTheReadError(t *testing.T) {
     readErr := errors.New("the client vanished mid-upload")
 
     postRequest := httptest.NewRequest("POST", "/submit", &failingBodyReader{err: readErr})
     postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    request := NewRequest(postRequest, nil, RequestConfig{})
+    request := NewRequest(postRequest, nil, formTestRequestConfig())
 
-    if readErr != request.bodyReadErr {
-        t.Fatalf("expected the read error to travel unwrapped, got %v", request.bodyReadErr)
+    _, postErr := request.Post()
+    httpException := exception.AsHttpException(postErr)
+    if nil == httpException || nethttp.StatusBadRequest != httpException.StatusCode() || readErr != httpException.CauseErr() {
+        t.Fatalf("expected a 400 caused by the read error itself, got %v", postErr)
     }
 }
 
@@ -550,10 +528,10 @@ func TestRequest_Input_PrefersThePostBodyOverTheQuery(t *testing.T) {
     httpRequest := httptest.NewRequest("POST", "/submit?field=fromQuery", strings.NewReader("field=fromBody"))
     httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    request := NewRequest(httpRequest, nil, RequestConfig{})
+    request := NewRequest(httpRequest, nil, formTestRequestConfig())
 
-    if "fromBody" != request.Input("field") {
-        t.Fatalf("expected the post body to win over the query, got %q", request.Input("field"))
+    if field, _ := request.Input("field"); "fromBody" != field {
+        t.Fatalf("expected the post body to win over the query, got %q", field)
     }
 }
 
@@ -562,8 +540,8 @@ func TestRequest_Input_PrefersTheQueryOverTheRouteParameters(t *testing.T) {
 
     request := NewRequest(httpRequest, nil, RequestConfig{RouteParameters: map[string]string{"id": "fromParameters"}})
 
-    if "fromQuery" != request.Input("id") {
-        t.Fatalf("expected the query to win over the route parameters, got %q", request.Input("id"))
+    if id, _ := request.Input("id"); "fromQuery" != id {
+        t.Fatalf("expected the query to win over the route parameters, got %q", id)
     }
 }
 
@@ -572,8 +550,8 @@ func TestRequest_Input_FallsThroughToTheRouteParametersOnly(t *testing.T) {
 
     request := NewRequest(httpRequest, nil, RequestConfig{RouteParameters: map[string]string{"id": "fromParameters"}})
 
-    if "fromParameters" != request.Input("id") {
-        t.Fatalf("expected the route parameter when no other source carries the key, got %q", request.Input("id"))
+    if id, _ := request.Input("id"); "fromParameters" != id {
+        t.Fatalf("expected the route parameter when no other source carries the key, got %q", id)
     }
 }
 
@@ -583,18 +561,15 @@ func TestNewRequest_AMalformedQueryDoesNotRefuseAValidForm(t *testing.T) {
     postRequest := httptest.NewRequest("POST", "/submit?a=b;c=d", formBody)
     postRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    request := NewRequest(postRequest, nil, RequestConfig{})
+    request := NewRequest(postRequest, nil, formTestRequestConfig())
 
-    if nil != request.bodyReadErr {
-        t.Fatalf("expected the request to be served, got the refusal %v", request.bodyReadErr)
+    field, fieldErr := request.Input("field")
+    if nil != fieldErr || "value" != field {
+        t.Fatalf("expected the parsed form to reach the handler, got %q %v", field, fieldErr)
     }
 
-    if "value" != request.Input("field") {
-        t.Fatalf("expected the parsed form to reach the handler, got %q", request.Input("field"))
-    }
-
-    if "token" != request.Input("csrf") {
-        t.Fatalf("expected every parsed form key to reach the handler, got %q", request.Input("csrf"))
+    if csrf, _ := request.Input("csrf"); "token" != csrf {
+        t.Fatalf("expected every parsed form key to reach the handler, got %q", csrf)
     }
 }
 
@@ -607,9 +582,15 @@ func serveUrlEncodedFormUnderALimit(t *testing.T, bodyLimitBytes int, valueBytes
     router.Handle(
         "/form",
         func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            postedValueBytes = len(request.HttpRequest().PostForm.Get("value"))
-            if len(request.HttpRequest().FormValue("value")) != postedValueBytes {
-                t.Errorf("expected Form to carry the posted value beside PostForm")
+            postBag, formErr := request.Post()
+            if nil != formErr {
+                return nil, formErr
+            }
+
+            value, _, _ := bag.StringAt(postBag, "value", 0)
+            postedValueBytes = len(value)
+            if len(request.HttpRequest().PostForm.Get("value")) != postedValueBytes {
+                t.Errorf("expected PostForm to carry the posted value beside the form")
             }
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
@@ -645,7 +626,7 @@ func TestRequest_AUrlencodedBodyPastTheConfiguredLimitIsRefused(t *testing.T) {
     statusCode, postedValueBytes := serveUrlEncodedFormUnderALimit(t, 12<<20, 12<<20)
 
     if nethttp.StatusRequestEntityTooLarge != statusCode || -1 != postedValueBytes {
-        t.Fatalf("expected 413 with no handler run, got %d with %d bytes posted", statusCode, postedValueBytes)
+        t.Fatalf("expected 413 with no form handed to the handler, got %d with %d bytes posted", statusCode, postedValueBytes)
     }
 }
 
@@ -685,5 +666,195 @@ func TestNewRequest_ZeroConfigHasNoRouteParametersAndNoRequestContext(t *testing
 
     if requestContext != configured.RequestContext() {
         t.Fatalf("expected the configured request context")
+    }
+}
+
+func newUrlEncodedRequest(body io.ReadCloser) *nethttp.Request {
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/form?page=1", nil)
+    httpRequest.Body = body
+    httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+    return httpRequest
+}
+
+func TestNewRequest_ReadsNoBody(t *testing.T) {
+    body := newCountingBody("value=a")
+
+    NewRequest(newUrlEncodedRequest(body), nil, formTestRequestConfig())
+
+    if 0 != body.reads.Load() {
+        t.Fatalf("expected no read at construction, got %d", body.reads.Load())
+    }
+}
+
+func TestRequest_Post_ParsesOnFirstReadAndOnce(t *testing.T) {
+    body := newCountingBody("value=a")
+    request := NewRequest(newUrlEncodedRequest(body), nil, formTestRequestConfig())
+
+    firstBag, _ := request.Post()
+    readsAfterFirst := body.reads.Load()
+    secondBag, _ := request.Post()
+
+    if 0 == readsAfterFirst || readsAfterFirst != body.reads.Load() {
+        t.Fatalf("expected the body read by the first call only, got %d then %d", readsAfterFirst, body.reads.Load())
+    }
+
+    if firstBag != secondBag || false == firstBag.Has("value") {
+        t.Fatalf("expected the same parsed form on every call")
+    }
+}
+
+func TestRequest_Post_RestoresTheBodyForALaterReader(t *testing.T) {
+    httpRequest := newUrlEncodedRequest(io.NopCloser(strings.NewReader("value=a&other=b")))
+    request := NewRequest(httpRequest, nil, formTestRequestConfig())
+
+    _, _ = request.Post()
+
+    remaining, readErr := io.ReadAll(httpRequest.Body)
+    if nil != readErr || "value=a&other=b" != string(remaining) {
+        t.Fatalf("expected the raw body restored, got %q %v", string(remaining), readErr)
+    }
+
+    if "a" != httpRequest.PostForm.Get("value") || "a" != httpRequest.Form.Get("value") || "1" != httpRequest.Form.Get("page") {
+        t.Fatalf("expected PostForm and Form published as ParseForm does, got %v and %v", httpRequest.PostForm, httpRequest.Form)
+    }
+}
+
+func TestRequest_Post_ConcurrentFirstReads_ParseOnce(t *testing.T) {
+    body := newCountingBody("value=a")
+    request := NewRequest(newUrlEncodedRequest(body), nil, formTestRequestConfig())
+
+    start := make(chan struct{})
+    results := make(chan bool, 8)
+    for index := 0; index < 8; index++ {
+        go func() {
+            <-start
+            postBag, postErr := request.Post()
+            results <- nil == postErr && true == postBag.Has("value")
+        }()
+    }
+    close(start)
+
+    for index := 0; index < 8; index++ {
+        if false == <-results {
+            t.Fatalf("expected every concurrent reader to see the parsed form")
+        }
+    }
+
+    /* "value=a" is read in one read and one end-of-file read */
+    if 2 < body.reads.Load() {
+        t.Fatalf("expected the body read once, got %d reads", body.reads.Load())
+    }
+}
+
+func TestRequest_Post_OverTheCap_413CarryingTheSentinelAndTheMaxBytesError(t *testing.T) {
+    httpRequest := newUrlEncodedRequest(nil)
+    httpRequest.Body = nethttp.MaxBytesReader(httptest.NewRecorder(), io.NopCloser(strings.NewReader("value="+strings.Repeat("a", 32))), 16)
+    request := NewRequest(httpRequest, nil, RequestConfig{MaxBodyBytes: bound.Of(16)})
+
+    _, postErr := request.Post()
+
+    httpException := exception.AsHttpException(postErr)
+    if nil == httpException || nethttp.StatusRequestEntityTooLarge != httpException.StatusCode() || "payload too large" != httpException.Message() {
+        t.Fatalf("expected a 413, got %v", postErr)
+    }
+
+    var maxBytesError *nethttp.MaxBytesError
+    if false == exception.ChainIs(postErr, ErrRequestBodyTooLarge) || false == exception.ChainAs(postErr, &maxBytesError) {
+        t.Fatalf("expected the sentinel and the max-bytes error in the chain, got %v", postErr)
+    }
+
+    if 16 != httpException.Context()["maxBodyBytes"] {
+        t.Fatalf("expected the cap in the context, got %v", httpException.Context())
+    }
+}
+
+/* a request built by hand carries no MaxBytesReader: the cap is the request's own */
+func TestRequest_Post_OverTheCapWithoutAReaderLimit_413CarryingTheSentinel(t *testing.T) {
+    request := NewRequest(newUrlEncodedRequest(io.NopCloser(strings.NewReader("value="+strings.Repeat("a", 11)))), nil, RequestConfig{MaxBodyBytes: bound.Of(16)})
+
+    _, postErr := request.Post()
+
+    httpException := exception.AsHttpException(postErr)
+    if nil == httpException || nethttp.StatusRequestEntityTooLarge != httpException.StatusCode() || false == exception.ChainIs(postErr, ErrRequestBodyTooLarge) {
+        t.Fatalf("expected a 413 carrying the sentinel, got %v", postErr)
+    }
+}
+
+func TestRequest_Post_AtTheCap_Parsed(t *testing.T) {
+    request := NewRequest(newUrlEncodedRequest(io.NopCloser(strings.NewReader("value="+strings.Repeat("a", 10)))), nil, RequestConfig{MaxBodyBytes: bound.Of(16)})
+
+    postBag, postErr := request.Post()
+    if nil != postErr || false == postBag.Has("value") {
+        t.Fatalf("expected a body at the cap parsed, got %v", postErr)
+    }
+}
+
+func TestRequest_Post_JsonBody_EmptyAndBodyUntouched(t *testing.T) {
+    body := newCountingBody(`{"value":"a"}`)
+    httpRequest := newUrlEncodedRequest(body)
+    httpRequest.Header.Set("Content-Type", "application/json")
+    request := NewRequest(httpRequest, nil, formTestRequestConfig())
+
+    postBag, postErr := request.Post()
+    if nil != postErr || true == postBag.Has("value") || 0 != body.reads.Load() {
+        t.Fatalf("expected the empty form and an untouched body, got %v and %d reads", postErr, body.reads.Load())
+    }
+}
+
+func TestRequest_Post_GetRequest_EmptyAndBodyUntouched(t *testing.T) {
+    body := newCountingBody("value=a")
+    httpRequest := newUrlEncodedRequest(body)
+    httpRequest.Method = nethttp.MethodGet
+    request := NewRequest(httpRequest, nil, formTestRequestConfig())
+
+    postBag, postErr := request.Post()
+    if nil != postErr || true == postBag.Has("value") || 0 != body.reads.Load() {
+        t.Fatalf("expected the empty form and an untouched body, got %v and %d reads", postErr, body.reads.Load())
+    }
+}
+
+func TestRequest_Input_FailedForm_AnswersTheError(t *testing.T) {
+    request := NewRequest(newUrlEncodedRequest(io.NopCloser(strings.NewReader("value=%zz"))), nil, formTestRequestConfig())
+
+    value, inputErr := request.Input("page")
+    if nil == inputErr || "" != value {
+        t.Fatalf("expected the form's error before the query is consulted, got %q %v", value, inputErr)
+    }
+}
+
+func TestRequest_MaxBodyBytes_ConfigValueThenConfiguration(t *testing.T) {
+    serviceContainer := newHttpTestContainerWithSessionStorageAndEnvironmentValues(
+        session.NewInMemoryStorage(session.InMemoryStorageConfig{}),
+        map[string]string{config.HttpMaxRequestBodyBytesKey: "4096"},
+    )
+    runtimeInstance := runtime.NewRequest(t.Context(), serviceContainer.NewScope())
+
+    configured := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/", nil), runtimeInstance, RequestConfig{MaxBodyBytes: bound.Of(64)})
+    if 64 != configured.MaxBodyBytes() {
+        t.Fatalf("expected the config value, got %d", configured.MaxBodyBytes())
+    }
+
+    absent := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/", nil), runtimeInstance, RequestConfig{})
+    if 4096 != absent.MaxBodyBytes() {
+        t.Fatalf("expected the configuration's cap, got %d", absent.MaxBodyBytes())
+    }
+}
+
+func TestNewRequest_MaxBodyBytesUnlimited_Panics(t *testing.T) {
+    assertPanicsNamingField(t, func() {
+        NewRequest(httptest.NewRequest(nethttp.MethodGet, "/", nil), nil, RequestConfig{MaxBodyBytes: bound.UnlimitedCount()})
+    }, "the limit does not admit unlimited", "RequestConfig.MaxBodyBytes")
+}
+
+func TestNewRequest_MaxBodyBytesBelowOne_Panics(t *testing.T) {
+    assertPanicsNamingField(t, func() {
+        NewRequest(httptest.NewRequest(nethttp.MethodGet, "/", nil), nil, RequestConfig{MaxBodyBytes: bound.Of(0)})
+    }, "the limit is below its minimum", "RequestConfig.MaxBodyBytes")
+}
+
+func TestHttpTestRequestMaxBodyBytes_IsTheConfigurationDefault(t *testing.T) {
+    if config.DefaultHttpMaxRequestBodyBytes != testhelper.HttpTestRequestMaxBodyBytes {
+        t.Fatalf("expected the test request's cap to be the configuration default")
     }
 }

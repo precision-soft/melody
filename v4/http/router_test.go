@@ -11,6 +11,7 @@ import (
     "testing"
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/routeseam"
@@ -1195,5 +1196,34 @@ func TestRouter_Protection_SecurityHeadersDisabled_CopiedAtRegistration(t *testi
     protection, isProtection := matchResult.RouteAttributes[RouteAttributeProtection].(RouteProtectionConfig)
     if false == isProtection || false != protection.CsrfDisabled || 2 != len(protection.SecurityHeadersDisabled) || HeaderContentSecurityPolicy != protection.SecurityHeadersDisabled[0] || HeaderFrameOptions != protection.SecurityHeadersDisabled[1] {
         t.Fatalf("expected the route's own canonical copy under %s, got %#v", RouteAttributeProtection, matchResult.RouteAttributes[RouteAttributeProtection])
+    }
+}
+
+func TestRouter_Protection_MaxBodyBytesUnlimited_Refused(t *testing.T) {
+    assertPanicsNamingField(t, func() {
+        NewRouter().Handle("/upload", csrfProtectionTestHandler, RouteOptions{Methods: []string{nethttp.MethodPost}, Protection: RouteProtectionConfig{MaxBodyBytes: bound.UnlimitedCount()}})
+    }, "the limit does not admit unlimited", "RouteOptions.Protection.MaxBodyBytes")
+}
+
+func TestRouter_Protection_MaxBodyBytesBelowOne_RefusedNamingThePattern(t *testing.T) {
+    defer func() {
+        recoveredErr, _ := recover().(*exception.Error)
+        if nil == recoveredErr || "RouteOptions.Protection.MaxBodyBytes" != recoveredErr.Context()["field"] || "/upload" != recoveredErr.Context()["pattern"] {
+            t.Fatalf("expected the refusal naming the field and the pattern, got %v", recoveredErr)
+        }
+    }()
+
+    NewRouter().Handle("/upload", csrfProtectionTestHandler, RouteOptions{Methods: []string{nethttp.MethodPost}, Protection: RouteProtectionConfig{MaxBodyBytes: bound.Of(0)}})
+}
+
+func TestRouter_Protection_MaxBodyBytes_CarriedUnderTheReservedAttribute(t *testing.T) {
+    router := NewRouter()
+    router.Handle("/upload", csrfProtectionTestHandler, RouteOptions{Methods: []string{nethttp.MethodPost}, Protection: RouteProtectionConfig{MaxBodyBytes: bound.Of(1)}})
+
+    matchResult, _ := router.Match(nethttp.MethodPost, "/upload", "", "http")
+
+    protection, _ := matchResult.RouteAttributes[RouteAttributeProtection].(RouteProtectionConfig)
+    if routeCap, isSet := protection.MaxBodyBytes.Value(); false == isSet || 1 != routeCap {
+        t.Fatalf("expected the cap under %s, got %#v", RouteAttributeProtection, matchResult.RouteAttributes[RouteAttributeProtection])
     }
 }

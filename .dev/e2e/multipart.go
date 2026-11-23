@@ -306,3 +306,22 @@ func assertMultipartAnonymousPutRefused(baseUrl string) {
         fail("%s: an anonymous get on the storage door answered %d, wanted 401 — the door is public again: %s", multipartLabel, response.statusCode, exampleTruncate(response.bodyText()))
     }
 }
+
+/* exampleApplicationMaxBodyBytes and exampleObjectUploadMaxBodyBytes mirror the example's MELODY_HTTP_MAX_REQUEST_BODY_BYTES and the upload route's own cap */
+const (
+    exampleApplicationMaxBodyBytes  = 64 << 10
+    exampleObjectUploadMaxBodyBytes = 1 << 20
+)
+
+/* the object upload carries its own 1 MiB cap over the application's 64 KiB: a body past the application's cap is stored, one byte past the route's is refused 413 */
+func assertExampleObjectUploadCarriesItsOwnCap(major exampleMajor) {
+    client := newSignedInLiveMajorExampleClient(major)
+
+    under := client.call(multipartLabel, liveExampleRequest{method: "POST", path: multipartRoute + "?key=" + url.QueryEscape(liveExampleUnique("e2e-route-cap")), contentType: "application/octet-stream", body: bytes.Repeat([]byte("a"), 200<<10)})
+    requireLiveExampleStatus(multipartLabel, "["+major.label+"] a 200 KiB upload, past the application's cap and under the route's", under, http.StatusOK)
+
+    over := client.call(multipartLabel, liveExampleRequest{method: "POST", path: multipartRoute + "?key=" + url.QueryEscape(liveExampleUnique("e2e-route-cap")), contentType: "application/octet-stream", body: bytes.Repeat([]byte("a"), exampleObjectUploadMaxBodyBytes+1)})
+    requireLiveExampleStatus(multipartLabel, "["+major.label+"] an upload one byte past the route's cap", over, http.StatusRequestEntityTooLarge)
+
+    pass("[%s] the object upload is bounded by its own %d-byte cap, above the application's %d", major.label, exampleObjectUploadMaxBodyBytes, exampleApplicationMaxBodyBytes)
+}

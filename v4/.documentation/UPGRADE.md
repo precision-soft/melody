@@ -72,6 +72,46 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** For the frame, `Protection.SecurityHeadersDisabled: []string{http.HeaderFrameOptions}` on the framed route or `FrameOptions: "SAMEORIGIN"`; serve the asset under its type; `StrictTransportSecurity: middleware.SecurityHeaderDisabled` while the host is not ready for `https`, or when the edge already sends the header; every header off: `SecurityHeaders: middleware.SecurityHeadersConfig{Disabled: true}`. No `.env` key turns them off: the switch is Go.
 
+### Http: `Request.Post` and `Request.Input` answer an error
+
+**What changed.** [`httpcontract.Request.Post()`](../http/contract/request.go) answers `(bagcontract.ParameterBag, error)` and [`Request.Input(key)`](../http/request.go) `(string, error)`: the error is the form read's, `413` with `http.ErrRequestBodyTooLarge` past the cap, `400 bad request` for a body that does not parse or a read that failed. See [Form parsing](package/HTTP.md#form-parsing).
+
+**Symptom.** `assignment mismatch: 1 variable but request.Post returns 2 values`.
+
+**Remedy.** Handle the error by returning it from the handler; the kernel answers the `413` or the `400`.
+
+### Http: a urlencoded body is parsed by its first reader
+
+**What changed.** `NewRequest` reads nothing of the body; the urlencoded form is parsed by the first `Post` or `Input`, and the kernel no longer answers a malformed or oversized form `400` or `413` before the handler.
+
+**Symptom.** A `kernel.request` listener or a middleware reading `request.HttpRequest().PostForm` finds it nil; a route that never reads its form now serves a request whose urlencoded body is malformed or oversized; a request the firewall, the rate limiter or the access control refuses is refused without its body being read.
+
+**Remedy.** Call `request.Post()` before reading `PostForm`, and return its error; a handler that must refuse a broken submission reads its form.
+
+### Http: `Request.FormValue` and `Request.ParseFormBody` are gone
+
+**What changed.** The two doors are removed: `FormValue` parsed a multipart body through net/http under its 32 MiB memory default, by accident, and `ParseFormBody` duplicated the form read. The framework parses no multipart body on any door.
+
+**Symptom.** `request.FormValue undefined`, `request.ParseFormBody undefined`.
+
+**Remedy.** `Input(key)` or `Post()` for a urlencoded form; for a multipart body, `request.HttpRequest().MultipartReader()` under the route's cap.
+
+### Http: a route carries its own body cap
+
+**What changed.** `RouteOptions.Protection.MaxBodyBytes`, a [`bound.Count`](../bound/limit.go), is the route's body cap, larger or smaller than `MELODY_HTTP_MAX_REQUEST_BODY_BYTES`, which every other route, an unmatched path and a firewall door keep; unlimited and a value below 1 are refused at registration. See [Request body limits](package/HTTP.md#request-body-limits).
+
+**Symptom.** None.
+
+**Remedy.** An application that raised `MELODY_HTTP_MAX_REQUEST_BODY_BYTES` for one upload route lowers the key back and sets `Protection.MaxBodyBytes` on that route.
+
+### Http: `httpcontract.Request` gains `MaxBodyBytes`, and `Post` changes
+
+**What changed.** The framework-implemented [`httpcontract.Request`](../http/contract/request.go) gains `MaxBodyBytes() int` and `Post` answers an error.
+
+**Symptom.** A hand-written fake of the request no longer satisfies the interface.
+
+**Remedy.** Build requests through `http.NewRequest`, with `RequestConfig.MaxBodyBytes` when no runtime carries the configuration.
+
 ### Constructors: a value object takes a config
 
 **What changed.** A constructor of a value object keeps the values that name it positional and takes the rest in a config struct whose zero value is the empty or default value, and the doors over a fixed value or a positional optional gain one:

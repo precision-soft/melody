@@ -78,8 +78,15 @@ func (instance *HttpTestRequest) Query() bagcontract.ParameterBag {
     return instance.queryBagValue
 }
 
-func (instance *HttpTestRequest) Post() bagcontract.ParameterBag {
-    return instance.postBagValue
+func (instance *HttpTestRequest) Post() (bagcontract.ParameterBag, error) {
+    return instance.postBagValue, nil
+}
+
+/* HttpTestRequestMaxBodyBytes is config.DefaultHttpMaxRequestBodyBytes, which this package cannot import: config's own dependencies test through it */
+const HttpTestRequestMaxBodyBytes = 1 << 20
+
+func (instance *HttpTestRequest) MaxBodyBytes() int {
+    return HttpTestRequestMaxBodyBytes
 }
 
 func (instance *HttpTestRequest) Attributes() bagcontract.ParameterBag {

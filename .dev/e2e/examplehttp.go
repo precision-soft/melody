@@ -60,6 +60,19 @@ func newSignedInLiveExampleClient(baseUrl string, username string, password stri
     }
 }
 
+/* newSignedInLiveMajorExampleClient signs the seeded editor in where this major's sign-in posts: a firewall-door major answers the shared /login/ 405 */
+func newSignedInLiveMajorExampleClient(major exampleMajor) *liveExampleClient {
+    client := newExampleHttpClient()
+    client.Timeout = 15 * time.Second
+
+    signInExampleHttpMajorEditor(client, major, major.baseUrl(), "")
+
+    return &liveExampleClient{
+        baseUrl: strings.TrimRight(major.baseUrl(), "/"),
+        client:  client,
+    }
+}
+
 /* liveExampleRequest describes one call. The header map is what this client adds over exampleClient.call; a contentType of "" leaves the header unset, which matters for the GET probes (a Content-Type on a body-less GET would change the request the framework sees). */
 type liveExampleRequest struct {
     method      string

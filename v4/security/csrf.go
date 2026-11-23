@@ -290,7 +290,12 @@ func checkForgedRequest(
         return nil
     }
 
-    presented := presentedCsrfToken(request, firewall.csrf)
+    presented, formErr := presentedCsrfToken(request, firewall.csrf)
+    if nil != formErr {
+        /* a body past its cap or one that does not parse is refused as malformed before it is judged forged */
+        return formErr
+    }
+
     if "" == presented {
         return newCsrfRefusal(firewall, request, "csrf token refused", CsrfReasonTokenMissing)
     }
@@ -307,35 +312,39 @@ func checkForgedRequest(
     return nil
 }
 
-/* presentedCsrfToken reads the header, else the field of a urlencoded body; a multipart body is never read, so an upload is not buffered before authorization */
-func presentedCsrfToken(request httpcontract.Request, config CsrfConfig) string {
+/* presentedCsrfToken reads the header, else the field of a urlencoded body, through the request's form read bounded by the route's cap, whose failure it answers; a multipart body is never read, so an upload is not buffered before authorization */
+func presentedCsrfToken(request httpcontract.Request, config CsrfConfig) (string, error) {
     httpRequest := request.HttpRequest()
 
     if headerToken := strings.TrimSpace(httpRequest.Header.Get(config.HeaderName)); "" != headerToken {
-        return headerToken
+        return headerToken, nil
     }
 
     mediaType, _, parseErr := mime.ParseMediaType(httpRequest.Header.Get("Content-Type"))
     if nil != parseErr || "application/x-www-form-urlencoded" != mediaType {
-        return ""
+        return "", nil
     }
 
-    postBag := request.Post()
+    postBag, formErr := request.Post()
+    if nil != formErr {
+        return "", formErr
+    }
+
     if true == internal.IsNilInterface(postBag) {
-        return ""
+        return "", nil
     }
 
     value, exists := postBag.Get(config.FieldName)
     if false == exists {
-        return ""
+        return "", nil
     }
 
     fieldToken, isText := value.(string)
     if false == isText {
-        return ""
+        return "", nil
     }
 
-    return strings.TrimSpace(fieldToken)
+    return strings.TrimSpace(fieldToken), nil
 }
 
 func newCsrfRefusal(firewall *CompiledFirewall, request httpcontract.Request, message string, reason string) error {

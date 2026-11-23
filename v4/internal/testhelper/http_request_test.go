@@ -20,7 +20,8 @@ func TestNewHttpTestRequest_BuildsARequestCarryingTheMethodAndTheUrl(t *testing.
         t.Fatalf("unexpected path: %q", request.HttpRequest().URL.Path)
     }
 
-    if nil == request.Query() || nil == request.Post() || nil == request.Attributes() {
+    postBag, postErr := request.Post()
+    if nil == request.Query() || nil == postBag || nil != postErr || nil == request.Attributes() {
         t.Fatalf("expected every bag to be built rather than left nil")
     }
 }

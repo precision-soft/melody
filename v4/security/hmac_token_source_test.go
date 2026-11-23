@@ -1373,3 +1373,33 @@ func TestNewHmacTokenSource_RefusesANilRequiredArgumentByName(t *testing.T) {
         })
     }
 }
+
+func TestHmacTokenSource_UrlEncodedBody_HashedFromTheRawBytes_ThenStillParsable(t *testing.T) {
+    signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
+    body := []byte("sku=X-1&quantity=2")
+
+    for _, formFirst := range []bool{false, true} {
+        headerValue, _ := signer.Sign(newTestRuntime(), "POST", "/internal/orders", body, nil)
+        netRequest := httptest.NewRequest("POST", "/internal/orders", bytes.NewReader(body))
+        netRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+        netRequest.Header.Set(signer.HeaderName(), headerValue)
+        request := melodyhttp.NewRequest(netRequest, testRuntime(), melodyhttp.RequestConfig{MaxBodyBytes: bound.Of(1024)})
+
+        if true == formFirst {
+            if _, formErr := request.Post(); nil != formErr {
+                t.Fatalf("form read: %v", formErr)
+            }
+        }
+
+        source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
+        token, _ := source.Resolve(testRuntime(), request)
+        if false == token.IsAuthenticated() {
+            t.Fatalf("expected the envelope verified over the raw bytes (form read first: %t)", formFirst)
+        }
+
+        postBag, formErr := request.Post()
+        if nil != formErr || false == postBag.Has("sku") {
+            t.Fatalf("expected the form parsable after the check (form read first: %t), got %v", formFirst, formErr)
+        }
+    }
+}

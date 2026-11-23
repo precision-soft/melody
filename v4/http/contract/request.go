@@ -16,7 +16,11 @@ type Request interface {
 
     Query() bagcontract.ParameterBag
 
-    Post() bagcontract.ParameterBag
+    /* Post answers the urlencoded form of a POST, PUT or PATCH, parsed by its first reader under MaxBodyBytes; the error is the 413 or 400 the failed read answers, the same on every call. A multipart or json body is not read and answers the empty form. */
+    Post() (bagcontract.ParameterBag, error)
+
+    /* MaxBodyBytes is the request body cap: the matched route's, else the application's. */
+    MaxBodyBytes() int
 
     Attributes() bagcontract.ParameterBag
 

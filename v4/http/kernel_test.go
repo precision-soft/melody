@@ -2359,13 +2359,17 @@ func TestKernel_AListenerPanicOnRecoveryPathClosesBodyAndDelivers500(t *testing.
     }
 }
 
-func TestKernel_OversizedUrlencodedFormIsRefusedWith413(t *testing.T) {
+func TestKernel_OversizedUrlencodedForm_TheReadAnswers413(t *testing.T) {
     handlerInvoked := false
 
     router := NewRouter()
     router.Handle(
         "/form",
         func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            if _, formErr := request.Post(); nil != formErr {
+                return nil, formErr
+            }
+
             handlerInvoked = true
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
@@ -2387,7 +2391,7 @@ func TestKernel_OversizedUrlencodedFormIsRefusedWith413(t *testing.T) {
     }
 
     if true == handlerInvoked {
-        t.Fatalf("expected the handler not to run for an oversized urlencoded form")
+        t.Fatalf("expected the handler to be answered the form error for an oversized urlencoded form")
     }
 }
 
@@ -2406,13 +2410,17 @@ func (instance *brokenBodyReader) Read(buffer []byte) (int, error) {
     return 0, exception.NewError("client aborted the upload", nil, nil)
 }
 
-func TestKernel_BrokenUrlencodedBodyIsRefusedWith400(t *testing.T) {
+func TestKernel_BrokenUrlencodedBody_TheReadAnswers400(t *testing.T) {
     handlerInvoked := false
 
     router := NewRouter()
     router.Handle(
         "/form",
         func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            if _, formErr := request.Post(); nil != formErr {
+                return nil, formErr
+            }
+
             handlerInvoked = true
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
@@ -2433,7 +2441,7 @@ func TestKernel_BrokenUrlencodedBodyIsRefusedWith400(t *testing.T) {
     }
 
     if true == handlerInvoked {
-        t.Fatalf("expected the handler not to run for a broken urlencoded body")
+        t.Fatalf("expected the handler to be answered the form error for a broken urlencoded body")
     }
 }
 
@@ -3596,7 +3604,7 @@ func TestKernel_ServesCanonicalRequestPathThroughToTheHandler(t *testing.T) {
 func TestNormalizeBodyLimitError_MapsMaxBytesErrorTo413(t *testing.T) {
     maxBytesError := &nethttp.MaxBytesError{Limit: 1048576}
 
-    normalized := normalizeBodyLimitError(maxBytesError)
+    normalized := normalizeBodyLimitError(maxBytesError, 1048576)
 
     httpException := exception.AsHttpException(normalized)
     if nil == httpException {
@@ -3608,16 +3616,27 @@ func TestNormalizeBodyLimitError_MapsMaxBytesErrorTo413(t *testing.T) {
     if false == errors.Is(normalized, maxBytesError) {
         t.Fatalf("expected the original max-bytes error to stay in the cause chain")
     }
+    if false == exception.ChainIs(normalized, ErrRequestBodyTooLarge) {
+        t.Fatalf("expected the sentinel in the cause chain")
+    }
+}
+
+func TestNormalizeBodyLimitError_KeepsTheFrameworksOwn413(t *testing.T) {
+    built := newRequestBodyTooLargeError(16, &nethttp.MaxBytesError{Limit: 16})
+
+    if built != normalizeBodyLimitError(built, 16) {
+        t.Fatalf("expected the framework's 413 to be returned unchanged")
+    }
 }
 
 func TestNormalizeBodyLimitError_LeavesOtherErrorsUntouched(t *testing.T) {
     plainErr := errors.New("some handler failure")
 
-    if plainErr != normalizeBodyLimitError(plainErr) {
+    if plainErr != normalizeBodyLimitError(plainErr, 1) {
         t.Fatalf("expected a non-body-limit error to be returned unchanged")
     }
 
-    if nil != normalizeBodyLimitError(nil) {
+    if nil != normalizeBodyLimitError(nil, 1) {
         t.Fatalf("expected nil to stay nil")
     }
 }
@@ -5438,6 +5457,10 @@ func TestKernel_ACyclicChainFromTheRequestBodyIsAnsweredWithABadRequest(t *testi
         router.Handle(
             "/cycle",
             func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                if _, formErr := request.Post(); nil != formErr {
+                    return nil, formErr
+                }
+
                 return TextResponse(nethttp.StatusOK, "served"), nil
             },
             RouteOptions{Methods: []string{nethttp.MethodPost}},
@@ -6177,5 +6200,209 @@ func TestKernel_APersistenceWaitingOnAHeldStripeIsCutByTheStorageTimeout(t *test
 
     if savesWhileHeld != storage.saves.Load() {
         t.Fatalf("expected the cut wait never to reach the storage's save")
+    }
+}
+
+func TestKernel_RouteCap_RaisesTheCapOnThatRouteOnly(t *testing.T) {
+    handler, _ := newFormRoutedKernel(t, 64, RouteOptions{Protection: RouteProtectionConfig{MaxBodyBytes: bound.Of(1024)}}, config.EnvironmentProduction)
+
+    if recorder := serveUrlEncodedForm(handler, "/form", 512); nethttp.StatusOK != recorder.Code || "512" != recorder.Body.String() {
+        t.Fatalf("expected the route's raised cap to admit the body, got %d %q", recorder.Code, recorder.Body.String())
+    }
+
+    if recorder := serveUrlEncodedForm(handler, "/other", 512); nethttp.StatusRequestEntityTooLarge != recorder.Code {
+        t.Fatalf("expected the application's cap on another route, got %d", recorder.Code)
+    }
+}
+
+func TestKernel_RouteCap_LowersTheCapOnThatRouteOnly(t *testing.T) {
+    handler, _ := newFormRoutedKernel(t, 1024, RouteOptions{Protection: RouteProtectionConfig{MaxBodyBytes: bound.Of(64)}}, config.EnvironmentProduction)
+
+    if recorder := serveUrlEncodedForm(handler, "/form", 512); nethttp.StatusRequestEntityTooLarge != recorder.Code {
+        t.Fatalf("expected the route's lowered cap to refuse the body, got %d", recorder.Code)
+    }
+
+    if recorder := serveUrlEncodedForm(handler, "/other", 512); nethttp.StatusOK != recorder.Code {
+        t.Fatalf("expected the application's cap on another route, got %d", recorder.Code)
+    }
+}
+
+func TestKernel_UnmatchedPath_BodyNeverRead_404(t *testing.T) {
+    handler, _ := newFormRoutedKernel(t, 64, RouteOptions{}, config.EnvironmentProduction)
+
+    body := newCountingBody("value=" + strings.Repeat("a", 50<<20))
+    request := httptest.NewRequest(nethttp.MethodPost, "/missing", nil)
+    request.Body = body
+    request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusNotFound != recorder.Code || 0 != body.reads.Load() {
+        t.Fatalf("expected a 404 with the body never read, got %d and %d reads", recorder.Code, body.reads.Load())
+    }
+}
+
+func TestKernel_ListenerRefusal_BodyNeverRead(t *testing.T) {
+    router := NewRouter()
+    router.Handle("/form", func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        _, formErr := request.Post()
+
+        return TextResponse(nethttp.StatusOK, "served"), formErr
+    }, RouteOptions{Methods: []string{nethttp.MethodPost}})
+
+    serviceContainer := newHttpTestContainer()
+    event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
+            eventValue.Payload().(*KernelRequestEvent).Refuse(exception.Forbidden("refused"))
+
+            return nil
+        },
+        eventcontract.ListenerConfig{Priority: 100},
+    )
+
+    body := newCountingBody("value=a")
+    request := httptest.NewRequest(nethttp.MethodPost, "/form", nil)
+    request.Body = body
+    request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    recorder := httptest.NewRecorder()
+
+    NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, request)
+
+    if nethttp.StatusForbidden != recorder.Code || 0 != body.reads.Load() {
+        t.Fatalf("expected the refusal with the body never read, got %d and %d reads", recorder.Code, body.reads.Load())
+    }
+}
+
+func TestKernel_HandlerThatIgnoresTheForm_ServesAMalformedBody(t *testing.T) {
+    router := NewRouter()
+    router.Handle("/form", func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return TextResponse(nethttp.StatusOK, "served"), nil
+    }, RouteOptions{Methods: []string{nethttp.MethodPost}})
+
+    request := httptest.NewRequest(nethttp.MethodPost, "/form", strings.NewReader("value=%zz"))
+    request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    recorder := httptest.NewRecorder()
+
+    NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer()).ServeHTTP(recorder, request)
+
+    if nethttp.StatusOK != recorder.Code {
+        t.Fatalf("expected a route that never reads its form to be served, got %d", recorder.Code)
+    }
+}
+
+func TestKernel_HandlerReturningTheFormError_413Or400_OneWarningRecord(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        body           string
+        expectedStatus int
+    }{
+        "too large": {body: "value=" + strings.Repeat("a", 128), expectedStatus: nethttp.StatusRequestEntityTooLarge},
+        "malformed": {body: "value=%zz", expectedStatus: nethttp.StatusBadRequest},
+    } {
+        t.Run(name, func(t *testing.T) {
+            handler, capture := newFormRoutedKernel(t, 64, RouteOptions{}, config.EnvironmentProduction)
+
+            request := httptest.NewRequest(nethttp.MethodPost, "/form", strings.NewReader(testCase.body))
+            request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+            recorder := httptest.NewRecorder()
+            handler.ServeHTTP(recorder, request)
+
+            if testCase.expectedStatus != recorder.Code {
+                t.Fatalf("expected %d, got %d", testCase.expectedStatus, recorder.Code)
+            }
+
+            records := capture.failureRecords()
+            if 1 != len(records) || loggingcontract.LevelWarning != records[0].level {
+                t.Fatalf("expected one warning record, got %#v", records)
+            }
+        })
+    }
+}
+
+func TestKernel_HandlerDroppingTheFormError_FilesTheWarning(t *testing.T) {
+    capture := &recordsCaptureLogger{}
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
+
+    router := NewRouter()
+    router.Handle("/form", func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        _, _ = request.Post()
+
+        return TextResponse(nethttp.StatusOK, "served"), nil
+    }, RouteOptions{Methods: []string{nethttp.MethodPost}})
+
+    request := httptest.NewRequest(nethttp.MethodPost, "/form", strings.NewReader("value=%zz"))
+    request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    recorder := httptest.NewRecorder()
+
+    NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, request)
+
+    records := capture.failureRecords()
+    if nethttp.StatusOK != recorder.Code || 1 != len(records) || "a handler answered over a request form that failed to parse" != records[0].message || loggingcontract.LevelWarning != records[0].level {
+        t.Fatalf("expected the response to stand beside one warning, got %d and %#v", recorder.Code, records)
+    }
+}
+
+func TestKernel_HandlerReadingAValidForm_FilesNoWarning(t *testing.T) {
+    handler, capture := newFormRoutedKernel(t, 64, RouteOptions{}, config.EnvironmentProduction)
+
+    if recorder := serveUrlEncodedForm(handler, "/form", 8); nethttp.StatusOK != recorder.Code || 0 != len(capture.failureRecords()) {
+        t.Fatalf("expected a served form with no failure record, got %d and %#v", recorder.Code, capture.failureRecords())
+    }
+}
+
+func TestKernel_BindJson_HonoursTheRouteCap(t *testing.T) {
+    router := NewRouter()
+    router.Handle("/json", func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        var target map[string]any
+        if bindErr := request.(*Request).BindJson(&target); nil != bindErr {
+            return nil, bindErr
+        }
+
+        return TextResponse(nethttp.StatusOK, "bound"), nil
+    }, RouteOptions{Methods: []string{nethttp.MethodPost}, Protection: RouteProtectionConfig{MaxBodyBytes: bound.Of(8)}})
+
+    request := httptest.NewRequest(nethttp.MethodPost, "/json", strings.NewReader(`{"value":"aaaaaaaaaa"}`))
+    request.Header.Set("Content-Type", "application/json")
+    recorder := httptest.NewRecorder()
+
+    NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer()).ServeHTTP(recorder, request)
+
+    if nethttp.StatusRequestEntityTooLarge != recorder.Code {
+        t.Fatalf("expected the route's cap to bound the json body, got %d", recorder.Code)
+    }
+}
+
+func TestKernel_BodyTooLarge_SameStatusInDevAndProd(t *testing.T) {
+    for _, environment := range []string{config.EnvironmentProduction, config.EnvironmentDevelopment} {
+        handler, _ := newFormRoutedKernel(t, 64, RouteOptions{}, environment)
+
+        if recorder := serveUrlEncodedForm(handler, "/form", 128); nethttp.StatusRequestEntityTooLarge != recorder.Code {
+            t.Fatalf("expected 413 in the %s environment, got %d", environment, recorder.Code)
+        }
+    }
+}
+
+func TestKernel_HandlerDroppingTheFormErrorAndAnsweringAnError_FilesNoWarning(t *testing.T) {
+    capture := &recordsCaptureLogger{}
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
+
+    router := NewRouter()
+    router.Handle("/form", func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        _, _ = request.Post()
+
+        return TextResponse(nethttp.StatusUnprocessableEntity, "refused"), nil
+    }, RouteOptions{Methods: []string{nethttp.MethodPost}})
+
+    request := httptest.NewRequest(nethttp.MethodPost, "/form", strings.NewReader("value=%zz"))
+    request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    recorder := httptest.NewRecorder()
+
+    NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, request)
+
+    if nethttp.StatusUnprocessableEntity != recorder.Code || 0 != len(capture.failureRecords()) {
+        t.Fatalf("expected a handler's own refusal with no warning, got %d and %#v", recorder.Code, capture.failureRecords())
     }
 }

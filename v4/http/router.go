@@ -8,6 +8,7 @@ import (
     "strings"
     "sync/atomic"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
@@ -187,6 +188,7 @@ func buildRouteValue(pattern string, handler httpcontract.Handler, options httpc
     rejectCsrfDisabledOnSafeOnlyRoute(options.Protection, options.Methods, normalizedPattern)
     protection := options.Protection
     protection.SecurityHeadersDisabled = canonicalSecurityHeadersDisabled(options.Protection.SecurityHeadersDisabled, normalizedPattern)
+    rejectMalformedRouteMaxBodyBytes(protection.MaxBodyBytes, normalizedPattern)
 
     attributes := map[string]any{}
     for key, value := range options.Attributes {
@@ -418,6 +420,26 @@ func rejectCsrfDisabledOnSafeOnlyRoute(protection httpcontract.RouteProtectionCo
             nil,
         ),
     )
+}
+
+var routeMaxBodyBytesRule = bound.Rule[int]{Name: "RouteOptions.Protection.MaxBodyBytes", Minimum: 1}
+
+/* rejectMalformedRouteMaxBodyBytes refuses an unlimited cap, since the large value is the door, and one below a byte. */
+func rejectMalformedRouteMaxBodyBytes(maxBodyBytes bound.Count, normalizedPattern string) {
+    if true == maxBodyBytes.IsAbsent() {
+        return
+    }
+
+    _, resolveErr := bound.Resolve(maxBodyBytes, routeMaxBodyBytesRule)
+    if nil == resolveErr {
+        return
+    }
+
+    /* bound.Resolve refuses with an exception error */
+    refusal := resolveErr.(*exception.Error)
+    refusal.SetContextValue("pattern", normalizedPattern)
+
+    exception.Panic(refusal)
 }
 
 /* canonicalSecurityHeadersDisabled answers the route's own copy of the header names in their canonical spelling, refusing a name the framework does not send and a name given twice, since either turns nothing off. */

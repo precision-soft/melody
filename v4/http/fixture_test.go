@@ -7,11 +7,15 @@ import (
     "io"
     "net"
     nethttp "net/http"
+    "net/http/httptest"
+    "strconv"
+    "strings"
     "sync"
     "sync/atomic"
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bag"
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/config"
@@ -660,4 +664,72 @@ func sessionRuntime() containercontract.Runtime {
 
 func sessionRuntimeUnder(ctx context.Context) containercontract.Runtime {
     return runtime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
+}
+
+/* formTestRequestConfig carries the cap a request built without a runtime reads its form under */
+func formTestRequestConfig() RequestConfig {
+    return RequestConfig{MaxBodyBytes: bound.Of(config.DefaultHttpMaxRequestBodyBytes)}
+}
+
+/* countingBody counts the reads a body answers, so a pin tells a body never touched from one read */
+type countingBody struct {
+    reader io.Reader
+    reads  atomic.Int64
+}
+
+func newCountingBody(content string) *countingBody {
+    return &countingBody{reader: strings.NewReader(content)}
+}
+
+func (instance *countingBody) Read(buffer []byte) (int, error) {
+    instance.reads.Add(1)
+
+    return instance.reader.Read(buffer)
+}
+
+func (instance *countingBody) Close() error {
+    return nil
+}
+
+/* newFormRoutedKernel serves POST /form under the given options and POST /other under none, each handler answering the form read's error or the length of the field it read */
+func newFormRoutedKernel(t *testing.T, applicationMaxBodyBytes int, options RouteOptions, environment string) (nethttp.Handler, *recordsCaptureLogger) {
+    t.Helper()
+
+    formHandler := func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        postBag, formErr := request.Post()
+        if nil != formErr {
+            return nil, formErr
+        }
+
+        value, _, _ := bag.StringAt(postBag, "value", 0)
+
+        return TextResponse(nethttp.StatusOK, strconv.Itoa(len(value))), nil
+    }
+
+    router := NewRouter()
+    options.Methods = []string{nethttp.MethodPost}
+    router.Handle("/form", formHandler, options)
+    router.Handle("/other", formHandler, RouteOptions{Methods: []string{nethttp.MethodPost}})
+
+    capture := &recordsCaptureLogger{}
+    serviceContainer := newHttpTestContainerWithSessionStorageAndEnvironmentValues(
+        session.NewInMemoryStorage(session.InMemoryStorageConfig{}),
+        map[string]string{
+            config.HttpMaxRequestBodyBytesKey: strconv.Itoa(applicationMaxBodyBytes),
+            config.EnvironmentNameKey:         environment,
+        },
+    )
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
+
+    return NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer), capture
+}
+
+func serveUrlEncodedForm(handler nethttp.Handler, path string, valueBytes int) *httptest.ResponseRecorder {
+    request := httptest.NewRequest(nethttp.MethodPost, path, strings.NewReader("value="+strings.Repeat("a", valueBytes)))
+    request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    recorder := httptest.NewRecorder()
+
+    handler.ServeHTTP(recorder, request)
+
+    return recorder
 }

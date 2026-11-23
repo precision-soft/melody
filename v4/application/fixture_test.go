@@ -34,8 +34,15 @@ const servingTestStaticFile = "app.css"
 func bootServingTestApplication(t *testing.T, environmentName string, applicationConfig ApplicationConfig, prepare func(applicationInstance *Application)) kernelcontract.Kernel {
     t.Helper()
 
+    return bootServingTestApplicationWithEnvironment(t, environmentName, "", applicationConfig, prepare)
+}
+
+/* bootServingTestApplicationWithEnvironment appends environmentLines, each ending in a newline, to the .env it boots with */
+func bootServingTestApplicationWithEnvironment(t *testing.T, environmentName string, environmentLines string, applicationConfig ApplicationConfig, prepare func(applicationInstance *Application)) kernelcontract.Kernel {
+    t.Helper()
+
     directory := t.TempDir()
-    environment := []byte(config.EnvironmentNameKey + "=" + environmentName + "\n")
+    environment := []byte(config.EnvironmentNameKey + "=" + environmentName + "\n" + environmentLines)
     staticFile := []byte("body{}")
 
     if writeErr := os.WriteFile(filepath.Join(directory, ".env"), environment, 0o600); nil != writeErr {

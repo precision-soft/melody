@@ -2,17 +2,34 @@ package http
 
 import (
     "encoding/json"
+    "errors"
+    "fmt"
     "io"
     "math"
     nethttp "net/http"
     "reflect"
 
-    "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/validation"
 )
+
+/* ErrRequestBodyTooLarge heads the cause chain of every 413 the framework answers for a body past its cap, the net/http MaxBytesError behind it when one was raised, so a listener matches one error whatever read raised it. */
+var ErrRequestBodyTooLarge = errors.New("request body too large")
+
+/* newRequestBodyTooLargeError builds the 413 of a body past its cap, the read's own error, when there is one, kept behind the sentinel */
+func newRequestBodyTooLargeError(maxBodyBytes int, readErr error) error {
+    cause := ErrRequestBodyTooLarge
+    if nil != readErr {
+        cause = fmt.Errorf("%w: %w", ErrRequestBodyTooLarge, readErr)
+    }
+
+    refusal := exception.NewHttpError(nethttp.StatusRequestEntityTooLarge, exception.HttpErrorConfig{Message: "payload too large", Cause: cause})
+    refusal.SetContextValue("maxBodyBytes", maxBodyBytes)
+
+    return refusal
+}
 
 func (instance *Request) BindJson(target any) error {
     return bindJsonBody(instance, target)
@@ -28,7 +45,7 @@ func bindJsonBody(instance httpcontract.Request, target any) error {
         return exception.NewHttpException(400, "invalid request body")
     }
 
-    maxBytes := maxRequestBodyBytes(instance)
+    maxBytes := instance.MaxBodyBytes()
 
     /* one byte past the limit tells an at-limit body from an oversized one; the allowance saturates at the top of the int64 range */
     overLimitAllowance := int64(maxBytes)
@@ -41,7 +58,7 @@ func bindJsonBody(instance httpcontract.Request, target any) error {
     if nil != err {
         var maxBytesError *nethttp.MaxBytesError
         if true == exception.ChainAs(err, &maxBytesError) {
-            return exception.NewHttpException(nethttp.StatusRequestEntityTooLarge, "payload too large")
+            return newRequestBodyTooLargeError(maxBytes, err)
         }
 
         /* the cause tells a body that stopped arriving from one that never parsed; the response is the same */
@@ -53,7 +70,7 @@ func bindJsonBody(instance httpcontract.Request, target any) error {
     }
 
     if maxBytes < len(bodyBytes) {
-        return exception.NewHttpException(nethttp.StatusRequestEntityTooLarge, "payload too large")
+        return newRequestBodyTooLargeError(maxBytes, nil)
     }
 
     err = json.Unmarshal(bodyBytes, target)
@@ -107,12 +124,6 @@ func boundBodyValidationAnswer(validationError error) error {
     )
 
     return httpException
-}
-
-func maxRequestBodyBytes(request httpcontract.Request) int {
-    configuration := config.ConfigMustFromRuntime(request.RuntimeInstance())
-
-    return configuration.Http().MaxRequestBodyBytes().Value
 }
 
 /* boundTargetIsNil reports whether the value a json binding wrote through the target pointer is nil, every kind a json null can leave nil */

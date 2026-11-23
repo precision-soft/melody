@@ -75,7 +75,7 @@ func RouteProtection(request httpcontract.Request) httpcontract.RouteProtectionC
 }
 
 func routeProtectionTurnsNothingOff(protection httpcontract.RouteProtectionConfig) bool {
-    return false == protection.CsrfDisabled && 0 == len(protection.SecurityHeadersDisabled)
+    return false == protection.CsrfDisabled && 0 == len(protection.SecurityHeadersDisabled) && true == protection.MaxBodyBytes.IsAbsent()
 }
 
 /* RouteZones answers the declared zones in declaration order. */
