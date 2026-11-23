@@ -381,13 +381,13 @@ func TestNewApplication_HttpServerLimit_RefusedNamingTheNestedField(t *testing.T
 }
 
 func TestNewApplication_HttpKernelNotFoundHandler_ServesAnUnmatchedPath(t *testing.T) {
-    kernelInstance := bootServingTestApplication(t, config.EnvironmentProduction, ApplicationConfig{HttpKernel: http.KernelConfig{
+    applicationInstance := bootServingTestApplication(t, config.EnvironmentProduction, ApplicationConfig{HttpKernel: http.KernelConfig{
         NotFoundHandler: func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return http.TextResponse(nethttp.StatusTeapot, "the application's own"), nil
         },
     }}, nil)
 
-    recorder := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/nowhere", nil))
+    recorder := serveTestRequest(t, applicationInstance, httptest.NewRequest(nethttp.MethodGet, "/nowhere", nil))
     if nethttp.StatusTeapot != recorder.Code || "the application's own" != recorder.Body.String() {
         t.Fatalf("expected the field's not found handler to answer, got %d %q", recorder.Code, recorder.Body.String())
     }
@@ -401,9 +401,9 @@ func TestNewApplication_HttpKernelRetryAfter_KeyWinsOverTheField(t *testing.T) {
         "the key over the field":   {environmentLines: config.HttpUnavailableRetryAfterKey + "=7s\n", expected: "7"},
         "the field without the key": {environmentLines: "", expected: "9"},
     } {
-        kernelInstance := bootServingTestApplicationWithEnvironment(t, config.EnvironmentProduction, testCase.environmentLines, ApplicationConfig{HttpKernel: http.KernelConfig{UnavailableRetryAfter: bound.Of(9 * time.Second)}}, nil)
+        applicationInstance := bootServingTestApplicationWithEnvironment(t, config.EnvironmentProduction, testCase.environmentLines, ApplicationConfig{HttpKernel: http.KernelConfig{UnavailableRetryAfter: bound.Of(9 * time.Second)}}, nil)
 
-        kernelInstance.HttpRouter().Handle(
+        applicationInstance.kernel.HttpRouter().Handle(
             "/unavailable",
             func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 return nil, exception.MarkInfrastructureFailure(errors.New("cache is down"))
@@ -411,7 +411,7 @@ func TestNewApplication_HttpKernelRetryAfter_KeyWinsOverTheField(t *testing.T) {
             httpcontract.RouteOptions{Methods: []string{nethttp.MethodGet}},
         )
 
-        recorder := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/unavailable", nil))
+        recorder := serveTestRequest(t, applicationInstance, httptest.NewRequest(nethttp.MethodGet, "/unavailable", nil))
         if nethttp.StatusServiceUnavailable != recorder.Code || testCase.expected != recorder.Header().Get("Retry-After") {
             t.Fatalf("%s: expected 503 with Retry-After %s, got %d %q", name, testCase.expected, recorder.Code, recorder.Header().Get("Retry-After"))
         }
@@ -428,11 +428,11 @@ func TestNewApplication_HttpKernelSessionEmptyOnOutage_KeyWinsOverTheField(t *te
         "the key off over the field on":  {environmentLines: config.HttpSessionEmptyOnOutageKey + "=false\n", field: true, expected: nethttp.StatusServiceUnavailable},
         "the field on without the key":   {environmentLines: "", field: true, expected: nethttp.StatusOK},
     } {
-        kernelInstance := bootServingTestApplicationWithEnvironment(t, config.EnvironmentProduction, testCase.environmentLines, ApplicationConfig{HttpKernel: http.KernelConfig{SessionPolicy: httpcontract.SessionPolicy{EmptyOnOutage: testCase.field}}}, nil)
+        applicationInstance := bootServingTestApplicationWithEnvironment(t, config.EnvironmentProduction, testCase.environmentLines, ApplicationConfig{HttpKernel: http.KernelConfig{SessionPolicy: httpcontract.SessionPolicy{EmptyOnOutage: testCase.field}}}, nil)
 
-        prepareSessionReaderOverAnOutage(kernelInstance.ServiceContainer(), kernelInstance.HttpRouter())
+        prepareSessionReaderOverAnOutage(applicationInstance.kernel.ServiceContainer(), applicationInstance.kernel.HttpRouter())
 
-        if status := serveSessionReader(kernelInstance.ServiceContainer(), kernelInstance.HttpKernel()); testCase.expected != status {
+        if status := serveSessionReader(t, applicationInstance); testCase.expected != status {
             t.Fatalf("%s: expected %d, got %d", name, testCase.expected, status)
         }
     }
@@ -449,9 +449,9 @@ func TestNewApplication_HttpKernelSessionCookieSecure_KeyWinsOverTheField(t *tes
         "the field always without the key":          {environmentLines: "", field: httpcontract.SessionCookieSecureAlways, expected: true},
         "neither":                                   {environmentLines: "", field: httpcontract.SessionCookieSecureFromScheme, expected: false},
     } {
-        kernelInstance := bootServingTestApplicationWithEnvironment(t, config.EnvironmentProduction, testCase.environmentLines, ApplicationConfig{HttpKernel: http.KernelConfig{SessionCookiePolicy: httpcontract.SessionCookiePolicy{Secure: testCase.field}}}, nil)
+        applicationInstance := bootServingTestApplicationWithEnvironment(t, config.EnvironmentProduction, testCase.environmentLines, ApplicationConfig{HttpKernel: http.KernelConfig{SessionCookiePolicy: httpcontract.SessionCookiePolicy{Secure: testCase.field}}}, nil)
 
-        kernelInstance.HttpRouter().Handle(
+        applicationInstance.kernel.HttpRouter().Handle(
             "/writes-the-session",
             func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 sessionInstance, sessionErr := http.RequestSession(request)
@@ -466,7 +466,7 @@ func TestNewApplication_HttpKernelSessionCookieSecure_KeyWinsOverTheField(t *tes
             httpcontract.RouteOptions{Methods: []string{nethttp.MethodGet}},
         )
 
-        cookies := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "http://app.example/writes-the-session", nil)).Result().Cookies()
+        cookies := serveTestRequest(t, applicationInstance, httptest.NewRequest(nethttp.MethodGet, "http://app.example/writes-the-session", nil)).Result().Cookies()
         if 1 != len(cookies) || testCase.expected != cookies[0].Secure {
             t.Fatalf("%s: expected one session cookie Secure %v over plain http, got %+v", name, testCase.expected, cookies)
         }
@@ -492,22 +492,9 @@ func TestNewApplication_HttpSessionCookieSecureKey_RefusedNamingTheKey(t *testin
 }
 
 func TestApplicationBoot_InstallsThePipelineThroughTheSeam(t *testing.T) {
-    kernelInstance := bootServingTestApplication(t, config.EnvironmentProduction, ApplicationConfig{}, nil)
-
-    httpKernel, isFrameworkKernel := kernelInstance.HttpKernel().(*http.Kernel)
-    if false == isFrameworkKernel {
-        t.Fatalf("expected the framework's http kernel, got %T", kernelInstance.HttpKernel())
-    }
+    applicationInstance := bootServingTestApplication(t, config.EnvironmentProduction, ApplicationConfig{}, nil)
 
     testhelper.AssertPanicsWithError(t, func() {
-        httpKernel.InstallMiddlewares(httpkernelseam.NewToken(), nil)
+        applicationInstance.httpKernel.InstallMiddlewares(httpkernelseam.NewToken(), nil)
     }, "the http kernel's middlewares are already installed")
-}
-
-func TestApplicationBoot_KernelWithoutTheInstaller_Refused(t *testing.T) {
-    applicationInstance := newEnvironmentKeyBootApplication(t, nil)
-
-    testhelper.AssertPanicsWithError(t, func() {
-        applicationInstance.installHttpMiddlewares(&plainHttpKernel{})
-    }, "the http kernel cannot hold the application's middlewares")
 }

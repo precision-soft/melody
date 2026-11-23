@@ -2,8 +2,6 @@ package contract
 
 import (
     nethttp "net/http"
-
-    containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 /* ForwardedHeadersPolicy decides whether forwarded headers from the direct peer are believed. Both fields are needed: an empty TrustedProxyList trusts nobody, whatever TrustForwardedHeaders says. The doors that accept it copy TrustedProxyList. X-Forwarded-Proto is read by its leftmost entry, so a trusted edge must overwrite the header rather than append to it. */
@@ -39,9 +37,4 @@ type MethodPolicy struct {
 type SessionPolicy struct {
     /* EmptyOnOutage answers a reader an empty session marked unavailable when the storage cannot answer, in place of the error: nothing of it is saved, no cookie is written or expired, and one warning is recorded for the request. An error that is not an outage stays an error, and the firewall's sign-in and sign-out doors still refuse 503. */
     EmptyOnOutage bool
-}
-
-/* Kernel is the http entry point an application serves with; it is configured once, when it is built. */
-type Kernel interface {
-    ServeHttp(serviceContainer containercontract.Container) nethttp.Handler
 }

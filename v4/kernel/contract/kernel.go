@@ -24,7 +24,5 @@ type Kernel interface {
 
     HttpRouter() httpcontract.Router
 
-    HttpKernel() httpcontract.Kernel
-
     Clock() clockcontract.Clock
 }

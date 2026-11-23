@@ -304,8 +304,6 @@ func (instance *corsListenerTestKernel) Config() configcontract.Configuration { 
 
 func (instance *corsListenerTestKernel) BootRuntime() containercontract.Runtime { return nil }
 
-func (instance *corsListenerTestKernel) HttpKernel() httpcontract.Kernel { return nil }
-
 func (instance *corsListenerTestKernel) HttpRouter() httpcontract.Router { return nil }
 
 func (instance *corsListenerTestKernel) Clock() clockcontract.Clock { return nil }

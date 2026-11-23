@@ -373,6 +373,7 @@ func TestResolveUnavailableRetryAfter_TheKeyWinsOverTheFieldOverTheDefault(t *te
 
 func TestNewApplication_TheUnavailableRetryAfterFieldReachesTheHttpKernel(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), HttpKernel: http.KernelConfig{UnavailableRetryAfter: bound.Of(13 * time.Second)}})
+    applicationInstance.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
     serviceContainer := applicationInstance.kernel.ServiceContainer()
     defer func() {
         _ = serviceContainer.CloseWithContext(context.Background())
@@ -388,8 +389,7 @@ func TestNewApplication_TheUnavailableRetryAfterFieldReachesTheHttpKernel(t *tes
         httpcontract.RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
-    recorder := httptest.NewRecorder()
-    applicationInstance.kernel.HttpKernel().ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/unavailable", nil))
+    recorder := serveTestRequest(t, applicationInstance, httptest.NewRequest(nethttp.MethodGet, "/unavailable", nil))
 
     if nethttp.StatusServiceUnavailable != recorder.Code || "13" != recorder.Header().Get("Retry-After") {
         t.Fatalf("expected 503 with the field's Retry-After 13, got %d %q", recorder.Code, recorder.Header().Get("Retry-After"))

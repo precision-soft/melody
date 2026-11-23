@@ -130,8 +130,6 @@ func (instance *gatingTestKernel) HttpRouter() httpcontract.Router { return nil 
 
 func (instance *gatingTestKernel) BootRuntime() containercontract.Runtime { return nil }
 
-func (instance *gatingTestKernel) HttpKernel() httpcontract.Kernel { return nil }
-
 func (instance *gatingTestKernel) Clock() clockcontract.Clock { return nil }
 
 var _ kernelcontract.Kernel = (*gatingTestKernel)(nil)

@@ -159,9 +159,8 @@ func TestBuildInProcessCatalogWriteThrottle_GivesTheSlotOfTheAddressSeenLongestA
 
 type routeKernel struct {
     melodykernelcontract.Kernel
-    router     *melodyhttp.Router
-    httpKernel melodyhttpcontract.Kernel
-    container  melodycontainercontract.Container
+    router    *melodyhttp.Router
+    container melodycontainercontract.Container
 }
 
 func (instance *routeKernel) BootRuntime() melodycontainercontract.Runtime {
@@ -170,10 +169,6 @@ func (instance *routeKernel) BootRuntime() melodycontainercontract.Runtime {
 
 func (instance *routeKernel) HttpRouter() melodyhttpcontract.Router {
     return instance.router
-}
-
-func (instance *routeKernel) HttpKernel() melodyhttpcontract.Kernel {
-    return instance.httpKernel
 }
 
 func (instance *routeKernel) ServiceContainer() melodycontainercontract.Container {
@@ -200,7 +195,7 @@ func TestRegisterHttpRoutes_PutsTheBackendSpendingDoorsBehindTheWriteBudget(t *t
     router := melodyhttp.NewRouter()
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
-    moduleInstance.RegisterHttpRoutes(&routeKernel{router: router, httpKernel: melodyhttp.NewKernel(router, melodyhttp.KernelConfig{}), container: containerInstance})
+    moduleInstance.RegisterHttpRoutes(&routeKernel{router: router, container: containerInstance})
 
     runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
     noContent := func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
@@ -272,7 +267,7 @@ func TestRegisterHttpRoutes_RegistersEachNamedDoorUnderItsPatternAndMethod(t *te
     router := melodyhttp.NewRouter()
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
-    moduleInstance.RegisterHttpRoutes(&routeKernel{router: router, httpKernel: melodyhttp.NewKernel(router, melodyhttp.KernelConfig{}), container: containerInstance})
+    moduleInstance.RegisterHttpRoutes(&routeKernel{router: router, container: containerInstance})
 
     doors := []struct {
         name    string
@@ -357,7 +352,7 @@ func TestRegisterHttpRoutes_HoldsTheIssueDoorToTheConfiguredBoundAndTheRevokeDoo
     melodycontainer.MustRegister(containerInstance, melodyvalidation.ServiceValidator, func(resolver melodycontainercontract.Resolver) (*melodyvalidation.Validator, error) {
         return melodyvalidation.NewValidator(melodyvalidation.ValidatorConfig{}), nil
     }, melodycontainer.RegisterOptions{})
-    moduleInstance.RegisterHttpRoutes(&routeKernel{router: router, httpKernel: melodyhttp.NewKernel(router, melodyhttp.KernelConfig{}), container: containerInstance})
+    moduleInstance.RegisterHttpRoutes(&routeKernel{router: router, container: containerInstance})
 
     callDoor := func(pattern string, deviceIdentifier string) int {
         runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
@@ -417,7 +412,7 @@ func TestRegisterHttpRoutes_EveryJsonDoorDeclaresARequestTypeTheValidatorAdmits(
     router := melodyhttp.NewRouter()
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
-    moduleInstance.RegisterHttpRoutes(&routeKernel{router: router, httpKernel: melodyhttp.NewKernel(router, melodyhttp.KernelConfig{}), container: containerInstance})
+    moduleInstance.RegisterHttpRoutes(&routeKernel{router: router, container: containerInstance})
 
     validator := examplevalidation.NewValidator()
 

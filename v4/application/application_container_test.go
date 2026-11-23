@@ -57,7 +57,6 @@ type testKernel struct {
     configuration    configcontract.Configuration
     serviceContainer containercontract.Container
     eventDispatcher  eventcontract.EventDispatcher
-    httpKernel       httpcontract.Kernel
     httpRouter       httpcontract.Router
     clock            clockcontract.Clock
 }
@@ -69,7 +68,6 @@ func newTestKernel() *testKernel {
         configuration:    nil,
         serviceContainer: container.NewContainer(container.ContainerConfig{}),
         eventDispatcher:  event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()}),
-        httpKernel:       http.NewKernel(httpRouter, http.KernelConfig{}),
         httpRouter:       httpRouter,
         clock:            clock.NewSystemClock(),
     }
@@ -101,10 +99,6 @@ func (instance *testKernel) BootRuntime() containercontract.Runtime {
 
 func (instance *testKernel) InstallBootRuntime(token kernelseam.Token, bootRuntime containercontract.Runtime) {
     instance.bootRuntime = bootRuntime
-}
-
-func (instance *testKernel) HttpKernel() httpcontract.Kernel {
-    return instance.httpKernel
 }
 
 func (instance *testKernel) HttpRouter() httpcontract.Router {

@@ -354,7 +354,7 @@ type testKernel struct {
     configuration    configcontract.Configuration
     serviceContainer containercontract.Container
     eventDispatcher  eventcontract.EventDispatcher
-    httpKernel       httpcontract.Kernel
+    httpKernel       *http.Kernel
     httpRouter       httpcontract.Router
     clock            clockcontract.Clock
 }
@@ -390,10 +390,6 @@ func (instance *testKernel) Config() configcontract.Configuration { return nil }
 
 func (instance *testKernel) BootRuntime() containercontract.Runtime {
     return nil
-}
-
-func (instance *testKernel) HttpKernel() httpcontract.Kernel {
-    return instance.httpKernel
 }
 
 func (instance *testKernel) HttpRouter() httpcontract.Router {

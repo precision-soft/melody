@@ -188,7 +188,7 @@ func TestInstallHttpMiddlewares_RefusesARouteAFactoryPutOnADoorsPath(t *testing.
         },
     })
 
-    kernelInstance := application.Boot()
+    application.Boot()
 
     defer func() {
         if _, isRefusal := recover().(*exception.Error); false == isRefusal {
@@ -196,7 +196,9 @@ func TestInstallHttpMiddlewares_RefusesARouteAFactoryPutOnADoorsPath(t *testing.
         }
     }()
 
-    application.installHttpMiddlewares(kernelInstance.HttpKernel())
+    /* a fresh kernel, so the refusal is the route's and not a second installation's */
+    application.httpKernel = nil
+    application.installHttpMiddlewares()
 }
 
 func TestFirewallDoor_ARouteOnTheCsrfTokenPathIsReported(t *testing.T) {
@@ -250,8 +252,7 @@ func serveCsrfApplicationWrite(t *testing.T, csrf security.CsrfConfig, headers m
     application := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
     application.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
     application.RegisterModule(&csrfApplicationTestModule{fakeModule: fakeModule{name: "csrf"}, csrf: csrf})
-    kernelInstance := application.Boot()
-    serviceContainer := kernelInstance.ServiceContainer()
+    serviceContainer := application.Boot().ServiceContainer()
 
     manager := session.SessionMustFromResolver(t.Context(), serviceContainer)
     sessionInstance := mustSession(manager.NewSession(sessionRuntime()))
@@ -266,10 +267,7 @@ func serveCsrfApplicationWrite(t *testing.T, csrf security.CsrfConfig, headers m
         request.Header.Set(name, value)
     }
 
-    recorder := httptest.NewRecorder()
-    kernelInstance.HttpKernel().ServeHttp(serviceContainer).ServeHTTP(recorder, request)
-
-    return recorder.Code
+    return serveTestRequest(t, application, request).Code
 }
 
 func TestApplication_SiblingSubdomainWrite_OnASessionRoute_Refused403(t *testing.T) {
@@ -290,20 +288,20 @@ func TestApplication_GlobalCsrfDisabled_ForgedRequestServed(t *testing.T) {
     }
 }
 
-func forgedAccountWrite(t *testing.T, kernelInstance kernelcontract.Kernel, accept string) *httptest.ResponseRecorder {
+func forgedAccountWrite(t *testing.T, applicationInstance *Application, accept string) *httptest.ResponseRecorder {
     t.Helper()
 
     request := httptest.NewRequest(nethttp.MethodPost, "http://app.example.com/account", nil)
-    request.AddCookie(sessionCookieOfAnIdentity(t, kernelInstance))
+    request.AddCookie(sessionCookieOfAnIdentity(t, applicationInstance.kernel))
     request.Header.Set("Sec-Fetch-Site", "cross-site")
     request.Header.Set("Accept", accept)
 
-    return serveTestRequest(kernelInstance, request)
+    return serveTestRequest(t, applicationInstance, request)
 }
 
 func TestApplication_ForgedRequest_OneWarningRecord_RenderedByAccept(t *testing.T) {
     var logger *levelCapturingLogger
-    kernelInstance := bootServingTestApplication(t, config.EnvironmentProduction, ApplicationConfig{}, func(applicationInstance *Application) {
+    applicationInstance := bootServingTestApplication(t, config.EnvironmentProduction, ApplicationConfig{}, func(applicationInstance *Application) {
         logger = registerLevelCapturingLogger(applicationInstance)
         applicationInstance.RegisterModule(&csrfApplicationTestModule{fakeModule: fakeModule{name: "csrf"}})
     })
@@ -317,7 +315,7 @@ func TestApplication_ForgedRequest_OneWarningRecord_RenderedByAccept(t *testing.
     } {
         from := logger.recorded()
 
-        recorder := forgedAccountWrite(t, kernelInstance, testCase.accept)
+        recorder := forgedAccountWrite(t, applicationInstance, testCase.accept)
         if nethttp.StatusForbidden != recorder.Code || false == strings.HasPrefix(recorder.Result().Header.Get("Content-Type"), testCase.contentType) {
             t.Fatalf("%s: expected a 403 rendered as %s, got %d %q", testCase.accept, testCase.contentType, recorder.Code, recorder.Result().Header.Get("Content-Type"))
         }
@@ -330,12 +328,12 @@ func TestApplication_ForgedRequest_OneWarningRecord_RenderedByAccept(t *testing.
 
 func TestApplication_ForgedRequest_SameStatusInDevAndProd(t *testing.T) {
     for _, environmentName := range []string{config.EnvironmentDevelopment, config.EnvironmentProduction} {
-        kernelInstance := bootServingTestApplication(t, environmentName, ApplicationConfig{}, func(applicationInstance *Application) {
+        applicationInstance := bootServingTestApplication(t, environmentName, ApplicationConfig{}, func(applicationInstance *Application) {
             applicationInstance.RegisterModule(&csrfApplicationTestModule{fakeModule: fakeModule{name: "csrf"}})
         })
 
         for _, accept := range []string{"application/json", "text/html"} {
-            if recorder := forgedAccountWrite(t, kernelInstance, accept); nethttp.StatusForbidden != recorder.Code {
+            if recorder := forgedAccountWrite(t, applicationInstance, accept); nethttp.StatusForbidden != recorder.Code {
                 t.Fatalf("%s %s: expected 403, got %d", environmentName, accept, recorder.Code)
             }
         }

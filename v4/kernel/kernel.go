@@ -7,14 +7,13 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
-    "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/internal/kernelseam"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
 )
 
-/* NewKernel is called by the application alone: a token NewToken did not build is refused. The http kernel is built from httpKernelConfig, its one source. */
+/* NewKernel is called by the application alone: a token NewToken did not build is refused. */
 func NewKernel(
     token kernelseam.Token,
     applicationConfiguration configcontract.Configuration,
@@ -22,7 +21,6 @@ func NewKernel(
     httpRouter httpcontract.Router,
     eventDispatcher eventcontract.EventDispatcher,
     clock clockcontract.Clock,
-    httpKernelConfig http.KernelConfig,
 ) kernelcontract.Kernel {
     if false == token.Valid() {
         exception.Panic(
@@ -60,13 +58,10 @@ func NewKernel(
         )
     }
 
-    httpKernel := http.NewKernel(httpRouter, httpKernelConfig)
-
     return &kernel{
         config:           applicationConfiguration,
         serviceContainer: serviceContainer,
         httpRouter:       httpRouter,
-        httpKernel:       httpKernel,
         eventDispatcher:  eventDispatcher,
         clock:            clock,
     }
@@ -77,7 +72,6 @@ type kernel struct {
     config           configcontract.Configuration
     serviceContainer containercontract.Container
     httpRouter       httpcontract.Router
-    httpKernel       httpcontract.Kernel
     eventDispatcher  eventcontract.EventDispatcher
     clock            clockcontract.Clock
 }
@@ -120,10 +114,6 @@ func (instance *kernel) Config() configcontract.Configuration {
 
 func (instance *kernel) HttpRouter() httpcontract.Router {
     return instance.httpRouter
-}
-
-func (instance *kernel) HttpKernel() httpcontract.Kernel {
-    return instance.httpKernel
 }
 
 func (instance *kernel) Clock() clockcontract.Clock {

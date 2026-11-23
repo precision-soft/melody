@@ -33,15 +33,15 @@ func sessionRuntimeUnder(ctx context.Context) containercontract.Runtime {
 
 const servingTestStaticFile = "app.css"
 
-/* bootServingTestApplication boots an http application in the named environment from a directory of its own, a .env and one public file, under every build tag set */
-func bootServingTestApplication(t *testing.T, environmentName string, applicationConfig ApplicationConfig, prepare func(applicationInstance *Application)) kernelcontract.Kernel {
+/* bootServingTestApplication answers an http application booted in the named environment from a directory of its own, a .env and one public file, under every build tag set */
+func bootServingTestApplication(t *testing.T, environmentName string, applicationConfig ApplicationConfig, prepare func(applicationInstance *Application)) *Application {
     t.Helper()
 
     return bootServingTestApplicationWithEnvironment(t, environmentName, "", applicationConfig, prepare)
 }
 
 /* bootServingTestApplicationWithEnvironment appends environmentLines, each ending in a newline, to the .env it boots with */
-func bootServingTestApplicationWithEnvironment(t *testing.T, environmentName string, environmentLines string, applicationConfig ApplicationConfig, prepare func(applicationInstance *Application)) kernelcontract.Kernel {
+func bootServingTestApplicationWithEnvironment(t *testing.T, environmentName string, environmentLines string, applicationConfig ApplicationConfig, prepare func(applicationInstance *Application)) *Application {
     t.Helper()
 
     directory := t.TempDir()
@@ -80,12 +80,22 @@ func bootServingTestApplicationWithEnvironment(t *testing.T, environmentName str
         prepare(applicationInstance)
     }
 
-    return applicationInstance.Boot()
+    applicationInstance.Boot()
+
+    return applicationInstance
 }
 
-func serveTestRequest(kernelInstance kernelcontract.Kernel, request *nethttp.Request) *httptest.ResponseRecorder {
+/* serveTestRequest serves the request through the handler the application hands out */
+func serveTestRequest(t *testing.T, applicationInstance *Application, request *nethttp.Request) *httptest.ResponseRecorder {
+    t.Helper()
+
+    handler, handlerErr := applicationInstance.HttpHandler()
+    if nil != handlerErr {
+        t.Fatalf("unexpected http handler error: %v", handlerErr)
+    }
+
     recorder := httptest.NewRecorder()
-    kernelInstance.HttpKernel().ServeHttp(kernelInstance.ServiceContainer()).ServeHTTP(recorder, request)
+    handler.ServeHTTP(recorder, request)
 
     return recorder
 }

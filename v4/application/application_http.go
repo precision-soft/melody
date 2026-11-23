@@ -3,7 +3,6 @@ package application
 import (
     "context"
     "errors"
-    "fmt"
     "maps"
     nethttp "net/http"
     "slices"
@@ -148,26 +147,154 @@ func (instance *Application) bootHttpPipeline(bootRuntime containercontract.Runt
         exception.Panic(exception.FromError(refusedErr))
     }
 
-    instance.installHttpMiddlewares(instance.kernel.HttpKernel())
+    instance.installHttpMiddlewares()
 }
 
 /* installHttpMiddlewares builds the pipeline. A middleware factory runs here with the writable router, so the walk Boot made is made again over what it registered. */
-func (instance *Application) installHttpMiddlewares(httpKernel httpcontract.Kernel) {
-    installer, isInstaller := httpKernel.(httpkernelseam.MiddlewareInstaller)
-    if false == isInstaller {
-        exception.Panic(
-            exception.NewError(
-                "the http kernel cannot hold the application's middlewares",
-                exceptioncontract.Context{"kernel": fmt.Sprintf("%T", httpKernel)},
-                nil,
-            ),
-        )
-    }
-
-    installer.InstallMiddlewares(httpkernelseam.NewToken(), instance.httpMiddlewares.all(instance.kernel))
+func (instance *Application) installHttpMiddlewares() {
+    instance.servedHttpKernel().InstallMiddlewares(httpkernelseam.NewToken(), instance.httpMiddlewares.all(instance.kernel))
 
     instance.recordFirewallDoorRouteCollisions()
     instance.panicOnBootCollisions()
+}
+
+/* servedHttpKernel answers the http kernel NewApplication built; an Application built by literal gets the zero-configuration one over its kernel's router */
+func (instance *Application) servedHttpKernel() *http.Kernel {
+    if nil == instance.httpKernel {
+        instance.httpKernel = http.NewKernel(instance.kernel.HttpRouter(), http.KernelConfig{})
+    }
+
+    return instance.httpKernel
+}
+
+/* HttpHandler boots the application and answers the handler it serves under a server of the caller's, the one Run serves with: the pipeline, the decorators and the http kernel's configuration, with the configuration and the openapi registry marked serving and the boot warnings written. A .env Run refuses is refused here too. The handler, or the refusal, is built once and answered on every call. It is refused in cli mode and once Run started, and Run is refused once the handler is out. The server's owner calls BeginHttpShutdown as its server begins shutting down and CloseWithContext once it stopped. */
+func (instance *Application) HttpHandler() (nethttp.Handler, error) {
+    instance.httpHandlerMutex.Lock()
+    defer instance.httpHandlerMutex.Unlock()
+
+    if true == instance.httpHandlerBuilt {
+        return instance.httpHandler, instance.httpHandlerErr
+    }
+
+    if nil != instance.runtimeFlags && config.ModeCli == instance.runtimeFlags.Mode() {
+        return nil, exception.NewError(
+            "the http handler is asked of a process in cli mode",
+            exceptioncontract.Context{"mode": config.ModeCli},
+            nil,
+        )
+    }
+
+    if false == instance.servingClaim.CompareAndSwap(servingClaimNone, servingClaimHttpHandler) && servingClaimHttpHandler != instance.servingClaim.Load() {
+        return nil, exception.NewError("the http handler is asked of an application that runs its own server", nil, nil)
+    }
+
+    _ = instance.Boot()
+
+    markConfigurationServing(instance.configuration)
+    markOpenApiRegistryServing(instance.ctx, instance.kernel.ServiceContainer())
+
+    instance.httpHandlerBuilt = true
+
+    built, builtErr := instance.buildHttpHandler()
+    if nil != builtErr {
+        instance.httpHandlerErr = builtErr
+
+        return nil, builtErr
+    }
+
+    logger, loggerErr := logging.LoggerFromResolver(instance.ctx, instance.kernel.ServiceContainer())
+    if nil != loggerErr {
+        instance.httpHandlerErr = loggerErr
+
+        return nil, loggerErr
+    }
+
+    instance.writeBootWarnings(logger)
+
+    instance.httpHandlerLogger = logger
+    instance.httpHandler = built.handler
+
+    return instance.httpHandler, nil
+}
+
+/* BeginHttpShutdown starts the OnHttpShutdown hooks of a handed-out handler, each handed shutdownContext, once, and returns without waiting for them: the server's owner calls it just before its server's Shutdown, which neither cancels an in-flight request nor drains a hijacked connection. An application that runs its own server, or handed nothing out, starts nothing. */
+func (instance *Application) BeginHttpShutdown(shutdownContext context.Context) error {
+    if true == internal.IsNilInterface(shutdownContext) {
+        return exception.NewError("the shutdown context is nil", exceptioncontract.Context{"door": "Application.BeginHttpShutdown"}, nil)
+    }
+
+    logger, handedOut := instance.handedOutHttpHandler()
+    if false == handedOut {
+        return nil
+    }
+
+    instance.startHttpShutdownHooks(shutdownContext, logger)
+
+    return nil
+}
+
+/* handedOutHttpHandler answers whether HttpHandler handed a handler out, and the logger it was built with */
+func (instance *Application) handedOutHttpHandler() (loggingcontract.Logger, bool) {
+    instance.httpHandlerMutex.Lock()
+    defer instance.httpHandlerMutex.Unlock()
+
+    return instance.httpHandlerLogger, nil != instance.httpHandler
+}
+
+/* startHttpShutdownHooks starts each shutdown hook on its own goroutine, as a server's Shutdown does; only the first call starts them */
+func (instance *Application) startHttpShutdownHooks(shutdownContext context.Context, logger loggingcontract.Logger) {
+    instance.httpShutdownHooksOnce.Do(func() {
+        instance.httpShutdownHookSet.shutdownContext.Store(shutdownContext)
+
+        for _, hook := range instance.httpShutdownHooks {
+            go wrapHttpShutdownHook(hook, &instance.httpShutdownHookSet, logger)()
+        }
+    })
+}
+
+/* windDownHandedOutHttpHandler holds the close of a handed-out handler, under the close's deadline, until its shutdown hooks returned and its request scopes closed, the wait Run makes after its own server's Shutdown; the hooks are started under the close context unless BeginHttpShutdown started them. */
+func (instance *Application) windDownHandedOutHttpHandler(closeContext context.Context) error {
+    logger, handedOut := instance.handedOutHttpHandler()
+    if false == handedOut {
+        return nil
+    }
+
+    instance.startHttpShutdownHooks(closeContext, logger)
+
+    waitForHttpShutdownHooks(&instance.httpShutdownHookSet.done, closeContext)
+
+    return awaitOpenRequestScopes(closeContext, instance.httpKernel, logger)
+}
+
+type builtHttpHandler struct {
+    handler         nethttp.Handler
+    serverLimits    httpServerLimits
+    shutdownTimeout time.Duration
+}
+
+/* buildHttpHandler judges the limits a server serves under and answers the decorated handler; Run and HttpHandler share it, so one .env serves, or is refused, the same under both */
+func (instance *Application) buildHttpHandler() (builtHttpHandler, error) {
+    configuration := instance.configuration
+
+    serverLimits, serverLimitsErr := resolveHttpServerLimits(configuration, instance.applicationConfig)
+    if nil != serverLimitsErr {
+        return builtHttpHandler{}, serverLimitsErr
+    }
+
+    if refusedErr := refuseScopeTeardownOutlastingHttpShutdown(configuration, instance.applicationConfig); nil != refusedErr {
+        return builtHttpHandler{}, refusedErr
+    }
+
+    httpShutdownTimeout, httpShutdownTimeoutErr := resolveHttpShutdownTimeout(configuration, instance.applicationConfig)
+    if nil != httpShutdownTimeoutErr {
+        return builtHttpHandler{}, httpShutdownTimeoutErr
+    }
+
+    return builtHttpHandler{
+        handler:         instance.decorateHttpHandler(instance.servedHttpKernel().ServeHttp(instance.kernel.ServiceContainer())),
+        serverLimits:    serverLimits,
+        shutdownTimeout: httpShutdownTimeout.Value,
+    }, nil
 }
 
 func (instance *Application) runHttp(
@@ -175,30 +302,17 @@ func (instance *Application) runHttp(
 ) error {
     configuration := instance.configuration
 
-    serverLimits, serverLimitsErr := resolveHttpServerLimits(configuration, instance.applicationConfig)
-    if nil != serverLimitsErr {
-        return serverLimitsErr
+    built, builtErr := instance.buildHttpHandler()
+    if nil != builtErr {
+        return builtErr
     }
-
-    if refusedErr := refuseScopeTeardownOutlastingHttpShutdown(configuration, instance.applicationConfig); nil != refusedErr {
-        return refusedErr
-    }
-
-    httpShutdownTimeout, httpShutdownTimeoutErr := resolveHttpShutdownTimeout(configuration, instance.applicationConfig)
-    if nil != httpShutdownTimeoutErr {
-        return httpShutdownTimeoutErr
-    }
-
-    httpKernel := instance.kernel.HttpKernel()
-
-    httpHandler := instance.decorateHttpHandler(httpKernel.ServeHttp(instance.kernel.ServiceContainer()))
 
     httpServer := &nethttp.Server{
         Addr:    configuration.Http().Address(),
-        Handler: httpHandler,
+        Handler: built.handler,
     }
 
-    applyHttpServerTimeouts(httpServer, serverLimits)
+    applyHttpServerTimeouts(httpServer, built.serverLimits)
 
     logger := logging.LoggerMustFromResolver(ctx, instance.kernel.ServiceContainer())
 
@@ -231,8 +345,8 @@ func (instance *Application) runHttp(
         httpServer,
         errorChannel,
         logger,
-        httpShutdownTimeout.Value,
-        httpKernel,
+        built.shutdownTimeout,
+        instance.servedHttpKernel(),
         shutdownHooks,
     )
 }
@@ -269,7 +383,7 @@ func awaitHttpServerEnd(
     errorChannel chan error,
     logger loggingcontract.Logger,
     shutdownTimeout time.Duration,
-    httpKernel httpcontract.Kernel,
+    openRequestScopes openRequestScopeReporter,
     shutdownHooks *httpShutdownHookSet,
 ) error {
     select {
@@ -307,7 +421,7 @@ func awaitHttpServerEnd(
             runErrs = append(runErrs, shutdownErr)
         }
 
-        drainErr := awaitOpenRequestScopes(shutdownContext, httpKernel, logger)
+        drainErr := awaitOpenRequestScopes(shutdownContext, openRequestScopes, logger)
         if nil != drainErr {
             runErrs = append(runErrs, drainErr)
         }
@@ -442,15 +556,14 @@ func waitForHttpShutdownHooks(
     }
 }
 
-/* openRequestScopeReporter is the door through which the shutdown asks a kernel how many requests are still inside it; a kernel without it is not asked. */
+/* openRequestScopeReporter is the door through which the shutdown asks a kernel how many requests are still inside it; a nil one is not asked. */
 type openRequestScopeReporter interface {
     OpenRequestScopes() int64
 }
 
-/* openRequestScopeCount answers the number of request scopes still open, and -1 for a kernel that cannot be asked, which is not zero: zero means everything drained. */
-func openRequestScopeCount(httpKernel httpcontract.Kernel) int64 {
-    reporter, ok := httpKernel.(openRequestScopeReporter)
-    if false == ok {
+/* openRequestScopeCount answers the number of request scopes still open, and -1 when there is no kernel to ask, which is not zero: zero means everything drained. */
+func openRequestScopeCount(reporter openRequestScopeReporter) int64 {
+    if true == internal.IsNilInterface(reporter) {
         return -1
     }
 
@@ -460,13 +573,13 @@ func openRequestScopeCount(httpKernel httpcontract.Kernel) int64 {
 /* awaitOpenRequestScopesInterval is how often the drain re-reads the counter: short enough to add no perceptible delay, long enough not to spin. */
 const awaitOpenRequestScopesInterval = 20 * time.Millisecond
 
-/* awaitOpenRequestScopes holds the exit until every request scope the kernel opened has closed or the shutdown budget runs out, since Shutdown returns nil for a hijacked connection still being served. An expiry is an error, so the process exits non-zero; a kernel that answers -1 is not waited on. */
+/* awaitOpenRequestScopes holds the exit until every request scope the kernel opened has closed or the shutdown budget runs out, since Shutdown returns nil for a hijacked connection still being served. An expiry is an error, so the process exits non-zero; no kernel to ask is not waited on. */
 func awaitOpenRequestScopes(
     ctx context.Context,
-    httpKernel httpcontract.Kernel,
+    reporter openRequestScopeReporter,
     logger loggingcontract.Logger,
 ) error {
-    if 0 > openRequestScopeCount(httpKernel) {
+    if 0 > openRequestScopeCount(reporter) {
         return nil
     }
 
@@ -474,7 +587,7 @@ func awaitOpenRequestScopes(
     defer ticker.Stop()
 
     for {
-        openScopes := openRequestScopeCount(httpKernel)
+        openScopes := openRequestScopeCount(reporter)
         if 0 >= openScopes {
             return nil
         }

@@ -2,7 +2,6 @@ package kernel
 
 import (
     "context"
-    nethttp "net/http"
     "testing"
 
     "github.com/precision-soft/melody/v4/clock"
@@ -11,9 +10,7 @@ import (
     "github.com/precision-soft/melody/v4/container"
     "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/event"
-    "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/http"
-    httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/kernelseam"
 )
 
@@ -70,7 +67,6 @@ func TestNewKernel_InitialState(t *testing.T) {
         httpRouter,
         dispatcher,
         clockInstance,
-        http.KernelConfig{},
     )
 
     if config.EnvironmentDevelopment != kernelInstance.Environment() {
@@ -105,7 +101,6 @@ func TestKernel_DebugModeFalseOutsideDevelopment(t *testing.T) {
         httpRouter,
         event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance}),
         clockInstance,
-        http.KernelConfig{},
     )
 
     if true == kernelInstance.DebugMode() {
@@ -139,7 +134,6 @@ func TestNewKernel_ATypedNilCollaboratorIsRefusedByName(t *testing.T) {
         http.NewRouterWithRouteRegistry(routeRegistry),
         event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance}),
         clockInstance,
-        http.KernelConfig{},
     )
 }
 
@@ -155,7 +149,6 @@ func TestKernel_BootRuntimeAnswersTheRuntimeTheApplicationInstalled(t *testing.T
         http.NewRouterWithRouteRegistry(http.NewRouteRegistry()),
         event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance}),
         clockInstance,
-        http.KernelConfig{},
     )
 
     if nil != kernelInstance.BootRuntime() {
@@ -174,28 +167,3 @@ func TestKernel_BootRuntimeAnswersTheRuntimeTheApplicationInstalled(t *testing.T
     }
 }
 
-/* a refusal only the handed config can raise proves the http kernel is built from it, not from the zero config */
-func TestNewKernel_HandsTheHttpKernelConfigDown(t *testing.T) {
-    clockInstance := clock.NewSystemClock()
-
-    defer func() {
-        recoveredErr, isErr := recover().(error)
-        if false == isErr {
-            t.Fatalf("expected the http kernel's refusal of the handed policy")
-        }
-
-        if "SessionCookiePolicy.Secure" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
-            t.Fatalf("expected the refusal to name the policy's field, got %v", recoveredErr)
-        }
-    }()
-
-    NewKernel(
-        kernelseam.NewToken(),
-        newTestConfiguration(t, config.EnvironmentProduction),
-        container.NewContainer(container.ContainerConfig{}),
-        http.NewRouterWithRouteRegistry(http.NewRouteRegistry()),
-        event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance}),
-        clockInstance,
-        http.KernelConfig{SessionCookiePolicy: httpcontract.SessionCookiePolicy{SameSite: nethttp.SameSiteNoneMode, Secure: httpcontract.SessionCookieSecureNever}},
-    )
-}

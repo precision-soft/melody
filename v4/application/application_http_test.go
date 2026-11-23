@@ -875,16 +875,7 @@ func registeredListenerNames(t *testing.T, applicationInstance *Application) []s
     return names
 }
 
-type plainHttpKernel struct{}
-
-func (instance *plainHttpKernel) ServeHttp(serviceContainer containercontract.Container) nethttp.Handler {
-    return nil
-}
-
-var _ httpcontract.Kernel = (*plainHttpKernel)(nil)
-
 type countingHttpKernel struct {
-    plainHttpKernel
     openScopes atomic.Int64
 }
 
@@ -892,7 +883,7 @@ func (instance *countingHttpKernel) OpenRequestScopes() int64 {
     return instance.openScopes.Load()
 }
 
-var _ httpcontract.Kernel = (*countingHttpKernel)(nil)
+var _ openRequestScopeReporter = (*countingHttpKernel)(nil)
 
 func TestAwaitOpenRequestScopes_WaitsUntilTheLastScopeCloses(t *testing.T) {
     httpKernel := &countingHttpKernel{}
@@ -949,13 +940,15 @@ func TestAwaitOpenRequestScopes_ReportsTheScopesStillOpenWhenTheBudgetRunsOut(t 
     }
 }
 
-func TestAwaitOpenRequestScopes_DoesNotWaitOnAKernelThatCannotBeAsked(t *testing.T) {
+func TestAwaitOpenRequestScopes_DoesNotWaitWithoutAKernelToAsk(t *testing.T) {
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    drainErr := awaitOpenRequestScopes(cancelledContext, &plainHttpKernel{}, &warningRecordingLogger{})
+    var typedNilKernel *http.Kernel
+
+    drainErr := awaitOpenRequestScopes(cancelledContext, typedNilKernel, &warningRecordingLogger{})
     if nil != drainErr {
-        t.Fatalf("expected no drain for a kernel with no counter, got: %v", drainErr)
+        t.Fatalf("expected no drain without a kernel to ask, got: %v", drainErr)
     }
 }
 
@@ -1141,7 +1134,7 @@ func newServedExceptionTestApplication(t *testing.T) *Application {
 func serveMissingOverTheWire(t *testing.T, applicationInstance *Application) (int, string) {
     t.Helper()
 
-    server := httptest.NewServer(applicationInstance.kernel.HttpKernel().ServeHttp(applicationInstance.kernel.ServiceContainer()))
+    server := httptest.NewServer(applicationInstance.servedHttpKernel().ServeHttp(applicationInstance.kernel.ServiceContainer()))
     defer server.Close()
 
     response, requestErr := nethttp.Get(server.URL + "/missing")
@@ -1188,7 +1181,7 @@ func TestServeHttp_AnExceptionListenerAddedAfterTheHandlerWasBuiltAnswers(t *tes
 
     applicationInstance.registerKernelHttpListeners()
 
-    handler := applicationInstance.kernel.HttpKernel().ServeHttp(applicationInstance.kernel.ServiceContainer())
+    handler := applicationInstance.servedHttpKernel().ServeHttp(applicationInstance.kernel.ServiceContainer())
 
     addTeapotExceptionListener(applicationInstance)
 
@@ -1240,7 +1233,7 @@ func TestServeHttp_AnExceptionListenerAnswersAPanicAndAFailingNotFoundHandler(t 
         http.RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
-    kernelInstance.httpKernel = http.NewKernel(kernelInstance.httpRouter, http.KernelConfig{
+    applicationInstance.httpKernel = http.NewKernel(kernelInstance.httpRouter, http.KernelConfig{
         NotFoundHandler: func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, exception.NewHttpException(nethttp.StatusNotFound, "the not found handler failed")
         },
@@ -1250,7 +1243,7 @@ func TestServeHttp_AnExceptionListenerAnswersAPanicAndAFailingNotFoundHandler(t 
 
     addTeapotExceptionListener(applicationInstance)
 
-    server := httptest.NewServer(applicationInstance.kernel.HttpKernel().ServeHttp(applicationInstance.kernel.ServiceContainer()))
+    server := httptest.NewServer(applicationInstance.servedHttpKernel().ServeHttp(applicationInstance.kernel.ServiceContainer()))
     defer server.Close()
 
     for _, path := range []string{"/panics", "/nowhere"} {
@@ -1572,7 +1565,7 @@ func TestServeHttp_AnAsteriskFormTargetAnswersTheRootFirewallsRefusal(t *testing
     }
 
     kernelInstance.httpRouter.Handle("/:slug", markHandler, http.RouteOptions{Methods: []string{nethttp.MethodGet}})
-    kernelInstance.httpKernel = http.NewKernel(kernelInstance.httpRouter, http.KernelConfig{NotFoundHandler: markHandler})
+    applicationInstance.httpKernel = http.NewKernel(kernelInstance.httpRouter, http.KernelConfig{NotFoundHandler: markHandler})
 
     firewall := security.NewCompiledFirewall(security.CompiledFirewallConfig{
         Name:               "main",
@@ -1601,7 +1594,7 @@ func TestServeHttp_AnAsteriskFormTargetAnswersTheRootFirewallsRefusal(t *testing
     security.RegisterKernelAccessControlListener(applicationInstance.kernel, registry)
     applicationInstance.registerKernelHttpListeners()
 
-    server := httptest.NewServer(applicationInstance.kernel.HttpKernel().ServeHttp(applicationInstance.kernel.ServiceContainer()))
+    server := httptest.NewServer(applicationInstance.servedHttpKernel().ServeHttp(applicationInstance.kernel.ServiceContainer()))
     defer server.Close()
 
     for _, requestLine := range []string{"GET /x HTTP/1.1", "GET * HTTP/1.1"} {
@@ -1678,7 +1671,7 @@ func TestServeHttp_ASlashLessPathThatFoldsIsRefusedBeforeTheFirewallAndTheRouter
     security.RegisterKernelAccessControlListener(applicationInstance.kernel, registry)
     applicationInstance.registerKernelHttpListeners()
 
-    server := httptest.NewServer(nethttp.StripPrefix("/api", applicationInstance.kernel.HttpKernel().ServeHttp(applicationInstance.kernel.ServiceContainer())))
+    server := httptest.NewServer(nethttp.StripPrefix("/api", applicationInstance.servedHttpKernel().ServeHttp(applicationInstance.kernel.ServiceContainer())))
     defer server.Close()
 
     for _, testCase := range []struct {
@@ -1949,26 +1942,26 @@ func prepareSessionReaderOverAnOutage(serviceContainer containercontract.Contain
     )
 }
 
-func serveSessionReader(serviceContainer containercontract.Container, httpKernel httpcontract.Kernel) int {
+func serveSessionReader(t *testing.T, applicationInstance *Application) int {
+    t.Helper()
+
     request := httptest.NewRequest(nethttp.MethodGet, "/reads-the-session", nil)
     request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
 
-    recorder := httptest.NewRecorder()
-    httpKernel.ServeHttp(serviceContainer).ServeHTTP(recorder, request)
-
-    return recorder.Code
+    return serveTestRequest(t, applicationInstance, request).Code
 }
 
 func TestApplication_InstallsTheSessionPolicyOnTheHttpKernel(t *testing.T) {
     for field, expected := range map[bool]int{true: nethttp.StatusOK, false: nethttp.StatusServiceUnavailable} {
         applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), HttpKernel: http.KernelConfig{SessionPolicy: httpcontract.SessionPolicy{EmptyOnOutage: field}}})
+        applicationInstance.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
         serviceContainer := applicationInstance.kernel.ServiceContainer()
 
         applicationInstance.Boot()
 
         prepareSessionReaderOverAnOutage(serviceContainer, applicationInstance.kernel.HttpRouter())
 
-        if status := serveSessionReader(serviceContainer, applicationInstance.kernel.HttpKernel()); expected != status {
+        if status := serveSessionReader(t, applicationInstance); expected != status {
             t.Fatalf("field %v: expected %d at construction, got %d", field, expected, status)
         }
 
@@ -2084,7 +2077,7 @@ func (instance *headersTestModule) RegisterHttpRoutes(kernelInstance kernelcontr
     }, http.RouteOptions{Methods: []string{nethttp.MethodGet}})
 }
 
-func bootHeadersTestApplication(t *testing.T, environmentName string, applicationConfig ApplicationConfig) kernelcontract.Kernel {
+func bootHeadersTestApplication(t *testing.T, environmentName string, applicationConfig ApplicationConfig) *Application {
     t.Helper()
 
     return bootServingTestApplication(t, environmentName, applicationConfig, func(applicationInstance *Application) {
@@ -2111,9 +2104,9 @@ func assertDefaultSecurityHeaders(t *testing.T, what string, header nethttp.Head
 }
 
 func TestApplication_DefaultHeaders_OnAStaticFile(t *testing.T) {
-    kernelInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
+    applicationInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
 
-    recorder := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/"+servingTestStaticFile, nil))
+    recorder := serveTestRequest(t, applicationInstance, httptest.NewRequest(nethttp.MethodGet, "/"+servingTestStaticFile, nil))
     if nethttp.StatusOK != recorder.Code || "body{}" != recorder.Body.String() {
         t.Fatalf("expected the static file served, got %d %q", recorder.Code, recorder.Body.String())
     }
@@ -2122,19 +2115,19 @@ func TestApplication_DefaultHeaders_OnAStaticFile(t *testing.T) {
 }
 
 func TestApplication_DefaultHeaders_OnAJsonRoute(t *testing.T) {
-    kernelInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
+    applicationInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
 
-    assertDefaultSecurityHeaders(t, "json route", serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/json", nil)).Result().Header)
+    assertDefaultSecurityHeaders(t, "json route", serveTestRequest(t, applicationInstance, httptest.NewRequest(nethttp.MethodGet, "/json", nil)).Result().Header)
 }
 
 func TestApplication_DefaultHeaders_OnAFirewallRefusal(t *testing.T) {
-    kernelInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
+    applicationInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
 
     request := httptest.NewRequest(nethttp.MethodPost, "http://app.example.com/account", nil)
-    request.AddCookie(sessionCookieOfAnIdentity(t, kernelInstance))
+    request.AddCookie(sessionCookieOfAnIdentity(t, applicationInstance.kernel))
     request.Header.Set("Sec-Fetch-Site", "cross-site")
 
-    recorder := serveTestRequest(kernelInstance, request)
+    recorder := serveTestRequest(t, applicationInstance, request)
     if nethttp.StatusForbidden != recorder.Code {
         t.Fatalf("expected the forged write refused 403, got %d", recorder.Code)
     }
@@ -2143,9 +2136,9 @@ func TestApplication_DefaultHeaders_OnAFirewallRefusal(t *testing.T) {
 }
 
 func TestApplication_DefaultHeaders_OnTheErrorPage(t *testing.T) {
-    kernelInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
+    applicationInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
 
-    recorder := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
+    recorder := serveTestRequest(t, applicationInstance, httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
     if nethttp.StatusInternalServerError != recorder.Code {
         t.Fatalf("expected the error page, got %d", recorder.Code)
     }
@@ -2154,9 +2147,9 @@ func TestApplication_DefaultHeaders_OnTheErrorPage(t *testing.T) {
 }
 
 func TestApplication_DefaultHeaders_OnANotFound(t *testing.T) {
-    kernelInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
+    applicationInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
 
-    recorder := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/missing", nil))
+    recorder := serveTestRequest(t, applicationInstance, httptest.NewRequest(nethttp.MethodGet, "/missing", nil))
     if nethttp.StatusNotFound != recorder.Code {
         t.Fatalf("expected a not found, got %d", recorder.Code)
     }
@@ -2165,9 +2158,9 @@ func TestApplication_DefaultHeaders_OnANotFound(t *testing.T) {
 }
 
 func TestApplication_DefaultHeaders_OnAServerSentEventStream(t *testing.T) {
-    kernelInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
+    applicationInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
 
-    recorder := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/stream", nil))
+    recorder := serveTestRequest(t, applicationInstance, httptest.NewRequest(nethttp.MethodGet, "/stream", nil))
     if "text/event-stream" != recorder.Result().Header.Get("Content-Type") || false == strings.Contains(recorder.Body.String(), "data: one") {
         t.Fatalf("expected the stream served, got %d %v %q", recorder.Code, recorder.Result().Header, recorder.Body.String())
     }
@@ -2176,10 +2169,10 @@ func TestApplication_DefaultHeaders_OnAServerSentEventStream(t *testing.T) {
 }
 
 func TestApplication_SecurityHeadersDisabledByField_NoneSentAndNoListener(t *testing.T) {
-    kernelInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{SecurityHeaders: middleware.SecurityHeadersConfig{Disabled: true}})
+    applicationInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{SecurityHeaders: middleware.SecurityHeadersConfig{Disabled: true}})
 
     for _, path := range []string{"/json", "/missing", "/" + servingTestStaticFile} {
-        header := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, path, nil)).Result().Header
+        header := serveTestRequest(t, applicationInstance, httptest.NewRequest(nethttp.MethodGet, path, nil)).Result().Header
         for _, name := range http.SecurityHeaderNames() {
             if _, present := header[name]; true == present {
                 t.Fatalf("%s: expected no security header, got %v", path, header)
@@ -2187,7 +2180,7 @@ func TestApplication_SecurityHeadersDisabledByField_NoneSentAndNoListener(t *tes
         }
     }
 
-    for _, registeredEvent := range kernelInstance.EventDispatcher().RegisteredEvents() {
+    for _, registeredEvent := range applicationInstance.kernel.EventDispatcher().RegisteredEvents() {
         for _, listener := range registeredEvent.Listeners {
             if slices.Contains(listener.Config.Tags, kernelcontract.ListenerTagKernelSecurityHeaders) {
                 t.Fatalf("expected no security headers listener, got %+v on %s", listener, registeredEvent.EventName)
@@ -2197,33 +2190,33 @@ func TestApplication_SecurityHeadersDisabledByField_NoneSentAndNoListener(t *tes
 }
 
 func TestApplication_StrictTransportSecurity_BehindATrustedProxy_Sent(t *testing.T) {
-    kernelInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{HttpKernel: http.KernelConfig{ForwardedHeadersPolicy: httpcontract.ForwardedHeadersPolicy{TrustForwardedHeaders: true, TrustedProxyList: []string{"192.0.2.0/24"}}}})
+    applicationInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{HttpKernel: http.KernelConfig{ForwardedHeadersPolicy: httpcontract.ForwardedHeadersPolicy{TrustForwardedHeaders: true, TrustedProxyList: []string{"192.0.2.0/24"}}}})
 
     request := httptest.NewRequest(nethttp.MethodGet, "/json", nil)
     request.Header.Set("X-Forwarded-Proto", "https")
 
-    header := serveTestRequest(kernelInstance, request).Result().Header
+    header := serveTestRequest(t, applicationInstance, request).Result().Header
     if "max-age=31536000" != header.Get(http.HeaderStrictTransportSecurity) {
         t.Fatalf("expected HSTS on a request a trusted proxy states https, got %v", header)
     }
 }
 
 func TestApplication_StrictTransportSecurity_BehindAnUntrustedPeer_NotSent(t *testing.T) {
-    kernelInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{HttpKernel: http.KernelConfig{ForwardedHeadersPolicy: httpcontract.ForwardedHeadersPolicy{TrustForwardedHeaders: true, TrustedProxyList: []string{"10.0.0.0/8"}}}})
+    applicationInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{HttpKernel: http.KernelConfig{ForwardedHeadersPolicy: httpcontract.ForwardedHeadersPolicy{TrustForwardedHeaders: true, TrustedProxyList: []string{"10.0.0.0/8"}}}})
 
     request := httptest.NewRequest(nethttp.MethodGet, "/json", nil)
     request.Header.Set("X-Forwarded-Proto", "https")
 
-    header := serveTestRequest(kernelInstance, request).Result().Header
+    header := serveTestRequest(t, applicationInstance, request).Result().Header
     if _, present := header[http.HeaderStrictTransportSecurity]; true == present {
         t.Fatalf("expected no HSTS on a scheme an untrusted peer states, got %v", header)
     }
 }
 
 func TestApplication_SecurityHeaders_LeaveCacheControlAndCorsAlone(t *testing.T) {
-    kernelInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
+    applicationInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
 
-    header := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/own", nil)).Result().Header
+    header := serveTestRequest(t, applicationInstance, httptest.NewRequest(nethttp.MethodGet, "/own", nil)).Result().Header
     if "public, max-age=60" != header.Get("Cache-Control") || "SAMEORIGIN" != strings.Join(header.Values(http.HeaderFrameOptions), ",") || "nosniff" != header.Get(http.HeaderContentTypeOptions) {
         t.Fatalf("expected the route's own cache and frame headers kept and the others added, got %v", header)
     }
@@ -2237,11 +2230,11 @@ func TestApplication_SecurityHeaders_LeaveCacheControlAndCorsAlone(t *testing.T)
 
 func TestApplication_SecurityHeaders_SameInDevAndProd(t *testing.T) {
     headersOf := func(environmentName string) map[string][]string {
-        kernelInstance := bootHeadersTestApplication(t, environmentName, ApplicationConfig{})
+        applicationInstance := bootHeadersTestApplication(t, environmentName, ApplicationConfig{})
 
         answered := map[string][]string{}
         for _, path := range []string{"/json", "/fail", "/missing"} {
-            header := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, path, nil)).Result().Header
+            header := serveTestRequest(t, applicationInstance, httptest.NewRequest(nethttp.MethodGet, path, nil)).Result().Header
             for _, name := range http.SecurityHeaderNames() {
                 answered[path+" "+name] = header.Values(name)
             }
@@ -2261,14 +2254,14 @@ func TestApplication_SecurityHeaders_SameInDevAndProd(t *testing.T) {
 }
 
 func TestApplication_RouteProtection_DropsTheHeaderOnThatRouteOnly(t *testing.T) {
-    kernelInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
+    applicationInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
 
-    framed := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/framed", nil)).Result().Header
+    framed := serveTestRequest(t, applicationInstance, httptest.NewRequest(nethttp.MethodGet, "/framed", nil)).Result().Header
     if _, present := framed[http.HeaderFrameOptions]; true == present || "nosniff" != framed.Get(http.HeaderContentTypeOptions) {
         t.Fatalf("expected X-Frame-Options dropped on the route alone, got %v", framed)
     }
 
-    assertDefaultSecurityHeaders(t, "another route", serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/json", nil)).Result().Header)
+    assertDefaultSecurityHeaders(t, "another route", serveTestRequest(t, applicationInstance, httptest.NewRequest(nethttp.MethodGet, "/json", nil)).Result().Header)
 }
 
 const malformedSecurityHeadersProbeMarker = "MELODY_TEST_MALFORMED_SECURITY_HEADERS_PROBE"
@@ -2294,7 +2287,7 @@ func TestApplication_SecurityHeaders_AMalformedValueRefusesTheApplicationWhenDis
 func TestApplicationRegisterHttpRoute_CopiesTheSecurityHeadersDisabled(t *testing.T) {
     names := []string{http.HeaderFrameOptions}
 
-    kernelInstance := bootServingTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{}, func(applicationInstance *Application) {
+    applicationInstance := bootServingTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{}, func(applicationInstance *Application) {
         applicationInstance.RegisterHttpRoute("/copied", func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return http.TextResponse(nethttp.StatusOK, "copied"), nil
         }, http.RouteOptions{Methods: []string{nethttp.MethodGet}, Protection: http.RouteProtectionConfig{SecurityHeadersDisabled: names}})
@@ -2302,7 +2295,7 @@ func TestApplicationRegisterHttpRoute_CopiesTheSecurityHeadersDisabled(t *testin
         names[0] = http.HeaderReferrerPolicy
     })
 
-    header := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/copied", nil)).Result().Header
+    header := serveTestRequest(t, applicationInstance, httptest.NewRequest(nethttp.MethodGet, "/copied", nil)).Result().Header
     if _, present := header[http.HeaderFrameOptions]; true == present || "strict-origin-when-cross-origin" != header.Get(http.HeaderReferrerPolicy) {
         t.Fatalf("expected the names as registered, got %v", header)
     }
@@ -2327,7 +2320,7 @@ func (instance *bodyCapTestModule) RegisterHttpRoutes(kernelInstance kernelcontr
 }
 
 func TestApplication_UploadRouteCap_LeavesTheOtherRoutesAtTheApplicationCap(t *testing.T) {
-    kernelInstance := bootServingTestApplicationWithEnvironment(t, config.EnvironmentProduction, config.HttpMaxRequestBodyBytesKey+"=64\n", ApplicationConfig{}, func(applicationInstance *Application) {
+    applicationInstance := bootServingTestApplicationWithEnvironment(t, config.EnvironmentProduction, config.HttpMaxRequestBodyBytesKey+"=64\n", ApplicationConfig{}, func(applicationInstance *Application) {
         applicationInstance.RegisterModule(&bodyCapTestModule{csrfApplicationTestModule: csrfApplicationTestModule{fakeModule: fakeModule{name: "cap"}}})
     })
 
@@ -2335,7 +2328,7 @@ func TestApplication_UploadRouteCap_LeavesTheOtherRoutesAtTheApplicationCap(t *t
         request := httptest.NewRequest(nethttp.MethodPost, path, strings.NewReader("value="+strings.Repeat("a", 512)))
         request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-        return serveTestRequest(kernelInstance, request).Code
+        return serveTestRequest(t, applicationInstance, request).Code
     }
 
     if status := post("/upload"); nethttp.StatusOK != status {
@@ -2344,5 +2337,510 @@ func TestApplication_UploadRouteCap_LeavesTheOtherRoutesAtTheApplicationCap(t *t
 
     if status := post("/account"); nethttp.StatusRequestEntityTooLarge != status {
         t.Fatalf("expected the application's cap on another route, got %d", status)
+    }
+}
+
+type handlerTestContextKey struct{}
+
+/* bootHandlerTestApplication boots a production http application holding one plain route and one route that holds its request until release is closed */
+func bootHandlerTestApplication(t *testing.T, environmentLines string, prepare func(applicationInstance *Application)) (*Application, chan struct{}, chan struct{}) {
+    t.Helper()
+
+    entered := make(chan struct{}, 1)
+    release := make(chan struct{})
+
+    applicationInstance := bootServingTestApplicationWithEnvironment(t, config.EnvironmentProduction, environmentLines, ApplicationConfig{}, func(applicationInstance *Application) {
+        applicationInstance.RegisterHttpRoute(
+            "/plain",
+            func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                return http.TextResponse(nethttp.StatusOK, "plain"), nil
+            },
+            http.RouteOptions{Methods: []string{nethttp.MethodGet}},
+        )
+
+        applicationInstance.RegisterHttpRoute(
+            "/held",
+            func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                entered <- struct{}{}
+                <-release
+
+                return http.TextResponse(nethttp.StatusOK, "held"), nil
+            },
+            http.RouteOptions{Methods: []string{nethttp.MethodGet}},
+        )
+
+        if nil != prepare {
+            prepare(applicationInstance)
+        }
+    })
+
+    return applicationInstance, entered, release
+}
+
+func mustHttpHandler(t *testing.T, applicationInstance *Application) nethttp.Handler {
+    t.Helper()
+
+    handler, handlerErr := applicationInstance.HttpHandler()
+    if nil != handlerErr {
+        t.Fatalf("unexpected http handler error: %v", handlerErr)
+    }
+
+    return handler
+}
+
+/* holdOpenRequestScope serves the held route on its own goroutine and returns once the request is inside the handler */
+func holdOpenRequestScope(t *testing.T, handler nethttp.Handler, entered chan struct{}) *sync.WaitGroup {
+    t.Helper()
+
+    served := &sync.WaitGroup{}
+    served.Add(1)
+
+    go func() {
+        defer served.Done()
+
+        handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/held", nil))
+    }()
+
+    <-entered
+
+    return served
+}
+
+type shutdownHookRecorder struct {
+    calls    atomic.Int64
+    contexts sync.Map
+}
+
+func (instance *shutdownHookRecorder) hook(name string) func(shutdownContext context.Context) {
+    return func(shutdownContext context.Context) {
+        instance.calls.Add(1)
+        instance.contexts.Store(name, shutdownContext.Value(handlerTestContextKey{}))
+    }
+}
+
+func (instance *shutdownHookRecorder) contextOf(name string) any {
+    value, _ := instance.contexts.Load(name)
+
+    return value
+}
+
+func TestApplicationHttpHandler_ServesARouteThroughThePipelineBuiltAtBoot(t *testing.T) {
+    var middlewareRan atomic.Bool
+
+    applicationInstance, _, _ := bootHandlerTestApplication(t, "", func(applicationInstance *Application) {
+        applicationInstance.RegisterHttpMiddlewares([]httpcontract.Middleware{
+            func(next httpcontract.Handler) httpcontract.Handler {
+                return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                    middlewareRan.Store(true)
+
+                    return next(runtimeInstance, writer, request)
+                }
+            },
+        })
+    })
+
+    server := httptest.NewServer(mustHttpHandler(t, applicationInstance))
+    defer server.Close()
+
+    response, requestErr := nethttp.Get(server.URL + "/plain")
+    if nil != requestErr {
+        t.Fatalf("unexpected request error: %v", requestErr)
+    }
+    defer func() { _ = response.Body.Close() }()
+
+    body, _ := io.ReadAll(response.Body)
+    if nethttp.StatusOK != response.StatusCode || "plain" != string(body) {
+        t.Fatalf("expected the route served, got %d %q", response.StatusCode, body)
+    }
+
+    if false == middlewareRan.Load() {
+        t.Fatalf("expected the application's middleware to run in the handed-out handler")
+    }
+}
+
+func TestApplicationHttpHandler_WrapsTheHandlerInTheRegisteredDecorators(t *testing.T) {
+    order := make([]string, 0, 2)
+    orderMutex := sync.Mutex{}
+
+    decorator := func(name string) applicationcontract.HttpHandlerDecorator {
+        return func(next nethttp.Handler) nethttp.Handler {
+            return nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+                orderMutex.Lock()
+                order = append(order, name)
+                orderMutex.Unlock()
+
+                next.ServeHTTP(writer, request)
+            })
+        }
+    }
+
+    applicationInstance, _, _ := bootHandlerTestApplication(t, "", func(applicationInstance *Application) {
+        applicationInstance.RegisterHttpHandlerDecorator(decorator("first"))
+        applicationInstance.RegisterHttpHandlerDecorator(decorator("second"))
+    })
+
+    recorder := serveTestRequest(t, applicationInstance, httptest.NewRequest(nethttp.MethodGet, "/plain", nil))
+    if nethttp.StatusOK != recorder.Code {
+        t.Fatalf("expected the route served, got %d", recorder.Code)
+    }
+
+    if false == slices.Equal([]string{"first", "second"}, order) {
+        t.Fatalf("expected the first registered decorator outermost, got %v", order)
+    }
+}
+
+func TestApplicationHttpHandler_AnswersTheSameHandlerOnEveryCall(t *testing.T) {
+    var decorations atomic.Int64
+
+    applicationInstance, _, _ := bootHandlerTestApplication(t, "", func(applicationInstance *Application) {
+        applicationInstance.RegisterHttpHandlerDecorator(func(next nethttp.Handler) nethttp.Handler {
+            decorations.Add(1)
+
+            return next
+        })
+    })
+
+    mustHttpHandler(t, applicationInstance)
+    mustHttpHandler(t, applicationInstance)
+
+    if 1 != decorations.Load() {
+        t.Fatalf("expected the handler built once, decorated %d times", decorations.Load())
+    }
+}
+
+func TestApplicationHttpHandler_ReturnsThePreServeRefusal_AndMemoizesIt(t *testing.T) {
+    applicationInstance, _, _ := bootHandlerTestApplication(t, config.ScopeTeardownTimeoutKey+"=10s\n"+config.HttpShutdownTimeoutKey+"=5s\n", nil)
+
+    handler, firstErr := applicationInstance.HttpHandler()
+    if nil != handler || nil == firstErr {
+        t.Fatalf("expected the scope teardown outlasting the shutdown refused, got %v %v", handler, firstErr)
+    }
+
+    if "the scope teardown timeout must stay under the http shutdown timeout" != firstErr.Error() {
+        t.Fatalf("expected the refusal of the scope teardown, got %v", firstErr)
+    }
+
+    _, secondErr := applicationInstance.HttpHandler()
+    if firstErr != secondErr {
+        t.Fatalf("expected the refusal memoized, got %v then %v", firstErr, secondErr)
+    }
+}
+
+func TestApplicationHttpHandler_AppliesTheHttpKernelConfig(t *testing.T) {
+    applicationInstance, _, _ := bootHandlerTestApplication(t, config.HttpUnavailableRetryAfterKey+"=7s\n", func(applicationInstance *Application) {
+        applicationInstance.RegisterHttpRoute(
+            "/unavailable",
+            func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                return nil, exception.MarkInfrastructureFailure(errors.New("cache is down"))
+            },
+            http.RouteOptions{Methods: []string{nethttp.MethodGet}},
+        )
+    })
+
+    recorder := serveTestRequest(t, applicationInstance, httptest.NewRequest(nethttp.MethodGet, "/unavailable", nil))
+    if nethttp.StatusServiceUnavailable != recorder.Code || "7" != recorder.Header().Get("Retry-After") {
+        t.Fatalf("expected 503 with the key's Retry-After 7, got %d %q", recorder.Code, recorder.Header().Get("Retry-After"))
+    }
+}
+
+func TestApplicationHttpHandler_MarksTheConfigurationServing(t *testing.T) {
+    applicationInstance, _, _ := bootHandlerTestApplication(t, "", nil)
+
+    if resolveErr := applicationInstance.configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("expected a resolve admitted before the handler is handed out, got %v", resolveErr)
+    }
+
+    mustHttpHandler(t, applicationInstance)
+
+    resolveErr := applicationInstance.configuration.Resolve()
+    if nil == resolveErr || false == strings.Contains(resolveErr.Error(), "begun serving") {
+        t.Fatalf("expected a resolve refused once the handler was handed out, got %v", resolveErr)
+    }
+}
+
+func TestApplicationHttpHandler_WritesTheBootWarningsOnce(t *testing.T) {
+    var logger *levelCapturingLogger
+
+    applicationInstance, _, _ := bootHandlerTestApplication(t, "", func(applicationInstance *Application) {
+        logger = registerLevelCapturingLogger(applicationInstance)
+        applicationInstance.bootWarnings = append(applicationInstance.bootWarnings, internal.BootWarning{Name: "handler.test", Message: "the handler test's boot warning"})
+    })
+
+    from := logger.recorded()
+    mustHttpHandler(t, applicationInstance)
+
+    if 0 == logger.countSince(from, loggingcontract.LevelWarning) {
+        t.Fatalf("expected the boot warnings written when the handler is handed out")
+    }
+
+    from = logger.recorded()
+    mustHttpHandler(t, applicationInstance)
+
+    if 0 != logger.countSince(from, loggingcontract.LevelWarning) {
+        t.Fatalf("expected the boot warnings written once")
+    }
+}
+
+func TestApplicationHttpHandler_CliMode_Refused(t *testing.T) {
+    applicationInstance, _, _ := bootHandlerTestApplication(t, "", nil)
+    applicationInstance.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli})
+
+    handler, handlerErr := applicationInstance.HttpHandler()
+    if nil != handler || nil == handlerErr || "the http handler is asked of a process in cli mode" != handlerErr.Error() {
+        t.Fatalf("expected the cli mode refused, got %v %v", handler, handlerErr)
+    }
+
+    if config.ModeCli != exception.LogContext(handlerErr, exception.LogContextConfig{})["mode"] {
+        t.Fatalf("expected the refusal to name the mode, got %v", exception.LogContext(handlerErr, exception.LogContextConfig{}))
+    }
+}
+
+func TestApplicationHttpHandler_AfterRun_Refused(t *testing.T) {
+    applicationInstance, _, _ := bootHandlerTestApplication(t, "", nil)
+    applicationInstance.servingClaim.Store(servingClaimRun)
+
+    handler, handlerErr := applicationInstance.HttpHandler()
+    if nil != handler || nil == handlerErr || "the http handler is asked of an application that runs its own server" != handlerErr.Error() {
+        t.Fatalf("expected the handler refused once Run started, got %v %v", handler, handlerErr)
+    }
+}
+
+func TestApplicationRun_AfterTheHandlerWasHandedOut_Panics(t *testing.T) {
+    applicationInstance, _, _ := bootHandlerTestApplication(t, "", nil)
+    mustHttpHandler(t, applicationInstance)
+
+    testhelper.AssertPanicsWithError(t, func() {
+        applicationInstance.Run()
+    }, "application run called after its http handler was handed out")
+}
+
+func TestApplicationBeginHttpShutdown_HandsTheContextToEachHookOnce(t *testing.T) {
+    recorder := &shutdownHookRecorder{}
+
+    applicationInstance, _, _ := bootHandlerTestApplication(t, "", func(applicationInstance *Application) {
+        applicationInstance.OnHttpShutdown(recorder.hook("first"))
+        applicationInstance.OnHttpShutdown(recorder.hook("second"))
+    })
+    mustHttpHandler(t, applicationInstance)
+
+    shutdownContext := context.WithValue(context.Background(), handlerTestContextKey{}, "the shutdown's")
+
+    for range 2 {
+        if beginErr := applicationInstance.BeginHttpShutdown(shutdownContext); nil != beginErr {
+            t.Fatalf("unexpected begin error: %v", beginErr)
+        }
+    }
+
+    waitForHttpShutdownHooks(&applicationInstance.httpShutdownHookSet.done, context.Background())
+
+    if 2 != recorder.calls.Load() {
+        t.Fatalf("expected each hook started once, got %d calls", recorder.calls.Load())
+    }
+
+    for _, name := range []string{"first", "second"} {
+        if "the shutdown's" != recorder.contextOf(name) {
+            t.Fatalf("expected %s handed the shutdown's context, got %v", name, recorder.contextOf(name))
+        }
+    }
+}
+
+func TestApplicationBeginHttpShutdown_NilContext_Refused(t *testing.T) {
+    applicationInstance, _, _ := bootHandlerTestApplication(t, "", nil)
+    mustHttpHandler(t, applicationInstance)
+
+    var nilContext context.Context
+
+    beginErr := applicationInstance.BeginHttpShutdown(nilContext)
+    if nil == beginErr || "the shutdown context is nil" != beginErr.Error() {
+        t.Fatalf("expected the nil context refused, got %v", beginErr)
+    }
+
+    if "Application.BeginHttpShutdown" != exception.LogContext(beginErr, exception.LogContextConfig{})["door"] {
+        t.Fatalf("expected the refusal to name the door, got %v", exception.LogContext(beginErr, exception.LogContextConfig{}))
+    }
+}
+
+func TestApplicationBeginHttpShutdown_OfARunApplication_StartsNothing(t *testing.T) {
+    recorder := &shutdownHookRecorder{}
+
+    applicationInstance, _, _ := bootHandlerTestApplication(t, "", func(applicationInstance *Application) {
+        applicationInstance.OnHttpShutdown(recorder.hook("only"))
+    })
+    applicationInstance.servingClaim.Store(servingClaimRun)
+
+    if beginErr := applicationInstance.BeginHttpShutdown(context.Background()); nil != beginErr {
+        t.Fatalf("unexpected begin error: %v", beginErr)
+    }
+
+    time.Sleep(50 * time.Millisecond)
+
+    if 0 != recorder.calls.Load() {
+        t.Fatalf("expected no hook started for an application that runs its own server, got %d", recorder.calls.Load())
+    }
+}
+
+func TestApplicationCloseWithContext_HandedOut_RunsTheHooksUnderTheCloseContext(t *testing.T) {
+    recorder := &shutdownHookRecorder{}
+
+    applicationInstance, _, _ := bootHandlerTestApplication(t, "", func(applicationInstance *Application) {
+        applicationInstance.OnHttpShutdown(recorder.hook("only"))
+    })
+    mustHttpHandler(t, applicationInstance)
+
+    closeContext := context.WithValue(context.Background(), handlerTestContextKey{}, "the close's")
+
+    if closeErr := applicationInstance.CloseWithContext(closeContext); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != recorder.calls.Load() || "the close's" != recorder.contextOf("only") {
+        t.Fatalf("expected the hook run once under the close context before the close returned, got %d calls, context %v", recorder.calls.Load(), recorder.contextOf("only"))
+    }
+}
+
+func TestApplicationCloseWithContext_HandedOut_WaitsForAnOpenRequestScope(t *testing.T) {
+    applicationInstance, entered, release := bootHandlerTestApplication(t, "", nil)
+    served := holdOpenRequestScope(t, mustHttpHandler(t, applicationInstance), entered)
+    defer served.Wait()
+    defer close(release)
+
+    closeContext, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+    defer cancel()
+
+    closeErr := applicationInstance.CloseWithContext(closeContext)
+    if nil == closeErr || false == strings.Contains(closeErr.Error(), "http shutdown left request scopes open") || false == errors.Is(closeErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the open request scope reported under the close's deadline, got %v", closeErr)
+    }
+}
+
+func TestApplicationCloseWithContext_HandedOut_HooksBegunEarlier_NotStartedTwice(t *testing.T) {
+    recorder := &shutdownHookRecorder{}
+
+    applicationInstance, _, _ := bootHandlerTestApplication(t, "", func(applicationInstance *Application) {
+        applicationInstance.OnHttpShutdown(recorder.hook("only"))
+    })
+    mustHttpHandler(t, applicationInstance)
+
+    if beginErr := applicationInstance.BeginHttpShutdown(context.WithValue(context.Background(), handlerTestContextKey{}, "the shutdown's")); nil != beginErr {
+        t.Fatalf("unexpected begin error: %v", beginErr)
+    }
+
+    if closeErr := applicationInstance.CloseWithContext(context.WithValue(context.Background(), handlerTestContextKey{}, "the close's")); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != recorder.calls.Load() || "the shutdown's" != recorder.contextOf("only") {
+        t.Fatalf("expected the hook begun earlier not started again by the close, got %d calls, context %v", recorder.calls.Load(), recorder.contextOf("only"))
+    }
+}
+
+func TestApplicationCloseWithContext_OfARunApplication_StartsNoHook(t *testing.T) {
+    recorder := &shutdownHookRecorder{}
+
+    applicationInstance, _, _ := bootHandlerTestApplication(t, "", func(applicationInstance *Application) {
+        applicationInstance.OnHttpShutdown(recorder.hook("only"))
+    })
+    applicationInstance.servingClaim.Store(servingClaimRun)
+
+    if closeErr := applicationInstance.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    time.Sleep(50 * time.Millisecond)
+
+    if 0 != recorder.calls.Load() {
+        t.Fatalf("expected the close of an application that ran its own server to start no hook, got %d", recorder.calls.Load())
+    }
+}
+
+func TestApplicationCloseWithContext_HandedOut_JoinsTheWindDownFailureWithTheTeardowns(t *testing.T) {
+    applicationInstance, entered, release := bootHandlerTestApplication(t, "", func(applicationInstance *Application) {
+        applicationInstance.RegisterService(
+            "app.failing.close",
+            func(resolver containercontract.Resolver) (*failingCloseProbe, error) {
+                return &failingCloseProbe{}, nil
+            },
+            containercontract.RegisterOptions{},
+        )
+    })
+
+    if _, getErr := applicationInstance.kernel.ServiceContainer().Get(t.Context(), "app.failing.close"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    served := holdOpenRequestScope(t, mustHttpHandler(t, applicationInstance), entered)
+    defer served.Wait()
+    defer close(release)
+
+    closeContext, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+    defer cancel()
+
+    closeErr := applicationInstance.CloseWithContext(closeContext)
+    if nil == closeErr || false == strings.Contains(closeErr.Error(), "http shutdown left request scopes open") || false == strings.Contains(closeErr.Error(), "failed to close container services") {
+        t.Fatalf("expected the wind-down's failure joined with the teardown's, got %v", closeErr)
+    }
+}
+
+func TestApplicationHttpHandler_ConcurrentCalls_BuildOneHandler(t *testing.T) {
+    var decorations atomic.Int64
+
+    applicationInstance, _, _ := bootHandlerTestApplication(t, "", func(applicationInstance *Application) {
+        applicationInstance.RegisterHttpHandlerDecorator(func(next nethttp.Handler) nethttp.Handler {
+            decorations.Add(1)
+
+            return next
+        })
+    })
+
+    callers := sync.WaitGroup{}
+    var failures atomic.Int64
+
+    for range 8 {
+        callers.Add(1)
+
+        go func() {
+            defer callers.Done()
+
+            if _, handlerErr := applicationInstance.HttpHandler(); nil != handlerErr {
+                failures.Add(1)
+            }
+        }()
+    }
+
+    callers.Wait()
+
+    if 0 != failures.Load() || 1 != decorations.Load() {
+        t.Fatalf("expected every concurrent caller answered the one handler, got %d failures and %d decorations", failures.Load(), decorations.Load())
+    }
+}
+
+func TestApplicationBeginHttpShutdown_ConcurrentCalls_StartEachHookOnce(t *testing.T) {
+    recorder := &shutdownHookRecorder{}
+
+    applicationInstance, _, _ := bootHandlerTestApplication(t, "", func(applicationInstance *Application) {
+        applicationInstance.OnHttpShutdown(recorder.hook("only"))
+    })
+    mustHttpHandler(t, applicationInstance)
+
+    callers := sync.WaitGroup{}
+
+    for range 8 {
+        callers.Add(1)
+
+        go func() {
+            defer callers.Done()
+
+            _ = applicationInstance.BeginHttpShutdown(context.Background())
+        }()
+    }
+
+    callers.Wait()
+
+    if closeErr := applicationInstance.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != recorder.calls.Load() {
+        t.Fatalf("expected the hook started once by concurrent callers and the close, got %d", recorder.calls.Load())
     }
 }

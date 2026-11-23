@@ -45,7 +45,7 @@ This package covers the HTTP runtime behavior inside Melody:
     - [`UrlGenerator`](../../http/url_generator.go) / [`NewUrlGenerator`](../../http/url_generator.go)
 
 - Kernel orchestration:
-    - [`Kernel`](../../http/kernel.go) / [`NewKernel`](../../http/kernel.go)
+    - [`Kernel`](../../http/kernel.go) / [`NewKernel`](../../http/kernel.go); [`(*Kernel).ServeHttp(serviceContainer)`](../../http/kernel.go) builds a bare kernel's handler, for a unit test of the kernel, and an application's handler is asked of the application through [`Application.HttpHandler`](APPLICATION.md#serving-under-another-server), the supported way: it carries the decorators, the serving marks and the exclusivity with `Run`
     - The kernel's configuration via [`KernelConfig`](../../http/kernel.go), `MethodPolicy`, `ForwardedHeadersPolicy` (see [Forwarded headers and trusted proxies](#forwarded-headers-and-trusted-proxies)), `SessionCookiePolicy`, `SessionPolicy`, `Middlewares`, `NotFoundHandler` and `UnavailableRetryAfter`; its zero value is the default, and `NewKernel` is the one way to configure a kernel: the kernel has no setter, a field outside its rule panics naming the field, and an application builds its kernel from `ApplicationConfig.HttpKernel` (see [APPLICATION](APPLICATION.md#http-kernel))
     - The method policy — whether `HEAD` falls back to the `GET` route, whether an unrouted `OPTIONS` is answered with the computed `Allow` header — is `KernelConfig.MethodPolicy`, the [`MethodPolicy`](../../http/contract/kernel.go) of the contract; the zero policy keeps both halves on, which is what the framework has always done. An api that must answer `405` to `OPTIONS` sets `AutomaticOptionsDisabled`, and one that must not serve `HEAD` from the `GET` route sets `HeadFallbackDisabled`.
     - Kernel lifecycle events in [`kernel_event.go`](../../http/kernel_event.go)
@@ -682,7 +682,6 @@ Where the list itself comes from is the application's business — a constant as
 - [`type RouteRegistry`](../../http/contract/route_registry.go)
 - [`type UrlGenerator`](../../http/contract/url_generator.go) — `GeneratePath(routeName, PathConfig) (string, error)` and `GenerateUrl(routeName, PathConfig) (string, error)`
 - [`type PathConfig`](../../http/contract/url_generator.go) — `Parameters`, `Query` (`url.Values`, an empty key skipped, the keys sorted, a repeated key's values in order) and `Fragment`, written after the query
-- [`type Kernel`](../../http/contract/kernel.go) — `ServeHttp` alone; the kernel is configured when it is built
 - [`type SessionCookiePolicy`](../../http/contract/kernel.go)
 - [`type SessionCookieSecurePolicy`](../../http/contract/kernel.go) — `SessionCookieSecureFromScheme` (zero value), `SessionCookieSecureAlways`, `SessionCookieSecureNever`
 - [`type ForwardedHeadersPolicy`](../../http/contract/kernel.go) — `TrustForwardedHeaders` and `TrustedProxyList`, both needed; see [Forwarded headers and trusted proxies](#forwarded-headers-and-trusted-proxies)

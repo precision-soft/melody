@@ -407,10 +407,6 @@ func (instance *fakeKernel) BootRuntime() containercontract.Runtime {
     return nil
 }
 
-func (instance *fakeKernel) HttpKernel() httpcontract.Kernel {
-    return nil
-}
-
 func (instance *fakeKernel) Clock() clockcontract.Clock {
     return nil
 }

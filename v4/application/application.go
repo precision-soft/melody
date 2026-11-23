@@ -4,6 +4,7 @@ import (
     "context"
     "fmt"
     "io/fs"
+    nethttp "net/http"
     "os"
     "slices"
     "strings"
@@ -20,6 +21,7 @@ import (
     "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/internal/configseam"
@@ -35,9 +37,16 @@ import (
 
 type RouteRegistrar func(kernelInstance kernelcontract.Kernel)
 
+const (
+    servingClaimNone int32 = iota
+    servingClaimRun
+    servingClaimHttpHandler
+)
+
 type Application struct {
-    booted     bool
-    runStarted atomic.Bool
+    booted bool
+    /* the one claim Run and HttpHandler race for: whichever takes it first owns the serving */
+    servingClaim atomic.Int32
     /* raised for the boot window so the module doors refuse a registration from inside a module boot hook: the phase loops iterate a snapshot, so such a module would receive only the hooks of the phases not yet run */
     booting             bool
     ctx                 context.Context
@@ -46,6 +55,8 @@ type Application struct {
     configuration       configcontract.Configuration
     runtimeFlags        *RuntimeFlags
     kernel              kernelcontract.Kernel
+    /* NewApplication builds it; an Application built by literal gets one over the kernel's router at its first use */
+    httpKernel          *http.Kernel
     embeddedPublicFiles fs.FS
     modules             []applicationcontract.Module
     /* each registered module's identity, its name folded to lower case, to the spelling registered first. Populated lazily, since tests assemble a bare Application without the constructor. */
@@ -55,6 +66,15 @@ type Application struct {
     httpMiddlewares           *HttpMiddleware
     httpHandlerDecorators     []applicationcontract.HttpHandlerDecorator
     httpShutdownHooks         []func(shutdownContext context.Context)
+    /* guards the handler HttpHandler builds once and answers on every call, or the refusal it answers instead */
+    httpHandlerMutex          sync.Mutex
+    httpHandlerBuilt          bool
+    httpHandler               nethttp.Handler
+    httpHandlerErr            error
+    httpHandlerLogger         loggingcontract.Logger
+    /* starts the shutdown hooks of a handed-out handler once, from BeginHttpShutdown or from the close */
+    httpShutdownHooksOnce     sync.Once
+    httpShutdownHookSet       httpShutdownHookSet
     securityConfiguration     *security.CompiledConfiguration
     bootWarnings              []internal.BootWarning
     /* the run writes the boot warnings when it starts and an exit handler when the process dies before that, so the two never write them twice */
@@ -331,9 +351,13 @@ func (instance *Application) ProcessRole() string {
     return instance.runtimeFlags.Role()
 }
 
-/* Run serves the application once: a second call panics naming the misuse, before anything is booted or marked serving. */
+/* Run serves the application once: a second call, or one after HttpHandler handed the handler out, panics naming the misuse, before anything is booted or marked serving. */
 func (instance *Application) Run() {
-    if false == instance.runStarted.CompareAndSwap(false, true) {
+    if false == instance.servingClaim.CompareAndSwap(servingClaimNone, servingClaimRun) {
+        if servingClaimHttpHandler == instance.servingClaim.Load() {
+            exception.Panic(exception.NewError("application run called after its http handler was handed out", nil, nil))
+        }
+
         exception.Panic(exception.NewError("application run called twice", nil, nil))
     }
 

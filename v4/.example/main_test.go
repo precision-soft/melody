@@ -2,8 +2,14 @@ package main
 
 import (
     "context"
+    nethttp "net/http"
+    "net/http/httptest"
+    "os"
     "reflect"
     "testing"
+    "time"
+
+    "github.com/precision-soft/melody/v4/.example/config"
 
     "github.com/precision-soft/melody/v4/application"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
@@ -31,10 +37,10 @@ func invokeInstall[T any](door func(T, func(kind string, name string)), recorder
 }
 
 func invokeNewKernel[T any](
-    door func(T, configcontract.Configuration, containercontract.Container, httpcontract.Router, eventcontract.EventDispatcher, clockcontract.Clock, melodyhttp.KernelConfig) kernelcontract.Kernel,
+    door func(T, configcontract.Configuration, containercontract.Container, httpcontract.Router, eventcontract.EventDispatcher, clockcontract.Clock) kernelcontract.Kernel,
 ) {
     var zero T
-    door(zero, nil, nil, nil, nil, nil, melodyhttp.KernelConfig{})
+    door(zero, nil, nil, nil, nil, nil)
 }
 
 func requireFrameworkOnlyRefusal(t *testing.T, expectedMessage string, call func()) {
@@ -128,5 +134,61 @@ func TestFrameworkDoors_RefuseATokenTheFrameworkDidNotBuild(t *testing.T) {
 
     if nil == kernelInstance.BootRuntime() {
         t.Fatal("expected the boot runtime the application installed to stand after the refused install")
+    }
+}
+
+/* the example served under a server of its owner's: the handler the application hands out answers the health route, the owner begins the shutdown before its server's and closes the application after it */
+func TestApplicationHttpHandler_ServesTheHealthRouteUnderAnotherServer(t *testing.T) {
+    /* the test binary's own flags would read as a cli command; without them the process runs the .env's default mode, http */
+    originalArguments := os.Args
+    os.Args = []string{originalArguments[0]}
+    defer func() { os.Args = originalArguments }()
+
+    applicationInstance := application.NewApplication(
+        context.Background(),
+        application.ApplicationConfig{
+            Version:            applicationVersion,
+            EnvironmentFiles:   embeddedEnvironmentFiles,
+            PublicFiles:        embeddedPublicFiles,
+            EnvironmentKeys:    config.EnvironmentKeys(),
+            ParameterOverrides: config.ParameterOverrides(),
+            SecurityHeaders:    config.SecurityHeaders(),
+            HttpKernel:         config.HttpKernelConfig(),
+        },
+    )
+
+    config.Configure(context.Background(), applicationInstance, applicationVersion)
+
+    handler, handlerErr := applicationInstance.HttpHandler()
+    if nil != handlerErr {
+        t.Fatalf("unexpected http handler error: %v", handlerErr)
+    }
+
+    server := httptest.NewServer(handler)
+
+    response, requestErr := nethttp.Get(server.URL + "/health")
+    if nil != requestErr {
+        t.Fatalf("unexpected request error: %v", requestErr)
+    }
+    _ = response.Body.Close()
+
+    if nethttp.StatusOK != response.StatusCode {
+        t.Fatalf("expected the health route served, got %d", response.StatusCode)
+    }
+
+    shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancelShutdown()
+
+    if beginErr := applicationInstance.BeginHttpShutdown(shutdownContext); nil != beginErr {
+        t.Fatalf("unexpected begin error: %v", beginErr)
+    }
+
+    server.Close()
+
+    closeContext, cancelClose := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancelClose()
+
+    if closeErr := applicationInstance.CloseWithContext(closeContext); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
     }
 }

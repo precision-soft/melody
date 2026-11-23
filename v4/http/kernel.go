@@ -87,10 +87,6 @@ type Kernel struct {
     serving atomic.Bool
 }
 
-var _ httpcontract.Kernel = (*Kernel)(nil)
-
-var _ httpkernelseam.MiddlewareInstaller = (*Kernel)(nil)
-
 /* OpenRequestScopes reports how many request scopes are open, hijacked connections included. */
 func (instance *Kernel) OpenRequestScopes() int64 {
     return instance.openRequestScopes.Load()
@@ -1143,6 +1139,4 @@ func (instance *Kernel) buildHandler(
 ) httpcontract.Handler {
     return wrapWithMiddlewaresRecording(handler, middlewares, recordChainResponse)
 }
-
-var _ httpcontract.Kernel = (*Kernel)(nil)
 

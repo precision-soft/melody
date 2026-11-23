@@ -197,8 +197,9 @@ func NewApplication(
         httpRouter,
         eventDispatcher,
         clockInstance,
-        httpKernelConfig,
     )
+
+    httpKernel := http.NewKernel(httpRouter, httpKernelConfig)
 
     httpMiddleware := NewHttpMiddleware(
         newStaticFileServerConfig(embeddedPublicFiles, configuration),
@@ -219,6 +220,7 @@ func NewApplication(
         configuration:        configuration,
         runtimeFlags:         ParseRuntimeFlags(RuntimeFlagsConfig{Mode: configuration.Kernel().DefaultMode(), Role: configuration.Kernel().ProcessRole()}),
         kernel:               kernelInstance,
+        httpKernel:           httpKernel,
         embeddedPublicFiles:  embeddedPublicFiles,
         modules:              make([]applicationcontract.Module, 0),
         cliCommands:          make([]clicontract.Command, 0),

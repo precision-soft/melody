@@ -34,7 +34,7 @@ The application boot is split around configuration resolve:
 This allows HTTP/CLI module code to read resolved configuration values during registration, e.g.
 `kernelInstance.Config().MustGet("my.param").String()`.
 
-`Run` is called once per process. It closes the application when it returns, and a second call panics with `application run called twice` before anything is booted or marked serving, a plain Go panic raised before `Run`'s exit handler, so it carries a stack trace and no exit record. `Boot` and `Close` may be called again and do nothing the second time; `Run` may not, so return from `main` after it.
+`Run` is called once per process. It closes the application when it returns, and a second call panics with `application run called twice` before anything is booted or marked serving, a plain Go panic raised before `Run`'s exit handler, so it carries a stack trace and no exit record. An application serves through `Run` or hands its handler out through `HttpHandler`, never both: one claim decides, so `HttpHandler` after `Run` started answers `the http handler is asked of an application that runs its own server`, and `Run` after the handler was handed out panics with `application run called after its http handler was handed out` (see [Serving under another server](#serving-under-another-server)). `Boot` and `Close` may be called again and do nothing the second time; `Run` may not, so return from `main` after it.
 
 `Boot` opens the boot runtime before its first step and finishes it before it returns: every module hook reads it through `Kernel.BootRuntime()`, the services registered `BuiltAtBoot` are built under it after every registration is in, each failure judged by its `BootFailure` mode, a warn-mode service built at boot by an http process only, and in an http process the session manager's storage timeout is judged and the middleware pipeline built under it, so their refusals fail `Boot`. The finish closes the boot scope and ends the boot context with `ErrBootFinished`; a boot scope that fails to close refuses the boot.
 
@@ -148,6 +148,67 @@ func (instance *observabilityModule) RegisterHttpHandlerDecorators(
 
 var _ applicationcontract.HttpHandlerDecoratorModule = (*observabilityModule)(nil)
 ```
+
+
+## Serving under another server
+
+[`(*Application).HttpHandler()`](../../application/application_http.go) answers the `nethttp.Handler` `Run` would serve, for a server the application does not own: a test's `httptest.Server`, a `net/http` server assembled by hand, a platform adapter. It boots the application when `Boot` has not run, marks the configuration and the openapi registry serving, writes the boot warnings, and answers the kernel's handler wrapped in the [handler decorators](#handler-decorators), built from `ApplicationConfig.HttpKernel` and the middleware pipeline the boot installed. The `.env` refusals `Run` raises before it listens hold here too: a scope teardown outlasting the shutdown wait or a server limit outside its rule is returned as the error. The handler, or that error, is built once and answered on every call. It is refused in cli mode (`the http handler is asked of a process in cli mode`, naming the `mode`) and once `Run` started; a boot failure inside it exits the process, as `Boot` does.
+
+The server's owner drives the stop the way `Run` drives its own: [`(*Application).BeginHttpShutdown(shutdownContext)`](../../application/application_http.go) just before the server's `Shutdown`, which starts the `OnHttpShutdown` hooks once, each handed `shutdownContext`, and returns without waiting, then the server's `Shutdown(shutdownContext)`, then [`CloseWithContext`](../../application/application_close.go). The close of an application that handed its handler out first starts the hooks under the close's context unless `BeginHttpShutdown` did, waits for them and for the open request scopes, a hijacked connection's included, under the same deadline, and then tears the container down; a scope still open at the deadline is `http shutdown left request scopes open`, joined with a failure of the teardown. A nil context is refused (`the shutdown context is nil`, `door` `Application.BeginHttpShutdown`); an application that runs its own server, or handed nothing out, starts nothing.
+
+```go
+package main
+
+import (
+    "context"
+    nethttp "net/http"
+    "net/http/httptest"
+    "os"
+    "testing"
+    "time"
+
+    "github.com/precision-soft/melody/v4/application"
+)
+
+/* newApplication is the composition root main builds and configures its application through */
+func newApplication() *application.Application {
+    return application.NewApplication(context.Background(), application.ApplicationConfig{EnvironmentFiles: embeddedEnvironmentFiles})
+}
+
+func TestHealth(t *testing.T) {
+    /* the test binary's own flags would read as a cli command, which HttpHandler refuses */
+    originalArguments := os.Args
+    os.Args = originalArguments[:1]
+    defer func() { os.Args = originalArguments }()
+
+    app := newApplication()
+
+    handler, handlerErr := app.HttpHandler()
+    if nil != handlerErr {
+        t.Fatal(handlerErr)
+    }
+
+    server := httptest.NewServer(handler)
+
+    response, requestErr := nethttp.Get(server.URL + "/health")
+    if nil != requestErr {
+        t.Fatal(requestErr)
+    }
+    _ = response.Body.Close()
+
+    shutdownContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+
+    _ = app.BeginHttpShutdown(shutdownContext)
+    server.Close()
+
+    if closeErr := app.CloseWithContext(shutdownContext); nil != closeErr {
+        t.Fatal(closeErr)
+    }
+}
+```
+
+The hook needs the shutdown's context, which does not exist when a server is assembled, so `BeginHttpShutdown` is called by the code that calls `Shutdown`, not registered through `Server.RegisterOnShutdown`.
 
 ## Usage
 
@@ -355,6 +416,8 @@ func run(ctx context.Context, embeddedEnvironmentFiles fs.FS, embeddedPublicFile
 
 - [`(*Application).Boot()`](../../application/application.go)
 - [`(*Application).Run()`](../../application/application.go)
+- [`(*Application).HttpHandler() (nethttp.Handler, error)`](../../application/application_http.go) — the handler `Run` serves, for a server of the caller's; see [Serving under another server](#serving-under-another-server)
+- [`(*Application).BeginHttpShutdown(shutdownContext context.Context) error`](../../application/application_http.go) — starts the shutdown hooks of a handed-out handler, once, without waiting
 - [`(*Application).Close()`](../../application/application_close.go)
 - [`(*Application).CloseWithContext(closeContext context.Context) error`](../../application/application_close.go)
 - [`(*Application).ProcessRole()`](../../application/application.go) — the role this process resolved to, the same string `ServiceProcessRole` answers
@@ -422,7 +485,7 @@ The container's teardown order is a switch beside them, decided the same way: `C
 | `HttpKernel.SessionPolicy.EmptyOnOutage`    | `MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE` | `true`, `false`                   |
 | `HttpKernel.SessionCookiePolicy.Secure`     | `MELODY_HTTP_SESSION_COOKIE_SECURE`   | `from-scheme`, `always`           |
 
-`SessionCookieSecureNever` has no key spelling: it strips `Secure`, so only the application's Go can write it. `HttpKernel.Middlewares` is refused at `NewApplication`, naming the field and the count: the application's middlewares go through `RegisterHttpMiddlewares` or a module's registrar, which order them by priority, and the pipeline is installed on the kernel at Boot through a framework-only door. A `SameSite=None` cookie policy with `Secure` never and an unparsable trusted-proxy entry are refused at `NewApplication` too. A module cannot set a kernel policy: the composition root owns the kernel.
+`SessionCookieSecureNever` has no key spelling: it strips `Secure`, so only the application's Go can write it. `HttpKernel.Middlewares` is refused at `NewApplication`, naming the field and the count: the application's middlewares go through `RegisterHttpMiddlewares` or a module's registrar, which order them by priority, and the pipeline is installed on the kernel at Boot through a framework-only door. A `SameSite=None` cookie policy with `Secure` never and an unparsable trusted-proxy entry are refused at `NewApplication` too. A module cannot set a kernel policy: the composition root owns the kernel. The application keeps the kernel it built; `kernelcontract.Kernel` hands no http kernel out, and [`HttpHandler`](#serving-under-another-server) is the one door to the handler it serves.
 
 ### Middleware helpers
 

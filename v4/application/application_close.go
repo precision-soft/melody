@@ -2,6 +2,7 @@ package application
 
 import (
     "context"
+    "errors"
 
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -13,7 +14,7 @@ func (instance *Application) Close() {
     _ = instance.close(context.Background())
 }
 
-/* CloseWithContext is Close under the caller's deadline, handed to the teardown, and returns the teardown failure when this call discovered it. */
+/* CloseWithContext is Close under the caller's deadline, handed to the teardown, and returns the teardown failure when this call discovered it. An application that handed its http handler out is wound down first under the same deadline: its shutdown hooks are started unless BeginHttpShutdown started them, then awaited with its open request scopes. */
 func (instance *Application) CloseWithContext(closeContext context.Context) error {
     /* refused before the once the close claims, so a refused call leaves the teardown to a later one */
     if true == internal.IsNilInterface(closeContext) {
@@ -54,7 +55,24 @@ func (instance *Application) close(closeContext context.Context) error {
     return performErr
 }
 
+/* performClose winds a handed-out http handler down before the container, whose services its requests and hooks still use, and joins the wind-down's failure with the teardown's */
 func (instance *Application) performClose(closeContext context.Context) error {
+    windDownErr := instance.windDownHandedOutHttpHandler(closeContext)
+
+    teardownErr := instance.performTeardown(closeContext)
+
+    if nil == windDownErr {
+        return teardownErr
+    }
+
+    if nil == teardownErr {
+        return windDownErr
+    }
+
+    return errors.Join(windDownErr, teardownErr)
+}
+
+func (instance *Application) performTeardown(closeContext context.Context) error {
     emergencyLogger := logging.EmergencyLogger()
 
     serviceContainer := instance.kernel.ServiceContainer()
