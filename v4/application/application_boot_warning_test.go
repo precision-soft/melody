@@ -309,7 +309,7 @@ func TestBoot_JudgesTheCliCodesAfterTheModulesDeclaredTheirs(t *testing.T) {
     if probe := os.Getenv(bootCliCodeProbeMarker); "" != probe {
         values := map[string]string{
             config.EnvironmentNameKey:        config.EnvironmentDevelopment,
-            config.HttpAddressKey:            "127.0.0.1:34524",
+            config.HttpAddressKey:            freeLoopbackAddress(t),
             config.CliBootWarningsIgnoredKey: map[string]string{"moduleCode": "test.module.hazard", "unknownCode": "test.nobody.writes"}[probe],
         }
 
@@ -434,7 +434,7 @@ const bootWarningsBeforeExitProbeMarker = "MELODY_TEST_BOOT_WARNINGS_BEFORE_EXIT
 func TestBoot_ARefusedBootWritesTheCollectedBootWarningsBeforeItsExitRecord(t *testing.T) {
     if probe := os.Getenv(bootWarningsBeforeExitProbeMarker); "" != probe {
         projectDirectory, disabled, _ := strings.Cut(probe, "|")
-        values := map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment, config.HttpAddressKey: "127.0.0.1:34525"}
+        values := map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment, config.HttpAddressKey: freeLoopbackAddress(t)}
         if "disabled" == disabled {
             values[config.CliBootWarningsDisabledKey] = "true"
         }
@@ -530,7 +530,7 @@ func TestRun_AnHttpRunRefusedBeforeItsWriterWritesTheBootWarningsBeforeItsExitRe
     if projectDirectory := os.Getenv(runRefusalBootWarningsProbeMarker); "" != projectDirectory {
         environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: map[string]string{
             config.EnvironmentNameKey:      config.EnvironmentDevelopment,
-            config.HttpAddressKey:          "127.0.0.1:34526",
+            config.HttpAddressKey:          freeLoopbackAddress(t),
             config.ScopeTeardownTimeoutKey: "1h",
         }})
         if nil != environmentErr {

@@ -401,3 +401,12 @@ func TestRequestIsCrossSite_ReadsTheBrowsersStatement(t *testing.T) {
         }
     }
 }
+
+func TestRefuseForgedRequest_FieldRead_OnEveryMethodTheCheckGuards(t *testing.T) {
+    fixture := newCsrfFixture(t, nil)
+    sessionId, token := fixture.storedSession(t, csrfSignedIn)
+
+    for _, method := range []string{nethttp.MethodPost, nethttp.MethodPut, nethttp.MethodPatch, nethttp.MethodDelete, "PURGE"} {
+        expectCsrfStatus(t, fixture.serve(t, csrfProbe{method: method, sessionId: sessionId, body: http.DefaultCsrfFieldName + "=" + token, contentType: "application/x-www-form-urlencoded"}), nethttp.StatusOK, method+" field")
+    }
+}

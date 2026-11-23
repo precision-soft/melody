@@ -3,6 +3,7 @@ package http
 import (
     "errors"
     "io"
+    "math"
     nethttp "net/http"
     "net/http/httptest"
     "strconv"
@@ -856,5 +857,49 @@ func TestNewRequest_MaxBodyBytesBelowOne_Panics(t *testing.T) {
 func TestHttpTestRequestMaxBodyBytes_IsTheConfigurationDefault(t *testing.T) {
     if config.DefaultHttpMaxRequestBodyBytes != testhelper.HttpTestRequestMaxBodyBytes {
         t.Fatalf("expected the test request's cap to be the configuration default")
+    }
+}
+
+func TestRequest_Post_ACapAtTheTopOfTheIntRange_ReadsTheForm(t *testing.T) {
+    for _, maxBodyBytes := range []int{math.MaxInt, math.MaxInt - 1} {
+        request := NewRequest(newUrlEncodedRequest(io.NopCloser(strings.NewReader("name=alice"))), nil, RequestConfig{MaxBodyBytes: bound.Of(maxBodyBytes)})
+
+        postBag, postErr := request.Post()
+        if nil != postErr {
+            t.Fatalf("cap %d: unexpected form error: %v", maxBodyBytes, postErr)
+        }
+
+        if value, exists := postBag.Get("name"); false == exists || "alice" != value {
+            t.Fatalf("cap %d: expected the form read, got %v %v", maxBodyBytes, value, exists)
+        }
+    }
+}
+
+func TestRequest_Post_ReadsTheFormOfEveryUnsafeMethod_AndNoSafeOne(t *testing.T) {
+    for _, testCase := range []struct {
+        method string
+        read   bool
+    }{
+        {nethttp.MethodPost, true},
+        {nethttp.MethodPut, true},
+        {nethttp.MethodPatch, true},
+        {nethttp.MethodDelete, true},
+        {"PURGE", true},
+        {nethttp.MethodGet, false},
+        {nethttp.MethodHead, false},
+        {nethttp.MethodOptions, false},
+        {nethttp.MethodTrace, false},
+    } {
+        httpRequest := newUrlEncodedRequest(io.NopCloser(strings.NewReader("name=alice")))
+        httpRequest.Method = testCase.method
+
+        postBag, postErr := NewRequest(httpRequest, nil, formTestRequestConfig()).Post()
+        if nil != postErr {
+            t.Fatalf("%s: unexpected form error: %v", testCase.method, postErr)
+        }
+
+        if testCase.read != postBag.Has("name") {
+            t.Fatalf("%s: expected the form read %v, got %v", testCase.method, testCase.read, postBag.Has("name"))
+        }
     }
 }

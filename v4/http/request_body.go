@@ -47,13 +47,7 @@ func bindJsonBody(instance httpcontract.Request, target any) error {
 
     maxBytes := instance.MaxBodyBytes()
 
-    /* one byte past the limit tells an at-limit body from an oversized one; the allowance saturates at the top of the int64 range */
-    overLimitAllowance := int64(maxBytes)
-    if overLimitAllowance < math.MaxInt64 {
-        overLimitAllowance++
-    }
-
-    limitedReader := io.LimitReader(instance.HttpRequest().Body, overLimitAllowance)
+    limitedReader := io.LimitReader(instance.HttpRequest().Body, overCapAllowance(maxBytes))
     bodyBytes, err := io.ReadAll(limitedReader)
     if nil != err {
         var maxBytesError *nethttp.MaxBytesError
@@ -134,4 +128,14 @@ func boundTargetIsNil(target any) bool {
     }
 
     return boundBodyIsNil(targetValue.Elem().Interface())
+}
+
+/* overCapAllowance answers the bytes a body read under the cap is allowed: one byte past the cap tells an at-cap body from an oversized one, saturating at the top of the int64 range */
+func overCapAllowance(maxBodyBytes int) int64 {
+    allowance := int64(maxBodyBytes)
+    if allowance < math.MaxInt64 {
+        allowance++
+    }
+
+    return allowance
 }

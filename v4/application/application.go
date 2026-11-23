@@ -10,6 +10,7 @@ import (
     "strings"
     "sync"
     "sync/atomic"
+    "time"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/bound"
@@ -72,6 +73,7 @@ type Application struct {
     httpHandler               nethttp.Handler
     httpHandlerErr            error
     httpHandlerLogger         loggingcontract.Logger
+    httpHandlerShutdownTimeout time.Duration
     /* starts the shutdown hooks of a handed-out handler once, from BeginHttpShutdown or from the close */
     httpShutdownHooksOnce     sync.Once
     httpShutdownHookSet       httpShutdownHookSet

@@ -95,13 +95,21 @@ func (instance *Application) RegisterHttpHandlerDecorator(decorator applicationc
     instance.httpHandlerDecorators = append(instance.httpHandlerDecorators, decorator)
 }
 
-/* decorateHttpHandler wraps the handler the http kernel built in the registered decorators, last to first, so the first registered decorator ends up outermost */
-func (instance *Application) decorateHttpHandler(httpHandler nethttp.Handler) nethttp.Handler {
+/* decorateHttpHandler wraps the handler the http kernel built in the registered decorators, last to first, so the first registered decorator ends up outermost; a decorator answering nil, typed nil included, is refused before the next one wraps it, since a nil handler serves net/http's default mux */
+func (instance *Application) decorateHttpHandler(httpHandler nethttp.Handler) (nethttp.Handler, error) {
     for index := len(instance.httpHandlerDecorators) - 1; 0 <= index; index-- {
         httpHandler = instance.httpHandlerDecorators[index](httpHandler)
+
+        if true == internal.IsNilInterface(httpHandler) {
+            return nil, exception.NewError(
+                "http handler decorator answered nil",
+                exceptioncontract.Context{"index": index},
+                nil,
+            )
+        }
     }
 
-    return httpHandler
+    return httpHandler, nil
 }
 
 /* OnHttpShutdown registers a callback that runs as soon as the http server begins shutting down, before it waits for connections to drain, handed the shutdown's context, which carries the shutdown deadline and is done when its budget ends. It is how an application unwinds handlers the server cannot: `http.Server.Shutdown` neither cancels the contexts of in-flight requests nor tracks hijacked connections, so a Server-Sent Events stream or a websocket blocks the whole shutdown timeout and is then cut mid-flight. Closing the hub those handlers select on releases them at once. */
@@ -193,10 +201,10 @@ func (instance *Application) HttpHandler() (nethttp.Handler, error) {
     markConfigurationServing(instance.configuration)
     markOpenApiRegistryServing(instance.ctx, instance.kernel.ServiceContainer())
 
-    instance.httpHandlerBuilt = true
-
+    /* only a finished build is memoized: a panic inside a decorator leaves the next call to build again, never a nil handler answered without an error */
     built, builtErr := instance.buildHttpHandler()
     if nil != builtErr {
+        instance.httpHandlerBuilt = true
         instance.httpHandlerErr = builtErr
 
         return nil, builtErr
@@ -204,6 +212,7 @@ func (instance *Application) HttpHandler() (nethttp.Handler, error) {
 
     logger, loggerErr := logging.LoggerFromResolver(instance.ctx, instance.kernel.ServiceContainer())
     if nil != loggerErr {
+        instance.httpHandlerBuilt = true
         instance.httpHandlerErr = loggerErr
 
         return nil, loggerErr
@@ -211,7 +220,9 @@ func (instance *Application) HttpHandler() (nethttp.Handler, error) {
 
     instance.writeBootWarnings(logger)
 
+    instance.httpHandlerBuilt = true
     instance.httpHandlerLogger = logger
+    instance.httpHandlerShutdownTimeout = built.shutdownTimeout
     instance.httpHandler = built.handler
 
     return instance.httpHandler, nil
@@ -223,22 +234,31 @@ func (instance *Application) BeginHttpShutdown(shutdownContext context.Context) 
         return exception.NewError("the shutdown context is nil", exceptioncontract.Context{"door": "Application.BeginHttpShutdown"}, nil)
     }
 
-    logger, handedOut := instance.handedOutHttpHandler()
-    if false == handedOut {
+    handedOut := instance.handedOutHttpHandler()
+    if nil == handedOut {
         return nil
     }
 
-    instance.startHttpShutdownHooks(shutdownContext, logger)
+    instance.startHttpShutdownHooks(shutdownContext, handedOut.logger)
 
     return nil
 }
 
-/* handedOutHttpHandler answers whether HttpHandler handed a handler out, and the logger it was built with */
-func (instance *Application) handedOutHttpHandler() (loggingcontract.Logger, bool) {
+type handedOutHttpHandler struct {
+    logger          loggingcontract.Logger
+    shutdownTimeout time.Duration
+}
+
+/* handedOutHttpHandler answers the logger and the shutdown timeout a handed-out handler was built with, nil when HttpHandler handed none out */
+func (instance *Application) handedOutHttpHandler() *handedOutHttpHandler {
     instance.httpHandlerMutex.Lock()
     defer instance.httpHandlerMutex.Unlock()
 
-    return instance.httpHandlerLogger, nil != instance.httpHandler
+    if nil == instance.httpHandler {
+        return nil
+    }
+
+    return &handedOutHttpHandler{logger: instance.httpHandlerLogger, shutdownTimeout: instance.httpHandlerShutdownTimeout}
 }
 
 /* startHttpShutdownHooks starts each shutdown hook on its own goroutine, as a server's Shutdown does; only the first call starts them */
@@ -252,18 +272,21 @@ func (instance *Application) startHttpShutdownHooks(shutdownContext context.Cont
     })
 }
 
-/* windDownHandedOutHttpHandler holds the close of a handed-out handler, under the close's deadline, until its shutdown hooks returned and its request scopes closed, the wait Run makes after its own server's Shutdown; the hooks are started under the close context unless BeginHttpShutdown started them. */
+/* windDownHandedOutHttpHandler holds the close of a handed-out handler until its shutdown hooks returned and its request scopes closed, the wait Run makes after its own server's Shutdown, bounded by the http shutdown timeout as Run bounds its own, the close's deadline winning when it is earlier; the hooks are started under that bound unless BeginHttpShutdown started them. */
 func (instance *Application) windDownHandedOutHttpHandler(closeContext context.Context) error {
-    logger, handedOut := instance.handedOutHttpHandler()
-    if false == handedOut {
+    handedOut := instance.handedOutHttpHandler()
+    if nil == handedOut {
         return nil
     }
 
-    instance.startHttpShutdownHooks(closeContext, logger)
+    windDownContext, cancelWindDown := context.WithTimeout(closeContext, handedOut.shutdownTimeout)
+    defer cancelWindDown()
 
-    waitForHttpShutdownHooks(&instance.httpShutdownHookSet.done, closeContext)
+    instance.startHttpShutdownHooks(windDownContext, handedOut.logger)
 
-    return awaitOpenRequestScopes(closeContext, instance.httpKernel, logger)
+    waitForHttpShutdownHooks(&instance.httpShutdownHookSet.done, windDownContext)
+
+    return awaitOpenRequestScopes(windDownContext, instance.httpKernel, handedOut.logger)
 }
 
 type builtHttpHandler struct {
@@ -290,8 +313,13 @@ func (instance *Application) buildHttpHandler() (builtHttpHandler, error) {
         return builtHttpHandler{}, httpShutdownTimeoutErr
     }
 
+    handler, handlerErr := instance.decorateHttpHandler(instance.servedHttpKernel().ServeHttp(instance.kernel.ServiceContainer()))
+    if nil != handlerErr {
+        return builtHttpHandler{}, handlerErr
+    }
+
     return builtHttpHandler{
-        handler:         instance.decorateHttpHandler(instance.servedHttpKernel().ServeHttp(instance.kernel.ServiceContainer())),
+        handler:         handler,
         serverLimits:    serverLimits,
         shutdownTimeout: httpShutdownTimeout.Value,
     }, nil

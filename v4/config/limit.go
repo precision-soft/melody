@@ -134,7 +134,7 @@ func checkedParameterSwitch(parameter configcontract.Parameter, environmentKey s
     return configcontract.Switch{Value: switchValue, IsSet: isSet}, nil
 }
 
-/* checkedSessionCookieSecure admits the two spellings that never weaken the cookie; never stays a Go value, since a key would let a deployment strip Secure */
+/* checkedSessionCookieSecure admits always alone: the key wins over the Go field, so from-scheme or never would let a deployment lower an always the composition root chose; only the Go field lowers the policy */
 func checkedSessionCookieSecure(parameter configcontract.Parameter) (string, error) {
     value := parameter.Value()
     text, isString := value.(string)
@@ -142,12 +142,12 @@ func checkedSessionCookieSecure(parameter configcontract.Parameter) (string, err
         return "", nil
     }
 
-    if true == isString && (HttpSessionCookieSecureFromScheme == text || HttpSessionCookieSecureAlways == text) {
+    if true == isString && HttpSessionCookieSecureAlways == text {
         return text, nil
     }
 
     refusalContext := limitRefusalContext(parameter, HttpSessionCookieSecureKey)
-    refusalContext["admitted"] = []string{HttpSessionCookieSecureFromScheme, HttpSessionCookieSecureAlways}
+    refusalContext["admitted"] = []string{HttpSessionCookieSecureAlways}
     if false == parameter.IsSecret() {
         refusalContext["value"] = value
     }

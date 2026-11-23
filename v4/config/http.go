@@ -243,7 +243,7 @@ func (instance *httpConfiguration) SessionEmptyOnOutage() configcontract.Switch 
     return instance.serverLimits.sessionEmptyOnOutage
 }
 
-/* SessionCookieSecure is MELODY_HTTP_SESSION_COOKIE_SECURE as the deployment set it, from-scheme or always, empty when the key says nothing. */
+/* SessionCookieSecure is MELODY_HTTP_SESSION_COOKIE_SECURE as the deployment set it, always or empty when the key says nothing. */
 func (instance *httpConfiguration) SessionCookieSecure() string {
     return instance.serverLimits.sessionCookieSecure
 }

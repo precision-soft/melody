@@ -185,3 +185,34 @@ func TestRouter_AllowedMethodsAndTheMatcherAgreeOnTheSameLocalePath(t *testing.T
         }
     }
 }
+
+func TestRouterMatch_AnEditOfTheMatchedProtection_NeverReachesTheNextMatch(t *testing.T) {
+    router := NewRouter()
+    router.Handle("/page", csrfProtectionTestHandler, RouteOptions{
+        Methods:    []string{nethttp.MethodGet},
+        Protection: RouteProtectionConfig{SecurityHeadersDisabled: []string{HeaderFrameOptions}},
+    })
+    router.DeclareRouteDefinition("/form", RouteOptions{
+        Methods:    []string{nethttp.MethodPost},
+        Protection: RouteProtectionConfig{SecurityHeadersDisabled: []string{HeaderFrameOptions}},
+    })
+
+    first, firstOk := router.Match(nethttp.MethodGet, "/page", "example.test", "https")
+    if false == firstOk {
+        t.Fatalf("expected the route matched")
+    }
+    first.RouteAttributes[RouteAttributeProtection].(RouteProtectionConfig).SecurityHeadersDisabled[0] = HeaderStrictTransportSecurity
+
+    second, _ := router.Match(nethttp.MethodGet, "/page", "example.test", "https")
+    if disabled := second.RouteAttributes[RouteAttributeProtection].(RouteProtectionConfig).SecurityHeadersDisabled; HeaderFrameOptions != disabled[0] {
+        t.Fatalf("expected a fresh match untouched by an edit of an earlier match's protection, got %v", disabled)
+    }
+
+    definitionOnly, _ := router.Match(nethttp.MethodPost, "/form", "example.test", "https")
+    definitionOnly.RouteAttributes[RouteAttributeProtection].(RouteProtectionConfig).SecurityHeadersDisabled[0] = HeaderStrictTransportSecurity
+
+    again, _ := router.Match(nethttp.MethodPost, "/form", "example.test", "https")
+    if disabled := again.RouteAttributes[RouteAttributeProtection].(RouteProtectionConfig).SecurityHeadersDisabled; HeaderFrameOptions != disabled[0] {
+        t.Fatalf("expected the definition-only match's protection copied too, got %v", disabled)
+    }
+}

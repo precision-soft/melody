@@ -130,7 +130,7 @@ func TestResolveSessionCookieSecure_TheKeyWinsOverTheField(t *testing.T) {
     }{
         "the field never without the key": {key: "", field: httpcontract.SessionCookieSecureNever, expected: httpcontract.SessionCookieSecureNever},
         "the key always over never":       {key: config.HttpSessionCookieSecureAlways, field: httpcontract.SessionCookieSecureNever, expected: httpcontract.SessionCookieSecureAlways},
-        "the key from scheme over always": {key: config.HttpSessionCookieSecureFromScheme, field: httpcontract.SessionCookieSecureAlways, expected: httpcontract.SessionCookieSecureFromScheme},
+        "the key always over from scheme": {key: config.HttpSessionCookieSecureAlways, field: httpcontract.SessionCookieSecureFromScheme, expected: httpcontract.SessionCookieSecureAlways},
     } {
         values := map[string]string{}
         if "" != testCase.key {

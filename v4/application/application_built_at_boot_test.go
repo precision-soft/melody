@@ -154,7 +154,7 @@ func TestBoot_AnHttpBootBuildsThePipelineOnceAndACliBootBuildsNone(t *testing.T)
         {config.ModeHttp, 1},
         {config.ModeCli, 0},
     } {
-        applicationInstance := newEnvironmentKeyBootApplication(t, map[string]string{config.HttpAddressKey: "127.0.0.1:34526"})
+        applicationInstance := newEnvironmentKeyBootApplication(t, map[string]string{config.HttpAddressKey: freeLoopbackAddress(t)})
         applicationInstance.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: testCase.mode})
         applicationInstance.httpMiddlewares = NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), applicationInstance.configuration))
 

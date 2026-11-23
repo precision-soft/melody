@@ -414,7 +414,7 @@ func (instance *warnedServiceFactoryModule) RegisterHttpMiddlewares(kernelInstan
 
 func TestBoot_AMiddlewareFactoryOverAWarnedServiceFailsTheBootAfterTheWarningIsWritten(t *testing.T) {
     if projectDirectory := os.Getenv(builtAtBootFactoryProbeMarker); "" != projectDirectory {
-        applicationInstance := newEnvironmentKeyBootApplicationIn(t, map[string]string{config.HttpAddressKey: "127.0.0.1:34527"}, projectDirectory)
+        applicationInstance := newEnvironmentKeyBootApplicationIn(t, map[string]string{config.HttpAddressKey: freeLoopbackAddress(t)}, projectDirectory)
         applicationInstance.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
         applicationInstance.httpMiddlewares = NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), applicationInstance.configuration))
         applicationInstance.RegisterService("app.built.factory", func(resolver containercontract.Resolver) (*warnedBootProbe, error) {

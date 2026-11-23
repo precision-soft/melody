@@ -46,7 +46,7 @@ type CsrfConfig struct {
     /* HeaderName is the header the token is read from first; an http token. */
     HeaderName string
 
-    /* FieldName is the urlencoded form field the token is read from when the header is absent; never a multipart field, the query or a json body. */
+    /* FieldName is the urlencoded form field the token is read from when the header is absent, on every method the check guards; never a multipart field, the query or a json body. */
     FieldName string
 
     /* TrustedOrigins are other origins read as the request's own, each scheme://host[:port], the scheme and the port exact, the host in any case. */

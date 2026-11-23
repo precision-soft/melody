@@ -75,6 +75,18 @@ func RouteProtection(request httpcontract.Request) httpcontract.RouteProtectionC
     return protection
 }
 
+/* copyRouteAttributes copies a route's attributes for a reader, maps and slices deep and the protection's header list too, a slice inside a struct the deep copy does not descend into, so no reader's edit reaches the live route */
+func copyRouteAttributes(attributes map[string]any) map[string]any {
+    copied := internal.CopyAnyMap(attributes)
+
+    if protection, isProtection := copied[RouteAttributeProtection].(httpcontract.RouteProtectionConfig); true == isProtection {
+        protection.SecurityHeadersDisabled = slices.Clone(protection.SecurityHeadersDisabled)
+        copied[RouteAttributeProtection] = protection
+    }
+
+    return copied
+}
+
 func routeProtectionTurnsNothingOff(protection httpcontract.RouteProtectionConfig) bool {
     return false == protection.CsrfDisabled && 0 == len(protection.SecurityHeadersDisabled) && true == protection.MaxBodyBytes.IsAbsent()
 }

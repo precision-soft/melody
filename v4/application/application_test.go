@@ -1047,7 +1047,7 @@ func bootHttpRefusalChildValues() map[string]map[string]string {
 
 func TestBoot_RefusesAnHttpBootOverAnUnboundedSessionPairOrACliBootWarningKey(t *testing.T) {
     if probe := os.Getenv(bootHttpRefusalProbeMarker); "" != probe {
-        values := map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment, config.HttpAddressKey: "127.0.0.1:34523"}
+        values := map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment, config.HttpAddressKey: freeLoopbackAddress(t)}
         for key, value := range bootHttpRefusalChildValues()[probe] {
             values[key] = value
         }

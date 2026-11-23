@@ -714,6 +714,11 @@ func (instance *HttpClient) SetHeader(key string, value string) {
 
 /* CloseWithContext releases the idle connections of the client's own transport, whatever decorators wrap it, which dropping the last reference does not; it does not wait, so the deadline has nothing to bound. It does not abort requests in flight, and the client stays usable afterwards. */
 func (instance *HttpClient) CloseWithContext(closeContext context.Context) error {
+    /* a client not built by NewHttpClient owns no transport to release */
+    if nil == instance.transport {
+        return nil
+    }
+
     instance.transport.CloseIdleConnections()
 
     return nil

@@ -445,7 +445,7 @@ func TestNewApplication_HttpKernelSessionCookieSecure_KeyWinsOverTheField(t *tes
         expected         bool
     }{
         "the key always over the field from scheme": {environmentLines: config.HttpSessionCookieSecureKey + "=always\n", field: httpcontract.SessionCookieSecureFromScheme, expected: true},
-        "the key from scheme over the field always": {environmentLines: config.HttpSessionCookieSecureKey + "=from-scheme\n", field: httpcontract.SessionCookieSecureAlways, expected: false},
+        "the key always over the field never":       {environmentLines: config.HttpSessionCookieSecureKey + "=always\n", field: httpcontract.SessionCookieSecureNever, expected: true},
         "the field always without the key":          {environmentLines: "", field: httpcontract.SessionCookieSecureAlways, expected: true},
         "neither":                                   {environmentLines: "", field: httpcontract.SessionCookieSecureFromScheme, expected: false},
     } {
@@ -473,21 +473,24 @@ func TestNewApplication_HttpKernelSessionCookieSecure_KeyWinsOverTheField(t *tes
     }
 }
 
+/* the key only hardens: from-scheme would lower a Go always, so only the Go field lowers the policy */
 func TestNewApplication_HttpSessionCookieSecureKey_RefusedNamingTheKey(t *testing.T) {
-    if "" != os.Getenv(newApplicationRefusalProbeMarker) {
-        bootServingTestApplicationWithEnvironment(t, config.EnvironmentProduction, config.HttpSessionCookieSecureKey+"=never\n", ApplicationConfig{}, nil)
+    if value := os.Getenv(newApplicationRefusalProbeMarker); "" != value {
+        bootServingTestApplicationWithEnvironment(t, config.EnvironmentProduction, config.HttpSessionCookieSecureKey+"="+value+"\n", ApplicationConfig{HttpKernel: http.KernelConfig{SessionCookiePolicy: httpcontract.SessionCookiePolicy{Secure: httpcontract.SessionCookieSecureAlways}}}, nil)
 
         os.Exit(93)
     }
 
-    child := exec.Command(os.Args[0], "-test.run=^TestNewApplication_HttpSessionCookieSecureKey_RefusedNamingTheKey$")
-    child.Env = append(os.Environ(), newApplicationRefusalProbeMarker+"=1")
+    for _, value := range []string{"never", "from-scheme"} {
+        child := exec.Command(os.Args[0], "-test.run=^TestNewApplication_HttpSessionCookieSecureKey_RefusedNamingTheKey$")
+        child.Env = append(os.Environ(), newApplicationRefusalProbeMarker+"="+value)
 
-    output, runErr := child.CombinedOutput()
+        output, runErr := child.CombinedOutput()
 
-    exitError, isExitError := runErr.(*exec.ExitError)
-    if false == isExitError || 1 != exitError.ExitCode() || false == strings.Contains(string(output), config.HttpSessionCookieSecureKey) {
-        t.Fatalf("expected the application refused naming the key, got err %v with output: %s", runErr, string(output))
+        exitError, isExitError := runErr.(*exec.ExitError)
+        if false == isExitError || 1 != exitError.ExitCode() || false == strings.Contains(string(output), config.HttpSessionCookieSecureKey) {
+            t.Fatalf("%s: expected the application refused naming the key, got err %v with output: %s", value, runErr, string(output))
+        }
     }
 }
 

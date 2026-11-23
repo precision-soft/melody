@@ -803,8 +803,8 @@ func (instance *Router) match(method string, path string, host string, scheme st
         return nil, nil, map[string]any{}
     }
 
-    /* the attributes are deep-copied, since the registry's map lives for the process; a pointer or struct inside stays shared */
-    return bestHandler, bestParameters, internal.CopyAnyMap(bestAttributes)
+    /* the attributes are deep-copied, since the registry's map lives for the process; a pointer or a struct of the application's own inside stays shared */
+    return bestHandler, bestParameters, copyRouteAttributes(bestAttributes)
 }
 
 func (instance *Router) findRouteCandidates(pathSegments []string) []int {

@@ -224,13 +224,14 @@ func serveLoginDoor(
 ) {
     request := requestEvent.Request()
 
-    if nil != firewall.loginRateLimit && true == firewall.loginRateLimit.Apply(runtimeInstance, requestEvent) {
-        return
-    }
-
+    /* judged before the limiter, so a forged sign-in spends none of the client's budget */
     if forgeryErr := refuseForgedDoorRequest(runtimeInstance, requestEvent, firewall, firewall.loginDoor); nil != forgeryErr {
         requestEvent.Refuse(forgeryErr)
 
+        return
+    }
+
+    if nil != firewall.loginRateLimit && true == firewall.loginRateLimit.Apply(runtimeInstance, requestEvent) {
         return
     }
 

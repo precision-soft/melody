@@ -151,12 +151,7 @@ func (instance *RouteDefinition) Attributes() map[string]any {
         return nil
     }
 
-    copied := make(map[string]any, len(instance.attributes))
-    for key, value := range instance.attributes {
-        copied[key] = value
-    }
-
-    return copied
+    return copyRouteAttributes(instance.attributes)
 }
 
 func (instance *RouteDefinition) RequestType() reflect.Type { return instance.requestType }

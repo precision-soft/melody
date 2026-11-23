@@ -659,10 +659,8 @@ func TestConfigurationHttp_SessionCookieSecure_AnswersTheKeyAsSet(t *testing.T) 
         t.Fatalf("expected no value when the key is unset")
     }
 
-    for _, value := range []string{HttpSessionCookieSecureFromScheme, HttpSessionCookieSecureAlways} {
-        if value != mustConfigurationFromValues(t, map[string]string{HttpSessionCookieSecureKey: value}).Http().SessionCookieSecure() {
-            t.Fatalf("expected %q answered as set", value)
-        }
+    if HttpSessionCookieSecureAlways != mustConfigurationFromValues(t, map[string]string{HttpSessionCookieSecureKey: HttpSessionCookieSecureAlways}).Http().SessionCookieSecure() {
+        t.Fatalf("expected %q answered as set", HttpSessionCookieSecureAlways)
     }
 
     if "" != mustConfigurationFromValues(t, map[string]string{HttpSessionCookieSecureKey: "  "}).Http().SessionCookieSecure() {
@@ -670,9 +668,9 @@ func TestConfigurationHttp_SessionCookieSecure_AnswersTheKeyAsSet(t *testing.T) 
     }
 }
 
-/* never weakens the cookie, so it has no key spelling */
+/* the key only hardens the cookie: from-scheme and never would lower a Go always, so neither has a key spelling */
 func TestConfigurationHttp_SessionCookieSecure_RefusesAnyOtherValueNamingTheKey(t *testing.T) {
-    for _, value := range []string{"never", "Always", " always", "true", "from_scheme"} {
+    for _, value := range []string{"never", "from-scheme", "Always", " always", "true", "from_scheme"} {
         _, err := newConfigurationFromValues(map[string]string{HttpSessionCookieSecureKey: value})
         assertLimitRefusal(t, err, HttpSessionCookieSecureKey, "")
     }

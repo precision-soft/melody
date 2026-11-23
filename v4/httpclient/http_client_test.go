@@ -2906,3 +2906,14 @@ func TestHttpClient_PerRequestTimeout_KeepsTheDecorators(t *testing.T) {
         t.Fatalf("expected the per-request client to keep the decorators, got %d requests", len(recorder.requests))
     }
 }
+
+func TestHttpClientCloseWithContext_OfAClientWithoutItsOwnTransport_AnswersNil(t *testing.T) {
+    for name, client := range map[string]*HttpClient{
+        "zero":              {},
+        "a net/http client": {client: &http.Client{}},
+    } {
+        if closeErr := client.CloseWithContext(t.Context()); nil != closeErr {
+            t.Fatalf("%s: expected nil, got %v", name, closeErr)
+        }
+    }
+}

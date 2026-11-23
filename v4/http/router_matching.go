@@ -4,7 +4,6 @@ import (
     "sort"
 
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    "github.com/precision-soft/melody/v4/internal"
 )
 
 func (instance *Router) Match(method string, path string, host string, scheme string) (*httpcontract.MatchResult, bool) {
@@ -19,7 +18,7 @@ func (instance *Router) Match(method string, path string, host string, scheme st
 
     if nil == handler && 0 == len(routeAttributes) && true == requestPathIsRoutable(path) {
         if definition, declared := instance.routeRegistry.definitionOnlyFor(method, splitRequestPath(path)); true == declared {
-            routeAttributes = internal.CopyAnyMap(definition.attributes)
+            routeAttributes = copyRouteAttributes(definition.attributes)
             /* the kernel reads the methods beside no handler as a 405 */
             delete(routeAttributes, RouteAttributeMethods)
             routeAttributes[RouteAttributeDefinitionOnly] = true

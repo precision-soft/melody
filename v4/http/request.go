@@ -153,8 +153,7 @@ func (instance *Request) loadForm() {
 
     maxBodyBytes := instance.MaxBodyBytes()
 
-    /* one byte past the cap tells an at-cap body from an oversized one */
-    rawBody, readErr := io.ReadAll(io.LimitReader(httpRequest.Body, int64(maxBodyBytes)+1))
+    rawBody, readErr := io.ReadAll(io.LimitReader(httpRequest.Body, overCapAllowance(maxBodyBytes)))
     if nil != readErr {
         var maxBytesError *nethttp.MaxBytesError
         if true == exception.ChainAs(readErr, &maxBytesError) {
@@ -212,11 +211,9 @@ func (instance *Request) Header(name string) string {
     return instance.httpRequest.Header.Get(name)
 }
 
-/* isUrlEncodedFormSubmission reports a POST, PUT or PATCH carrying the urlencoded media type, the one body the form read parses */
+/* isUrlEncodedFormSubmission reports a request of a method that is not safe carrying the urlencoded media type, the one body the form read parses; the method set is the one the csrf check guards, so a token in the field is read wherever it is asked for */
 func isUrlEncodedFormSubmission(httpRequest *nethttp.Request) bool {
-    if nethttp.MethodPost != httpRequest.Method &&
-        nethttp.MethodPut != httpRequest.Method &&
-        nethttp.MethodPatch != httpRequest.Method {
+    if true == IsSafeMethod(httpRequest.Method) {
         return false
     }
 
@@ -250,7 +247,7 @@ func (instance *Request) ContentType() string {
     return mediaType
 }
 
-/* Input answers a request parameter by name from the urlencoded form of a POST, PUT or PATCH, then the query string, then the route parameters: the first source that has the key answers. A multipart or json body is not a source. The error is the failed form read's, answered before the query is consulted, so a broken submission is never read as a blank one. A handler that must have the value the router bound reads Parameters. A repeated key answers its first value; bag.StringSlice reads the whole array. */
+/* Input answers a request parameter by name from the urlencoded form of a request whose method is not safe, then the query string, then the route parameters: the first source that has the key answers. A multipart or json body is not a source. The error is the failed form read's, answered before the query is consulted, so a broken submission is never read as a blank one. A handler that must have the value the router bound reads Parameters. A repeated key answers its first value; bag.StringSlice reads the whole array. */
 func (instance *Request) Input(key string) (string, error) {
     postBag, formErr := instance.Post()
     if nil != formErr {

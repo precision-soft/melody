@@ -330,7 +330,7 @@ func newCacheWarningTestApplicationOver(t *testing.T, mode string, extraValues m
     t.Helper()
 
     values := map[string]string{
-        config.HttpAddressKey: "127.0.0.1:34517",
+        config.HttpAddressKey: freeLoopbackAddress(t),
     }
     for key, value := range extraValues {
         values[key] = value
@@ -405,7 +405,7 @@ func newSessionBoundTestApplication(t *testing.T, mode string, sessionValues map
     t.Helper()
 
     values := map[string]string{
-        config.HttpAddressKey: "127.0.0.1:34519",
+        config.HttpAddressKey: freeLoopbackAddress(t),
     }
     for key, value := range sessionValues {
         if "" != value {
@@ -614,7 +614,7 @@ func TestAwaitHttpServerEnd_ReportsAServeErrorWhicheverBranchWins(t *testing.T) 
 func TestRunHttp_CutsTheShutdownAtTheBudgetTheEnvironmentConfigured(t *testing.T) {
     assertRunHttpCutsTheShutdownAtTheBudget(
         t,
-        "127.0.0.1:34519",
+        freeLoopbackAddress(t),
         map[string]string{config.HttpShutdownTimeoutKey: "50ms"},
         ApplicationConfig{},
     )
@@ -623,7 +623,7 @@ func TestRunHttp_CutsTheShutdownAtTheBudgetTheEnvironmentConfigured(t *testing.T
 func TestRunHttp_CutsTheShutdownAtTheBudgetTheApplicationsFieldConfigured(t *testing.T) {
     assertRunHttpCutsTheShutdownAtTheBudget(
         t,
-        "127.0.0.1:34520",
+        freeLoopbackAddress(t),
         map[string]string{},
         ApplicationConfig{HttpServer: HttpServerConfig{ShutdownTimeout: bound.Of(50 * time.Millisecond)}},
     )
@@ -953,6 +953,8 @@ func TestAwaitOpenRequestScopes_DoesNotWaitWithoutAKernelToAsk(t *testing.T) {
 }
 
 func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *testing.T) {
+    address := freeLoopbackAddress(t)
+
     handlerHijacked := make(chan struct{})
     releaseHandler := make(chan struct{})
 
@@ -988,7 +990,7 @@ func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *
     environment, environmentErr := config.NewEnvironment(context.Background(), 
         &mapEnvironmentSource{
             values: map[string]string{
-                config.HttpAddressKey:         "127.0.0.1:34521",
+                config.HttpAddressKey:         address,
                 config.HttpShutdownTimeoutKey: "200ms",
                 config.ScopeTeardownTimeoutKey: "10ms",
             },
@@ -1048,7 +1050,7 @@ func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *
     }()
 
     for attempt := 0; attempt < 200; attempt++ {
-        probeConnection, dialErr := net.Dial("tcp", "127.0.0.1:34521")
+        probeConnection, dialErr := net.Dial("tcp", address)
         if nil == dialErr {
             _ = probeConnection.Close()
 
@@ -1059,7 +1061,7 @@ func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *
     }
 
     go func() {
-        response, requestErr := nethttp.Get("http://127.0.0.1:34521/upgrade")
+        response, requestErr := nethttp.Get("http://"+address+"/upgrade")
         if nil == requestErr {
             _ = response.Body.Close()
         }
@@ -1431,9 +1433,12 @@ func TestApplicationDecorateHttpHandler_TheFirstRegisteredDecoratorIsOutermost(t
 
     applicationInstance.Boot()
 
-    handler := applicationInstance.decorateHttpHandler(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+    handler, decorateErr := applicationInstance.decorateHttpHandler(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         sequence = append(sequence, "kernel")
     }))
+    if nil != decorateErr {
+        t.Fatalf("unexpected decorate error: %v", decorateErr)
+    }
 
     handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/", nil))
 
@@ -1463,10 +1468,12 @@ func TestApplicationRegisterHttpHandlerDecorator_PanicsAfterBoot(t *testing.T) {
 }
 
 func TestRunHttp_ServesThroughTheRegisteredDecorators(t *testing.T) {
+    address := freeLoopbackAddress(t)
+
     environment, environmentErr := config.NewEnvironment(context.Background(), 
         &mapEnvironmentSource{
             values: map[string]string{
-                config.HttpAddressKey: "127.0.0.1:34523",
+                config.HttpAddressKey: address,
             },
         },
     )
@@ -1523,7 +1530,7 @@ func TestRunHttp_ServesThroughTheRegisteredDecorators(t *testing.T) {
     var response *nethttp.Response
     var requestErr error
     for attempt := 0; attempt < 200; attempt++ {
-        response, requestErr = client.Get("http://127.0.0.1:34523/probe")
+        response, requestErr = client.Get("http://"+address+"/probe")
         if nil == requestErr {
             break
         }
@@ -1813,7 +1820,7 @@ func TestRunHttp_RefusesAScopeTeardownTimeoutOutlastingTheShutdownBeforeServing(
     environment, environmentErr := config.NewEnvironment(context.Background(), 
         &mapEnvironmentSource{
             values: map[string]string{
-                config.HttpAddressKey:         "127.0.0.1:34523",
+                config.HttpAddressKey:         freeLoopbackAddress(t),
                 config.HttpShutdownTimeoutKey: "2s",
             },
         },
@@ -1853,7 +1860,7 @@ func (instance *refusedBoundSessionManager) StorageTimeout() bound.Duration {
 func TestBootHttpPipeline_RefusesAManagerDeclaringAStorageTimeoutTheRuleRefusesInsideBoot(t *testing.T) {
     probeKind := containercontract.KindUnspecified
 
-    environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: map[string]string{config.HttpAddressKey: "127.0.0.1:34524"}})
+    environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: map[string]string{config.HttpAddressKey: freeLoopbackAddress(t)}})
     if nil != environmentErr {
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
@@ -2663,19 +2670,25 @@ func TestApplicationBeginHttpShutdown_NilContext_Refused(t *testing.T) {
 func TestApplicationBeginHttpShutdown_OfARunApplication_StartsNothing(t *testing.T) {
     recorder := &shutdownHookRecorder{}
 
-    applicationInstance, _, _ := bootHandlerTestApplication(t, "", func(applicationInstance *Application) {
+    applicationInstance, stopRun, runEnded := runServingTestApplication(t, func(applicationInstance *Application) {
         applicationInstance.OnHttpShutdown(recorder.hook("only"))
     })
-    applicationInstance.servingClaim.Store(servingClaimRun)
 
     if beginErr := applicationInstance.BeginHttpShutdown(context.Background()); nil != beginErr {
         t.Fatalf("unexpected begin error: %v", beginErr)
     }
 
-    time.Sleep(50 * time.Millisecond)
+    waitForHttpShutdownHooks(&applicationInstance.httpShutdownHookSet.done, context.Background())
 
     if 0 != recorder.calls.Load() {
         t.Fatalf("expected no hook started for an application that runs its own server, got %d", recorder.calls.Load())
+    }
+
+    stopRun()
+    <-runEnded
+
+    if 1 != recorder.calls.Load() {
+        t.Fatalf("expected the hook started once, by the server Run owns, got %d", recorder.calls.Load())
     }
 }
 
@@ -2737,19 +2750,19 @@ func TestApplicationCloseWithContext_HandedOut_HooksBegunEarlier_NotStartedTwice
 func TestApplicationCloseWithContext_OfARunApplication_StartsNoHook(t *testing.T) {
     recorder := &shutdownHookRecorder{}
 
-    applicationInstance, _, _ := bootHandlerTestApplication(t, "", func(applicationInstance *Application) {
+    applicationInstance, stopRun, runEnded := runServingTestApplication(t, func(applicationInstance *Application) {
         applicationInstance.OnHttpShutdown(recorder.hook("only"))
     })
-    applicationInstance.servingClaim.Store(servingClaimRun)
+
+    stopRun()
+    <-runEnded
 
     if closeErr := applicationInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    time.Sleep(50 * time.Millisecond)
-
-    if 0 != recorder.calls.Load() {
-        t.Fatalf("expected the close of an application that ran its own server to start no hook, got %d", recorder.calls.Load())
+    if 1 != recorder.calls.Load() {
+        t.Fatalf("expected the hook started once, by the server Run owns, and never by the close, got %d", recorder.calls.Load())
     }
 }
 
@@ -2842,5 +2855,221 @@ func TestApplicationBeginHttpShutdown_ConcurrentCalls_StartEachHookOnce(t *testi
 
     if 1 != recorder.calls.Load() {
         t.Fatalf("expected the hook started once by concurrent callers and the close, got %d", recorder.calls.Load())
+    }
+}
+
+/* runServingTestApplication runs the application's own server on a free loopback port and answers once it accepts connections, with the door that stops it and the channel closed when Run returned */
+func runServingTestApplication(t *testing.T, prepare func(applicationInstance *Application)) (*Application, func(), chan struct{}) {
+    t.Helper()
+
+    address := freeLoopbackAddress(t)
+
+    applicationInstance, _, _ := bootHandlerTestApplication(t, config.HttpAddressKey+"="+address+"\n", prepare)
+
+    runContext, stopRun := context.WithCancel(context.Background())
+    t.Cleanup(stopRun)
+    applicationInstance.ctx = runContext
+
+    originalExit := applicationExit
+    applicationExit = func(code int) { t.Errorf("expected the run to end cleanly, exited %d", code) }
+    t.Cleanup(func() { applicationExit = originalExit })
+
+    runEnded := make(chan struct{})
+    go func() {
+        defer close(runEnded)
+
+        applicationInstance.Run()
+    }()
+
+    awaitListening(t, address)
+
+    return applicationInstance, stopRun, runEnded
+}
+
+func TestApplicationHttpHandler_ADecoratorPanicking_LeavesNoNilHandlerBehind(t *testing.T) {
+    var decorations atomic.Int64
+
+    applicationInstance, _, _ := bootHandlerTestApplication(t, "", func(applicationInstance *Application) {
+        applicationInstance.RegisterHttpHandlerDecorator(func(next nethttp.Handler) nethttp.Handler {
+            if 1 == decorations.Add(1) {
+                panic("the decorator's first build panics")
+            }
+
+            return next
+        })
+    })
+
+    func() {
+        defer func() { _ = recover() }()
+
+        _, _ = applicationInstance.HttpHandler()
+    }()
+
+    handler, handlerErr := applicationInstance.HttpHandler()
+    if nil == handler || nil != handlerErr {
+        t.Fatalf("expected the build retried after the recovered panic, got %v %v", handler, handlerErr)
+    }
+
+    recorder := httptest.NewRecorder()
+    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/plain", nil))
+    if nethttp.StatusOK != recorder.Code {
+        t.Fatalf("expected the retried handler to serve the route, got %d", recorder.Code)
+    }
+}
+
+func TestApplicationHttpHandler_ADecoratorAnsweringNil_Refused(t *testing.T) {
+    var typedNil *nethttp.ServeMux
+
+    rows := map[string]nethttp.Handler{
+        "nil":       nil,
+        "typed nil": typedNil,
+    }
+
+    for name, answer := range rows {
+        t.Run(name, func(t *testing.T) {
+            var outerRan atomic.Bool
+
+            applicationInstance, _, _ := bootHandlerTestApplication(t, "", func(applicationInstance *Application) {
+                applicationInstance.RegisterHttpHandlerDecorator(func(next nethttp.Handler) nethttp.Handler {
+                    outerRan.Store(true)
+
+                    return nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {})
+                })
+                applicationInstance.RegisterHttpHandlerDecorator(func(next nethttp.Handler) nethttp.Handler {
+                    return answer
+                })
+            })
+
+            handler, handlerErr := applicationInstance.HttpHandler()
+            if nil != handler || nil == handlerErr || "http handler decorator answered nil" != handlerErr.Error() {
+                t.Fatalf("expected the nil answer refused, got %v %v", handler, handlerErr)
+            }
+
+            if 1 != exception.LogContext(handlerErr, exception.LogContextConfig{})["index"] {
+                t.Fatalf("expected the refusal to name the decorator's index 1, got %v", exception.LogContext(handlerErr, exception.LogContextConfig{}))
+            }
+
+            if true == outerRan.Load() {
+                t.Fatalf("expected the outer decorator never handed the nil answer")
+            }
+
+            _, secondErr := applicationInstance.HttpHandler()
+            if handlerErr != secondErr {
+                t.Fatalf("expected the refusal memoized, got %v then %v", handlerErr, secondErr)
+            }
+        })
+    }
+}
+
+func TestRunHttp_ADecoratorAnsweringNil_Refused(t *testing.T) {
+    applicationInstance, _, _ := bootHandlerTestApplication(t, config.HttpAddressKey+"="+freeLoopbackAddress(t)+"\n", func(applicationInstance *Application) {
+        applicationInstance.RegisterHttpHandlerDecorator(func(next nethttp.Handler) nethttp.Handler {
+            return nil
+        })
+    })
+
+    runErr := applicationInstance.runHttp(context.Background())
+    if nil == runErr || "http handler decorator answered nil" != runErr.Error() {
+        t.Fatalf("expected the run refused before serving, got %v", runErr)
+    }
+
+    if 0 != exception.LogContext(runErr, exception.LogContextConfig{})["index"] {
+        t.Fatalf("expected the refusal to name the decorator's index 0, got %v", exception.LogContext(runErr, exception.LogContextConfig{}))
+    }
+}
+
+func TestApplicationClose_HandedOut_BoundsTheWindDownByTheShutdownTimeout(t *testing.T) {
+    var hookDeadline atomic.Bool
+
+    applicationInstance, _, _ := bootHandlerTestApplication(t, config.HttpShutdownTimeoutKey+"=100ms\n"+config.ScopeTeardownTimeoutKey+"=10ms\n", func(applicationInstance *Application) {
+        applicationInstance.OnHttpShutdown(func(shutdownContext context.Context) {
+            _, hasDeadline := shutdownContext.Deadline()
+            hookDeadline.Store(hasDeadline)
+
+            <-shutdownContext.Done()
+        })
+    })
+    mustHttpHandler(t, applicationInstance)
+
+    closed := make(chan struct{})
+    go func() {
+        defer close(closed)
+
+        applicationInstance.Close()
+    }()
+
+    select {
+    case <-closed:
+    case <-time.After(3 * time.Second):
+        t.Fatalf("expected the close bounded by the 100ms shutdown timeout; it is still waiting")
+    }
+
+    if false == hookDeadline.Load() {
+        t.Fatalf("expected the hook handed a context carrying the shutdown timeout's deadline")
+    }
+}
+
+func TestApplicationCloseWithContext_HandedOut_TheEarlierDeadlineWins_AndTheTeardownKeepsItsBudget(t *testing.T) {
+    teardownContextErr := make(chan error, 1)
+
+    applicationInstance, _, _ := bootHandlerTestApplication(t, config.HttpShutdownTimeoutKey+"=5s\n"+config.ScopeTeardownTimeoutKey+"=10ms\n", func(applicationInstance *Application) {
+        applicationInstance.OnHttpShutdown(func(shutdownContext context.Context) {
+            <-shutdownContext.Done()
+        })
+        applicationInstance.RegisterService(
+            "app.context.close",
+            func(resolver containercontract.Resolver) (*contextClosingApplicationProbe, error) {
+                return &contextClosingApplicationProbe{close: func(closeContext context.Context) error {
+                    teardownContextErr <- closeContext.Err()
+
+                    return nil
+                }}, nil
+            },
+            containercontract.RegisterOptions{TypeRegistrationDisabled: true},
+        )
+    })
+
+    if _, getErr := applicationInstance.kernel.ServiceContainer().Get(t.Context(), "app.context.close"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    mustHttpHandler(t, applicationInstance)
+
+    closeContext, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+    defer cancel()
+
+    startedAt := time.Now()
+    _ = applicationInstance.CloseWithContext(closeContext)
+
+    if elapsed := time.Since(startedAt); 2*time.Second < elapsed {
+        t.Fatalf("expected the caller's 100ms deadline to win over the 5s shutdown timeout, took %v", elapsed)
+    }
+
+    select {
+    case err := <-teardownContextErr:
+        if nil != err {
+            t.Fatalf("expected the teardown to run under a context the wind-down did not expire, got %v", err)
+        }
+    default:
+        t.Fatalf("expected the teardown to close the service")
+    }
+}
+
+func TestApplicationClose_HandedOut_WaitsForAHookWithinTheShutdownTimeout(t *testing.T) {
+    var hookReturned atomic.Bool
+
+    applicationInstance, _, _ := bootHandlerTestApplication(t, config.HttpShutdownTimeoutKey+"=5s\n"+config.ScopeTeardownTimeoutKey+"=10ms\n", func(applicationInstance *Application) {
+        applicationInstance.OnHttpShutdown(func(shutdownContext context.Context) {
+            time.Sleep(100 * time.Millisecond)
+
+            hookReturned.Store(true)
+        })
+    })
+    mustHttpHandler(t, applicationInstance)
+
+    applicationInstance.Close()
+
+    if false == hookReturned.Load() {
+        t.Fatalf("expected the close to wait for the hook within the 5s shutdown timeout")
     }
 }

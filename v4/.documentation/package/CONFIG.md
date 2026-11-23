@@ -303,13 +303,13 @@ The value is a boolean in the spellings the container teardown order accepts, an
 
 ### Session cookie secure
 
-Whether the session cookie is marked `Secure` from the scheme the forwarded-headers policy believes or on every response. Read through [`HttpConfiguration.SessionCookieSecure()`](../../config/contract/http.go), empty when the key is unset, and decided by the application against its own [`ApplicationConfig.HttpKernel.SessionCookiePolicy.Secure`](../../application/application_new.go): the key wins over the field.
+Whether the session cookie is marked `Secure` on every response whatever the application's field says. Read through [`HttpConfiguration.SessionCookieSecure()`](../../config/contract/http.go), empty when the key is unset, and decided by the application against its own [`ApplicationConfig.HttpKernel.SessionCookiePolicy.Secure`](../../application/application_new.go): the key only hardens the field.
 
 | Environment key                     | Parameter name                      | Default |
 |-------------------------------------|-------------------------------------|---------|
 | `MELODY_HTTP_SESSION_COOKIE_SECURE` | `kernel.http.session_cookie_secure` | `""`    |
 
-The value is [`HttpSessionCookieSecureFromScheme`](../../config/environment.go) (`from-scheme`) or [`HttpSessionCookieSecureAlways`](../../config/environment.go) (`always`), spelled exactly; anything else, `never` included, fails the boot with `invalid environment value`, naming the key and the two admitted values. `never` weakens the cookie, so it is written in Go alone, `SessionCookieSecureNever`. Left out, the key is unset and the field decides; without the field the scheme decides.
+The value is [`HttpSessionCookieSecureAlways`](../../config/environment.go) (`always`), spelled exactly; anything else, `from-scheme` and `never` included, fails the boot with `invalid environment value`, naming the key and the admitted value. The key wins over the field, so a lower spelling would let a deployment weaken an `always` the composition root chose: `SessionCookieSecureFromScheme` and `SessionCookieSecureNever` are written in Go alone. Left out, the key is unset and the field decides; without the field the scheme decides.
 
 ### Static file cache
 
@@ -497,7 +497,7 @@ func example() configcontract.Configuration {
 
 - [`EnvironmentDevelopment`, `EnvironmentProduction`](../../config/environment.go)
 - [`ModeHttp`, `ModeCli`](../../config/environment.go)
-- [`HttpSessionCookieSecureFromScheme`, `HttpSessionCookieSecureAlways`](../../config/environment.go) — the two values `MELODY_HTTP_SESSION_COOKIE_SECURE` admits
+- [`HttpSessionCookieSecureAlways`](../../config/environment.go) — the one value `MELODY_HTTP_SESSION_COOKIE_SECURE` admitss
 - [`RoleWeb`, `RoleWorker`, `RoleAll`](../../config/environment.go)
 - [`RoleAllowsBackgroundWork(role string) bool`](../../config/process_role.go) — whether a process with this role should start outbox relays and message consumers. Melody itself gates nothing on the role: it is declared intent for application wiring to query
 - [`RoleAllowsHttp(role string) bool`](../../config/process_role.go) — informational in the same way; the runtime **mode**, not the role, decides whether the http kernel starts

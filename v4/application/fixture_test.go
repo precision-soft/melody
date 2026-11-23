@@ -2,6 +2,7 @@ package application
 
 import (
     "context"
+    "net"
     nethttp "net/http"
     "net/http/httptest"
     "os"
@@ -11,6 +12,7 @@ import (
     "sync"
     "testing"
     "testing/fstest"
+    "time"
 
     "github.com/precision-soft/melody/v4/config"
     "github.com/precision-soft/melody/v4/internal/testhelper"
@@ -220,4 +222,42 @@ func expectNewApplicationRefused(t *testing.T, testName string, applicationConfi
             t.Fatalf("expected the refusal to carry %q, got: %s", expectedText, string(output))
         }
     }
+}
+
+/* freeLoopbackAddress answers a loopback address whose port the system just handed out, so repeated and parallel runs never share one */
+func freeLoopbackAddress(t *testing.T) string {
+    t.Helper()
+
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("unexpected listen error: %v", listenErr)
+    }
+
+    address := listener.Addr().String()
+
+    if closeErr := listener.Close(); nil != closeErr {
+        t.Fatalf("unexpected listener close error: %v", closeErr)
+    }
+
+    return address
+}
+
+/* awaitListening dials the address until it accepts a connection */
+func awaitListening(t *testing.T, address string) {
+    t.Helper()
+
+    var dialErr error
+    for attempt := 0; attempt < 200; attempt++ {
+        var connection net.Conn
+        connection, dialErr = net.Dial("tcp", address)
+        if nil == dialErr {
+            _ = connection.Close()
+
+            return
+        }
+
+        time.Sleep(10 * time.Millisecond)
+    }
+
+    t.Fatalf("the server never came up: %v", dialErr)
 }

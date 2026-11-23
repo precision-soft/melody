@@ -20,9 +20,8 @@ const (
     RoleWorker = "worker"
     RoleAll    = "all"
 
-    /* HttpSessionCookieSecureFromScheme and HttpSessionCookieSecureAlways are the values MELODY_HTTP_SESSION_COOKIE_SECURE admits */
-    HttpSessionCookieSecureFromScheme = "from-scheme"
-    HttpSessionCookieSecureAlways     = "always"
+    /* HttpSessionCookieSecureAlways is the one value MELODY_HTTP_SESSION_COOKIE_SECURE admits: the key only hardens the cookie */
+    HttpSessionCookieSecureAlways = "always"
 
     DefaultModeKey                   = "MELODY_DEFAULT_MODE"
     ProcessRoleKey                   = "MELODY_PROCESS_ROLE"

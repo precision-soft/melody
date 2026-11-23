@@ -3,6 +3,7 @@ package application
 import (
     "context"
     "errors"
+    "time"
 
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -14,7 +15,7 @@ func (instance *Application) Close() {
     _ = instance.close(context.Background())
 }
 
-/* CloseWithContext is Close under the caller's deadline, handed to the teardown, and returns the teardown failure when this call discovered it. An application that handed its http handler out is wound down first under the same deadline: its shutdown hooks are started unless BeginHttpShutdown started them, then awaited with its open request scopes. */
+/* CloseWithContext is Close under the caller's deadline, handed to the teardown, and returns the teardown failure when this call discovered it. An application that handed its http handler out is wound down first, bounded by the http shutdown timeout or the caller's deadline, whichever is earlier: its shutdown hooks are started unless BeginHttpShutdown started them, then awaited with its open request scopes; the teardown that follows keeps the caller's whole budget. */
 func (instance *Application) CloseWithContext(closeContext context.Context) error {
     /* refused before the once the close claims, so a refused call leaves the teardown to a later one */
     if true == internal.IsNilInterface(closeContext) {
@@ -57,9 +58,22 @@ func (instance *Application) close(closeContext context.Context) error {
 
 /* performClose winds a handed-out http handler down before the container, whose services its requests and hooks still use, and joins the wind-down's failure with the teardown's */
 func (instance *Application) performClose(closeContext context.Context) error {
+    teardownDeadline, hasTeardownDeadline := closeContext.Deadline()
+    teardownBudget := time.Until(teardownDeadline)
+    contextDoneBefore := nil != closeContext.Err()
+
     windDownErr := instance.windDownHandedOutHttpHandler(closeContext)
 
-    teardownErr := instance.performTeardown(closeContext)
+    /* the teardown keeps the budget the caller handed the close: a wind-down that spent the caller's deadline does not leave the container to close under an expired context */
+    teardownContext := closeContext
+    if true == hasTeardownDeadline && false == contextDoneBefore && nil != closeContext.Err() {
+        detachedContext, cancelTeardown := context.WithTimeout(context.WithoutCancel(closeContext), teardownBudget)
+        defer cancelTeardown()
+
+        teardownContext = detachedContext
+    }
+
+    teardownErr := instance.performTeardown(teardownContext)
 
     if nil == windDownErr {
         return teardownErr

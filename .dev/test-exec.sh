@@ -46,6 +46,8 @@ trap 'kill -s QUIT "${TEST_PID}" 2>/dev/null' QUIT
 trap 'kill -s TERM "${TEST_PID}" 2>/dev/null' TERM
 trap 'kill -s INT "${TEST_PID}" 2>/dev/null' INT
 
+SLEEP_PID=""
+
 while kill -0 "${TEST_PID}" 2>/dev/null; do
     RSS_KIBIBYTES=$(awk '/^VmRSS:/ { print $2 }' "/proc/${TEST_PID}/status" 2>/dev/null || true)
 
@@ -56,9 +58,15 @@ while kill -0 "${TEST_PID}" 2>/dev/null; do
         exit 137
     fi
 
-    # the sleep runs aside so the loop wakes the moment the test ends, not at the end of the interval
-    sleep 0.5 &
-    wait -n "${TEST_PID}" "$!" 2>/dev/null
+    # the sleep runs aside so the loop wakes the moment the test ends, not at the end of the interval; detached from the
+    # streams, since go test waits for every holder of the test's output to close it
+    sleep 0.5 </dev/null >/dev/null 2>&1 &
+    SLEEP_PID=$!
+    wait -n "${TEST_PID}" "${SLEEP_PID}" 2>/dev/null
 done
+
+if [[ -n "${SLEEP_PID}" ]]; then
+    kill "${SLEEP_PID}" 2>/dev/null
+fi
 
 wait "${TEST_PID}"

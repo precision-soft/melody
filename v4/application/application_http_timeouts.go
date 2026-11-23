@@ -90,16 +90,13 @@ func resolveSessionEmptyOnOutage(configuration configcontract.Configuration, app
     return applicationConfig.HttpKernel.SessionPolicy.EmptyOnOutage
 }
 
-/* resolveSessionCookieSecure answers the policy the key names when the deployment set it and the application's field otherwise; the key admits no never, the configuration refused any other value naming the key */
+/* resolveSessionCookieSecure answers always when the deployment set the key and the application's field otherwise; the key only hardens, the configuration refused any other value naming the key */
 func resolveSessionCookieSecure(configuration configcontract.Configuration, applicationConfig ApplicationConfig) httpcontract.SessionCookieSecurePolicy {
-    switch configuration.Http().SessionCookieSecure() {
-    case config.HttpSessionCookieSecureAlways:
+    if config.HttpSessionCookieSecureAlways == configuration.Http().SessionCookieSecure() {
         return httpcontract.SessionCookieSecureAlways
-    case config.HttpSessionCookieSecureFromScheme:
-        return httpcontract.SessionCookieSecureFromScheme
-    default:
-        return applicationConfig.HttpKernel.SessionCookiePolicy.Secure
     }
+
+    return applicationConfig.HttpKernel.SessionCookiePolicy.Secure
 }
 
 func resolveTeardownTimeout(configuration configcontract.Configuration, applicationConfig ApplicationConfig) (bound.Resolved[time.Duration], error) {

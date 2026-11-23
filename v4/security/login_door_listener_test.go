@@ -1731,18 +1731,24 @@ func TestLoginDoor_StatedCrossSiteOnAStatelessFirewall_StillRefused(t *testing.T
     }
 }
 
-func TestLoginDoor_LimiterRunsBeforeTheCsrfCheck(t *testing.T) {
+func TestLoginDoor_TheForgeryCheckRunsBeforeTheLimiter(t *testing.T) {
     fixture := newCsrfFixture(t, func(config *CompiledFirewallConfig) {
         config.LoginRateLimit = httpmiddleware.NewRateLimitGate(httpmiddleware.NewFixedWindowLimiter("test", 1, 60_000_000_000, httpmiddleware.LimiterConfig{}), httpmiddleware.RateLimitConfig{})
     })
     crossSite := csrfProbe{path: doorLoginPath, headers: map[string]string{"Sec-Fetch-Site": "cross-site"}}
 
-    if recorder := fixture.serve(t, crossSite); nethttp.StatusForbidden != recorder.Code {
-        t.Fatalf("expected the first forged sign-in refused 403, got %d", recorder.Code)
+    for attempt := 1; attempt <= 3; attempt++ {
+        if recorder := fixture.serve(t, crossSite); nethttp.StatusForbidden != recorder.Code {
+            t.Fatalf("expected forged sign-in %d refused 403 without spending the budget, got %d", attempt, recorder.Code)
+        }
     }
 
-    if recorder := fixture.serve(t, crossSite); nethttp.StatusTooManyRequests != recorder.Code {
-        t.Fatalf("expected the forged sign-in metered before it is checked, got %d", recorder.Code)
+    if recorder := fixture.serve(t, csrfProbe{path: doorLoginPath}); nethttp.StatusOK != recorder.Code {
+        t.Fatalf("expected the genuine sign-in admitted by the limiter after the forged ones, got %d", recorder.Code)
+    }
+
+    if recorder := fixture.serve(t, csrfProbe{path: doorLoginPath}); nethttp.StatusTooManyRequests != recorder.Code {
+        t.Fatalf("expected the limiter to meter the genuine sign-ins, got %d", recorder.Code)
     }
 }
 

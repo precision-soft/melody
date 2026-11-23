@@ -178,3 +178,28 @@ func TestRouter_ForwardsIntrospectionToItsRegistry(t *testing.T) {
         t.Fatalf("expected the router and its registry to describe the route identically")
     }
 }
+
+func TestRouteDefinitionAttributes_AnEditOfTheProtectionOrTheMethods_NeverReachesTheLiveRoute(t *testing.T) {
+    router := NewRouter()
+    router.Handle("/page", csrfProtectionTestHandler, RouteOptions{
+        Methods:    []string{nethttp.MethodGet, nethttp.MethodPost},
+        Protection: RouteProtectionConfig{SecurityHeadersDisabled: []string{HeaderFrameOptions}},
+    })
+
+    attributes := router.RouteDefinitions()[0].Attributes()
+    attributes[RouteAttributeProtection].(RouteProtectionConfig).SecurityHeadersDisabled[0] = HeaderStrictTransportSecurity
+    attributes[RouteAttributeMethods].([]string)[0] = nethttp.MethodDelete
+
+    matched, matchedOk := router.Match(nethttp.MethodGet, "/page", "example.test", "https")
+    if false == matchedOk {
+        t.Fatalf("expected the route matched")
+    }
+
+    if disabled := matched.RouteAttributes[RouteAttributeProtection].(RouteProtectionConfig).SecurityHeadersDisabled; HeaderFrameOptions != disabled[0] {
+        t.Fatalf("expected the live route's protection untouched by an edit of its definition, got %v", disabled)
+    }
+
+    if methods := router.RouteDefinitions()[0].Attributes()[RouteAttributeMethods].([]string); nethttp.MethodGet != methods[0] {
+        t.Fatalf("expected the live route's methods untouched by an edit of its definition, got %v", methods)
+    }
+}
