@@ -84,6 +84,11 @@ func (instance *Regex) Error() error {
     return instance.err
 }
 
+/* DeclarationError answers why the pattern does not compile, nil for a sound one. */
+func (instance *Regex) DeclarationError() error {
+    return instance.err
+}
+
 func (instance *Regex) WithParameters(parameters map[string]string) (validationcontract.Constraint, error) {
     patternString, exists := parameters["pattern"]
     if false == exists {
@@ -116,3 +121,4 @@ func (instance *Regex) WithParameters(parameters map[string]string) (validationc
 
 var _ validationcontract.Constraint = (*Regex)(nil)
 var _ validationcontract.ParameterizedConstraint = (*Regex)(nil)
+var _ validationcontract.DeclarationReporter = (*Regex)(nil)

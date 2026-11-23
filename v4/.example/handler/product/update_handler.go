@@ -32,7 +32,7 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
         }
 
         updateProduct := melodyhttp.JsonHandler(
-            func(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request, dto updateRequest) (melodyhttpcontract.Response, error) {
+            func(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request, dto UpdateRequest) (melodyhttpcontract.Response, error) {
                 dto = dto.trimmed()
                 if refusal := presenter.ApiRefusalOfInvalidBody(runtimeInstance, request, dto); nil != refusal {
                     return refusal, nil
@@ -73,7 +73,7 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
     }
 }
 
-type updateRequest struct {
+type UpdateRequest struct {
     Name        string `json:"name" validate:"notBlank,min=2,max=120"`
     Description string `json:"description" validate:"notBlank,min=1,max=40"`
     CategoryId  string `json:"categoryId" validate:"notBlank"`
@@ -84,7 +84,7 @@ type updateRequest struct {
 }
 
 /* trimmed answers the body as the door stores it, so it is validated in that spelling */
-func (instance updateRequest) trimmed() updateRequest {
+func (instance UpdateRequest) trimmed() UpdateRequest {
     instance.Name = strings.TrimSpace(instance.Name)
     instance.Description = strings.TrimSpace(instance.Description)
     instance.CategoryId = strings.TrimSpace(instance.CategoryId)

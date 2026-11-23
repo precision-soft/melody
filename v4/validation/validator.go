@@ -693,35 +693,55 @@ func typeCarriesValidationTag(targetType reflect.Type, seen map[reflect.Type]boo
     }
 }
 
-/* visibleFieldCandidate pairs a field with the value it was reached through, so the dominance pick and the validation of the winner are decided from one record. */
+/* visibleFieldCandidate pairs a field with the route it is reached through from the walked struct, so the dominance pick and the field it validates are decided from one record. */
 type visibleFieldCandidate struct {
     field reflect.StructField
-    value reflect.Value
+    route []int
 }
 
-/* validateStruct validates the fields of one json object, its own and those its embeds promote, resolved by encoding/json's dominance rules. Only the winners are validated, since only they are populated from a payload; the openapi mirror (collectStructFields) is kept in lockstep with this walk. */
-func (instance *Validator) validateStruct(value reflect.Value, path *validationPath, depth int, walk *validationWalk) ValidationErrors {
-    var errors ValidationErrors
+/* structFieldStep is one step of a struct's validation plan: an exported embed whose own tag runs against the embed value, or a visible field under its json name; route is the field indexes from the walked struct, an embed between them dereferenced. */
+type structFieldStep struct {
+    field    reflect.StructField
+    route    []int
+    jsonName string
+    embed    bool
+}
 
-    if true == promotesValidationTimeCodec(value.Type()) {
-        return errors
+/* structValidationPlanCache memoizes structValidationPlan: the fields a payload populates are a property of the type alone. */
+var structValidationPlanCache sync.Map
+
+/* structValidationPlan answers the steps Validate takes over a struct and VerifyType reads, so a value walk and a type walk select the same fields. */
+func structValidationPlan(structType reflect.Type) []structFieldStep {
+    if cached, exists := structValidationPlanCache.Load(structType); true == exists {
+        return cached.([]structFieldStep)
+    }
+
+    stored, _ := structValidationPlanCache.LoadOrStore(structType, buildStructValidationPlan(structType))
+
+    return stored.([]structFieldStep)
+}
+
+/* buildStructValidationPlan selects the fields of one json object, its own and those its embeds promote, resolved by encoding/json's dominance rules. Only the winners are validated, since only they are populated from a payload; the openapi mirror (collectStructFields) is kept in lockstep with this selection. */
+func buildStructValidationPlan(structType reflect.Type) []structFieldStep {
+    var plan []structFieldStep
+
+    if true == promotesValidationTimeCodec(structType) {
+        return plan
     }
 
     type embeddedLevelItem struct {
         itemType reflect.Type
-        value    reflect.Value
+        route    []int
         count    int
     }
-
-    owner := validationOwnerOf(value)
 
     resolved := make(map[string]bool)
 
     embeddedSeen := make(map[reflect.Type]bool)
-    embeddedSeen[value.Type()] = true
+    embeddedSeen[structType] = true
 
     level := []*embeddedLevelItem{
-        {itemType: value.Type(), value: value, count: 1},
+        {itemType: structType, count: 1},
     }
 
     for 0 < len(level) {
@@ -735,15 +755,12 @@ func (instance *Validator) validateStruct(value reflect.Value, path *validationP
             for index := 0; index < item.itemType.NumField(); index++ {
                 field := item.itemType.Field(index)
 
-                fieldValue := reflect.Value{}
-                if true == item.value.IsValid() {
-                    fieldValue = item.value.Field(index)
-                }
+                route := append(append(make([]int, 0, len(item.route)+1), item.route...), index)
 
                 if true == isPromotedValidationEmbed(field) {
                     /* the embed's own tag runs against the embed value, whose promoted fields a payload populates; an unexported embed's value cannot pass through Interface, so its tag stays out of reach */
                     if true == field.IsExported() {
-                        errors = append(errors, instance.applyFieldRules(field, fieldValue, embeddedFieldPath(field, path), owner, walk)...)
+                        plan = append(plan, structFieldStep{field: field, route: route, embed: true})
                     }
 
                     embeddedType := dereferencedValidationStructType(field.Type)
@@ -756,7 +773,7 @@ func (instance *Validator) validateStruct(value reflect.Value, path *validationP
                     if false == exists {
                         nextItem = &embeddedLevelItem{
                             itemType: embeddedType,
-                            value:    dereferencedValidationStructValue(fieldValue),
+                            route:    route,
                         }
                         nextByType[embeddedType] = nextItem
                         nextLevel = append(nextLevel, nextItem)
@@ -795,17 +812,13 @@ func (instance *Validator) validateStruct(value reflect.Value, path *validationP
                 for copyIndex := 0; copyIndex < duplicateCount; copyIndex++ {
                     candidatesByName[jsonName] = append(candidatesByName[jsonName], visibleFieldCandidate{
                         field: field,
-                        value: fieldValue,
+                        route: route,
                     })
                 }
             }
         }
 
         for _, jsonName := range order {
-            if true == walk.exceeded {
-                return errors
-            }
-
             resolved[jsonName] = true
 
             winner, ok := dominantVisibleField(candidatesByName[jsonName])
@@ -813,7 +826,7 @@ func (instance *Validator) validateStruct(value reflect.Value, path *validationP
                 continue
             }
 
-            errors = append(errors, instance.validateVisibleField(winner, jsonName, path, depth, owner, walk)...)
+            plan = append(plan, structFieldStep{field: winner.field, route: winner.route, jsonName: jsonName})
         }
 
         for _, nextItem := range nextLevel {
@@ -823,12 +836,47 @@ func (instance *Validator) validateStruct(value reflect.Value, path *validationP
         level = nextLevel
     }
 
+    return plan
+}
+
+/* structFieldStepValue reaches the step's field from the walked struct; a nil embed pointer on the way yields the zero embed, so its promoted fields are validated against their zero values as a value embed's are. */
+func structFieldStepValue(value reflect.Value, route []int) reflect.Value {
+    for _, index := range route[:len(route)-1] {
+        value = dereferencedValidationStructValue(value.Field(index))
+    }
+
+    return value.Field(route[len(route)-1])
+}
+
+/* validateStruct validates the fields of one json object along its validation plan. */
+func (instance *Validator) validateStruct(value reflect.Value, path *validationPath, depth int, walk *validationWalk) ValidationErrors {
+    var errors ValidationErrors
+
+    owner := validationOwnerOf(value)
+
+    for _, step := range structValidationPlan(value.Type()) {
+        fieldValue := structFieldStepValue(value, step.route)
+
+        if true == step.embed {
+            errors = append(errors, instance.applyFieldRules(step.field, fieldValue, embeddedFieldPath(step.field, path), owner, walk)...)
+
+            continue
+        }
+
+        if true == walk.exceeded {
+            return errors
+        }
+
+        errors = append(errors, instance.validateVisibleField(step.field, fieldValue, step.jsonName, path, depth, owner, walk)...)
+    }
+
     return errors
 }
 
 /* validateVisibleField applies the field's own tag and recurses into its value, under the json name of the field — the promoted fields of an embed keep the parent's path prefix, exactly as the payload spells them. */
 func (instance *Validator) validateVisibleField(
-    candidate visibleFieldCandidate,
+    field reflect.StructField,
+    value reflect.Value,
     jsonName string,
     path *validationPath,
     depth int,
@@ -837,15 +885,15 @@ func (instance *Validator) validateVisibleField(
 ) ValidationErrors {
     var errors ValidationErrors
 
-    if false == candidate.value.IsValid() {
+    if false == value.IsValid() {
         return errors
     }
 
     fieldPath := path.member(jsonName)
 
-    errors = append(errors, instance.applyFieldRules(candidate.field, candidate.value, fieldPath, owner, walk)...)
+    errors = append(errors, instance.applyFieldRules(field, value, fieldPath, owner, walk)...)
 
-    return append(errors, instance.validateReflected(candidate.value, fieldPath, depth+1, walk)...)
+    return append(errors, instance.validateReflected(value, fieldPath, depth+1, walk)...)
 }
 
 /* applyFieldRules spells the path only once the field carries a tag, since every rule and every error names the field. */
@@ -857,8 +905,7 @@ func (instance *Validator) applyFieldRules(field reflect.StructField, value refl
     }
 
     validateTag := field.Tag.Get("validate")
-    /* the trimmed comparison keeps a padded " - " a skip marker, in lockstep with the openapi mirror's splitRules */
-    if trimmedTag := strings.TrimSpace(validateTag); "" == trimmedTag || "-" == trimmedTag {
+    if true == validationTagDeclaresNothing(validateTag) {
         return errors
     }
 
@@ -866,23 +913,11 @@ func (instance *Validator) applyFieldRules(field reflect.StructField, value refl
 
     rules, err := parseValidationTag(validateTag)
     if nil != err {
-        context := map[string]any{
-            "tag": validateTag,
-        }
-
-        /* the parser names the comma-separated segment it refused; without it a long tag reports only that "the tag" is invalid */
-        var parseError *exception.Error
-        if true == goerrors.As(err, &parseError) {
-            if part, exists := parseError.Context()["part"]; true == exists {
-                context["part"] = part
-            }
-        }
-
         return walk.admit(ValidationErrors{NewValidationError(
             fieldPath,
-            "invalid validation tag syntax",
+            invalidValidationTagMessage,
             ErrorInvalidRuleSyntax,
-            context,
+            invalidValidationTagContext(validateTag, err),
         )})
     }
 
@@ -898,6 +933,173 @@ func (instance *Validator) applyFieldRules(field reflect.StructField, value refl
     }
 
     return errors
+}
+
+const invalidValidationTagMessage = "invalid validation tag syntax"
+
+/* validationTagDeclaresNothing reads an absent tag and the skip marker; the trimmed comparison keeps a padded " - " a skip marker, in lockstep with the openapi mirror's splitRules. */
+func validationTagDeclaresNothing(validateTag string) bool {
+    trimmedTag := strings.TrimSpace(validateTag)
+
+    return "" == trimmedTag || "-" == trimmedTag
+}
+
+func invalidValidationTagContext(validateTag string, err error) map[string]any {
+    context := map[string]any{
+        "tag": validateTag,
+    }
+
+    /* the parser names the comma-separated segment it refused; without it a long tag reports only that "the tag" is invalid */
+    var parseError *exception.Error
+    if true == goerrors.As(err, &parseError) {
+        if part, exists := parseError.Context()["part"]; true == exists {
+            context["part"] = part
+        }
+    }
+
+    return context
+}
+
+/* ErrTypeDeclarationRefused is the cause VerifyType's refusal wraps: the type declares a validate tag no value can pass. */
+var ErrTypeDeclarationRefused = goerrors.New("the type declares a validate tag no value can pass")
+
+/* maxReportedDeclarationFaults bounds the faults one VerifyType refusal lists; the count names the rest. */
+const maxReportedDeclarationFaults = 50
+
+/* declarationFault is one validate tag VerifyType refuses, under the path a payload spells the field with; a sequence or a map member is spelled "[]". */
+type declarationFault struct {
+    field string
+    tag   string
+    rule  string
+    code  string
+    cause string
+}
+
+/* VerifyType reads the validate tags of the fields Validate walks for a value of the type, through pointers, sequences, map values and embeds, each type once, and refuses a tag no value can pass: an unreadable tag, an unknown rule, a parameter set its constraint refuses, a constraint reporting a declaration error. An interface member is not followed, since what it holds is chosen per value. Pure: no runtime, no I/O; a constraint registered after the call is not seen. */
+func (instance *Validator) VerifyType(targetType reflect.Type) error {
+    if nil == targetType {
+        return nil
+    }
+
+    var faults []declarationFault
+    instance.verifyTypeMembers(targetType, nil, make(map[reflect.Type]bool), &faults)
+
+    if 0 == len(faults) {
+        return nil
+    }
+
+    sort.SliceStable(faults, func(left int, right int) bool {
+        return faults[left].field < faults[right].field
+    })
+
+    reported := faults
+    if maxReportedDeclarationFaults < len(reported) {
+        reported = reported[:maxReportedDeclarationFaults]
+    }
+
+    listed := make([]map[string]any, 0, len(reported))
+    for _, fault := range reported {
+        listed = append(listed, map[string]any{
+            "field": fault.field,
+            "tag":   fault.tag,
+            "rule":  fault.rule,
+            "code":  fault.code,
+            "cause": fault.cause,
+        })
+    }
+
+    context := exceptioncontract.Context{
+        "type":   targetType.String(),
+        "faults": listed,
+    }
+
+    if maxReportedDeclarationFaults < len(faults) {
+        context["faultCount"] = len(faults)
+    }
+
+    return exception.NewError(ErrTypeDeclarationRefused.Error(), context, ErrTypeDeclarationRefused)
+}
+
+func (instance *Validator) verifyTypeMembers(targetType reflect.Type, path *validationPath, seen map[reflect.Type]bool, faults *[]declarationFault) {
+    if true == seen[targetType] {
+        return
+    }
+    seen[targetType] = true
+
+    switch targetType.Kind() {
+    case reflect.Ptr:
+        instance.verifyTypeMembers(targetType.Elem(), path, seen, faults)
+    case reflect.Slice, reflect.Array, reflect.Map:
+        /* a map key is never validated, so only the element type is followed */
+        instance.verifyTypeMembers(targetType.Elem(), path.bracketed(""), seen, faults)
+    case reflect.Struct:
+        for _, step := range structValidationPlan(targetType) {
+            if true == step.embed {
+                *faults = append(*faults, instance.declarationFaults(step.field, embeddedFieldPath(step.field, path))...)
+
+                continue
+            }
+
+            fieldPath := path.member(step.jsonName)
+
+            *faults = append(*faults, instance.declarationFaults(step.field, fieldPath)...)
+
+            instance.verifyTypeMembers(step.field.Type, fieldPath, seen, faults)
+        }
+    }
+}
+
+/* declarationFaults reads one field's tag as applyFieldRules does, without a value. */
+func (instance *Validator) declarationFaults(field reflect.StructField, path *validationPath) []declarationFault {
+    validateTag := field.Tag.Get("validate")
+    if true == validationTagDeclaresNothing(validateTag) {
+        return nil
+    }
+
+    rules, err := parseValidationTag(validateTag)
+    if nil != err {
+        return []declarationFault{{
+            field: path.String(),
+            tag:   validateTag,
+            code:  ErrorInvalidRuleSyntax,
+            cause: err.Error(),
+        }}
+    }
+
+    var faults []declarationFault
+    for _, rule := range rules {
+        constraint, refusal := instance.ruleConstraint(rule)
+        if nil != refusal {
+            cause := refusal.message
+            if refusalCause, exists := refusal.context["cause"]; true == exists {
+                cause = cause + ": " + fmt.Sprint(refusalCause)
+            }
+
+            faults = append(faults, declarationFault{field: path.String(), tag: validateTag, rule: rule.name, code: refusal.code, cause: cause})
+
+            continue
+        }
+
+        reporter, reports := constraint.(validationcontract.DeclarationReporter)
+        if false == reports {
+            continue
+        }
+
+        declarationErr := reporter.DeclarationError()
+        if true == internal.IsNilInterface(declarationErr) {
+            continue
+        }
+
+        /* a regex answers invalidPattern at request time, so its boot fault carries the same code */
+        code := ErrorInvalidRuleSyntax
+        if _, isRegex := constraint.(*Regex); true == isRegex {
+            code = ConstraintRegexErrorInvalidPattern
+        }
+
+        faults = append(faults, declarationFault{field: path.String(), tag: validateTag, rule: rule.name, code: code, cause: declarationErr.Error()})
+    }
+
+    return faults
 }
 
 /* embeddedFieldPath names the embed the way an error can point at it: by its field name under the parent's path, since the embed itself has no json name of its own. */
@@ -1173,22 +1375,27 @@ func (instance *Validator) validateMap(value reflect.Value, path *validationPath
     return errors
 }
 
-func (instance *Validator) validateRule(validationContext validationcontract.ValidationContext, value any, rule validationRule) validationcontract.ValidationError {
-    fieldName := validationContext.Field
+/* ruleRefusal is why a rule resolves to no constraint, spelled as the field error Validate answers for it. */
+type ruleRefusal struct {
+    message string
+    code    string
+    context map[string]any
+}
 
+/* ruleConstraint answers the constraint a rule resolves to, or the refusal of its declaration: an unknown name or a parameter set the constraint refuses. Validate and VerifyType both ask it, so a value and a type are refused alike. */
+func (instance *Validator) ruleConstraint(rule validationRule) (validationcontract.Constraint, *ruleRefusal) {
     instance.mutex.RLock()
     _, exists := instance.constraints[rule.name]
     instance.mutex.RUnlock()
 
     if false == exists {
-        return NewValidationError(
-            fieldName,
-            "unknown validation rule",
-            ErrorUnknownRule,
-            map[string]any{
+        return nil, &ruleRefusal{
+            message: "unknown validation rule",
+            code:    ErrorUnknownRule,
+            context: map[string]any{
                 "rule": rule.name,
             },
-        )
+        }
     }
 
     constraint, parametersOk, refusalCause := instance.createConstraintWithParameters(rule.name, rule.parameters)
@@ -1202,12 +1409,22 @@ func (instance *Validator) validateRule(validationContext validationcontract.Val
             context["cause"] = refusalCause
         }
 
-        return NewValidationError(
-            fieldName,
-            "invalid validation rule parameter",
-            ErrorInvalidRuleSyntax,
-            context,
-        )
+        return nil, &ruleRefusal{
+            message: "invalid validation rule parameter",
+            code:    ErrorInvalidRuleSyntax,
+            context: context,
+        }
+    }
+
+    return constraint, nil
+}
+
+func (instance *Validator) validateRule(validationContext validationcontract.ValidationContext, value any, rule validationRule) validationcontract.ValidationError {
+    fieldName := validationContext.Field
+
+    constraint, refusal := instance.ruleConstraint(rule)
+    if nil != refusal {
+        return NewValidationError(fieldName, refusal.message, refusal.code, refusal.context)
     }
 
     err := constraint.Validate(validationContext, value)

@@ -1,6 +1,8 @@
 package contract
 
 import (
+    "reflect"
+
     "github.com/precision-soft/melody/v4/bound"
 )
 
@@ -35,6 +37,9 @@ type RouteOptions struct {
 
     /* Protection changes protections of the framework for this route; the zero value keeps every one. */
     Protection RouteProtectionConfig
+
+    /* RequestType is the body type the handler binds, whose validate tags the boot verifies against the application's validator; nil declares none, left to the first request. */
+    RequestType reflect.Type
 }
 
 /* RouteProtectionConfig is what a route changes of the framework's per-request protections; each field's zero value keeps its protection as the application set it. */

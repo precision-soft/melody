@@ -2,6 +2,7 @@ package validation
 
 import (
     "encoding/json"
+    "errors"
     "fmt"
     "reflect"
     "runtime"
@@ -3358,5 +3359,291 @@ func TestNewValidator_TheRegisteredParameterizedTemplatesCarryNoBound(t *testing
 
     if 0 != validatorInstance.constraints[ConstraintGreaterThan].(*GreaterThan).min || 0 != validatorInstance.constraints[ConstraintLessThan].(*LessThan).max {
         t.Fatalf("expected the comparison templates to carry no bound")
+    }
+}
+
+type verifyTypeUnknownRulePayload struct {
+    Name string `json:"name" validate:"notBlank,noSuchRule"`
+}
+
+type verifyTypeParameterizedWithoutParametersPayload struct {
+    Name string `json:"name" validate:"min"`
+}
+
+type verifyTypeParametersOnAPlainRulePayload struct {
+    Email string `json:"email" validate:"email=strict"`
+}
+
+type verifyTypeBrokenPatternPayload struct {
+    Code string `json:"code" validate:"regex=^[a$"`
+}
+
+type verifyTypeSortedPayload struct {
+    Zeta  string `json:"zeta" validate:"noSuchRule"`
+    Alpha string `json:"alpha" validate:"min"`
+    Mu    string `json:"mu" validate:"regex=^[a$"`
+}
+
+type verifyTypeLeaf struct {
+    Value string `json:"value" validate:"noSuchRule"`
+}
+
+type verifyTypeSequenceLeaf struct {
+    Value string `json:"value" validate:"noSuchRule"`
+}
+
+type verifyTypeMapLeaf struct {
+    Value string `json:"value" validate:"noSuchRule"`
+}
+
+type verifyTypePromoted struct {
+    Promoted string `json:"promoted" validate:"noSuchRule"`
+}
+
+type VerifyTypeTaggedEmbed struct{}
+
+type verifyTypeSoundPayload struct {
+    Code  string   `json:"code" validate:"notBlank,regex=^[a-z]+$"`
+    Name  string   `json:"name" validate:"min=2,max(value=8)"`
+    Codes []string `json:"codes" validate:"notEmpty"`
+}
+
+type verifyTypeNestedPayload struct {
+    verifyTypePromoted
+    VerifyTypeTaggedEmbed `validate:"noSuchRule"`
+    Pointer  *verifyTypeLeaf                  `json:"pointer"`
+    Sequence []verifyTypeSequenceLeaf         `json:"sequence"`
+    Mapped   map[string]verifyTypeMapLeaf     `json:"mapped"`
+}
+
+type verifyTypeNode struct {
+    Name     string                     `json:"name" validate:"noSuchRule"`
+    Next     *verifyTypeNode            `json:"next"`
+    Children []verifyTypeNode           `json:"children"`
+    Index    map[string]*verifyTypeNode `json:"index"`
+}
+
+type verifyTypeAmbiguousLeft struct {
+    Shared string `validate:"noSuchRule"`
+}
+
+type verifyTypeAmbiguousRight struct {
+    Shared string `validate:"noSuchRule"`
+}
+
+type verifyTypeSkippedPayload struct {
+    verifyTypeAmbiguousLeft
+    verifyTypeAmbiguousRight
+    hidden  string `validate:"noSuchRule"`
+    Omitted string `json:"-" validate:"noSuchRule"`
+    Skipped string `json:"skipped" validate:"-"`
+    Padded  string `json:"padded" validate:" - "`
+}
+
+type verifyTypeInterfacePayload struct {
+    Held any `json:"held"`
+}
+
+type verifyTypeMapKey struct {
+    Key string `validate:"noSuchRule"`
+}
+
+type verifyTypeMapKeyPayload struct {
+    Mapped map[verifyTypeMapKey]string `json:"mapped"`
+}
+
+func requireSingleFault(t *testing.T, err error, field string, rule string, code string) {
+    t.Helper()
+
+    faults := verifiedTypeFaults(t, err)
+    if 1 != len(faults) {
+        t.Fatalf("expected one fault, got %#v", faults)
+    }
+
+    if field != faults[0]["field"] || rule != faults[0]["rule"] || code != faults[0]["code"] {
+        t.Fatalf("expected the fault field=%q rule=%q code=%q, got %#v", field, rule, code, faults[0])
+    }
+}
+
+func TestValidatorVerifyType_SoundType_Passes(t *testing.T) {
+    validatorInstance := NewValidator(ValidatorConfig{})
+
+    if verifyErr := validatorInstance.VerifyType(reflect.TypeFor[testPayload]()); nil != verifyErr {
+        t.Fatalf("expected a sound type to pass, got %v", verifyErr)
+    }
+
+    if verifyErr := validatorInstance.VerifyType(reflect.TypeFor[verifyTypeSoundPayload]()); nil != verifyErr {
+        t.Fatalf("expected a sound pattern and sound parameters to pass, got %v", verifyErr)
+    }
+
+    if verifyErr := validatorInstance.VerifyType(nil); nil != verifyErr {
+        t.Fatalf("expected no type to pass, got %v", verifyErr)
+    }
+}
+
+func TestValidatorVerifyType_UnknownRule_Refused(t *testing.T) {
+    verifyErr := NewValidator(ValidatorConfig{}).VerifyType(reflect.TypeFor[verifyTypeUnknownRulePayload]())
+
+    requireSingleFault(t, verifyErr, "name", "noSuchRule", ErrorUnknownRule)
+}
+
+func TestValidatorVerifyType_UnreadableTag_Refused(t *testing.T) {
+    verifyErr := NewValidator(ValidatorConfig{}).VerifyType(reflect.TypeFor[payloadWithInvalidTag]())
+
+    requireSingleFault(t, verifyErr, "Name", "", ErrorInvalidRuleSyntax)
+}
+
+func TestValidatorVerifyType_ParameterizedRuleWithoutParameters_Refused(t *testing.T) {
+    verifyErr := NewValidator(ValidatorConfig{}).VerifyType(reflect.TypeFor[verifyTypeParameterizedWithoutParametersPayload]())
+
+    requireSingleFault(t, verifyErr, "name", ConstraintMinLength, ErrorInvalidRuleSyntax)
+}
+
+func TestValidatorVerifyType_ParametersOnARuleThatTakesNone_Refused(t *testing.T) {
+    verifyErr := NewValidator(ValidatorConfig{}).VerifyType(reflect.TypeFor[verifyTypeParametersOnAPlainRulePayload]())
+
+    requireSingleFault(t, verifyErr, "email", ConstraintEmail, ErrorInvalidRuleSyntax)
+}
+
+func TestValidatorVerifyType_PatternThatDoesNotCompile_Refused(t *testing.T) {
+    verifyErr := NewValidator(ValidatorConfig{}).VerifyType(reflect.TypeFor[verifyTypeBrokenPatternPayload]())
+
+    requireSingleFault(t, verifyErr, "code", ConstraintRegex, ConstraintRegexErrorInvalidPattern)
+}
+
+func TestValidatorVerifyType_ReportsEveryFaultSorted(t *testing.T) {
+    faults := verifiedTypeFaults(t, NewValidator(ValidatorConfig{}).VerifyType(reflect.TypeFor[verifyTypeSortedPayload]()))
+
+    fields := make([]string, 0, len(faults))
+    for _, fault := range faults {
+        fields = append(fields, fault["field"].(string))
+    }
+
+    if "alpha,mu,zeta" != strings.Join(fields, ",") {
+        t.Fatalf("expected every fault sorted by field, got %v", fields)
+    }
+}
+
+func TestValidatorVerifyType_ReportsAtMostFiftyFaultsAndTheirCount(t *testing.T) {
+    structFields := make([]reflect.StructField, 0, 51)
+    for index := 0; index < 51; index++ {
+        structFields = append(structFields, reflect.StructField{
+            Name: fmt.Sprintf("Field%02d", index),
+            Type: reflect.TypeFor[string](),
+            Tag:  `validate:"noSuchRule"`,
+        })
+    }
+
+    verifyErr := NewValidator(ValidatorConfig{}).VerifyType(reflect.StructOf(structFields))
+
+    faults := verifiedTypeFaults(t, verifyErr)
+    if 50 != len(faults) {
+        t.Fatalf("expected 50 faults listed, got %d", len(faults))
+    }
+
+    var exceptionErr *exception.Error
+    if false == errors.As(verifyErr, &exceptionErr) || 51 != exceptionErr.Context()["faultCount"] {
+        t.Fatalf("expected the count of every fault, got %#v", exceptionErr)
+    }
+}
+
+func TestValidatorVerifyType_FollowsPointersSequencesMapValuesAndEmbeds(t *testing.T) {
+    faults := verifiedTypeFaults(t, NewValidator(ValidatorConfig{}).VerifyType(reflect.TypeFor[*verifyTypeNestedPayload]()))
+
+    fields := make([]string, 0, len(faults))
+    for _, fault := range faults {
+        fields = append(fields, fault["field"].(string))
+    }
+
+    if "VerifyTypeTaggedEmbed,mapped[].value,pointer.value,promoted,sequence[].value" != strings.Join(fields, ",") {
+        t.Fatalf("expected a fault under the pointer, the sequence, the map value, the embed and the embed's own tag, got %v", fields)
+    }
+}
+
+func TestValidatorVerifyType_SelfReferencingType_Ends(t *testing.T) {
+    verifyErr := NewValidator(ValidatorConfig{}).VerifyType(reflect.TypeFor[verifyTypeNode]())
+
+    requireSingleFault(t, verifyErr, "name", "noSuchRule", ErrorUnknownRule)
+}
+
+func TestValidatorVerifyType_SkipsWhatValidateSkips(t *testing.T) {
+    if verifyErr := NewValidator(ValidatorConfig{}).VerifyType(reflect.TypeFor[verifyTypeSkippedPayload]()); nil != verifyErr {
+        t.Fatalf("expected an unexported, json-omitted, skip-marked and ambiguous field to be skipped, got %v", verifyErr)
+    }
+}
+
+func TestValidatorVerifyType_InterfaceMember_NotFollowed(t *testing.T) {
+    if verifyErr := NewValidator(ValidatorConfig{}).VerifyType(reflect.TypeFor[verifyTypeInterfacePayload]()); nil != verifyErr {
+        t.Fatalf("expected an interface member not to be followed, got %v", verifyErr)
+    }
+}
+
+func TestValidatorVerifyType_CustomConstraintRegisteredBefore_Known(t *testing.T) {
+    validatorInstance := NewValidator(ValidatorConfig{})
+    validatorInstance.RegisterConstraint("my_custom", &customConstraint{})
+
+    if verifyErr := validatorInstance.VerifyType(reflect.TypeFor[customPayload]()); nil != verifyErr {
+        t.Fatalf("expected a constraint registered before the call to be known, got %v", verifyErr)
+    }
+}
+
+func TestValidatorVerifyType_RegisteredAfter_Unknown(t *testing.T) {
+    validatorInstance := NewValidator(ValidatorConfig{})
+
+    verifyErr := validatorInstance.VerifyType(reflect.TypeFor[customPayload]())
+
+    validatorInstance.RegisterConstraint("my_custom", &customConstraint{})
+
+    requireSingleFault(t, verifyErr, "code", "my_custom", ErrorUnknownRule)
+}
+
+func TestValidatorVerifyType_AgreesWithValidate(t *testing.T) {
+    /* leftToTheValue: an interface member's type is chosen per value, so only Validate reaches it */
+    rows := []struct {
+        name           string
+        value          any
+        leftToTheValue bool
+    }{
+        {name: "sound", value: testPayload{Email: "a@example.com", Name: "abcd"}},
+        {name: "sound pattern", value: verifyTypeSoundPayload{Code: "abc", Name: "abc", Codes: []string{"a"}}},
+        {name: "unknown rule", value: verifyTypeUnknownRulePayload{Name: "x"}},
+        {name: "unreadable tag", value: payloadWithInvalidTag{Name: "x"}},
+        {name: "parameterized without parameters", value: verifyTypeParameterizedWithoutParametersPayload{Name: "x"}},
+        {name: "parameters on a plain rule", value: verifyTypeParametersOnAPlainRulePayload{Email: "a@example.com"}},
+        {name: "pattern that does not compile", value: verifyTypeBrokenPatternPayload{Code: "x"}},
+        {name: "nested", value: &verifyTypeNestedPayload{
+            Pointer:  &verifyTypeLeaf{},
+            Sequence: []verifyTypeSequenceLeaf{{}},
+            Mapped:   map[string]verifyTypeMapLeaf{"key": {}},
+        }},
+        {name: "skipped", value: verifyTypeSkippedPayload{}},
+        {name: "interface member", value: verifyTypeInterfacePayload{Held: verifyTypeLeaf{Value: "x"}}, leftToTheValue: true},
+        {name: "map key", value: verifyTypeMapKeyPayload{Mapped: map[verifyTypeMapKey]string{{Key: "x"}: "y"}}},
+        {name: "self reference", value: verifyTypeNode{Next: &verifyTypeNode{}}},
+    }
+
+    for _, row := range rows {
+        t.Run(row.name, func(t *testing.T) {
+            validatorInstance := NewValidator(ValidatorConfig{})
+
+            refused := nil != validatorInstance.VerifyType(reflect.TypeOf(row.value))
+
+            wiringError := false
+            if validationErrors, isCollection := validatorInstance.Validate(testValidationRuntime(), row.value).(ValidationErrors); true == isCollection {
+                wiringError = validationErrors.HasRuleWiringError()
+            }
+
+            if true == row.leftToTheValue {
+                if true == refused || false == wiringError {
+                    t.Fatalf("expected the member to be left to the value, refused=%v wiring=%v", refused, wiringError)
+                }
+
+                return
+            }
+
+            if refused != wiringError {
+                t.Fatalf("expected VerifyType to refuse exactly where Validate answers a wiring error, refused=%v wiring=%v", refused, wiringError)
+            }
+        })
     }
 }

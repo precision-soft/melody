@@ -1,5 +1,9 @@
 package contract
 
+import (
+    "reflect"
+)
+
 type RouteDefinition interface {
     Name() string
 
@@ -20,4 +24,7 @@ type RouteDefinition interface {
     Priority() int
 
     Attributes() map[string]any
+
+    /* RequestType is the body type the route declared through RouteOptions.RequestType, nil when it declared none. */
+    RequestType() reflect.Type
 }

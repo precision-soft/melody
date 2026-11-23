@@ -6,6 +6,7 @@ import (
     "fmt"
     nethttp "net/http"
     "net/http/httptest"
+    "sort"
     "strings"
     "testing"
     "time"
@@ -16,6 +17,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/message"
     "github.com/precision-soft/melody/v4/.example/page"
     "github.com/precision-soft/melody/v4/.example/route"
+    examplevalidation "github.com/precision-soft/melody/v4/.example/validation"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
     melodyconfig "github.com/precision-soft/melody/v4/config"
@@ -396,5 +398,55 @@ func TestSecurityHeaders_CarriesThePagesContentSecurityPolicyOverTheDefaults(t *
 
     if page.ContentSecurityPolicy != securityHeaders.ContentSecurityPolicy || (melodyhttpmiddleware.SecurityHeadersConfig{ContentSecurityPolicy: page.ContentSecurityPolicy}) != securityHeaders {
         t.Fatalf("expected the default set with the pages' policy, got %+v", securityHeaders)
+    }
+}
+
+func TestRegisterHttpRoutes_EveryJsonDoorDeclaresARequestTypeTheValidatorAdmits(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.trustedProxyResolver = newTrustedProxyResolver("", time.Now)
+    moduleInstance.catalogueWired = true
+    moduleInstance.eventStreamSlots = handlerevent.NewStreamSlots(1, 1)
+
+    client, clientErr := melodyawss3.NewClient("127.0.0.1:9", melodyawss3.Config{AccessKey: "test", SecretKey: "test", Region: "us-east-1", Insecure: true})
+    if nil != clientErr {
+        t.Fatalf("client: %v", clientErr)
+    }
+    moduleInstance.storageClient = client
+    moduleInstance.storageBucket = "melody-test"
+
+    router := melodyhttp.NewRouter()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
+    moduleInstance.RegisterHttpRoutes(&routeKernel{router: router, httpKernel: melodyhttp.NewKernel(router, melodyhttp.KernelConfig{}), container: containerInstance})
+
+    validator := examplevalidation.NewValidator()
+
+    var declared []string
+    for _, definition := range router.RouteDefinitions() {
+        if nil == definition.RequestType() {
+            continue
+        }
+
+        declared = append(declared, definition.Name())
+
+        if verifyErr := validator.VerifyType(definition.RequestType()); nil != verifyErr {
+            t.Fatalf("%s: expected the request type admitted, got %v", definition.Name(), verifyErr)
+        }
+    }
+
+    expected := []string{
+        route.AccessTokenIssueName,
+        route.AccessTokenRevokeDeviceName,
+        route.AccessTokenRevokeUserName,
+        route.CurrenciesApiCreateName,
+        route.CurrenciesApiUpdateName,
+        route.ProductsApiCreateName,
+        route.ProductsApiUpdateName,
+    }
+
+    sort.Strings(declared)
+    sort.Strings(expected)
+    if strings.Join(expected, ",") != strings.Join(declared, ",") {
+        t.Fatalf("expected the seven json doors to declare their type, got %v", declared)
     }
 }

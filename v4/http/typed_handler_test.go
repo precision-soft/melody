@@ -4,6 +4,7 @@ import (
     "context"
     nethttp "net/http"
     "net/http/httptest"
+    "reflect"
     "strconv"
     "strings"
     "testing"
@@ -502,5 +503,85 @@ func TestJsonHandler_HandsTheResponderTheCauseItNeedsToRenderTheDetail(t *testin
 
     if nil == exception.AsHttpException(receivedCause) {
         t.Fatalf("expected the cause to carry the http exception, got %T", receivedCause)
+    }
+}
+
+func handleJsonTestHandle(currentRuntime containercontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
+    return TextResponse(nethttp.StatusOK, body.Name), nil
+}
+
+func TestHandleJson_DeclaresTheRequestTypeOnTheRoute(t *testing.T) {
+    router := NewRouter()
+
+    HandleJson(router, "/items", handleJsonTestHandle, RouteOptions{Name: "items"}, JsonHandlerConfig{})
+
+    definition, exists := router.RouteDefinition("items")
+    if false == exists || reflect.TypeFor[jsonHandlerTestRequest]() != definition.RequestType() {
+        t.Fatalf("expected the bound type declared on the route, got %v", definition)
+    }
+}
+
+func TestHandleJson_ServesThroughJsonHandler(t *testing.T) {
+    router := NewRouter()
+
+    HandleJson(router, "/items", handleJsonTestHandle, RouteOptions{Methods: []string{nethttp.MethodPost}}, JsonHandlerConfig{})
+
+    matchResult, matched := router.Match(nethttp.MethodPost, "/items", "", "")
+    if false == matched {
+        t.Fatalf("expected the route to match")
+    }
+
+    runtimeInstance := newJsonHandlerRuntime()
+
+    response, handleErr := matchResult.Handler(runtimeInstance, httptest.NewRecorder(), NewRequest(httptest.NewRequest(nethttp.MethodPost, "/items", strings.NewReader(`{"name":"abc"}`)), runtimeInstance, RequestConfig{}))
+    if nil != handleErr || nil == response || nethttp.StatusOK != response.StatusCode() {
+        t.Fatalf("expected the handle to answer, got %v %v", response, handleErr)
+    }
+
+    _, refusedErr := matchResult.Handler(runtimeInstance, httptest.NewRecorder(), NewRequest(httptest.NewRequest(nethttp.MethodPost, "/items", strings.NewReader(`{"name":""}`)), runtimeInstance, RequestConfig{}))
+    requireJsonHandlerBadRequest(t, refusedErr)
+}
+
+func TestHandleJson_OptionsDeclaringAnotherType_Refused(t *testing.T) {
+    router := NewRouter()
+
+    defer func() {
+        recoveredErr, _ := recover().(*exception.Error)
+        if nil == recoveredErr || "the route options declare another request type than the handler binds" != recoveredErr.Message() || "/items" != recoveredErr.Context()["pattern"] || "string" != recoveredErr.Context()["declared"] || "http.jsonHandlerTestRequest" != recoveredErr.Context()["bound"] {
+            t.Fatalf("expected the conflicting type refused naming both, got %v", recoveredErr)
+        }
+
+        if 0 != len(router.RouteDefinitions()) {
+            t.Fatalf("expected no route registered")
+        }
+    }()
+
+    HandleJson(router, "/items", handleJsonTestHandle, RouteOptions{RequestType: reflect.TypeFor[string]()}, JsonHandlerConfig{})
+}
+
+func TestHandleJson_OptionsDeclaringTheSameType_Admitted(t *testing.T) {
+    router := NewRouter()
+
+    HandleJson(router, "/items", handleJsonTestHandle, RouteOptions{Name: "items", RequestType: reflect.TypeFor[jsonHandlerTestRequest]()}, JsonHandlerConfig{})
+
+    if _, exists := router.RouteDefinition("items"); false == exists {
+        t.Fatalf("expected the route registered")
+    }
+}
+
+func TestHandleJson_OnAGroup_KeepsTheTypeAndThePrefix(t *testing.T) {
+    router := NewRouter()
+    group := router.Group(GroupConfig{PathPrefix: "/api", NamePrefix: "api."})
+
+    HandleJson(group, "/items", handleJsonTestHandle, RouteOptions{Name: "items", Protection: RouteProtectionConfig{CsrfDisabled: true}, Methods: []string{nethttp.MethodPost}}, JsonHandlerConfig{})
+
+    definition, exists := router.RouteDefinition("api.items")
+    if false == exists || "/api/items" != definition.Pattern() || reflect.TypeFor[jsonHandlerTestRequest]() != definition.RequestType() {
+        t.Fatalf("expected the grouped route under its prefix with its type, got %v", definition)
+    }
+
+    protection, _ := definition.Attributes()[RouteAttributeProtection].(RouteProtectionConfig)
+    if false == protection.CsrfDisabled {
+        t.Fatalf("expected the grouped route to keep its protection")
     }
 }

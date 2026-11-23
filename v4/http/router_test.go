@@ -1227,3 +1227,31 @@ func TestRouter_Protection_MaxBodyBytes_CarriedUnderTheReservedAttribute(t *test
         t.Fatalf("expected the cap under %s, got %#v", RouteAttributeProtection, matchResult.RouteAttributes[RouteAttributeProtection])
     }
 }
+
+type routerRequestTypeBody struct {
+    Name string `json:"name"`
+}
+
+func TestRouter_RequestType_ReachesTheDefinition(t *testing.T) {
+    router := NewRouter()
+    router.Handle("/items", csrfProtectionTestHandler, RouteOptions{Name: "items", RequestType: reflect.TypeFor[routerRequestTypeBody]()})
+
+    definition, exists := router.RouteDefinition("items")
+    if false == exists || reflect.TypeFor[routerRequestTypeBody]() != definition.RequestType() {
+        t.Fatalf("expected the declared request type on the definition, got %v", definition)
+    }
+
+    if reflect.TypeFor[routerRequestTypeBody]() != router.RouteDefinitions()[0].RequestType() {
+        t.Fatalf("expected the declared request type in the listed definitions")
+    }
+}
+
+func TestRouter_RequestType_Undeclared_Nil(t *testing.T) {
+    router := NewRouter()
+    router.Handle("/items", csrfProtectionTestHandler, RouteOptions{Name: "items"})
+
+    definition, _ := router.RouteDefinition("items")
+    if nil != definition.RequestType() {
+        t.Fatalf("expected no request type, got %v", definition.RequestType())
+    }
+}

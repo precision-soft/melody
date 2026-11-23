@@ -26,3 +26,8 @@ type ParameterizedConstraint interface {
 
     WithParameters(parameters map[string]string) (Constraint, error)
 }
+
+/* DeclarationReporter is implemented by a constraint whose declaration can be wrong in a way its Validate reports only per value, a pattern that does not compile; DeclarationError answers that fault, nil when the declaration is sound, and Validator.VerifyType refuses the type declaring it. */
+type DeclarationReporter interface {
+    DeclarationError() error
+}

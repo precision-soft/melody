@@ -158,6 +158,7 @@ Every module below has one section, headed by its directory, and one row per exp
 | [`translation/contract.Loader`](../translation/contract/catalog.go) | application | an application loads its catalogues from its own source |
 | [`translation/contract.Translator`](../translation/contract/translator.go) | framework | the framework's translator |
 | [`validation/contract.Constraint`](../validation/contract/constraint.go) | application | every constraint an application writes implements it |
+| [`validation/contract.DeclarationReporter`](../validation/contract/constraint.go) | application | a constraint an application writes reports a fault of its own declaration through it |
 | [`validation/contract.ParameterizedConstraint`](../validation/contract/constraint.go) | application | a constraint an application writes with parameters implements it |
 | [`validation/contract.ValidationError`](../validation/contract/validation_error.go) | framework | the validator builds every validation error |
 

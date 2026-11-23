@@ -124,7 +124,7 @@ func issueAs(t *testing.T, userIdentifier string) (int, *melodysecurity.InMemory
     tokenStore := melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{})
 
     status := callAccessTokenDoor(t, accessTokenDoorCall{
-        handler:        IssueHandler(defaultTestDeviceIdentifierMaximumBytes),
+        handler:        melodyhttp.JsonHandler(Issue(defaultTestDeviceIdentifierMaximumBytes), melodyhttp.JsonHandlerConfig{}),
         path:           "/access-token/issue/",
         body:           `{"deviceIdentifier":"phone"}`,
         userIdentifier: userIdentifier,
@@ -141,7 +141,7 @@ func issueDevice(t *testing.T, deviceIdentifier string) (int, *melodysecurity.In
     body, _ := json.Marshal(map[string]string{"deviceIdentifier": deviceIdentifier})
 
     status := callAccessTokenDoor(t, accessTokenDoorCall{
-        handler:        IssueHandler(defaultTestDeviceIdentifierMaximumBytes),
+        handler:        melodyhttp.JsonHandler(Issue(defaultTestDeviceIdentifierMaximumBytes), melodyhttp.JsonHandlerConfig{}),
         path:           "/access-token/issue/",
         body:           string(body),
         userIdentifier: "user-2",
@@ -207,7 +207,7 @@ func TestIssueHandler_AFailedLookupOverAStoreThatCannotDeleteStillAnswersTheLook
 
     var handlerErr error
     callAccessTokenDoor(t, accessTokenDoorCall{
-        handler:        IssueHandler(defaultTestDeviceIdentifierMaximumBytes),
+        handler:        melodyhttp.JsonHandler(Issue(defaultTestDeviceIdentifierMaximumBytes), melodyhttp.JsonHandlerConfig{}),
         path:           "/access-token/issue/",
         body:           `{"deviceIdentifier":"phone"}`,
         userIdentifier: "user-2",
@@ -226,7 +226,7 @@ func TestIssueHandler_AFailedPutIsReturned(t *testing.T) {
 
     var handlerErr error
     callAccessTokenDoor(t, accessTokenDoorCall{
-        handler:        IssueHandler(defaultTestDeviceIdentifierMaximumBytes),
+        handler:        melodyhttp.JsonHandler(Issue(defaultTestDeviceIdentifierMaximumBytes), melodyhttp.JsonHandlerConfig{}),
         path:           "/access-token/issue/",
         body:           `{"deviceIdentifier":"phone"}`,
         userIdentifier: "user-2",
@@ -291,7 +291,7 @@ func TestRevokeDeviceHandler_RefusesADeviceIdentifierOutsideTheCeiling(t *testin
         body, _ := json.Marshal(map[string]string{"deviceIdentifier": deviceIdentifier})
 
         status := callAccessTokenDoor(t, accessTokenDoorCall{
-            handler:        RevokeDeviceHandler(),
+            handler:        melodyhttp.JsonHandler(RevokeDevice, melodyhttp.JsonHandlerConfig{}),
             path:           "/access-token/revoke-device/",
             body:           string(body),
             userIdentifier: "user-2",
@@ -306,7 +306,7 @@ func TestRevokeDeviceHandler_RefusesADeviceIdentifierOutsideTheCeiling(t *testin
         body, _ := json.Marshal(map[string]string{"deviceIdentifier": deviceIdentifier})
 
         status := callAccessTokenDoor(t, accessTokenDoorCall{
-            handler:        RevokeDeviceHandler(),
+            handler:        melodyhttp.JsonHandler(RevokeDevice, melodyhttp.JsonHandlerConfig{}),
             path:           "/access-token/revoke-device/",
             body:           string(body),
             userIdentifier: "user-2",
@@ -322,7 +322,7 @@ func TestIssueHandler_DeletesTheTokenWhenTheLookupFails(t *testing.T) {
     tokenStore := &lookupFailingTokenStore{InMemoryTokenStore: melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{}), lookupErr: errors.New("store unavailable")}
 
     status := callAccessTokenDoor(t, accessTokenDoorCall{
-        handler:        IssueHandler(defaultTestDeviceIdentifierMaximumBytes),
+        handler:        melodyhttp.JsonHandler(Issue(defaultTestDeviceIdentifierMaximumBytes), melodyhttp.JsonHandlerConfig{}),
         path:           "/access-token/issue/",
         body:           `{"deviceIdentifier":"phone"}`,
         userIdentifier: "user-2",
@@ -341,7 +341,7 @@ func TestIssueHandler_DeletesTheTokenWhenTheLookupFindsNothing(t *testing.T) {
     tokenStore := &lookupFailingTokenStore{InMemoryTokenStore: melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{})}
 
     status := callAccessTokenDoor(t, accessTokenDoorCall{
-        handler:        IssueHandler(defaultTestDeviceIdentifierMaximumBytes),
+        handler:        melodyhttp.JsonHandler(Issue(defaultTestDeviceIdentifierMaximumBytes), melodyhttp.JsonHandlerConfig{}),
         path:           "/access-token/issue/",
         body:           `{"deviceIdentifier":"phone"}`,
         userIdentifier: "user-2",
@@ -360,7 +360,7 @@ func TestRevokeUserHandler_RefusesAnIdentifierNoKeyCanCarry(t *testing.T) {
     body, _ := json.Marshal(map[string]string{"userIdentifier": strings.Repeat("u", 256)})
 
     status := callAccessTokenDoor(t, accessTokenDoorCall{
-        handler:        RevokeUserHandler(),
+        handler:        melodyhttp.JsonHandler(RevokeUser, melodyhttp.JsonHandlerConfig{}),
         path:           "/access-token/revoke-user/",
         body:           string(body),
         userIdentifier: "user-1",

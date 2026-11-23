@@ -255,6 +255,8 @@ Controller functions wired through [`ControllerHandler`](../../http/router_utili
 The response's status must be a final one, within 200 to 999: an informational status, 101 included, is refused before anything is written and answered as the rendered 500, since a response object cannot hand the connection over. A handler that upgrades the connection writes 101 on the `ResponseWriter` and hijacks it.
 
 For JSON-body endpoints, [`JsonHandler[RequestBody](handle, JsonHandlerConfig)`](../../http/typed_handler.go) wraps a handler so the framework decodes the request body into `Req` and runs the container validator before calling `handle(runtime, request, body)`; a decode/validation failure returns an error, or a caller-supplied response shape via `JsonHandlerConfig.ErrorResponder`, whose responder is handed a `JsonHandlerRefusal{Status, Message, Cause}`, the failure itself its cause. This removes the per-handler decode-and-validate block. The body is read through the same door `Request.BindJson` is, so the configured body limit answers 413, the decoder's own diagnosis travels as the refusal's cause, and a nil or empty body is refused by name. Validation travels the error body: the per-field detail reaches the client under `validationErrors` and a rule-wiring fault is recorded at error rather than at warning.
+
+[`HandleJson[RequestBody](routeHandler, pattern, handle, RouteOptions, JsonHandlerConfig)`](../../http/typed_handler.go) is `JsonHandler` and `Handle` in one call, on a router or a group, and declares `RequestBody` as the route's `RouteOptions.RequestType`; options already declaring another type are refused with `the route options declare another request type than the handler binds`, naming the pattern and both types. A route whose handler wraps `JsonHandler` behind a check of its own declares the type itself: `RouteOptions{RequestType: reflect.TypeFor[CreateRequest]()}`. A declared type is read at boot against the application's validator, in every mode, and a `validate` tag no value can pass refuses the boot naming the route (see [rule-declaration faults](VALIDATION.md#constants)); an undeclared type is found by its first request, as before. `RequestType` protects nothing and has no off value, so it is a field of `RouteOptions`, not of `Protection`.
 The responder runs under the kernel's containment discipline, and cannot turn a refusal into a success — a responder that answers no response leaves the original refusal standing, where returning `(nil, nil)` used to be read by the kernel as a handler that answered nothing and served an empty 204. A nil handle is refused at construction, a nil `ErrorResponder` leaves the refusals to the framework, and a `null` body is read as empty for every nilable kind rather than for pointers alone.
 
 ## The error body
@@ -670,7 +672,7 @@ Where the list itself comes from is the application's business — a constant as
 - [`type RouteHandler`](../../http/contract/router.go)
 - [`type RouteGroup`](../../http/contract/router_group.go)
 - [`type RouteOptions`](../../http/contract/route_option.go)
-- [`type RouteDefinition`](../../http/contract/route_definition.go)
+- [`type RouteDefinition`](../../http/contract/route_definition.go) — the accessors of a registered route, `RequestType()` the type its options declared, nil when none
 - [`type RouteRegistry`](../../http/contract/route_registry.go)
 - [`type UrlGenerator`](../../http/contract/url_generator.go) — `GeneratePath(routeName, PathConfig) (string, error)` and `GenerateUrl(routeName, PathConfig) (string, error)`
 - [`type PathConfig`](../../http/contract/url_generator.go) — `Parameters`, `Query` (`url.Values`, an empty key skipped, the keys sorted, a repeated key's values in order) and `Fragment`, written after the query
@@ -704,10 +706,11 @@ Where the list itself comes from is the application's business — a constant as
 - Router and registry:
     - [`NewRouter()`](../../http/router.go)
     - [`NewRouterWithRouteRegistry(httpcontract.RouteRegistry)`](../../http/router.go)
+    - [`HandleJson[RequestBody](routeHandler httpcontract.RouteHandler, pattern string, handle, options httpcontract.RouteOptions, config JsonHandlerConfig)`](../../http/typed_handler.go) — registers `JsonHandler(handle, config)` and declares `RequestBody` as the route's request type; another declared type is refused with a panic
     - [`ControllerHandler(controller any) httpcontract.Handler`](../../http/router_utility.go) — a controller function as a handler, its first argument the request, every later one resolved by its type from the runtime scope at each request; a function of another shape is refused with a panic where it is built
     - [`NewRouteRegistry()`](../../http/route_registry.go)
     - [`NewRouteGroup(router httpcontract.Router, groupConfig httpcontract.GroupConfig) httpcontract.RouteGroup`](../../http/router_group.go) — `Router.Group(groupConfig)` is the same door on a router; `PathPrefix`, `NamePrefix`, `Requirements` and `Defaults`, the maps copied, and the group takes no setting once built
-    - [`type RouteOptions`](../../http/contract/route_option.go) — `Name`, `Methods`, `Host`, `Schemes`, `Requirements`, `Defaults`, `Locales`, `Priority`, `Attributes` and `Protection`, the zero value a route under no name for every method, host and scheme; `Handle` takes it by value and copies its lists and maps
+    - [`type RouteOptions`](../../http/contract/route_option.go) — `Name`, `Methods`, `Host`, `Schemes`, `Requirements`, `Defaults`, `Locales`, `Priority`, `Attributes`, `Protection` and `RequestType`, the zero value a route under no name for every method, host and scheme; `Handle` takes it by value and copies its lists and maps
 
 - URL generator:
     - [`NewUrlGenerator(httpcontract.RouteRegistry, UrlGeneratorConfig)`](../../http/url_generator.go) — `UrlGeneratorConfig{PublicUrl}`, the base `GenerateUrl` answers behind, a base that is no clean http or https url refused with a panic naming the field

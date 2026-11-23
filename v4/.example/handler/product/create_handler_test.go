@@ -269,7 +269,7 @@ func TestApiCreateDoor_RefusesAPriceAtTheBound(t *testing.T) {
 }
 
 func TestApiCreateDoor_TagSpellsTheRepositoryBound(t *testing.T) {
-    for _, dto := range []any{CreateRequest{}, updateRequest{}} {
+    for _, dto := range []any{CreateRequest{}, UpdateRequest{}} {
         field, _ := reflect.TypeOf(dto).FieldByName("Price")
         if wanted := fmt.Sprintf("lessThan=%d", int64(repository.ProductPriceBound)); false == strings.Contains(field.Tag.Get("validate"), wanted) {
             t.Fatalf("%T: expected the price tag to spell %s, got %q", dto, wanted, field.Tag.Get("validate"))

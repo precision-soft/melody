@@ -33,7 +33,7 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
         }
 
         updateCurrency := melodyhttp.JsonHandler(
-            func(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request, dto updateRequest) (melodyhttpcontract.Response, error) {
+            func(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request, dto UpdateRequest) (melodyhttpcontract.Response, error) {
                 dto = dto.trimmed()
                 if refusal := presenter.ApiRefusalOfInvalidBody(runtimeInstance, request, dto); nil != refusal {
                     return refusal, nil
@@ -68,13 +68,13 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
     }
 }
 
-type updateRequest struct {
+type UpdateRequest struct {
     Code string `json:"code" validate:"notBlank,currencyCode"`
     Name string `json:"name" validate:"notBlank,min=2,max=120"`
 }
 
 /* trimmed answers the body as the door stores it, so it is validated in that spelling */
-func (instance updateRequest) trimmed() updateRequest {
+func (instance UpdateRequest) trimmed() UpdateRequest {
     instance.Code = strings.TrimSpace(instance.Code)
     instance.Name = strings.TrimSpace(instance.Name)
 

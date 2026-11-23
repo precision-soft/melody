@@ -1,6 +1,8 @@
 package config
 
 import (
+    "reflect"
+
     outboxintegration "github.com/precision-soft/melody/integrations/outbox/v4"
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
     "github.com/precision-soft/melody/v4/.example/handler"
@@ -79,9 +81,9 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.Handle("/encrypt/roundtrip", handler.EncryptRoundTripHandler(instance.cipher), melodyhttp.RouteOptions{Name: "example.encrypt.roundtrip", Methods: []string{"GET"}})
 
     deviceIdentifierMaximumBytes := instance.deviceIdentifierMaximumBytes()
-    router.Handle(route.AccessTokenIssuePattern, accesstoken.IssueHandler(deviceIdentifierMaximumBytes), melodyhttp.RouteOptions{Name: route.AccessTokenIssueName, Methods: []string{"POST"}})
-    router.Handle(route.AccessTokenRevokeDevicePattern, accesstoken.RevokeDeviceHandler(), melodyhttp.RouteOptions{Name: route.AccessTokenRevokeDeviceName, Methods: []string{"POST"}})
-    router.Handle(route.AccessTokenRevokeUserPattern, accesstoken.RevokeUserHandler(), melodyhttp.RouteOptions{Name: route.AccessTokenRevokeUserName, Methods: []string{"POST"}})
+    melodyhttp.HandleJson(router, route.AccessTokenIssuePattern, accesstoken.Issue(deviceIdentifierMaximumBytes), melodyhttp.RouteOptions{Name: route.AccessTokenIssueName, Methods: []string{"POST"}}, melodyhttp.JsonHandlerConfig{})
+    melodyhttp.HandleJson(router, route.AccessTokenRevokeDevicePattern, accesstoken.RevokeDevice, melodyhttp.RouteOptions{Name: route.AccessTokenRevokeDeviceName, Methods: []string{"POST"}}, melodyhttp.JsonHandlerConfig{})
+    melodyhttp.HandleJson(router, route.AccessTokenRevokeUserPattern, accesstoken.RevokeUser, melodyhttp.RouteOptions{Name: route.AccessTokenRevokeUserName, Methods: []string{"POST"}}, melodyhttp.JsonHandlerConfig{})
     router.Handle(route.DeviceIdentityPattern, handlersecure.MeHandler(), melodyhttp.RouteOptions{Name: route.DeviceIdentityName, Methods: []string{"GET"}})
 
     router.Handle(route.LoginPagePattern, handler.LoginPageHandler(), melodyhttp.RouteOptions{Name: route.LoginPageName, Methods: []string{"GET"}})
@@ -155,10 +157,10 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.Handle(route.ProductsListPagePattern, handlerproduct.ListPageHandler(), frontendRoute(route.ProductsListPageName, "GET"))
     router.Handle(route.ProductsCreatePagePattern, handlerproduct.CreatePageHandler(), frontendRoute(route.ProductsCreatePageName, "GET"))
     router.Handle(route.ProductsUpdatePagePattern, handlerproduct.UpdatePageHandler(), frontendRoute(route.ProductsUpdatePageName, "GET"))
-    router.Handle(route.ProductsApiCreatePattern, instance.throttledWrite(handlerproduct.ApiCreateHandler()), frontendRoute(route.ProductsApiCreateName, "POST"))
+    router.Handle(route.ProductsApiCreatePattern, instance.throttledWrite(handlerproduct.ApiCreateHandler()), frontendJsonRoute(route.ProductsApiCreateName, "POST", reflect.TypeFor[handlerproduct.CreateRequest]()))
     router.Handle(route.ProductsApiReadAllPattern, handlerproduct.ApiReadAllHandler(), frontendRoute(route.ProductsApiReadAllName, "GET"))
     router.Handle(route.ProductsApiReadPattern, handlerproduct.ApiReadHandler(), frontendRoute(route.ProductsApiReadName, "GET"))
-    router.Handle(route.ProductsApiUpdatePattern, instance.throttledWrite(handlerproduct.ApiUpdateHandler()), frontendRoute(route.ProductsApiUpdateName, "PUT"))
+    router.Handle(route.ProductsApiUpdatePattern, instance.throttledWrite(handlerproduct.ApiUpdateHandler()), frontendJsonRoute(route.ProductsApiUpdateName, "PUT", reflect.TypeFor[handlerproduct.UpdateRequest]()))
     router.Handle(route.ProductsApiDeletePattern, instance.throttledWrite(handlerproduct.ApiDeleteHandler()), frontendRoute(route.ProductsApiDeleteName, "DELETE"))
 
     router.Handle(route.UsersListPagePattern, handleruser.ListPageHandler(), frontendRoute(route.UsersListPageName, "GET"))
@@ -180,14 +182,22 @@ func (instance *Module) registerCurrencyApiRoutes(router melodyhttpcontract.Rout
         },
     )
     currencyApi.Handle(route.CurrenciesApiReadAllRelativePattern, handlercurrency.ApiReadAllHandler(), frontendRoute(route.CurrenciesApiReadAllRelativeName, "GET"))
-    currencyApi.Handle(route.CurrenciesApiCreateRelativePattern, instance.throttledWrite(handlercurrency.ApiCreateHandler()), frontendRoute(route.CurrenciesApiCreateRelativeName, "POST"))
-    currencyApi.Handle(route.CurrenciesApiUpdateRelativePattern, instance.throttledWrite(handlercurrency.ApiUpdateHandler()), frontendRoute(route.CurrenciesApiUpdateRelativeName, "PUT"))
+    currencyApi.Handle(route.CurrenciesApiCreateRelativePattern, instance.throttledWrite(handlercurrency.ApiCreateHandler()), frontendJsonRoute(route.CurrenciesApiCreateRelativeName, "POST", reflect.TypeFor[handlercurrency.CreateRequest]()))
+    currencyApi.Handle(route.CurrenciesApiUpdateRelativePattern, instance.throttledWrite(handlercurrency.ApiUpdateHandler()), frontendJsonRoute(route.CurrenciesApiUpdateRelativeName, "PUT", reflect.TypeFor[handlercurrency.UpdateRequest]()))
     currencyApi.Handle(route.CurrenciesApiDeleteRelativePattern, instance.throttledWrite(handlercurrency.ApiDeleteHandler()), frontendRoute(route.CurrenciesApiDeleteRelativeName, "DELETE"))
 }
 
 /* frontendRoute marks a route as exposed in the frontend zone so its URL is generatable by name from the route manifest (window.melodyRoutes) that the admin SPA resolves data-route / route(...) calls against. */
 func frontendRoute(name string, method string) melodyhttpcontract.RouteOptions {
     return melodyhttp.RouteOptions{Name: name, Methods: []string{method}, Attributes: melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZoneFrontend)}
+}
+
+/* frontendJsonRoute declares the body type a json handler wrapped behind its role check binds, so the boot verifies its validate tags */
+func frontendJsonRoute(name string, method string, requestType reflect.Type) melodyhttpcontract.RouteOptions {
+    options := frontendRoute(name, method)
+    options.RequestType = requestType
+
+    return options
 }
 
 var _ melodyapplicationcontract.HttpModule = (*Module)(nil)

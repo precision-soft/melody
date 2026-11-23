@@ -234,6 +234,7 @@ func buildRouteValue(pattern string, handler httpcontract.Handler, options httpc
         locales:            append([]string{}, options.Locales...),
         priority:           options.Priority,
         attributes:         attributes,
+        requestType:        options.RequestType,
     }
 }
 

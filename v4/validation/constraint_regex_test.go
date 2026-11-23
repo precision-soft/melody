@@ -117,3 +117,17 @@ func TestRegex_TheConstructorRefusesAnEmptyPattern(t *testing.T) {
         t.Fatalf("expected the empty string to stay optional under the empty pattern, got %v", validationError)
     }
 }
+
+func TestRegexDeclarationError_AnswersTheCompileError(t *testing.T) {
+    constraint := NewRegex("^[a$")
+
+    if nil == constraint.DeclarationError() || constraint.Error() != constraint.DeclarationError() {
+        t.Fatalf("expected the compile error as the declaration error, got %v", constraint.DeclarationError())
+    }
+}
+
+func TestRegexDeclarationError_SoundPattern_Nil(t *testing.T) {
+    if declarationErr := NewRegex("^a+$").DeclarationError(); nil != declarationErr {
+        t.Fatalf("expected a sound pattern to report no declaration error, got %v", declarationErr)
+    }
+}

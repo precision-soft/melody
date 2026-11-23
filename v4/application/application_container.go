@@ -5,6 +5,7 @@ import (
     "io"
     "os"
     "path/filepath"
+    "reflect"
     "syscall"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
@@ -26,6 +27,7 @@ import (
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     "github.com/precision-soft/melody/v4/messagebus"
+    "github.com/precision-soft/melody/v4/openapi"
     "github.com/precision-soft/melody/v4/security"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
     "github.com/precision-soft/melody/v4/serializer"
@@ -595,3 +597,111 @@ func (instance *Application) buildMessageBusTransportsCloser() {
 
 var _ applicationcontract.ServiceRegistrar = (*Application)(nil)
 var _ applicationcontract.ScopedServiceRegistrar = (*Application)(nil)
+
+/* declaredRequestType is one request type the boot verifies, under the route that declared it. */
+type declaredRequestType struct {
+    route       string
+    requestType reflect.Type
+}
+
+/* verifyRequestTypes refuses the boot, in every mode, when a request type a route declares, or its openapi descriptor names, carries a validate tag no value can pass; with none declared, no validator is resolved. */
+func (instance *Application) verifyRequestTypes(bootRuntime containercontract.Runtime) {
+    declared := instance.declaredRequestTypes(bootRuntime)
+    if 0 == len(declared) {
+        return
+    }
+
+    validator, resolveErr := runtime.FromRuntime[*validation.Validator](bootRuntime, validation.ServiceValidator)
+    if nil != resolveErr {
+        exception.Panic(
+            exception.NewError(
+                "the request types cannot be verified",
+                exceptioncontract.Context{
+                    "service": validation.ServiceValidator,
+                },
+                resolveErr,
+            ),
+        )
+    }
+
+    verified := make(map[reflect.Type]error)
+    routes := make(map[string]string)
+    var refusals []error
+
+    for _, declaration := range declared {
+        verifyErr, done := verified[declaration.requestType]
+        if false == done {
+            verifyErr = validator.VerifyType(declaration.requestType)
+            verified[declaration.requestType] = verifyErr
+
+            if nil != verifyErr {
+                refusals = append(refusals, verifyErr)
+            }
+        }
+
+        if nil != verifyErr {
+            routes[declaration.route] = declaration.requestType.String()
+        }
+    }
+
+    if 0 == len(refusals) {
+        return
+    }
+
+    exception.Panic(
+        exception.NewError(
+            "a route's request type declares a validate tag no value can pass",
+            exceptioncontract.Context{
+                "routes": routes,
+            },
+            errors.Join(refusals...),
+        ),
+    )
+}
+
+/* declaredRequestTypes answers the type each route declared and, for a named route, the one its openapi descriptor names; a registry that cannot be built is left to its first consumer, as markOpenApiRegistryServing leaves it. */
+func (instance *Application) declaredRequestTypes(bootRuntime containercontract.Runtime) []declaredRequestType {
+    var declared []declaredRequestType
+
+    routeDefinitions := instance.kernel.HttpRouter().RouteDefinitions()
+
+    for _, routeDefinition := range routeDefinitions {
+        if nil == routeDefinition.RequestType() {
+            continue
+        }
+
+        declared = append(declared, declaredRequestType{route: routeLabel(routeDefinition), requestType: routeDefinition.RequestType()})
+    }
+
+    if false == instance.kernel.ServiceContainer().Has(openapi.ServiceOpenApiRegistry) {
+        return declared
+    }
+
+    registry, registryErr := runtime.FromRuntime[*openapi.Registry](bootRuntime, openapi.ServiceOpenApiRegistry)
+    if nil != registryErr {
+        return declared
+    }
+
+    for _, routeDefinition := range routeDefinitions {
+        if "" == routeDefinition.Name() {
+            continue
+        }
+
+        descriptor, described := registry.Get(routeDefinition.Name())
+        if false == described || nil == descriptor.RequestType {
+            continue
+        }
+
+        declared = append(declared, declaredRequestType{route: routeDefinition.Name(), requestType: descriptor.RequestType})
+    }
+
+    return declared
+}
+
+func routeLabel(routeDefinition httpcontract.RouteDefinition) string {
+    if "" != routeDefinition.Name() {
+        return routeDefinition.Name()
+    }
+
+    return routeDefinition.Pattern()
+}

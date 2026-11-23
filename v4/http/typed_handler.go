@@ -74,6 +74,37 @@ func JsonHandler[RequestBody any](
     }
 }
 
+/* HandleJson registers JsonHandler's handler for the pattern and declares RequestBody as the route's request type, so the boot verifies its validate tags; options declaring another request type are refused. */
+func HandleJson[RequestBody any](
+    routeHandler httpcontract.RouteHandler,
+    pattern string,
+    handle func(runtimeInstance containercontract.Runtime, request httpcontract.Request, body RequestBody) (httpcontract.Response, error),
+    options httpcontract.RouteOptions,
+    config JsonHandlerConfig,
+) {
+    boundType := reflect.TypeFor[RequestBody]()
+
+    if nil != options.RequestType && boundType != options.RequestType {
+        exception.Panic(
+            exception.NewError(
+                "the route options declare another request type than the handler binds",
+                exceptioncontract.Context{
+                    "pattern":  pattern,
+                    "declared": options.RequestType.String(),
+                    "bound":    boundType.String(),
+                },
+                nil,
+            ),
+        )
+    }
+
+    handler := JsonHandler(handle, config)
+
+    options.RequestType = boundType
+
+    routeHandler.Handle(pattern, handler, options)
+}
+
 /* boundBodyIsNil reads every kind a json null can leave nil, reflecting over the typed value; an invalid Value, RequestBody as an unset `any`, reads as nil. */
 func boundBodyIsNil(body any) bool {
     bodyValue := reflect.ValueOf(body)

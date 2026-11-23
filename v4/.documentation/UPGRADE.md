@@ -104,6 +104,22 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** An application that raised `MELODY_HTTP_MAX_REQUEST_BODY_BYTES` for one upload route lowers the key back and sets `Protection.MaxBodyBytes` on that route.
 
+### Validation: a declared request type with a wrong validate tag refuses the boot
+
+**What changed.** A route that declares its body type, through `RouteOptions.RequestType`, [`http.HandleJson`](../http/typed_handler.go) or the openapi descriptor's `RequestType` of a named route, has the type read at boot, in every mode, by [`(*validation.Validator).VerifyType`](../validation/validator.go) against the validator the application registered: a tag that does not parse, an unknown rule, a parameter set its constraint refuses and a pattern that does not compile refuse the boot.
+
+**Symptom.** The boot ends with `a route's request type declares a validate tag no value can pass`, naming each route and its type, every field, tag and rule under the cause.
+
+**Remedy.** Fix the tag; register a custom constraint where the validator is built (its provider), not after boot; put `validate:"-"` on a field that must carry none. There is no switch: the route could never have served that body. A type bound without a declaration is still found by its first request, at the same status in every environment.
+
+### Http: a route definition answers its request type
+
+**What changed.** The framework-implemented [`httpcontract.RouteDefinition`](../http/contract/route_definition.go) gains `RequestType() reflect.Type`, the type the route's options declared.
+
+**Symptom.** A type implementing `httpcontract.RouteDefinition`, a test fake, does not compile.
+
+**Remedy.** Add `RequestType() reflect.Type { return nil }`.
+
 ### Http: `httpcontract.Request` gains `MaxBodyBytes`, and `Post` changes
 
 **What changed.** The framework-implemented [`httpcontract.Request`](../http/contract/request.go) gains `MaxBodyBytes() int` and `Post` answers an error.

@@ -26,6 +26,7 @@ func (instance fakeRoute) Defaults() map[string]string     { return nil }
 func (instance fakeRoute) Locales() []string               { return nil }
 func (instance fakeRoute) Priority() int                   { return instance.priority }
 func (instance fakeRoute) Attributes() map[string]any      { return nil }
+func (instance fakeRoute) RequestType() reflect.Type        { return nil }
 
 func keysOf(paths map[string]PathItem) []string {
     keys := make([]string, 0, len(paths))

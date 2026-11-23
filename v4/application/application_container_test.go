@@ -4,8 +4,11 @@ import (
     "context"
     "errors"
     "io"
+    nethttp "net/http"
     "os"
+    "os/exec"
     "path/filepath"
+    "reflect"
     "slices"
     "strconv"
     "strings"
@@ -37,6 +40,7 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     "github.com/precision-soft/melody/v4/messagebus"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
+    "github.com/precision-soft/melody/v4/openapi"
     "github.com/precision-soft/melody/v4/security"
     securityconfig "github.com/precision-soft/melody/v4/security/config"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -45,6 +49,7 @@ import (
     "github.com/precision-soft/melody/v4/session"
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
     "github.com/precision-soft/melody/v4/validation"
+    validationcontract "github.com/precision-soft/melody/v4/validation/contract"
 )
 
 type testKernel struct {
@@ -1333,4 +1338,235 @@ func openBootRuntime(t *testing.T, applicationInstance *Application) {
     t.Cleanup(func() {
         _ = finish()
     })
+}
+
+type requestTypeUnknownRuleBody struct {
+    Name string `json:"name" validate:"noSuchRule"`
+}
+
+type requestTypeBrokenPatternBody struct {
+    Code string `json:"code" validate:"regex=^[a$"`
+}
+
+type requestTypeSoundBody struct {
+    Name string `json:"name" validate:"notBlank"`
+}
+
+type requestTypeApplicationRuleBody struct {
+    Name string `json:"name" validate:"applicationRule"`
+}
+
+type requestTypeApplicationConstraint struct{}
+
+func (instance *requestTypeApplicationConstraint) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
+    return nil
+}
+
+func requestTypeTestHandler(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    return http.EmptyResponse(nethttp.StatusNoContent), nil
+}
+
+/* requestTypeRefusal runs the boot's request-type verification and answers its refusal, nil when it passes. */
+func requestTypeRefusal(t *testing.T, applicationInstance *Application) (refusal *exception.Error) {
+    t.Helper()
+
+    defer func() {
+        if recovered := recover(); nil != recovered {
+            refusal, _ = recovered.(*exception.Error)
+            if nil == refusal {
+                t.Fatalf("expected an *exception.Error, got %v", recovered)
+            }
+        }
+    }()
+
+    applicationInstance.verifyRequestTypes(applicationInstance.kernel.BootRuntime())
+
+    return nil
+}
+
+func newRequestTypeBootApplication(t *testing.T) *Application {
+    t.Helper()
+
+    applicationInstance := newEnvironmentKeyBootApplication(t, nil)
+    applicationInstance.RegisterService(
+        validation.ServiceValidator,
+        func(resolver containercontract.Resolver) (*validation.Validator, error) {
+            return validation.NewValidator(validation.ValidatorConfig{}), nil
+        },
+        container.RegisterOptions{},
+    )
+    openBootRuntime(t, applicationInstance)
+
+    return applicationInstance
+}
+
+func TestApplicationBoot_RequestTypeWithAnUnknownRule_Refused(t *testing.T) {
+    applicationInstance := newRequestTypeBootApplication(t)
+    applicationInstance.kernel.HttpRouter().Handle("/items", requestTypeTestHandler, httpcontract.RouteOptions{Name: "items", RequestType: reflect.TypeFor[requestTypeUnknownRuleBody]()})
+    applicationInstance.kernel.HttpRouter().Handle("/sound", requestTypeTestHandler, httpcontract.RouteOptions{RequestType: reflect.TypeFor[requestTypeSoundBody]()})
+
+    refusal := requestTypeRefusal(t, applicationInstance)
+    if nil == refusal || "a route's request type declares a validate tag no value can pass" != refusal.Message() || false == errors.Is(refusal, validation.ErrTypeDeclarationRefused) {
+        t.Fatalf("expected the boot refused over the request type, got %v", refusal)
+    }
+
+    routes, _ := refusal.Context()["routes"].(map[string]string)
+    if 1 != len(routes) || "application.requestTypeUnknownRuleBody" != routes["items"] {
+        t.Fatalf("expected the refused route named with its type, got %#v", refusal.Context()["routes"])
+    }
+}
+
+func TestApplicationBoot_RequestTypeOfAnUnnamedRoute_NamedByItsPattern(t *testing.T) {
+    applicationInstance := newRequestTypeBootApplication(t)
+    applicationInstance.kernel.HttpRouter().Handle("/items", requestTypeTestHandler, httpcontract.RouteOptions{RequestType: reflect.TypeFor[requestTypeBrokenPatternBody]()})
+
+    refusal := requestTypeRefusal(t, applicationInstance)
+    if nil == refusal {
+        t.Fatalf("expected the boot refused")
+    }
+
+    if routes, _ := refusal.Context()["routes"].(map[string]string); "application.requestTypeBrokenPatternBody" != routes["/items"] {
+        t.Fatalf("expected the route named by its pattern, got %#v", refusal.Context()["routes"])
+    }
+}
+
+func TestApplicationBoot_TypeDescribedThroughOpenApi_Refused(t *testing.T) {
+    applicationInstance := newRequestTypeBootApplication(t)
+    registry := openapi.NewRegistry()
+    registry.Describe("items", openapi.Descriptor{RequestType: reflect.TypeFor[requestTypeUnknownRuleBody]()})
+    applicationInstance.RegisterService(
+        openapi.ServiceOpenApiRegistry,
+        func(resolver containercontract.Resolver) (*openapi.Registry, error) {
+            return registry, nil
+        },
+        container.RegisterOptions{},
+    )
+    applicationInstance.kernel.HttpRouter().Handle("/items", requestTypeTestHandler, httpcontract.RouteOptions{Name: "items"})
+
+    refusal := requestTypeRefusal(t, applicationInstance)
+    if nil == refusal {
+        t.Fatalf("expected the described type refused")
+    }
+
+    if routes, _ := refusal.Context()["routes"].(map[string]string); "application.requestTypeUnknownRuleBody" != routes["items"] {
+        t.Fatalf("expected the described route named, got %#v", refusal.Context()["routes"])
+    }
+}
+
+func TestApplicationBoot_EveryRefusedRequestTypeReportedAtOnce(t *testing.T) {
+    applicationInstance := newRequestTypeBootApplication(t)
+    applicationInstance.kernel.HttpRouter().Handle("/first", requestTypeTestHandler, httpcontract.RouteOptions{Name: "first", RequestType: reflect.TypeFor[requestTypeUnknownRuleBody]()})
+    applicationInstance.kernel.HttpRouter().Handle("/again", requestTypeTestHandler, httpcontract.RouteOptions{Name: "again", RequestType: reflect.TypeFor[requestTypeUnknownRuleBody]()})
+    applicationInstance.kernel.HttpRouter().Handle("/second", requestTypeTestHandler, httpcontract.RouteOptions{Name: "second", RequestType: reflect.TypeFor[requestTypeBrokenPatternBody]()})
+
+    refusal := requestTypeRefusal(t, applicationInstance)
+    if nil == refusal {
+        t.Fatalf("expected the boot refused")
+    }
+
+    routes, _ := refusal.Context()["routes"].(map[string]string)
+    if 3 != len(routes) || "" == routes["first"] || "" == routes["again"] || "" == routes["second"] {
+        t.Fatalf("expected every refused route reported, got %#v", refusal.Context()["routes"])
+    }
+
+    joined, isJoined := refusal.Unwrap().(interface{ Unwrap() []error })
+    if false == isJoined || 2 != len(joined.Unwrap()) {
+        t.Fatalf("expected one cause per refused type, got %v", refusal.Unwrap())
+    }
+}
+
+func TestApplicationBoot_VerifiesAgainstTheApplicationsValidator(t *testing.T) {
+    applicationInstance := newEnvironmentKeyBootApplication(t, nil)
+    applicationInstance.RegisterService(
+        validation.ServiceValidator,
+        func(resolver containercontract.Resolver) (*validation.Validator, error) {
+            validatorInstance := validation.NewValidator(validation.ValidatorConfig{})
+            validatorInstance.RegisterConstraint("applicationRule", &requestTypeApplicationConstraint{})
+
+            return validatorInstance, nil
+        },
+        container.RegisterOptions{},
+    )
+    openBootRuntime(t, applicationInstance)
+    applicationInstance.kernel.HttpRouter().Handle("/items", requestTypeTestHandler, httpcontract.RouteOptions{RequestType: reflect.TypeFor[requestTypeApplicationRuleBody]()})
+
+    if refusal := requestTypeRefusal(t, applicationInstance); nil != refusal {
+        t.Fatalf("expected the application's own constraint known, got %v", refusal)
+    }
+}
+
+func TestApplicationBoot_ValidatorServiceOfAnotherType_Refused(t *testing.T) {
+    applicationInstance := newEnvironmentKeyBootApplication(t, nil)
+    applicationInstance.RegisterService(
+        validation.ServiceValidator,
+        func(resolver containercontract.Resolver) (*requestTypeApplicationConstraint, error) {
+            return &requestTypeApplicationConstraint{}, nil
+        },
+        container.RegisterOptions{},
+    )
+    openBootRuntime(t, applicationInstance)
+    applicationInstance.kernel.HttpRouter().Handle("/items", requestTypeTestHandler, httpcontract.RouteOptions{RequestType: reflect.TypeFor[requestTypeSoundBody]()})
+
+    refusal := requestTypeRefusal(t, applicationInstance)
+    if nil == refusal || "the request types cannot be verified" != refusal.Message() || validation.ServiceValidator != refusal.Context()["service"] {
+        t.Fatalf("expected the validator service refused, got %v", refusal)
+    }
+}
+
+func TestApplicationBoot_NoRequestTypeDeclared_ResolvesNoValidator(t *testing.T) {
+    applicationInstance := newEnvironmentKeyBootApplication(t, nil)
+    var resolved atomic.Int32
+    applicationInstance.RegisterService(
+        validation.ServiceValidator,
+        func(resolver containercontract.Resolver) (*validation.Validator, error) {
+            resolved.Add(1)
+
+            return nil, errors.New("the validator may not be built")
+        },
+        container.RegisterOptions{},
+    )
+    openBootRuntime(t, applicationInstance)
+    applicationInstance.kernel.HttpRouter().Handle("/items", requestTypeTestHandler, httpcontract.RouteOptions{Name: "items"})
+
+    if refusal := requestTypeRefusal(t, applicationInstance); nil != refusal || 0 != resolved.Load() {
+        t.Fatalf("expected nothing resolved with no type declared, got %v after %d resolutions", refusal, resolved.Load())
+    }
+}
+
+func TestApplicationBoot_UndeclaredType_LeftToTheRequest(t *testing.T) {
+    applicationInstance := newRequestTypeBootApplication(t)
+    applicationInstance.kernel.HttpRouter().Handle("/items", http.JsonHandler(func(runtimeInstance containercontract.Runtime, request httpcontract.Request, body requestTypeUnknownRuleBody) (httpcontract.Response, error) {
+        return http.EmptyResponse(nethttp.StatusNoContent), nil
+    }, http.JsonHandlerConfig{}), httpcontract.RouteOptions{Name: "items"})
+
+    if refusal := requestTypeRefusal(t, applicationInstance); nil != refusal {
+        t.Fatalf("expected a type bound without a declaration left to the request, got %v", refusal)
+    }
+}
+
+const requestTypeCliBootProbeMarker = "MELODY_TEST_REQUEST_TYPE_CLI_BOOT_PROBE"
+
+func TestApplicationBoot_VerifiesRequestTypesInCliMode(t *testing.T) {
+    if "" != os.Getenv(requestTypeCliBootProbeMarker) {
+        applicationInstance := newEnvironmentKeyBootApplication(t, nil)
+        if config.ModeCli != applicationInstance.runtimeFlags.Mode() {
+            os.Exit(94)
+        }
+
+        applicationInstance.RegisterHttpRoute("/items", requestTypeTestHandler, httpcontract.RouteOptions{Name: "items", RequestType: reflect.TypeFor[requestTypeUnknownRuleBody]()})
+
+        applicationInstance.Boot()
+
+        os.Exit(93)
+    }
+
+    child := exec.Command(os.Args[0], "-test.run=^TestApplicationBoot_VerifiesRequestTypesInCliMode$")
+    child.Env = append(os.Environ(), requestTypeCliBootProbeMarker+"=1")
+
+    output, runErr := child.CombinedOutput()
+
+    exitError, isExitError := runErr.(*exec.ExitError)
+    if false == isExitError || 1 != exitError.ExitCode() || false == strings.Contains(string(output), "a route's request type declares a validate tag no value can pass") {
+        t.Fatalf("expected the cli boot to exit 1 over the request type, got err %v with output: %s", runErr, string(output))
+    }
 }

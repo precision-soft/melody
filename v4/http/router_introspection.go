@@ -2,6 +2,7 @@ package http
 
 import (
     "encoding/json"
+    "reflect"
 
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
 )
@@ -17,6 +18,7 @@ func newRouteDefinition(
     locales []string,
     priority int,
     attributes map[string]any,
+    requestType reflect.Type,
 ) *RouteDefinition {
     copiedMethods := []string{}
     if nil != methods {
@@ -68,6 +70,7 @@ func newRouteDefinition(
         locales:      copiedLocales,
         priority:     priority,
         attributes:   copiedAttributes,
+        requestType:  requestType,
     }
 }
 
@@ -82,6 +85,7 @@ type RouteDefinition struct {
     locales      []string
     priority     int
     attributes   map[string]any
+    requestType  reflect.Type
 }
 
 func (instance *RouteDefinition) Name() string { return instance.name }
@@ -154,6 +158,8 @@ func (instance *RouteDefinition) Attributes() map[string]any {
 
     return copied
 }
+
+func (instance *RouteDefinition) RequestType() reflect.Type { return instance.requestType }
 
 func (instance *RouteDefinition) MarshalJSON() ([]byte, error) {
     type jsonDefinition struct {
@@ -237,5 +243,6 @@ func mapRouteToDefinition(routeValue route) *RouteDefinition {
         routeValue.locales,
         routeValue.priority,
         attributes,
+        routeValue.requestType,
     )
 }

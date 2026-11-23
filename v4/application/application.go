@@ -206,6 +206,8 @@ func (instance *Application) Boot() kernelcontract.Kernel {
         instance.bootHttpPipeline(bootRuntime)
     }
 
+    instance.verifyRequestTypes(bootRuntime)
+
     /* after the services built at boot, so a lazy handle a factory or a boot-built service created is verified too */
     instance.verifyLazyHandles()
 

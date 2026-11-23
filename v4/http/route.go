@@ -1,6 +1,7 @@
 package http
 
 import (
+    "reflect"
     "regexp"
     "slices"
 
@@ -115,6 +116,8 @@ type route struct {
     locales    []string
     priority   int
     attributes map[string]any
+
+    requestType reflect.Type
 }
 
 type routeTreeNode struct {
