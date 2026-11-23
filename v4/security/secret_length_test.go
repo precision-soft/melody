@@ -122,29 +122,6 @@ func expectShortSecretRefusal(t *testing.T, key string, field string, secretLeng
     callback()
 }
 
-func TestNewJwtTokenValidator_RefusesASecretShorterThanTheMinimum(t *testing.T) {
-    expectShortSecretRefusal(t, "field", "JwtConfig.Secret", 31, 32, "", func() {
-        NewJwtTokenValidator(JwtConfig{Secret: []byte("short-secret-of-31-bytes-long!!")})
-    })
-
-    NewJwtTokenValidator(JwtConfig{Secret: []byte(thirtyTwoByteSecret)})
-}
-
-func TestNewJwtTokenValidator_MinimumSecretLengthRaisesTheFloorOnly(t *testing.T) {
-    expectShortSecretRefusal(t, "field", "JwtConfig.Secret", 32, 40, "", func() {
-        NewJwtTokenValidator(JwtConfig{Secret: []byte(thirtyTwoByteSecret), MinimumSecretLength: bound.Of(40)})
-    })
-
-    NewJwtTokenValidator(JwtConfig{Secret: []byte(strings.Repeat("k", 40)), MinimumSecretLength: bound.Of(40)})
-
-    expectPanicNamingField(t, "JwtConfig.MinimumSecretLength", func() {
-        NewJwtTokenValidator(JwtConfig{Secret: []byte(thirtyTwoByteSecret), MinimumSecretLength: bound.Of(31)})
-    })
-    expectPanicNamingField(t, "JwtConfig.MinimumSecretLength", func() {
-        NewJwtTokenValidator(JwtConfig{Secret: []byte(thirtyTwoByteSecret), MinimumSecretLength: bound.UnlimitedCount()})
-    })
-}
-
 func TestNewStaticHmacSecretProvider_RefusesAShortSecretOfAnyKey(t *testing.T) {
     expectShortSecretRefusal(t, "field", "HmacKeyRing.Keys", 9, 32, "key-previous", func() {
         NewStaticHmacSecretProvider(HmacKeyRing{

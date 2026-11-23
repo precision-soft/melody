@@ -16,10 +16,14 @@ const (
     tokenRevocationEpochSkew = 2 * time.Second
 )
 
+/* exampleJwtKeySet is the one HS256 secret the token firewall verifies bearer tokens with; a rotating or remote key source implements securitycontract.JwtKeySet instead */
+func exampleJwtKeySet(secret []byte) *melodysecurity.JwtSecretKeySet {
+    return melodysecurity.NewJwtSecretKeySet(secret, melodysecurity.JwtSecretKeySetConfig{})
+}
+
 /* exampleJwtConfig is the configuration the token firewall verifies bearer tokens with */
-func exampleJwtConfig(secret []byte) melodysecurity.JwtConfig {
+func exampleJwtConfig() melodysecurity.JwtConfig {
     return melodysecurity.JwtConfig{
-        Secret:              secret,
         ScopeClaim:          "scope",
         DeviceClaim:         security.DeviceClaim,
         RevocationEpochSkew: bound.Of(tokenRevocationEpochSkew),
@@ -28,9 +32,9 @@ func exampleJwtConfig(secret []byte) melodysecurity.JwtConfig {
 
 func (instance *Module) buildTokenAuth() {
     instance.jwtSecret = []byte(instance.credential(environmentKeyJwtSecret, parameterJwtSecret, exampleJwtSecret))
-    jwtConfig := exampleJwtConfig(instance.jwtSecret)
+    jwtConfig := exampleJwtConfig()
     jwtConfig.RevocationEpochStore = security.ResolvedTokenStore{}
-    instance.tokenValidator = melodysecurity.NewJwtTokenValidator(jwtConfig)
+    instance.tokenValidator = melodysecurity.NewJwtTokenValidator(exampleJwtKeySet(instance.jwtSecret), jwtConfig)
 
     instance.opaqueTokenStore = melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{})
 

@@ -67,10 +67,10 @@ func TestBuildTokenAuth_OutsideDevelopmentRefusesATokenSignedWithTheCommittedSec
     moduleInstance.buildTokenAuth()
 
     issuedAt := time.Unix(1700000000, 0).UTC()
-    config := exampleJwtConfig(moduleInstance.jwtSecret)
+    config := exampleJwtConfig()
     config.Clock = melodyclock.NewFrozenClock(issuedAt.Add(time.Minute))
     config.RevocationEpochStore = fixedRevocationEpochStore{}
-    validator := melodysecurity.NewJwtTokenValidator(config)
+    validator := melodysecurity.NewJwtTokenValidator(exampleJwtKeySet(moduleInstance.jwtSecret), config)
 
     tokenSignedWith := func(secret string) string {
         return signedTestJwt(t, []byte(secret), map[string]any{
@@ -87,6 +87,19 @@ func TestBuildTokenAuth_OutsideDevelopmentRefusesATokenSignedWithTheCommittedSec
 
     if _, validateErr := validator.Validate(nil, tokenSignedWith(ownJwtSecret)); nil != validateErr {
         t.Fatalf("expected a token signed with the configured secret accepted, got %v", validateErr)
+    }
+
+    /* the module's own validator: a token without iat stops before its runtime-bound epoch store, so only the signature tells the two secrets apart */
+    tokenWithoutIssuedAt := func(secret string) string {
+        return signedTestJwt(t, []byte(secret), map[string]any{"sub": "user-1", "exp": time.Now().Add(time.Hour).Unix()})
+    }
+
+    if _, validateErr := moduleInstance.tokenValidator.Validate(nil, tokenWithoutIssuedAt(exampleJwtSecret)); nil == validateErr || "jwt signature mismatch" != validateErr.Error() {
+        t.Fatalf("expected the module's validator to refuse the committed secret's signature, got %v", validateErr)
+    }
+
+    if _, validateErr := moduleInstance.tokenValidator.Validate(nil, tokenWithoutIssuedAt(ownJwtSecret)); nil == validateErr || "jwt signature mismatch" == validateErr.Error() {
+        t.Fatalf("expected the module's validator to verify the configured secret's signature, got %v", validateErr)
     }
 }
 

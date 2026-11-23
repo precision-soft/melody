@@ -128,6 +128,7 @@ Every module below has one section, headed by its directory, and one row per exp
 | [`security/contract.FirewallManager`](../security/contract/firewall_manager.go) | framework | the framework's firewall manager |
 | [`security/contract.ImpersonatedUserResolver`](../security/contract/impersonation.go) | application | the application resolves the user it impersonates |
 | [`security/contract.Impersonating`](../security/contract/impersonation.go) | application | a token trait an application token implements |
+| [`security/contract.JwtKeySet`](../security/contract/jwt_key_set.go) | application | the application supplies the keys a token is verified with |
 | [`security/contract.LoginHandler`](../security/contract/login_handler.go) | application | an application writes its login answer |
 | [`security/contract.LogoutHandler`](../security/contract/logout_handler.go) | application | an application writes its logout answer |
 | [`security/contract.Matcher`](../security/contract/matcher.go) | application | an application writes its own request matcher |

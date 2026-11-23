@@ -136,6 +136,14 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** Return the framework's token, `NewTwoFactorRejectedToken` or `NewTwoFactorLockedToken`, or embed `*security.TwoFactorPendingToken`.
 
+### Security: the JWT validator takes a key set
+
+**What changed.** [`NewJwtTokenValidator(keySet, config)`](../security/jwt_token_validator.go) takes a [`securitycontract.JwtKeySet`](../security/contract/jwt_key_set.go) as its first argument, a nil or typed-nil one refused naming the argument `keySet`; `JwtConfig.Secret` and `JwtConfig.MinimumSecretLength` are removed. [`NewJwtSecretKeySet(secret, JwtSecretKeySetConfig{})`](../security/jwt_secret_key_set.go) is the key set of one HS256 secret, its refusals naming the argument `secret` where they named `JwtConfig.Secret`, `MinimumSecretLength` moved to its config. The validator hands the set the token's `kid` and `alg` under the request's runtime and tries the answered keys in order, a key only under the algorithm it names; no key is `401`, a set that cannot answer `503`. `JwtConfig.MaxCandidateKeys` (8) bounds the keys one token is tried against, and a key whose secret is shorter than 32 bytes verifies nothing, answered `503`. A token with or without `kid` verifies against the secret key set as before.
+
+**Symptom.** `security.JwtConfig{Secret: …}` and `MinimumSecretLength` no longer compile; `NewJwtTokenValidator` wants two arguments.
+
+**Remedy.** `security.NewJwtTokenValidator(security.NewJwtSecretKeySet(secret, security.JwtSecretKeySetConfig{}), security.JwtConfig{…})`; a rotating or remote key source implements `securitycontract.JwtKeySet`. See [Key sets](package/SECURITY.md#key-sets).
+
 ### Constructors: a value object takes a config
 
 **What changed.** A constructor of a value object keeps the values that name it positional and takes the rest in a config struct whose zero value is the empty or default value, and the doors over a fixed value or a positional optional gain one:
@@ -1924,9 +1932,9 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 ### Security: an HS256 or internal-auth secret shorter than 32 bytes is refused
 
-**What changed.** [`NewJwtTokenValidator`](../security/jwt_token_validator.go) refuses a `JwtConfig.Secret`, and [`NewStaticHmacSecretProvider`](../security/hmac_secret_provider.go) a key of `HmacKeyRing.Keys`, shorter than 32 bytes, the length of the hash RFC 7518 section 3.2 asks of an HMAC-SHA256 key, naming the field and the length, the key id for a ring, never the value. [`HmacTokenSource`](../security/hmac_token_source.go) judges the secret a custom `HmacSecretProvider` resolves for each envelope: a shorter one verifies nothing, the envelope answers anonymous and the misconfiguration is journaled at Error as an infrastructure failure naming the key id. [`NewHmacEnvelopeSigner`](../security/hmac_signer.go) refuses a short current key, and `Sign` refuses to sign with one a provider rotates to after boot, answering the refusal as its error. A new `MinimumSecretLength bound.Count` on `JwtConfig`, `HmacKeyRing`, `HmacTokenSourceConfig` and `HmacEnvelopeSignerConfig` raises the floor: 32 when left out, at least 32, unlimited refused. The third major accepted a shorter secret and named it in the `security.jwtSecretShort` and `security.hmacSecretShort` boot warnings, which are removed.
+**What changed.** [`NewJwtSecretKeySet`](../security/jwt_secret_key_set.go) refuses its `secret` argument, and [`NewStaticHmacSecretProvider`](../security/hmac_secret_provider.go) a key of `HmacKeyRing.Keys`, shorter than 32 bytes, the length of the hash RFC 7518 section 3.2 asks of an HMAC-SHA256 key, naming the argument or the field and the length, the key id for a ring, never the value. [`HmacTokenSource`](../security/hmac_token_source.go) judges the secret a custom `HmacSecretProvider` resolves for each envelope: a shorter one verifies nothing, the envelope answers anonymous and the misconfiguration is journaled at Error as an infrastructure failure naming the key id. [`NewHmacEnvelopeSigner`](../security/hmac_signer.go) refuses a short current key, and `Sign` refuses to sign with one a provider rotates to after boot, answering the refusal as its error. A new `MinimumSecretLength bound.Count` on `JwtSecretKeySetConfig`, `HmacKeyRing`, `HmacTokenSourceConfig` and `HmacEnvelopeSignerConfig` raises the floor: 32 when left out, at least 32, unlimited refused. The third major accepted a shorter secret and named it in the `security.jwtSecretShort` and `security.hmacSecretShort` boot warnings, which are removed.
 
-**Symptom.** The boot panics with "jwt secret is shorter than its minimum" or "hmac secret is shorter than its minimum", naming the field and the length; an internal caller whose custom provider hands a short secret is answered `503` with `Retry-After` on a protected route, with an Error record "security token source could not verify the credential: its platform is unavailable".
+**Symptom.** The boot panics with "jwt secret is shorter than its minimum", naming the argument `secret`, or "hmac secret is shorter than its minimum", naming the field, and the length; an internal caller whose custom provider hands a short secret is answered `503` with `Retry-After` on a protected route, with an Error record "security token source could not verify the credential: its platform is unavailable".
 
 **Remedy.** Generate a secret of at least 32 random bytes (`openssl rand -base64 48`), and rotate the internal-auth key under a new key id so the overlap keeps the callers working.
 
@@ -1996,7 +2004,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 ### Security: a firewall matcher bounded at a segment, and a configurable secret floor
 
-**What changed.** [`NewSegmentPrefixMatcher(prefix)`](../security/matcher.go) is new: it claims the prefix and its tree under a `/` boundary, `/api` claiming `/api` and `/api/users` and never `/api-admin`, the reach of `accesscontrol.NewSegmentPrefixRule`; a trailing slash is folded, `/` claims every path, and an empty, relative or non-canonical prefix is refused naming the argument. The shadowed-firewall boot warning reads it at its segment boundary. `MinimumSecretLength` on `JwtConfig`, `HmacKeyRing`, `HmacTokenSourceConfig` and `HmacEnvelopeSignerConfig` raises the 32-byte secret floor.
+**What changed.** [`NewSegmentPrefixMatcher(prefix)`](../security/matcher.go) is new: it claims the prefix and its tree under a `/` boundary, `/api` claiming `/api` and `/api/users` and never `/api-admin`, the reach of `accesscontrol.NewSegmentPrefixRule`; a trailing slash is folded, `/` claims every path, and an empty, relative or non-canonical prefix is refused naming the argument. The shadowed-firewall boot warning reads it at its segment boundary. `MinimumSecretLength` on `JwtSecretKeySetConfig`, `HmacKeyRing`, `HmacTokenSourceConfig` and `HmacEnvelopeSignerConfig` raises the 32-byte secret floor.
 
 **Symptom.** None; an application that does not use them is unaffected.
 

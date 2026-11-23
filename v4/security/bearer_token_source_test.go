@@ -114,7 +114,7 @@ func (instance scopeRoleEnricher) Enrich(runtimeInstance containercontract.Runti
 
 func TestBearerTokenSource_EnricherResolvesRolesFromScope(t *testing.T) {
     secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
-    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, ScopeClaim: "scope"})
+    validator := newTestJwtValidator(secret, JwtConfig{ScopeClaim: "scope"})
     source := NewBearerTokenSource(validator, BearerTokenSourceConfig{Enricher: scopeRoleEnricher{}})
 
     tokenString := signJwtHs256(secret, map[string]any{
@@ -140,7 +140,7 @@ func TestBearerTokenSource_EnricherResolvesRolesFromScope(t *testing.T) {
 
 func TestBearerTokenSource_EnrichmentFailureFallsBackToAnonymous(t *testing.T) {
     secret := []byte("super-secret-value-padded-to-the-hs256-minimum")
-    validator := NewJwtTokenValidator(JwtConfig{Secret: secret, ScopeClaim: "scope"})
+    validator := newTestJwtValidator(secret, JwtConfig{ScopeClaim: "scope"})
     source := NewBearerTokenSource(validator, BearerTokenSourceConfig{Enricher: scopeRoleEnricher{}})
 
     tokenString := signJwtHs256(secret, map[string]any{
@@ -195,6 +195,25 @@ func TestBearerTokenSource_AStoreThatCannotAnswerIsUnavailable(t *testing.T) {
 
     missing, _ := source.Resolve(testRuntime(), newSecurityTestRequest("GET", "/", nil, testRuntime()))
     expectAnonymousToken(t, missing)
+}
+
+/* the token's key cannot be looked up: the source answers unavailable, which the firewall serves as 503, and a key the set does not know stays the caller's anonymous request */
+func TestBearerTokenSource_AKeySetThatCannotAnswerIsUnavailable(t *testing.T) {
+    outage := errors.New("the key service is down")
+    tokenString := signJwtHs256([]byte(thirtyTwoByteSecret), map[string]any{"sub": "user-1", "exp": time.Now().Add(time.Hour).Unix()})
+    source := NewBearerTokenSource(NewJwtTokenValidator(&stubJwtKeySet{err: outage}, JwtConfig{}), BearerTokenSourceConfig{})
+
+    token, resolveErr := source.Resolve(testRuntime(), bearerRequest(tokenString))
+    if nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    if cause := expectUnavailableToken(t, token); false == errors.Is(cause, outage) {
+        t.Fatalf("expected the key set's error in the cause chain, got %v", cause)
+    }
+
+    unknown, _ := NewBearerTokenSource(NewJwtTokenValidator(&stubJwtKeySet{}, JwtConfig{}), BearerTokenSourceConfig{}).Resolve(testRuntime(), bearerRequest(tokenString))
+    expectAnonymousToken(t, unknown)
 }
 
 func TestBearerTokenSource_BadCredentialStaysAtInfo(t *testing.T) {

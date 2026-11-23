@@ -52,11 +52,11 @@ func signedTestJwt(t *testing.T, secret []byte, claims map[string]any) string {
 func TestExampleJwtConfig_RefusesATokenIssuedInsideTheSkewAfterARevocation(t *testing.T) {
     revokedAt := time.Unix(1700000000, 0).UTC()
 
-    config := exampleJwtConfig([]byte(exampleJwtSecret))
+    config := exampleJwtConfig()
     config.Clock = melodyclock.NewFrozenClock(revokedAt.Add(10 * time.Second))
 
     config.RevocationEpochStore = fixedRevocationEpochStore{epoch: revokedAt}
-    validator := melodysecurity.NewJwtTokenValidator(config)
+    validator := melodysecurity.NewJwtTokenValidator(exampleJwtKeySet([]byte(exampleJwtSecret)), config)
 
     tokenIssuedAt := func(issuedAt time.Time) string {
         return signedTestJwt(t, []byte(exampleJwtSecret), map[string]any{

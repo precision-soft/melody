@@ -22,7 +22,6 @@ var constructorArgumentRuleException = map[string]string{
 
 /* the config fields refused as required, each with the reason they stay; an entry the walk does not meet fails */
 var configRequiredFieldException = map[string]string{
-    "v4/security:JwtConfig.Secret":                                   "the key set replaces the secret and becomes the positional argument with it",
     "v4/lock:InMemoryLockerConfig.Clock":                             "optional, the system clock when left out; only a typed nil is refused",
     "v4/translation:ManagerConfig.FallbackLocales":                   "required only beside catalogs, and an empty entry of the list is refused by its index",
     "integrations/amqp/v4:TransportConfig.Connection":                "one of Connection or Dialer, the connection source the amqp module reshapes",

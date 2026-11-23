@@ -915,3 +915,36 @@ func runtimeWithCache(t *testing.T, cacheInstance cachecontract.Cache) (containe
 
     return runtime.NewRequest(context.Background(), scope), logger
 }
+
+/* newTestJwtValidator builds a validator over the one-secret key set, the shape every HS256 test verifies against */
+func newTestJwtValidator(secret []byte, config JwtConfig) *JwtTokenValidator {
+    return NewJwtTokenValidator(NewJwtSecretKeySet(secret, JwtSecretKeySetConfig{}), config)
+}
+
+type stubJwtKeySet struct {
+    keys     []securitycontract.JwtKey
+    err      error
+    mutex    sync.Mutex
+    queries  []securitycontract.JwtKeyQuery
+    runtimes []containercontract.Runtime
+}
+
+func (instance *stubJwtKeySet) VerificationKeys(
+    runtimeInstance containercontract.Runtime,
+    query securitycontract.JwtKeyQuery,
+) ([]securitycontract.JwtKey, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.queries = append(instance.queries, query)
+    instance.runtimes = append(instance.runtimes, runtimeInstance)
+
+    return instance.keys, instance.err
+}
+
+func (instance *stubJwtKeySet) queriesSeen() []securitycontract.JwtKeyQuery {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]securitycontract.JwtKeyQuery{}, instance.queries...)
+}

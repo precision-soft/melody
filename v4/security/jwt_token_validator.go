@@ -19,8 +19,10 @@ import (
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
+/* JwtAlgorithmHs256 is the one algorithm the validator implements, HMAC with SHA-256. */
+const JwtAlgorithmHs256 = "HS256"
+
 const (
-    jwtAlgorithmHs256 = "HS256"
     jwtDefaultSubject = "sub"
     jwtDefaultRoles   = "roles"
     jwtMaxNumericDate = 253402300799
@@ -28,6 +30,15 @@ const (
 
 /* jwtNumericDateResolution is the resolution the future checks grant a NumericDate: issuers write whole seconds, their instant truncated down, so a validator whose clock trails the issuer's by a millisecond across a second boundary reads a fresh token as issued in its future */
 const jwtNumericDateResolution = time.Second
+
+var jwtMaxCandidateKeysRule = bound.Rule[int]{
+    Name:    "JwtConfig.MaxCandidateKeys",
+    Default: defaultJwtMaxCandidateKeys,
+    Minimum: 1,
+}
+
+/* defaultJwtMaxCandidateKeys bounds the signatures one token may cost: a rotation overlap answers two or three keys, a key set answering more is refused as a failure of the set */
+const defaultJwtMaxCandidateKeys = 8
 
 var jwtLeewayRule = bound.Rule[time.Duration]{
     Name:    "JwtConfig.Leeway",
@@ -40,19 +51,15 @@ var jwtRevocationEpochSkewRule = bound.Rule[time.Duration]{
     Name: "JwtConfig.RevocationEpochSkew",
 }
 
-/* NewJwtTokenValidator builds the validator, panicking on an empty secret, a secret shorter than MinimumSecretLength, a typed-nil revocation epoch store, AllowFutureIssuedAt beside a store and a leeway or skew its rule refuses, each by the field's name. */
-func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
-    if 0 == len(config.Secret) {
-        exception.Panic(exception.NewError("jwt secret is empty", exceptioncontract.Context{"field": "JwtConfig.Secret"}, nil))
+/* NewJwtTokenValidator builds the validator over the key set its tokens are verified with, panicking on a nil or typed-nil key set by the argument's name, and on a typed-nil revocation epoch store, AllowFutureIssuedAt beside a store and a candidate-key cap, leeway or skew its rule refuses, each by the field's name. */
+func NewJwtTokenValidator(keySet securitycontract.JwtKeySet, config JwtConfig) *JwtTokenValidator {
+    if true == internal.IsNilInterface(keySet) {
+        exception.Panic(exception.NewError("jwt key set is nil", exceptioncontract.Context{"argument": "keySet"}, nil))
     }
 
-    minimumSecretLength := resolveMinimumSecretLength(config.MinimumSecretLength, "JwtConfig.MinimumSecretLength")
-    if minimumSecretLength > len(config.Secret) {
-        exception.Panic(exception.NewError(
-            "jwt secret is shorter than its minimum, the 32 bytes RFC 7518 asks of an HS256 key unless MinimumSecretLength raises it",
-            shortSecretContext("field", "JwtConfig.Secret", len(config.Secret), minimumSecretLength),
-            nil,
-        ))
+    maxCandidateKeys, maxCandidateKeysErr := bound.Resolve(config.MaxCandidateKeys, jwtMaxCandidateKeysRule)
+    if nil != maxCandidateKeysErr {
+        exception.Panic(exception.FromError(maxCandidateKeysErr))
     }
 
     if nil != config.RevocationEpochStore && true == internal.IsNilInterface(config.RevocationEpochStore) {
@@ -106,8 +113,8 @@ func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
     }
 
     return &JwtTokenValidator{
-        /* the secret is copied on the way in, so the caller's slice cannot change it under a later signature check */
-        secret:                  append([]byte{}, config.Secret...),
+        keySet:                  keySet,
+        maxCandidateKeys:        maxCandidateKeys.Value,
         clock:                   clockInstance,
         subjectClaim:            subjectClaim,
         rolesClaim:              rolesClaim,
@@ -125,10 +132,8 @@ func NewJwtTokenValidator(config JwtConfig) *JwtTokenValidator {
 }
 
 type JwtConfig struct {
-    Secret []byte
-
-    /* MinimumSecretLength is the fewest bytes Secret may hold: 32 by default, the RFC 7518 floor for an HS256 key, at least 32, unlimited refused; a shorter secret is refused naming JwtConfig.Secret. */
-    MinimumSecretLength bound.Count
+    /* MaxCandidateKeys is the most keys of the key set one token is tried against: 8 when left out, at least 1, unlimited refused; a set answering more is refused as unavailable. */
+    MaxCandidateKeys bound.Count
 
     SubjectClaim string
     RolesClaim   string
@@ -155,7 +160,8 @@ type JwtConfig struct {
 }
 
 type JwtTokenValidator struct {
-    secret                  []byte
+    keySet                  securitycontract.JwtKeySet
+    maxCandidateKeys        int
     clock                   clockcontract.Clock
     subjectClaim            string
     rolesClaim              string
@@ -188,12 +194,13 @@ func (instance *JwtTokenValidator) Validate(
     var header struct {
         Algorithm string `json:"alg"`
         Type      string `json:"typ"`
+        KeyId     string `json:"kid"`
     }
     if unmarshalErr := json.Unmarshal(headerBytes, &header); nil != unmarshalErr {
         return securitycontract.Claims{}, exception.NewError("jwt header is not valid json", nil, unmarshalErr)
     }
 
-    if jwtAlgorithmHs256 != header.Algorithm {
+    if JwtAlgorithmHs256 != header.Algorithm {
         return securitycontract.Claims{}, exception.NewError(
             "jwt algorithm is not supported",
             map[string]any{"algorithm": internal.BoundDiagnosticText(header.Algorithm)},
@@ -215,9 +222,8 @@ func (instance *JwtTokenValidator) Validate(
         return securitycontract.Claims{}, exception.NewError("jwt signature is not valid base64url", nil, signatureErr)
     }
 
-    expectedSignature := signHmacSha256(parts[0]+"."+parts[1], instance.secret)
-    if false == hmac.Equal(signature, expectedSignature) {
-        return securitycontract.Claims{}, exception.NewError("jwt signature mismatch", nil, nil)
+    if verifyErr := instance.verifySignature(runtimeInstance, header.KeyId, header.Algorithm, parts[0]+"."+parts[1], signature); nil != verifyErr {
+        return securitycontract.Claims{}, verifyErr
     }
 
     payloadBytes, payloadErr := base64.RawURLEncoding.DecodeString(parts[1])
@@ -268,6 +274,56 @@ func (instance *JwtTokenValidator) Validate(
     }
 
     return claims, nil
+}
+
+func (instance *JwtTokenValidator) verifySignature(
+    runtimeInstance containercontract.Runtime,
+    keyId string,
+    algorithm string,
+    signingInput string,
+    signature []byte,
+) error {
+    keys, keysErr := instance.keySet.VerificationKeys(runtimeInstance, securitycontract.JwtKeyQuery{KeyId: keyId, Algorithm: algorithm})
+    if nil != keysErr {
+        return exception.NewError("jwt verification keys are unavailable", nil, exception.MarkInfrastructureFailure(keysErr))
+    }
+
+    if instance.maxCandidateKeys < len(keys) {
+        return exception.MarkInfrastructureFailure(exception.NewError(
+            "jwt key set answered more keys than the validator tries",
+            map[string]any{"keys": len(keys), "maximum": instance.maxCandidateKeys},
+            nil,
+        ))
+    }
+
+    candidates := 0
+    for _, key := range keys {
+        /* a key verifies only under the algorithm it names, so a token cannot choose how its key is used */
+        if key.Algorithm != algorithm {
+            continue
+        }
+
+        /* a custom set's empty or short secret would verify a token anyone can sign, so it verifies nothing and is reported as the set's failure */
+        if minimumHmacSha256SecretLength > len(key.Secret) {
+            shortSecret := shortSecretContext("argument", "keySet", len(key.Secret), minimumHmacSha256SecretLength)
+            shortSecret["keyId"] = internal.BoundDiagnosticText(key.KeyId)
+
+            return exception.MarkInfrastructureFailure(
+                exception.NewError("jwt key secret is shorter than its minimum, so it verifies nothing", shortSecret, nil),
+            )
+        }
+
+        candidates++
+        if true == hmac.Equal(signature, signHmacSha256(signingInput, key.Secret)) {
+            return nil
+        }
+    }
+
+    if 0 == candidates {
+        return exception.NewError("jwt key is not known", map[string]any{"keyId": internal.BoundDiagnosticText(keyId)}, nil)
+    }
+
+    return exception.NewError("jwt signature mismatch", nil, nil)
 }
 
 func (instance *JwtTokenValidator) verifyRevocationEpoch(
