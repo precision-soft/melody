@@ -4,13 +4,13 @@ import (
     "context"
     "fmt"
     "io/fs"
+    "net"
     nethttp "net/http"
     "os"
     "slices"
     "strings"
     "sync"
     "sync/atomic"
-    "time"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/bound"
@@ -67,13 +67,15 @@ type Application struct {
     httpMiddlewares           *HttpMiddleware
     httpHandlerDecorators     []applicationcontract.HttpHandlerDecorator
     httpShutdownHooks         []func(shutdownContext context.Context)
-    /* guards the handler HttpHandler builds once and answers on every call, or the refusal it answers instead */
+    /* guards the handler HttpHandler builds once and answers on every call, or the refusal it answers instead, and Run's claim while a build decides it */
     httpHandlerMutex          sync.Mutex
     httpHandlerBuilt          bool
     httpHandler               nethttp.Handler
     httpHandlerErr            error
-    httpHandlerLogger         loggingcontract.Logger
-    httpHandlerShutdownTimeout time.Duration
+    /* published once the handler is out, read without the build's mutex, so a close running inside a build that dies never waits on it */
+    httpHandlerHandedOut      atomic.Pointer[handedOutHttpHandler]
+    /* a listener a test bound, served instead of the configured address, so no other process takes the port between its bind and the serve */
+    httpListener              net.Listener
     /* starts the shutdown hooks of a handed-out handler once, from BeginHttpShutdown or from the close */
     httpShutdownHooksOnce     sync.Once
     httpShutdownHookSet       httpShutdownHookSet
@@ -353,9 +355,14 @@ func (instance *Application) ProcessRole() string {
     return instance.runtimeFlags.Role()
 }
 
-/* Run serves the application once: a second call, or one after HttpHandler handed the handler out, panics naming the misuse, before anything is booted or marked serving. */
+/* Run serves the application once: a second call, or one after HttpHandler handed the handler out, panics naming the misuse, before anything is booted or marked serving. A handler build in progress is waited for, so a build that hands nothing out leaves Run to serve. */
 func (instance *Application) Run() {
-    if false == instance.servingClaim.CompareAndSwap(servingClaimNone, servingClaimRun) {
+    /* the build holds the mutex until it decided whether the handler is out, so the claim read here is never one a build may still release */
+    instance.httpHandlerMutex.Lock()
+    claimed := instance.servingClaim.CompareAndSwap(servingClaimNone, servingClaimRun)
+    instance.httpHandlerMutex.Unlock()
+
+    if false == claimed {
         if servingClaimHttpHandler == instance.servingClaim.Load() {
             exception.Panic(exception.NewError("application run called after its http handler was handed out", nil, nil))
         }

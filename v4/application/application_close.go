@@ -3,7 +3,6 @@ package application
 import (
     "context"
     "errors"
-    "time"
 
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -15,7 +14,7 @@ func (instance *Application) Close() {
     _ = instance.close(context.Background())
 }
 
-/* CloseWithContext is Close under the caller's deadline, handed to the teardown, and returns the teardown failure when this call discovered it. An application that handed its http handler out is wound down first, bounded by the http shutdown timeout or the caller's deadline, whichever is earlier: its shutdown hooks are started unless BeginHttpShutdown started them, then awaited with its open request scopes; the teardown that follows keeps the caller's whole budget. */
+/* CloseWithContext is Close under the caller's context, whose deadline and cancel every phase of the close is handed, a closer that ignores it not cut at the deadline, and returns the teardown failure when this call discovered it. An application that handed its http handler out is wound down first, bounded by the http shutdown timeout or the caller's context, whichever ends earlier: its shutdown hooks are started unless BeginHttpShutdown started them, then awaited with its open request scopes; the teardown that follows runs under what is left of the caller's context, never a context of its own. */
 func (instance *Application) CloseWithContext(closeContext context.Context) error {
     /* refused before the once the close claims, so a refused call leaves the teardown to a later one */
     if true == internal.IsNilInterface(closeContext) {
@@ -56,24 +55,11 @@ func (instance *Application) close(closeContext context.Context) error {
     return performErr
 }
 
-/* performClose winds a handed-out http handler down before the container, whose services its requests and hooks still use, and joins the wind-down's failure with the teardown's */
+/* performClose winds a handed-out http handler down before the container, whose services its requests and hooks still use, and joins the wind-down's failure with the teardown's; the teardown runs under what is left of the caller's context, so the caller's deadline and cancel reach every closer */
 func (instance *Application) performClose(closeContext context.Context) error {
-    teardownDeadline, hasTeardownDeadline := closeContext.Deadline()
-    teardownBudget := time.Until(teardownDeadline)
-    contextDoneBefore := nil != closeContext.Err()
-
     windDownErr := instance.windDownHandedOutHttpHandler(closeContext)
 
-    /* the teardown keeps the budget the caller handed the close: a wind-down that spent the caller's deadline does not leave the container to close under an expired context */
-    teardownContext := closeContext
-    if true == hasTeardownDeadline && false == contextDoneBefore && nil != closeContext.Err() {
-        detachedContext, cancelTeardown := context.WithTimeout(context.WithoutCancel(closeContext), teardownBudget)
-        defer cancelTeardown()
-
-        teardownContext = detachedContext
-    }
-
-    teardownErr := instance.performTeardown(teardownContext)
+    teardownErr := instance.performTeardown(closeContext)
 
     if nil == windDownErr {
         return teardownErr

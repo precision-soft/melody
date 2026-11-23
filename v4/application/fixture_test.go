@@ -2,12 +2,14 @@ package application
 
 import (
     "context"
+    "io"
     "net"
     nethttp "net/http"
     "net/http/httptest"
     "os"
     "os/exec"
     "path/filepath"
+    "strconv"
     "strings"
     "sync"
     "testing"
@@ -224,7 +226,7 @@ func expectNewApplicationRefused(t *testing.T, testName string, applicationConfi
     }
 }
 
-/* freeLoopbackAddress answers a loopback address whose port the system just handed out, so repeated and parallel runs never share one */
+/* freeLoopbackAddress answers a loopback address whose port the system just handed out, for a configuration whose server never serves; a test whose server serves binds through listenLoopback */
 func freeLoopbackAddress(t *testing.T) string {
     t.Helper()
 
@@ -242,22 +244,75 @@ func freeLoopbackAddress(t *testing.T) string {
     return address
 }
 
-/* awaitListening dials the address until it accepts a connection */
-func awaitListening(t *testing.T, address string) {
+const servingProbePath = "/serving-probe"
+
+/* listenLoopback binds a loopback port the system hands out and keeps it bound for the server the test hands the listener to, so no other process takes the port in between */
+func listenLoopback(t *testing.T) (net.Listener, string) {
     t.Helper()
 
-    var dialErr error
-    for attempt := 0; attempt < 200; attempt++ {
-        var connection net.Conn
-        connection, dialErr = net.Dial("tcp", address)
-        if nil == dialErr {
-            _ = connection.Close()
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("unexpected listen error: %v", listenErr)
+    }
 
-            return
+    t.Cleanup(func() { _ = listener.Close() })
+
+    return listener, listener.Addr().String()
+}
+
+/* servingProbeToken is what this test's own server answers on the probe route, unique to the test and the process */
+func servingProbeToken(t *testing.T) string {
+    return t.Name() + "-" + strconv.Itoa(os.Getpid())
+}
+
+/* registerServingProbe answers the probe path with the test's token from an outer decorator, ahead of whatever the kernel under test would answer */
+func registerServingProbe(t *testing.T, applicationInstance *Application) {
+    t.Helper()
+
+    token := servingProbeToken(t)
+
+    applicationInstance.RegisterHttpHandlerDecorator(func(next nethttp.Handler) nethttp.Handler {
+        return nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+            if servingProbePath != request.URL.Path {
+                next.ServeHTTP(writer, request)
+
+                return
+            }
+
+            _, _ = io.WriteString(writer, token)
+        })
+    })
+}
+
+/* awaitServing asks the probe path until the test's own server answers its token, so a foreign listener on the port never passes for it */
+func awaitServing(t *testing.T, address string) {
+    t.Helper()
+
+    token := servingProbeToken(t)
+
+    client := &nethttp.Client{
+        Timeout:   500 * time.Millisecond,
+        Transport: &nethttp.Transport{DisableKeepAlives: true},
+    }
+
+    answered := "no answer"
+    for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+        response, requestErr := client.Get("http://" + address + servingProbePath)
+        if nil == requestErr {
+            body, _ := io.ReadAll(response.Body)
+            _ = response.Body.Close()
+
+            if nethttp.StatusOK == response.StatusCode && token == string(body) {
+                return
+            }
+
+            answered = strconv.Itoa(response.StatusCode) + " " + string(body)
+        } else {
+            answered = requestErr.Error()
         }
 
         time.Sleep(10 * time.Millisecond)
     }
 
-    t.Fatalf("the server never came up: %v", dialErr)
+    t.Fatalf("the test's own server never answered on %s: %s", address, answered)
 }

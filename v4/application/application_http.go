@@ -175,7 +175,7 @@ func (instance *Application) servedHttpKernel() *http.Kernel {
     return instance.httpKernel
 }
 
-/* HttpHandler boots the application and answers the handler it serves under a server of the caller's, the one Run serves with: the pipeline, the decorators and the http kernel's configuration, with the configuration and the openapi registry marked serving and the boot warnings written. A .env Run refuses is refused here too. The handler, or the refusal, is built once and answered on every call. It is refused in cli mode and once Run started, and Run is refused once the handler is out. The server's owner calls BeginHttpShutdown as its server begins shutting down and CloseWithContext once it stopped. */
+/* HttpHandler boots the application and answers the handler it serves under a server of the caller's, the one Run serves with: the pipeline, the decorators and the http kernel's configuration, with the configuration and the openapi registry marked serving and the boot warnings written. A .env Run refuses is refused here too. The handler, or the refusal, is built once and answered on every call. It is refused in cli mode and once Run started, and Run is refused once the handler is out; a refused build or a panicking decorator hands nothing out and leaves the application unclaimed. The server's owner calls BeginHttpShutdown as its server begins shutting down and CloseWithContext once it stopped. */
 func (instance *Application) HttpHandler() (nethttp.Handler, error) {
     instance.httpHandlerMutex.Lock()
     defer instance.httpHandlerMutex.Unlock()
@@ -195,6 +195,14 @@ func (instance *Application) HttpHandler() (nethttp.Handler, error) {
     if false == instance.servingClaim.CompareAndSwap(servingClaimNone, servingClaimHttpHandler) && servingClaimHttpHandler != instance.servingClaim.Load() {
         return nil, exception.NewError("the http handler is asked of an application that runs its own server", nil, nil)
     }
+
+    /* nothing handed out leaves the application unclaimed: a refused build or a panicking decorator releases the claim, so Run is refused only once a handler is out */
+    handedOut := false
+    defer func() {
+        if false == handedOut {
+            instance.servingClaim.CompareAndSwap(servingClaimHttpHandler, servingClaimNone)
+        }
+    }()
 
     _ = instance.Boot()
 
@@ -221,9 +229,9 @@ func (instance *Application) HttpHandler() (nethttp.Handler, error) {
     instance.writeBootWarnings(logger)
 
     instance.httpHandlerBuilt = true
-    instance.httpHandlerLogger = logger
-    instance.httpHandlerShutdownTimeout = built.shutdownTimeout
     instance.httpHandler = built.handler
+    instance.httpHandlerHandedOut.Store(&handedOutHttpHandler{logger: logger, shutdownTimeout: built.shutdownTimeout})
+    handedOut = true
 
     return instance.httpHandler, nil
 }
@@ -251,14 +259,7 @@ type handedOutHttpHandler struct {
 
 /* handedOutHttpHandler answers the logger and the shutdown timeout a handed-out handler was built with, nil when HttpHandler handed none out */
 func (instance *Application) handedOutHttpHandler() *handedOutHttpHandler {
-    instance.httpHandlerMutex.Lock()
-    defer instance.httpHandlerMutex.Unlock()
-
-    if nil == instance.httpHandler {
-        return nil
-    }
-
-    return &handedOutHttpHandler{logger: instance.httpHandlerLogger, shutdownTimeout: instance.httpHandlerShutdownTimeout}
+    return instance.httpHandlerHandedOut.Load()
 }
 
 /* startHttpShutdownHooks starts each shutdown hook on its own goroutine, as a server's Shutdown does; only the first call starts them */
@@ -272,7 +273,7 @@ func (instance *Application) startHttpShutdownHooks(shutdownContext context.Cont
     })
 }
 
-/* windDownHandedOutHttpHandler holds the close of a handed-out handler until its shutdown hooks returned and its request scopes closed, the wait Run makes after its own server's Shutdown, bounded by the http shutdown timeout as Run bounds its own, the close's deadline winning when it is earlier; the hooks are started under that bound unless BeginHttpShutdown started them. */
+/* windDownHandedOutHttpHandler holds the close of a handed-out handler until its shutdown hooks returned and its request scopes closed, the wait Run makes after its own server's Shutdown, bounded by the http shutdown timeout as Run bounds its own, the close's context winning when it ends earlier; the hooks are started under that bound unless BeginHttpShutdown started them. */
 func (instance *Application) windDownHandedOutHttpHandler(closeContext context.Context) error {
     handedOut := instance.handedOutHttpHandler()
     if nil == handedOut {
@@ -364,8 +365,7 @@ func (instance *Application) runHttp(
     errorChannel := make(chan error, 1)
 
     go func() {
-        listenAndServeErr := httpServer.ListenAndServe()
-        errorChannel <- listenAndServeErr
+        errorChannel <- instance.serveHttpServer(httpServer)
     }()
 
     return awaitHttpServerEnd(
@@ -377,6 +377,14 @@ func (instance *Application) runHttp(
         instance.servedHttpKernel(),
         shutdownHooks,
     )
+}
+
+func (instance *Application) serveHttpServer(httpServer *nethttp.Server) error {
+    if nil != instance.httpListener {
+        return httpServer.Serve(instance.httpListener)
+    }
+
+    return httpServer.ListenAndServe()
 }
 
 /* refuseSessionStorageTimeout judges the registered manager's bound once at boot, so a replaced manager declaring one the rule refuses fails the boot rather than every saving request. */

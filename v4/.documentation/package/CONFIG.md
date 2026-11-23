@@ -497,7 +497,7 @@ func example() configcontract.Configuration {
 
 - [`EnvironmentDevelopment`, `EnvironmentProduction`](../../config/environment.go)
 - [`ModeHttp`, `ModeCli`](../../config/environment.go)
-- [`HttpSessionCookieSecureAlways`](../../config/environment.go) — the one value `MELODY_HTTP_SESSION_COOKIE_SECURE` admitss
+- [`HttpSessionCookieSecureAlways`](../../config/environment.go) — the one value `MELODY_HTTP_SESSION_COOKIE_SECURE` admits
 - [`RoleWeb`, `RoleWorker`, `RoleAll`](../../config/environment.go)
 - [`RoleAllowsBackgroundWork(role string) bool`](../../config/process_role.go) — whether a process with this role should start outbox relays and message consumers. Melody itself gates nothing on the role: it is declared intent for application wiring to query
 - [`RoleAllowsHttp(role string) bool`](../../config/process_role.go) — informational in the same way; the runtime **mode**, not the role, decides whether the http kernel starts
