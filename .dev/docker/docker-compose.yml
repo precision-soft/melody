@@ -9,7 +9,14 @@ services:
                 CONFIG_PATH: ${DOCKER_PATH}
                 ROOT_PATH: ${CONTAINER_ROOT_PATH}
         restart: 'no'
+        # a runaway run is killed inside the container before the desktop session
+        mem_limit: ${DEV_MEMORY_LIMIT:-40g}
+        memswap_limit: ${DEV_MEMORY_LIMIT:-40g}
+        oom_score_adj: 500
         environment:
+            # go test binaries run under the RSS watchdog; build, vet and list ignore the flag, a limit of 0 turns it off
+            GOFLAGS: -exec=/app/.dev/test-exec.sh
+            MELODY_TEST_MEMORY_LIMIT: ${MELODY_TEST_MEMORY_LIMIT:-6G}
             MELODY_DEV_REFLEX_ENABLED: ${MELODY_DEV_REFLEX_ENABLED:-1}
             MELODY_DEV_EXAMPLE_DIR: ${MELODY_DEV_EXAMPLE_DIR:-/app/v3/.example}
             # the third major's example reports the version its build stamped on /health, so the serving build is stamped
@@ -52,7 +59,12 @@ services:
                 CONFIG_PATH: ${DOCKER_PATH}
                 ROOT_PATH: ${CONTAINER_ROOT_PATH}
         restart: 'no'
+        mem_limit: ${DEV_MEMORY_LIMIT:-40g}
+        memswap_limit: ${DEV_MEMORY_LIMIT:-40g}
+        oom_score_adj: 500
         environment:
+            GOFLAGS: -exec=/app/.dev/test-exec.sh
+            MELODY_TEST_MEMORY_LIMIT: ${MELODY_TEST_MEMORY_LIMIT:-6G}
             MELODY_DEV_REFLEX_ENABLED: ${MELODY_DEV_V1_REFLEX_ENABLED:-1}
             MELODY_DEV_EXAMPLE_DIR: /app/.example
             MELODY_DEV_RUN_COMMAND: ${MELODY_DEV_RUN_COMMAND:-go run .}
@@ -72,7 +84,12 @@ services:
                 CONFIG_PATH: ${DOCKER_PATH}
                 ROOT_PATH: ${CONTAINER_ROOT_PATH}
         restart: 'no'
+        mem_limit: ${DEV_MEMORY_LIMIT:-40g}
+        memswap_limit: ${DEV_MEMORY_LIMIT:-40g}
+        oom_score_adj: 500
         environment:
+            GOFLAGS: -exec=/app/.dev/test-exec.sh
+            MELODY_TEST_MEMORY_LIMIT: ${MELODY_TEST_MEMORY_LIMIT:-6G}
             MELODY_DEV_REFLEX_ENABLED: ${MELODY_DEV_V2_REFLEX_ENABLED:-1}
             MELODY_DEV_EXAMPLE_DIR: /app/v2/.example
             MELODY_DEV_RUN_COMMAND: ${MELODY_DEV_RUN_COMMAND:-go run .}
@@ -92,7 +109,12 @@ services:
                 CONFIG_PATH: ${DOCKER_PATH}
                 ROOT_PATH: ${CONTAINER_ROOT_PATH}
         restart: 'no'
+        mem_limit: ${DEV_MEMORY_LIMIT:-40g}
+        memswap_limit: ${DEV_MEMORY_LIMIT:-40g}
+        oom_score_adj: 500
         environment:
+            GOFLAGS: -exec=/app/.dev/test-exec.sh
+            MELODY_TEST_MEMORY_LIMIT: ${MELODY_TEST_MEMORY_LIMIT:-6G}
             MELODY_DEV_REFLEX_ENABLED: ${MELODY_DEV_V4_REFLEX_ENABLED:-1}
             MELODY_DEV_EXAMPLE_DIR: /app/v4/.example
             MELODY_DEV_RUN_COMMAND: ${MELODY_DEV_RUN_COMMAND:-go run .}
