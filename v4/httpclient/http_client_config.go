@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+    nethttp "net/http"
     "net/url"
     "strings"
     "time"
@@ -10,7 +11,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
-/* HttpClientConfig is the configuration of one client. A field left out takes its default: no base url, a 30s timeout, no header, the default transport, and redirects followed up to net/http's cap of ten requests. */
+/* HttpClientConfig is the configuration of one client. A field left out takes its default: no base url, a 30s timeout, no header, the default transport, no decorator, and redirects followed up to net/http's cap of ten requests. */
 type HttpClientConfig struct {
     /* BaseUrl is the url a relative target resolves against; its path ends with a slash, or the client is refused. A client with a base refuses a target that leaves its origin, and one without refuses a relative target. */
     BaseUrl string
@@ -28,7 +29,13 @@ type HttpClientConfig struct {
 
     /* MaxRedirects bounds the requests one exchange makes while it follows redirects, the first included, as net/http counts its own cap: 10 by default, at least 1, so a cap of n follows n-1 redirects and refuses the next. It is refused beside RedirectsDisabled. */
     MaxRedirects bound.Count
+
+    /* RoundTripperDecorators wrap the client's transport, the first outermost, and see every request it puts on the wire, each redirect hop included, after the client attached its headers. A decorator clones the request before adding a header, as net/http asks of a RoundTripper. A header a decorator adds crosses a redirect to another origin: the client strips only what it attached itself. */
+    RoundTripperDecorators []RoundTripperDecorator
 }
+
+/* RoundTripperDecorator wraps the next round tripper of a client's chain and answers the one the client sends through. */
+type RoundTripperDecorator func(next nethttp.RoundTripper) nethttp.RoundTripper
 
 var (
     timeoutRule = bound.Rule[time.Duration]{

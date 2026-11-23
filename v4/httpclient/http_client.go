@@ -33,13 +33,14 @@ func NewDefaultHttpClient() *HttpClient {
 
 type HttpClient struct {
     client       *nethttp.Client
+    transport    *nethttp.Transport
     mutex        sync.RWMutex
     baseUrl      string
     headers      map[string]string
     maxRedirects int
 }
 
-/* NewHttpClient builds a client over its own net/http transport and idle connection pool: hold the client while the application calls the service, and close it when done, rather than building one per call. A configuration the client cannot honour is refused, naming the field: a limit below its minimum, an unlimited the field does not admit, a base url path without its trailing slash, two spellings of one header, or MaxRedirects beside RedirectsDisabled. */
+/* NewHttpClient builds a client over its own net/http transport and idle connection pool: hold the client while the application calls the service, and close it when done, rather than building one per call. A configuration the client cannot honour is refused, naming the field: a limit below its minimum, an unlimited the field does not admit, a base url path without its trailing slash, two spellings of one header, MaxRedirects beside RedirectsDisabled, or a round tripper decorator that is nil or answers nil. */
 func NewHttpClient(config HttpClientConfig) (*HttpClient, error) {
     if baseUrlErr := refuseBaseUrlWithoutTrailingSlash(config.BaseUrl); nil != baseUrlErr {
         return nil, baseUrlErr
@@ -88,12 +89,18 @@ func NewHttpClient(config HttpClientConfig) (*HttpClient, error) {
         DisableKeepAlives:     transportConfig.DisableKeepAlives,
     }
 
+    roundTripper, decoratorErr := decorateRoundTripper(transport, config.RoundTripperDecorators)
+    if nil != decoratorErr {
+        return nil, decoratorErr
+    }
+
     instance := &HttpClient{
         client: &nethttp.Client{
             /* an unlimited timeout resolves to zero, which net/http reads as no deadline */
             Timeout:   timeout.Value,
-            Transport: transport,
+            Transport: roundTripper,
         },
+        transport:    transport,
         baseUrl:      config.BaseUrl,
         headers:      headers,
         maxRedirects: maxRedirects.Value,
@@ -105,6 +112,41 @@ func NewHttpClient(config HttpClientConfig) (*HttpClient, error) {
     }
 
     return instance, nil
+}
+
+/* decorateRoundTripper wraps the base transport last decorator first, so the first one is outermost. */
+func decorateRoundTripper(transport *nethttp.Transport, decorators []RoundTripperDecorator) (nethttp.RoundTripper, error) {
+    var roundTripper nethttp.RoundTripper = transport
+
+    for index := len(decorators) - 1; index >= 0; index-- {
+        decorator := decorators[index]
+        if nil == decorator {
+            return nil, exception.NewError(
+                "http client round tripper decorator is nil",
+                exceptioncontract.Context{
+                    "field": "HttpClientConfig.RoundTripperDecorators",
+                    "index": index,
+                },
+                nil,
+            )
+        }
+
+        decorated := decorator(roundTripper)
+        if true == internal.IsNilInterface(decorated) {
+            return nil, exception.NewError(
+                "http client round tripper decorator answered nil",
+                exceptioncontract.Context{
+                    "field": "HttpClientConfig.RoundTripperDecorators",
+                    "index": index,
+                },
+                nil,
+            )
+        }
+
+        roundTripper = decorated
+    }
+
+    return roundTripper, nil
 }
 
 /* answerRedirectAsTheResponse is the policy of a client built with RedirectsDisabled: net/http hands the redirect back unfollowed, body open, so the caller receives the 3xx. */
@@ -670,14 +712,9 @@ func (instance *HttpClient) SetHeader(key string, value string) {
     instance.headers[canonicalHeaderKey(key)] = value
 }
 
-/* CloseWithContext releases the idle connections of the client's own transport, which dropping the last reference does not; it does not wait, so the deadline has nothing to bound. It does not abort requests in flight, and the client stays usable afterwards. */
+/* CloseWithContext releases the idle connections of the client's own transport, whatever decorators wrap it, which dropping the last reference does not; it does not wait, so the deadline has nothing to bound. It does not abort requests in flight, and the client stays usable afterwards. */
 func (instance *HttpClient) CloseWithContext(closeContext context.Context) error {
-    transport, ok := instance.client.Transport.(*nethttp.Transport)
-    if false == ok {
-        return nil
-    }
-
-    transport.CloseIdleConnections()
+    instance.transport.CloseIdleConnections()
 
     return nil
 }

@@ -33,6 +33,7 @@ var configRequiredFieldException = map[string]string{
     "integrations/bunorm/v4/encrypt:CommandContextConfig.Cipher":     "an entry of the module's context list cannot be positional",
     "integrations/websocket/v4:ModuleConfig.Streams":                 "an entry of the module's stream list cannot be positional; the refusal names the index",
     "v4/security:CompiledFirewallConfig.Name":                        "a firewall's name is its declaration, which the security configuration's list of firewalls carries",
+    "v4/httpclient:HttpClientConfig.RoundTripperDecorators":          "optional, the transport alone when left out; only a nil entry of the list is refused, by its index",
     "v4/http/static:Config.FileSystem":                               "required only in the embedded mode; the filesystem mode builds it from the public directory",
 }
 

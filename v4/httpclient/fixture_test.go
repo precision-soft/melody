@@ -86,3 +86,73 @@ func assertTimedOut(t *testing.T, err error) {
         t.Fatalf("expected the exchange to time out, got %v", err)
     }
 }
+
+/* recordingRoundTripper keeps every request the chain hands it before passing it on */
+type recordingRoundTripper struct {
+    next     http.RoundTripper
+    requests []*http.Request
+}
+
+func (instance *recordingRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+    instance.requests = append(instance.requests, request)
+
+    return instance.next.RoundTrip(request)
+}
+
+func recordingDecorator(recorder *recordingRoundTripper) RoundTripperDecorator {
+    return func(next http.RoundTripper) http.RoundTripper {
+        recorder.next = next
+
+        return recorder
+    }
+}
+
+type labelRoundTripper struct {
+    next  http.RoundTripper
+    label string
+    order *[]string
+}
+
+func (instance *labelRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+    *instance.order = append(*instance.order, instance.label)
+
+    return instance.next.RoundTrip(request)
+}
+
+func labelDecorator(label string, order *[]string) RoundTripperDecorator {
+    return func(next http.RoundTripper) http.RoundTripper {
+        return &labelRoundTripper{next: next, label: label, order: order}
+    }
+}
+
+type headerRoundTripper struct {
+    next  http.RoundTripper
+    name  string
+    value string
+}
+
+func (instance *headerRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+    cloned := request.Clone(request.Context())
+    cloned.Header.Set(instance.name, instance.value)
+
+    return instance.next.RoundTrip(cloned)
+}
+
+func headerDecorator(name string, value string) RoundTripperDecorator {
+    return func(next http.RoundTripper) http.RoundTripper {
+        return &headerRoundTripper{next: next, name: name, value: value}
+    }
+}
+
+func assertRefusedIndex(t *testing.T, err error, index int) {
+    t.Helper()
+
+    var refusal *exception.Error
+    if false == errors.As(err, &refusal) {
+        t.Fatalf("expected a melody error, got %v", err)
+    }
+
+    if index != refusal.Context()["index"] {
+        t.Fatalf("expected the refusal to name index %d, got %+v", index, refusal.Context())
+    }
+}

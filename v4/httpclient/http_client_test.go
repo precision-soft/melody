@@ -2651,3 +2651,258 @@ func TestHttpClient_EveryRequestDoorNamesItselfWhenHandedNoRuntime(t *testing.T)
         }
     }
 }
+
+func TestNewHttpClient_Decorators_FirstIsOutermost(t *testing.T) {
+    server, _ := newCountingServer(t)
+
+    order := []string{}
+    client := newTestHttpClient(t, HttpClientConfig{
+        BaseUrl:                server.URL,
+        RoundTripperDecorators: []RoundTripperDecorator{labelDecorator("first", &order), labelDecorator("second", &order)},
+    })
+
+    if _, err := client.Get(testRuntime(), "/", RequestOptions{}); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if 2 != len(order) || "first" != order[0] || "second" != order[1] {
+        t.Fatalf("expected the first decorator to run outermost, got %v", order)
+    }
+}
+
+func TestNewHttpClient_Decorators_ADecoratorSeesTheClientHeaders(t *testing.T) {
+    server, _ := newCountingServer(t)
+
+    recorder := &recordingRoundTripper{}
+    client := newTestHttpClient(t, HttpClientConfig{
+        BaseUrl:                server.URL,
+        Headers:                map[string]string{"X-Client": "client-value"},
+        RoundTripperDecorators: []RoundTripperDecorator{recordingDecorator(recorder)},
+    })
+
+    if _, err := client.Get(testRuntime(), "/", RequestOptions{Headers: map[string]string{"X-Request": "request-value"}}); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if 1 != len(recorder.requests) {
+        t.Fatalf("expected the decorator to see one request, got %d", len(recorder.requests))
+    }
+
+    header := recorder.requests[0].Header
+    if "client-value" != header.Get("X-Client") || "request-value" != header.Get("X-Request") {
+        t.Fatalf("expected the decorator to see the headers the client attached, got %v", header)
+    }
+}
+
+func TestNewHttpClient_Decorators_ADecoratorSeesEveryRedirectHop(t *testing.T) {
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        if "/start" == request.URL.Path {
+            http.Redirect(writer, request, "/end", http.StatusFound)
+            return
+        }
+
+        writer.WriteHeader(http.StatusOK)
+    }))
+    t.Cleanup(server.Close)
+
+    recorder := &recordingRoundTripper{}
+    client := newTestHttpClient(t, HttpClientConfig{
+        BaseUrl:                server.URL,
+        RoundTripperDecorators: []RoundTripperDecorator{recordingDecorator(recorder)},
+    })
+
+    if _, err := client.Get(testRuntime(), "/start", RequestOptions{}); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if 2 != len(recorder.requests) || "/start" != recorder.requests[0].URL.Path || "/end" != recorder.requests[1].URL.Path {
+        t.Fatalf("expected the decorator to see both hops, got %d requests", len(recorder.requests))
+    }
+}
+
+/* the documented caveat: the client strips only what it attached itself */
+func TestNewHttpClient_Decorators_ADecoratorHeaderCrossesARedirectToAnotherOrigin_TheClientsOwnDoesNot(t *testing.T) {
+    received := make(chan http.Header, 1)
+    target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        received <- request.Header.Clone()
+        writer.WriteHeader(http.StatusOK)
+    }))
+    t.Cleanup(target.Close)
+
+    origin := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        http.Redirect(writer, request, target.URL+"/landing", http.StatusFound)
+    }))
+    t.Cleanup(origin.Close)
+
+    client := newTestHttpClient(t, HttpClientConfig{
+        BaseUrl:                origin.URL,
+        Headers:                map[string]string{"X-Client": "client-value"},
+        RoundTripperDecorators: []RoundTripperDecorator{headerDecorator("X-Decorator", "decorator-value")},
+    })
+
+    if _, err := client.Get(testRuntime(), "/", RequestOptions{}); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    header := <-received
+    if "decorator-value" != header.Get("X-Decorator") {
+        t.Fatalf("expected the decorator's header to reach the other origin, got %v", header)
+    }
+
+    if "" != header.Get("X-Client") {
+        t.Fatalf("expected the client's own header to be stripped, got %v", header)
+    }
+}
+
+func TestNewHttpClient_Decorators_NilDecorator_RefusedNamingTheIndex(t *testing.T) {
+    order := []string{}
+
+    _, err := NewHttpClient(HttpClientConfig{
+        RoundTripperDecorators: []RoundTripperDecorator{labelDecorator("first", &order), nil},
+    })
+
+    assertRefusedField(t, err, "HttpClientConfig.RoundTripperDecorators", "http client round tripper decorator is nil")
+    assertRefusedIndex(t, err, 1)
+}
+
+func TestNewHttpClient_Decorators_DecoratorAnsweringNil_RefusedNamingTheIndex(t *testing.T) {
+    cases := map[string]RoundTripperDecorator{
+        "untyped nil": func(next http.RoundTripper) http.RoundTripper {
+            return nil
+        },
+        "typed nil": func(next http.RoundTripper) http.RoundTripper {
+            var recorder *recordingRoundTripper
+
+            return recorder
+        },
+    }
+
+    for name, answeringNil := range cases {
+        t.Run(name, func(t *testing.T) {
+            order := []string{}
+
+            _, err := NewHttpClient(HttpClientConfig{
+                RoundTripperDecorators: []RoundTripperDecorator{labelDecorator("first", &order), answeringNil},
+            })
+
+            assertRefusedField(t, err, "HttpClientConfig.RoundTripperDecorators", "http client round tripper decorator answered nil")
+            assertRefusedIndex(t, err, 1)
+        })
+    }
+}
+
+func TestNewHttpClient_Decorators_NoDecorator_SendsThroughTheTransportAlone(t *testing.T) {
+    server, hits := newCountingServer(t)
+
+    for name, decorators := range map[string][]RoundTripperDecorator{"nil": nil, "empty": {}} {
+        t.Run(name, func(t *testing.T) {
+            client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL, RoundTripperDecorators: decorators})
+
+            if client.client.Transport != http.RoundTripper(client.transport) {
+                t.Fatalf("expected the client to send through its own transport, got %T", client.client.Transport)
+            }
+
+            before := hits.Load()
+            if _, err := client.Get(testRuntime(), "/", RequestOptions{}); nil != err {
+                t.Fatalf("unexpected error: %v", err)
+            }
+
+            if before+1 != hits.Load() {
+                t.Fatalf("expected the request to reach the server")
+            }
+        })
+    }
+}
+
+func TestNewHttpClient_Decorators_LaterChangeOfTheSlice_Ignored(t *testing.T) {
+    server, _ := newCountingServer(t)
+
+    order := []string{}
+    decorators := []RoundTripperDecorator{labelDecorator("built", &order)}
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL, RoundTripperDecorators: decorators})
+
+    decorators[0] = labelDecorator("changed", &order)
+
+    if _, err := client.Get(testRuntime(), "/", RequestOptions{}); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if 1 != len(order) || "built" != order[0] {
+        t.Fatalf("expected the chain built at construction, got %v", order)
+    }
+}
+
+func TestHttpClientCloseWithContext_UnderADecorator_ReleasesTheBaseTransport(t *testing.T) {
+    var dialed int64
+
+    server := httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        writer.WriteHeader(http.StatusOK)
+    }))
+    server.Config.ConnState = func(connection net.Conn, state http.ConnState) {
+        if http.StateNew == state {
+            atomic.AddInt64(&dialed, 1)
+        }
+    }
+    server.Start()
+    t.Cleanup(server.Close)
+
+    recorder := &recordingRoundTripper{}
+    client := newTestHttpClient(t, HttpClientConfig{
+        BaseUrl:                server.URL,
+        RoundTripperDecorators: []RoundTripperDecorator{recordingDecorator(recorder)},
+    })
+
+    if _, err := client.Get(testRuntime(), "/", RequestOptions{}); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if err := client.CloseWithContext(t.Context()); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    if _, err := client.Get(testRuntime(), "/", RequestOptions{}); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if 2 != atomic.LoadInt64(&dialed) {
+        t.Fatalf("expected Close to release the base transport's idle connection under a decorator, %d dialled", atomic.LoadInt64(&dialed))
+    }
+}
+
+func TestHttpClientRequestStream_SendsThroughTheDecorators(t *testing.T) {
+    server, _ := newCountingServer(t)
+
+    recorder := &recordingRoundTripper{}
+    client := newTestHttpClient(t, HttpClientConfig{
+        BaseUrl:                server.URL,
+        RoundTripperDecorators: []RoundTripperDecorator{recordingDecorator(recorder)},
+    })
+
+    response, err := client.RequestStream(testRuntime(), http.MethodGet, "/", RequestOptions{})
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    _ = response.Body().Close()
+
+    if 1 != len(recorder.requests) {
+        t.Fatalf("expected the stream to go through the decorator, got %d requests", len(recorder.requests))
+    }
+}
+
+func TestHttpClient_PerRequestTimeout_KeepsTheDecorators(t *testing.T) {
+    server, _ := newCountingServer(t)
+
+    recorder := &recordingRoundTripper{}
+    client := newTestHttpClient(t, HttpClientConfig{
+        BaseUrl:                server.URL,
+        RoundTripperDecorators: []RoundTripperDecorator{recordingDecorator(recorder)},
+    })
+
+    if _, err := client.Get(testRuntime(), "/", RequestOptions{Timeout: bound.Of(2 * time.Second)}); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if 1 != len(recorder.requests) {
+        t.Fatalf("expected the per-request client to keep the decorators, got %d requests", len(recorder.requests))
+    }
+}
