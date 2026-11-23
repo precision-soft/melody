@@ -326,13 +326,10 @@ func runRegisteredGenerateCommand(t *testing.T, arguments []string) string {
     command := NewGenerateCommand(appBindSet(), GenerateConfig{})
     runtimeInstance := newCommandFixtureRuntime(t, projectDirectory)
 
-    rootCommand := melodycli.NewRoot("app", "desc")
     buffer := &bytes.Buffer{}
+    rootCommand := melodycli.NewRoot("app", "desc", melodycli.RootConfig{Writer: buffer, ErrorWriter: buffer})
 
     rootCommand.Register(command, runtimeInstance)
-
-    rootCommand.SetWriter(buffer)
-    rootCommand.SetErrorWriter(buffer)
 
     runErr := rootCommand.Run(context.Background(), append([]string{"app", command.Name()}, arguments...))
     if nil != runErr {

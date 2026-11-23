@@ -209,10 +209,7 @@ func (instance *Application) runCli() error {
 
     loggerWithProcess.Info("starting cli application", nil)
 
-    rootCli := cli.NewRoot(configuration.Cli().Name(), configuration.Cli().Description())
-    rootCli.SetVersion(instance.applicationConfig.Version)
-    rootCli.SetWriter(os.Stdout)
-    rootCli.SetErrorWriter(os.Stderr)
+    rootCli := cli.NewRoot(configuration.Cli().Name(), configuration.Cli().Description(), cli.RootConfig{Version: instance.applicationConfig.Version, Writer: os.Stdout, ErrorWriter: os.Stderr})
 
     availableCommands := make([]commandSuggestion, 0, len(instance.cliCommands))
 

@@ -14,7 +14,7 @@ import (
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
 )
 
-/* NewKernel is called by the application alone: a token NewToken did not build is refused. */
+/* NewKernel is called by the application alone: a token NewToken did not build is refused. The http kernel is built from httpKernelConfig, its one source. */
 func NewKernel(
     token kernelseam.Token,
     applicationConfiguration configcontract.Configuration,
@@ -22,6 +22,7 @@ func NewKernel(
     httpRouter httpcontract.Router,
     eventDispatcher eventcontract.EventDispatcher,
     clock clockcontract.Clock,
+    httpKernelConfig http.KernelConfig,
 ) kernelcontract.Kernel {
     if false == token.Valid() {
         exception.Panic(
@@ -59,7 +60,7 @@ func NewKernel(
         )
     }
 
-    httpKernel := http.NewKernel(httpRouter, http.KernelConfig{})
+    httpKernel := http.NewKernel(httpRouter, httpKernelConfig)
 
     return &kernel{
         config:           applicationConfiguration,

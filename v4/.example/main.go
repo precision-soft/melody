@@ -30,6 +30,7 @@ func main() {
             EnvironmentKeys:    config.EnvironmentKeys(),
             ParameterOverrides: config.ParameterOverrides(),
             SecurityHeaders:    config.SecurityHeaders(),
+            HttpKernel:         config.HttpKernelConfig(),
         },
     )
 

@@ -79,6 +79,7 @@ Keys and parameters are two tables. A key is not a parameter: `Get("MELODY_HTTP_
 | `MELODY_HTTP_MAX_HEADER_BYTES`            | `kernel.http.max_header_bytes`            | `""` (the application's, then `1048576`)           |
 | `MELODY_HTTP_UNAVAILABLE_RETRY_AFTER`     | `kernel.http.unavailable_retry_after`     | `""` (the application's, then `5s`)                |
 | `MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE`     | `kernel.http.session_empty_on_outage`     | `""` (the application's, then `false`)             |
+| `MELODY_HTTP_SESSION_COOKIE_SECURE`       | `kernel.http.session_cookie_secure`       | `""` (the application's, then `from-scheme`)       |
 | `MELODY_CLI_NAME`                         | `kernel.cli_name`                         | `"melody"`                                         |
 | `MELODY_CLI_DESCRIPTION`                  | `kernel.cli_description`                  | `""`                                               |
 | `MELODY_CLI_BOOT_WARNINGS_IGNORED`        | `kernel.cli_boot_warnings_ignored`        | `""`                                               |
@@ -230,13 +231,13 @@ The value is a count of at least one, and `unlimited` is admitted. At the count,
 
 ### Http shutdown timeout
 
-How long a stopping http server waits for the requests it has already admitted before cutting them. Read through [`HttpConfiguration.ShutdownTimeout()`](../../config/contract/http.go), absent when the key is unset, and resolved by the application over `ApplicationConfig.HttpShutdownTimeout`, which is the key's default.
+How long a stopping http server waits for the requests it has already admitted before cutting them. Read through [`HttpConfiguration.ShutdownTimeout()`](../../config/contract/http.go), absent when the key is unset, and resolved by the application over `ApplicationConfig.HttpServer.ShutdownTimeout`, which is the key's default.
 
 | Environment key                | Parameter name                 | Default |
 |--------------------------------|--------------------------------|---------|
 | `MELODY_HTTP_SHUTDOWN_TIMEOUT` | `kernel.http.shutdown_timeout` | `""`    |
 
-The value is a Go duration string of at least 1ms, and `unlimited` is refused: zero and negative values fail the boot. Without the key and the field the wait is [`DefaultHttpShutdownTimeout`](../../config/http.go), five seconds; a refused value names `ApplicationConfig.HttpShutdownTimeout`, and the key when the key carried it. The same budget bounds the shutdown of the server and the drain of the request scopes the kernel still holds, so a deployment whose supervisor grants a longer termination grace raises this to match.
+The value is a Go duration string of at least 1ms, and `unlimited` is refused: zero and negative values fail the boot. Without the key and the field the wait is [`DefaultHttpShutdownTimeout`](../../config/http.go), five seconds; a refused value names `ApplicationConfig.HttpServer.ShutdownTimeout`, and the key when the key carried it. The same budget bounds the shutdown of the server and the drain of the request scopes the kernel still holds, so a deployment whose supervisor grants a longer termination grace raises this to match.
 
 ### Teardown timeout
 
@@ -292,13 +293,23 @@ The value is a boolean in any spelling the parameter conversion accepts — `tru
 
 ### Session storage outage
 
-Whether a request that reads the session while the session storage cannot answer is served an empty session marked unavailable, saved nowhere and with no cookie written, where the default answers its reader the marked error, `503` with `Retry-After` when a handler returns it (see [SESSION.md](SESSION.md)). Read through [`HttpConfiguration.SessionEmptyOnOutage()`](../../config/contract/http.go) as a [`Switch`](../../config/contract/kernel.go) and decided by the application against its own [`ApplicationConfig.SessionEmptyOnOutage`](../../application/application_new.go): the key wins over the field.
+Whether a request that reads the session while the session storage cannot answer is served an empty session marked unavailable, saved nowhere and with no cookie written, where the default answers its reader the marked error, `503` with `Retry-After` when a handler returns it (see [SESSION.md](SESSION.md)). Read through [`HttpConfiguration.SessionEmptyOnOutage()`](../../config/contract/http.go) as a [`Switch`](../../config/contract/kernel.go) and decided by the application against its own [`ApplicationConfig.HttpKernel.SessionPolicy.EmptyOnOutage`](../../application/application_new.go): the key wins over the field.
 
 | Environment key                       | Parameter name                        | Default |
 |---------------------------------------|---------------------------------------|---------|
 | `MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE` | `kernel.http.session_empty_on_outage` | `""`    |
 
 The value is a boolean in the spellings the container teardown order accepts, and anything else fails the boot with `invalid environment value`, naming the key. Left out, the key is unset and the field decides; without the field the outage is answered as an error. The firewall's sign-in and sign-out doors refuse the empty session `503` either way.
+
+### Session cookie secure
+
+Whether the session cookie is marked `Secure` from the scheme the forwarded-headers policy believes or on every response. Read through [`HttpConfiguration.SessionCookieSecure()`](../../config/contract/http.go), empty when the key is unset, and decided by the application against its own [`ApplicationConfig.HttpKernel.SessionCookiePolicy.Secure`](../../application/application_new.go): the key wins over the field.
+
+| Environment key                     | Parameter name                      | Default |
+|-------------------------------------|-------------------------------------|---------|
+| `MELODY_HTTP_SESSION_COOKIE_SECURE` | `kernel.http.session_cookie_secure` | `""`    |
+
+The value is [`HttpSessionCookieSecureFromScheme`](../../config/environment.go) (`from-scheme`) or [`HttpSessionCookieSecureAlways`](../../config/environment.go) (`always`), spelled exactly; anything else, `never` included, fails the boot with `invalid environment value`, naming the key and the two admitted values. `never` weakens the cookie, so it is written in Go alone, `SessionCookieSecureNever`. Left out, the key is unset and the field decides; without the field the scheme decides.
 
 ### Static file cache
 
@@ -476,16 +487,17 @@ func example() configcontract.Configuration {
 
 ### Environment variable keys (`config`)
 
-- [`EnvironmentNameKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpSessionMaxSessionsKey`, `HttpShutdownTimeoutKey`, `HttpUnavailableRetryAfterKey`, `HttpSessionEmptyOnOutageKey`, `TeardownTimeoutKey`, `ScopeTeardownTimeoutKey`, `ContainerCreationWaitersKey`, `ContainerTeardownSequentialKey`, `CliNameKey`, `CliDescriptionKey`, `CliBootWarningsIgnoredKey`, `CliBootWarningsDisabledKey`, `LogPathKey`, `LogLevelKey`, `DefaultLocaleKey`, `PublicDirectoryKey`, `StaticIndexFileKey`, `StaticCacheDisabledKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
+- [`EnvironmentNameKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpSessionMaxSessionsKey`, `HttpShutdownTimeoutKey`, `HttpUnavailableRetryAfterKey`, `HttpSessionEmptyOnOutageKey`, `HttpSessionCookieSecureKey`, `TeardownTimeoutKey`, `ScopeTeardownTimeoutKey`, `ContainerCreationWaitersKey`, `ContainerTeardownSequentialKey`, `CliNameKey`, `CliDescriptionKey`, `CliBootWarningsIgnoredKey`, `CliBootWarningsDisabledKey`, `LogPathKey`, `LogLevelKey`, `DefaultLocaleKey`, `PublicDirectoryKey`, `StaticIndexFileKey`, `StaticCacheDisabledKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
 
 ### Kernel parameter names (`config`)
 
-- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnvironment`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpSessionMaxSessions`, `KernelHttpShutdownTimeout`, `KernelHttpUnavailableRetryAfter`, `KernelHttpSessionEmptyOnOutage`, `KernelTeardownTimeout`, `KernelScopeTeardownTimeout`, `KernelContainerCreationWaiters`, `KernelContainerTeardownSequential`, `KernelCliName`, `KernelCliDescription`, `KernelCliBootWarningsIgnored`, `KernelCliBootWarningsDisabled`, `KernelLogPath`, `KernelLogLevel`, `KernelDefaultLocale`, `KernelPublicDirectory`, `KernelStaticIndexFile`, `KernelStaticCacheDisabled`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDirectory`, `KernelLogsDirectory`, `KernelCacheDirectory`](../../config/environment.go)
+- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnvironment`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpSessionMaxSessions`, `KernelHttpShutdownTimeout`, `KernelHttpUnavailableRetryAfter`, `KernelHttpSessionEmptyOnOutage`, `KernelHttpSessionCookieSecure`, `KernelTeardownTimeout`, `KernelScopeTeardownTimeout`, `KernelContainerCreationWaiters`, `KernelContainerTeardownSequential`, `KernelCliName`, `KernelCliDescription`, `KernelCliBootWarningsIgnored`, `KernelCliBootWarningsDisabled`, `KernelLogPath`, `KernelLogLevel`, `KernelDefaultLocale`, `KernelPublicDirectory`, `KernelStaticIndexFile`, `KernelStaticCacheDisabled`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDirectory`, `KernelLogsDirectory`, `KernelCacheDirectory`](../../config/environment.go)
 
 ### Environment / mode / role constants (`config`)
 
 - [`EnvironmentDevelopment`, `EnvironmentProduction`](../../config/environment.go)
 - [`ModeHttp`, `ModeCli`](../../config/environment.go)
+- [`HttpSessionCookieSecureFromScheme`, `HttpSessionCookieSecureAlways`](../../config/environment.go) — the two values `MELODY_HTTP_SESSION_COOKIE_SECURE` admits
 - [`RoleWeb`, `RoleWorker`, `RoleAll`](../../config/environment.go)
 - [`RoleAllowsBackgroundWork(role string) bool`](../../config/process_role.go) — whether a process with this role should start outbox relays and message consumers. Melody itself gates nothing on the role: it is declared intent for application wiring to query
 - [`RoleAllowsHttp(role string) bool`](../../config/process_role.go) — informational in the same way; the runtime **mode**, not the role, decides whether the http kernel starts

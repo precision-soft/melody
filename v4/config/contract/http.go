@@ -59,4 +59,7 @@ type HttpConfiguration interface {
 
     /* SessionEmptyOnOutage is MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE as the deployment set it, unset when the key says nothing. */
     SessionEmptyOnOutage() Switch
+
+    /* SessionCookieSecure is MELODY_HTTP_SESSION_COOKIE_SECURE as the deployment set it, from-scheme or always, empty when the key says nothing. */
+    SessionCookieSecure() string
 }

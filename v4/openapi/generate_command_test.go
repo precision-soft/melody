@@ -231,13 +231,10 @@ func runRegisteredOpenApiGenerateCommand(t *testing.T, arguments []string) strin
     runtimeInstance := newCommandFixtureRuntime(t, t.TempDir(), true, true)
     command := NewGenerateCommand()
 
-    rootCommand := melodycli.NewRoot("app", "desc")
     buffer := &bytes.Buffer{}
+    rootCommand := melodycli.NewRoot("app", "desc", melodycli.RootConfig{Writer: buffer, ErrorWriter: buffer})
 
     rootCommand.Register(command, runtimeInstance)
-
-    rootCommand.SetWriter(buffer)
-    rootCommand.SetErrorWriter(buffer)
 
     runErr := rootCommand.Run(context.Background(), append([]string{"app", command.Name()}, arguments...))
     if nil != runErr {

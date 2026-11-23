@@ -3,6 +3,7 @@ package application
 import (
     "context"
     "errors"
+    "fmt"
     "maps"
     nethttp "net/http"
     "slices"
@@ -11,7 +12,6 @@ import (
     "time"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
-    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
@@ -22,6 +22,7 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     middlewarepipeline "github.com/precision-soft/melody/v4/http/middleware/pipeline"
     "github.com/precision-soft/melody/v4/internal"
+    "github.com/precision-soft/melody/v4/internal/httpkernelseam"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -152,7 +153,18 @@ func (instance *Application) bootHttpPipeline(bootRuntime containercontract.Runt
 
 /* installHttpMiddlewares builds the pipeline. A middleware factory runs here with the writable router, so the walk Boot made is made again over what it registered. */
 func (instance *Application) installHttpMiddlewares(httpKernel httpcontract.Kernel) {
-    httpKernel.Use(instance.httpMiddlewares.all(instance.kernel))
+    installer, isInstaller := httpKernel.(httpkernelseam.MiddlewareInstaller)
+    if false == isInstaller {
+        exception.Panic(
+            exception.NewError(
+                "the http kernel cannot hold the application's middlewares",
+                exceptioncontract.Context{"kernel": fmt.Sprintf("%T", httpKernel)},
+                nil,
+            ),
+        )
+    }
+
+    installer.InstallMiddlewares(httpkernelseam.NewToken(), instance.httpMiddlewares.all(instance.kernel))
 
     instance.recordFirewallDoorRouteCollisions()
     instance.panicOnBootCollisions()
@@ -177,16 +189,7 @@ func (instance *Application) runHttp(
         return httpShutdownTimeoutErr
     }
 
-    unavailableRetryAfter, unavailableRetryAfterErr := resolveUnavailableRetryAfter(configuration, instance.applicationConfig)
-    if nil != unavailableRetryAfterErr {
-        return unavailableRetryAfterErr
-    }
-
     httpKernel := instance.kernel.HttpKernel()
-
-    /* installed again last, so a module's own SetUnavailableRetryAfter or SetSessionPolicy does not outrank the deployment's key */
-    httpKernel.SetUnavailableRetryAfter(bound.Of(unavailableRetryAfter))
-    httpKernel.SetSessionPolicy(httpcontract.SessionPolicy{EmptyOnOutage: resolveSessionEmptyOnOutage(configuration, instance.applicationConfig)})
 
     httpHandler := instance.decorateHttpHandler(httpKernel.ServeHttp(instance.kernel.ServiceContainer()))
 

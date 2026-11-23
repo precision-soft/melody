@@ -733,6 +733,10 @@ func (instance *Configuration) buildHttpConfiguration() error {
         return serverLimitErr
     }
 
+    if serverLimits.sessionCookieSecure, serverLimitErr = checkedSessionCookieSecure(instance.MustGet(KernelHttpSessionCookieSecure)); nil != serverLimitErr {
+        return serverLimitErr
+    }
+
     publicUrl := instance.MustGet(KernelHttpPublicUrl).MustString()
     if "" == publicUrl {
         normalizedPublicUrl, publicUrlRefusal := internal.NormalizePublicUrl(instance.httpPublicUrl)

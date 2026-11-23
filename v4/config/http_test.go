@@ -142,23 +142,23 @@ func TestConfigurationHttpLimitsRefuseWhatTheirRuleDoesNotAdmit(t *testing.T) {
         {HttpSessionStorageTimeoutKey, "0", "HttpConfiguration.SessionStorageTimeout"},
         {HttpSessionStorageTimeoutKey, "-1s", "HttpConfiguration.SessionStorageTimeout"},
         {HttpSessionStorageTimeoutKey, "500us", "HttpConfiguration.SessionStorageTimeout"},
-        {HttpShutdownTimeoutKey, "0", "ApplicationConfig.HttpShutdownTimeout"},
-        {HttpShutdownTimeoutKey, "unlimited", "ApplicationConfig.HttpShutdownTimeout"},
-        {HttpReadTimeoutKey, "0", "ApplicationConfig.ReadTimeout"},
-        {HttpReadHeaderTimeoutKey, "unlimited", "ApplicationConfig.ReadHeaderTimeout"},
-        {HttpWriteTimeoutKey, "-1s", "ApplicationConfig.WriteTimeout"},
-        {HttpIdleTimeoutKey, "0s", "ApplicationConfig.IdleTimeout"},
-        {HttpMaxHeaderBytesKey, "4095", "ApplicationConfig.MaxHeaderBytes"},
-        {HttpReadTimeoutKey, "unlimited", "ApplicationConfig.ReadTimeout"},
-        {HttpWriteTimeoutKey, "unlimited", "ApplicationConfig.WriteTimeout"},
-        {HttpIdleTimeoutKey, "unlimited", "ApplicationConfig.IdleTimeout"},
-        {HttpMaxHeaderBytesKey, "unlimited", "ApplicationConfig.MaxHeaderBytes"},
-        {HttpReadHeaderTimeoutKey, "999us", "ApplicationConfig.ReadHeaderTimeout"},
+        {HttpShutdownTimeoutKey, "0", "ApplicationConfig.HttpServer.ShutdownTimeout"},
+        {HttpShutdownTimeoutKey, "unlimited", "ApplicationConfig.HttpServer.ShutdownTimeout"},
+        {HttpReadTimeoutKey, "0", "ApplicationConfig.HttpServer.ReadTimeout"},
+        {HttpReadHeaderTimeoutKey, "unlimited", "ApplicationConfig.HttpServer.ReadHeaderTimeout"},
+        {HttpWriteTimeoutKey, "-1s", "ApplicationConfig.HttpServer.WriteTimeout"},
+        {HttpIdleTimeoutKey, "0s", "ApplicationConfig.HttpServer.IdleTimeout"},
+        {HttpMaxHeaderBytesKey, "4095", "ApplicationConfig.HttpServer.MaxHeaderBytes"},
+        {HttpReadTimeoutKey, "unlimited", "ApplicationConfig.HttpServer.ReadTimeout"},
+        {HttpWriteTimeoutKey, "unlimited", "ApplicationConfig.HttpServer.WriteTimeout"},
+        {HttpIdleTimeoutKey, "unlimited", "ApplicationConfig.HttpServer.IdleTimeout"},
+        {HttpMaxHeaderBytesKey, "unlimited", "ApplicationConfig.HttpServer.MaxHeaderBytes"},
+        {HttpReadHeaderTimeoutKey, "999us", "ApplicationConfig.HttpServer.ReadHeaderTimeout"},
         {TeardownTimeoutKey, "0", "ApplicationConfig.TeardownTimeout"},
-        {HttpUnavailableRetryAfterKey, "500ms", "ApplicationConfig.UnavailableRetryAfter"},
-        {HttpUnavailableRetryAfterKey, "2h", "ApplicationConfig.UnavailableRetryAfter"},
-        {HttpUnavailableRetryAfterKey, "unlimited", "ApplicationConfig.UnavailableRetryAfter"},
-        {HttpUnavailableRetryAfterKey, "1500ms", "ApplicationConfig.UnavailableRetryAfter"},
+        {HttpUnavailableRetryAfterKey, "500ms", "ApplicationConfig.HttpKernel.UnavailableRetryAfter"},
+        {HttpUnavailableRetryAfterKey, "2h", "ApplicationConfig.HttpKernel.UnavailableRetryAfter"},
+        {HttpUnavailableRetryAfterKey, "unlimited", "ApplicationConfig.HttpKernel.UnavailableRetryAfter"},
+        {HttpUnavailableRetryAfterKey, "1500ms", "ApplicationConfig.HttpKernel.UnavailableRetryAfter"},
     }
 
     for _, testCase := range cases {
@@ -651,5 +651,29 @@ func TestHttpConfiguration_AdmitsAPublicUrlAndTrimsItsTrailingSlash(t *testing.T
         if publicUrl := mustConfigurationFromValues(t, map[string]string{HttpPublicUrlKey: value}).Http().PublicUrl(); expected != publicUrl {
             t.Fatalf("expected %q read as %q, got %q", value, expected, publicUrl)
         }
+    }
+}
+
+func TestConfigurationHttp_SessionCookieSecure_AnswersTheKeyAsSet(t *testing.T) {
+    if "" != mustConfigurationFromValues(t, map[string]string{}).Http().SessionCookieSecure() {
+        t.Fatalf("expected no value when the key is unset")
+    }
+
+    for _, value := range []string{HttpSessionCookieSecureFromScheme, HttpSessionCookieSecureAlways} {
+        if value != mustConfigurationFromValues(t, map[string]string{HttpSessionCookieSecureKey: value}).Http().SessionCookieSecure() {
+            t.Fatalf("expected %q answered as set", value)
+        }
+    }
+
+    if "" != mustConfigurationFromValues(t, map[string]string{HttpSessionCookieSecureKey: "  "}).Http().SessionCookieSecure() {
+        t.Fatalf("expected a blank value read as unset")
+    }
+}
+
+/* never weakens the cookie, so it has no key spelling */
+func TestConfigurationHttp_SessionCookieSecure_RefusesAnyOtherValueNamingTheKey(t *testing.T) {
+    for _, value := range []string{"never", "Always", " always", "true", "from_scheme"} {
+        _, err := newConfigurationFromValues(map[string]string{HttpSessionCookieSecureKey: value})
+        assertLimitRefusal(t, err, HttpSessionCookieSecureKey, "")
     }
 }

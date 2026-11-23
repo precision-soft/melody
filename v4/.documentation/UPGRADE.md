@@ -160,6 +160,38 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** `security.NewJwtTokenValidator(security.NewJwtSecretKeySet(secret, security.JwtSecretKeySetConfig{}), security.JwtConfig{…})`; a rotating or remote key source implements `securitycontract.JwtKeySet`. See [Key sets](package/SECURITY.md#key-sets).
 
+### Application: the http server limits live under `ApplicationConfig.HttpServer`
+
+**What changed.** [`ApplicationConfig.HttpServer`](../application/application_new.go), an `application.HttpServerConfig`, holds `ReadTimeout`, `ReadHeaderTimeout`, `WriteTimeout`, `IdleTimeout`, `MaxHeaderBytes` and `ShutdownTimeout`, the flat `ReadTimeout`, `ReadHeaderTimeout`, `WriteTimeout`, `IdleTimeout`, `MaxHeaderBytes` and `HttpShutdownTimeout` removed. Keys and defaults are unchanged. See [Http server](package/APPLICATION.md#http-server).
+
+**Symptom.** `ApplicationConfig{ReadTimeout: …}` and its five siblings do not compile; a refusal that named `ApplicationConfig.ReadTimeout` names `ApplicationConfig.HttpServer.ReadTimeout`, and `ApplicationConfig.HttpShutdownTimeout` is `ApplicationConfig.HttpServer.ShutdownTimeout`.
+
+**Remedy.** `ApplicationConfig{HttpServer: application.HttpServerConfig{ReadTimeout: …, ShutdownTimeout: …}}`; a log query or alert keyed on the old field names reads the nested ones.
+
+### Http: the kernel is configured through `ApplicationConfig.HttpKernel`
+
+**What changed.** [`ApplicationConfig.HttpKernel`](../application/application_new.go), an [`http.KernelConfig`](../http/kernel.go), is the http kernel's one source, built once at `NewApplication`. `(*http.Kernel).Use`, `SetNotFoundHandler`, `SetForwardedHeadersPolicy`, `SetSessionCookiePolicy`, `SetMethodPolicy`, `SetSessionPolicy` and `SetUnavailableRetryAfter` are removed, from [`httpcontract.Kernel`](../http/contract/kernel.go), which keeps `ServeHttp` alone, and from the kernel; `http.NewKernel(router, http.KernelConfig{…})` is the only way to configure a kernel. `ApplicationConfig.UnavailableRetryAfter` is `HttpKernel.UnavailableRetryAfter` and `ApplicationConfig.SessionEmptyOnOutage` is `HttpKernel.SessionPolicy.EmptyOnOutage`, their keys still winning; `HttpKernel.Middlewares` is refused at `NewApplication`, naming `RegisterHttpMiddlewares`. A module can no longer set a kernel policy: the composition root owns it. A policy a module set after the application's used to stand until the serve time put two of them back; now there is one value. See [Http kernel](package/APPLICATION.md#http-kernel).
+
+**Symptom.** `kernelInstance.HttpKernel().SetNotFoundHandler(…)`, `SetForwardedHeadersPolicy`, `SetSessionCookiePolicy`, `SetMethodPolicy`, `SetSessionPolicy`, `SetUnavailableRetryAfter` and `Use` do not compile, on the interface or on `*http.Kernel`; `ApplicationConfig{UnavailableRetryAfter: …, SessionEmptyOnOutage: …}` does not compile; an out-of-tree `httpcontract.Kernel` with the seven methods still compiles; `ApplicationConfig{HttpKernel: http.KernelConfig{Middlewares: …}}` exits at `NewApplication` with `the application's http middlewares are registered through RegisterHttpMiddlewares`.
+
+**Remedy.** `ApplicationConfig{HttpKernel: http.KernelConfig{NotFoundHandler: …, ForwardedHeadersPolicy: …, SessionCookiePolicy: …, MethodPolicy: …, SessionPolicy: httpcontract.SessionPolicy{EmptyOnOutage: true}, UnavailableRetryAfter: bound.Of(…)}}`; a middleware through `Application.RegisterHttpMiddlewares` or a module's registrar; a bare kernel in a test through `http.NewKernel(router, http.KernelConfig{…})`. A value a module read from its own key and set on the kernel moves to the composition root; the session cookie's `Secure` has the framework key `MELODY_HTTP_SESSION_COOKIE_SECURE` (next section).
+
+### Http: `MELODY_HTTP_SESSION_COOKIE_SECURE` marks the session cookie
+
+**What changed.** The framework key `MELODY_HTTP_SESSION_COOKIE_SECURE` (`kernel.http.session_cookie_secure`), read through `Http().SessionCookieSecure()`, admits `from-scheme` and `always` and wins over `ApplicationConfig.HttpKernel.SessionCookiePolicy.Secure`, which is its default; any other value, `never` included, refuses the boot naming the key. `configcontract.HttpConfiguration` gains `SessionCookieSecure() string`. See [Session cookie secure](package/CONFIG.md#session-cookie-secure).
+
+**Symptom.** An out-of-tree `configcontract.HttpConfiguration` does not compile; a deployment `.env` that set the key to another value refuses the boot.
+
+**Remedy.** Add `SessionCookieSecure() string { return "" }`; an application key that switched the cookie through a module's `SetSessionCookiePolicy`, as the example's `APP_SESSION_COOKIE_SECURE` did, is replaced by the framework key.
+
+### Cli: the root is built from a config
+
+**What changed.** [`cli.NewRoot(applicationName, applicationDescription, cli.RootConfig{Version, Writer, ErrorWriter})`](../cli/root.go) takes the version and the two streams at construction, stamped on every command at `Register`; `Root.SetVersion`, `SetWriter` and `SetErrorWriter` are removed. The zero config is an undeclared version and the process's standard streams.
+
+**Symptom.** `root.SetVersion`, `SetWriter` and `SetErrorWriter` do not compile; `cli.NewRoot(name, description)` wants a third argument.
+
+**Remedy.** `cli.NewRoot(name, description, cli.RootConfig{Version: …, Writer: …, ErrorWriter: …})`.
+
 ### Constructors: a value object takes a config
 
 **What changed.** A constructor of a value object keeps the values that name it positional and takes the rest in a config struct whose zero value is the empty or default value, and the doors over a fixed value or a positional optional gain one:
@@ -680,13 +712,13 @@ The six `service.<module>` names of a module's principal service, `service.cache
 
 **Remedy.** **Invert the value when renaming the key**: `MELODY_STATIC_ENABLE_CACHE=false` is `MELODY_STATIC_CACHE_DISABLED=true`, and `MELODY_STATIC_ENABLE_CACHE=true` is the default, the line dropped or `MELODY_STATIC_CACHE_DISABLED=false`. Drop the max age from a file that disables the cache. Read `StaticCacheDisabled()` where `false == StaticEnableCache()` was read.
 
-### Stop grace: one name, `ShutdownTimeout`, and `ApplicationConfig.HttpShutdownTimeout`
+### Stop grace: one name, `ShutdownTimeout`, and `ApplicationConfig.HttpServer.ShutdownTimeout`
 
-**What changed.** The wait a stopping process gives the work it admitted has one name, `ShutdownTimeout`, which the consume command's [`ConsumeCommandConfig.ShutdownTimeout`](../messagebus/consume_command.go) carries in place of `WithShutdownGrace`: the cron [`RunnerConfig.GracefulTimeout`](../../integrations/cron/v4/runner_config.go) and [`EntryConfig.GracefulTimeout`](../../integrations/cron/v4/configuration.go) are `ShutdownTimeout`, their refusals naming `RunnerConfig.ShutdownTimeout` and `EntryConfig.ShutdownTimeout`, and the cron log key `gracefulTimeout` and the context key `unwindGrace` of the abandon errors are `shutdownTimeout`; the entry's field still bounds the unwind after its own `Timeout` too. The http wait gains its field, [`ApplicationConfig.HttpShutdownTimeout`](../application/application_new.go), the default of `MELODY_HTTP_SHUTDOWN_TIMEOUT`, which wins when a deployment sets it, 5s without either; `HttpConfiguration.ShutdownTimeout()` answers the key as the deployment set it, a `bound.Duration` absent when unset, and a refused value names `ApplicationConfig.HttpShutdownTimeout`.
+**What changed.** The wait a stopping process gives the work it admitted has one name, `ShutdownTimeout`, which the consume command's [`ConsumeCommandConfig.ShutdownTimeout`](../messagebus/consume_command.go) carries in place of `WithShutdownGrace`: the cron [`RunnerConfig.GracefulTimeout`](../../integrations/cron/v4/runner_config.go) and [`EntryConfig.GracefulTimeout`](../../integrations/cron/v4/configuration.go) are `ShutdownTimeout`, their refusals naming `RunnerConfig.ShutdownTimeout` and `EntryConfig.ShutdownTimeout`, and the cron log key `gracefulTimeout` and the context key `unwindGrace` of the abandon errors are `shutdownTimeout`; the entry's field still bounds the unwind after its own `Timeout` too. The http wait gains its field, [`ApplicationConfig.HttpServer.ShutdownTimeout`](../application/application_new.go), the default of `MELODY_HTTP_SHUTDOWN_TIMEOUT`, which wins when a deployment sets it, 5s without either; `HttpConfiguration.ShutdownTimeout()` answers the key as the deployment set it, a `bound.Duration` absent when unset, and a refused value names `ApplicationConfig.HttpServer.ShutdownTimeout`.
 
 **Symptom.** `RunnerConfig{GracefulTimeout: …}` and `EntryConfig{GracefulTimeout: …}` no longer compile; `Http().ShutdownTimeout().Value` no longer compiles; a log query keyed on the cron `gracefulTimeout` or `unwindGrace` stops matching.
 
-**Remedy.** Rename the fields to `ShutdownTimeout`; set the http wait in code with `ApplicationConfig{HttpShutdownTimeout: bound.Of(d)}`, the key keeping the last word; read `Http().ShutdownTimeout()` as an optional limit, or keep the key's value out of the code and let the application resolve it.
+**Remedy.** Rename the fields to `ShutdownTimeout`; set the http wait in code with `ApplicationConfig{HttpServer: application.HttpServerConfig{ShutdownTimeout: bound.Of(d)}}`, the key keeping the last word; read `Http().ShutdownTimeout()` as an optional limit, or keep the key's value out of the code and let the application resolve it.
 
 ### Cors: `AllowOrigin` receives the request
 
@@ -1284,11 +1316,11 @@ The wire key stays `app` on purpose: a fleet upgrades service by service, and a 
 
 ### Exception: the infrastructure mark lives in `exception`, and the error renderer answers it `503` with `Retry-After`
 
-**What changed.** [`MarkInfrastructureFailure`](../exception/infrastructure_failure.go) and [`IsInfrastructureFailure`](../exception/infrastructure_failure.go) moved from `security` to `exception`, beside [`AnswersUnavailable`](../exception/infrastructure_failure.go), the rule the renderer and the security machinery read; `security.MarkInfrastructureFailure`, `security.IsInfrastructureFailure` and `security.ResolveUnavailableRetryAfter` are gone, the last as [`config.ResolveUnavailableRetryAfter`](../config/limit.go). [`RenderExceptionResponse`](../http/exception_listener.go) answers a marked error from any layer, an application's storage, cache or handler, `503 service unavailable` with `Retry-After`, unless an http status answers outside what the mark wraps, which is kept; a store's own status beneath the mark is answered `503` and its message, code and parameters are not served. The delay is the kernel's: [`ApplicationConfig.UnavailableRetryAfter`](../application/application_new.go) or the new key `MELODY_HTTP_UNAVAILABLE_RETRY_AFTER`, the key winning, 5s when left out, 1s to 1h in whole seconds, unlimited refused, a refusal failing the boot naming the key or the field. A handler's panic whose value carries the mark is answered the same way; the security resolution listener still reads a token source's panic as a refusal. It reaches a listener as `KernelExceptionEvent.UnavailableRetryAfter()`, a `time.Duration`, and the renderer as `ExceptionRenderConfig.UnavailableRetryAfter`; the http kernel takes it through `KernelConfig.UnavailableRetryAfter` and `SetUnavailableRetryAfter`, a method added to `httpcontract.Kernel`, `NewKernelExceptionEvent` takes a fourth argument, `KernelExceptionEventConfig{UnavailableRetryAfter}`, and `configcontract.HttpConfiguration` gains `UnavailableRetryAfter() bound.Duration`, the key as set. A firewall's refusal keeps the firewall's own delay.
+**What changed.** [`MarkInfrastructureFailure`](../exception/infrastructure_failure.go) and [`IsInfrastructureFailure`](../exception/infrastructure_failure.go) moved from `security` to `exception`, beside [`AnswersUnavailable`](../exception/infrastructure_failure.go), the rule the renderer and the security machinery read; `security.MarkInfrastructureFailure`, `security.IsInfrastructureFailure` and `security.ResolveUnavailableRetryAfter` are gone, the last as [`config.ResolveUnavailableRetryAfter`](../config/limit.go). [`RenderExceptionResponse`](../http/exception_listener.go) answers a marked error from any layer, an application's storage, cache or handler, `503 service unavailable` with `Retry-After`, unless an http status answers outside what the mark wraps, which is kept; a store's own status beneath the mark is answered `503` and its message, code and parameters are not served. The delay is the kernel's: [`ApplicationConfig.HttpKernel.UnavailableRetryAfter`](../application/application_new.go) or the new key `MELODY_HTTP_UNAVAILABLE_RETRY_AFTER`, the key winning, 5s when left out, 1s to 1h in whole seconds, unlimited refused, a refusal failing the boot naming the key or the field. A handler's panic whose value carries the mark is answered the same way; the security resolution listener still reads a token source's panic as a refusal. It reaches a listener as `KernelExceptionEvent.UnavailableRetryAfter()`, a `time.Duration`, and the renderer as `ExceptionRenderConfig.UnavailableRetryAfter`; the http kernel takes it through `KernelConfig.UnavailableRetryAfter`, `NewKernelExceptionEvent` takes a fourth argument, `KernelExceptionEventConfig{UnavailableRetryAfter}`, and `configcontract.HttpConfiguration` gains `UnavailableRetryAfter() bound.Duration`, the key as set. A firewall's refusal keeps the firewall's own delay.
 
-**Symptom.** `security.MarkInfrastructureFailure`, `security.IsInfrastructureFailure` and `security.ResolveUnavailableRetryAfter` no longer compile. A handler, a storage or a cache returning, or panicking with, a marked error gets `503` with `Retry-After` where it got `500`. An out-of-tree `httpcontract.Kernel` no longer compiles without `SetUnavailableRetryAfter`, an own `configcontract.HttpConfiguration` without `UnavailableRetryAfter`, and a call of `NewKernelExceptionEvent` without its config.
+**Symptom.** `security.MarkInfrastructureFailure`, `security.IsInfrastructureFailure` and `security.ResolveUnavailableRetryAfter` no longer compile. A handler, a storage or a cache returning, or panicking with, a marked error gets `503` with `Retry-After` where it got `500`. An own `configcontract.HttpConfiguration` no longer compiles without `UnavailableRetryAfter`, and a call of `NewKernelExceptionEvent` without its config.
 
-**Remedy.** Spell the mark `exception.MarkInfrastructureFailure` and the reader `exception.IsInfrastructureFailure`. Set `ApplicationConfig.UnavailableRetryAfter`, or the key in a deployment, for another delay than 5s. A listener that answers through `RenderExceptionResponse` passes `ExceptionRenderConfig{UnavailableRetryAfter: bound.Of(event.UnavailableRetryAfter())}`; one that builds its own response asks `exception.AnswersUnavailable(err)`, answers `503` and sets `http.SetRetryAfter(response, event.UnavailableRetryAfter())`. Pass `http.KernelExceptionEventConfig{}` to `NewKernelExceptionEvent`, or the delay an own kernel was configured with. Return an unmarked error where a `500` is the intended answer. Add `SetUnavailableRetryAfter(delay bound.Duration)` to an own http kernel and `UnavailableRetryAfter() bound.Duration`, answering `bound.Duration{}`, to an own http configuration.
+**Remedy.** Spell the mark `exception.MarkInfrastructureFailure` and the reader `exception.IsInfrastructureFailure`. Set `ApplicationConfig.HttpKernel.UnavailableRetryAfter`, or the key in a deployment, for another delay than 5s. A listener that answers through `RenderExceptionResponse` passes `ExceptionRenderConfig{UnavailableRetryAfter: bound.Of(event.UnavailableRetryAfter())}`; one that builds its own response asks `exception.AnswersUnavailable(err)`, answers `503` and sets `http.SetRetryAfter(response, event.UnavailableRetryAfter())`. Pass `http.KernelExceptionEventConfig{}` to `NewKernelExceptionEvent`, or the delay an own kernel was configured with. Return an unmarked error where a `500` is the intended answer. Add `UnavailableRetryAfter() bound.Duration`, answering `bound.Duration{}`, to an own http configuration.
 
 ### Session: `Manager.Session` and `NewSession` answer an error, and a storage outage is `503` with `Retry-After`
 
@@ -1317,11 +1349,11 @@ Publish a replacement with `melodyhttp.SetRequestSession(request, replacement)` 
 
 ### Http: a session storage outage can serve an empty session, opt-in
 
-**What changed.** [`httpcontract.SessionPolicy{EmptyOnOutage}`](../http/contract/kernel.go), installed through `KernelConfig.SessionPolicy` or `Kernel.SetSessionPolicy`, boot-only, and under an application declared by the application, installed last so a module's setter gives way, through `ApplicationConfig.SessionEmptyOnOutage` or the new key `MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE`, the key winning and a value that is not a boolean failing the boot naming the key, answers a reader of the session an empty [`session.UnavailableSession`](../session/unavailable_session.go) and no error when the storage cannot answer, where the default answers the marked error. The session has no id and keeps what the request writes for the request alone: the manager refuses to save or rotate it, marked, with `session.ErrSessionUnavailable` in the chain, and the response path writes no cookie and expires none, so the client finds its session when the storage answers again. One Warning record is filed for the request. An unmarked manager error stays an error, and the firewall's sign-in and sign-out doors refuse the empty session `503` as they refuse the outage. `httpcontract.Kernel` declares `SetSessionPolicy` and `configcontract.HttpConfiguration` declares `SessionEmptyOnOutage`.
+**What changed.** [`httpcontract.SessionPolicy{EmptyOnOutage}`](../http/contract/kernel.go), installed through `KernelConfig.SessionPolicy`, and under an application through `ApplicationConfig.HttpKernel.SessionPolicy.EmptyOnOutage` or the new key `MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE`, the key winning and a value that is not a boolean failing the boot naming the key, answers a reader of the session an empty [`session.UnavailableSession`](../session/unavailable_session.go) and no error when the storage cannot answer, where the default answers the marked error. The session has no id and keeps what the request writes for the request alone: the manager refuses to save or rotate it, marked, with `session.ErrSessionUnavailable` in the chain, and the response path writes no cookie and expires none, so the client finds its session when the storage answers again. One Warning record is filed for the request. An unmarked manager error stays an error, and the firewall's sign-in and sign-out doors refuse the empty session `503` as they refuse the outage. `configcontract.HttpConfiguration` declares `SessionEmptyOnOutage`.
 
-**Symptom.** An out-of-tree `httpcontract.Kernel` or `configcontract.HttpConfiguration` no longer compiles. With the policy off, one thing changes: a sign-in door without an `Authenticator` reads the session before its `Handler`, as the door with one does, so during a session storage outage it refuses `503` before the `Handler` runs, where the `Handler` ran and met the outage at its rotation.
+**Symptom.** An out-of-tree `configcontract.HttpConfiguration` no longer compiles. With the policy off, one thing changes: a sign-in door without an `Authenticator` reads the session before its `Handler`, as the door with one does, so during a session storage outage it refuses `503` before the `Handler` runs, where the `Handler` ran and met the outage at its rotation.
 
-**Remedy.** Add the two methods to an out-of-tree implementation. With the policy on, a `securitycontract.TokenResolver` that reads the session answers the unavailable token for the empty session, so a protected route answers `503` rather than sending a signed-in visitor to sign in:
+**Remedy.** Add the method to an out-of-tree implementation. With the policy on, a `securitycontract.TokenResolver` that reads the session answers the unavailable token for the empty session, so a protected route answers `503` rather than sending a signed-in visitor to sign in:
 
 ```go
 if cause, isUnavailable := melodysession.SessionUnavailableCause(sessionInstance); true == isUnavailable {
@@ -1419,11 +1451,11 @@ when it is cancelled, the body read included, and an absent runtime is refused w
 
 **Symptom.** `http.NewKernel(router)`, `http.DefaultKernelOptions()`, `MethodPolicy{HeadFallbackToGet: true}` and `kernel.Use(first, second)` no longer compile.
 
-**Remedy.** `http.NewKernel(router, http.KernelConfig{})`; an api that answers `405` to OPTIONS writes `MethodPolicy: httpcontract.MethodPolicy{AutomaticOptionsDisabled: true}`, in the struct or through `SetMethodPolicy`; `kernel.Use([]httpcontract.Middleware{first, second})`.
+**Remedy.** `http.NewKernel(router, http.KernelConfig{})`; an api that answers `405` to OPTIONS writes `MethodPolicy: httpcontract.MethodPolicy{AutomaticOptionsDisabled: true}` in the struct; `http.KernelConfig{Middlewares: []httpcontract.Middleware{first, second}}` on a bare kernel, `Application.RegisterHttpMiddlewares` in an application.
 
 ### Http: a session cookie policy of `SameSite=None` with `SessionCookieSecureNever` is refused
 
-**What changed.** [`SetSessionCookiePolicy`](../http/kernel.go), the setter `NewKernel` and a module both go through, panics on a policy whose `SameSite` is `None` and whose `Secure` is `SessionCookieSecureNever`, naming `SessionCookiePolicy.Secure`: every current browser drops such a cookie, so no session stuck. Either half alone is admitted. The third major wrote the cookie as asked and named the pair in the `http.sessionCookie.sameSiteNoneNeverSecure` boot warning at the kernel's first request, which is removed.
+**What changed.** [`NewKernel`](../http/kernel.go), and so `NewApplication` over `ApplicationConfig.HttpKernel`, panics on a policy whose `SameSite` is `None` and whose `Secure` is `SessionCookieSecureNever`, naming `SessionCookiePolicy.Secure`: every current browser drops such a cookie, so no session stuck. Either half alone is admitted. The third major wrote the cookie as asked and named the pair in the `http.sessionCookie.sameSiteNoneNeverSecure` boot warning at the kernel's first request, which is removed.
 
 **Symptom.** The boot panics with "the session cookie policy sets SameSite=None with Secure never".
 
@@ -2840,7 +2872,7 @@ A code path that asserted `SubscriberRegistrar` calls the two methods on the dis
 
 **Symptom.** A redirected or piped standard output no longer ends with the `[error]` line; under `--format=json` a failing command now prints the line, on standard error.
 
-**Remedy.** A script that read the failure off standard output reads standard error, or the exit code, and keeps the two streams apart so the line never lands inside a json document. A test or an application that captures the error stream sets it through `Root.SetErrorWriter`, or `ErrWriter` on the command.
+**Remedy.** A script that read the failure off standard output reads standard error, or the exit code, and keeps the two streams apart so the line never lands inside a json document. A test or an application that captures the error stream sets it through `RootConfig.ErrorWriter`, or `ErrWriter` on the command.
 
 ### Debug: `NewMiddlewareCommand` takes the description and the build providers
 
@@ -2929,11 +2961,11 @@ debug.NewMiddlewareCommand(
 
 **Remedy.** A redirect to a fixed or allowlisted external target moves to `RedirectExternalResponse`, whose name is the assertion that the target is the caller's own. A redirect whose target arrives from client input must not become external by remedy: validate it against an allowlist first, or keep it relative.
 
-### Http: the kernel and router configuration doors are boot-only and refuse after serving starts
+### Http: the router's registration doors are boot-only and refuse after serving starts
 
-**What changed.** `Kernel.Use`, `SetNotFoundHandler`, `SetForwardedHeadersPolicy`, `SetSessionCookiePolicy`, `SetMethodPolicy` and every route registration door refuse by name once `Kernel.ServeHttp` has built the handler. The contract sentence is written on `httpcontract.Kernel`, `httpcontract.Router` and `httpcontract.RouteHandler`.
+**What changed.** Every route registration door refuses by name once `Kernel.ServeHttp` has built the handler; the kernel has no configuration door after `NewKernel` (see "Http: the kernel is configured through `ApplicationConfig.HttpKernel`" above). The contract sentence is written on `httpcontract.Router` and `httpcontract.RouteHandler`.
 
-**Symptom.** An application that registers a route or installs a middleware lazily — from inside a handler, from a goroutine started after boot, from a hot-reload path — panics with `may not register a route after the http kernel started serving` or `may not configure the http kernel after it started serving`, naming the door.
+**Symptom.** An application that registers a route lazily — from inside a handler, from a goroutine started after boot, from a hot-reload path — panics with `may not register a route after the http kernel started serving`, naming the door.
 
 **Remedy.** Move the call into the composition root or a module's registration hook, which run before the handler is built. There is no opt-out, and that is deliberate: every one of those doors writes state each request goroutine reads without synchronization, so what used to happen instead was a data race — and for the route tree's maps a concurrent write is an unrecoverable fatal error the process cannot recover from. The READING doors are untouched: `RouteDefinitions`, `RouteDefinition`, `RouteRegistry` and the introspection surface stay open for the life of the process, because the openapi document and the route manifest are served from handlers.
 
@@ -2943,7 +2975,7 @@ debug.NewMiddlewareCommand(
 
 **Symptom.** A handler that reads the session under the literal key `session` finds nothing there. A route declared with an attribute named `_session` or `_scheme` no longer reaches the handler under that name: the handler reads the kernel's session and scheme there. A route attribute named `session` reaches the handler again, as an application attribute.
 
-**Remedy.** Read the session through `http.RequestSession`, never through the literal key, and rename a route attribute that collides with `_session` or `_scheme`. A handler that rotates the session publishes the rotated one through `http.RegenerateRequestSession`, and the scheme follows the request and the kernel's `SetForwardedHeadersPolicy`, not a route.
+**Remedy.** Read the session through `http.RequestSession`, never through the literal key, and rename a route attribute that collides with `_session` or `_scheme`. A handler that rotates the session publishes the rotated one through `http.RegenerateRequestSession`, and the scheme follows the request and the kernel's `KernelConfig.ForwardedHeadersPolicy`, not a route.
 
 ### Http: `SetCookie` refuses a cookie name that is not a token
 
@@ -3115,7 +3147,7 @@ debug.NewMiddlewareCommand(
 
 ### Http: a route pattern, a route zone and a trusted-proxy entry are refused when they are wrong
 
-**What changed.** Four boot-time refusals replace four silent drops. A pattern naming one parameter twice (`/orgs/:id/members/:id`) or carrying a nameless `:` is refused at registration. A zone that is not one of the `RouteZone*` values is refused, at `ExposedRouteAttributes` and at registration, as are an exposed route with no name, an expose attribute that is not a bool and a zone attribute that is not a string. A trusted-proxy entry that parses as neither a CIDR prefix nor an address is refused by `Kernel.SetForwardedHeadersPolicy` and by `NewForwardedClientIpResolver`.
+**What changed.** Four boot-time refusals replace four silent drops. A pattern naming one parameter twice (`/orgs/:id/members/:id`) or carrying a nameless `:` is refused at registration. A zone that is not one of the `RouteZone*` values is refused, at `ExposedRouteAttributes` and at registration, as are an exposed route with no name, an expose attribute that is not a bool and a zone attribute that is not a string. A trusted-proxy entry that parses as neither a CIDR prefix nor an address is refused by `NewKernel`, over `KernelConfig.ForwardedHeadersPolicy`, and by `NewForwardedClientIpResolver`.
 
 **Symptom.** A boot that used to succeed now panics, naming the pattern, the zone or the offending entry.
 
@@ -3169,13 +3201,13 @@ debug.NewMiddlewareCommand(
 
 **Remedy.** Read repeated keys whole with `bag.StringSlice` or `bag.StringAt`; nothing else changes for well-typed readers.
 
-### Http: the method policy is set through `Kernel.SetMethodPolicy`, and duplicate routes are refused at registration
+### Http: the method policy is `KernelConfig.MethodPolicy`, and duplicate routes are refused at registration
 
-**What changed.** `http/contract.MethodPolicy` decides whether HEAD falls back to the GET route and whether an unrouted OPTIONS is answered; `http/contract.Kernel` declares `SetMethodPolicy`, through which the framework kernel takes it; the optional `MethodPolicySetter` the third major asserted is removed. The route registry refuses a second route identical on everything the matcher discriminates (pattern, methods, host, schemes, locales, requirements, priority), because the later one could never be dispatched and was silently shadowed.
+**What changed.** `http/contract.MethodPolicy` decides whether HEAD falls back to the GET route and whether an unrouted OPTIONS is answered; the framework kernel takes it from `KernelConfig.MethodPolicy`, `ApplicationConfig.HttpKernel.MethodPolicy` in an application; the optional `MethodPolicySetter` the third major asserted is removed. The route registry refuses a second route identical on everything the matcher discriminates (pattern, methods, host, schemes, locales, requirements, priority), because the later one could never be dispatched and was silently shadowed.
 
-**Symptom.** A boot that registered the same route twice — usually a module wired twice, or a copy-pasted registration — now panics naming the pattern, the methods and the route name. An out-of-tree `http/contract.Kernel` no longer compiles until it declares `SetMethodPolicy(policy MethodPolicy)`.
+**Symptom.** A boot that registered the same route twice — usually a module wired twice, or a copy-pasted registration — now panics naming the pattern, the methods and the route name.
 
-**Remedy.** Remove the duplicate registration; a route that must coexist differs in at least one discriminator. The application aggregates the boot collisions of its own registrations itself. To change the method policy on a kernel held as `http/contract.Kernel`, call its `SetMethodPolicy`; a kernel of your own declares it.
+**Remedy.** Remove the duplicate registration; a route that must coexist differs in at least one discriminator. The application aggregates the boot collisions of its own registrations itself. Set the method policy in `ApplicationConfig.HttpKernel.MethodPolicy`.
 
 ### Http: every framework error goes through one renderer and answers the error envelope, and the validation detail is under `validationErrors`
 
@@ -3932,7 +3964,7 @@ A correct size, a zero declared size, and a body **shorter** than its declared s
 
 **Remedy.** Make the constraint `WithParameters` returns immutable and safe for concurrent use; do not retain the params map it was handed, and do not accumulate state in `Validate`. One instance is shared for the process lifetime across every request and goroutine that reaches the rule.
 
-### HTTP kernel: `SetSessionCookiePolicy` keeps the `SameSite=Lax` default
+### HTTP kernel: `KernelConfig.SessionCookiePolicy` keeps the `SameSite=Lax` default
 
 **What changed.** [`resolveSessionCookieSameSite`](../http/router_utility.go) treats the zero `SameSite` as unset and falls back to `Lax`, the same way an empty `Path` falls back to `/`.
 
@@ -3940,7 +3972,7 @@ A correct size, a zero declared size, and a body **shorter** than its declared s
 
 **Remedy.** None, unless the omission was deliberate — `nethttp.SameSiteDefaultMode` remains the way to ask for no attribute on purpose.
 
-A policy that asks for `SameSite=None` gets a `Secure` session cookie under `SessionCookieSecureFromScheme` whatever the request's scheme, since every current browser drops a `None` cookie that is not `Secure`. Over plain http the browser refuses that cookie, so a development setup served without TLS uses `SameSite=Lax`, the default, or `Strict`, and keeps `None` for https. `SessionCookieSecureNever` is still written as asked, and browsers drop a `None` cookie it leaves unsecured.
+A policy that asks for `SameSite=None` gets a `Secure` session cookie under `SessionCookieSecureFromScheme` whatever the request's scheme, since every current browser drops a `None` cookie that is not `Secure`. Over plain http the browser refuses that cookie, so a development setup served without TLS uses `SameSite=Lax`, the default, or `Strict`, and keeps `None` for https. `SessionCookieSecureNever` beside `None` is refused when the kernel is built.
 
 ### HTTP kernel: the session saved is the one published on the request
 

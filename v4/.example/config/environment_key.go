@@ -67,7 +67,6 @@ const (
     parameterCorsAllowOrigins     = "app.cors.allow_origins"
     parameterRequestBudgetPerHour = "app.request_budget.per_hour"
     parameterTrustedProxyList     = "app.trusted_proxy.list"
-    parameterSessionCookieSecure  = "app.session.cookie_secure"
 
     parameterRatesBaseUrl         = wiring.ParameterRatesBaseUrl
     parameterRatesApiKey          = "app.rates.api_key"
@@ -142,7 +141,6 @@ func EnvironmentKeys() []configcontract.EnvironmentKey {
         exampleKey(environmentKeyCorsAllowOrigins, parameterCorsAllowOrigins, "", false, nil),
         exampleKey(environmentKeyRequestBudgetPerHour, parameterRequestBudgetPerHour, "", false, melodyconfig.LimitKeyRule(requestBudgetPerHourRule)),
         exampleKey(environmentKeyTrustedProxyList, parameterTrustedProxyList, "", false, nil),
-        exampleKey(environmentKeySessionCookieSecure, parameterSessionCookieSecure, "", false, melodyconfig.ChoiceKeyRule([]string{sessionCookieSecureFromScheme, sessionCookieSecureAlways})),
 
         /* the two outbound urls are secret whatever they hold: a userinfo in either is a credential the client sends */
         exampleKey(environmentKeyRatesBaseUrl, parameterRatesBaseUrl, "", true, nil),

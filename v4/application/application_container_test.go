@@ -1453,6 +1453,24 @@ func TestApplicationBoot_TypeDescribedThroughOpenApi_Refused(t *testing.T) {
     }
 }
 
+func TestApplicationBoot_DescriptorUnderAnEmptyName_ReachesNoUnnamedRoute(t *testing.T) {
+    applicationInstance := newRequestTypeBootApplication(t)
+    registry := openapi.NewRegistry()
+    registry.Describe("", openapi.Descriptor{RequestType: reflect.TypeFor[requestTypeUnknownRuleBody]()})
+    applicationInstance.RegisterService(
+        openapi.ServiceOpenApiRegistry,
+        func(resolver containercontract.Resolver) (*openapi.Registry, error) {
+            return registry, nil
+        },
+        container.RegisterOptions{},
+    )
+    applicationInstance.kernel.HttpRouter().Handle("/items", requestTypeTestHandler, httpcontract.RouteOptions{})
+
+    if refusal := requestTypeRefusal(t, applicationInstance); nil != refusal {
+        t.Fatalf("expected an unnamed route to carry no described type, got %v", refusal)
+    }
+}
+
 func TestApplicationBoot_EveryRefusedRequestTypeReportedAtOnce(t *testing.T) {
     applicationInstance := newRequestTypeBootApplication(t)
     applicationInstance.kernel.HttpRouter().Handle("/first", requestTypeTestHandler, httpcontract.RouteOptions{Name: "first", RequestType: reflect.TypeFor[requestTypeUnknownRuleBody]()})

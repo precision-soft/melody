@@ -20,6 +20,10 @@ const (
     RoleWorker = "worker"
     RoleAll    = "all"
 
+    /* HttpSessionCookieSecureFromScheme and HttpSessionCookieSecureAlways are the values MELODY_HTTP_SESSION_COOKIE_SECURE admits */
+    HttpSessionCookieSecureFromScheme = "from-scheme"
+    HttpSessionCookieSecureAlways     = "always"
+
     DefaultModeKey                   = "MELODY_DEFAULT_MODE"
     ProcessRoleKey                   = "MELODY_PROCESS_ROLE"
     EnvironmentNameKey               = "MELODY_ENV"
@@ -38,6 +42,7 @@ const (
     HttpMaxHeaderBytesKey            = "MELODY_HTTP_MAX_HEADER_BYTES"
     HttpUnavailableRetryAfterKey     = "MELODY_HTTP_UNAVAILABLE_RETRY_AFTER"
     HttpSessionEmptyOnOutageKey      = "MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE"
+    HttpSessionCookieSecureKey       = "MELODY_HTTP_SESSION_COOKIE_SECURE"
     TeardownTimeoutKey               = "MELODY_TEARDOWN_TIMEOUT"
     ScopeTeardownTimeoutKey          = "MELODY_SCOPE_TEARDOWN_TIMEOUT"
     ContainerCreationWaitersKey      = "MELODY_CONTAINER_CREATION_WAITERS"
@@ -73,6 +78,7 @@ const (
     KernelHttpMaxHeaderBytes            = "kernel.http.max_header_bytes"
     KernelHttpUnavailableRetryAfter     = "kernel.http.unavailable_retry_after"
     KernelHttpSessionEmptyOnOutage      = "kernel.http.session_empty_on_outage"
+    KernelHttpSessionCookieSecure       = "kernel.http.session_cookie_secure"
     KernelTeardownTimeout               = "kernel.teardown_timeout"
     KernelScopeTeardownTimeout          = "kernel.scope_teardown_timeout"
     KernelContainerCreationWaiters      = "kernel.container_creation_waiters"

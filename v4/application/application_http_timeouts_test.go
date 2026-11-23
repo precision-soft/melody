@@ -63,14 +63,14 @@ func TestApplyHttpServerTimeoutsDefaults(t *testing.T) {
     }
 }
 
-func TestResolveHttpServerLimits_TheKeyWinsOverTheFieldAndTheFieldOverTheDefault(t *testing.T) {
-    applicationConfig := ApplicationConfig{
+func TestResolveHttpServerLimits_HttpServerField_IsTheDefaultOfItsKey(t *testing.T) {
+    applicationConfig := ApplicationConfig{HttpServer: HttpServerConfig{
         ReadTimeout:       bound.Of(10 * time.Second),
         ReadHeaderTimeout: bound.Of(2 * time.Second),
         WriteTimeout:      bound.Of(20 * time.Second),
         IdleTimeout:       bound.Of(40 * time.Second),
         MaxHeaderBytes:    bound.Of(8192),
-    }
+    }}
 
     fromField, fromFieldErr := resolveHttpServerLimits(newLimitConfiguration(t, map[string]string{}), applicationConfig)
     if nil != fromFieldErr {
@@ -100,18 +100,62 @@ func TestResolveHttpServerLimits_TheKeyWinsOverTheFieldAndTheFieldOverTheDefault
     }
 }
 
+func TestResolveHttpServerLimits_HttpServerLimit_RefusedNamingTheNestedField(t *testing.T) {
+    configuration := newLimitConfiguration(t, map[string]string{})
+
+    for field, applicationConfig := range map[string]ApplicationConfig{
+        "ApplicationConfig.HttpServer.ReadTimeout":       {HttpServer: HttpServerConfig{ReadTimeout: bound.UnlimitedDuration()}},
+        "ApplicationConfig.HttpServer.ReadHeaderTimeout": {HttpServer: HttpServerConfig{ReadHeaderTimeout: bound.UnlimitedDuration()}},
+        "ApplicationConfig.HttpServer.WriteTimeout":      {HttpServer: HttpServerConfig{WriteTimeout: bound.UnlimitedDuration()}},
+        "ApplicationConfig.HttpServer.IdleTimeout":       {HttpServer: HttpServerConfig{IdleTimeout: bound.UnlimitedDuration()}},
+        "ApplicationConfig.HttpServer.MaxHeaderBytes":    {HttpServer: HttpServerConfig{MaxHeaderBytes: bound.Of(4095)}},
+    } {
+        _, limitsErr := resolveHttpServerLimits(configuration, applicationConfig)
+        if nil == limitsErr || field != exception.LogContext(limitsErr, exception.LogContextConfig{})["field"] {
+            t.Fatalf("expected the refusal to name %s, got %v", field, limitsErr)
+        }
+    }
+
+    _, shutdownErr := resolveHttpShutdownTimeout(configuration, ApplicationConfig{HttpServer: HttpServerConfig{ShutdownTimeout: bound.UnlimitedDuration()}})
+    if nil == shutdownErr || "ApplicationConfig.HttpServer.ShutdownTimeout" != exception.LogContext(shutdownErr, exception.LogContextConfig{})["field"] {
+        t.Fatalf("expected the refusal to name the shutdown timeout, got %v", shutdownErr)
+    }
+}
+
+func TestResolveSessionCookieSecure_TheKeyWinsOverTheField(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        key      string
+        field    httpcontract.SessionCookieSecurePolicy
+        expected httpcontract.SessionCookieSecurePolicy
+    }{
+        "the field never without the key": {key: "", field: httpcontract.SessionCookieSecureNever, expected: httpcontract.SessionCookieSecureNever},
+        "the key always over never":       {key: config.HttpSessionCookieSecureAlways, field: httpcontract.SessionCookieSecureNever, expected: httpcontract.SessionCookieSecureAlways},
+        "the key from scheme over always": {key: config.HttpSessionCookieSecureFromScheme, field: httpcontract.SessionCookieSecureAlways, expected: httpcontract.SessionCookieSecureFromScheme},
+    } {
+        values := map[string]string{}
+        if "" != testCase.key {
+            values[config.HttpSessionCookieSecureKey] = testCase.key
+        }
+
+        resolved := resolveSessionCookieSecure(newLimitConfiguration(t, values), ApplicationConfig{HttpKernel: http.KernelConfig{SessionCookiePolicy: httpcontract.SessionCookiePolicy{Secure: testCase.field}}})
+        if testCase.expected != resolved {
+            t.Fatalf("%s: expected %v, got %v", name, testCase.expected, resolved)
+        }
+    }
+}
+
 func TestResolveHttpServerLimits_RefusesAFieldItsRuleDoesNotAdmit(t *testing.T) {
     configuration := newLimitConfiguration(t, map[string]string{})
 
     for _, applicationConfig := range []ApplicationConfig{
-        {ReadTimeout: bound.Of(time.Duration(0))},
-        {ReadHeaderTimeout: bound.UnlimitedDuration()},
-        {WriteTimeout: bound.Of(-time.Second)},
-        {IdleTimeout: bound.UnlimitedDuration()},
-        {MaxHeaderBytes: bound.Of(4095)},
-        {ReadTimeout: bound.UnlimitedDuration()},
-        {WriteTimeout: bound.UnlimitedDuration()},
-        {MaxHeaderBytes: bound.UnlimitedCount()},
+        {HttpServer: HttpServerConfig{ReadTimeout: bound.Of(time.Duration(0))}},
+        {HttpServer: HttpServerConfig{ReadHeaderTimeout: bound.UnlimitedDuration()}},
+        {HttpServer: HttpServerConfig{WriteTimeout: bound.Of(-time.Second)}},
+        {HttpServer: HttpServerConfig{IdleTimeout: bound.UnlimitedDuration()}},
+        {HttpServer: HttpServerConfig{MaxHeaderBytes: bound.Of(4095)}},
+        {HttpServer: HttpServerConfig{ReadTimeout: bound.UnlimitedDuration()}},
+        {HttpServer: HttpServerConfig{WriteTimeout: bound.UnlimitedDuration()}},
+        {HttpServer: HttpServerConfig{MaxHeaderBytes: bound.UnlimitedCount()}},
     } {
         if _, limitsErr := resolveHttpServerLimits(configuration, applicationConfig); nil == limitsErr {
             t.Fatalf("expected %+v refused", applicationConfig)
@@ -304,12 +348,12 @@ func TestResolveUnavailableRetryAfter_TheKeyWinsOverTheFieldOverTheDefault(t *te
         t.Fatalf("expected the default, got %s (%v)", byDefault, byDefaultErr)
     }
 
-    fromField, fromFieldErr := resolveUnavailableRetryAfter(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{UnavailableRetryAfter: bound.Of(9 * time.Second)})
+    fromField, fromFieldErr := resolveUnavailableRetryAfter(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{HttpKernel: http.KernelConfig{UnavailableRetryAfter: bound.Of(9 * time.Second)}})
     if nil != fromFieldErr || 9*time.Second != fromField {
         t.Fatalf("expected the field, got %s (%v)", fromField, fromFieldErr)
     }
 
-    fromKey, fromKeyErr := resolveUnavailableRetryAfter(newLimitConfiguration(t, map[string]string{config.HttpUnavailableRetryAfterKey: "7s"}), ApplicationConfig{UnavailableRetryAfter: bound.Of(9 * time.Second)})
+    fromKey, fromKeyErr := resolveUnavailableRetryAfter(newLimitConfiguration(t, map[string]string{config.HttpUnavailableRetryAfterKey: "7s"}), ApplicationConfig{HttpKernel: http.KernelConfig{UnavailableRetryAfter: bound.Of(9 * time.Second)}})
     if nil != fromKeyErr || 7*time.Second != fromKey {
         t.Fatalf("expected the key to win, got %s (%v)", fromKey, fromKeyErr)
     }
@@ -320,15 +364,15 @@ func TestResolveUnavailableRetryAfter_TheKeyWinsOverTheFieldOverTheDefault(t *te
         "2h":        bound.Of(2 * time.Hour),
         "unlimited": bound.UnlimitedDuration(),
     } {
-        _, refusedErr := resolveUnavailableRetryAfter(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{UnavailableRetryAfter: limit})
-        if nil == refusedErr || "ApplicationConfig.UnavailableRetryAfter" != exception.LogContext(refusedErr, exception.LogContextConfig{})["field"] {
+        _, refusedErr := resolveUnavailableRetryAfter(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{HttpKernel: http.KernelConfig{UnavailableRetryAfter: limit}})
+        if nil == refusedErr || "ApplicationConfig.HttpKernel.UnavailableRetryAfter" != exception.LogContext(refusedErr, exception.LogContextConfig{})["field"] {
             t.Fatalf("%s: expected a refusal naming the field, got %v", name, refusedErr)
         }
     }
 }
 
 func TestNewApplication_TheUnavailableRetryAfterFieldReachesTheHttpKernel(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), UnavailableRetryAfter: bound.Of(13 * time.Second)})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), HttpKernel: http.KernelConfig{UnavailableRetryAfter: bound.Of(13 * time.Second)}})
     serviceContainer := applicationInstance.kernel.ServiceContainer()
     defer func() {
         _ = serviceContainer.CloseWithContext(context.Background())
@@ -368,7 +412,7 @@ func TestResolveSessionEmptyOnOutage_TheKeyWinsOverTheField(t *testing.T) {
             values[config.HttpSessionEmptyOnOutageKey] = testCase.key
         }
 
-        if testCase.expected != resolveSessionEmptyOnOutage(newLimitConfiguration(t, values), ApplicationConfig{SessionEmptyOnOutage: testCase.field}) {
+        if testCase.expected != resolveSessionEmptyOnOutage(newLimitConfiguration(t, values), ApplicationConfig{HttpKernel: http.KernelConfig{SessionPolicy: httpcontract.SessionPolicy{EmptyOnOutage: testCase.field}}}) {
             t.Fatalf("%s: expected %v", name, testCase.expected)
         }
     }
@@ -414,15 +458,15 @@ func TestApplicationConfig_HttpShutdownTimeoutIsTheKeysDefault(t *testing.T) {
     }
 
     for name, testCase := range cases {
-        resolved, resolveErr := resolveHttpShutdownTimeout(newLimitConfiguration(t, testCase.values), ApplicationConfig{HttpShutdownTimeout: testCase.field})
+        resolved, resolveErr := resolveHttpShutdownTimeout(newLimitConfiguration(t, testCase.values), ApplicationConfig{HttpServer: HttpServerConfig{ShutdownTimeout: testCase.field}})
         if nil != resolveErr || testCase.expected != resolved.Value {
             t.Fatalf("%s: expected %v, got %v (%v)", name, testCase.expected, resolved.Value, resolveErr)
         }
     }
 
     for name, field := range map[string]bound.Duration{"below 1ms": bound.Of(time.Microsecond), "unlimited": bound.UnlimitedDuration()} {
-        _, resolveErr := resolveHttpShutdownTimeout(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{HttpShutdownTimeout: field})
-        if nil == resolveErr || "ApplicationConfig.HttpShutdownTimeout" != exception.LogContext(resolveErr, exception.LogContextConfig{})["field"] {
+        _, resolveErr := resolveHttpShutdownTimeout(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{HttpServer: HttpServerConfig{ShutdownTimeout: field}})
+        if nil == resolveErr || "ApplicationConfig.HttpServer.ShutdownTimeout" != exception.LogContext(resolveErr, exception.LogContextConfig{})["field"] {
             t.Fatalf("%s: expected the field refused naming it, got %v", name, resolveErr)
         }
     }
@@ -431,7 +475,7 @@ func TestApplicationConfig_HttpShutdownTimeoutIsTheKeysDefault(t *testing.T) {
 func TestRefuseScopeTeardownOutlastingHttpShutdown_ReadsTheFieldsValue(t *testing.T) {
     refusedErr := refuseScopeTeardownOutlastingHttpShutdown(
         newLimitConfiguration(t, map[string]string{}),
-        ApplicationConfig{ScopeTeardownTimeout: bound.Of(8 * time.Second), HttpShutdownTimeout: bound.Of(6 * time.Second)},
+        ApplicationConfig{ScopeTeardownTimeout: bound.Of(8 * time.Second), HttpServer: HttpServerConfig{ShutdownTimeout: bound.Of(6 * time.Second)}},
     )
     if nil == refusedErr {
         t.Fatal("expected a scope teardown over the field's shutdown timeout refused")
@@ -439,7 +483,7 @@ func TestRefuseScopeTeardownOutlastingHttpShutdown_ReadsTheFieldsValue(t *testin
 
     if admittedErr := refuseScopeTeardownOutlastingHttpShutdown(
         newLimitConfiguration(t, map[string]string{}),
-        ApplicationConfig{ScopeTeardownTimeout: bound.Of(8 * time.Second), HttpShutdownTimeout: bound.Of(9 * time.Second)},
+        ApplicationConfig{ScopeTeardownTimeout: bound.Of(8 * time.Second), HttpServer: HttpServerConfig{ShutdownTimeout: bound.Of(9 * time.Second)}},
     ); nil != admittedErr {
         t.Fatalf("expected a scope teardown under the field's shutdown timeout admitted, got %v", admittedErr)
     }

@@ -46,6 +46,7 @@ func frameworkEnvironmentKeys() []configcontract.EnvironmentKey {
         frameworkEnvironmentKey(HttpMaxHeaderBytesKey, KernelHttpMaxHeaderBytes, ""),
         frameworkEnvironmentKey(HttpUnavailableRetryAfterKey, KernelHttpUnavailableRetryAfter, ""),
         frameworkEnvironmentKey(HttpSessionEmptyOnOutageKey, KernelHttpSessionEmptyOnOutage, ""),
+        frameworkEnvironmentKey(HttpSessionCookieSecureKey, KernelHttpSessionCookieSecure, ""),
     }
 }
 

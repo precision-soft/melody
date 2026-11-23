@@ -15,48 +15,39 @@ type Root struct {
     command *clicontract.CommandContext
 }
 
+/* RootConfig is what the tree is built with; the zero value is an undeclared version and the process's standard streams. */
+type RootConfig struct {
+    /* Version is the application's version: --version prints it, <unknown> when empty, and the tree's commands read it through output.ApplicationVersionOf. */
+    Version string
+    /* Writer is the stream of the help and usage the tree writes and of every command registered on it; nil, or a typed nil, is the process's standard output. */
+    Writer io.Writer
+    /* ErrorWriter is the error stream of the tree and of every command registered on it; nil, or a typed nil, is the process's standard error. */
+    ErrorWriter io.Writer
+}
+
 /* NewRoot builds the tree over NewCommandContext, whose inert exit handler it keeps: the tree's command is its own, so no caller can put the engine's default back. */
-func NewRoot(applicationName string, applicationDescription string) *Root {
+func NewRoot(applicationName string, applicationDescription string, rootConfig RootConfig) *Root {
+    command := NewCommandContext(applicationName, applicationDescription)
+
+    command.Version = rootConfig.Version
+    if "" == rootConfig.Version {
+        command.Version = output.UnknownApplicationVersion
+    }
+
+    if nil == command.Metadata {
+        command.Metadata = make(map[string]any)
+    }
+
+    command.Metadata[output.MetadataApplicationVersion] = rootConfig.Version
+    command.Writer = resolvedWriter(rootConfig.Writer)
+    command.ErrWriter = resolvedWriter(rootConfig.ErrorWriter)
+
     return &Root{
-        command: NewCommandContext(applicationName, applicationDescription),
+        command: command,
     }
 }
 
-/* SetVersion declares the application's version: --version prints it, <unknown> when empty, and the tree's commands read it through output.ApplicationVersionOf. */
-func (instance *Root) SetVersion(version string) {
-    instance.command.Version = version
-    if "" == version {
-        instance.command.Version = output.UnknownApplicationVersion
-    }
-
-    if nil == instance.command.Metadata {
-        instance.command.Metadata = make(map[string]any)
-    }
-
-    instance.command.Metadata[output.MetadataApplicationVersion] = version
-}
-
-/* SetWriter points the tree's output at a stream: the help and usage the tree writes, and the output of every command registered on it, whenever registered. Left unset, or set to a typed nil, the stream is the process's standard output. */
-func (instance *Root) SetWriter(writer io.Writer) {
-    writer = resolvedWriter(writer)
-    instance.command.Writer = writer
-
-    for _, registered := range instance.command.Commands {
-        registered.Writer = writer
-    }
-}
-
-/* SetErrorWriter points the tree's error output at a stream, for the tree and for every command registered on it, for the same reason SetWriter does. Left unset, or set to a typed nil, the stream is the process's standard error. */
-func (instance *Root) SetErrorWriter(writer io.Writer) {
-    writer = resolvedWriter(writer)
-    instance.command.ErrWriter = writer
-
-    for _, registered := range instance.command.Commands {
-        registered.ErrWriter = writer
-    }
-}
-
-/* Register appends a command to the tree, as cli.Register does on a root command; the tree's streams reach it whether they are set before or after. */
+/* Register appends a command to the tree, as cli.Register does on a root command, stamping the tree's streams on it. */
 func (instance *Root) Register(command clicontract.Command, runtimeInstance containercontract.Runtime) {
     registerCommand(instance.command, command, runtimeInstance)
 }

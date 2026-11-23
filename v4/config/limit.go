@@ -134,6 +134,27 @@ func checkedParameterSwitch(parameter configcontract.Parameter, environmentKey s
     return configcontract.Switch{Value: switchValue, IsSet: isSet}, nil
 }
 
+/* checkedSessionCookieSecure admits the two spellings that never weaken the cookie; never stays a Go value, since a key would let a deployment strip Secure */
+func checkedSessionCookieSecure(parameter configcontract.Parameter) (string, error) {
+    value := parameter.Value()
+    text, isString := value.(string)
+    if true == isString && "" == strings.TrimSpace(text) {
+        return "", nil
+    }
+
+    if true == isString && (HttpSessionCookieSecureFromScheme == text || HttpSessionCookieSecureAlways == text) {
+        return text, nil
+    }
+
+    refusalContext := limitRefusalContext(parameter, HttpSessionCookieSecureKey)
+    refusalContext["admitted"] = []string{HttpSessionCookieSecureFromScheme, HttpSessionCookieSecureAlways}
+    if false == parameter.IsSecret() {
+        refusalContext["value"] = value
+    }
+
+    return "", exception.NewError("invalid environment value", refusalContext, nil)
+}
+
 /* an overridden parameter does not read its key, so the refusal names the parameter the override wrote */
 func limitRefusalContext(parameter configcontract.Parameter, environmentKey string) exceptioncontract.Context {
     context := exceptioncontract.Context{
@@ -210,7 +231,7 @@ func SessionMaxSessionsRule() bound.Rule[int] {
 
 func ShutdownTimeoutRule() bound.Rule[time.Duration] {
     return bound.Rule[time.Duration]{
-        Name:    "ApplicationConfig.HttpShutdownTimeout",
+        Name:    "ApplicationConfig.HttpServer.ShutdownTimeout",
         Default: DefaultHttpShutdownTimeout,
         Minimum: bound.TimeoutMinimum,
     }
@@ -219,7 +240,7 @@ func ShutdownTimeoutRule() bound.Rule[time.Duration] {
 /* HttpReadTimeoutRule and the three http timeout rules after it refuse unlimited: net/http reads no bound as no timeout. */
 func HttpReadTimeoutRule() bound.Rule[time.Duration] {
     return bound.Rule[time.Duration]{
-        Name:    "ApplicationConfig.ReadTimeout",
+        Name:    "ApplicationConfig.HttpServer.ReadTimeout",
         Default: DefaultHttpReadTimeout,
         Minimum: bound.TimeoutMinimum,
     }
@@ -227,7 +248,7 @@ func HttpReadTimeoutRule() bound.Rule[time.Duration] {
 
 func HttpReadHeaderTimeoutRule() bound.Rule[time.Duration] {
     return bound.Rule[time.Duration]{
-        Name:    "ApplicationConfig.ReadHeaderTimeout",
+        Name:    "ApplicationConfig.HttpServer.ReadHeaderTimeout",
         Default: DefaultHttpReadHeaderTimeout,
         Minimum: bound.TimeoutMinimum,
     }
@@ -235,7 +256,7 @@ func HttpReadHeaderTimeoutRule() bound.Rule[time.Duration] {
 
 func HttpWriteTimeoutRule() bound.Rule[time.Duration] {
     return bound.Rule[time.Duration]{
-        Name:    "ApplicationConfig.WriteTimeout",
+        Name:    "ApplicationConfig.HttpServer.WriteTimeout",
         Default: DefaultHttpWriteTimeout,
         Minimum: bound.TimeoutMinimum,
     }
@@ -243,7 +264,7 @@ func HttpWriteTimeoutRule() bound.Rule[time.Duration] {
 
 func HttpIdleTimeoutRule() bound.Rule[time.Duration] {
     return bound.Rule[time.Duration]{
-        Name:    "ApplicationConfig.IdleTimeout",
+        Name:    "ApplicationConfig.HttpServer.IdleTimeout",
         Default: DefaultHttpIdleTimeout,
         Minimum: bound.TimeoutMinimum,
     }
@@ -251,7 +272,7 @@ func HttpIdleTimeoutRule() bound.Rule[time.Duration] {
 
 func HttpMaxHeaderBytesRule() bound.Rule[int] {
     return bound.Rule[int]{
-        Name:    "ApplicationConfig.MaxHeaderBytes",
+        Name:    "ApplicationConfig.HttpServer.MaxHeaderBytes",
         Default: DefaultHttpMaxHeaderBytes,
         Minimum: 4 << 10,
     }
@@ -269,7 +290,7 @@ func TeardownTimeoutRule() bound.Rule[time.Duration] {
 /* UnavailableRetryAfterRule bounds the Retry-After of an infrastructure-failure 503: 5s when left out, 1s to 1h, unlimited refused. */
 func UnavailableRetryAfterRule() bound.Rule[time.Duration] {
     return bound.Rule[time.Duration]{
-        Name:    "ApplicationConfig.UnavailableRetryAfter",
+        Name:    "ApplicationConfig.HttpKernel.UnavailableRetryAfter",
         Default: DefaultUnavailableRetryAfter,
         Minimum: bound.TtlMinimum,
         Maximum: maximumUnavailableRetryAfter,

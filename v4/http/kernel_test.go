@@ -4,6 +4,9 @@ import (
     "context"
     "errors"
     "fmt"
+    "go/ast"
+    "go/parser"
+    "go/token"
     "io"
     "math"
     nethttp "net/http"
@@ -26,6 +29,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
+    "github.com/precision-soft/melody/v4/internal/httpkernelseam"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
@@ -1442,11 +1446,10 @@ func TestKernel_PublishesThePolicyResolvedSchemeOnTheRequest(t *testing.T) {
         RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
-    kernelInstance := NewKernel(router, KernelConfig{})
-    kernelInstance.SetForwardedHeadersPolicy(httpcontract.ForwardedHeadersPolicy{
-        TrustForwardedHeaders: true,
-        TrustedProxyList:      []string{"10.0.0.0/8"},
-    })
+    kernelInstance := NewKernel(router, KernelConfig{ForwardedHeadersPolicy: httpcontract.ForwardedHeadersPolicy{
+    TrustForwardedHeaders: true,
+    TrustedProxyList:      []string{"10.0.0.0/8"},
+}})
 
     handler := kernelInstance.ServeHttp(newHttpTestContainer())
 
@@ -2022,12 +2025,9 @@ func TestKernel_SessionCookiePolicyWithoutSameSiteKeepsTheLaxDefault(t *testing.
         RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
-    kernelInstance := NewKernel(router, KernelConfig{})
-    kernelInstance.SetSessionCookiePolicy(
-        httpcontract.SessionCookiePolicy{
-            Domain: "example.com",
-        },
-    )
+    kernelInstance := NewKernel(router, KernelConfig{SessionCookiePolicy: httpcontract.SessionCookiePolicy{
+        Domain: "example.com",
+    }})
 
     handler := kernelInstance.ServeHttp(newHttpTestContainer())
 
@@ -2292,18 +2292,15 @@ func TestKernel_AListenerPanicOnHandlerErrorPathClosesBodyAndDelivers500(t *test
 func TestKernel_AListenerPanicOnNotFoundPathClosesBodyAndDelivers500(t *testing.T) {
     bodyReader := &closeTrackingReader{}
 
-    kernel := NewKernel(NewRouter(), KernelConfig{})
-    kernel.SetNotFoundHandler(
-        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            response := &Response{
-                statusCode: nethttp.StatusNotFound,
-                headers:    make(nethttp.Header),
-                bodyReader: bodyReader,
-            }
+    kernel := NewKernel(NewRouter(), KernelConfig{NotFoundHandler: func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        response := &Response{
+            statusCode: nethttp.StatusNotFound,
+            headers:    make(nethttp.Header),
+            bodyReader: bodyReader,
+        }
 
-            return response, exception.NewError("not found handler failed after opening the body", nil, nil)
-        },
-    )
+        return response, exception.NewError("not found handler failed after opening the body", nil, nil)
+    }})
     handler := kernel.ServeHttp(newContainerWithPanickingExceptionListener(t, newHttpTestContainer()))
 
     request := httptest.NewRequest(nethttp.MethodGet, "/no-such-route", nil)
@@ -2972,8 +2969,7 @@ func TestKernel_AnOuterMiddlewarePanicAfterNextClosesTheChainResponse(t *testing
         }
     }
 
-    kernelInstance := NewKernel(router, KernelConfig{})
-    kernelInstance.Use([]httpcontract.Middleware{panickingOuterMiddleware})
+    kernelInstance := NewKernel(router, KernelConfig{Middlewares: []httpcontract.Middleware{panickingOuterMiddleware}})
     handler := kernelInstance.ServeHttp(newHttpTestContainer())
 
     recorder := httptest.NewRecorder()
@@ -3129,14 +3125,12 @@ func TestLogHandlerError_ACancellationWithALiveRequestContextStaysAnError(t *tes
     }
 }
 
-func TestSetForwardedHeadersPolicy_CopiesTheTrustedProxyList(t *testing.T) {
-    kernel := NewKernel(NewRouter(), KernelConfig{})
-
+func TestNewKernel_CopiesTheTrustedProxyList(t *testing.T) {
     trustedProxyList := []string{"10.0.0.0/8"}
-    kernel.SetForwardedHeadersPolicy(httpcontract.ForwardedHeadersPolicy{
+    kernel := NewKernel(NewRouter(), KernelConfig{ForwardedHeadersPolicy: httpcontract.ForwardedHeadersPolicy{
         TrustForwardedHeaders: true,
         TrustedProxyList:      trustedProxyList,
-    })
+    }})
 
     trustedProxyList[0] = "0.0.0.0/0"
 
@@ -3294,9 +3288,7 @@ func TestKernel_SetMethodPolicyReachesTheAutomaticOptionsAnswer(t *testing.T) {
 
     serviceContainer := newHttpTestContainer()
 
-    kernelInstance := NewKernel(router, KernelConfig{})
-
-    kernelInstance.SetMethodPolicy(MethodPolicy{AutomaticOptionsDisabled: true})
+    kernelInstance := NewKernel(router, KernelConfig{MethodPolicy: MethodPolicy{AutomaticOptionsDisabled: true}})
 
     handler := kernelInstance.ServeHttp(serviceContainer)
 
@@ -3645,42 +3637,152 @@ func TestKernel_RefusesAMalformedTrustedProxyEntry(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
         func() {
-            NewKernel(NewRouter(), KernelConfig{}).SetForwardedHeadersPolicy(httpcontract.ForwardedHeadersPolicy{
+            NewKernel(NewRouter(), KernelConfig{ForwardedHeadersPolicy: httpcontract.ForwardedHeadersPolicy{
                 TrustForwardedHeaders: true,
                 TrustedProxyList:      []string{"10.0.0.0/8", "10.0.0"},
-            })
+            }})
         },
         "trusted proxy entry is neither a CIDR prefix nor an address",
     )
 }
 
-func TestKernel_RefusesEveryConfigurationDoorOnceItStartedServing(t *testing.T) {
-    for _, testCase := range []struct {
-        door   string
-        mutate func(kernel *Kernel)
-    }{
-        {"Use", func(kernel *Kernel) {
-            kernel.Use([]httpcontract.Middleware{func(next httpcontract.Handler) httpcontract.Handler { return next }})
-        }},
-        {"SetNotFoundHandler", func(kernel *Kernel) { kernel.SetNotFoundHandler(nil) }},
-        {"SetForwardedHeadersPolicy", func(kernel *Kernel) {
-            kernel.SetForwardedHeadersPolicy(httpcontract.ForwardedHeadersPolicy{})
-        }},
-        {"SetSessionCookiePolicy", func(kernel *Kernel) {
-            kernel.SetSessionCookiePolicy(httpcontract.SessionCookiePolicy{})
-        }},
-        {"SetMethodPolicy", func(kernel *Kernel) { kernel.SetMethodPolicy(httpcontract.MethodPolicy{}) }},
-        {"SetSessionPolicy", func(kernel *Kernel) { kernel.SetSessionPolicy(httpcontract.SessionPolicy{EmptyOnOutage: true}) }},
-    } {
-        kernel := NewKernel(NewRouter(), KernelConfig{})
+func TestKernel_InstallMiddlewares_AfterServing_Refused(t *testing.T) {
+    kernel := NewKernel(NewRouter(), KernelConfig{})
 
-        testCase.mutate(kernel)
+    _ = kernel.ServeHttp(newHttpTestContainer())
 
-        _ = kernel.ServeHttp(newHttpTestContainer())
+    defer func() {
+        refusal, isRefusal := recover().(*exception.Error)
+        if false == isRefusal || "may not configure the http kernel after it started serving" != refusal.Message() || "InstallMiddlewares" != refusal.Context()["door"] {
+            t.Fatalf("expected the serving refusal naming the door, got %v", refusal)
+        }
+    }()
 
-        testhelper.AssertPanicsWithError(t, func() {
-            testCase.mutate(kernel)
-        }, "may not configure the http kernel after it started serving")
+    kernel.InstallMiddlewares(httpkernelseam.NewToken(), []httpcontract.Middleware{passThroughKernelMiddleware})
+}
+
+func TestKernel_InstallMiddlewares_ZeroToken_Refused(t *testing.T) {
+    kernel := NewKernel(NewRouter(), KernelConfig{})
+
+    testhelper.AssertPanicsWithError(t, func() {
+        kernel.InstallMiddlewares(httpkernelseam.Token{}, []httpcontract.Middleware{passThroughKernelMiddleware})
+    }, "http kernel InstallMiddlewares is called by the framework only")
+
+    if 0 != len(kernel.middlewares) {
+        t.Fatalf("expected the refused installation to install nothing, got %d", len(kernel.middlewares))
+    }
+}
+
+func TestKernel_InstallMiddlewares_Twice_Refused(t *testing.T) {
+    kernel := NewKernel(NewRouter(), KernelConfig{})
+
+    kernel.InstallMiddlewares(httpkernelseam.NewToken(), nil)
+
+    testhelper.AssertPanicsWithError(t, func() {
+        kernel.InstallMiddlewares(httpkernelseam.NewToken(), []httpcontract.Middleware{passThroughKernelMiddleware})
+    }, "the http kernel's middlewares are already installed")
+}
+
+func TestKernel_InstallMiddlewares_RunAfterTheConfigMiddlewares(t *testing.T) {
+    order := make([]string, 0, 2)
+    recordingMiddleware := func(name string) httpcontract.Middleware {
+        return func(next httpcontract.Handler) httpcontract.Handler {
+            return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                order = append(order, name)
+
+                return next(runtimeInstance, writer, request)
+            }
+        }
+    }
+
+    router := NewRouter()
+    router.Handle("/ordered", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
+
+    kernel := NewKernel(router, KernelConfig{Middlewares: []httpcontract.Middleware{recordingMiddleware("config")}})
+    kernel.InstallMiddlewares(httpkernelseam.NewToken(), []httpcontract.Middleware{recordingMiddleware("installed")})
+
+    kernel.ServeHttp(newHttpTestContainer()).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/ordered", nil))
+
+    if 2 != len(order) || "config" != order[0] || "installed" != order[1] {
+        t.Fatalf("expected the config's middleware outside the installed one, got %v", order)
+    }
+}
+
+func TestNewKernel_AppliesEveryConfigField(t *testing.T) {
+    notFoundHandler := func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return TextResponse(nethttp.StatusTeapot, "nothing here"), nil
+    }
+
+    kernelConfig := KernelConfig{
+        MethodPolicy:           MethodPolicy{HeadFallbackDisabled: true, AutomaticOptionsDisabled: true},
+        ForwardedHeadersPolicy: httpcontract.ForwardedHeadersPolicy{TrustForwardedHeaders: true, TrustedProxyList: []string{"10.0.0.0/8"}},
+        SessionCookiePolicy:    httpcontract.SessionCookiePolicy{Path: "/app", Domain: "example.com", SameSite: nethttp.SameSiteStrictMode, Secure: httpcontract.SessionCookieSecureAlways},
+        SessionPolicy:          httpcontract.SessionPolicy{EmptyOnOutage: true},
+        Middlewares:            []httpcontract.Middleware{passThroughKernelMiddleware},
+        NotFoundHandler:        notFoundHandler,
+        UnavailableRetryAfter:  bound.Of(17 * time.Second),
+    }
+
+    kernel := NewKernel(NewRouter(), kernelConfig)
+
+    if kernelConfig.MethodPolicy != kernel.policies.methodPolicy {
+        t.Fatalf("expected the method policy, got %+v", kernel.policies.methodPolicy)
+    }
+
+    if true != kernel.policies.forwardedHeadersPolicy.TrustForwardedHeaders || 1 != len(kernel.policies.forwardedHeadersPolicy.TrustedProxyList) || "10.0.0.0/8" != kernel.policies.forwardedHeadersPolicy.TrustedProxyList[0] {
+        t.Fatalf("expected the forwarded headers policy, got %+v", kernel.policies.forwardedHeadersPolicy)
+    }
+
+    if kernelConfig.SessionCookiePolicy != kernel.policies.sessionCookiePolicy {
+        t.Fatalf("expected the session cookie policy, got %+v", kernel.policies.sessionCookiePolicy)
+    }
+
+    if kernelConfig.SessionPolicy != kernel.policies.sessionPolicy {
+        t.Fatalf("expected the session policy, got %+v", kernel.policies.sessionPolicy)
+    }
+
+    if 1 != len(kernel.middlewares) {
+        t.Fatalf("expected the config's middleware, got %d", len(kernel.middlewares))
+    }
+
+    if nil == kernel.notFoundHandler {
+        t.Fatalf("expected the not found handler")
+    }
+
+    recorder := httptest.NewRecorder()
+    kernel.ServeHttp(newHttpTestContainer()).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/nowhere", nil))
+    if nethttp.StatusTeapot != recorder.Code {
+        t.Fatalf("expected the not found handler to answer the unmatched path, got %d", recorder.Code)
+    }
+
+    if 17*time.Second != kernel.unavailableRetryAfter {
+        t.Fatalf("expected the unavailable retry after, got %s", kernel.unavailableRetryAfter)
+    }
+}
+
+/* a setter beside KernelConfig would be a second door for one value */
+func TestKernel_ExportsNoMutator(t *testing.T) {
+    fileSet := token.NewFileSet()
+    parsedFile, parseErr := parser.ParseFile(fileSet, "kernel.go", nil, 0)
+    if nil != parseErr {
+        t.Fatalf("expected kernel.go to parse, got %v", parseErr)
+    }
+
+    methodCount := 0
+    for _, declaration := range parsedFile.Decls {
+        function, isFunction := declaration.(*ast.FuncDecl)
+        if false == isFunction || nil == function.Recv || false == function.Name.IsExported() {
+            continue
+        }
+
+        methodCount++
+        if "Use" == function.Name.Name || true == strings.HasPrefix(function.Name.Name, "Set") {
+            t.Fatalf("expected no exported mutator on Kernel, found %s", function.Name.Name)
+        }
+    }
+
+    if 0 == methodCount {
+        t.Fatalf("expected the walk to read Kernel's methods")
     }
 }
 
@@ -3750,7 +3852,7 @@ func TestKernel_ServesWhileAConfigurationDoorIsRefused(t *testing.T) {
                 }
             }()
 
-            kernel.Use([]httpcontract.Middleware{func(next httpcontract.Handler) httpcontract.Handler { return next }})
+            kernel.InstallMiddlewares(httpkernelseam.NewToken(), []httpcontract.Middleware{passThroughKernelMiddleware})
         }()
     }
 
@@ -3775,23 +3877,19 @@ func TestKernel_AbortHandlerPanicStillClosesTheResponseInFlight(t *testing.T) {
         RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
-    kernel := NewKernel(router, KernelConfig{})
+    kernel := NewKernel(router, KernelConfig{Middlewares: []httpcontract.Middleware{
+        func(next httpcontract.Handler) httpcontract.Handler {
+            return func(
+                runtimeInstance containercontract.Runtime,
+                writer nethttp.ResponseWriter,
+                request httpcontract.Request,
+            ) (httpcontract.Response, error) {
+                _, _ = next(runtimeInstance, writer, request)
 
-    kernel.Use(
-        []httpcontract.Middleware{
-            func(next httpcontract.Handler) httpcontract.Handler {
-                return func(
-                    runtimeInstance containercontract.Runtime,
-                    writer nethttp.ResponseWriter,
-                    request httpcontract.Request,
-                ) (httpcontract.Response, error) {
-                    _, _ = next(runtimeInstance, writer, request)
-
-                    panic(nethttp.ErrAbortHandler)
-                }
-            },
+                panic(nethttp.ErrAbortHandler)
+            }
         },
-    )
+    }})
 
     handler := kernel.ServeHttp(newHttpTestContainer())
 
@@ -4332,7 +4430,6 @@ func TestKernel_RefusesASameSiteNoneNeverSecurePolicy(t *testing.T) {
     policy := httpcontract.SessionCookiePolicy{Path: "/", SameSite: nethttp.SameSiteNoneMode, Secure: httpcontract.SessionCookieSecureNever}
 
     expectSessionCookiePolicyRefusal(t, "NewKernel", func() { NewKernel(NewRouter(), KernelConfig{SessionCookiePolicy: policy}) })
-    expectSessionCookiePolicyRefusal(t, "SetSessionCookiePolicy", func() { NewKernel(NewRouter(), KernelConfig{}).SetSessionCookiePolicy(policy) })
 }
 
 func TestKernel_AdmitsEitherHalfOfTheRefusedSessionCookiePair(t *testing.T) {
@@ -4398,12 +4495,9 @@ func TestKernel_APanicCarryingAnHttpExceptionNoListenerAnswersKeepsItsStatus(t *
 }
 
 func TestKernel_ANotFoundHandlerErrorNoListenerAnswersKeepsItsStatus(t *testing.T) {
-    kernel := NewKernel(NewRouter(), KernelConfig{})
-    kernel.SetNotFoundHandler(
-        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            return nil, exception.Forbidden("hidden")
-        },
-    )
+    kernel := NewKernel(NewRouter(), KernelConfig{NotFoundHandler: func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return nil, exception.Forbidden("hidden")
+    }})
     recorder := httptest.NewRecorder()
     kernel.ServeHttp(newHttpTestContainer()).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/no-such-route", nil))
 
@@ -5341,7 +5435,7 @@ func TestKernel_ServeHttpOverAContainerWithoutADispatcherLeavesTheKernelConfigur
         kernelInstance.ServeHttp(container.NewContainer(container.ContainerConfig{}))
     }()
 
-    kernelInstance.SetMethodPolicy(MethodPolicy{})
+    kernelInstance.InstallMiddlewares(httpkernelseam.NewToken(), nil)
 }
 
 type panickingContentTypeSerializer struct {
@@ -5564,7 +5658,7 @@ func TestKernel_AHandlerReturningAMarkedErrorAnswers503WithTheKernelDelay(t *tes
     }
 }
 
-func TestKernel_SetUnavailableRetryAfterRefusesADelayOutsideTheRule(t *testing.T) {
+func TestNewKernel_RefusesAnUnavailableRetryAfterOutsideItsRule(t *testing.T) {
     for name, delay := range map[string]bound.Duration{
         "below a second":   bound.Of(500 * time.Millisecond),
         "above an hour":    bound.Of(2 * time.Hour),
@@ -6405,4 +6499,8 @@ func TestKernel_HandlerDroppingTheFormErrorAndAnsweringAnError_FilesNoWarning(t 
     if nethttp.StatusUnprocessableEntity != recorder.Code || 0 != len(capture.failureRecords()) {
         t.Fatalf("expected a handler's own refusal with no warning, got %d and %#v", recorder.Code, capture.failureRecords())
     }
+}
+
+func passThroughKernelMiddleware(next httpcontract.Handler) httpcontract.Handler {
+    return next
 }

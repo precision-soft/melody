@@ -48,7 +48,7 @@ const DefaultSessionMaxSessions = 100_000
 /* DefaultUnavailableRetryAfter is the Retry-After of an infrastructure-failure 503 when neither MELODY_HTTP_UNAVAILABLE_RETRY_AFTER nor ApplicationConfig names one. */
 const DefaultUnavailableRetryAfter = 5 * time.Second
 
-/* DefaultHttpShutdownTimeout is how long a stopping http server waits for admitted requests when neither MELODY_HTTP_SHUTDOWN_TIMEOUT nor ApplicationConfig.HttpShutdownTimeout names one. */
+/* DefaultHttpShutdownTimeout is how long a stopping http server waits for admitted requests when neither MELODY_HTTP_SHUTDOWN_TIMEOUT nor ApplicationConfig.HttpServer.ShutdownTimeout names one. */
 const DefaultHttpShutdownTimeout = 5 * time.Second
 
 func newHttpConfiguration(
@@ -143,6 +143,7 @@ type httpServerLimits struct {
 
     unavailableRetryAfter bound.Duration
     sessionEmptyOnOutage  configcontract.Switch
+    sessionCookieSecure   string
 }
 
 func (instance *httpConfiguration) Address() string {
@@ -240,6 +241,11 @@ func (instance *httpConfiguration) UnavailableRetryAfter() bound.Duration {
 /* SessionEmptyOnOutage is MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE as the deployment set it, unset when the key says nothing. */
 func (instance *httpConfiguration) SessionEmptyOnOutage() configcontract.Switch {
     return instance.serverLimits.sessionEmptyOnOutage
+}
+
+/* SessionCookieSecure is MELODY_HTTP_SESSION_COOKIE_SECURE as the deployment set it, from-scheme or always, empty when the key says nothing. */
+func (instance *httpConfiguration) SessionCookieSecure() string {
+    return instance.serverLimits.sessionCookieSecure
 }
 
 func (instance *httpConfiguration) validate() error {

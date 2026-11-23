@@ -20,14 +20,13 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/http"
     "github.com/precision-soft/melody/v4/http/middleware"
-    httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/kernelseam"
     "github.com/precision-soft/melody/v4/kernel"
     "github.com/precision-soft/melody/v4/logging"
     "github.com/precision-soft/melody/v4/messagebus"
 )
 
-/* ApplicationConfig is what an application is built from. A field left out takes its default: no embedded env files, no embedded public files, and the framework defaults of the limits, a 15s read timeout, a 5s read header timeout, a 30s write timeout, a 60s idle timeout, a 1 MiB header cap, a 10s teardown budget, 1,024 container creation waiters and a 5s unavailable retry after. Each limit is the application's own default for the configuration key of the same name, MELODY_HTTP_READ_TIMEOUT, MELODY_HTTP_READ_HEADER_TIMEOUT, MELODY_HTTP_WRITE_TIMEOUT, MELODY_HTTP_IDLE_TIMEOUT, MELODY_HTTP_MAX_HEADER_BYTES, MELODY_TEARDOWN_TIMEOUT, MELODY_CONTAINER_CREATION_WAITERS and MELODY_HTTP_UNAVAILABLE_RETRY_AFTER: the field is the default of its kernel.* parameter, which reads that key unless ParameterOverrides rewrites the parameter. */
+/* ApplicationConfig is what an application is built from. A field left out takes its default: no embedded env files, no embedded public files, the framework's http server and http kernel, and the framework defaults of the limits, a 10s teardown budget and 1,024 container creation waiters. Each limit is the application's own default for the configuration key of the same name, MELODY_TEARDOWN_TIMEOUT and MELODY_CONTAINER_CREATION_WAITERS: the field is the default of its kernel.* parameter, which reads that key unless ParameterOverrides rewrites the parameter. */
 type ApplicationConfig struct {
     /* Version is the application's own version; empty is undeclared, <unknown> in a table and --version, "" in json. */
     Version string
@@ -37,18 +36,10 @@ type ApplicationConfig struct {
     PublicFiles fs.FS
     /* HttpPublicUrl is the public base an absolute url is generated behind, the default of MELODY_HTTP_PUBLIC_URL, which wins when a deployment sets it: an http or https url with a host name and no user info, query, fragment or empty, "." or ".." path segment, its path joined before every route's; Http().PublicUrl() answers the key, then this field; empty is none. */
     HttpPublicUrl string
-    /* HttpShutdownTimeout is how long a stopping http server waits for the requests it admitted, the default of MELODY_HTTP_SHUTDOWN_TIMEOUT, which wins when a deployment sets it: 5s when left out, at least 1ms, unlimited refused. */
-    HttpShutdownTimeout bound.Duration
-    /* ReadTimeout bounds reading one whole request, headers and body: at least 1ms, unlimited refused. */
-    ReadTimeout bound.Duration
-    /* ReadHeaderTimeout bounds reading the request headers: at least 1ms, unlimited refused. */
-    ReadHeaderTimeout bound.Duration
-    /* WriteTimeout bounds writing one response, armed from the request line: at least 1ms, unlimited refused. */
-    WriteTimeout bound.Duration
-    /* IdleTimeout bounds a keep-alive connection waiting for its next request: at least 1ms, unlimited refused. */
-    IdleTimeout bound.Duration
-    /* MaxHeaderBytes caps the request line and headers: at least 4 KiB, unlimited refused. */
-    MaxHeaderBytes bound.Count
+    /* HttpServer is the http server Run listens with; the zero value is the framework's. */
+    HttpServer HttpServerConfig
+    /* HttpKernel is what the http kernel is built with, its one source; the zero value is the framework's. UnavailableRetryAfter, SessionPolicy.EmptyOnOutage and SessionCookiePolicy.Secure are the defaults of MELODY_HTTP_UNAVAILABLE_RETRY_AFTER, MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE and MELODY_HTTP_SESSION_COOKIE_SECURE, which win when a deployment sets them; Middlewares is refused, the application's own going through RegisterHttpMiddlewares. */
+    HttpKernel http.KernelConfig
     /* TeardownTimeout budgets the whole ordered teardown of a clean stop: at least 1ms, unlimited admitted for a supervisor that grants no deadline. */
     TeardownTimeout bound.Duration
     /* ScopeTeardownTimeout bounds the close of a request's, a command's, a message's and a cron run's scope: 3s when left out, at least 1ms, unlimited admitted for no term. */
@@ -56,14 +47,8 @@ type ApplicationConfig struct {
 
     /* ContainerCreationWaiters bounds the resolutions that may wait on one in-flight creation: 1,024 when left out, at least 1, unlimited admitted. */
     ContainerCreationWaiters bound.Count
-    /* UnavailableRetryAfter is the Retry-After of the 503 the error renderer answers an infrastructure failure with outside a firewall, a marked error an application's storage, cache or handler returns: 5s when left out, 1s to 1h in whole seconds, unlimited refused; the field is the default of kernel.http.unavailable_retry_after, which reads MELODY_HTTP_UNAVAILABLE_RETRY_AFTER unless overridden. A firewall answers with its own delay. */
-    UnavailableRetryAfter bound.Duration
-
     /* ContainerTeardownSequential closes the container's services one after the other instead of in waves, for services whose Close methods touch shared external state the container cannot see; the field is the default of kernel.container_teardown_sequential, which reads MELODY_CONTAINER_TEARDOWN_SEQUENTIAL unless overridden. */
     ContainerTeardownSequential bool
-
-    /* SessionEmptyOnOutage answers a reader of the session an empty, unavailable session when the session storage cannot answer, where the default is a 503 with Retry-After: nothing of it is saved and no cookie is written; the firewall's sign-in and sign-out doors still refuse 503. The field is the default of kernel.http.session_empty_on_outage, which reads MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE unless overridden. */
-    SessionEmptyOnOutage bool
 
     /* EnvironmentKeys are the .env keys the application owns, outside the MELODY_ namespace, each with the default, rule, secret mark, retired spellings and refusals of a module's key. They are declared when the application is built, before any parameter is read. A key in the MELODY_ namespace is refused. */
     EnvironmentKeys []configcontract.EnvironmentKey
@@ -79,6 +64,22 @@ type ApplicationConfig struct {
 
     /* ParameterOverrides rewrites, by parameter name, the template of a framework (kernel.*) parameter or of a parameter a module's key feeds: "%env(APP_Y)%", "%app.param%", a literal, or any mix. The override is the parameter's one source: the key that would feed it is not read, and a .env artifact that still sets that key refuses the boot naming the override, unless the override itself reads it. kernel.environment and kernel.project_directory are refused. An override of a kernel.* parameter is resolved when the application is built, so it reads keys, literals and other kernel.* parameters only; a name no framework or module key feeds refuses the boot. */
     ParameterOverrides map[string]string
+}
+
+/* HttpServerConfig is the http server Run listens with. Each field is the application's default of the key named beside it, which wins when a deployment sets it; a value outside its rule refuses NewApplication naming the field. */
+type HttpServerConfig struct {
+    /* ReadTimeout bounds reading one whole request, headers and body, the default of MELODY_HTTP_READ_TIMEOUT: 15s when left out, at least 1ms, unlimited refused. */
+    ReadTimeout bound.Duration
+    /* ReadHeaderTimeout bounds reading the request headers, the default of MELODY_HTTP_READ_HEADER_TIMEOUT: 5s when left out, at least 1ms, unlimited refused. */
+    ReadHeaderTimeout bound.Duration
+    /* WriteTimeout bounds writing one response, armed from the request line, the default of MELODY_HTTP_WRITE_TIMEOUT: 30s when left out, at least 1ms, unlimited refused. */
+    WriteTimeout bound.Duration
+    /* IdleTimeout bounds a keep-alive connection waiting for its next request, the default of MELODY_HTTP_IDLE_TIMEOUT: 60s when left out, at least 1ms, unlimited refused. */
+    IdleTimeout bound.Duration
+    /* MaxHeaderBytes caps the request line and headers, the default of MELODY_HTTP_MAX_HEADER_BYTES: 1 MiB when left out, at least 4 KiB, unlimited refused. */
+    MaxHeaderBytes bound.Count
+    /* ShutdownTimeout is how long a stopping http server waits for the requests it admitted, the default of MELODY_HTTP_SHUTDOWN_TIMEOUT: 5s when left out, at least 1ms, unlimited refused. */
+    ShutdownTimeout bound.Duration
 }
 
 /* MessageBusConfig is the message bus configuration the application owns; the zero value is the framework's. */
@@ -155,6 +156,25 @@ func NewApplication(
         exception.Panic(exception.NewError("the unavailable retry after is refused", nil, unavailableRetryAfterErr))
     }
 
+    if 0 != len(applicationConfig.HttpKernel.Middlewares) {
+        exception.Panic(
+            exception.NewError(
+                "the application's http middlewares are registered through RegisterHttpMiddlewares",
+                exceptioncontract.Context{
+                    "field": "ApplicationConfig.HttpKernel.Middlewares",
+                    "count": len(applicationConfig.HttpKernel.Middlewares),
+                },
+                nil,
+            ),
+        )
+    }
+
+    /* the key a deployment set wins over the field, so the kernel is built once with the value it serves */
+    httpKernelConfig := applicationConfig.HttpKernel
+    httpKernelConfig.UnavailableRetryAfter = bound.Of(unavailableRetryAfter)
+    httpKernelConfig.SessionPolicy.EmptyOnOutage = resolveSessionEmptyOnOutage(configuration, applicationConfig)
+    httpKernelConfig.SessionCookiePolicy.Secure = resolveSessionCookieSecure(configuration, applicationConfig)
+
     routeRegistry := http.NewRouteRegistry()
     httpRouter := http.NewRouterWithRouteRegistry(routeRegistry)
 
@@ -177,10 +197,8 @@ func NewApplication(
         httpRouter,
         eventDispatcher,
         clockInstance,
+        httpKernelConfig,
     )
-
-    kernelInstance.HttpKernel().SetUnavailableRetryAfter(bound.Of(unavailableRetryAfter))
-    kernelInstance.HttpKernel().SetSessionPolicy(httpcontract.SessionPolicy{EmptyOnOutage: resolveSessionEmptyOnOutage(configuration, applicationConfig)})
 
     httpMiddleware := NewHttpMiddleware(
         newStaticFileServerConfig(embeddedPublicFiles, configuration),

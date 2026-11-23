@@ -48,10 +48,6 @@ func SecurityHeaders() melodyhttpmiddleware.SecurityHeadersConfig {
 func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.Kernel) {
     router := kernelInstance.HttpRouter()
 
-    kernelInstance.HttpKernel().SetNotFoundHandler(handler.NotFoundHandler())
-    kernelInstance.HttpKernel().SetForwardedHeadersPolicy(exampleForwardedHeadersPolicy())
-    applySessionCookieSecure(kernelInstance.HttpKernel(), instance.parameterValue(parameterSessionCookieSecure))
-
     /* the health and openapi routes opt into the frontend route manifest (melody:routes:manifest) as working proof of the export: exposed + zoned public, so the TypeScript RouteGenerator can build their URLs by name */
     router.Handle(
         "/health",

@@ -260,7 +260,6 @@ func TestExampleKeys_EachRuleRefusesWhatItsReaderRefuses(t *testing.T) {
         {environmentKeyS3Insecure, []string{"treu"}, []string{"false"}},
         {environmentKeySmtpAllowPlaintext, []string{"yes"}, []string{"true"}},
         {environmentKeySmtpImplicitTls, []string{"1"}, []string{"false"}},
-        {environmentKeySessionCookieSecure, []string{"bogus", " always"}, []string{"", "always", "from-scheme"}},
         {environmentKeyDeviceIdentifierMaxBytes, []string{"0", "256", "abc", "unlimited"}, []string{"", "1", "255"}},
         {environmentKeyRequestBudgetPerHour, []string{"0", "-5", "1.5", "unlimited"}, []string{"", "1", "100000"}},
         {environmentKeyMaxItemsPerPage, []string{"0", "abc"}, []string{"", "1"}},

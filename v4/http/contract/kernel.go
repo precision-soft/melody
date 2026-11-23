@@ -3,7 +3,6 @@ package contract
 import (
     nethttp "net/http"
 
-    "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
@@ -42,22 +41,7 @@ type SessionPolicy struct {
     EmptyOnOutage bool
 }
 
-/* Kernel is the http entry point an application configures at boot and then serves with. Every mutator is boot-only, since requests read the state it writes without synchronization; once ServeHttp has produced a handler, the framework kernel refuses such a call, naming the door, and it refuses a policy it cannot serve, naming the field. */
+/* Kernel is the http entry point an application serves with; it is configured once, when it is built. */
 type Kernel interface {
-    Use(middlewares []Middleware)
-
-    SetNotFoundHandler(handler Handler)
-
-    SetForwardedHeadersPolicy(policy ForwardedHeadersPolicy)
-
-    SetSessionCookiePolicy(policy SessionCookiePolicy)
-
-    SetMethodPolicy(policy MethodPolicy)
-
-    SetSessionPolicy(policy SessionPolicy)
-
-    /* SetUnavailableRetryAfter installs the Retry-After of the 503 the error renderer answers an infrastructure failure with: 5s when absent, 1s to 1h in whole seconds, unlimited refused. */
-    SetUnavailableRetryAfter(delay bound.Duration)
-
     ServeHttp(serviceContainer containercontract.Container) nethttp.Handler
 }

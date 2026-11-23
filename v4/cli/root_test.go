@@ -4,6 +4,9 @@ import (
     "bytes"
     "context"
     "errors"
+    "go/ast"
+    "go/parser"
+    "go/token"
     "io"
     "strings"
     "testing"
@@ -19,7 +22,7 @@ import (
 )
 
 func TestNewRoot_SetsNameAndUsage(t *testing.T) {
-    rootCommand := NewRoot("app", "desc")
+    rootCommand := NewRoot("app", "desc", RootConfig{})
 
     if nil == rootCommand {
         t.Fatalf("expected a root command")
@@ -34,7 +37,7 @@ func TestNewRoot_SetsNameAndUsage(t *testing.T) {
 
 func TestRoot_CommandNamesAnswersTheRegistrationOrder(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
-    rootCommand := NewRoot("app", "desc")
+    rootCommand := NewRoot("app", "desc", RootConfig{})
 
     for _, commandName := range []string{"second", "first"} {
         rootCommand.Register(
@@ -57,72 +60,27 @@ func TestRoot_CommandNamesAnswersTheRegistrationOrder(t *testing.T) {
     }
 }
 
-/* the engine defaults each command's stream on its own, to the process's standard output, so a writer set on the tree alone would leave every command writing past it: the door has to reach the commands or it does not mean what it says */
-func TestRoot_SetWriterReachesACommandRegisteredBeforeIt(t *testing.T) {
-    written := runProbeCommandThroughRoot(t, false)
+/* the engine defaults each command's stream on its own, to the process's standard streams, so the tree's streams are stamped on every command at its registration or the command writes past them */
+func TestNewRoot_Config_WritersReachACommandRegisteredLater(t *testing.T) {
+    outputBuffer := &bytes.Buffer{}
+    errorBuffer := &bytes.Buffer{}
+    rootCommand := NewRoot("app", "desc", RootConfig{Writer: outputBuffer, ErrorWriter: errorBuffer})
 
-    if false == bytes.Contains(written, []byte("probe wrote this")) {
-        t.Fatalf("expected the command output on the tree's writer, got %q", written)
-    }
-}
+    rootCommand.Register(
+        &testCommand{
+            nameValue:        "probe",
+            descriptionValue: "probe",
+            runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
+                _, _ = commandContext.Writer.Write([]byte("probe wrote this"))
 
-func TestRoot_SetWriterReachesACommandRegisteredAfterIt(t *testing.T) {
-    written := runProbeCommandThroughRoot(t, true)
-
-    if false == bytes.Contains(written, []byte("probe wrote this")) {
-        t.Fatalf("expected the command output on the tree's writer, got %q", written)
-    }
-}
-
-/* the engine defaults each command's error stream on its own, as it does the output stream, so the door has to reach the commands whichever side of the registration it is called on */
-func TestRoot_SetErrorWriterReachesACommandRegisteredBeforeOrAfterIt(t *testing.T) {
-    for _, setErrorWriterFirst := range []bool{true, false} {
-        runtimeInstance := newTestRuntime(t)
-        rootCommand := NewRoot("app", "desc")
-        buffer := &bytes.Buffer{}
-
-        command := &testCommand{nameValue: "probe", descriptionValue: "probe"}
-
-        if true == setErrorWriterFirst {
-            rootCommand.SetErrorWriter(buffer)
-            rootCommand.Register(command, runtimeInstance)
-        } else {
-            rootCommand.Register(command, runtimeInstance)
-            rootCommand.SetErrorWriter(buffer)
-        }
-
-        if buffer != rootCommand.command.Commands[0].ErrWriter {
-            t.Fatalf("expected the command's error stream to be the tree's (set first: %v)", setErrorWriterFirst)
-        }
-    }
-}
-
-func runProbeCommandThroughRoot(t *testing.T, setWriterFirst bool) []byte {
-    t.Helper()
-
-    runtimeInstance := newTestRuntime(t)
-    rootCommand := NewRoot("app", "desc")
-    buffer := &bytes.Buffer{}
-
-    command := &testCommand{
-        nameValue:        "probe",
-        descriptionValue: "probe",
-        flagsValue:       nil,
-        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
-            _, _ = commandContext.Writer.Write([]byte("probe wrote this"))
-
-            return nil
+                return nil
+            },
         },
-    }
+        newTestRuntime(t),
+    )
 
-    if true == setWriterFirst {
-        rootCommand.SetWriter(buffer)
-        rootCommand.SetErrorWriter(buffer)
-        rootCommand.Register(command, runtimeInstance)
-    } else {
-        rootCommand.Register(command, runtimeInstance)
-        rootCommand.SetWriter(buffer)
-        rootCommand.SetErrorWriter(buffer)
+    if outputBuffer != rootCommand.command.Commands[0].Writer || errorBuffer != rootCommand.command.Commands[0].ErrWriter {
+        t.Fatalf("expected the command's streams to be the tree's")
     }
 
     runErr := rootCommand.Run(context.Background(), []string{"app", "probe"})
@@ -130,7 +88,52 @@ func runProbeCommandThroughRoot(t *testing.T, setWriterFirst bool) []byte {
         t.Fatalf("expected no error, got %v", runErr)
     }
 
-    return buffer.Bytes()
+    if false == bytes.Contains(outputBuffer.Bytes(), []byte("probe wrote this")) {
+        t.Fatalf("expected the command output on the tree's writer, got %q", outputBuffer.String())
+    }
+}
+
+func TestNewRoot_Config_VersionEmptyIsUnknown(t *testing.T) {
+    rootCommand := NewRoot("app", "desc", RootConfig{})
+
+    if output.UnknownApplicationVersion != rootCommand.command.Version {
+        t.Fatalf("expected the unknown version, got %q", rootCommand.command.Version)
+    }
+
+    if "" != rootCommand.command.Metadata[output.MetadataApplicationVersion] {
+        t.Fatalf("expected the undeclared version in the metadata, got %v", rootCommand.command.Metadata[output.MetadataApplicationVersion])
+    }
+
+    declared := NewRoot("app", "desc", RootConfig{Version: "1.2.3"})
+    if "1.2.3" != declared.command.Version || "1.2.3" != declared.command.Metadata[output.MetadataApplicationVersion] {
+        t.Fatalf("expected the declared version, got %q %v", declared.command.Version, declared.command.Metadata[output.MetadataApplicationVersion])
+    }
+}
+
+/* a setter beside the config would be a second door for one value */
+func TestRoot_ExportsNoSetter(t *testing.T) {
+    fileSet := token.NewFileSet()
+    parsedFile, parseErr := parser.ParseFile(fileSet, "root.go", nil, 0)
+    if nil != parseErr {
+        t.Fatalf("expected root.go to parse, got %v", parseErr)
+    }
+
+    methodCount := 0
+    for _, declaration := range parsedFile.Decls {
+        function, isFunction := declaration.(*ast.FuncDecl)
+        if false == isFunction || nil == function.Recv || false == function.Name.IsExported() {
+            continue
+        }
+
+        methodCount++
+        if true == strings.HasPrefix(function.Name.Name, "Set") {
+            t.Fatalf("expected no exported setter on Root, found %s", function.Name.Name)
+        }
+    }
+
+    if 0 == methodCount {
+        t.Fatalf("expected the walk to read Root's methods")
+    }
 }
 
 /* the tree installs an inert exit handler and the whole cli shutdown path depends on what that buys: the engine must hand the exit-coded error back instead of taking the process down from inside Run, or the application's deferred Close and its structured error log never run. This locks that engine contract, so an upgrade that changes it fails here rather than silently skipping teardown in production. */
@@ -141,9 +144,7 @@ func TestNewRoot_ExitCodedErrorLeavesRunInsteadOfExitingInside(t *testing.T) {
     defer func() { urfavecli.OsExiter = originalExiter }()
 
     runtimeInstance := newTestRuntime(t)
-    rootCommand := NewRoot("probe", "probe")
-    rootCommand.SetWriter(&bytes.Buffer{})
-    rootCommand.SetErrorWriter(&bytes.Buffer{})
+    rootCommand := NewRoot("probe", "probe", RootConfig{Writer: &bytes.Buffer{}, ErrorWriter: &bytes.Buffer{}})
 
     rootCommand.Register(
         &testCommand{
@@ -203,12 +204,9 @@ func TestNewRoot_WithoutTheInertExitHandlerTheEngineExitsFromInsideRun(t *testin
 }
 
 /* a typed nil stream is the untyped nil for the engine, which then defaults the stream of the tree and of every command on it; copied verbatim it would panic in a command's first write */
-func TestRoot_SetWriterWithATypedNilLeavesTheEngineDefault(t *testing.T) {
-    rootCommand := NewRoot("app", "desc")
+func TestNewRoot_Config_TypedNilWriter_IsTheStandardStream(t *testing.T) {
+    rootCommand := NewRoot("app", "desc", RootConfig{Writer: (*bytes.Buffer)(nil), ErrorWriter: (*bytes.Buffer)(nil)})
     rootCommand.Register(&testCommand{nameValue: "probe", descriptionValue: "probe"}, newTestRuntime(t))
-
-    rootCommand.SetWriter((*bytes.Buffer)(nil))
-    rootCommand.SetErrorWriter((*bytes.Buffer)(nil))
 
     if nil != rootCommand.command.Writer || nil != rootCommand.command.ErrWriter {
         t.Fatalf("expected the tree's streams nil, got %#v %#v", rootCommand.command.Writer, rootCommand.command.ErrWriter)
@@ -250,9 +248,7 @@ func TestRoot_RunEndsAtTheScopeTeardownTimeoutWithTheScopeFailure(t *testing.T) 
         },
     }
 
-    root := NewRoot("app", "app")
-    root.SetWriter(io.Discard)
-    root.SetErrorWriter(io.Discard)
+    root := NewRoot("app", "app", RootConfig{Writer: io.Discard, ErrorWriter: io.Discard})
     root.Register(command, &testRuntime{
         contextValue:   context.Background(),
         scopeValue:     serviceContainer.NewScope(),
@@ -284,9 +280,7 @@ func TestRoot_VersionFlagPrintsTheDeclaredVersion(t *testing.T) {
     } {
         buffer := &bytes.Buffer{}
 
-        root := NewRoot("app", "")
-        root.SetVersion(testCase.declared)
-        root.SetWriter(buffer)
+        root := NewRoot("app", "", RootConfig{Version: testCase.declared, Writer: buffer})
 
         if runErr := root.Run(context.Background(), []string{"app", "--version"}); nil != runErr {
             t.Fatalf("expected no error, got %v", runErr)
@@ -302,9 +296,7 @@ func TestRoot_ARegisteredCommandReadsTheVersionOffTheRoot(t *testing.T) {
     for _, declared := range []string{"5.6.7", ""} {
         observed := "unset"
 
-        root := NewRoot("app", "")
-        root.SetVersion(declared)
-        root.SetWriter(io.Discard)
+        root := NewRoot("app", "", RootConfig{Version: declared, Writer: io.Discard})
         root.Register(
             &testCommand{
                 nameValue:        "probe",
@@ -331,10 +323,7 @@ func TestRoot_ARegisteredCommandReadsTheVersionOffTheRoot(t *testing.T) {
 func TestRoot_VersionFlagHasNoShortAliasAndTheHelpNamesTheVersion(t *testing.T) {
     buffer := &bytes.Buffer{}
 
-    root := NewRoot("app", "")
-    root.SetVersion("")
-    root.SetWriter(buffer)
-    root.SetErrorWriter(buffer)
+    root := NewRoot("app", "", RootConfig{Version: "", Writer: buffer, ErrorWriter: buffer})
 
     if runErr := root.Run(context.Background(), []string{"app", "-v"}); nil == runErr {
         t.Fatalf("expected -v refused on the root, got the output %q", buffer.String())

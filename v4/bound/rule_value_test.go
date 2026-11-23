@@ -32,27 +32,27 @@ func TestRule_EveryFrameworkRuleCarriesItsDocumentedValues(t *testing.T) {
         UnlimitedAdmitted: true,
     })
     expectRule(t, "config.HttpIdleTimeoutRule", config.HttpIdleTimeoutRule(), bound.Rule[time.Duration]{
-        Name: "ApplicationConfig.IdleTimeout",
+        Name: "ApplicationConfig.HttpServer.IdleTimeout",
         Default: time.Minute,
         Minimum: time.Millisecond,
     })
     expectRule(t, "config.HttpMaxHeaderBytesRule", config.HttpMaxHeaderBytesRule(), bound.Rule[int]{
-        Name: "ApplicationConfig.MaxHeaderBytes",
+        Name: "ApplicationConfig.HttpServer.MaxHeaderBytes",
         Default: 1048576,
         Minimum: 4096,
     })
     expectRule(t, "config.HttpReadHeaderTimeoutRule", config.HttpReadHeaderTimeoutRule(), bound.Rule[time.Duration]{
-        Name: "ApplicationConfig.ReadHeaderTimeout",
+        Name: "ApplicationConfig.HttpServer.ReadHeaderTimeout",
         Default: 5 * time.Second,
         Minimum: time.Millisecond,
     })
     expectRule(t, "config.HttpReadTimeoutRule", config.HttpReadTimeoutRule(), bound.Rule[time.Duration]{
-        Name: "ApplicationConfig.ReadTimeout",
+        Name: "ApplicationConfig.HttpServer.ReadTimeout",
         Default: 15 * time.Second,
         Minimum: time.Millisecond,
     })
     expectRule(t, "config.HttpWriteTimeoutRule", config.HttpWriteTimeoutRule(), bound.Rule[time.Duration]{
-        Name: "ApplicationConfig.WriteTimeout",
+        Name: "ApplicationConfig.HttpServer.WriteTimeout",
         Default: 30 * time.Second,
         Minimum: time.Millisecond,
     })
@@ -85,7 +85,7 @@ func TestRule_EveryFrameworkRuleCarriesItsDocumentedValues(t *testing.T) {
         UnlimitedAdmitted: true,
     })
     expectRule(t, "config.ShutdownTimeoutRule", config.ShutdownTimeoutRule(), bound.Rule[time.Duration]{
-        Name: "ApplicationConfig.HttpShutdownTimeout",
+        Name: "ApplicationConfig.HttpServer.ShutdownTimeout",
         Default: 5 * time.Second,
         Minimum: time.Millisecond,
     })
@@ -100,7 +100,7 @@ func TestRule_EveryFrameworkRuleCarriesItsDocumentedValues(t *testing.T) {
         UnlimitedAdmitted: true,
     })
     expectRule(t, "config.UnavailableRetryAfterRule", config.UnavailableRetryAfterRule(), bound.Rule[time.Duration]{
-        Name: "ApplicationConfig.UnavailableRetryAfter",
+        Name: "ApplicationConfig.HttpKernel.UnavailableRetryAfter",
         Default: 5 * time.Second,
         Minimum: time.Second,
         Maximum: time.Hour,

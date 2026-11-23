@@ -5,12 +5,15 @@ import (
     nethttp "net/http"
     "net/http/httptest"
     "os"
+    "os/exec"
     "path/filepath"
+    "strings"
     "sync"
     "testing"
     "testing/fstest"
 
     "github.com/precision-soft/melody/v4/config"
+    "github.com/precision-soft/melody/v4/internal/testhelper"
     container "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     runtime "github.com/precision-soft/melody/v4/container/runtime"
@@ -176,4 +179,35 @@ func (instance *levelCapturingLogger) recorded() int {
     defer instance.mutex.Unlock()
 
     return len(instance.levels)
+}
+
+const newApplicationRefusalProbeMarker = "MELODY_TEST_NEW_APPLICATION_REFUSAL_PROBE"
+
+/* expectNewApplicationRefused runs the test again in a child, which builds the application over applicationConfig: NewApplication owns the process boundary and exits on a refusal, so the child's exit and output are what is read */
+func expectNewApplicationRefused(t *testing.T, testName string, applicationConfig ApplicationConfig, expectedTexts ...string) {
+    t.Helper()
+
+    if "" != os.Getenv(newApplicationRefusalProbeMarker) {
+        applicationConfig.EnvironmentFiles = testhelper.NewEmbeddedEnvironmentFs()
+        applicationConfig.PublicFiles = testhelper.NewEmbeddedStaticFs()
+        NewApplication(context.Background(), applicationConfig)
+
+        os.Exit(93)
+    }
+
+    child := exec.Command(os.Args[0], "-test.run=^"+testName+"$")
+    child.Env = append(os.Environ(), newApplicationRefusalProbeMarker+"=1")
+
+    output, runErr := child.CombinedOutput()
+
+    exitError, isExitError := runErr.(*exec.ExitError)
+    if false == isExitError || 1 != exitError.ExitCode() {
+        t.Fatalf("expected the application refused, got err %v with output: %s", runErr, string(output))
+    }
+
+    for _, expectedText := range expectedTexts {
+        if false == strings.Contains(string(output), expectedText) {
+            t.Fatalf("expected the refusal to carry %q, got: %s", expectedText, string(output))
+        }
+    }
 }

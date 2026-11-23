@@ -340,8 +340,7 @@ func newAccessControlledCorsKernel(registerListenerDoors bool) nethttp.Handler {
         RegisterListeners(dispatcher, service)
     }
 
-    kernelInstance := http.NewKernel(router, http.KernelConfig{})
-    kernelInstance.Use([]httpcontract.Middleware{Middleware(service)})
+    kernelInstance := http.NewKernel(router, http.KernelConfig{Middlewares: []httpcontract.Middleware{Middleware(service)}})
 
     return kernelInstance.ServeHttp(serviceContainer)
 }

@@ -17,10 +17,7 @@ func runVersionUnderRoot(t *testing.T, version string, arguments []string) (stri
 
     buffer := &bytes.Buffer{}
 
-    root := melodycli.NewRoot("app", "")
-    root.SetVersion(version)
-    root.SetWriter(buffer)
-    root.SetErrorWriter(buffer)
+    root := melodycli.NewRoot("app", "", melodycli.RootConfig{Version: version, Writer: buffer, ErrorWriter: buffer})
     root.Register(&VersionCommand{}, newTestRuntime(container.NewContainer(container.ContainerConfig{})))
 
     runErr := root.Run(context.Background(), append([]string{"app", "debug:version"}, arguments...))

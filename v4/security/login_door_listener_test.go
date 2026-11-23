@@ -1393,7 +1393,7 @@ func TestLoginDoor_EmptyOnOutageRefusesTheSignInBeforeTheAuthenticator(t *testin
             }
             config.UnavailableRetryAfter = bound.Of(doorFirewallRetryAfter)
         })
-        fixture.kernel.httpKernel.SetSessionPolicy(httpcontract.SessionPolicy{EmptyOnOutage: true})
+        fixture.kernel.httpKernel = http.NewKernel(fixture.kernel.httpRouter, http.KernelConfig{SessionPolicy: httpcontract.SessionPolicy{EmptyOnOutage: true}})
 
         recorded := fixture.refusals()
 
@@ -1426,7 +1426,7 @@ func TestLogoutDoor_EmptyOnOutageRefusesTheSignOutBeforeTheHandler(t *testing.T)
     fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
         config.UnavailableRetryAfter = bound.Of(doorFirewallRetryAfter)
     })
-    fixture.kernel.httpKernel.SetSessionPolicy(httpcontract.SessionPolicy{EmptyOnOutage: true})
+    fixture.kernel.httpKernel = http.NewKernel(fixture.kernel.httpRouter, http.KernelConfig{SessionPolicy: httpcontract.SessionPolicy{EmptyOnOutage: true}})
 
     recorded := fixture.refusals()
 

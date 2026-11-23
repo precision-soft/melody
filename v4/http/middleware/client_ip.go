@@ -12,7 +12,7 @@ import (
 
 const forwardedForHeaderName = "X-Forwarded-For"
 
-/* NewForwardedClientIpResolver returns a ClientIpResolver that walks X-Forwarded-For right-to-left, skipping the trusted proxies of the policy handed to Kernel.SetForwardedHeadersPolicy, and answers the first untrusted address. It falls back to DefaultClientIp, the direct peer, whenever the chain cannot be trusted: forwarded headers not trusted, an empty trusted list, a direct peer that is not a trusted proxy, an unparseable entry or no untrusted one. */
+/* NewForwardedClientIpResolver returns a ClientIpResolver that walks X-Forwarded-For right-to-left, skipping the trusted proxies of the policy handed to KernelConfig.ForwardedHeadersPolicy, and answers the first untrusted address. It falls back to DefaultClientIp, the direct peer, whenever the chain cannot be trusted: forwarded headers not trusted, an empty trusted list, a direct peer that is not a trusted proxy, an unparseable entry or no untrusted one. */
 func NewForwardedClientIpResolver(policy httpcontract.ForwardedHeadersPolicy) ClientIpResolver {
     /* an entry that parses as neither a prefix nor an address is refused, as the kernel refuses it */
     if validationErr := internal.ValidateTrustedProxyList(policy.TrustedProxyList); nil != validationErr {

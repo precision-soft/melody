@@ -21,6 +21,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
+    "github.com/precision-soft/melody/v4/internal/httpkernelseam"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -30,18 +31,24 @@ import (
 
 type MethodPolicy = httpcontract.MethodPolicy
 
-/* KernelConfig is what the http kernel is built with; the zero value is the default, and every field also has a boot-time setter. */
+/* KernelConfig is what the http kernel is built with, its one source; the zero value is the framework's. */
 type KernelConfig struct {
+    /* MethodPolicy decides whether HEAD falls back to GET and whether an unrouted OPTIONS is answered. */
     MethodPolicy MethodPolicy
 
+    /* ForwardedHeadersPolicy decides whether the direct peer's forwarded headers are believed; an unparsable trusted-proxy entry is refused by name, and the list is copied. */
     ForwardedHeadersPolicy httpcontract.ForwardedHeadersPolicy
 
+    /* SessionCookiePolicy is the session cookie's path, domain, SameSite and Secure; SameSite=None with Secure never is refused, since every current browser drops such a cookie. */
     SessionCookiePolicy httpcontract.SessionCookiePolicy
 
+    /* SessionPolicy decides how a session its storage cannot answer is served. */
     SessionPolicy httpcontract.SessionPolicy
 
+    /* Middlewares wrap the matched handler only, a response a listener produced being written without them; an application registers its own through RegisterHttpMiddlewares and refuses this field. */
     Middlewares []httpcontract.Middleware
 
+    /* NotFoundHandler answers a path no route matches; nil is the framework's 404. */
     NotFoundHandler httpcontract.Handler
 
     /* UnavailableRetryAfter is the Retry-After of an infrastructure-failure 503: 5s when left out, 1s to 1h in whole seconds, unlimited refused. */
@@ -55,19 +62,14 @@ type kernelPolicies struct {
     sessionPolicy          httpcontract.SessionPolicy
 }
 
+/* NewKernel is the one way to configure a kernel: a field its rule refuses panics naming the field. */
 func NewKernel(router httpcontract.Router, kernelConfig KernelConfig) *Kernel {
     kernel := &Kernel{
         router:      router,
         middlewares: make([]httpcontract.Middleware, 0),
     }
 
-    kernel.SetMethodPolicy(kernelConfig.MethodPolicy)
-    kernel.SetForwardedHeadersPolicy(kernelConfig.ForwardedHeadersPolicy)
-    kernel.SetSessionCookiePolicy(kernelConfig.SessionCookiePolicy)
-    kernel.SetSessionPolicy(kernelConfig.SessionPolicy)
-    kernel.Use(kernelConfig.Middlewares)
-    kernel.SetNotFoundHandler(kernelConfig.NotFoundHandler)
-    kernel.SetUnavailableRetryAfter(kernelConfig.UnavailableRetryAfter)
+    kernel.applyKernelConfig(kernelConfig)
 
     return kernel
 }
@@ -78,64 +80,28 @@ type Kernel struct {
     notFoundHandler       httpcontract.Handler
     policies              kernelPolicies
     unavailableRetryAfter time.Duration
+    middlewaresInstalled  bool
     /* the shutdown's only measure of a hijacked connection, which net/http's Shutdown does not wait for */
     openRequestScopes atomic.Int64
-    /* atomic, since a mutator racing the first request is what it exists to catch */
+    /* atomic, since an installation racing the first request is what it exists to catch */
     serving atomic.Bool
 }
+
+var _ httpcontract.Kernel = (*Kernel)(nil)
+
+var _ httpkernelseam.MiddlewareInstaller = (*Kernel)(nil)
 
 /* OpenRequestScopes reports how many request scopes are open, hijacked connections included. */
 func (instance *Kernel) OpenRequestScopes() int64 {
     return instance.openRequestScopes.Load()
 }
 
-/* boot-only: request goroutines read these fields without synchronization */
-func (instance *Kernel) refuseMutationWhileServing(door string) {
-    if false == instance.serving.Load() {
-        return
-    }
-
-    exception.Panic(
-        exception.NewError(
-            "may not configure the http kernel after it started serving",
-            map[string]any{
-                "door": door,
-            },
-            nil,
-        ),
-    )
-}
-
-/* Use appends middlewares around the matched handler only: a response a listener produced is written without them. */
-func (instance *Kernel) Use(middlewares []httpcontract.Middleware) {
-    instance.refuseMutationWhileServing("Use")
-
-    instance.middlewares = append(instance.middlewares, middlewares...)
-}
-
-func (instance *Kernel) SetNotFoundHandler(handler httpcontract.Handler) {
-    instance.refuseMutationWhileServing("SetNotFoundHandler")
-
-    instance.notFoundHandler = handler
-}
-
-/* SetForwardedHeadersPolicy installs the forwarded-header policy; it is boot-only, refuses an unparsable trusted-proxy entry by name and copies the list. */
-func (instance *Kernel) SetForwardedHeadersPolicy(policy httpcontract.ForwardedHeadersPolicy) {
-    instance.refuseMutationWhileServing("SetForwardedHeadersPolicy")
-
-    if validationErr := internal.ValidateTrustedProxyList(policy.TrustedProxyList); nil != validationErr {
+func (instance *Kernel) applyKernelConfig(kernelConfig KernelConfig) {
+    if validationErr := internal.ValidateTrustedProxyList(kernelConfig.ForwardedHeadersPolicy.TrustedProxyList); nil != validationErr {
         exception.Panic(validationErr)
     }
 
-    policy.TrustedProxyList = copyStringList(policy.TrustedProxyList)
-    instance.policies.forwardedHeadersPolicy = policy
-}
-
-/* SetSessionCookiePolicy installs the session cookie policy; it is boot-only and refuses SameSite=None with Secure never, which every current browser drops. */
-func (instance *Kernel) SetSessionCookiePolicy(policy httpcontract.SessionCookiePolicy) {
-    instance.refuseMutationWhileServing("SetSessionCookiePolicy")
-
-    if nethttp.SameSiteNoneMode == resolveSessionCookieSameSite(policy) && httpcontract.SessionCookieSecureNever == policy.Secure {
+    if nethttp.SameSiteNoneMode == resolveSessionCookieSameSite(kernelConfig.SessionCookiePolicy) && httpcontract.SessionCookieSecureNever == kernelConfig.SessionCookiePolicy.Secure {
         exception.Panic(
             exception.NewError(
                 "the session cookie policy sets SameSite=None with Secure never, which every current browser drops, so no session sticks; write Secure always or auto, or another SameSite",
@@ -148,33 +114,54 @@ func (instance *Kernel) SetSessionCookiePolicy(policy httpcontract.SessionCookie
         )
     }
 
-    instance.policies.sessionCookiePolicy = policy
-}
-
-/* SetMethodPolicy installs whether HEAD falls back to GET and whether an unrouted OPTIONS is answered; it is boot-only. */
-func (instance *Kernel) SetMethodPolicy(policy httpcontract.MethodPolicy) {
-    instance.refuseMutationWhileServing("SetMethodPolicy")
-
-    instance.policies.methodPolicy = policy
-}
-
-/* SetSessionPolicy installs how the kernel serves a session its storage cannot answer; it is boot-only. */
-func (instance *Kernel) SetSessionPolicy(policy httpcontract.SessionPolicy) {
-    instance.refuseMutationWhileServing("SetSessionPolicy")
-
-    instance.policies.sessionPolicy = policy
-}
-
-/* SetUnavailableRetryAfter installs the Retry-After of an infrastructure-failure 503; it is boot-only and refuses a delay outside 1s to 1h, not in whole seconds or unlimited. */
-func (instance *Kernel) SetUnavailableRetryAfter(delay bound.Duration) {
-    instance.refuseMutationWhileServing("SetUnavailableRetryAfter")
-
-    resolved, resolveErr := config.ResolveUnavailableRetryAfter(delay, "KernelConfig.UnavailableRetryAfter")
+    unavailableRetryAfter, resolveErr := config.ResolveUnavailableRetryAfter(kernelConfig.UnavailableRetryAfter, "KernelConfig.UnavailableRetryAfter")
     if nil != resolveErr {
         exception.Panic(exception.FromError(resolveErr))
     }
 
-    instance.unavailableRetryAfter = resolved
+    forwardedHeadersPolicy := kernelConfig.ForwardedHeadersPolicy
+    forwardedHeadersPolicy.TrustedProxyList = copyStringList(forwardedHeadersPolicy.TrustedProxyList)
+
+    instance.policies = kernelPolicies{
+        methodPolicy:           kernelConfig.MethodPolicy,
+        forwardedHeadersPolicy: forwardedHeadersPolicy,
+        sessionCookiePolicy:    kernelConfig.SessionCookiePolicy,
+        sessionPolicy:          kernelConfig.SessionPolicy,
+    }
+    instance.middlewares = append(instance.middlewares, kernelConfig.Middlewares...)
+    instance.notFoundHandler = kernelConfig.NotFoundHandler
+    instance.unavailableRetryAfter = unavailableRetryAfter
+}
+
+/* InstallMiddlewares appends the application's pipeline after KernelConfig.Middlewares, once and before the kernel serves; it is the framework's door, a token NewToken did not build refused. */
+func (instance *Kernel) InstallMiddlewares(token httpkernelseam.Token, middlewares []httpcontract.Middleware) {
+    if false == token.Valid() {
+        exception.Panic(
+            exception.NewError("http kernel InstallMiddlewares is called by the framework only", nil, nil),
+        )
+    }
+
+    /* boot-only: request goroutines read the middlewares without synchronization */
+    if true == instance.serving.Load() {
+        exception.Panic(
+            exception.NewError(
+                "may not configure the http kernel after it started serving",
+                exceptioncontract.Context{
+                    "door": "InstallMiddlewares",
+                },
+                nil,
+            ),
+        )
+    }
+
+    if true == instance.middlewaresInstalled {
+        exception.Panic(
+            exception.NewError("the http kernel's middlewares are already installed", nil, nil),
+        )
+    }
+
+    instance.middlewaresInstalled = true
+    instance.middlewares = append(instance.middlewares, middlewares...)
 }
 
 /* a kernel built without NewKernel holds no delay, which reads as the default */
@@ -198,7 +185,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
     /* in the kernel rather than at boot, so a bare kernel and Boot's kernel under another server answer alike */
     installBuiltInExceptionListener(event.EventDispatcherMustFromResolver(context.Background(), serviceContainer))
 
-    /* the freeze is not a lock: a mutator already past its check is not caught */
+    /* the freeze is not a lock: an installation already past its check is not caught */
     instance.serving.Store(true)
     freezeRouterForServing(instance.router)
 

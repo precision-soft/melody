@@ -3,16 +3,24 @@ package application
 import (
     "context"
     "errors"
+    nethttp "net/http"
+    "net/http/httptest"
     "os"
+    "os/exec"
     "path/filepath"
+    "strings"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/http"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/internal/httpkernelseam"
     "github.com/precision-soft/melody/v4/internal/testhelper"
 )
 
@@ -331,4 +339,175 @@ func TestNewApplication_AnOverrideReachesTheContainerAndTheRuntimeFlags(t *testi
     case <-time.After(10 * time.Second):
         t.Fatalf("expected the overridden bound to refuse the second waiter")
     }
+}
+
+func TestNewApplication_HttpKernelMiddlewares_RefusedNamingTheDoor(t *testing.T) {
+    expectNewApplicationRefused(
+        t,
+        "TestNewApplication_HttpKernelMiddlewares_RefusedNamingTheDoor",
+        ApplicationConfig{HttpKernel: http.KernelConfig{Middlewares: []httpcontract.Middleware{func(next httpcontract.Handler) httpcontract.Handler { return next }}}},
+        "the application's http middlewares are registered through RegisterHttpMiddlewares",
+        "ApplicationConfig.HttpKernel.Middlewares",
+    )
+}
+
+func TestNewApplication_HttpKernelSessionCookiePolicy_RefusedAtConstruction(t *testing.T) {
+    expectNewApplicationRefused(
+        t,
+        "TestNewApplication_HttpKernelSessionCookiePolicy_RefusedAtConstruction",
+        ApplicationConfig{HttpKernel: http.KernelConfig{SessionCookiePolicy: httpcontract.SessionCookiePolicy{SameSite: nethttp.SameSiteNoneMode, Secure: httpcontract.SessionCookieSecureNever}}},
+        "the session cookie policy sets SameSite=None with Secure never",
+        "SessionCookiePolicy.Secure",
+    )
+}
+
+func TestNewApplication_HttpKernelUnparsableTrustedProxy_RefusedAtConstruction(t *testing.T) {
+    expectNewApplicationRefused(
+        t,
+        "TestNewApplication_HttpKernelUnparsableTrustedProxy_RefusedAtConstruction",
+        ApplicationConfig{HttpKernel: http.KernelConfig{ForwardedHeadersPolicy: httpcontract.ForwardedHeadersPolicy{TrustForwardedHeaders: true, TrustedProxyList: []string{"10.0.0"}}}},
+        "trusted proxy entry is neither a CIDR prefix nor an address",
+    )
+}
+
+func TestNewApplication_HttpServerLimit_RefusedNamingTheNestedField(t *testing.T) {
+    expectNewApplicationRefused(
+        t,
+        "TestNewApplication_HttpServerLimit_RefusedNamingTheNestedField",
+        ApplicationConfig{HttpServer: HttpServerConfig{WriteTimeout: bound.UnlimitedDuration()}},
+        "the http server limits are refused",
+        "ApplicationConfig.HttpServer.WriteTimeout",
+    )
+}
+
+func TestNewApplication_HttpKernelNotFoundHandler_ServesAnUnmatchedPath(t *testing.T) {
+    kernelInstance := bootServingTestApplication(t, config.EnvironmentProduction, ApplicationConfig{HttpKernel: http.KernelConfig{
+        NotFoundHandler: func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return http.TextResponse(nethttp.StatusTeapot, "the application's own"), nil
+        },
+    }}, nil)
+
+    recorder := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/nowhere", nil))
+    if nethttp.StatusTeapot != recorder.Code || "the application's own" != recorder.Body.String() {
+        t.Fatalf("expected the field's not found handler to answer, got %d %q", recorder.Code, recorder.Body.String())
+    }
+}
+
+func TestNewApplication_HttpKernelRetryAfter_KeyWinsOverTheField(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        environmentLines string
+        expected         string
+    }{
+        "the key over the field":   {environmentLines: config.HttpUnavailableRetryAfterKey + "=7s\n", expected: "7"},
+        "the field without the key": {environmentLines: "", expected: "9"},
+    } {
+        kernelInstance := bootServingTestApplicationWithEnvironment(t, config.EnvironmentProduction, testCase.environmentLines, ApplicationConfig{HttpKernel: http.KernelConfig{UnavailableRetryAfter: bound.Of(9 * time.Second)}}, nil)
+
+        kernelInstance.HttpRouter().Handle(
+            "/unavailable",
+            func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                return nil, exception.MarkInfrastructureFailure(errors.New("cache is down"))
+            },
+            httpcontract.RouteOptions{Methods: []string{nethttp.MethodGet}},
+        )
+
+        recorder := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/unavailable", nil))
+        if nethttp.StatusServiceUnavailable != recorder.Code || testCase.expected != recorder.Header().Get("Retry-After") {
+            t.Fatalf("%s: expected 503 with Retry-After %s, got %d %q", name, testCase.expected, recorder.Code, recorder.Header().Get("Retry-After"))
+        }
+    }
+}
+
+func TestNewApplication_HttpKernelSessionEmptyOnOutage_KeyWinsOverTheField(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        environmentLines string
+        field            bool
+        expected         int
+    }{
+        "the key on over the field off":  {environmentLines: config.HttpSessionEmptyOnOutageKey + "=true\n", field: false, expected: nethttp.StatusOK},
+        "the key off over the field on":  {environmentLines: config.HttpSessionEmptyOnOutageKey + "=false\n", field: true, expected: nethttp.StatusServiceUnavailable},
+        "the field on without the key":   {environmentLines: "", field: true, expected: nethttp.StatusOK},
+    } {
+        kernelInstance := bootServingTestApplicationWithEnvironment(t, config.EnvironmentProduction, testCase.environmentLines, ApplicationConfig{HttpKernel: http.KernelConfig{SessionPolicy: httpcontract.SessionPolicy{EmptyOnOutage: testCase.field}}}, nil)
+
+        prepareSessionReaderOverAnOutage(kernelInstance.ServiceContainer(), kernelInstance.HttpRouter())
+
+        if status := serveSessionReader(kernelInstance.ServiceContainer(), kernelInstance.HttpKernel()); testCase.expected != status {
+            t.Fatalf("%s: expected %d, got %d", name, testCase.expected, status)
+        }
+    }
+}
+
+func TestNewApplication_HttpKernelSessionCookieSecure_KeyWinsOverTheField(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        environmentLines string
+        field            httpcontract.SessionCookieSecurePolicy
+        expected         bool
+    }{
+        "the key always over the field from scheme": {environmentLines: config.HttpSessionCookieSecureKey + "=always\n", field: httpcontract.SessionCookieSecureFromScheme, expected: true},
+        "the key from scheme over the field always": {environmentLines: config.HttpSessionCookieSecureKey + "=from-scheme\n", field: httpcontract.SessionCookieSecureAlways, expected: false},
+        "the field always without the key":          {environmentLines: "", field: httpcontract.SessionCookieSecureAlways, expected: true},
+        "neither":                                   {environmentLines: "", field: httpcontract.SessionCookieSecureFromScheme, expected: false},
+    } {
+        kernelInstance := bootServingTestApplicationWithEnvironment(t, config.EnvironmentProduction, testCase.environmentLines, ApplicationConfig{HttpKernel: http.KernelConfig{SessionCookiePolicy: httpcontract.SessionCookiePolicy{Secure: testCase.field}}}, nil)
+
+        kernelInstance.HttpRouter().Handle(
+            "/writes-the-session",
+            func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                sessionInstance, sessionErr := http.RequestSession(request)
+                if nil != sessionErr {
+                    return nil, sessionErr
+                }
+
+                sessionInstance.Set("identity", "u1")
+
+                return http.TextResponse(nethttp.StatusOK, "ok"), nil
+            },
+            httpcontract.RouteOptions{Methods: []string{nethttp.MethodGet}},
+        )
+
+        cookies := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "http://app.example/writes-the-session", nil)).Result().Cookies()
+        if 1 != len(cookies) || testCase.expected != cookies[0].Secure {
+            t.Fatalf("%s: expected one session cookie Secure %v over plain http, got %+v", name, testCase.expected, cookies)
+        }
+    }
+}
+
+func TestNewApplication_HttpSessionCookieSecureKey_RefusedNamingTheKey(t *testing.T) {
+    if "" != os.Getenv(newApplicationRefusalProbeMarker) {
+        bootServingTestApplicationWithEnvironment(t, config.EnvironmentProduction, config.HttpSessionCookieSecureKey+"=never\n", ApplicationConfig{}, nil)
+
+        os.Exit(93)
+    }
+
+    child := exec.Command(os.Args[0], "-test.run=^TestNewApplication_HttpSessionCookieSecureKey_RefusedNamingTheKey$")
+    child.Env = append(os.Environ(), newApplicationRefusalProbeMarker+"=1")
+
+    output, runErr := child.CombinedOutput()
+
+    exitError, isExitError := runErr.(*exec.ExitError)
+    if false == isExitError || 1 != exitError.ExitCode() || false == strings.Contains(string(output), config.HttpSessionCookieSecureKey) {
+        t.Fatalf("expected the application refused naming the key, got err %v with output: %s", runErr, string(output))
+    }
+}
+
+func TestApplicationBoot_InstallsThePipelineThroughTheSeam(t *testing.T) {
+    kernelInstance := bootServingTestApplication(t, config.EnvironmentProduction, ApplicationConfig{}, nil)
+
+    httpKernel, isFrameworkKernel := kernelInstance.HttpKernel().(*http.Kernel)
+    if false == isFrameworkKernel {
+        t.Fatalf("expected the framework's http kernel, got %T", kernelInstance.HttpKernel())
+    }
+
+    testhelper.AssertPanicsWithError(t, func() {
+        httpKernel.InstallMiddlewares(httpkernelseam.NewToken(), nil)
+    }, "the http kernel's middlewares are already installed")
+}
+
+func TestApplicationBoot_KernelWithoutTheInstaller_Refused(t *testing.T) {
+    applicationInstance := newEnvironmentKeyBootApplication(t, nil)
+
+    testhelper.AssertPanicsWithError(t, func() {
+        applicationInstance.installHttpMiddlewares(&plainHttpKernel{})
+    }, "the http kernel cannot hold the application's middlewares")
 }

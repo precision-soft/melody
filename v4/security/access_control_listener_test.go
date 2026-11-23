@@ -1404,7 +1404,7 @@ func TestAccessControlListener_TheFirewallRefusalKeepsTheFirewallDelayOverTheKer
     } {
         t.Run(name, func(t *testing.T) {
             fixture := newUnavailableRouteFixture(newMarkedUnavailableToken(), testCase.retryAfter)
-            fixture.kernel.httpKernel.SetUnavailableRetryAfter(bound.Of(13 * time.Second))
+            fixture.kernel.httpKernel = httpPkg.NewKernel(fixture.kernel.httpRouter, httpPkg.KernelConfig{UnavailableRetryAfter: bound.Of(13 * time.Second)})
 
             recorder, _, _ := fixture.serve(t, "/admin")
 

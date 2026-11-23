@@ -40,7 +40,7 @@ func TestRegister_PanicsOnNilRootCommand(t *testing.T) {
 func TestRegister_PanicsOnNilCommand(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
 
-    rootCommand := NewRoot("app", "desc")
+    rootCommand := NewRoot("app", "desc", RootConfig{})
 
     testhelper.AssertPanicsWithError(t, func() {
         rootCommand.Register(nil, runtimeInstance)
@@ -48,7 +48,7 @@ func TestRegister_PanicsOnNilCommand(t *testing.T) {
 }
 
 func TestRegister_PanicsOnNilRuntime(t *testing.T) {
-    rootCommand := NewRoot("app", "desc")
+    rootCommand := NewRoot("app", "desc", RootConfig{})
 
     command := &testCommand{
         nameValue:        "test",
@@ -66,7 +66,7 @@ func TestRegister_PanicsOnNilRuntime(t *testing.T) {
 
 func TestRegister_PanicsOnEmptyCommandName(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
-    rootCommand := NewRoot("app", "desc")
+    rootCommand := NewRoot("app", "desc", RootConfig{})
 
     command := &testCommand{
         nameValue:        "   ",
@@ -85,7 +85,7 @@ func TestRegister_PanicsOnEmptyCommandName(t *testing.T) {
 func TestRegister_AppendsCommandAndBindsFields(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
 
-    rootCommand := NewRoot("app", "desc")
+    rootCommand := NewRoot("app", "desc", RootConfig{})
 
     command := &testCommand{
         nameValue:        "hello",
@@ -129,7 +129,7 @@ func TestRegister_AppendsCommandAndBindsFields(t *testing.T) {
 
 func TestRegister_PanicsOnDuplicateCommandName(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
-    rootCommand := NewRoot("app", "desc")
+    rootCommand := NewRoot("app", "desc", RootConfig{})
 
     commandA := &testCommand{
         nameValue:        "hello",
@@ -289,10 +289,8 @@ func TestAggregateCliErrors_AnswersThePlainAggregateWhenTheCommandCarriesNoExitC
 func TestRegister_ActionCallsRunWithRuntimeInstance(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
 
-    rootCommand := NewRoot("app", "desc")
-
     buffer := &bytes.Buffer{}
-    rootCommand.SetWriter(buffer)
+    rootCommand := NewRoot("app", "desc", RootConfig{Writer: buffer})
 
     expectedErr := errors.New("run error")
 
@@ -348,9 +346,8 @@ func runRegisteredCommand(
 
     runtimeInstance := newTestRuntime(t)
 
-    rootCommand := NewRoot("app", "desc")
-
     buffer := &bytes.Buffer{}
+    rootCommand := NewRoot("app", "desc", RootConfig{Writer: buffer, ErrorWriter: buffer})
 
     command := &testCommand{
         nameValue:        "hello",
@@ -364,9 +361,6 @@ func runRegisteredCommand(
     }
 
     rootCommand.Register(command, runtimeInstance)
-
-    rootCommand.SetWriter(buffer)
-    rootCommand.SetErrorWriter(buffer)
 
     commandArguments := make([]string, 0, len(arguments)+2)
     commandArguments = append(commandArguments, "app", "hello")
@@ -396,9 +390,8 @@ func runRegisteredStandardFlagsCommand(
 
     runtimeInstance := newTestRuntime(t)
 
-    rootCommand := NewRoot("app", "desc")
-
     buffer := &bytes.Buffer{}
+    rootCommand := NewRoot("app", "desc", RootConfig{Writer: buffer, ErrorWriter: buffer})
 
     command := &testCommand{
         nameValue:        "hello",
@@ -412,9 +405,6 @@ func runRegisteredStandardFlagsCommand(
     }
 
     rootCommand.Register(command, runtimeInstance)
-
-    rootCommand.SetWriter(buffer)
-    rootCommand.SetErrorWriter(buffer)
 
     commandArguments := make([]string, 0, len(arguments)+2)
     commandArguments = append(commandArguments, "app", "hello")
@@ -512,15 +502,11 @@ func runRegisteredCommandOnTwoStreams(
     command clicontract.Command,
     arguments []string,
 ) (string, string, error) {
-    rootCommand := NewRoot("app", "desc")
-
     outputBuffer := &bytes.Buffer{}
     errorBuffer := &bytes.Buffer{}
+    rootCommand := NewRoot("app", "desc", RootConfig{Writer: outputBuffer, ErrorWriter: errorBuffer})
 
     rootCommand.Register(command, runtimeInstance)
-
-    rootCommand.SetWriter(outputBuffer)
-    rootCommand.SetErrorWriter(errorBuffer)
 
     commandArguments := make([]string, 0, len(arguments)+2)
     commandArguments = append(commandArguments, "app", command.Name())
@@ -655,7 +641,7 @@ func TestRegister_ActionLeavesTheContainerOpenWhenTheCommandSucceeds(t *testing.
 func TestRegister_ActionPrintsTheFailedBannerAndRepanicsWhenTheCommandPanics(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
 
-    rootCommand := NewRoot("app", "desc")
+    rootCommand := NewRoot("app", "desc", RootConfig{})
 
     buffer := &bytes.Buffer{}
 
@@ -702,7 +688,7 @@ func TestRegister_ActionPrintsTheFailedBannerAndRepanicsWhenTheCommandPanics(t *
 func TestRegister_ActionLeavesTheContainerOpenOnThePanicPath(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
 
-    rootCommand := NewRoot("app", "desc")
+    rootCommand := NewRoot("app", "desc", RootConfig{})
 
     command := &testCommand{
         nameValue:        "explode",
@@ -750,7 +736,7 @@ func (instance *typedNilErrorCommandFailure) Error() string {
 func TestRegister_ActionReadsATypedNilCommandErrorAsSuccess(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
 
-    rootCommand := NewRoot("app", "desc")
+    rootCommand := NewRoot("app", "desc", RootConfig{})
 
     buffer := &bytes.Buffer{}
 
@@ -802,7 +788,7 @@ func TestRegister_ActionDoesNotReportTheCloseFailureOfAContainerTheCommandAlread
         container.RegisterOptions{},
     )
 
-    rootCommand := NewRoot("app", "desc")
+    rootCommand := NewRoot("app", "desc", RootConfig{})
 
     buffer := &bytes.Buffer{}
 
@@ -1124,7 +1110,7 @@ func TestRegister_APositionalHelpReachesTheCommand(t *testing.T) {
     for _, positional := range []string{"h", "help"} {
         observedArguments := []string(nil)
 
-        rootCommand := NewRoot("app", "desc")
+        rootCommand := NewRoot("app", "desc", RootConfig{Writer: io.Discard, ErrorWriter: io.Discard})
 
         command := &testCommand{
             nameValue:        "hello",
@@ -1137,8 +1123,6 @@ func TestRegister_APositionalHelpReachesTheCommand(t *testing.T) {
         }
 
         rootCommand.Register(command, newTestRuntime(t))
-        rootCommand.SetWriter(io.Discard)
-        rootCommand.SetErrorWriter(io.Discard)
 
         runErr := rootCommand.Run(context.Background(), []string{"app", "hello", positional})
         if nil != runErr {
@@ -1155,7 +1139,7 @@ func TestRegister_AFailingCommandWritesItsErrorLineWhateverQuietSays(t *testing.
     for _, quietArgument := range []string{"", "--quiet=true", "--quiet=false"} {
         buffer := &bytes.Buffer{}
 
-        rootCommand := NewRoot("app", "desc")
+        rootCommand := NewRoot("app", "desc", RootConfig{Writer: buffer, ErrorWriter: buffer})
 
         command := &testCommand{
             nameValue:        "hello",
@@ -1167,8 +1151,6 @@ func TestRegister_AFailingCommandWritesItsErrorLineWhateverQuietSays(t *testing.
         }
 
         rootCommand.Register(command, newTestRuntime(t))
-        rootCommand.SetWriter(buffer)
-        rootCommand.SetErrorWriter(buffer)
 
         arguments := []string{"app", "hello", "--no-color"}
         if "" != quietArgument {
@@ -1189,7 +1171,7 @@ func TestRegister_AFailingCommandWritesItsErrorLineOnTheErrorStream(t *testing.T
         outputBuffer := &bytes.Buffer{}
         errorBuffer := &bytes.Buffer{}
 
-        rootCommand := NewRoot("app", "desc")
+        rootCommand := NewRoot("app", "desc", RootConfig{Writer: outputBuffer, ErrorWriter: errorBuffer})
 
         command := &testCommand{
             nameValue:        "hello",
@@ -1201,8 +1183,6 @@ func TestRegister_AFailingCommandWritesItsErrorLineOnTheErrorStream(t *testing.T
         }
 
         rootCommand.Register(command, newTestRuntime(t))
-        rootCommand.SetWriter(outputBuffer)
-        rootCommand.SetErrorWriter(errorBuffer)
 
         arguments := []string{"app", "hello", "--no-color"}
         if "" != formatArgument {

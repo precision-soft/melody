@@ -31,10 +31,10 @@ func invokeInstall[T any](door func(T, func(kind string, name string)), recorder
 }
 
 func invokeNewKernel[T any](
-    door func(T, configcontract.Configuration, containercontract.Container, httpcontract.Router, eventcontract.EventDispatcher, clockcontract.Clock) kernelcontract.Kernel,
+    door func(T, configcontract.Configuration, containercontract.Container, httpcontract.Router, eventcontract.EventDispatcher, clockcontract.Clock, melodyhttp.KernelConfig) kernelcontract.Kernel,
 ) {
     var zero T
-    door(zero, nil, nil, nil, nil, nil)
+    door(zero, nil, nil, nil, nil, nil, melodyhttp.KernelConfig{})
 }
 
 func requireFrameworkOnlyRefusal(t *testing.T, expectedMessage string, call func()) {
