@@ -32,6 +32,6 @@ This is an internal integration package. Userland code should not construct a ke
     - [`EventKernelResponse`](../../kernel/contract/event.go)
     - [`EventKernelTerminate`](../../kernel/contract/event.go)
     - [`EventKernelException`](../../kernel/contract/event.go)
-    - [`ListenerTagKernelAccessLog`](../../kernel/contract/event.go), [`ListenerTagKernelCors`](../../kernel/contract/event.go) — the tags the access log and the cors response listener carry, which the application declares on `kernel.terminate` and `kernel.response`
+    - [`ListenerTagKernelAccessLog`](../../kernel/contract/event.go), [`ListenerTagKernelCors`](../../kernel/contract/event.go), [`ListenerTagKernelSecurityHeaders`](../../kernel/contract/event.go) — the tags the access log, the cors response listener and the security headers listener carry, which the application declares on `kernel.terminate` and `kernel.response`
 
 `Kernel.BootRuntime()` answers the runtime of the application's boot, installed by `Boot` before its first step: a module hook resolves and calls its doors under it. Once `Boot` returned its context is done with `containercontract.ErrBootFinished` as its cause and its scope is closed; before `Boot` it is nil.

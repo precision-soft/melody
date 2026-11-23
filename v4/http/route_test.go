@@ -93,3 +93,14 @@ func TestRouteProtection_AttributeOfAnotherType_AnswersTheZeroValue(t *testing.T
         t.Fatalf("expected the carried protection read")
     }
 }
+
+func TestRouteProtection_AnswersACopyOfTheHeaderNames(t *testing.T) {
+    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, RequestConfig{})
+    request.Attributes().Set(RouteAttributeProtection, RouteProtectionConfig{SecurityHeadersDisabled: []string{HeaderFrameOptions}})
+
+    RouteProtection(request).SecurityHeadersDisabled[0] = HeaderReferrerPolicy
+
+    if HeaderFrameOptions != RouteProtection(request).SecurityHeadersDisabled[0] {
+        t.Fatalf("expected the carried names untouched by a reader")
+    }
+}

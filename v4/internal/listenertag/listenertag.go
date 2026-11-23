@@ -12,6 +12,7 @@ const FrameworkPrefix = "melody."
 const (
     FrameworkAccessLog = FrameworkPrefix + "access_log"
     FrameworkCors      = FrameworkPrefix + "cors"
+    FrameworkSecurityHeaders = FrameworkPrefix + "security_headers"
 )
 
 const (
@@ -23,7 +24,7 @@ const (
 
 /* FrameworkTags answers the tags the framework defines, a list of the caller's own */
 func FrameworkTags() []string {
-    return []string{FrameworkAccessLog, FrameworkCors}
+    return []string{FrameworkAccessLog, FrameworkCors, FrameworkSecurityHeaders}
 }
 
 /* Refused answers the first tag of the list a dispatch could not match exactly or that the framework's namespace does not hold: an empty tag, a tag carrying whitespace or a control character, a tag in the melody. namespace the framework does not define, or a tag listed twice; refused is false for a list that passes, nil and an empty list included. */

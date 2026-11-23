@@ -2,6 +2,7 @@ package http
 
 import (
     "regexp"
+    "slices"
 
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
@@ -68,12 +69,13 @@ func RouteProtection(request httpcontract.Request) httpcontract.RouteProtectionC
 
     /* a value of another type answers the zero value the failed assertion yields */
     protection, _ := value.(httpcontract.RouteProtectionConfig)
+    protection.SecurityHeadersDisabled = slices.Clone(protection.SecurityHeadersDisabled)
 
     return protection
 }
 
 func routeProtectionTurnsNothingOff(protection httpcontract.RouteProtectionConfig) bool {
-    return false == protection.CsrfDisabled
+    return false == protection.CsrfDisabled && 0 == len(protection.SecurityHeadersDisabled)
 }
 
 /* RouteZones answers the declared zones in declaration order. */

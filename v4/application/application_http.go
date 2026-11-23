@@ -18,6 +18,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/http"
+    "github.com/precision-soft/melody/v4/http/middleware"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     middlewarepipeline "github.com/precision-soft/melody/v4/http/middleware/pipeline"
     "github.com/precision-soft/melody/v4/internal"
@@ -55,6 +56,7 @@ func (instance *Application) RegisterHttpRoute(
     options.Requirements = maps.Clone(options.Requirements)
     options.Defaults = maps.Clone(options.Defaults)
     options.Attributes = maps.Clone(options.Attributes)
+    options.Protection.SecurityHeadersDisabled = slices.Clone(options.Protection.SecurityHeadersDisabled)
 
     instance.httpRouteRegistrars = append(
         instance.httpRouteRegistrars,
@@ -133,6 +135,10 @@ func (instance *Application) registerKernelHttpListeners() {
 
     http.RegisterKernelResponseNormalizerListener(eventDispatcher)
     http.RegisterKernelTerminateAccessLogListener(eventDispatcher)
+
+    if nil != instance.httpMiddlewares && nil != instance.httpMiddlewares.securityHeaders {
+        middleware.RegisterSecurityHeadersResponseListener(eventDispatcher, instance.httpMiddlewares.securityHeaders)
+    }
 }
 
 /* bootHttpPipeline judges the session manager's storage timeout and builds the middleware pipeline under the boot runtime, once */

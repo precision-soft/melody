@@ -1156,3 +1156,44 @@ func TestRouter_Protection_ReservedProtectionAttributeWrittenByHand_Refused(t *t
 
     NewRouter().Handle("/forged", csrfProtectionTestHandler, RouteOptions{Attributes: map[string]any{RouteAttributeProtection: RouteProtectionConfig{CsrfDisabled: true}}})
 }
+
+func assertSecurityHeadersDisabledRefused(t *testing.T, names []string, expectedMessage string, expectedValue string) {
+    t.Helper()
+
+    defer func() {
+        t.Helper()
+
+        refusal, isError := recover().(*exception.Error)
+        if false == isError || expectedMessage != refusal.Error() || "RouteOptions.Protection.SecurityHeadersDisabled" != refusal.Context()["field"] || "/page" != refusal.Context()["pattern"] || expectedValue != refusal.Context()["value"] {
+            t.Fatalf("expected %q naming the field, the pattern and %q, got %v", expectedMessage, expectedValue, refusal)
+        }
+    }()
+
+    NewRouter().Handle("/page", csrfProtectionTestHandler, RouteOptions{Protection: RouteProtectionConfig{SecurityHeadersDisabled: names}})
+}
+
+func TestRouter_Protection_UnknownSecurityHeader_Refused(t *testing.T) {
+    assertSecurityHeadersDisabledRefused(t, []string{HeaderFrameOptions, "X-XSS-Protection"}, "route turns off a header the framework does not send", "X-XSS-Protection")
+}
+
+func TestRouter_Protection_SecurityHeaderNamedTwice_Refused(t *testing.T) {
+    assertSecurityHeadersDisabledRefused(t, []string{HeaderFrameOptions, "x-frame-options"}, "route names a security header twice", "x-frame-options")
+}
+
+func TestRouter_Protection_SecurityHeadersDisabled_CopiedAtRegistration(t *testing.T) {
+    router := NewRouter()
+    names := []string{"content-security-policy", " x-frame-options "}
+    router.Handle("/page", csrfProtectionTestHandler, RouteOptions{Protection: RouteProtectionConfig{SecurityHeadersDisabled: names}})
+
+    names[0] = HeaderReferrerPolicy
+
+    matchResult, matched := router.Match(nethttp.MethodGet, "/page", "", "http")
+    if false == matched {
+        t.Fatalf("expected a match")
+    }
+
+    protection, isProtection := matchResult.RouteAttributes[RouteAttributeProtection].(RouteProtectionConfig)
+    if false == isProtection || false != protection.CsrfDisabled || 2 != len(protection.SecurityHeadersDisabled) || HeaderContentSecurityPolicy != protection.SecurityHeadersDisabled[0] || HeaderFrameOptions != protection.SecurityHeadersDisabled[1] {
+        t.Fatalf("expected the route's own canonical copy under %s, got %#v", RouteAttributeProtection, matchResult.RouteAttributes[RouteAttributeProtection])
+    }
+}

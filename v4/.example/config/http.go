@@ -17,6 +17,7 @@ import (
     handlerstorage "github.com/precision-soft/melody/v4/.example/handler/storage"
     handlertwofactor "github.com/precision-soft/melody/v4/.example/handler/twofactor"
     handleruser "github.com/precision-soft/melody/v4/.example/handler/user"
+    "github.com/precision-soft/melody/v4/.example/page"
     "github.com/precision-soft/melody/v4/.example/route"
     "github.com/precision-soft/melody/v4/.example/twofactor"
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
@@ -33,6 +34,11 @@ import (
     melodystorage "github.com/precision-soft/melody/v4/storage"
     melodystoragecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
+
+/* SecurityHeaders is the framework's default set with the pages' content security policy. */
+func SecurityHeaders() melodyhttpmiddleware.SecurityHeadersConfig {
+    return melodyhttpmiddleware.SecurityHeadersConfig{ContentSecurityPolicy: page.ContentSecurityPolicy}
+}
 
 func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.Kernel) {
     router := kernelInstance.HttpRouter()

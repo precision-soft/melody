@@ -17,6 +17,7 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     "github.com/precision-soft/melody/v4/security"
     securityconfig "github.com/precision-soft/melody/v4/security/config"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -286,5 +287,57 @@ func TestApplication_SiblingSubdomainWrite_OnASessionRoute_Refused403(t *testing
 func TestApplication_GlobalCsrfDisabled_ForgedRequestServed(t *testing.T) {
     if status := serveCsrfApplicationWrite(t, security.CsrfConfig{Mode: security.CsrfModeDisabled}, map[string]string{"Sec-Fetch-Site": "cross-site"}); nethttp.StatusForbidden == status {
         t.Fatalf("expected the global door to serve a forged write, got %d", status)
+    }
+}
+
+func forgedAccountWrite(t *testing.T, kernelInstance kernelcontract.Kernel, accept string) *httptest.ResponseRecorder {
+    t.Helper()
+
+    request := httptest.NewRequest(nethttp.MethodPost, "http://app.example.com/account", nil)
+    request.AddCookie(sessionCookieOfAnIdentity(t, kernelInstance))
+    request.Header.Set("Sec-Fetch-Site", "cross-site")
+    request.Header.Set("Accept", accept)
+
+    return serveTestRequest(kernelInstance, request)
+}
+
+func TestApplication_ForgedRequest_OneWarningRecord_RenderedByAccept(t *testing.T) {
+    var logger *levelCapturingLogger
+    kernelInstance := bootServingTestApplication(t, config.EnvironmentProduction, ApplicationConfig{}, func(applicationInstance *Application) {
+        logger = registerLevelCapturingLogger(applicationInstance)
+        applicationInstance.RegisterModule(&csrfApplicationTestModule{fakeModule: fakeModule{name: "csrf"}})
+    })
+
+    for _, testCase := range []struct {
+        accept      string
+        contentType string
+    }{
+        {"application/json", "application/json"},
+        {"text/html", "text/html"},
+    } {
+        from := logger.recorded()
+
+        recorder := forgedAccountWrite(t, kernelInstance, testCase.accept)
+        if nethttp.StatusForbidden != recorder.Code || false == strings.HasPrefix(recorder.Result().Header.Get("Content-Type"), testCase.contentType) {
+            t.Fatalf("%s: expected a 403 rendered as %s, got %d %q", testCase.accept, testCase.contentType, recorder.Code, recorder.Result().Header.Get("Content-Type"))
+        }
+
+        if warnings, errorRecords := logger.countSince(from, loggingcontract.LevelWarning), logger.countSince(from, loggingcontract.LevelError); 1 != warnings || 0 != errorRecords {
+            t.Fatalf("%s: expected one warning record and no error, got %d warnings and %d errors", testCase.accept, warnings, errorRecords)
+        }
+    }
+}
+
+func TestApplication_ForgedRequest_SameStatusInDevAndProd(t *testing.T) {
+    for _, environmentName := range []string{config.EnvironmentDevelopment, config.EnvironmentProduction} {
+        kernelInstance := bootServingTestApplication(t, environmentName, ApplicationConfig{}, func(applicationInstance *Application) {
+            applicationInstance.RegisterModule(&csrfApplicationTestModule{fakeModule: fakeModule{name: "csrf"}})
+        })
+
+        for _, accept := range []string{"application/json", "text/html"} {
+            if recorder := forgedAccountWrite(t, kernelInstance, accept); nethttp.StatusForbidden != recorder.Code {
+                t.Fatalf("%s %s: expected 403, got %d", environmentName, accept, recorder.Code)
+            }
+        }
     }
 }

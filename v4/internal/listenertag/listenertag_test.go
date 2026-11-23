@@ -16,7 +16,7 @@ func TestRefused(t *testing.T) {
         {"nil", nil, "", 0, "", false},
         {"empty list", []string{}, "", 0, "", false},
         {"valid", []string{"audit", "cache"}, "", 0, "", false},
-        {"the framework's own tags", []string{FrameworkAccessLog, FrameworkCors}, "", 0, "", false},
+        {"the framework's own tags", []string{FrameworkAccessLog, FrameworkCors, FrameworkSecurityHeaders}, "", 0, "", false},
         {"empty tag", []string{"audit", ""}, RefusalEmpty, 1, "", true},
         {"whitespace", []string{"a b"}, RefusalWhitespace, 0, "a b", true},
         {"control character", []string{"audit", "a\tb"}, RefusalWhitespace, 1, "a\tb", true},
@@ -38,7 +38,7 @@ func TestFrameworkTags_AnswersACopyOfTheCallersOwn(t *testing.T) {
     tags := FrameworkTags()
     tags[0] = "changed"
 
-    if FrameworkAccessLog != FrameworkTags()[0] || 2 != len(FrameworkTags()) {
-        t.Fatalf("expected the two framework tags, got %v", FrameworkTags())
+    if FrameworkAccessLog != FrameworkTags()[0] || 3 != len(FrameworkTags()) || FrameworkSecurityHeaders != FrameworkTags()[2] {
+        t.Fatalf("expected the three framework tags, got %v", FrameworkTags())
     }
 }

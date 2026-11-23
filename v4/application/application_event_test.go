@@ -46,7 +46,7 @@ func TestDeclareFrameworkEvents_DeclaresTheTwelveFrameworkEvents(t *testing.T) {
         expected := ""
         switch eventName {
         case kernelcontract.EventKernelResponse:
-            expected = kernelcontract.ListenerTagKernelCors
+            expected = kernelcontract.ListenerTagKernelCors + "," + kernelcontract.ListenerTagKernelSecurityHeaders
         case kernelcontract.EventKernelTerminate:
             expected = kernelcontract.ListenerTagKernelAccessLog
         }
@@ -65,7 +65,7 @@ func TestDeclareFrameworkEvents_DeclaresTheApplicationsTagsAfterTheFrameworks(t 
         kernelcontract.EventKernelRequest:  {TagsToRunAfterFailure: []string{"audit"}},
     })
 
-    if "melody.cors,audit,cache" != strings.Join(declared[kernelcontract.EventKernelResponse], ",") {
+    if "melody.cors,melody.security_headers,audit,cache" != strings.Join(declared[kernelcontract.EventKernelResponse], ",") {
         t.Fatalf("expected the framework's tags first, got %v", declared[kernelcontract.EventKernelResponse])
     }
 

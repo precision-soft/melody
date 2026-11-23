@@ -29,6 +29,7 @@ func main() {
             PublicFiles:        embeddedPublicFiles,
             EnvironmentKeys:    config.EnvironmentKeys(),
             ParameterOverrides: config.ParameterOverrides(),
+            SecurityHeaders:    config.SecurityHeaders(),
         },
     )
 

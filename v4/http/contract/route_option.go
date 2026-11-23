@@ -37,4 +37,7 @@ type RouteOptions struct {
 type RouteProtectionConfig struct {
     /* CsrfDisabled exempts the route from its firewall's cross-site request forgery check, for a handler that verifies the token itself; refused on a route that serves only safe methods, which the check never reads. */
     CsrfDisabled bool
+
+    /* SecurityHeadersDisabled names the security headers this route's responses go without, in any case; a name the framework does not send, or one named twice, is refused at registration. */
+    SecurityHeadersDisabled []string
 }

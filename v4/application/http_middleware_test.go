@@ -10,6 +10,7 @@ import (
     "github.com/precision-soft/melody/v4/config"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/http/middleware"
     middlewarepipeline "github.com/precision-soft/melody/v4/http/middleware/pipeline"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/internal/testhelper"
@@ -141,8 +142,8 @@ func TestHttpMiddlewareDescribe_RunsNoFactoryAndNamesTheRegisteredFunction(t *te
         t.Fatal("expected the description to leave the last build report alone")
     }
 
-    if 2 != len(descriptions) {
-        t.Fatalf("expected the static middleware and the factory described, got %d", len(descriptions))
+    if 3 != len(descriptions) {
+        t.Fatalf("expected the security headers, the static middleware and the factory described, got %d", len(descriptions))
     }
 
     factoryFunctionNamed := false
@@ -430,5 +431,32 @@ func TestHttpMiddleware_AFactoryYieldingNilIsRefusedNamingTheModule(t *testing.T
 
     if nil == nilRefusal || "billing" != nilRefusal.Context()["moduleName"] || "billing" != buildRefusalOf(t, buildErr).Context()["moduleName"] {
         t.Fatalf("expected both refusals to name the module, got %v", buildErr)
+    }
+}
+
+func TestDefaultDefinitions_SecurityHeadersOutsideStatic(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+
+    definitions := applicationInstance.httpMiddlewares.defaultDefinitions(applicationInstance.kernel)
+    if 2 != len(definitions) || MiddlewareNameSecurityHeaders != definitions[0].Name || MiddlewareNameStatic != definitions[1].Name {
+        t.Fatalf("expected the security headers then the static file server, got %+v", definitions)
+    }
+
+    if MiddlewarePrioritySecurityHeaders != definitions[0].Priority || definitions[0].Priority >= definitions[1].Priority {
+        t.Fatalf("expected the security headers below the static priority, got %d and %d", definitions[0].Priority, definitions[1].Priority)
+    }
+
+    descriptions, _, describeErr := applicationInstance.httpMiddlewares.describe(applicationInstance.kernel)
+    if nil != describeErr || 2 != len(descriptions) || MiddlewareNameSecurityHeaders != descriptions[0].Name {
+        t.Fatalf("expected the security headers listed first, got %+v %v", descriptions, describeErr)
+    }
+}
+
+func TestDefaultDefinitions_Disabled_OnlyStatic(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), SecurityHeaders: middleware.SecurityHeadersConfig{Disabled: true}})
+
+    definitions := applicationInstance.httpMiddlewares.defaultDefinitions(applicationInstance.kernel)
+    if 1 != len(definitions) || MiddlewareNameStatic != definitions[0].Name {
+        t.Fatalf("expected the static file server alone, got %+v", definitions)
     }
 }

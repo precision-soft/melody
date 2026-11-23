@@ -1,7 +1,9 @@
 package http
 
 import (
+    "net/textproto"
     "regexp"
+    "slices"
     "sort"
     "strings"
     "sync/atomic"
@@ -183,6 +185,8 @@ func buildRouteValue(pattern string, handler httpcontract.Handler, options httpc
     rejectMalformedExposureAttributes(options.Attributes, options.Name, normalizedPattern)
     rejectReservedAttributes(options.Attributes, normalizedPattern)
     rejectCsrfDisabledOnSafeOnlyRoute(options.Protection, options.Methods, normalizedPattern)
+    protection := options.Protection
+    protection.SecurityHeadersDisabled = canonicalSecurityHeadersDisabled(options.Protection.SecurityHeadersDisabled, normalizedPattern)
 
     attributes := map[string]any{}
     for key, value := range options.Attributes {
@@ -210,8 +214,8 @@ func buildRouteValue(pattern string, handler httpcontract.Handler, options httpc
     if 0 < len(options.Locales) {
         attributes[RouteAttributeLocales] = append([]string{}, options.Locales...)
     }
-    if false == routeProtectionTurnsNothingOff(options.Protection) {
-        attributes[RouteAttributeProtection] = options.Protection
+    if false == routeProtectionTurnsNothingOff(protection) {
+        attributes[RouteAttributeProtection] = protection
     }
 
     return route{
@@ -414,6 +418,45 @@ func rejectCsrfDisabledOnSafeOnlyRoute(protection httpcontract.RouteProtectionCo
             nil,
         ),
     )
+}
+
+/* canonicalSecurityHeadersDisabled answers the route's own copy of the header names in their canonical spelling, refusing a name the framework does not send and a name given twice, since either turns nothing off. */
+func canonicalSecurityHeadersDisabled(declaredNames []string, normalizedPattern string) []string {
+    if 0 == len(declaredNames) {
+        return nil
+    }
+
+    securityHeaderNames := SecurityHeaderNames()
+    canonicalNames := make([]string, 0, len(declaredNames))
+
+    for _, declaredName := range declaredNames {
+        canonicalName := textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(declaredName))
+
+        message := ""
+        if false == slices.Contains(securityHeaderNames, canonicalName) {
+            message = "route turns off a header the framework does not send"
+        } else if true == slices.Contains(canonicalNames, canonicalName) {
+            message = "route names a security header twice"
+        }
+
+        if "" != message {
+            exception.Panic(
+                exception.NewError(
+                    message,
+                    map[string]any{
+                        "field":   "RouteOptions.Protection.SecurityHeadersDisabled",
+                        "pattern": normalizedPattern,
+                        "value":   internal.BoundDiagnosticText(declaredName),
+                    },
+                    nil,
+                ),
+            )
+        }
+
+        canonicalNames = append(canonicalNames, canonicalName)
+    }
+
+    return canonicalNames
 }
 
 /* rejectMalformedExposureAttributes refuses an exposure attribute that is not a bool, a zone that is not a string and an exposed route with no name, each of which would drop the route from the manifest it opted into. */

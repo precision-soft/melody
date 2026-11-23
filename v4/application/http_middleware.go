@@ -19,6 +19,10 @@ import (
 const (
     MiddlewareGroupHttp = "http"
 
+    /* MiddlewarePrioritySecurityHeaders puts the security headers outside the static file server, so a served file carries them too. */
+    MiddlewarePrioritySecurityHeaders = -2000
+    MiddlewareNameSecurityHeaders     = "security_headers"
+
     /* MiddlewarePriorityStatic puts the static file server outermost, below the default priority: a request for a file that exists is answered before anything registered through Use observes it, so the rate limiter, the compressor and any access log written as a middleware are skipped for it, while the framework's own access log, a kernel.terminate listener, still records it. A middleware that must see static requests registers below this priority. */
     MiddlewarePriorityStatic = -1000
     MiddlewareNameStatic     = "static"
@@ -29,6 +33,7 @@ const (
 
 type HttpMiddleware struct {
     staticConfig    static.Config
+    securityHeaders *middleware.SecurityHeaders
     definitions     []middlewarepipeline.HttpMiddlewareDefinition
     customIndex     int
     lastBuildReport *middlewarepipeline.MiddlewareBuildReport
@@ -226,6 +231,20 @@ func registeredFunctionName(value any) string {
 
 func (instance *HttpMiddleware) defaultDefinitions(kernelInstance kernelcontract.Kernel) []middlewarepipeline.HttpMiddlewareDefinition {
     definitions := make([]middlewarepipeline.HttpMiddlewareDefinition, 0, 5)
+
+    if nil != instance.securityHeaders {
+        securityHeaders := instance.securityHeaders
+
+        definitions = append(definitions, middlewarepipeline.HttpMiddlewareDefinition{
+            Name:     MiddlewareNameSecurityHeaders,
+            Priority: MiddlewarePrioritySecurityHeaders,
+            Groups:   []string{MiddlewareGroupHttp},
+            Factory: func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
+                return securityHeaders.Middleware(), nil
+            },
+            FunctionName: registeredFunctionName(securityHeaders.Middleware),
+        })
+    }
 
     staticDefinition := middlewarepipeline.HttpMiddlewareDefinition{
         Name:     MiddlewareNameStatic,

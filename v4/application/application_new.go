@@ -19,6 +19,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/http"
+    "github.com/precision-soft/melody/v4/http/middleware"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/kernelseam"
     "github.com/precision-soft/melody/v4/kernel"
@@ -69,6 +70,9 @@ type ApplicationConfig struct {
 
     /* Events is what the application declares on the framework's own events, by event name: kernel.request, kernel.controller, kernel.response, kernel.terminate, kernel.exception, the six security.* events and http.request.profile. The application declares all twelve through EventDispatcher.DeclareEvent when it is built, each with the framework's own tags followed by the TagsToRunAfterFailure given here and under the dispatcher's rules, so a later DeclareEvent on one of those names is refused as already declared. A name that is not a framework event refuses the application by name, and a tag the dispatcher refuses is answered naming this field; an application event is declared through EventDispatcher.DeclareEvent. */
     Events map[string]eventcontract.EventConfig
+
+    /* SecurityHeaders is the security headers every response carries, through a middleware outside the static file server and a kernel.response listener; the zero value sends the defaults, Disabled none. */
+    SecurityHeaders middleware.SecurityHeadersConfig
 
     /* MessageBus is what the framework hands the melody:messagebus:consume command it registers. */
     MessageBus MessageBusConfig
@@ -181,6 +185,11 @@ func NewApplication(
     httpMiddleware := NewHttpMiddleware(
         newStaticFileServerConfig(embeddedPublicFiles, configuration),
     )
+    /* built when disabled too, so a malformed value is refused although nothing is sent */
+    securityHeaders := middleware.NewSecurityHeaders(applicationConfig.SecurityHeaders)
+    if false == applicationConfig.SecurityHeaders.Disabled {
+        httpMiddleware.securityHeaders = securityHeaders
+    }
 
     /* built here, so a retry policy outside its rule refuses the application before anything boots */
     consumeCommand := messagebus.NewConsumeCommand(messagebus.ConsumeCommandConfig{Retry: applicationConfig.MessageBus.Retry})

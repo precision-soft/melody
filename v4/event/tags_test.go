@@ -52,7 +52,7 @@ func TestEventDispatcher_AnUnknownFrameworkTagIsRefusedNamingTheFrameworksTags(t
     })
 
     frameworkTags, _ := refusal.Context()["frameworkTags"].([]string)
-    if "ListenerConfig.Tags carries a tag in the melody. namespace the framework does not define" != refusal.Message() || "melody.audit" != refusal.Context()["tag"] || 0 != refusal.Context()["index"] || 2 != len(frameworkTags) {
+    if "ListenerConfig.Tags carries a tag in the melody. namespace the framework does not define" != refusal.Message() || "melody.audit" != refusal.Context()["tag"] || 0 != refusal.Context()["index"] || 3 != len(frameworkTags) {
         t.Fatalf("expected the reserved tag refused with the framework's tags, got %s %v", refusal.Message(), refusal.Context())
     }
 }

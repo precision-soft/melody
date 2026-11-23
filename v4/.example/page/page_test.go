@@ -7,7 +7,9 @@ import (
     nethttp "net/http"
     "net/http/httptest"
     "os"
+    "net/url"
     "regexp"
+    "slices"
     "strings"
     "testing"
     "time"
@@ -362,5 +364,66 @@ func TestHtmlWithoutASessionRendersAnEmptyToken(t *testing.T) {
 
     if false == strings.Contains(body, `<meta content="" name="csrf-token"/>`) {
         t.Fatalf("expected the page rendered with an empty token")
+    }
+}
+
+func contentSecurityPolicySources(t *testing.T) map[string][]string {
+    t.Helper()
+
+    sources := map[string][]string{}
+    for _, directive := range strings.Split(ContentSecurityPolicy, ";") {
+        fields := strings.Fields(directive)
+        if 0 == len(fields) {
+            continue
+        }
+
+        if _, seen := sources[fields[0]]; true == seen {
+            t.Fatalf("the policy names %s twice", fields[0])
+        }
+
+        sources[fields[0]] = fields[1:]
+    }
+
+    return sources
+}
+
+func TestPages_EveryExternalOriginIsInTheContentSecurityPolicy(t *testing.T) {
+    sources := contentSecurityPolicySources(t)
+    checked := 0
+
+    for sourceName, content := range externalAssetSources(t) {
+        for _, tag := range externalAssetTagPattern.FindAllString(content, -1) {
+            urlMatch := externalAssetUrlPattern.FindStringSubmatch(tag)
+            if nil == urlMatch {
+                continue
+            }
+
+            assetUrl, parseErr := url.Parse(urlMatch[1])
+            if nil != parseErr {
+                t.Fatalf("%s: %s: %v", sourceName, urlMatch[1], parseErr)
+            }
+
+            directive := "style-src"
+            if true == strings.HasPrefix(tag, "<script") {
+                directive = "script-src"
+            }
+
+            origin := assetUrl.Scheme + "://" + assetUrl.Host
+            if false == slices.Contains(sources[directive], origin) {
+                t.Fatalf("%s: %s is not admitted by %s %v", sourceName, origin, directive, sources[directive])
+            }
+
+            checked++
+        }
+    }
+
+    if 31 != checked {
+        t.Fatalf("expected the 31 external asset tags checked, checked %d", checked)
+    }
+
+    for _, directive := range []string{"default-src", "frame-ancestors", "object-src", "base-uri", "form-action"} {
+        if 0 == len(sources[directive]) {
+            t.Fatalf("expected the policy to declare %s", directive)
+        }
     }
 }

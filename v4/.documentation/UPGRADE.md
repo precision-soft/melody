@@ -64,6 +64,14 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** Render the page, or read the token route, again after the sign-in.
 
+### Http: every response carries security headers
+
+**What changed.** Every response carries `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and `Referrer-Policy: strict-origin-when-cross-origin`, and a request resolved to `https` `Strict-Transport-Security: max-age=31536000`, through the `security_headers` middleware ahead of `static` and a `kernel.response` listener that reaches firewall refusals, error pages and not founds. `ApplicationConfig.SecurityHeaders` ([`middleware.SecurityHeadersConfig`](../http/middleware/security_headers.go)) sets each header's value, and `RouteOptions.Protection.SecurityHeadersDisabled` turns one off on one route. See [Security headers](package/HTTP.md#security-headers).
+
+**Symptom.** A page framed by another page of the same application renders blank; a script or a stylesheet served under a wrong content type stops loading; behind TLS, or a trusted proxy stating `https`, browsers keep the host on `https` for a year; a test asserting a response's exact header set, or the `debug:middleware` listing, now meets `security_headers` first and `static` second.
+
+**Remedy.** For the frame, `Protection.SecurityHeadersDisabled: []string{http.HeaderFrameOptions}` on the framed route or `FrameOptions: "SAMEORIGIN"`; serve the asset under its type; `StrictTransportSecurity: middleware.SecurityHeaderDisabled` while the host is not ready for `https`, or when the edge already sends the header; every header off: `SecurityHeaders: middleware.SecurityHeadersConfig{Disabled: true}`. No `.env` key turns them off: the switch is Go.
+
 ### Constructors: a value object takes a config
 
 **What changed.** A constructor of a value object keeps the values that name it positional and takes the rest in a config struct whose zero value is the empty or default value, and the doors over a fixed value or a positional optional gain one:

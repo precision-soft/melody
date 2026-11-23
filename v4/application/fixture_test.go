@@ -2,10 +2,22 @@ package application
 
 import (
     "context"
+    nethttp "net/http"
+    "net/http/httptest"
+    "os"
+    "path/filepath"
+    "sync"
+    "testing"
+    "testing/fstest"
 
+    "github.com/precision-soft/melody/v4/config"
     container "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     runtime "github.com/precision-soft/melody/v4/container/runtime"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    "github.com/precision-soft/melody/v4/logging"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    "github.com/precision-soft/melody/v4/session"
 )
 
 func sessionRuntime() containercontract.Runtime {
@@ -14,4 +26,147 @@ func sessionRuntime() containercontract.Runtime {
 
 func sessionRuntimeUnder(ctx context.Context) containercontract.Runtime {
     return runtime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
+}
+
+const servingTestStaticFile = "app.css"
+
+/* bootServingTestApplication boots an http application in the named environment from a directory of its own, a .env and one public file, under every build tag set */
+func bootServingTestApplication(t *testing.T, environmentName string, applicationConfig ApplicationConfig, prepare func(applicationInstance *Application)) kernelcontract.Kernel {
+    t.Helper()
+
+    directory := t.TempDir()
+    environment := []byte(config.EnvironmentNameKey + "=" + environmentName + "\n")
+    staticFile := []byte("body{}")
+
+    if writeErr := os.WriteFile(filepath.Join(directory, ".env"), environment, 0o600); nil != writeErr {
+        t.Fatalf("write .env: %v", writeErr)
+    }
+
+    if mkdirErr := os.MkdirAll(filepath.Join(directory, "public"), 0o700); nil != mkdirErr {
+        t.Fatalf("mkdir public: %v", mkdirErr)
+    }
+
+    if writeErr := os.WriteFile(filepath.Join(directory, "public", servingTestStaticFile), staticFile, 0o600); nil != writeErr {
+        t.Fatalf("write the public file: %v", writeErr)
+    }
+
+    previousDirectory, getwdErr := os.Getwd()
+    if nil != getwdErr {
+        t.Fatalf("getwd: %v", getwdErr)
+    }
+
+    if chdirErr := os.Chdir(directory); nil != chdirErr {
+        t.Fatalf("chdir: %v", chdirErr)
+    }
+    t.Cleanup(func() { _ = os.Chdir(previousDirectory) })
+
+    applicationConfig.EnvironmentFiles = fstest.MapFS{".env": &fstest.MapFile{Data: environment}}
+    applicationConfig.PublicFiles = fstest.MapFS{"public/" + servingTestStaticFile: &fstest.MapFile{Data: staticFile}}
+
+    applicationInstance := NewApplication(context.Background(), applicationConfig)
+    applicationInstance.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
+
+    if nil != prepare {
+        prepare(applicationInstance)
+    }
+
+    return applicationInstance.Boot()
+}
+
+func serveTestRequest(kernelInstance kernelcontract.Kernel, request *nethttp.Request) *httptest.ResponseRecorder {
+    recorder := httptest.NewRecorder()
+    kernelInstance.HttpKernel().ServeHttp(kernelInstance.ServiceContainer()).ServeHTTP(recorder, request)
+
+    return recorder
+}
+
+/* sessionCookieOfAnIdentity saves a session holding an identity and answers its cookie */
+func sessionCookieOfAnIdentity(t *testing.T, kernelInstance kernelcontract.Kernel) *nethttp.Cookie {
+    t.Helper()
+
+    manager := session.SessionMustFromResolver(t.Context(), kernelInstance.ServiceContainer())
+    sessionInstance := mustSession(manager.NewSession(sessionRuntime()))
+    sessionInstance.Set("identity", "u1")
+    if saveErr := manager.SaveSession(sessionRuntime(), sessionInstance); nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+
+    return &nethttp.Cookie{Name: session.SessionCookieName, Value: sessionInstance.Id()}
+}
+
+/* registerLevelCapturingLogger replaces the application's logger with one that counts records by level */
+func registerLevelCapturingLogger(applicationInstance *Application) *levelCapturingLogger {
+    logger := &levelCapturingLogger{}
+
+    applicationInstance.RegisterService(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return logger, nil
+        },
+        containercontract.RegisterOptions{},
+    )
+
+    return logger
+}
+
+type levelCapturingLogger struct {
+    mutex  sync.Mutex
+    levels []loggingcontract.Level
+}
+
+func (instance *levelCapturingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.levels = append(instance.levels, level)
+}
+
+func (instance *levelCapturingLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelDebug, message, context)
+}
+
+func (instance *levelCapturingLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelInfo, message, context)
+}
+
+func (instance *levelCapturingLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelWarning, message, context)
+}
+
+func (instance *levelCapturingLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelError, message, context)
+}
+
+func (instance *levelCapturingLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelEmergency, message, context)
+}
+
+func (instance *levelCapturingLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *levelCapturingLogger) CauseChainDepth() int {
+    return 8
+}
+
+/* countSince answers how many records at the level were filed after the first `from` records */
+func (instance *levelCapturingLogger) countSince(from int, level loggingcontract.Level) int {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    count := 0
+    for _, recordedLevel := range instance.levels[from:] {
+        if level == recordedLevel {
+            count = count + 1
+        }
+    }
+
+    return count
+}
+
+func (instance *levelCapturingLogger) recorded() int {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return len(instance.levels)
 }

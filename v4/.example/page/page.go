@@ -26,6 +26,9 @@ const ProfileHtml = "profile.html"
 const UsersHtml = "users.html"
 const TwoFactorHtml = "two_factor.html"
 
+/* ContentSecurityPolicy admits the two asset hosts the pages load from; 'unsafe-inline' stays while the pages carry inline style attributes and inline scripts holding templated data. */
+const ContentSecurityPolicy = "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com; img-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+
 var ErrPageNotFound = errors.New("page not found")
 
 //go:embed *.html

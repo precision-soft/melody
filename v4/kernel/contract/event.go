@@ -16,4 +16,5 @@ const (
 const (
     ListenerTagKernelAccessLog = listenertag.FrameworkAccessLog
     ListenerTagKernelCors      = listenertag.FrameworkCors
+    ListenerTagKernelSecurityHeaders = listenertag.FrameworkSecurityHeaders
 )

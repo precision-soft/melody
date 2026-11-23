@@ -14,6 +14,7 @@ import (
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
     handlerevent "github.com/precision-soft/melody/v4/.example/handler/event"
     "github.com/precision-soft/melody/v4/.example/message"
+    "github.com/precision-soft/melody/v4/.example/page"
     "github.com/precision-soft/melody/v4/.example/route"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
@@ -25,6 +26,7 @@ import (
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodyhttpmiddleware "github.com/precision-soft/melody/v4/http/middleware"
     melodykernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -380,5 +382,13 @@ func TestRegisterHttpRoutes_HoldsTheIssueDoorToTheConfiguredBoundAndTheRevokeDoo
 
     if status := callDoor(route.AccessTokenRevokeDevicePattern, "phone-123"); nethttp.StatusOK != status {
         t.Fatalf("expected the revoke-device door to admit nine bytes under a bound of eight with 200, got %d", status)
+    }
+}
+
+func TestSecurityHeaders_CarriesThePagesContentSecurityPolicyOverTheDefaults(t *testing.T) {
+    securityHeaders := SecurityHeaders()
+
+    if page.ContentSecurityPolicy != securityHeaders.ContentSecurityPolicy || (melodyhttpmiddleware.SecurityHeadersConfig{ContentSecurityPolicy: page.ContentSecurityPolicy}) != securityHeaders {
+        t.Fatalf("expected the default set with the pages' policy, got %+v", securityHeaders)
     }
 }

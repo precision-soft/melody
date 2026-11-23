@@ -22,7 +22,7 @@ func frameworkEvents() []frameworkEventDeclaration {
     return []frameworkEventDeclaration{
         {eventName: kernelcontract.EventKernelRequest},
         {eventName: kernelcontract.EventKernelController},
-        {eventName: kernelcontract.EventKernelResponse, config: eventcontract.EventConfig{TagsToRunAfterFailure: []string{kernelcontract.ListenerTagKernelCors}}},
+        {eventName: kernelcontract.EventKernelResponse, config: eventcontract.EventConfig{TagsToRunAfterFailure: []string{kernelcontract.ListenerTagKernelCors, kernelcontract.ListenerTagKernelSecurityHeaders}}},
         {eventName: kernelcontract.EventKernelTerminate, config: eventcontract.EventConfig{TagsToRunAfterFailure: []string{kernelcontract.ListenerTagKernelAccessLog}}},
         {eventName: kernelcontract.EventKernelException},
         {eventName: securitycontract.EventSecurityAuthorizationGranted},

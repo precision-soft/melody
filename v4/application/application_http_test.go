@@ -10,6 +10,7 @@ import (
     nethttp "net/http"
     "net/http/httptest"
     "os"
+    "os/exec"
     "slices"
     "strings"
     "sync"
@@ -30,6 +31,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/http/middleware"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
@@ -2140,5 +2142,266 @@ func TestAwaitHttpServerEnd_HandsAShutdownHookTheShutdownsContext(t *testing.T) 
     case <-shutdownContext.Done():
     case <-time.After(2 * time.Second):
         t.Fatalf("expected the hook's context done once the budget ends")
+    }
+}
+
+/* headersTestModule serves one session firewall over / with a json route, a failing route, a stream, a route that turns X-Frame-Options off, a route that sets its own cache and frame headers, and a write the csrf check refuses */
+type headersTestModule struct {
+    csrfApplicationTestModule
+}
+
+func (instance *headersTestModule) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
+    instance.csrfApplicationTestModule.RegisterHttpRoutes(kernelInstance)
+
+    router := kernelInstance.HttpRouter()
+    router.Handle("/json", func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return http.JsonResponse(nethttp.StatusOK, map[string]string{"ok": "yes"})
+    }, http.RouteOptions{Methods: []string{nethttp.MethodGet}})
+    router.Handle("/fail", func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return nil, exception.NewError("boom", nil, nil)
+    }, http.RouteOptions{Methods: []string{nethttp.MethodGet}})
+    router.Handle("/stream", func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        streamWriter, streamErr := http.NewServerSentEventWriter(writer, http.ServerSentEventWriterConfig{})
+        if nil != streamErr {
+            return nil, streamErr
+        }
+
+        return nil, streamWriter.Send(http.ServerSentEvent{Data: "one"})
+    }, http.RouteOptions{Methods: []string{nethttp.MethodGet}})
+    router.Handle("/framed", func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return http.TextResponse(nethttp.StatusOK, "framed"), nil
+    }, http.RouteOptions{Methods: []string{nethttp.MethodGet}, Protection: http.RouteProtectionConfig{SecurityHeadersDisabled: []string{http.HeaderFrameOptions}}})
+    router.Handle("/own", func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        response := http.TextResponse(nethttp.StatusOK, "own")
+        response.Headers().Set("Cache-Control", "public, max-age=60")
+        response.Headers().Set(http.HeaderFrameOptions, "SAMEORIGIN")
+
+        return response, nil
+    }, http.RouteOptions{Methods: []string{nethttp.MethodGet}})
+}
+
+func bootHeadersTestApplication(t *testing.T, environmentName string, applicationConfig ApplicationConfig) kernelcontract.Kernel {
+    t.Helper()
+
+    return bootServingTestApplication(t, environmentName, applicationConfig, func(applicationInstance *Application) {
+        applicationInstance.RegisterModule(&headersTestModule{csrfApplicationTestModule: csrfApplicationTestModule{fakeModule: fakeModule{name: "headers"}}})
+    })
+}
+
+func assertDefaultSecurityHeaders(t *testing.T, what string, header nethttp.Header) {
+    t.Helper()
+
+    for name, value := range map[string]string{
+        http.HeaderContentTypeOptions: "nosniff",
+        http.HeaderFrameOptions:       "DENY",
+        http.HeaderReferrerPolicy:     "strict-origin-when-cross-origin",
+    } {
+        if values := header.Values(name); 1 != len(values) || value != values[0] {
+            t.Fatalf("%s: expected one %s: %s, got %v", what, name, value, header)
+        }
+    }
+
+    if _, present := header[http.HeaderStrictTransportSecurity]; true == present {
+        t.Fatalf("%s: expected no HSTS over http, got %v", what, header)
+    }
+}
+
+func TestApplication_DefaultHeaders_OnAStaticFile(t *testing.T) {
+    kernelInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
+
+    recorder := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/"+servingTestStaticFile, nil))
+    if nethttp.StatusOK != recorder.Code || "body{}" != recorder.Body.String() {
+        t.Fatalf("expected the static file served, got %d %q", recorder.Code, recorder.Body.String())
+    }
+
+    assertDefaultSecurityHeaders(t, "static file", recorder.Result().Header)
+}
+
+func TestApplication_DefaultHeaders_OnAJsonRoute(t *testing.T) {
+    kernelInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
+
+    assertDefaultSecurityHeaders(t, "json route", serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/json", nil)).Result().Header)
+}
+
+func TestApplication_DefaultHeaders_OnAFirewallRefusal(t *testing.T) {
+    kernelInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
+
+    request := httptest.NewRequest(nethttp.MethodPost, "http://app.example.com/account", nil)
+    request.AddCookie(sessionCookieOfAnIdentity(t, kernelInstance))
+    request.Header.Set("Sec-Fetch-Site", "cross-site")
+
+    recorder := serveTestRequest(kernelInstance, request)
+    if nethttp.StatusForbidden != recorder.Code {
+        t.Fatalf("expected the forged write refused 403, got %d", recorder.Code)
+    }
+
+    assertDefaultSecurityHeaders(t, "firewall refusal", recorder.Result().Header)
+}
+
+func TestApplication_DefaultHeaders_OnTheErrorPage(t *testing.T) {
+    kernelInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
+
+    recorder := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the error page, got %d", recorder.Code)
+    }
+
+    assertDefaultSecurityHeaders(t, "error page", recorder.Result().Header)
+}
+
+func TestApplication_DefaultHeaders_OnANotFound(t *testing.T) {
+    kernelInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
+
+    recorder := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/missing", nil))
+    if nethttp.StatusNotFound != recorder.Code {
+        t.Fatalf("expected a not found, got %d", recorder.Code)
+    }
+
+    assertDefaultSecurityHeaders(t, "not found", recorder.Result().Header)
+}
+
+func TestApplication_DefaultHeaders_OnAServerSentEventStream(t *testing.T) {
+    kernelInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
+
+    recorder := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/stream", nil))
+    if "text/event-stream" != recorder.Result().Header.Get("Content-Type") || false == strings.Contains(recorder.Body.String(), "data: one") {
+        t.Fatalf("expected the stream served, got %d %v %q", recorder.Code, recorder.Result().Header, recorder.Body.String())
+    }
+
+    assertDefaultSecurityHeaders(t, "stream", recorder.Result().Header)
+}
+
+func TestApplication_SecurityHeadersDisabledByField_NoneSentAndNoListener(t *testing.T) {
+    kernelInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{SecurityHeaders: middleware.SecurityHeadersConfig{Disabled: true}})
+
+    for _, path := range []string{"/json", "/missing", "/" + servingTestStaticFile} {
+        header := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, path, nil)).Result().Header
+        for _, name := range http.SecurityHeaderNames() {
+            if _, present := header[name]; true == present {
+                t.Fatalf("%s: expected no security header, got %v", path, header)
+            }
+        }
+    }
+
+    for _, registeredEvent := range kernelInstance.EventDispatcher().RegisteredEvents() {
+        for _, listener := range registeredEvent.Listeners {
+            if slices.Contains(listener.Config.Tags, kernelcontract.ListenerTagKernelSecurityHeaders) {
+                t.Fatalf("expected no security headers listener, got %+v on %s", listener, registeredEvent.EventName)
+            }
+        }
+    }
+}
+
+func TestApplication_StrictTransportSecurity_BehindATrustedProxy_Sent(t *testing.T) {
+    kernelInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
+    kernelInstance.HttpKernel().SetForwardedHeadersPolicy(httpcontract.ForwardedHeadersPolicy{TrustForwardedHeaders: true, TrustedProxyList: []string{"192.0.2.0/24"}})
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/json", nil)
+    request.Header.Set("X-Forwarded-Proto", "https")
+
+    header := serveTestRequest(kernelInstance, request).Result().Header
+    if "max-age=31536000" != header.Get(http.HeaderStrictTransportSecurity) {
+        t.Fatalf("expected HSTS on a request a trusted proxy states https, got %v", header)
+    }
+}
+
+func TestApplication_StrictTransportSecurity_BehindAnUntrustedPeer_NotSent(t *testing.T) {
+    kernelInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
+    kernelInstance.HttpKernel().SetForwardedHeadersPolicy(httpcontract.ForwardedHeadersPolicy{TrustForwardedHeaders: true, TrustedProxyList: []string{"10.0.0.0/8"}})
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/json", nil)
+    request.Header.Set("X-Forwarded-Proto", "https")
+
+    header := serveTestRequest(kernelInstance, request).Result().Header
+    if _, present := header[http.HeaderStrictTransportSecurity]; true == present {
+        t.Fatalf("expected no HSTS on a scheme an untrusted peer states, got %v", header)
+    }
+}
+
+func TestApplication_SecurityHeaders_LeaveCacheControlAndCorsAlone(t *testing.T) {
+    kernelInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
+
+    header := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/own", nil)).Result().Header
+    if "public, max-age=60" != header.Get("Cache-Control") || "SAMEORIGIN" != strings.Join(header.Values(http.HeaderFrameOptions), ",") || "nosniff" != header.Get(http.HeaderContentTypeOptions) {
+        t.Fatalf("expected the route's own cache and frame headers kept and the others added, got %v", header)
+    }
+
+    for name := range header {
+        if true == strings.HasPrefix(name, "Access-Control-") {
+            t.Fatalf("expected no cors header added, got %v", header)
+        }
+    }
+}
+
+func TestApplication_SecurityHeaders_SameInDevAndProd(t *testing.T) {
+    headersOf := func(environmentName string) map[string][]string {
+        kernelInstance := bootHeadersTestApplication(t, environmentName, ApplicationConfig{})
+
+        answered := map[string][]string{}
+        for _, path := range []string{"/json", "/fail", "/missing"} {
+            header := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, path, nil)).Result().Header
+            for _, name := range http.SecurityHeaderNames() {
+                answered[path+" "+name] = header.Values(name)
+            }
+        }
+
+        return answered
+    }
+
+    development := headersOf(config.EnvironmentDevelopment)
+    production := headersOf(config.EnvironmentProduction)
+
+    for key, values := range development {
+        if strings.Join(values, ",") != strings.Join(production[key], ",") {
+            t.Fatalf("%s: expected the same header in dev and prod, got %v and %v", key, values, production[key])
+        }
+    }
+}
+
+func TestApplication_RouteProtection_DropsTheHeaderOnThatRouteOnly(t *testing.T) {
+    kernelInstance := bootHeadersTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{})
+
+    framed := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/framed", nil)).Result().Header
+    if _, present := framed[http.HeaderFrameOptions]; true == present || "nosniff" != framed.Get(http.HeaderContentTypeOptions) {
+        t.Fatalf("expected X-Frame-Options dropped on the route alone, got %v", framed)
+    }
+
+    assertDefaultSecurityHeaders(t, "another route", serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/json", nil)).Result().Header)
+}
+
+const malformedSecurityHeadersProbeMarker = "MELODY_TEST_MALFORMED_SECURITY_HEADERS_PROBE"
+
+func TestApplication_SecurityHeaders_AMalformedValueRefusesTheApplicationWhenDisabled(t *testing.T) {
+    if "" != os.Getenv(malformedSecurityHeadersProbeMarker) {
+        NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), SecurityHeaders: middleware.SecurityHeadersConfig{Disabled: true, FrameOptions: "ALLOW-FROM https://a.example"}})
+
+        os.Exit(93)
+    }
+
+    child := exec.Command(os.Args[0], "-test.run=^TestApplication_SecurityHeaders_AMalformedValueRefusesTheApplicationWhenDisabled$")
+    child.Env = append(os.Environ(), malformedSecurityHeadersProbeMarker+"=1")
+
+    output, runErr := child.CombinedOutput()
+
+    exitError, isExitError := runErr.(*exec.ExitError)
+    if false == isExitError || 1 != exitError.ExitCode() || false == strings.Contains(string(output), "X-Frame-Options admits DENY or SAMEORIGIN") {
+        t.Fatalf("expected the application refused naming the frame options, got err %v with output: %s", runErr, string(output))
+    }
+}
+
+func TestApplicationRegisterHttpRoute_CopiesTheSecurityHeadersDisabled(t *testing.T) {
+    names := []string{http.HeaderFrameOptions}
+
+    kernelInstance := bootServingTestApplication(t, config.EnvironmentDevelopment, ApplicationConfig{}, func(applicationInstance *Application) {
+        applicationInstance.RegisterHttpRoute("/copied", func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return http.TextResponse(nethttp.StatusOK, "copied"), nil
+        }, http.RouteOptions{Methods: []string{nethttp.MethodGet}, Protection: http.RouteProtectionConfig{SecurityHeadersDisabled: names}})
+
+        names[0] = http.HeaderReferrerPolicy
+    })
+
+    header := serveTestRequest(kernelInstance, httptest.NewRequest(nethttp.MethodGet, "/copied", nil)).Result().Header
+    if _, present := header[http.HeaderFrameOptions]; true == present || "strict-origin-when-cross-origin" != header.Get(http.HeaderReferrerPolicy) {
+        t.Fatalf("expected the names as registered, got %v", header)
     }
 }
