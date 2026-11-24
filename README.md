@@ -253,4 +253,3 @@ This GitHub repository is the **first stable public release** of Melody, startin
 The full development history is at https://gitlab.com/precision-soft-open-source/go/melody
 
 </details>
-<p align="center">
