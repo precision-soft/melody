@@ -15,7 +15,6 @@ type registryProbePayload struct {
     Name string `json:"name"`
 }
 
-/* TypeOf is the door every Describe call names its request and response shapes through, and it must answer the ELEMENT type: handing back the pointer type would make every descriptor describe a pointer, which the generator has no schema for */
 func TestTypeOf_AnswersTheElementTypeForEveryShape(t *testing.T) {
     if reflect.TypeOf(registryProbePayload{}) != TypeOf[registryProbePayload]() {
         t.Fatalf("expected the struct type, got %v", TypeOf[registryProbePayload]())
@@ -29,7 +28,6 @@ func TestTypeOf_AnswersTheElementTypeForEveryShape(t *testing.T) {
         t.Fatalf("expected a slice type, got %v", TypeOf[[]registryProbePayload]().Kind())
     }
 
-    /* an interface type is the shape a generic reflect.TypeOf(value) cannot produce at all: reflect.TypeOf on an interface value answers the dynamic type, so the Elem() form is what makes an interface describable */
     if reflect.Interface != TypeOf[error]().Kind() {
         t.Fatalf("expected an interface type to be answered as an interface, got %v", TypeOf[error]().Kind())
     }
@@ -74,7 +72,6 @@ func TestRegistry_DescribeRecordsTheDescriptorUnderItsRouteName(t *testing.T) {
     }
 }
 
-/* Describe answers the registry so a module can chain its whole surface in one expression, and the last description of a route name wins rather than being refused — a module re-describing its own route is how an override is expressed */
 func TestRegistry_DescribeChainsAndTheLastDescriptionWins(t *testing.T) {
     registry := NewRegistry()
 
@@ -90,7 +87,6 @@ func TestRegistry_DescribeChainsAndTheLastDescriptionWins(t *testing.T) {
     }
 }
 
-/* A Describe after MarkServing is refused at the door, naming the route: the map it would write is read by the spec handler on the request path with nothing synchronizing the two, so the refusal is the same one the router gives a late route */
 func TestRegistry_DescribeIsRefusedOnceTheRegistryIsMarkedServing(t *testing.T) {
     registry := NewRegistry().Describe("example.one", Descriptor{Summary: "first"})
 
@@ -114,7 +110,6 @@ func TestRegistry_DescribeIsRefusedOnceTheRegistryIsMarkedServing(t *testing.T) 
     }
 }
 
-/* the refusal carries the route under routeName, which is what an operator reads to find the module describing too late */
 func TestRegistry_ALateDescribeNamesTheRouteInItsRefusal(t *testing.T) {
     registry := NewRegistry()
     registry.MarkServing(openapiseam.NewToken())
@@ -140,7 +135,6 @@ func TestRegistry_ALateDescribeNamesTheRouteInItsRefusal(t *testing.T) {
 
 type descriptorCopyBody struct{}
 
-/* Describe and Get each copy Tags and Responses, so a caller's later write and a reader of Get never reach the stored descriptor; the test hands over its own slices and writes into them after the call. */
 func TestRegistry_DescribeAndGetKeepNoReferenceToTheCallersTagsAndResponses(t *testing.T) {
     registry := NewRegistry()
 
@@ -169,7 +163,6 @@ type describeNotFoundBody struct {
     Reason string `json:"reason"`
 }
 
-/* a status listed twice keeps the place of its first entry and the type of its last, so the later description replaces the earlier one rather than adding a second response under the same status */
 func TestRegistry_DescribeALaterResponseReplacesAnEarlierOneOfTheSameStatus(t *testing.T) {
     registry := NewRegistry()
 
@@ -211,7 +204,6 @@ func TestMarkServing_IsNotCallableWithoutTheSeamToken(t *testing.T) {
         t.Fatalf("expected MarkServing to take the seam token and nothing else, got %s", method.Type)
     }
 
-    /* a second door answering nothing would freeze the boot as MarkServing does, so every one takes the token */
     for index := 0; index < ownerType.NumMethod(); index++ {
         candidate := ownerType.Method(index)
         if false == strings.Contains(candidate.Name, "Serving") || 0 != candidate.Type.NumOut() {

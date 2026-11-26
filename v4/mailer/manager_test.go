@@ -56,7 +56,6 @@ func TestManager_RejectsMalformedAddress(t *testing.T) {
     }
 }
 
-/* Email is written as a bare addr-spec by the renderer and the SMTP envelope, so only one is accepted: a display name, angle brackets or padding the parser's wider grammar takes is refused, where it went out as `RCPT TO:<Bob <bob@x.com>>` */
 func TestManager_RejectsAnEmailThatIsNotABareAddrSpec(t *testing.T) {
     for _, email := range []string{"Bob <bob@example.com>", "<bob@example.com>", " bob@example.com ", "bob@example.com (Bob)"} {
         transport := NewInMemoryTransport()
@@ -77,7 +76,6 @@ func TestManager_RejectsAnEmailThatIsNotABareAddrSpec(t *testing.T) {
     }
 }
 
-/* an addr-spec with a quoted local part is a bare addr-spec too, and is accepted as before */
 func TestManager_AcceptsAQuotedLocalPart(t *testing.T) {
     transport := NewInMemoryTransport()
     manager := NewManager(transport, ManagerConfig{})

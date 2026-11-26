@@ -153,7 +153,6 @@ func tracedHandlerSpan(t *testing.T, handlerErr error) sdktrace.ReadOnlySpan {
     return spans[0]
 }
 
-/* a handled sub-500 is the client's error: the server span keeps its status unset, and the error stays recorded as the span's exception event */
 func TestTracingMiddleware_AHandledSubFiveHundredLeavesTheSpanStatusUnset(t *testing.T) {
     span := tracedHandlerSpan(t, exception.NewHttpException(nethttp.StatusNotFound, "not found"))
 
@@ -178,7 +177,6 @@ func (instance *tracingTypedNilError) Error() string {
     return *instance.message
 }
 
-/* a typed nil answers Error() with a panic: the middleware reads the message through the exception package and records the span without panicking on the handler's value */
 func TestTracingMiddleware_ATypedNilHandlerErrorIsRecordedWithoutPanicking(t *testing.T) {
     var typedNil *tracingTypedNilError
 
@@ -189,7 +187,6 @@ func TestTracingMiddleware_ATypedNilHandlerErrorIsRecordedWithoutPanicking(t *te
     }
 }
 
-/* a handler that writes the response itself returns no response, so the span reads the status off the writer: the status the client received, with the deadline and hijack doors still reachable through the recording writer */
 func TestTracingMiddleware_RecordsTheStatusAHandlerCommitsDirectly(t *testing.T) {
     for name, scenario := range map[string]struct {
         handle   func(t *testing.T, writer nethttp.ResponseWriter) (httpcontract.Response, error)

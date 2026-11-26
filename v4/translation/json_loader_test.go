@@ -96,7 +96,6 @@ func TestJsonDirectoryLoader_MisnamedJsonFileIsAHardError(t *testing.T) {
     writeCatalogFile(t, directory, "messages.en.json", `{"greeting": "Hello"}`)
     writeCatalogFile(t, directory, "en.json", `{"orphan": "no domain"}`)
 
-    /* a misnamed file is refused by name, not skipped */
     _, loadErr := NewJsonDirectoryLoader(directory).Load(context.Background())
     if nil == loadErr {
         t.Fatalf("expected a hard error for a .json file that does not parse as <domain>.<locale>.json")
@@ -116,7 +115,6 @@ func TestJsonDirectoryLoader_MalformedJsonReturnsError(t *testing.T) {
         t.Fatalf("expected an error for malformed json")
     }
 
-    /* the refusal names the directory beside the bare file name, as the misnamed-file refusal does */
     melodyErr, isMelodyErr := loadErr.(*exception.Error)
     if false == isMelodyErr || directory != melodyErr.Context()["directory"] || "messages.en.json" != melodyErr.Context()["file"] {
         t.Fatalf("expected the directory beside the file, got %v", loadErr)
@@ -137,7 +135,6 @@ func TestJsonDirectoryLoader_NamesTheFileTheMessageAndTheOffset(t *testing.T) {
     writeCatalogFile(t, directory, "a.en.json", `{"greeting": "Hello"}`)
     writeCatalogFile(t, directory, "errors.ro.json", `{"a_valid": "{n, plural, one {# eroare} other {# erori}}", "c_broken": "{g, select, male {el}}", "b_broken": "{n, plural, one {# eroare} other}"}`)
 
-    /* map order is random: the first defect in sorted message ids is the one named, on every load */
     for attempt := 0; attempt < 20; attempt++ {
         catalogs, loadErr := NewJsonDirectoryLoader(directory).Load(context.Background())
         if nil == loadErr {
@@ -187,7 +184,6 @@ func TestJsonDirectoryLoader_AnswersItsCatalogsInAStableOrder(t *testing.T) {
     }
 }
 
-/* cancelledAfterContext answers no error for its first allowed calls to Err and context.Canceled after them, so a test can end the context between two files without a hook inside the loader. */
 type cancelledAfterContext struct {
     context.Context
     allowed int

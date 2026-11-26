@@ -18,7 +18,6 @@ func (instance failingOutputWriter) Write(payload []byte) (int, error) {
     return 0, errFailingOutputWriter
 }
 
-/* the json printer is the whole of what a script reads: the document has to be decodable, the table has to stay OUT of it — it is a rendering of the same data and duplicating it would double every listing a client parses — and a write failure has to be reported rather than swallowed, or a report truncated by a full disk would end with a success exit code. */
 func TestJsonPrinter_WritesADecodableDocumentWithoutTheTableRendering(t *testing.T) {
     envelope := Envelope{
         Data:  map[string]any{"name": "melody"},
@@ -48,7 +47,6 @@ func TestJsonPrinter_WritesADecodableDocumentWithoutTheTableRendering(t *testing
     }
 }
 
-/* a machine reads a stream of records, so one document is one line: a consumer following a long-running command hands each line to a parser whole. The document itself carries newlines nowhere else, which is what makes the framing safe. */
 func TestJsonPrinter_TheMachineDocumentIsOneLine(t *testing.T) {
     envelope := Envelope{
         Data: map[string]any{"name": "melody", "nested": map[string]any{"deep": []any{1, 2, 3}}},
@@ -131,7 +129,6 @@ func TestJsonPrinter_AWriteFailureIsReportedRatherThanSwallowed(t *testing.T) {
 
 var errFailingOutputWriter = errors.New("the writer refused")
 
-/* the encoder emits the C1 block raw, so a document carrying U+009B would repaint the terminal it is printed to and a NEL would end the record for a reader splitting on Unicode line boundaries; the printer spells the block as json escapes on the way out — in the data, in a key, in a warning, in the one-line and in the pretty form alike — and the decoded document is the one the command gave. The spelling is asked of the encoder's own vocabulary rather than typed, so the assertion follows the encoder if it ever changes. */
 func TestJsonPrinter_SpellsTheC1BlockAsJsonEscapes(t *testing.T) {
     for _, format := range []Format{FormatJson, FormatJsonPretty} {
         envelope := Envelope{Data: map[string]any{"name": "a\xc2\x9bb", "k\xc2\x9dey": "value"}}
@@ -179,7 +176,6 @@ func TestJsonPrinter_SpellsTheC1BlockAsJsonEscapes(t *testing.T) {
     }
 }
 
-/* the class the table printer closed — a sink that accepts fewer bytes than it is handed, with no error — reaches the json door through the one write of the whole document, and a truncated document is what a machine consumer cannot parse */
 func TestJsonPrinter_ReportsAShortWriteAsAFailure(t *testing.T) {
     envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
 

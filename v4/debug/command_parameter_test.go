@@ -110,7 +110,6 @@ func newParameterTestRuntimeWith(t *testing.T, values map[string]string, configu
         t.Fatalf("failed to build the test configuration: %v", configurationErr)
     }
 
-    /* the window is asserted against the command's own ascending output rather than against these names, so the assertions never depend on which parameters melody registers by default */
     for index := 0; index < 12; index++ {
         applicationConfiguration.RegisterRuntime(
             fmt.Sprintf("zz.window.%02d", index),
@@ -387,7 +386,6 @@ func TestRedactedParameterValue_ReportsANilSecretAsEmpty(t *testing.T) {
     }
 }
 
-/* zzTypedNilParameterConfiguration embeds the real configuration and answers a TYPED nil for one name its Names() reports — the shape an application's own configuration decorator produces when it forwards a lookup that missed into a field of its own concrete type. */
 type zzTypedNilParameterConfiguration struct {
     configcontract.Configuration
     absentName string
@@ -407,7 +405,6 @@ func (instance *zzTypedNilParameterConfiguration) Get(name string) configcontrac
     return instance.Configuration.Get(name)
 }
 
-/* the listing walks every name the configuration reports and reads each one back, and the configuration is the application's: a decorator that answers a lookup with a nil *config.Parameter hands a Parameter that is not nil, so a skip that tested the interface for nil would call EnvironmentKey() on the nil receiver. The command that exists to show the wiring would then be the one that dies of it, over a name that is the operator's own. */
 func TestParameterCommand_ATypedNilParameterIsSkippedRatherThanDereferenced(t *testing.T) {
     baseRuntime := newParameterTestRuntime(t)
     baseConfiguration := config.ConfigMustFromResolver(baseRuntime.Context(), baseRuntime.Scope())

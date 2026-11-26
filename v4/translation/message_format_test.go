@@ -106,7 +106,6 @@ func TestEvaluatePlural_NonStandardNumericTypesSelectCategory(t *testing.T) {
 }
 
 func TestFormatMessage_AbsentParameterRendersTheVisiblePlaceholder(t *testing.T) {
-    /* rendered as an empty string — what a nil map lookup stringifies to — the missing value vanished from the message with no channel through which anyone learns of it; the visible placeholder is the observable form */
     if rendered := formatMessage("Hello, {name}!", nil, "en"); "Hello, {name}!" != rendered {
         t.Fatalf("expected the absent parameter to stay visible, got %q", rendered)
     }
@@ -117,7 +116,6 @@ func TestFormatMessage_AbsentParameterRendersTheVisiblePlaceholder(t *testing.T)
 }
 
 func TestFormatMessage_PresentNilParameterStillRendersEmpty(t *testing.T) {
-    /* a parameter present with a nil value is the caller saying so explicitly — only the ABSENT key renders as the placeholder */
     if rendered := formatMessage("Hello, {name}!", map[string]any{"name": nil}, "en"); "Hello, !" != rendered {
         t.Fatalf("expected the explicit nil to render empty, got %q", rendered)
     }
@@ -179,7 +177,6 @@ func TestValidatePattern_AdmitsWhatTranslateRendersWhole(t *testing.T) {
     }
 }
 
-/* the bound is the renderer's: 32 nested selects render whole, the 33rd's blocks render as raw text, so the validator refuses that one at its own offset */
 func TestValidatePattern_RefusesTheSelectNestedPastTheLevelsTranslateRenders(t *testing.T) {
     nested := func(levels int) string {
         return strings.Repeat("{g, select, other {", levels) + "{g}" + strings.Repeat("}}", levels)
@@ -243,7 +240,6 @@ func (instance unvalidatedCatalog) Get(messageId string, domain string) (string,
     return instance.message, true
 }
 
-/* the validator and the renderer each walk the style: for every generated select the validator admits, the renderer must hold its other block and answer an unmatched value with it */
 func TestValidatePattern_AgreesWithTheRenderersParseOfTheStyle(t *testing.T) {
     tokens := []string{"male", "other", "{x}", " ", "{y {z}}", "one", "{}", "\n"}
     random := rand.New(rand.NewSource(7))

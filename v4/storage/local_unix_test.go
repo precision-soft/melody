@@ -13,7 +13,6 @@ import (
     storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
-/* a named pipe under a key is not an object: Get refuses it at once, where a blocking open waited for a writer forever, and Exists answers the refusal Stat answers */
 func TestLocalStorage_GetRefusesANamedPipe(t *testing.T) {
     base := t.TempDir()
     local := NewLocalStorage(base, LocalStorageConfig{})
@@ -47,7 +46,6 @@ func TestLocalStorage_GetRefusesANamedPipe(t *testing.T) {
     }
 }
 
-/* Stat judges the pipe without opening it, so no writer is waited for */
 func TestLocalStorage_StatRefusesANamedPipeWithoutOpeningIt(t *testing.T) {
     base := t.TempDir()
     local := NewLocalStorage(base, LocalStorageConfig{})

@@ -47,7 +47,6 @@ func writeCommandFixtureFile(t *testing.T, projectDirectory string, relativePath
     }
 }
 
-/* newCommandFixtureProject lays out a project the command can be driven over: one plain constructor, one gated on a build tag, a vendor tree the scan steps over, and a package holding a constructor the scan has to skip. */
 func newCommandFixtureProject(t *testing.T) string {
     t.Helper()
 
@@ -84,7 +83,6 @@ func newCommandFixtureProject(t *testing.T) string {
     return projectDirectory
 }
 
-/* commandFixtureRuntime keeps the container the fixture registered on, so a test can register more after the runtime is built: a runtime reaches no container. */
 type commandFixtureRuntime struct {
     containercontract.Runtime
     serviceContainer containercontract.Container
@@ -120,8 +118,6 @@ func newCommandFixtureRuntime(t *testing.T, projectDirectory string) *commandFix
     }
 }
 
-/* runGenerateCommand drives the command through the cli library, so a flag the command stops declaring fails here instead of reading its zero value. Unless the caller gives --out, the source goes to a file and the report to the writer; what comes back is the writer followed by the generated source. */
-/* generateConfigFromArguments reads the target a test spells as flag pairs into the GenerateConfig the command is built with, leaving the other arguments */
 func generateConfigFromArguments(arguments []string) (GenerateConfig, []string) {
     config := GenerateConfig{}
     remaining := make([]string, 0, len(arguments))
@@ -195,7 +191,6 @@ func appBindSet() *BindSet {
     return bindSet
 }
 
-/* without the tag the gated constructor is absent from the generated source and the file that holds it is named on request, so a service missing from the wiring traces back to the tag it needs */
 func TestGenerateCommand_WithoutTheTagTheGatedConstructorIsAbsentAndItsFileIsNamedExcluded(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -222,7 +217,6 @@ func TestGenerateCommand_WithoutTheTagTheGatedConstructorIsAbsentAndItsFileIsNam
     }
 }
 
-/* this pins the plumbing of the tags flag into the scan: with the tag dropped on the way to GenerateRequest the gated constructor stays missing from the generated wiring, strict still reports success, and nothing else in the command fails */
 func TestGenerateCommand_ThreadsTheTagsFlagIntoTheScan(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -251,7 +245,6 @@ func TestGenerateCommand_ThreadsTheTagsFlagIntoTheScan(t *testing.T) {
     }
 }
 
-/* the rejection of a constraint expression has to reach the caller as a failed command, not as a scan that quietly matched no file */
 func TestGenerateCommand_RejectsAConstraintExpressionInTheTagsFlag(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -265,7 +258,6 @@ func TestGenerateCommand_RejectsAConstraintExpressionInTheTagsFlag(t *testing.T)
     }
 }
 
-/* a skipped constructor is coverage the wiring lost; it is always reported and strict turns it into a failure */
 func TestGenerateCommand_StrictFailsOnASkippedConstructor(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -294,7 +286,6 @@ func TestGenerateCommand_StrictFailsOnASkippedConstructor(t *testing.T) {
     }
 }
 
-/* registered through cli.Register, the command runs inside the run banner, and a command that declares no quiet flag keeps that banner: printed to stdout, the generated source began with the banner's escape sequence; the quiet flag defaults to true here as it does under StandardFlags, and --quiet=false brings the frame back */
 func TestGenerateCommand_TheStdoutSourceIsNotWrappedInTheBanner(t *testing.T) {
     written := runRegisteredGenerateCommand(t, nil)
 
@@ -311,7 +302,6 @@ func TestGenerateCommand_TheStdoutSourceIsNotWrappedInTheBanner(t *testing.T) {
         t.Fatalf("expected the banner back under --quiet=false, got %q", written[:min(len(written), 80)])
     }
 
-    /* the frame --quiet=false brings back is governed by the other standard flag too: a command declaring --quiet by hand and not --no-color offered a frame that could not be un-coloured */
     written = runRegisteredGenerateCommand(t, []string{"--quiet=false", "--no-color"})
 
     if false == strings.Contains(written, "[melody:wiring:generate] [started]") || true == strings.Contains(written, "\x1b[") {
@@ -339,7 +329,6 @@ func runRegisteredGenerateCommand(t *testing.T, arguments []string) string {
     return buffer.String()
 }
 
-/* a relative out path is resolved against the project directory, and the source goes to the file instead of the writer */
 func TestGenerateCommand_WritesTheGeneratedSourceToTheOutPath(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -392,7 +381,6 @@ func TestGenerateCommand_WritesTheGeneratedSourceToTheOutPath(t *testing.T) {
     }
 }
 
-/* a vendor tree cannot contribute services, so naming it is opt-in noise rather than part of every report */
 func TestGenerateCommand_NamesTheVendorDirectoryOnlyOnRequest(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -416,7 +404,6 @@ func TestGenerateCommand_NamesTheVendorDirectoryOnlyOnRequest(t *testing.T) {
     }
 }
 
-/* a build context carries plain tag identifiers; a constraint expression matches no file, so the scan would behave as if no tag were passed while strict reports success */
 func TestSplitBuildTags_RejectsAConstraintExpression(t *testing.T) {
     for _, tags := range []string{"!postgres", "postgres,!mysql", "postgres mysql", "post-gres", "(postgres)"} {
         buildTags, splitErr := splitBuildTags(tags)
@@ -431,7 +418,6 @@ func TestSplitBuildTags_RejectsAConstraintExpression(t *testing.T) {
     }
 }
 
-/* the accepted forms follow the go tool's own tag syntax, and surrounding spaces and empty entries stay tolerated */
 func TestSplitBuildTags_AcceptsPlainIdentifiers(t *testing.T) {
     buildTags, splitErr := splitBuildTags(" with_postgres , go1.22,, Integration2 ")
     if nil != splitErr {
@@ -461,7 +447,6 @@ func TestSplitBuildTags_EmptyInputYieldsNoTags(t *testing.T) {
     }
 }
 
-/* the run is inspected through its exit and its error record; a refusal naming only the first violation found would attribute the failure to a bind typo while the lost constructor coverage beside it never crosses the process boundary — strict carries every violation in one refusal. */
 func TestGenerateCommand_StrictCarriesEveryViolationInOneRefusal(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -492,7 +477,6 @@ func TestGenerateCommand_StrictCarriesEveryViolationInOneRefusal(t *testing.T) {
     }
 }
 
-/* a generated file inside a scanned directory is read back by the next scan with a package clause the surrounding sources do not carry, so the package stops compiling and the tool cannot regenerate its way out */
 func TestGenerateCommand_RefusesAnOutPathInsideAScannedDirectory(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -512,7 +496,6 @@ func TestGenerateCommand_RefusesAnOutPathInsideAScannedDirectory(t *testing.T) {
     }
 }
 
-/* the write truncates before it writes, so a mistyped --out pointing at a hand-written file must be refused: only a file opening with the generated marker — or an absent or empty one — is this command's to replace. */
 func TestGenerateCommand_RefusesToOverwriteAFileWithoutTheGeneratedMarker(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -539,7 +522,6 @@ func TestGenerateCommand_RefusesToOverwriteAFileWithoutTheGeneratedMarker(t *tes
     }
 }
 
-/* a file carrying the marker is a previous output of this command and is replaced in place, which is what every regeneration does. */
 func TestGenerateCommand_ReplacesAPreviousGeneratedFile(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -558,7 +540,6 @@ func TestGenerateCommand_ReplacesAPreviousGeneratedFile(t *testing.T) {
     }
 }
 
-/* the atomic write lands through a temp file and a rename: the artifact keeps the 0644 mode a direct write gave it, and no temp file survives a successful run beside it. */
 func TestGenerateCommand_AtomicWriteLeavesTheModeAndNoResidue(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
 
@@ -592,7 +573,6 @@ func TestGenerateCommand_AtomicWriteLeavesTheModeAndNoResidue(t *testing.T) {
     }
 }
 
-/* The containment guard read the relative path as text: a directory named ..hidden inside the scanned one started with two dots and passed as outside, and a project directory the output path could not be related to (a relative one against an absolute --out) failed the relation and passed as well. Both are refused now; the sibling directory next to the scanned one stays permitted. */
 func TestGenerateCommand_ReadsTheContainmentOnPathComponents(t *testing.T) {
     hiddenProject := newCommandFixtureProject(t)
     if mkdirErr := os.MkdirAll(filepath.Join(hiddenProject, "app", "..hidden"), 0o755); nil != mkdirErr {
@@ -646,7 +626,6 @@ func (instance *journalCapturingLogger) Warning(message string, context loggingc
     instance.warnings = append(instance.warnings, message)
 }
 
-/* in stdout mode the writer IS the generated source, so the report cannot share it: printed ahead of the package clause, the stream redirected into a file was never a compilable Go file, banner or not. The report goes to the journal, one record per line, through the application's logger. */
 func TestGenerateCommand_TheStdoutModeJournalsTheReportAndPrintsTheSourceAlone(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
     command := NewGenerateCommand(appBindSet(), GenerateConfig{})
@@ -693,7 +672,6 @@ func TestGenerateCommand_TheStdoutModeJournalsTheReportAndPrintsTheSourceAlone(t
     }
 }
 
-/* the lines that name lost coverage are warnings, so a journal read at the usual production threshold keeps them: journaled as information, the whole report vanished from an application logger at warning — the branch every deployment with a log path takes */
 func TestGenerateCommand_TheStdoutModeJournalsTheCoverageLossesAboveAWarningThreshold(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
     command := NewGenerateCommand(appBindSet(), GenerateConfig{})
@@ -730,7 +708,6 @@ func TestGenerateCommand_TheStdoutModeJournalsTheCoverageLossesAboveAWarningThre
     }
 }
 
-/* a last line written without its line end is journaled at the flush, not kept pending for ever */
 func TestJournalLineWriter_FlushJournalsALastLineWithoutALineEnd(t *testing.T) {
     journal := &journalCapturingLogger{Logger: logging.NewNopLogger()}
     writer := &journalLineWriter{logger: journal, command: "melody:wiring:generate"}
@@ -750,7 +727,6 @@ func TestJournalLineWriter_FlushJournalsALastLineWithoutALineEnd(t *testing.T) {
     }
 }
 
-/* the journal door of this command is the sibling openapi command's, copied: a configuration that resolves but answers no kernel section is read as "not stdout", not dereferenced */
 func TestJournalSharesStdout_AnswersFalseWithoutAKernelSection(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     container.MustRegister[configcontract.Configuration](
@@ -774,7 +750,6 @@ type kernelLessConfiguration struct {
 
 func (instance kernelLessConfiguration) Kernel() configcontract.KernelConfiguration { return nil }
 
-/* the classifier reads what a line IS, not what it is not: the counts and the vendor trees the scan stepped over are facts of a scan that worked, while every line naming lost coverage survives the threshold a deployment reads at. The reach of a global bind is neither — it is a warning the operator needs and one the generator emits per bound argument, so it is aggregated rather than demoted; that half is pinned below. */
 func TestJournalLineWriter_AFactOfAScanThatWorkedStaysInformation(t *testing.T) {
     journal := &bytes.Buffer{}
     writer := &journalLineWriter{
@@ -806,18 +781,11 @@ func TestJournalLineWriter_AFactOfAScanThatWorkedStaysInformation(t *testing.T) 
         }
     }
 
-    /* a generation with no global bind must not raise the aggregate warning at all */
     if true == strings.Contains(kept, "reach constructors by argument name") {
         t.Fatalf("expected no reach warning where no bind reached anything, got %q", kept)
     }
 }
 
-/* a global bind silently reaches every constructor declaring an argument of that name, which is what the
-   reach report exists to expose — so it has to survive the threshold a deployment journals at. What made
-   it read as noise is that the generator emits one line per bound argument, on every clean generation, so
-   what is cut is the REPETITION and not the warning: however many binds reach however many constructors,
-   the journal carries ONE record, its message naming how many binds and its context carrying every line.
-   Pinned in both directions — one record, and no line of it lost. */
 func TestJournalLineWriter_TheReachOfEveryGlobalBindIsOneWarningNotOnePerBind(t *testing.T) {
     journal := &bytes.Buffer{}
     writer := &journalLineWriter{
@@ -886,7 +854,6 @@ func TestGenerateCommand_ReadsTheContainmentThroughSymlinks(t *testing.T) {
     }
 }
 
-/* a refused read of the output path carries its reason — here a directory where a file was expected — in its cause, which the exit line does not print, so the chain goes to the error stream, never where the generated source goes */
 func TestGenerateCommand_WritesTheReasonOfARefusedRead(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
     outputDirectory := filepath.Join(projectDirectory, "generated_wiring")
@@ -909,10 +876,9 @@ func TestGenerateCommand_WritesTheReasonOfARefusedRead(t *testing.T) {
     }
 }
 
-/* a refused write reaches the error stream with its reason as the refused read does, escaped, since the path in the reason is the one the operator handed */
 func TestGenerateCommand_WritesTheEscapedReasonOfARefusedWrite(t *testing.T) {
     projectDirectory := newCommandFixtureProject(t)
-    /* a dangling link reads as a missing file, so the read lets the run through, and the writer cannot create a directory where the link stands */
+    /* a dangling link reads as a missing file, and the writer cannot create a directory where it stands */
     blockingFile := filepath.Join(projectDirectory, "block\x1b[2Ker")
     if linkErr := os.Symlink(filepath.Join(projectDirectory, "missing"), blockingFile); nil != linkErr {
         t.Fatalf("symlink: %v", linkErr)
@@ -933,7 +899,6 @@ func TestGenerateCommand_WritesTheEscapedReasonOfARefusedWrite(t *testing.T) {
     }
 }
 
-/* runGenerateCommandOnTwoStreams runs the command with its writer and its error writer apart, which DispatchCommand joins, so a test reads which stream a line reached */
 func runGenerateCommandOnTwoStreams(
     t *testing.T,
     projectDirectory string,

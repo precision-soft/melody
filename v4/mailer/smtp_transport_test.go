@@ -131,7 +131,6 @@ func TestSmtpTransport_AuthSucceedsWhenHostDiffersFromAddress(t *testing.T) {
     authResult := make(chan bool, 1)
     go serveStartTlsAuthSmtp(listener, serverCertificate, authResult)
 
-    /* Address is an IP:port while Host is a different name (the TLS SNI / auth identity used when dialing by IP, through a tunnel, or a CNAME). smtp.PlainAuth rejects a mismatch between the client's server name and its host with "wrong host name", so the plain/STARTTLS dial path must build the client with instance.host — not derive the server name from the address, as smtp.Dial does. */
     transport := NewSmtpTransport(listener.Addr().String(), SmtpConfig{
         Host:                  "smtp.internal.example",
         Username:              "user",
@@ -258,7 +257,6 @@ func serveStartTlsAuthSmtp(listener net.Listener, certificate tls.Certificate, a
     }
 }
 
-/* smtp.NewClient reads the server's 220 greeting synchronously with no deadline, so a server that accepts the connection and then says nothing pinned the sending goroutine and its socket forever. */
 func TestSmtpTransport_DialTimesOutWhenTheServerNeverGreets(t *testing.T) {
     listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
     if nil != listenErr {
@@ -308,7 +306,6 @@ func TestSmtpTransport_DialTimesOutWhenTheServerNeverGreets(t *testing.T) {
     }
 }
 
-/* the greeting is read after the connect, so only the cancellation watcher can unblock it — the connect's own context-awareness is already spent. A relay that accepts the connection and then says nothing must not pin the sender until the dial timeout when the runtime is cancelled. */
 func TestSmtpTransport_CancellationInterruptsTheGreetingRead(t *testing.T) {
     listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
     if nil != listenErr {
@@ -367,7 +364,6 @@ func TestSmtpTransport_CancellationInterruptsTheGreetingRead(t *testing.T) {
     }
 }
 
-/* the greeting deadline only bounds the opening handshake; a relay that greets promptly then stalls mid-session (here on DATA) must still be bounded by the per-step session deadline, or the sending goroutine hangs forever. */
 func TestSmtpTransport_TimesOutWhenServerStallsMidSession(t *testing.T) {
     listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
     if nil != listenErr {
@@ -405,7 +401,6 @@ func TestSmtpTransport_TimesOutWhenServerStallsMidSession(t *testing.T) {
     }
 }
 
-/* net/smtp has no context api, so a cancelled runtime context can only reach an in-flight command by closing the connection; the session timeout here is long, so only the cancellation can unblock the stalled DATA. */
 func TestSmtpTransport_ContextCancellationAbortsSession(t *testing.T) {
     listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
     if nil != listenErr {
@@ -451,7 +446,6 @@ func TestSmtpTransport_ContextCancellationAbortsSession(t *testing.T) {
     }
 }
 
-/* on the implicit-tls path the client sends its initial EHLO lazily on its first operation, after the greeting deadline has been cleared; the per-step session deadline must bound that hello too, or a server that greets and then goes silent pins the sending goroutine forever. */
 func TestSmtpTransport_ImplicitTlsTimesOutWhenServerStallsAfterGreeting(t *testing.T) {
     listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
     if nil != listenErr {
@@ -494,7 +488,6 @@ func TestSmtpTransport_ImplicitTlsTimesOutWhenServerStallsAfterGreeting(t *testi
     }
 }
 
-/* serveImplicitTlsGreetThenStallSmtp completes the tls handshake, sends the 220 greeting and then never answers the client's EHLO, until released is closed or a safety timeout elapses — modelling an implicit-tls relay that accepts the session and immediately black-holes it. */
 func serveImplicitTlsGreetThenStallSmtp(listener net.Listener, certificate tls.Certificate, released <-chan struct{}) {
     connection, acceptErr := listener.Accept()
     if nil != acceptErr {
@@ -516,7 +509,6 @@ func serveImplicitTlsGreetThenStallSmtp(listener net.Listener, certificate tls.C
     }
 }
 
-/* the runtime context drives mid-session cancellation, so a nil runtime must surface as an error from Send instead of reaching the cancellation watcher. */
 func TestSmtpTransport_SendWithNilRuntimeReturnsError(t *testing.T) {
     listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
     if nil != listenErr {
@@ -543,7 +535,6 @@ func TestSmtpTransport_SendWithNilRuntimeReturnsError(t *testing.T) {
     }
 }
 
-/* a user tls config that sets neither ServerName nor InsecureSkipVerify would fail the STARTTLS handshake ("either ServerName or InsecureSkipVerify must be specified"), so the transport must fill in its host on a clone while leaving the caller's config — which may be shared — untouched. */
 func TestSmtpTransport_ResolveTlsConfigDefaultsServerNameOnUserConfig(t *testing.T) {
     userConfig := &tls.Config{RootCAs: x509.NewCertPool()}
 
@@ -567,7 +558,6 @@ func TestSmtpTransport_ResolveTlsConfigDefaultsServerNameOnUserConfig(t *testing
     }
 }
 
-/* a user tls config with InsecureSkipVerify already set is complete for the handshake, so it is returned verbatim without cloning. */
 func TestSmtpTransport_ResolveTlsConfigKeepsInsecureSkipVerifyConfigVerbatim(t *testing.T) {
     userConfig := &tls.Config{InsecureSkipVerify: true}
 
@@ -580,7 +570,6 @@ func TestSmtpTransport_ResolveTlsConfigKeepsInsecureSkipVerifyConfigVerbatim(t *
     }
 }
 
-/* a single absolute deadline over the whole DATA payload conflates "slow" with "stalled": a large message on a slow-but-alive link is killed once the total transfer time exceeds the session timeout even though bytes keep flowing, so the payload write must re-arm the deadline per chunk of progress instead of once for the entire body. */
 func TestSmtpTransport_SendsLargePayloadToSlowButSteadyReader(t *testing.T) {
     listener := listenWithSmallReceiveBuffer(t)
     defer listener.Close()
@@ -613,7 +602,7 @@ func TestSmtpTransport_SendsLargePayloadToSlowButSteadyReader(t *testing.T) {
     }
 }
 
-/* a peer that stops reading mid-body makes no progress, so the blocked chunk write hits the per-step deadline and the session is cut within one timeout. The payload must exceed the socket buffers, or the client would wait on the dot acknowledgment, bounded by dataTerminationTimeout instead; the cut is timed from the instant the server stops reading. */
+/* the payload must exceed the socket buffers, or the client waits on the dot acknowledgment instead */
 func TestSmtpTransport_TimesOutWhenServerStopsReadingMidPayload(t *testing.T) {
     listener := listenWithSmallReceiveBuffer(t)
     defer listener.Close()
@@ -653,7 +642,7 @@ func TestSmtpTransport_TimesOutWhenServerStopsReadingMidPayload(t *testing.T) {
 
     stalledAt := time.Now()
 
-    /* the client may still have buffered bytes to push when reading stops, so the bound is a small multiple of the session timeout rather than the timeout itself; what it refuses is the moving target — a deadline re-armed per chunk that never fires while the peer makes no progress. */
+    /* buffered bytes may still flush after reading stops, so the bound is a small multiple of the timeout */
     const cutBound = 8 * sessionTimeout
 
     select {
@@ -675,7 +664,6 @@ func TestSmtpTransport_TimesOutWhenServerStopsReadingMidPayload(t *testing.T) {
     }
 }
 
-/* listenWithSmallReceiveBuffer opens a localhost listener whose receive buffer is clamped before the handshake, so accepted connections advertise a small window: the client's writes are then genuinely paced by the server's reads instead of vanishing into kernel buffering, which is what lets these tests observe a blocking payload write. The clamp stays above the point where the window drops so far below the loopback segment size that delayed acknowledgements throttle even a steadily-drained connection. */
 func listenWithSmallReceiveBuffer(t *testing.T) net.Listener {
     t.Helper()
 
@@ -701,7 +689,6 @@ func listenWithSmallReceiveBuffer(t *testing.T) net.Listener {
     return listener
 }
 
-/* serveSlowSteadyDataSmtp greets and accepts the envelope, then drains the first stretch of the DATA body in small reads separated by short pauses — each read arrives well within a per-chunk deadline while that stretch alone takes far longer than the session timeout — modelling a slow-but-alive link. The remainder is drained at full speed so the closing dot and its 250 reply, which run under a single per-step deadline, are not starved by the backlog the kernel buffered on the client's side. */
 func serveSlowSteadyDataSmtp(listener net.Listener) {
     connection, acceptErr := listener.Accept()
     if nil != acceptErr {
@@ -768,7 +755,6 @@ func serveSlowSteadyDataSmtp(listener net.Listener) {
     }
 }
 
-/* serveStallMidDataSmtp greets and accepts the envelope, drains the first stretch of the DATA body and then stops reading entirely — until released is closed or a safety timeout elapses — modelling a peer that goes dead mid-transfer. */
 func serveStallMidDataSmtp(listener net.Listener, released <-chan struct{}, stalled chan<- struct{}) {
     connection, acceptErr := listener.Accept()
     if nil != acceptErr {
@@ -811,7 +797,7 @@ func serveStallMidDataSmtp(listener net.Listener, released <-chan struct{}, stal
                 drained += count
             }
 
-            /* the cut is timed from the instant reading stops, since everything before it tracks machine load */
+            /* timed from the instant reading stops: what comes before tracks machine load */
             close(stalled)
 
             select {
@@ -829,7 +815,6 @@ func serveStallMidDataSmtp(listener net.Listener, released <-chan struct{}, stal
     }
 }
 
-/* serveStallOnDataSmtp greets, completes EHLO and accepts MAIL/RCPT, then stalls after the client issues DATA — it never sends the 354 continuation — until released is closed or a safety timeout elapses, modelling a relay that black-holes traffic once the conversation is under way. */
 func serveStallOnDataSmtp(listener net.Listener, released <-chan struct{}) {
     connection, acceptErr := listener.Accept()
     if nil != acceptErr {
@@ -875,7 +860,6 @@ func serveStallOnDataSmtp(listener net.Listener, released <-chan struct{}) {
     }
 }
 
-/* the dot-acknowledgment ceiling derives from the per-step timeout with a floor, so a default-configured transport leaves a scanning relay a realistic acceptance window; an explicit value always wins. */
 func TestSmtpTransport_DataTerminationTimeoutDerivation(t *testing.T) {
     cases := []struct {
         name     string
@@ -989,7 +973,6 @@ func TestNewSmtpTransport_RefusesATimeoutOutsideItsRuleByName(t *testing.T) {
     }
 }
 
-/* a relay that runs content inspection delays the dot acknowledgment far beyond any other reply; the per-step timeout must not cut that step, or a message the server may already have queued is reported as a failure and retried into a duplicate. */
 func TestSmtpTransport_SlowDotAcknowledgmentSucceedsWithinItsOwnCeiling(t *testing.T) {
     listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
     if nil != listenErr {
@@ -1026,7 +1009,6 @@ func TestSmtpTransport_SlowDotAcknowledgmentSucceedsWithinItsOwnCeiling(t *testi
     }
 }
 
-/* serveDelayedDotAcknowledgmentSmtp answers every step promptly and delays only the 250 after the message-ending dot, modelling a relay that runs its content inspection before accepting. */
 func serveDelayedDotAcknowledgmentSmtp(listener net.Listener, delay time.Duration) {
     connection, acceptErr := listener.Accept()
     if nil != acceptErr {
@@ -1076,7 +1058,6 @@ func serveDelayedDotAcknowledgmentSmtp(listener net.Listener, delay time.Duratio
     }
 }
 
-/* the cancellation watcher only covers the running session, so the dial itself must honor the runtime context — a shutdown during a connect to an unresponsive relay must not stall for the full dial timeout. */
 func TestSmtpTransport_CancelledContextAbortsDial(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     cancel()
@@ -1116,7 +1097,7 @@ func TestSmtpTransport_ConfiguredCredentialsFailClosedWhenAuthIsNotAdvertised(t 
 
     go serveAuthlessSmtp(listener)
 
-    /* RequireAuthentication deliberately left false — the zero-value default: before the guard, this exact configuration skipped the whole auth branch and delivered the message as anonymous submission while reporting success, the operator's configured identity quietly unused; configured credentials that cannot be applied must refuse, not degrade */
+    /* RequireAuthentication deliberately left false, its zero value */
     transport := NewSmtpTransport(listener.Addr().String(), SmtpConfig{
         AllowPlaintext: true,
         Username: "user",
@@ -1141,7 +1122,6 @@ func TestSmtpTransport_ConfiguredCredentialsFailClosedWhenAuthIsNotAdvertised(t 
 func TestSmtpTransport_SendWithTypedNilRuntimeReturnsError(t *testing.T) {
     transport := NewSmtpTransport("127.0.0.1:0", SmtpConfig{})
 
-    /* a typed-nil runtime walks straight through a plain == nil comparison and dereferences at the dial; the IsNilInterface guard must answer the same clean refusal the untyped nil gets */
     var typedNil *nilRuntime
 
     _, sendErr := transport.Send(typedNil, mailercontract.Message{
@@ -1153,7 +1133,6 @@ func TestSmtpTransport_SendWithTypedNilRuntimeReturnsError(t *testing.T) {
     }
 }
 
-/* serveMailRejectingSmtp greets, takes the hello, and answers 550 to MAIL FROM — a relay refusing the sender. */
 func serveMailRejectingSmtp(listener net.Listener) {
     connection, acceptErr := listener.Accept()
     if nil != acceptErr {
@@ -1211,13 +1190,11 @@ func TestSmtpTransport_MailCommandFailureNamesTheCommandNotAVerdict(t *testing.T
         t.Fatalf("expected the refused sender to fail the send")
     }
 
-    /* "failed", not "rejected": the same error path fires on a deadline expiry and on the cancellation watcher closing the connection, where asserting a server verdict sends the operator investigating a policy decision that never happened — the 550, when there was one, is in the cause */
     if false == strings.Contains(sendErr.Error(), "smtp mail command failed") {
         t.Fatalf("expected the failure to name the command, got %v", sendErr)
     }
 }
 
-/* serveRcptRejectingSmtp accepts the sender and refuses every recipient. */
 func serveRcptRejectingSmtp(listener net.Listener) {
     connection, acceptErr := listener.Accept()
     if nil != acceptErr {
@@ -1254,7 +1231,6 @@ func serveRcptRejectingSmtp(listener net.Listener) {
     }
 }
 
-/* serveThenBreakQuitSmtp accepts a full delivery — hello, envelope, DATA with its 354 and closing 250 — and then breaks the connection on QUIT instead of answering 221. */
 func serveThenBreakQuitSmtp(listener net.Listener) {
     connection, acceptErr := listener.Accept()
     if nil != acceptErr {
@@ -1293,7 +1269,6 @@ func serveThenBreakQuitSmtp(listener net.Listener) {
             inData = true
             writeLine("354 go ahead")
         case strings.HasPrefix(command, "QUIT"):
-            /* the abrupt close is the failure under test: the message is already queued, so the client's Quit errors after acceptance */
             return
         default:
             writeLine("250 ok")
@@ -1329,13 +1304,11 @@ func TestSmtpTransport_QuitFailureWarningCarriesTheCause(t *testing.T) {
         t.Fatalf("expected the quit failure to be warned")
     }
 
-    /* with only the address beside it, a recurring quit failure cannot be told apart from a timeout, a protocol error or a closed socket — the record must carry the cause */
     if _, hasCause := warningContext["error"]; false == hasCause {
         t.Fatalf("expected the quit warning to carry its cause, got context %v", warningContext)
     }
 }
 
-/* serveDotRejectingSmtp accepts the envelope and the data and refuses the message at the terminating dot, the relay's verdict on the whole message. */
 func serveDotRejectingSmtp(listener net.Listener) {
     connection, acceptErr := listener.Accept()
     if nil != acceptErr {
@@ -1383,7 +1356,6 @@ func serveDotRejectingSmtp(listener net.Listener) {
     }
 }
 
-/* the mail and rcpt refusals carry the relay's address like the thirteen other session refusals, and the verdict at the terminating dot is named as the acknowledgment's failure, not a flush's. */
 func TestSmtpTransport_EnvelopeRefusalsCarryTheAddressAndTheDotVerdictIsNamed(t *testing.T) {
     t.Run("mail carries the address", func(t *testing.T) {
         listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
@@ -1525,7 +1497,6 @@ func TestSmtpTransport_RefusesAnAddressThatIsNotABareAddrSpecBeforeTheDial(t *te
     }
 }
 
-/* serveCapturingSmtp accepts one message and hands its DATA body to the channel */
 func serveCapturingSmtp(listener net.Listener, captured chan<- string) {
     connection, acceptErr := listener.Accept()
     if nil != acceptErr {
@@ -1676,7 +1647,7 @@ func TestSmtpTransport_AllowPlaintextStillUpgradesWhenStartTlsIsOffered(t *testi
     authResult := make(chan bool, 1)
     go serveStartTlsAuthSmtp(listener, generateSelfSignedCertificate(t), authResult)
 
-    /* smtp.PlainAuth refuses a host other than localhost over a connection that is not tls, so the accepted AUTH proves the session was upgraded */
+    /* smtp.PlainAuth refuses this host without tls, so an accepted AUTH proves the upgrade */
     _, sendErr := NewSmtpTransport(listener.Addr().String(), SmtpConfig{
         Host:                  "smtp.internal.example",
         Username:              "user",

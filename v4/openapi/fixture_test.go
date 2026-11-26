@@ -19,7 +19,6 @@ type productResponse struct {
     Name string `json:"name"`
 }
 
-/* testValidationRuntime is the runtime a validation under test runs under */
 func testValidationRuntime() containercontract.Runtime {
     return runtime.NewRun(context.Background(), container.NewContainer(container.ContainerConfig{}).NewScope())
 }

@@ -69,7 +69,6 @@ func TestPrometheusMetrics_ADoneCloseContextIsAnsweredItsErrorAndLeavesTheProvid
     }
 }
 
-/* failingShutdownReader is a reader whose shutdown fails, so the provider's one shutdown answers an error */
 type failingShutdownReader struct {
     *sdkmetric.ManualReader
 }
@@ -78,7 +77,6 @@ func (instance *failingShutdownReader) Shutdown(context.Context) error {
     return errors.New("the reader could not shut down")
 }
 
-/* the sdk runs its shutdown once and answers every later call an error, so a close after a failed shutdown answers nil rather than that error on every retry of the container's teardown */
 func TestPrometheusMetrics_ACloseAfterAFailedShutdownAnswersNil(t *testing.T) {
     prometheusMetrics := &PrometheusMetrics{
         provider: sdkmetric.NewMeterProvider(sdkmetric.WithReader(&failingShutdownReader{ManualReader: sdkmetric.NewManualReader()})),

@@ -46,7 +46,6 @@ func newTestManager() *Manager {
     return NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{english, romanian}, FallbackLocales: []string{"en"}})
 }
 
-/* verbatimDomainCatalog answers exactly the domain it is asked for, which the contract permits: the coercion of the empty domain is the manager door's to make, not an obligation of every catalog. */
 type verbatimDomainCatalog struct {
     locale           string
     messagesByDomain map[string]map[string]string
@@ -66,7 +65,6 @@ func (instance *verbatimDomainCatalog) Get(messageId string, domain string) (str
     return message, found
 }
 
-/* the empty domain resolves at the one door every catalog is asked through: a catalog that takes the contract at its word and answers the asked-for domain verbatim is still asked for the default, rather than for "" */
 func TestTranslate_EmptyDomainResolvesToTheDefaultAtTheManagerDoor(t *testing.T) {
     catalog := &verbatimDomainCatalog{
         locale: "en",
@@ -225,7 +223,6 @@ func TestTranslate_RussianPluralCategories(t *testing.T) {
     }
 }
 
-/* MapCatalog.Add refuses such a nesting, so the judge Translate runs before rendering is reached through a catalog that does not validate */
 func TestTranslate_PathologicallyNestedPluralIsAnErrorWithoutOverflow(t *testing.T) {
     var builder strings.Builder
     const nesting = 200
@@ -249,7 +246,6 @@ func TestTranslate_PathologicallyNestedPluralIsAnErrorWithoutOverflow(t *testing
     }
 }
 
-/* a missing plural argument stays visible as its placeholder, as the plain placeholder does */
 func TestTranslate_PluralWithMissingArgumentRendersTheVisiblePlaceholder(t *testing.T) {
     manager := newTestManager()
 
@@ -259,7 +255,6 @@ func TestTranslate_PluralWithMissingArgumentRendersTheVisiblePlaceholder(t *test
     }
 }
 
-/* a parameter present with a nil value is the caller saying so explicitly: the plural keeps rendering its other branch with an empty pound, only the ABSENT key renders as the placeholder */
 func TestTranslate_PluralWithAPresentNilArgumentFallsBackToOther(t *testing.T) {
     manager := newTestManager()
 
@@ -334,13 +329,11 @@ func TestTranslate_TheZeroConfigReadsTheDefaultDomainAndTheDefaultLocale(t *test
 }
 
 func TestNewManager_RefusesANilCatalog(t *testing.T) {
-    /* a nil catalog is refused, since it would build a translator answering raw ids for a whole locale */
     testhelper.AssertPanicsWithError(t, func() {
         NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{nil}, FallbackLocales: []string{"en"}})
     }, "translation catalog is nil")
 }
 
-/* the catalogs of a locale are asked in the order given, the first to answer winning */
 func TestNewManager_TwoCatalogsOfOneLocaleAreAskedInOrder(t *testing.T) {
     first := NewMapCatalog("en")
     first.Add("messages", "greeting", "Hello")
@@ -365,14 +358,12 @@ func TestNewManager_TwoCatalogsOfOneLocaleAreAskedInOrder(t *testing.T) {
     }
 }
 
-/* the locale chain never asks for the empty locale, so a catalog whose Locale is empty could never be found: it is refused as the nil one is, instead of being stored under a key nothing reads */
 func TestNewManager_RefusesACatalogWithoutALocale(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{NewMapCatalog("")}, FallbackLocales: []string{"en"}})
     }, "translation catalog carries no locale")
 }
 
-/* the fallback locales are asked by their exact name, so one no catalog carries would answer raw ids for every message the request locale misses */
 func TestNewManager_RefusesALocaleNoCatalogCarries(t *testing.T) {
     cases := map[string]struct {
         fallbackLocales []string
@@ -428,7 +419,6 @@ func TestNewManager_TheRefusalNamesTheFallbackAndItsIndex(t *testing.T) {
     NewManager(ManagerConfig{Catalogs: []translationcontract.Catalog{NewMapCatalog("en")}, FallbackLocales: []string{"en", "de"}})
 }
 
-/* with no catalog there is no locale to check against */
 func TestNewManager_WithNoCatalogAdmitsAnyLocale(t *testing.T) {
     manager := NewManager(ManagerConfig{FallbackLocales: []string{"de"}})
 
@@ -528,7 +518,6 @@ func TestNewManager_TheRefusalsNameTheConfigField(t *testing.T) {
     })
 }
 
-/* a chain with catalogs and no fallback asks only the locale and its base, so a request in a locale no catalog carries would answer raw ids; the manager refuses it and the application ends the chain on its default locale */
 func TestNewManager_RefusesCatalogsWithNoFallbackLocale(t *testing.T) {
     english := NewMapCatalog("en")
 

@@ -136,7 +136,6 @@ func TestVersionCommand_NameAndDescriptionAndFlags(t *testing.T) {
     }
 }
 
-/* the META header prints the version too, so the row itself is read */
 func TestVersionCommand_TheDetailsRowCarriesTheDeclaredApplicationVersion(t *testing.T) {
     rendered, runErr := runVersionUnderRoot(t, "9.9.9-declared", []string{"--format=table", "--table-width=400"})
     if nil != runErr {

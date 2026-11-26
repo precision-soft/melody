@@ -7,7 +7,6 @@ import (
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
 )
 
-/* the declared validator is called directly: the flag set is what this source produces, and the validator is the guard it carries. That the engine consults it on the value it parsed is proved through a driven command line below. */
 func findStringFlagValidator(t *testing.T, flagName string) func(value string) error {
     t.Helper()
 
@@ -86,7 +85,6 @@ func TestStandardFlags_AcceptTheSupportedFormatAndOrderValues(t *testing.T) {
     }
 }
 
-/* the flag set and its order are those v3.13.0 released minus the two withdrawn flags: a flag set is help output as well as a parser */
 func TestStandardFlags_DeclareTheReleasedFlagSetInOrder(t *testing.T) {
     declared := make([]string, 0)
     for _, flag := range StandardFlags() {
@@ -110,7 +108,6 @@ func TestStandardFlags_DeclareTheReleasedFlagSetInOrder(t *testing.T) {
     }
 }
 
-/* the engine consults the declared validator on the value it parsed: a negative limit on the command line is refused naming the flag */
 func TestStandardFlags_RefuseANegativeIntegerOnTheCommandLine(t *testing.T) {
     _, runErr := runStandardFlags(t, "--limit=-1")
     if nil == runErr {
@@ -121,7 +118,7 @@ func TestStandardFlags_RefuseANegativeIntegerOnTheCommandLine(t *testing.T) {
     }
 }
 
-/* the four standard integer flags parse in base ten: with the engine's inferred base a zero-padded value would read as octal */
+/* with the engine's inferred base a zero-padded value would read as octal */
 func TestStandardFlags_ReadAZeroPaddedIntegerAsDecimal(t *testing.T) {
     for _, flagName := range []string{FlagNameVerbosity, FlagNameLimit, FlagNameOffset, FlagNameTableMaxWidth} {
         parsedCommand, runErr := runStandardFlags(t, "--"+flagName+"=010")
@@ -142,7 +139,6 @@ func TestStandardFlags_ReadAZeroPaddedIntegerAsDecimal(t *testing.T) {
     }
 }
 
-/* a hexadecimal spelling is not a decimal integer, so base ten refuses it rather than reading sixteen */
 func TestStandardFlags_RefuseAHexadecimalInteger(t *testing.T) {
     _, runErr := runStandardFlags(t, "--limit=0x10")
     if nil == runErr {

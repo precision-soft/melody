@@ -117,7 +117,7 @@ func TestStreamHandler_IdleTimeoutKeepsHealthyClientConnected(t *testing.T) {
         time.Sleep(time.Millisecond)
     }
 
-    /* broadcast only after several ping intervals have elapsed; the client's blocking Read below auto-answers the server pings in the meantime, so a healthy receive-only subscriber must stay connected through the keepalive loop */
+    /* the client's blocking Read below answers the server pings in the meantime */
     go func() {
         time.Sleep(350 * time.Millisecond)
         hub.Broadcast("demo", melodyhttp.ServerSentEvent{Event: "notification", Data: "still-here"})
@@ -170,7 +170,7 @@ func TestStreamHandler_IdleTimeoutDisconnectsUnresponsiveClient(t *testing.T) {
         time.Sleep(time.Millisecond)
     }
 
-    /* the client never reads, so it never answers the server's keepalive pings (coder/websocket only replies to pings while the application reads); the server must time out the ping and tear the half-open connection down, dropping the subscription */
+    /* the client never reads, so it never answers a ping: coder/websocket only replies while the application reads */
     disconnectDeadline := time.Now().Add(3 * time.Second)
     for hub.SubscriberCount("demo") > 0 {
         if true == time.Now().After(disconnectDeadline) {
@@ -180,7 +180,6 @@ func TestStreamHandler_IdleTimeoutDisconnectsUnresponsiveClient(t *testing.T) {
     }
 }
 
-/* the accept-time activity mark is offset zero and only a data message advances it, so a receive-only client bridged onto a broadcast hub — the handler's primary case — leaves the activity window dead for exactly the connections it is meant to protect unless a received pong records liveness. */
 func TestPingLoop_ReceivedPongRefreshesTheActivityMark(t *testing.T) {
     serverConnections := make(chan *coderwebsocket.Conn, 1)
     handlerRelease := make(chan struct{})
@@ -241,7 +240,7 @@ func TestPingLoop_ReceivedPongRefreshesTheActivityMark(t *testing.T) {
     }
 }
 
-/* a small kernel send buffer keeps the server parked inside connection.Write for as long as the client drains slowly, so the scenario reproduces without pushing megabytes. */
+/* a small kernel send buffer parks the server in connection.Write without pushing megabytes */
 type smallSendBufferListener struct {
     net.Listener
 }
@@ -317,7 +316,6 @@ func TestStreamHandler_TheWriteTimeoutBoundsAWriteTheClientNeverDrains(t *testin
     }
 }
 
-/* a keepalive ping is serialised behind the data frame the handler is flushing, so a ping issued while a slow client drains that frame never reaches the socket: its timeout tested nothing and must not be read as a dead peer. Any IdleTimeout below WriteTimeout would otherwise turn transient write contention into a disconnect mid-frame. */
 func TestStreamHandler_SlowClientDrainingOneFrameIsNotDisconnected(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
@@ -418,7 +416,6 @@ func TestStreamHandler_SlowClientDrainingOneFrameIsNotDisconnected(t *testing.T)
     clientConnection.Close(coderwebsocket.StatusNormalClosure, "")
 }
 
-/* a write that COMPLETED is no evidence the peer is alive: a write into a half-open connection succeeds for as long as the socket send buffer has room. A hub that keeps broadcasting must therefore not keep a peer that never pongs alive, or the descriptor, the hub subscription and the goroutines survive until the send buffer fills — minutes at a modest broadcast rate — while the ping loop that exists to detect exactly this excuses every timeout. */
 func TestStreamHandler_UnansweredPingsDisconnectAPeerThatKeepsAcceptingWrites(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
@@ -454,7 +451,7 @@ func TestStreamHandler_UnansweredPingsDisconnectAPeerThatKeepsAcceptingWrites(t 
         time.Sleep(time.Millisecond)
     }
 
-    /* a small event every third of an interval, as a hub bridging a busy topic would: every write completes into the send buffer while the peer answers nothing */
+    /* every third of an interval: each write completes into the send buffer while the peer answers nothing */
     stopBroadcast := make(chan struct{})
     defer close(stopBroadcast)
 
@@ -497,7 +494,6 @@ func TestDispatchOnMessage_RecoversPanicFromCallback(t *testing.T) {
     }
 }
 
-/* A pong is processed only inside connection.Read, and the read loop is not inside Read while it runs a synchronous OnMessage callback. A ping issued in that window always times out, so treating that timeout as death disconnects perfectly healthy clients whenever a callback outlives the ping interval. */
 func TestStreamHandler_SlowOnMessageDoesNotDisconnectHealthyClient(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
@@ -547,7 +543,6 @@ func TestStreamHandler_SlowOnMessageDoesNotDisconnectHealthyClient(t *testing.T)
 
     <-callbackEntered
 
-    /* the callback is still running; once it returns, a broadcast must still reach this client */
     go func() {
         time.Sleep(500 * time.Millisecond)
         hub.Broadcast("demo", melodyhttp.ServerSentEvent{Event: "notification", Data: "still-here"})
@@ -565,7 +560,6 @@ func TestStreamHandler_SlowOnMessageDoesNotDisconnectHealthyClient(t *testing.T)
     connection.Close(coderwebsocket.StatusNormalClosure, "")
 }
 
-/* A callback that never returns must not excuse pings forever: nothing else reaps a hijacked connection, so the descriptor, the hub subscription and the handler/read/ping goroutines would leak once per connection for the process lifetime. */
 func TestStreamHandler_StuckOnMessageStopsHoldingTheConnection(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
@@ -621,7 +615,6 @@ func TestStreamHandler_StuckOnMessageStopsHoldingTheConnection(t *testing.T) {
     }
 }
 
-/* A synchronous OnMessage callback holds the scope-backed runtime handed to it. If the handler returns to the kernel while the callback is still running, the kernel's deferred scope teardown races the callback and its next service resolution hits a closed scope. The handler must wait for the read loop — hence the callback — before returning. */
 func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
@@ -635,7 +628,6 @@ func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
         OnMessage: func(runtimeInstance containercontract.Runtime, _ StreamConnection, _ InboundMessage) error {
             close(callbackEntered)
 
-            /* keep processing briefly, then resolve a service through the scope-backed runtime; a healthy callback must never observe a closed scope */
             time.Sleep(200 * time.Millisecond)
 
             _, getErr := runtimeInstance.Scope().Get(runtimeInstance.Context(), "service")
@@ -679,7 +671,7 @@ func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
         time.Sleep(time.Millisecond)
     }
 
-    /* keep answering control frames so a graceful close that did not wait for the read loop would complete fast and the handler would return, and close the scope, well before the callback resolves */
+    /* keep answering control frames, so a close that did not wait for the read loop would return early */
     go func() {
         _, _, _ = connection.Read(ctx)
     }()
@@ -690,7 +682,6 @@ func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
 
     <-callbackEntered
 
-    /* end the connection from the server side while the callback is still running */
     hub.Shutdown()
 
     outcome := <-resolveOutcome
@@ -699,7 +690,6 @@ func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
     }
 }
 
-/* A connection reaped while wedged in a callback must free its descriptor and handler goroutine when the close grace lapses, not seconds later. An abandoned graceful close otherwise wins coder/websocket's close CAS and holds the transport for the library's full handshake timeout, while the deferred CloseNow loses that CAS and blocks the same span. */
 func TestStreamHandler_WedgedCallbackReleasesConnectionAtGraceNotFiveSeconds(t *testing.T) {
     if elapsed := wedgedCallbackReleaseAfterTeardown(t, bound.Duration{}); elapsed > 2500*time.Millisecond {
         t.Fatalf("the handler held the wedged connection for %v after teardown; expected release at the close grace", elapsed)
@@ -762,14 +752,13 @@ func wedgedCallbackReleaseAfterTeardown(t *testing.T, closeHandshakeGrace bound.
         time.Sleep(time.Millisecond)
     }
 
-    /* the client never reads again, so it never answers a close handshake: an unfixed graceful close can only end at coder/websocket's five-second timeout */
+    /* the client never reads again, so an unfixed graceful close ends only at coder/websocket's five-second timeout */
     if writeErr := connection.Write(ctx, coderwebsocket.MessageText, []byte("wedge")); nil != writeErr {
         t.Fatalf("write: %v", writeErr)
     }
 
     <-callbackEntered
 
-    /* reap the wedged connection from the server side */
     hub.Shutdown()
 
     start := time.Now()
@@ -782,7 +771,6 @@ func wedgedCallbackReleaseAfterTeardown(t *testing.T, closeHandshakeGrace bound.
     return time.Since(start)
 }
 
-/* leaveCallback must refresh the activity mark before it clears the running-callback count. If it clears the count first, a ping loop sampling cannotAnswer in that window sees no callback running yet still reads the stale pre-callback activity mark, and reaps a healthy connection at the instant its callback returns. */
 func TestConnectionLiveness_LeaveCallbackRefreshesActivityBeforeClearingCallback(t *testing.T) {
     previousProcs := goruntime.GOMAXPROCS(0)
     if previousProcs < 2 {
@@ -797,7 +785,6 @@ func TestConnectionLiveness_LeaveCallbackRefreshesActivityBeforeClearingCallback
     stop := make(chan struct{})
     reaped := make(chan struct{}, 1)
 
-    /* observer mirrors the non-callback branch of cannotAnswer: with no callback running the activity mark must already be fresh, or the connection is reaped. A stale mark seen at callbacks==0 is only reported when it is a STABLE state (callbacks still zero and the same mark on re-read), so a torn read that straddles the next iteration's freshly-entered callback cannot masquerade as the pre-decrement window the reorder closes. */
     go func() {
         for {
             select {
@@ -844,11 +831,10 @@ func TestConnectionLiveness_LeaveCallbackRefreshesActivityBeforeClearingCallback
     close(stop)
 }
 
-/* The liveness windows are kept against a monotonic base captured at accept time, not the wall clock. A wall-clock timestamp (time.Since(time.Unix(0, n))) lets a backward clock step excuse a wedged callback past the grace and leak the connection, or a forward step reap a healthy one. */
 func TestConnectionLiveness_GraceUsesMonotonicBase(t *testing.T) {
     liveness := newConnectionLiveness()
 
-    /* a time.Time carrying a monotonic reading differs from its own wall-clock rounding; one stripped of it (as time.Unix(0, n) yields) does not */
+    /* a monotonic reading differs from its wall-clock rounding; one stripped of it does not */
     if liveness.base == liveness.base.Round(0) {
         t.Fatalf("connectionLiveness base carries no monotonic reading; the grace windows would follow the wall clock")
     }
@@ -862,14 +848,12 @@ func TestConnectionLiveness_GraceUsesMonotonicBase(t *testing.T) {
         t.Fatalf("a callback within the grace must be excused")
     }
 
-    /* a callback whose start is older than the grace, counted from the monotonic base, is not excused */
     liveness.callbackStartedOffset.Store(int64(liveness.elapsed()) - int64(2*grace))
     if true == liveness.cannotAnswer(false, window, grace, grace) {
         t.Fatalf("a callback that outran the grace must no longer be excused")
     }
 }
 
-/* a ping cannot even be written while the handler is flushing a data frame, so the timeout of a ping issued in that span is not evidence of a dead peer; a ping issued with the writer free tested the peer for real, and a write that completed in the meantime excuses nothing. */
 func TestConnectionLiveness_InFlightWriteExcusesOnlyThePingItQueuedBehindItself(t *testing.T) {
     liveness := newConnectionLiveness()
 
@@ -901,7 +885,6 @@ func TestConnectionLiveness_InFlightWriteExcusesOnlyThePingItQueuedBehindItself(
 
     liveness.leaveWrite()
 
-    /* a write into a half-open connection completes for as long as the send buffer has room, so once it is done it is no evidence at all: the next ping goes out with the control-frame queue free and its timeout must be read as a death */
     liveness.writeStartedOffset.Store(int64(liveness.elapsed()))
 
     if true == liveness.cannotAnswer(false, window, callbackGrace, graceForWrite) {
@@ -1036,7 +1019,6 @@ func TestStreamHandler_RefusesAnEmptyResolvedTopicBeforeTheUpgrade(t *testing.T)
     }
 }
 
-/* capturingLogger records every entry so a test can read what the handler reported. */
 type capturingLogger struct {
     contexts []loggingcontract.Context
 }
@@ -1112,7 +1094,6 @@ func (unwrapPanickingCallbackError) Unwrap() error {
     panic("Unwrap() panics")
 }
 
-/* the read goroutine has no recovery above dispatchOnMessage, and the record of the callback's panic reads the panic's chain: a panic value whose Unwrap panicked raised a second panic past the recover already spent and ended the process on one client's message */
 func TestDispatchOnMessage_SurvivesAPanicWhoseUnwrapPanics(t *testing.T) {
     logger := &capturingLogger{}
 
@@ -1182,7 +1163,7 @@ func TestStreamHandler_AnUnlimitedReadLimitDisablesTheDefaultCap(t *testing.T) {
     }
     defer connection.CloseNow()
 
-    /* larger than coder/websocket's 32 KiB default read limit: a read limit not written as the library's no-limit value would leave its default armed, and this frame would kill the connection with 1009 instead of reaching the callback */
+    /* larger than coder/websocket's 32 KiB default read limit */
     oversized := make([]byte, 40*1024)
     if writeErr := connection.Write(ctx, coderwebsocket.MessageBinary, oversized); nil != writeErr {
         t.Fatalf("write: %v", writeErr)
@@ -1282,7 +1263,6 @@ func TestStreamHandler_BinaryWritesDeliverTheBroadcastAsABinaryFrame(t *testing.
     connection.Close(coderwebsocket.StatusNormalClosure, "")
 }
 
-/* messageCapturingLogger keeps the message and context of every record under a lock, for the records a served handler writes on its own goroutines */
 type messageCapturingLogger struct {
     mutex    sync.Mutex
     messages []string

@@ -32,7 +32,6 @@ func TestPrepareCommandFlags_RefusesADefaultTheDeclaredValidatorRefuses(t *testi
     }, "cli flag default value is refused by the flag's own validator")
 }
 
-/* a flag that leaves ValidateDefaults false is not checked, as the engine checks only the values it parsed: a validator refusing the zero default of a flag the run leaves out or must give is a declaration v3.13.0 accepted */
 func TestPrepareCommandFlags_AcceptsARefusedDefaultWithoutValidateDefaults(t *testing.T) {
     positiveLimit := func(value int) error {
         if 1 > value {
@@ -58,7 +57,6 @@ func TestPrepareCommandFlags_AcceptsARefusedDefaultWithoutValidateDefaults(t *te
     }
 }
 
-/* an unset default is the typed field's zero; under ValidateDefaults a validator refusing it is refused at registration like any other refused default */
 func TestPrepareCommandFlags_RefusesAnUnsetDefaultTheDeclaredValidatorRefusesUnderValidateDefaults(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         prepareCommandFlags([]clicontract.Flag{
@@ -77,7 +75,6 @@ func TestPrepareCommandFlags_RefusesAnUnsetDefaultTheDeclaredValidatorRefusesUnd
     }, "cli flag default value is refused by the flag's own validator")
 }
 
-/* the validator of a string-slice flag is handed the slice the engine builds from the declaration, a copy that is empty rather than nil when no default is declared: a validator refusing a nil slice accepts the flag here as the engine accepts it at every run */
 func TestPrepareCommandFlags_HandsTheSliceValidatorTheEmptySliceTheEngineBuilds(t *testing.T) {
     var seen []string
     declared := []string{"a"}
@@ -117,7 +114,6 @@ func TestPrepareCommandFlags_HandsTheSliceValidatorTheEmptySliceTheEngineBuilds(
     }
 }
 
-/* each of the four flag types a melody command declares is checked under ValidateDefaults; a flag without a validator is not */
 func TestPrepareCommandFlags_ChecksTheDefaultOfEveryFlagType(t *testing.T) {
     refusal := errors.New("refused")
 
@@ -196,7 +192,6 @@ func TestPrepareCommandFlags_ADefaultWhoseValidatorPanicsIsRefusedByFlagName(t *
     })
 }
 
-/* the engine writes into the instance it is handed what it parsed and never clears it; the fresh instance carries the declaration and none of that */
 func TestFreshFlagInstance_CopiesTheDeclarationAndNotTheParseState(t *testing.T) {
     destination := 0
     original := &clicontract.IntFlag{
@@ -238,7 +233,6 @@ func TestFreshFlagInstance_CopiesTheDeclarationAndNotTheParseState(t *testing.T)
     }
 }
 
-/* a flag that is not a pointer to a struct has nothing to copy and is handed over as it is */
 func TestFreshFlagInstance_HandsANonPointerFlagOverAsItIs(t *testing.T) {
     flag := valueFlag{name: "value"}
 
@@ -247,7 +241,6 @@ func TestFreshFlagInstance_HandsANonPointerFlagOverAsItIs(t *testing.T) {
     }
 }
 
-/* the reviewer's scenario: a command answering one stored slice is dispatched twice; the second dispatch, without the flag, reads the declared default and IsSet false, and a flag declared OnlyOnce accepts the second line's single spelling */
 func TestDispatchCommand_ASecondDispatchOfAMemoizingCommandReadsFreshState(t *testing.T) {
     observedIsSet := []bool{}
     observedValue := []int{}
@@ -283,7 +276,7 @@ func TestDispatchCommand_ASecondDispatchOfAMemoizingCommandReadsFreshState(t *te
     }
 }
 
-/* two dispatches in flight parse into instances of their own; the race band reads this one */
+/* the race detector is the oracle */
 func TestDispatchCommand_OverlappingDispatchesOfAMemoizingCommandDoNotShareState(t *testing.T) {
     var mutex sync.Mutex
     observed := map[string]int{}
@@ -324,7 +317,6 @@ func TestDispatchCommand_OverlappingDispatchesOfAMemoizingCommandDoNotShareState
     }
 }
 
-/* DispatchCommand refuses a default the flag's own validator refuses under ValidateDefaults, as registration does */
 func TestDispatchCommand_RefusesADefaultTheDeclaredValidatorRefuses(t *testing.T) {
     command := &testCommand{
         nameValue:        "probe",
@@ -348,7 +340,6 @@ func TestDispatchCommand_RefusesADefaultTheDeclaredValidatorRefuses(t *testing.T
     }, "cli flag default value is refused by the flag's own validator")
 }
 
-/* without ValidateDefaults a run that leaves the flag out runs on the default the validator would refuse, as the engine has always answered, and a run that gives the flag is validated on the value it gives */
 func TestDispatchCommand_RunsOnARefusedDefaultWithoutValidateDefaults(t *testing.T) {
     readLimit := -1
     command := &testCommand{
@@ -385,7 +376,6 @@ func TestDispatchCommand_RunsOnARefusedDefaultWithoutValidateDefaults(t *testing
     }
 }
 
-/* valueFlag is an engine flag that is not a pointer to a struct */
 type valueFlag struct {
     name string
 }

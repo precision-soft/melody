@@ -19,7 +19,6 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
 )
 
-/* conventionDurationBoundaries is the HTTP semantic conventions' advisory bucket list for http.server.request.duration, written out apart from the production default it pins */
 var conventionDurationBoundaries = []float64{0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10}
 
 func testRequestAndRuntime() (httpcontract.Request, containercontract.Runtime) {
@@ -38,7 +37,6 @@ func okHandler() httpcontract.Handler {
     }
 }
 
-/* streamingTestWriter is a writer that can take a write deadline and be hijacked, so a test can require the recording writer to leave both reachable to the handler behind it */
 type streamingTestWriter struct {
     *httptest.ResponseRecorder
     deadlineSet bool
@@ -57,7 +55,6 @@ func (instance *streamingTestWriter) Hijack() (net.Conn, *bufio.ReadWriter, erro
     return nil, nil, nil
 }
 
-/* collectHistogram reads the named histogram off a manual reader, failing the test when it is absent */
 func collectHistogram(t *testing.T, reader *sdkmetric.ManualReader, name string) (metricdata.Metrics, metricdata.HistogramDataPoint[float64]) {
     t.Helper()
 

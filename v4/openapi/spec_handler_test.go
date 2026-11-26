@@ -88,7 +88,6 @@ func TestSpecificationHandler_ServesDocumentFromLiveRoutes(t *testing.T) {
     }
 }
 
-/* a container with the registry and no info service serves the document with an empty info block, as the generate command writes it */
 func TestSpecificationHandler_ServesAnEmptyInfoWhenNoInfoServiceIsRegistered(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
@@ -148,7 +147,6 @@ func jsonContains(raw json.RawMessage, fragment string) bool {
     return true == strings.Contains(string(raw), "\""+fragment+"\"")
 }
 
-/* the registry is the document's source, so a mount over a container that registers none fails the request naming the service rather than serve an undescribed document */
 func TestSpecificationHandler_AContainerWithNoRegistryFailsTheRequestNamingTheService(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(

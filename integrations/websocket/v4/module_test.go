@@ -44,7 +44,6 @@ func TestModule_NameAndDescription(t *testing.T) {
     }
 }
 
-/* an unregistered route has no later consumer to fail loudly, since clients get 404 while boot reads healthy, so a missing hub is refused at boot; the module refuses it before NewStreamHandler's own guard, so the refusal names the stream's index */
 func TestModule_RegisterHttpRoutesRefusesAMissingHubAtBoot(t *testing.T) {
     kernel := &spyKernel{router: &spyRouter{}}
 
@@ -53,7 +52,7 @@ func TestModule_RegisterHttpRoutesRefusesAMissingHubAtBoot(t *testing.T) {
     })
 }
 
-/* the options carry a VALID IdleTimeout deliberately: with the zero value, NewStreamHandler's own panic would answer for a disarmed path guard and the mutant would survive shadowed — the empty path must be the only refusal candidate. */
+/* a valid IdleTimeout deliberately, so NewStreamHandler's own panic cannot answer for the path guard */
 func TestModule_RegisterHttpRoutesRefusesAnEmptyPathAtBoot(t *testing.T) {
     kernel := &spyKernel{router: &spyRouter{}}
 
@@ -155,7 +154,6 @@ func TestModule_RegisterHttpRoutesRefusesAModuleWithoutAStream(t *testing.T) {
     }
 }
 
-/* the second stream's defect is judged before the first stream registers, so a refused module leaves no route behind */
 func TestModule_RegisterHttpRoutesRefusesAStreamWithoutAPathNamingItsIndex(t *testing.T) {
     kernel := &spyKernel{router: &spyRouter{}}
 
@@ -186,7 +184,6 @@ func TestModule_RegisterHttpRoutesRefusesAnUnnamedStreamAmongSeveral(t *testing.
     }
 }
 
-/* a later stream's nil hub and invalid option are refused before the first stream registers, the hub naming its index */
 func TestModule_RegisterHttpRoutesRefusesALaterStreamsHubAndHandlerConfigBeforeAnyRoute(t *testing.T) {
     kernel := &spyKernel{router: &spyRouter{}}
 

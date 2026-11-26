@@ -240,7 +240,6 @@ func TestString_ReportsAnEmptyListAsUnset(t *testing.T) {
     }
 }
 
-/* a key that appeared once in url.Values is stored as the string it is, and only a genuinely repeated key stays a slice — the separation String and Input depend on. */
 func TestNewParameterBagFromValues_KeepsTheSingleAndTheRepeatedKeyApartByType(t *testing.T) {
     parameterBag := NewParameterBagFromValues(url.Values{
         "single":   []string{"one"},

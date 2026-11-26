@@ -7,7 +7,7 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
 )
 
-/* newStreamHandlerPastTheDoor builds a handler pinging at an interval below the one-second minimum, so the ping and reap tests run in milliseconds; every other limit is resolved by its rule */
+/* pings below the one-second minimum, so the ping and reap tests run in milliseconds */
 func newStreamHandlerPastTheDoor(hub *melodyhttp.ServerSentEventHub, config StreamHandlerConfig, idleTimeout time.Duration) httpcontract.Handler {
     resolved, resolveErr := resolveStreamHandlerConfig(config)
     if nil != resolveErr {

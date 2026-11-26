@@ -191,7 +191,6 @@ func TestGreaterThan_StringValueNamesTheNumericRequirement(t *testing.T) {
     }
 }
 
-/* a value that is not numeric is refused under its own code, not the bound's. */
 func TestGreaterThan_ANonNumericValueIsRefusedUnderItsOwnCode(t *testing.T) {
     validationError := NewGreaterThan(10).Validate(validationcontract.ValidationContext{Field: "field"}, "abc")
     if nil == validationError || ConstraintGreaterThanErrorNotNumeric != validationError.Code() {

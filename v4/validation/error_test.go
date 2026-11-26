@@ -108,7 +108,6 @@ func TestValidationErrors_RenderTheirMembersInAStableOrder(t *testing.T) {
     }
 }
 
-/* a nil *ValidationError a caller appended is an entry that is not nil, so it is skipped rather than having Code() called on its nil receiver */
 func TestValidationErrors_ATypedNilEntryIsSkippedRatherThanDereferenced(t *testing.T) {
     var absentError *ValidationError
 

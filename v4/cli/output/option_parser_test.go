@@ -86,7 +86,6 @@ func TestNormalizeOption_AdmitsAZeroLimitAndTheUnlimitedCounts(t *testing.T) {
     }
 }
 
-/* every standard flag is given a value other than its default, so a name the parser reads that StandardFlags does not declare leaves its field at the zero value and fails here: the two sources agree on the names only through this test */
 func TestParseOptionFromCommand_ReadsTheStandardFlags(t *testing.T) {
     parsedCommand, runErr := runStandardFlags(
         t,

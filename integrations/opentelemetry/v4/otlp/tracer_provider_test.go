@@ -18,7 +18,6 @@ import (
     "github.com/precision-soft/melody/v4/exception"
 )
 
-/* a missing endpoint is a configuration error, not a silent no-op exporter. */
 func TestNewTracerProvider_RequiresEndpoint(t *testing.T) {
     provider, err := NewTracerProvider(tracerTestRuntime(), "", Config{})
     if nil == err {
@@ -29,7 +28,6 @@ func TestNewTracerProvider_RequiresEndpoint(t *testing.T) {
     }
 }
 
-/* an unknown protocol is rejected rather than defaulting silently to the wrong transport. */
 func TestNewTracerProvider_RejectsUnsupportedProtocol(t *testing.T) {
     provider, err := NewTracerProvider(tracerTestRuntime(), "collector:4317", Config{Protocol: "carrier-pigeon"})
     if nil == err {
@@ -40,7 +38,7 @@ func TestNewTracerProvider_RejectsUnsupportedProtocol(t *testing.T) {
     }
 }
 
-/* grpc (default when unset) builds a provider without dialing — otlptracegrpc connects lazily. */
+/* otlptracegrpc connects lazily, so no collector is dialed */
 func TestNewTracerProvider_BuildsWithDefaultProtocol(t *testing.T) {
     provider, err := NewTracerProvider(tracerTestRuntime(), "collector:4317", Config{Insecure: true})
     if nil != err {
@@ -121,7 +119,6 @@ func TestNewTracerProvider_SampleNoneSamplesNoRootSpan(t *testing.T) {
         t.Fatal("expected SampleNone to leave the root span unsampled")
     }
 
-    /* the sampler is parent-based: a sampled inbound parent still decides for its trace */
     parent := trace.NewSpanContext(trace.SpanContextConfig{
         TraceID:    trace.TraceID{1},
         SpanID:     trace.SpanID{1},
@@ -175,7 +172,6 @@ func TestConfig_RedactsHeadersOnEveryFmtVerb(t *testing.T) {
         }
     }
 
-    /* a pointer to the config redacts too, since the value receiver is promoted */
     pointerRendered := fmt.Sprintf("%v", &config)
     if true == strings.Contains(pointerRendered, "super-secret-token") {
         t.Fatalf("a *Config leaked the header credential: %s", pointerRendered)

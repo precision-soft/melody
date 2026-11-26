@@ -77,7 +77,7 @@ func TestFrozenClockNewTicker_ReflectsTravelToOnNextTick(t *testing.T) {
 
     clockInstance.TravelTo(targetTime)
 
-    /* a tick fired before TravelTo can already sit in the buffered channel carrying the pre-travel time, so the stale ticks are drained: reading exactly one tick would race the 1ms interval */
+    /* a pre-travel tick can already sit in the buffer, so ticks are drained until the traveled one */
     deadline := time.After(250 * time.Millisecond)
     for {
         select {
@@ -164,7 +164,6 @@ func TestFrozenTickerStop_NoTickMintedAfterStop(t *testing.T) {
     }
 }
 
-/* each round first parks the relay by letting the buffer fill, so the exit path is the one Stop must wait out; the done channel the relay closes on its way out is what makes the wait observable rather than timed. */
 func TestFrozenTickerStop_WaitsForTheRelayGoroutine(t *testing.T) {
     for round := 0; round < 100; round++ {
         clockInstance := NewFrozenClock(time.Date(2026, 1, 5, 10, 0, 0, 0, time.UTC))

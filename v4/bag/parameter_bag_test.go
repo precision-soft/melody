@@ -70,7 +70,6 @@ func TestNewParameterBagFromValuesDeepCopy(t *testing.T) {
     }
 }
 
-/* the request bags keep the single and the repeated key apart by type: one occurrence is the string it really is, a repeated key is a genuine slice, an empty key and an empty list are absent */
 func TestNewParameterBagFromValues_SeparatesSingleFromRepeated(t *testing.T) {
     parameterBag := NewParameterBagFromValues(url.Values{
         "single":   {"melody"},
@@ -103,7 +102,6 @@ func TestNewParameterBagFromValues_SeparatesSingleFromRepeated(t *testing.T) {
     }
 }
 
-/* Remove takes the name out of the bag entirely: Get, Has and Count must all stop seeing it, and removing a name that was never there is not an error */
 func TestParameterBag_Remove_TakesTheNameOutOfEveryReader(t *testing.T) {
     parameterBag := NewParameterBag()
     parameterBag.Set("kept", "value")
@@ -129,7 +127,6 @@ func TestParameterBag_Remove_TakesTheNameOutOfEveryReader(t *testing.T) {
     }
 }
 
-/* Count answers the number of names the bag holds, not the number of values stored under them: a repeated key appended twice is still one name */
 func TestParameterBag_Count_CountsNamesNotValues(t *testing.T) {
     parameterBag := NewParameterBag()
 
@@ -153,7 +150,6 @@ func TestParameterBag_Count_CountsNamesNotValues(t *testing.T) {
     }
 }
 
-/* All copies as deep as the bag's own writers go: a mutation on the returned slice or map must not write into the stored value behind the lock */
 func TestParameterBag_TheZeroValueAcceptsItsFirstWrite(t *testing.T) {
     var bagInstance ParameterBag
 
@@ -204,7 +200,7 @@ func TestParameterBag_All_CopiesKnownShapesDeep(t *testing.T) {
     }
 }
 
-/* readers take the read lock against a writer: the test asserts nothing itself, the race detector is the oracle */
+/* asserts nothing: the race detector is the oracle */
 func TestParameterBag_ReadersUnderAConcurrentSet_HoldTheReadLock(t *testing.T) {
     parameterBag := NewParameterBag()
 
@@ -233,7 +229,6 @@ func TestParameterBag_ReadersUnderAConcurrentSet_HoldTheReadLock(t *testing.T) {
     waitGroup.Wait()
 }
 
-/* the concrete bag appends inside one critical section: two writers appending concurrently keep every value — the helper's contract fallback reads and writes under two separate locks, and that window loses appends without any error and without anything the race detector can see */
 func TestParameterBag_AppendString_KeepsEveryConcurrentAppend(t *testing.T) {
     parameterBag := NewParameterBag()
 
@@ -266,7 +261,6 @@ func TestParameterBag_AppendString_KeepsEveryConcurrentAppend(t *testing.T) {
     }
 }
 
-/* ParameterBag{} is a legal value a caller outside this package can declare, and writing into its nil map panicked inside the assignment rather than at a door the caller can see */
 func TestParameterBag_SetAllocatesTheZeroValueMap(t *testing.T) {
     parameterBag := &ParameterBag{}
 
@@ -278,7 +272,6 @@ func TestParameterBag_SetAllocatesTheZeroValueMap(t *testing.T) {
     }
 }
 
-/* the separating probe mutates what Get answered and reads the bag again: with the live reference, the write went into the bag behind its lock — visible to every later reader and racing a concurrent All copy */
 func TestParameterBag_HasDoesNotCopyTheStoredValue(t *testing.T) {
     parameterBag := NewParameterBag()
     parameterBag.Set("roles", []string{"a", "b", "c"})

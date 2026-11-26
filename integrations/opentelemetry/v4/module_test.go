@@ -49,7 +49,6 @@ func (instance *containerServiceRegistrar) RegisterService(serviceName string, p
     instance.MustRegister(serviceName, provider, options)
 }
 
-/* bootPrometheusModule registers the module's services on a container and answers the kernel whose boot runtime resolves through it */
 func bootPrometheusModule(t *testing.T, config ModuleConfig) (*Module, *spyKernel) {
     t.Helper()
 

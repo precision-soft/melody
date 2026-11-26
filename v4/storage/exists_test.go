@@ -48,7 +48,6 @@ func TestExists_ReadsStat(t *testing.T) {
 
 var existsScriptedStatErr = errors.New("the storage could not be asked")
 
-/* existsScriptedStorage answers every Stat with statErr and records the runtime it was asked under */
 type existsScriptedStorage struct {
     boundRecordingStorage
     statErr error

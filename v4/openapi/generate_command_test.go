@@ -31,8 +31,6 @@ func (instance *commandEmptyEnvironmentSource) Load(ctx context.Context) (map[st
     return map[string]string{}, nil
 }
 
-/* newCommandFixtureRuntime builds a runtime whose container carries a router with one route and the running configuration anchored at the given project directory, so the command resolves the same doors it resolves inside a booted application. */
-/* commandFixtureRuntime keeps the container the fixture registered on, so a test can register more after the runtime is built: a runtime reaches no container. */
 type commandFixtureRuntime struct {
     containercontract.Runtime
     serviceContainer containercontract.Container
@@ -107,7 +105,6 @@ func newCommandFixtureRuntime(t *testing.T, projectDirectory string, registerOpe
     }
 }
 
-/* runOpenApiGenerateCommand drives the command through the cli library rather than around it, so the flags it declares are the flags the arguments are parsed against. */
 func runOpenApiGenerateCommand(
     t *testing.T,
     command *GenerateCommand,
@@ -130,7 +127,6 @@ func runOpenApiGenerateCommand(
     return output.String(), runErr
 }
 
-/* the documented invocation is relative, and anchoring it at whatever directory the process happened to start in writes the document into a different tree per launcher while reporting success — the sibling wiring command has always anchored at the project directory, and the two flags must mean one thing. The parent directories are created on the way, and the atomic write leaves the 0644 mode and no temp residue. */
 func TestGenerateCommand_AnchorsARelativeOutAtTheProjectDirectory(t *testing.T) {
     projectDirectory := t.TempDir()
     runtimeInstance := newCommandFixtureRuntime(t, projectDirectory, true, true)
@@ -181,7 +177,6 @@ func TestGenerateCommand_AnchorsARelativeOutAtTheProjectDirectory(t *testing.T) 
     }
 }
 
-/* the stdout branch goes through the writer the cli hands over, not the process stdout: a harness that captures the command's output must see the document. */
 func TestGenerateCommand_PrintsTheDocumentToTheWriterWhenOutIsEmpty(t *testing.T) {
     projectDirectory := t.TempDir()
     runtimeInstance := newCommandFixtureRuntime(t, projectDirectory, true, true)
@@ -200,7 +195,6 @@ func TestGenerateCommand_PrintsTheDocumentToTheWriterWhenOutIsEmpty(t *testing.T
     }
 }
 
-/* registered through cli.Register, the command runs inside the run banner, and a command that declares no quiet flag keeps that banner: printed to stdout, the document began with the banner's escape sequence, so the documented redirection wrote a file no parser read; the quiet flag defaults to true here as it does under StandardFlags, and --quiet=false brings the frame back */
 func TestGenerateCommand_TheStdoutDocumentIsNotWrappedInTheBanner(t *testing.T) {
     written := runRegisteredOpenApiGenerateCommand(t, nil)
 
@@ -217,7 +211,6 @@ func TestGenerateCommand_TheStdoutDocumentIsNotWrappedInTheBanner(t *testing.T) 
         t.Fatalf("expected the banner back under --quiet=false, got %q", written[:min(len(written), 80)])
     }
 
-    /* the frame --quiet=false brings back is governed by the other standard flag too: a command declaring --quiet by hand and not --no-color offered a frame that could not be un-coloured */
     written = runRegisteredOpenApiGenerateCommand(t, []string{"--quiet=false", "--no-color"})
 
     if false == strings.Contains(written, "[melody:openapi:generate] [started]") || true == strings.Contains(written, "\x1b[") {
@@ -244,7 +237,6 @@ func runRegisteredOpenApiGenerateCommand(t *testing.T, arguments []string) strin
     return buffer.String()
 }
 
-/* the write replaces the file whole; an existing file that is not a JSON document is someone's source a mistyped --out points at, not a previous output of this command. */
 func TestGenerateCommand_RefusesToOverwriteAForeignFile(t *testing.T) {
     projectDirectory := t.TempDir()
     runtimeInstance := newCommandFixtureRuntime(t, projectDirectory, true, true)
@@ -275,7 +267,6 @@ func TestGenerateCommand_RefusesToOverwriteAForeignFile(t *testing.T) {
     }
 }
 
-/* a file already holding a JSON document is a previous output and is replaced in place, which is what every regeneration does. */
 func TestGenerateCommand_ReplacesAPreviousDocument(t *testing.T) {
     projectDirectory := t.TempDir()
     runtimeInstance := newCommandFixtureRuntime(t, projectDirectory, true, true)
@@ -294,7 +285,6 @@ func TestGenerateCommand_ReplacesAPreviousDocument(t *testing.T) {
     }
 }
 
-/* the auto-registration gate reads the registry service alone, so a container without the info service reaches the command and the tolerant resolver answers an empty Info; the run still succeeds, and with --out the writer is free, so the missing title and version are named there beside the "wrote" line, while without it the writer is the document and the warning is journaled, as TestGenerateCommand_TheStdoutDocumentStaysValidJsonWithoutTheInfoService proves */
 func TestGenerateCommand_WarnsOnTheWriterWhenTheInfoServiceIsAbsentAndTheDocumentGoesToAFile(t *testing.T) {
     projectDirectory := t.TempDir()
     out := filepath.Join(projectDirectory, "openapi.json")
@@ -335,7 +325,6 @@ func TestGenerateCommand_WritesTheInfoTheRunsScopeRegisters(t *testing.T) {
     }
 }
 
-/* the stdout mode prints the document on the command's one writer, so the document stays parsable and the warning is journaled through the logger the runtime resolves */
 func TestGenerateCommand_TheStdoutDocumentStaysValidJsonWithoutTheInfoService(t *testing.T) {
     projectDirectory := t.TempDir()
 
@@ -365,7 +354,6 @@ func TestGenerateCommand_TheStdoutDocumentStaysValidJsonWithoutTheInfoService(t 
     }
 }
 
-/* the journal door reads the configuration to learn whether the journal is stdout, and a configuration registered but failing to resolve must not become the one failure of a command written never to fail on its journal: it answers "not stdout" and the application's logger is asked, where the must-door panicked with no document and no warning */
 func TestGenerateCommand_AConfigurationThatDoesNotResolveDoesNotFailTheStdoutMode(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
@@ -417,7 +405,6 @@ func TestGenerateCommand_AConfigurationThatDoesNotResolveDoesNotFailTheStdoutMod
     }
 }
 
-/* a configuration that resolves but answers no kernel section does not fail the command */
 func TestGenerateCommand_AConfigurationWithoutAKernelSectionDoesNotFailTheStdoutMode(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
@@ -469,7 +456,6 @@ func TestGenerateCommand_AConfigurationWithoutAKernelSectionDoesNotFailTheStdout
     }
 }
 
-/* kernelLessConfiguration answers no kernel section; every other door is the zero value a configuration double may answer */
 type kernelLessConfiguration struct {
     configcontract.Configuration
 }
@@ -512,7 +498,6 @@ func (instance *commandStdoutJournalEnvironmentSource) Load(ctx context.Context)
     return map[string]string{config.LogPathKey: ""}, nil
 }
 
-/* an empty MELODY_LOG_PATH makes the container log to stdout, the writer the document goes to, so the warning goes to the emergency journal on stderr and the application's logger receives nothing */
 func TestGenerateCommand_AStdoutJournalDoesNotCarryTheWarningAheadOfTheDocument(t *testing.T) {
     projectDirectory := t.TempDir()
 

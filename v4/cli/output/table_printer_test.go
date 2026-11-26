@@ -229,7 +229,6 @@ func TestTablePrinter_SkipsAnUnnamedErrorDetail(t *testing.T) {
     }
 }
 
-/* the builder refuses a row shorter than the declared columns, so this state is reachable only through a TableData assembled by hand — which the printer also serves, and the sizing pass runs before anything renders */
 func TestTablePrinter_MeasuresARowShorterThanTheColumns(t *testing.T) {
     printer := NewTablePrinter(TablePrinterConfig{})
 
@@ -295,12 +294,10 @@ func TestTablePrinter_ShrinksTheWidestColumnAndWrapsTheSurplus(t *testing.T) {
         }
     }
 
-    /* the header, the separator and a row that does not fit on one line */
     if 4 > renderedLineCount {
         t.Fatalf("expected the oversized row to wrap onto more than one line, got %d rendered lines in %q", renderedLineCount, written)
     }
 
-    /* the widths themselves are the proof: the surplus is taken from the widest column, one rune at a time, and the narrow one stays at the minimum it may not go below */
     widths := printer.calculateColumnWidthsWithMaxWidth(envelope.Table.Blocks[0], tableMaxWidth)
 
     if 4 != widths[0] {
@@ -345,7 +342,6 @@ func TestTablePrinter_StopsShrinkingWhenEveryColumnIsAtItsMinimum(t *testing.T) 
         t.Fatalf("expected the shrink loop to stop when no column can give anything up")
     }
 
-    /* the minimum wins over the budget: four runes per column is the floor, so a budget of one cannot be honoured and the row wraps rather than the loop spinning */
     widths := printer.calculateColumnWidthsWithMaxWidth(envelope.Table.Blocks[0], 1)
 
     if 2 != len(widths) || defaultTableMinColumnWidth != widths[0] || defaultTableMinColumnWidth != widths[1] {
@@ -357,7 +353,6 @@ func TestTablePrinter_StopsShrinkingWhenEveryColumnIsAtItsMinimum(t *testing.T) 
     }
 }
 
-/* the two floors of the shrink pass are reached only from code, never through the printer's own doors, so the state is built here directly. */
 func TestTablePrinter_ShrinkPassFloors(t *testing.T) {
     printer := NewTablePrinter(TablePrinterConfig{})
 
@@ -438,7 +433,6 @@ func (instance *failingTableWriter) Write(payload []byte) (int, error) {
     return len(payload), nil
 }
 
-/* a writer that answers fewer bytes than it is handed, with no error, has truncated the report as a full disk does */
 type shortTableWriter struct {
     dropped int
 }
@@ -487,7 +481,6 @@ func TestTablePrinter_ReturnsTheFirstWriteFailure(t *testing.T) {
     }
 }
 
-/* the negative assertions are the proof: a raw escape byte or carriage return in the output would be obeyed by the terminal, and both render identically to the eye in a green test that only checks the positive spelling. */
 func TestTablePrinter_EscapesControlCharactersInTheTextChannels(t *testing.T) {
     envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
     envelope.SetError(
@@ -523,7 +516,6 @@ func TestTablePrinter_EscapesControlCharactersInTheTextChannels(t *testing.T) {
     }
 }
 
-/* the escaping runs before the widths are computed, so the escaped spelling is what the alignment counts */
 func TestTablePrinter_EscapedCellsStayAligned(t *testing.T) {
     envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
     envelope.Table = &TableData{
@@ -623,7 +615,6 @@ func TestTablePrinter_CjkCellsStayAlignedInDisplayCells(t *testing.T) {
     }
 }
 
-/* the wrap slices by the same display-cell measure the widths are computed in: sliced by rune count, a line of two ideograms and a line of four ascii letters both "fit" a width of four while rendering four and eight cells */
 func TestTablePrinter_WrapsByDisplayCellsNotRunes(t *testing.T) {
     printer := NewTablePrinter(TablePrinterConfig{})
 
@@ -637,7 +628,6 @@ func TestTablePrinter_WrapsByDisplayCellsNotRunes(t *testing.T) {
     }
 }
 
-/* a cell's width is the width of its widest line: taken whole, "12345\n67890" would read eleven cells wide */
 func TestTablePrinter_MeasuresAMultiLineCellByItsWidestLine(t *testing.T) {
     printer := NewTablePrinter(TablePrinterConfig{})
 
@@ -674,7 +664,6 @@ func TestTablePrinter_MeasuresAMultiLineCellByItsWidestLine(t *testing.T) {
     }
 }
 
-/* the phantom width a whole-string measure invents is counted into the maximum-width arithmetic, so the sibling columns are shrunk to pay for it */
 func TestTablePrinter_DoesNotShrinkASiblingColumnForAMultiLineCellsPhantomWidth(t *testing.T) {
     printer := NewTablePrinter(TablePrinterConfig{MaxWidth: bound.Of(30)})
 
@@ -708,7 +697,7 @@ func TestTablePrinter_DoesNotShrinkASiblingColumnForAMultiLineCellsPhantomWidth(
         t.Fatalf("expected a separator row in the output, got %q", buffer.String())
     }
 
-    /* ten lines of three cells measure three, not thirty-nine: the table fits the cap whole and neither column is shrunk */
+    /* ten lines of three cells measure three, not thirty-nine */
     if "| ----- | --------------- |" != separator {
         t.Fatalf("expected both columns at their measured widths, got %q", separator)
     }
@@ -718,7 +707,6 @@ func TestTablePrinter_DoesNotShrinkASiblingColumnForAMultiLineCellsPhantomWidth(
     }
 }
 
-/* the width helper is the one place the multi-line measure lives, and it answers the widest line for every shape the sanitized cell can take */
 func TestCellDisplayWidth_AnswersTheWidestLine(t *testing.T) {
     if 5 != cellDisplayWidth("12345\n67890") {
         t.Fatalf("expected the widest line of two equal lines, got %d", cellDisplayWidth("12345\n67890"))
@@ -741,7 +729,6 @@ func TestCellDisplayWidth_AnswersTheWidestLine(t *testing.T) {
     }
 }
 
-/* a column header is sanitized keeping its newlines and wrapped by the same renderer, so it is sized by its widest line as a cell is, on both the width pass and the minimum the shrink pass floors it at */
 func TestTablePrinter_MeasuresAMultiLineColumnHeaderByItsWidestLine(t *testing.T) {
     printer := NewTablePrinter(TablePrinterConfig{})
 

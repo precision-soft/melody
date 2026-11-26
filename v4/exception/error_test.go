@@ -83,7 +83,6 @@ func TestError_SetContext_WithNilMap_LeavesAWritableContext(t *testing.T) {
     }
 }
 
-/* the proof is one writer held open against one reader on the same instance, which without the lock is a concurrent map iteration and map write; a memoized creation failure is reachable from the owner request and every waiter at once. */
 func TestError_ConcurrentContextWriteAndRead_IsOrdered(t *testing.T) {
     sharedError := NewError("creation failed", map[string]any{"attempt": 1}, nil)
 
@@ -124,7 +123,6 @@ func TestError_ConcurrentContextWriteAndRead_IsOrdered(t *testing.T) {
     }
 }
 
-/* errors.As and errors.Is call Unwrap on every link, so a typed-nil *Error stored as another error's cause is walked on a nil receiver — FromError(nil) is the natural producer of that link */
 func TestError_UnwrapOnANilReceiverAnswersNil(t *testing.T) {
     var typedNil *Error
 
@@ -140,7 +138,6 @@ func TestError_UnwrapOnANilReceiverAnswersNil(t *testing.T) {
     }
 }
 
-/* FromError(nil) answers a typed nil, and errors.Join skips only a nil INTERFACE, so a join holding it called Error on the nil receiver and panicked when rendered; Error answers for the receiver as Unwrap already did. */
 func TestError_ErrorOnANilReceiverAnswersInsteadOfDereferencing(t *testing.T) {
     var typedNil *Error
 
@@ -154,7 +151,6 @@ func TestError_ErrorOnANilReceiverAnswersInsteadOfDereferencing(t *testing.T) {
     }
 }
 
-/* every accessor answers the nil receiver, as every accessor of ExitError does: a caller that read the typed nil FromError(nil) produces through the interface reached these before any guard. */
 func TestError_EveryAccessorAnswersTheNilReceiver(t *testing.T) {
     var typedNil *Error
 

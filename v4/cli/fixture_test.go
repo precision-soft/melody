@@ -1,4 +1,3 @@
-/* The shared test material of this package: the runtime and command doubles every test file of it reaches for. It carries no mirror of its own on purpose: it is the ONE test file of a package allowed to exist without a matching source, which is what keeps every other one honest. A test provable from a single source belongs in that source's own mirror, not here. */
 package cli
 
 import (
@@ -10,7 +9,7 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
-/* the scope is closed when the TEST ends, not when this constructor returns: a defer here handed every test a scope already closed at its first line, so each assertion about scope reporting and the action's teardown half passed vacuously — the two runtimes the package writes by hand omit that defer on purpose */
+/* closed through t.Cleanup, not a defer, which would hand every test an already closed scope */
 func newTestRuntime(t *testing.T) *testRuntime {
     t.Helper()
 

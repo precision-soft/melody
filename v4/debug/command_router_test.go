@@ -359,7 +359,6 @@ func TestRouterCommand_OmitsTheShownCountWhenNothingIsWindowedAway(t *testing.T)
     }
 }
 
-/* the dispatch picks the higher priority and breaks ties on the lower registration order; without these two columns two overlapping routes rendered as identical rows and the command could not answer which one answers */
 func TestRouterCommand_RendersThePriorityAndTheRegistrationOrder(t *testing.T) {
     router := http.NewRouter()
 
@@ -485,7 +484,6 @@ func TestRouterCommand_CarriesTheDiscriminatorsInJsonAndVerboseTable(t *testing.
         t.Fatalf("expected priority 5 and order 1, got %d and %d", item.Priority, item.Order)
     }
 
-    /* the requirement travels as the compiled anchor form, and the attributes carry the framework's own underscore-prefixed entries beside the caller's */
     if "" == item.Requirements["id"] || "1" != item.Defaults["id"] || "catalog" != item.Attributes["section"] {
         t.Fatalf("expected the discriminator maps to travel, got %+v", item)
     }
@@ -561,7 +559,6 @@ func TestRouterCommand_TiedPatternAndMethodsRowsKeepTheRegistrationOrder(t *test
     }
 }
 
-/* a route attribute is arbitrary any from userland, and one value the encoder cannot represent made the whole envelope fail to marshal: the printer has no fallback, so the command answered ZERO bytes and the caller was left with an empty stream indistinguishable from a missing binary. The value that cannot be represented degrades to the rendering the verbose table already prints; every value that CAN be represented keeps its json type, or the methods attribute would arrive as a string where the consumer keyed a list. */
 func TestRouterCommand_KeepsTheDocumentWhenAnAttributeCannotBeSerialized(t *testing.T) {
     router := http.NewRouter()
     router.Handle(
@@ -624,7 +621,6 @@ func TestRouterCommand_KeepsTheDocumentWhenAnAttributeCannotBeSerialized(t *test
         t.Fatalf("expected the unrepresentable attribute to degrade to its rendering, got %#v", attributes["handlerHook"])
     }
 
-    /* the list must stay a list: folding every value to text would have been the cheaper repair and the wrong one */
     roles, rolesAreList := attributes["allowedRoles"].([]any)
     if false == rolesAreList || 2 != len(roles) {
         t.Fatalf("expected the serializable list to keep its type, got %#v", attributes["allowedRoles"])
@@ -705,7 +701,6 @@ func TestRouterCommand_ACyclicAttributeIsRenderedAsAMarkerRatherThanKillingThePr
     }
 }
 
-/* the sibling above names its tied routes in the order it registers them, so a comparator falling back to any other ascending field answers exactly the same rows — the fixture cannot see which field decided. Here the names run OPPOSITE to the registration order, which is what puts the registration order and every alternative in disagreement. The frozen majors carry the sibling alone, so this half of the guarantee is unpinned there too. */
 func TestRouterCommand_TiedRowsFollowTheRegistrationOrderAndNotTheName(t *testing.T) {
     router := http.NewRouter()
 
@@ -746,7 +741,6 @@ func TestRouterCommand_TiedRowsFollowTheRegistrationOrderAndNotTheName(t *testin
         t.Fatalf("expected no error, got %v", runErr)
     }
 
-    /* decoded locally rather than through the shared envelope, which carries the pattern and the order alone: the name is the field that separates the two comparators here */
     named := struct {
         Data struct {
             Items []struct {

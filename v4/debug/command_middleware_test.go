@@ -350,7 +350,6 @@ func TestMiddlewareCommand_ZeroValueProvider_ReturnsANamedError(t *testing.T) {
     }
 }
 
-/* the refusal of the zero-value command is written on the envelope before the command fails: returned ahead of Render it left zero bytes where a machine consumer waits for a document, and the exit-coded error is the one the envelope's own failure carries */
 func TestMiddlewareCommand_ZeroValueProviderRendersTheEnvelopeBeforeItFails(t *testing.T) {
     rendered, runErr := runDebugCommand(
         &MiddlewareCommand{},
@@ -377,7 +376,6 @@ func TestMiddlewareCommand_ZeroValueProviderRendersTheEnvelopeBeforeItFails(t *t
     }
 }
 
-/* the default listing is a description: nothing is built, so the command has no side effect in the console process that asks — the build is the explicit flag's to run */
 func TestMiddlewareCommand_DefaultListingRunsNoBuild(t *testing.T) {
     buildRuns := 0
 
@@ -422,7 +420,6 @@ func TestMiddlewareCommand_DefaultListingRunsNoBuild(t *testing.T) {
     }
 }
 
-/* an inactive definition is part of the answer: the reason a middleware is off is exactly what the operator lists the pipeline to learn */
 func TestMiddlewareCommand_ListsTheInactiveEntriesWithTheirReason(t *testing.T) {
     command := NewMiddlewareCommand(
         func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
@@ -457,7 +454,6 @@ func TestMiddlewareCommand_ListsTheInactiveEntriesWithTheirReason(t *testing.T) 
     }
 }
 
-/* a factory that panics under --build answers as a rendered failure: the command that asks about the chain must survive the chain's worst answer */
 func TestMiddlewareCommand_BuildRecoversAPanickingFactory(t *testing.T) {
     command := NewMiddlewareCommand(
         func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
@@ -479,7 +475,6 @@ func TestMiddlewareCommand_BuildRecoversAPanickingFactory(t *testing.T) {
     }
 }
 
-/* a pipeline that cannot be assembled — a cycle, a missing reference — refuses the description with the same error the build answers, rendered instead of thrown */
 func TestMiddlewareCommand_RendersTheDescriptionRefusal(t *testing.T) {
     command := NewMiddlewareCommand(
         func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
@@ -548,7 +543,6 @@ func TestMiddlewareCommand_SameNameInactiveEntriesKeepTheReasonOrder(t *testing.
     }
 }
 
-/* the reason key is present on every row, active ones included, so a consumer keying on it can tell an active entry from a malformed document, and the three shapes this one struct serves — described-active, described-inactive, built — share one key set and differ only in their values. */
 func TestMiddlewareCommand_TheReasonKeyIsPresentOnEveryRow(t *testing.T) {
     rendered, runErr := runDebugCommand(
         NewMiddlewareCommand(

@@ -257,7 +257,6 @@ func TestValidator_ReturnsUnknownRuleError(t *testing.T) {
 func TestValidator_MalformedNumericParameterFailsClosed(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    /* a non-numeric constraint parameter must be rejected, not silently degraded to a default bound */
     for _, payload := range []any{
         payloadWithMalformedGreaterThan{Quantity: 5},
         payloadWithMalformedMinLength{Name: "anything"},
@@ -278,7 +277,6 @@ func TestValidator_MalformedNumericParameterFailsClosed(t *testing.T) {
         }
     }
 
-    /* a fractional bound is refused whole, not truncated: 3.9 read as 3 silently enforced a bound the tag does not declare, and on lessThan a truncated negative bound accepted values the tag as written refuses */
     fractionalErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payloadWithFractionalMaxLength{Name: "abc"}))
 
     fractionalError, ok := fractionalErrors[0].(*ValidationError)
@@ -318,7 +316,6 @@ type payloadWithGreaterThanShorthand struct {
 func TestValidator_UnrecognizedParameterKeyFailsClosed(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    /* a parameterizable constraint that receives parameters without its recognized key ("value", or "pattern"/"value" for regex) must fail closed rather than silently degrade to the registered default bound: a fail-open here would leave the field validated against a weaker constraint than the tag declares (regex(re=...) degrading to the match-all `.*` default, min(len=8) to a floor of 1) */
     for _, payload := range []any{
         payloadWithGreaterThanUnknownParam{Count: -1},
         payloadWithLessThanUnknownParam{Count: 100},
@@ -338,7 +335,6 @@ func TestValidator_UnrecognizedParameterKeyFailsClosed(t *testing.T) {
         }
     }
 
-    /* the shorthand form maps to the recognized `value` key, so it still configures and enforces the bound: 3 is not greater than 5, 9 is */
     requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payloadWithGreaterThanShorthand{Count: 3}))
     requireNoValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payloadWithGreaterThanShorthand{Count: 9}))
 }
@@ -1086,7 +1082,6 @@ func TestValidator_ValidatesConcurrentlyWithMemoizedConstraints(t *testing.T) {
 
     waitGroup.Wait()
 
-    /* LoadOrStore lets several goroutines build a value on the first touch and keeps one, so the memo bounds constructions by the racing goroutines rather than pinning them at one; without it every validated value builds its own */
     constructionCount := counting.constructionCount.Load()
     if constructionCount < 1 || int64(workerCount) < constructionCount {
         t.Fatalf("expected at most one construction per goroutine, got %d", constructionCount)
@@ -1158,7 +1153,6 @@ type depthCutMapNode struct {
     Children map[string]depthCutMapNode `json:"children"`
 }
 
-/* the depth cut follows the element type of a slice or a map, so a tag-bearing chain reached through either is still reported rather than passed */
 func TestValidateStruct_FailsClosedPastTheNestingDepthLimitThroughCollections(t *testing.T) {
     sliceNode := depthCutSliceNode{Name: "leaf"}
     mapNode := depthCutMapNode{Name: "leaf"}
@@ -1206,7 +1200,6 @@ type ordinaryTimeFieldPayload struct {
     Name      string    `json:"name" validate:"notBlank"`
 }
 
-/* the embedded time.Time promotes the codec for the whole value, so the body is an RFC 3339 string: encoding/json fills the embedded time and never the sibling, and enforcing the sibling's constraint would reject every body the type can decode */
 func TestValidateStruct_PromotedTimeCodecLeavesNoSiblingToValidate(t *testing.T) {
     payload := promotedTimeCodecPayload{}
 
@@ -1236,7 +1229,6 @@ func TestValidateStruct_PromotedTimeCodecLeavesNoSiblingToValidate(t *testing.T)
     }
 }
 
-/* only the promoted codec silences the walk: an ordinary time.Time field leaves the object shape intact, so its siblings are still enforced */
 func TestValidateStruct_OrdinaryTimeFieldKeepsItsSiblingsValidated(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
@@ -1276,7 +1268,6 @@ func buildNilLeafDepthChain(levels int) nilLeafDepthWrapper {
     return *outermost
 }
 
-/* a nil pointer past the cut has nothing the cut could have truncated — the walk returns no errors for it at any depth — so reporting one would reject a payload for a member it sent as null */
 func TestValidateStruct_DepthCutIgnoresANilMemberPastTheLimit(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
@@ -1300,7 +1291,6 @@ func buildTaglessDepthChain(levels int) *taglessDepthNode {
     return root
 }
 
-/* the counterpart of the depth error: a struct chain declaring no constraint at all is passed however deep it goes, so the cut reports a truncated subtree rather than every subtree */
 func TestValidateStruct_TaglessChainPastTheNestingDepthLimitIsAccepted(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
@@ -1829,7 +1819,6 @@ func TestValidator_TypedNilConstraintErrorIsSuccess(t *testing.T) {
     requireNoValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), typedNilErrorPayload{Value: "anything"}))
 }
 
-/* the registry is append-only, so the missing-name read is unreachable through Validate: the guard is latent and this pins it at the only level it is observable. */
 func TestValidator_CreateConstraintWithParametersRefusesUnregisteredName(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
@@ -1886,11 +1875,10 @@ func (instance *settlementProbeCodec) UnmarshalJSON(data []byte) error {
     return nil
 }
 
-/* the first probe is held open and computes the opposite answer, so the ordering is constructed rather than awaited. */
 func TestValidator_TimeCodecVerdictSettlesOnTheFirstStored(t *testing.T) {
     structType := reflect.TypeOf(settlementProbeCodec{})
 
-    /* the memo is process-global, so a repeated run (-count) finds the verdict already settled and the probe choreography must not replay over closed channels */
+    /* the memo is process-global, so a -count rerun finds the verdict already settled */
     if cached, exists := validationTimeCodecCache.Load(structType); true == exists {
         if true == cached.(bool) {
             t.Fatalf("expected the settled verdict to remain the first stored one")
@@ -1980,7 +1968,6 @@ func TestRefusesValidationObjectBody_APanickingDecoderCountsAsAccepting(t *testi
         t.Fatalf("expected a panicking decoder to count as accepting the object body")
     }
 
-    /* the two sides it sits between: a plain struct accepts an empty object, and a type whose body must be a string refuses it */
     if true == refusesValidationObjectBody(reflect.TypeOf(struct{ Name string }{})) {
         t.Fatalf("expected a plain struct to accept an empty object body")
     }
@@ -2132,7 +2119,6 @@ type dashExcludedEmbedPayload struct {
     DashExcludedEmbedCore `json:"-"`
 }
 
-/* this test is not the proof of the dash guard in isPromotedValidationEmbed: for the exact "-" tag the split check below it answers the same false, so the guard is shadowed there and is proved instead on verdict, by an inversion that stops flattening every plain embed. */
 func TestIsPromotedValidationEmbed_ADashTaggedEmbedIsNeitherFlattenedNorNamed(t *testing.T) {
     encoded, marshalErr := json.Marshal(dashExcludedEmbedPayload{})
     if nil != marshalErr {
@@ -2231,7 +2217,6 @@ func TestValidator_BuildConstraintWithParametersRefusesATypedNilConstruction(t *
     }
 }
 
-/* the segment the parser refused reaches the field error's context, so a long tag names the rule it could not read */
 func TestValidator_TheRefusedTagSegmentReachesTheErrorContext(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
@@ -2264,7 +2249,6 @@ type sharedSubtreeNode struct {
     Right *sharedSubtreeNode `json:"right"`
 }
 
-/* buildSharedSubtree builds levels nodes whose two pointer fields both reach the same next node, so every node is reachable through 2^depth paths; the node two levels below the root carries the empty name. */
 func buildSharedSubtree(levels int) *sharedSubtreeNode {
     node := &sharedSubtreeNode{Name: "leaf"}
     for level := 0; level < levels; level++ {
@@ -2279,7 +2263,7 @@ func buildSharedSubtree(levels int) *sharedSubtreeNode {
     return node
 }
 
-/* every path to a shared subtree reports it, and the subtree is walked once per depth; the 500 ms bound fails a walk that fell back to once per path, which costs 2^20 walks on twenty levels of two pointers */
+/* the 500 ms bound fails a walk per path, 2^20 walks on twenty levels of two pointers */
 func TestValidator_ASharedSubtreeIsWalkedOnceAndReportedUnderEveryPath(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
@@ -2326,13 +2310,12 @@ type sharedDepthRoot struct {
     Deep    *sharedDepthLink   `json:"deep"`
 }
 
-/* The memo is keyed on the depth a pointer is reached at: the same holder reached shallow is walked whole and reports its inner name, reached just under the cap it is cut and reports the nesting depth instead. A memo keyed on the pointer alone would answer the shallow walk for the deep path and report a constraint the cut never enforced. */
 func TestValidator_ASharedPointerReachedAtTwoDepthsIsWalkedAtEach(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
     holder := &sharedDepthHolder{Inner: &sharedDepthItem{Name: ""}}
 
-    /* the holder pointer sits at depth 63 on the deep path: the root struct is depth 0, each link costs a pointer and a struct, and the inner pointer under it is then the first value past the cap */
+    /* the holder pointer sits at depth 63: each link costs a pointer and a struct */
     deep := &sharedDepthLink{Holder: holder}
     for link := 0; link < 30; link++ {
         deep = &sharedDepthLink{Next: deep}
@@ -2355,7 +2338,6 @@ func TestValidator_ASharedPointerReachedAtTwoDepthsIsWalkedAtEach(t *testing.T) 
     }
 }
 
-/* a constraint answering an error under a field of its own is answered verbatim under every path that reaches the shared pointer, and one answering an error type of its own keeps that type under every path */
 type ownFieldConstraintError struct {
     field string
 }
@@ -2447,12 +2429,10 @@ func TestValidator_AConstraintErrorOfItsOwnTypeKeepsItsTypeAndItsPathUnderEveryP
 
 type pathPrefixedOwnFieldConstraint struct{}
 
-/* the own field begins with the text of the walked path — BillingLine under Billing — without lying under it in the walk's grammar */
 func (instance *pathPrefixedOwnFieldConstraint) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
     return NewValidationError("BillingLine", "own message", "own_code", nil)
 }
 
-/* "under the walked path" is a question of the walk's grammar — a member or an element of the path — not of text: an own field that merely begins with the path's spelling was memoized as its textual remainder and recalled glued onto the sibling path, naming a field that does not exist */
 func TestValidator_AnOwnFieldThatOnlyBeginsWithThePathTextIsAnsweredVerbatimUnderEveryPath(t *testing.T) {
     type sharedAddress struct {
         Zip string `validate:"pathPrefixedOwnField"`
@@ -2501,7 +2481,6 @@ func TestValidator_APackageErrorUnderAFieldOfItsOwnIsAnsweredVerbatimUnderEveryP
     }
 }
 
-/* hugeMapKeyBody spells a json object whose one member holds a map under a key of keyLength bytes, above a list of count copies of element. */
 func hugeMapKeyBody(member string, keyLength int, element string, count int) []byte {
     builder := strings.Builder{}
     builder.WriteString(`{"` + member + `":{"`)
@@ -2518,7 +2497,6 @@ func hugeMapKeyBody(member string, keyLength int, element string, count int) []b
     return []byte(builder.String())
 }
 
-/* validationAllocation answers the bytes one Validate call allocates, read from the runtime's cumulative counter, with the call's error. */
 func validationAllocation(validator *Validator, payload any) (uint64, error) {
     runtime.GC()
 
@@ -2533,7 +2511,7 @@ func validationAllocation(validator *Validator, payload any) (uint64, error) {
     return after.TotalAlloc - before.TotalAlloc, err
 }
 
-/* hugeMapKeyAllocationCeiling is the linear budget of the pins below: a hundred times the body, since a walk spends a path segment of a few dozen bytes per element of two. A walk that copies the path of the parent into each element spends the length of that path per element, over a thousand times the body at these sizes. */
+/* a hundred times the body: a walk spends a path segment of a few dozen bytes per element */
 const hugeMapKeyAllocationCeiling = 100
 
 func TestValidator_AHugeMapKeyAboveAListOfStringsCostsAllocationLinearInTheBody(t *testing.T) {
@@ -2592,7 +2570,6 @@ func TestValidator_AHugeMapKeyAboveFailingElementsKeepsTheErrorsAndTheirAllocati
         Groups map[string][]item `json:"groups"`
     }
 
-    /* as many failing elements as the error budget holds, so every one of them is answered */
     body := hugeMapKeyBody("groups", 128*1024, `{}`, maxValidationErrors)
 
     target := payload{}
@@ -2607,7 +2584,6 @@ func TestValidator_AHugeMapKeyAboveFailingElementsKeepsTheErrorsAndTheirAllocati
         t.Fatalf("expected %d errors, got %d", maxValidationErrors, len(errors))
     }
 
-    /* the rendered key is bounded, so a field name stays within a few hundred bytes whatever the key's length */
     for _, validationError := range errors {
         if 256 < len(validationError.Field()) {
             t.Fatalf("expected a field name of at most 256 bytes, got %d", len(validationError.Field()))
@@ -2626,7 +2602,6 @@ func TestValidator_ADeepDocumentOfLongKeysAboveAListCostsAllocationLinearInTheBo
         Metadata any `json:"metadata"`
     }
 
-    /* twenty nested objects under 128-byte keys, each key whole in the path, above a list: the path of the list is kilobytes long, and walking it costs a copy per element unless the path is spelled lazily */
     builder := strings.Builder{}
     builder.WriteString(`{"metadata":`)
     for level := 0; level < 20; level++ {
@@ -2726,7 +2701,6 @@ func TestValidationPath_SpellsTheWalksGrammar(t *testing.T) {
     }
 }
 
-/* deepLongKeyDocument spells levels nested objects under 128-byte keys, each key whole in the path, above a list of count copies of element, and answers the path the walk spells for that list. */
 func deepLongKeyDocument(levels int, element string, count int) ([]byte, string) {
     builder := strings.Builder{}
     builder.WriteString(`{"metadata":`)
@@ -2747,7 +2721,7 @@ func deepLongKeyDocument(levels int, element string, count int) ([]byte, string)
     return []byte(builder.String()), path
 }
 
-/* thirty levels leave the list at depth 63, so each of its elements holds a list the cut truncates; the cut is reported once under the list's path instead of once per element, each spelling a path of kilobytes */
+/* thirty levels leave the list at depth 63 */
 func TestValidator_ADeepListOfTruncatedListsAnswersOneDepthCutUnderTheListsPathWithinTheAllocationCeiling(t *testing.T) {
     type payload struct {
         Metadata any `json:"metadata"`
@@ -2775,7 +2749,6 @@ func TestValidator_ADeepListOfTruncatedListsAnswersOneDepthCutUnderTheListsPathW
     }
 }
 
-/* buildFreeFormNestingAbove nests levels maps under the key "k", the deepest holding the members given, and answers the path the walk spells for the deepest map. */
 func buildFreeFormNestingAbove(levels int, members map[string]any) (map[string]any, string) {
     current := members
     path := "metadata"
@@ -2788,7 +2761,7 @@ func buildFreeFormNestingAbove(levels int, members map[string]any) (map[string]a
     return current, path
 }
 
-/* thirty-two maps under the metadata field leave the deepest at depth 63, so the members it holds are truncated by the cut */
+/* thirty-two maps under the metadata field leave the deepest at depth 63 */
 func TestValidator_ATruncatedMapOfNonEmptyMembersAnswersOneEntryUnderTheMapsPath(t *testing.T) {
     metadata, mapPath := buildFreeFormNestingAbove(32, map[string]any{
         "first":  map[string]any{"leaf": "value"},
@@ -2817,7 +2790,6 @@ func TestValidator_ATruncatedContainerOfNullOrEmptyMembersAnswersNoEntry(t *test
     requireNoValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(testValidationRuntime(), freeFormPayload{Name: "given", Metadata: metadata}))
 }
 
-/* the fields of a struct are fixed by its type, not by the client, so each truncated field keeps its own entry under its own path */
 func TestValidator_TruncatedStructFieldsKeepOneEntryPerFieldUnderTheFieldsPath(t *testing.T) {
     wrapper := &emptyMemberDepthWrapper{
         Items:   []emptyMemberDepthLeaf{{}},
@@ -2896,7 +2868,6 @@ func (instance *alwaysFailingCountingConstraint) Validate(validationContext vali
     return NewValidationError(validationContext.Field, "always fails", "alwaysFails", nil)
 }
 
-/* the budget stops the walk, not only the answer: past the first error over the budget no rule runs, so a body of many failing elements costs no more than the budget */
 func TestValidator_AFlatListOfFailingElementsStopsRunningRulesPastTheBudgetWithinTheAllocationCeiling(t *testing.T) {
     type element struct {
         Name string `json:"name" validate:"alwaysFailingCounting"`
@@ -2934,7 +2905,6 @@ func TestValidator_AFlatListOfFailingElementsStopsRunningRulesPastTheBudgetWithi
     }
 }
 
-/* every door that adds an entry spends the one budget: the depth cut, an unknown rule and a failing rule together */
 func TestValidator_TheBudgetCountsTheErrorsOfEveryDoor(t *testing.T) {
     type element struct {
         Name  string `json:"name" validate:"notBlank"`
@@ -2995,7 +2965,6 @@ type deepPathPayload struct {
     Groups map[string]map[string]map[string]*deepPathLeaf `json:"groups"`
 }
 
-/* three map keys of the full rendered width put the leaf's path past the bound: the answer spells its tail, the member nearest the error, after the marker; the same leaf reached twice through the memo is cut the same way */
 func TestValidator_APathLongerThanTheBoundIsCutAtItsHeadAndKeepsItsTail(t *testing.T) {
     sharedLeaf := &deepPathLeaf{}
     key := strings.Repeat("k", maxRenderedMapKeyLength)
@@ -3026,7 +2995,6 @@ func (instance *longMessageConstraint) Validate(validationContext validationcont
     return NewValidationError(validationContext.Field, strings.Repeat("m", 2048), "longMessage", nil)
 }
 
-/* an application's constraint whose message is long fills the answer's byte budget before its count: the answer closes with the size entry, the walk stopped there */
 func TestValidator_AnAnswerPastTheByteBudgetClosesWithTheSizeEntry(t *testing.T) {
     type element struct {
         Name string `json:"name" validate:"longMessage"`
@@ -3075,7 +3043,6 @@ func depthCutChain(links int) *depthCutNode {
     return head
 }
 
-/* a client-sized list whose elements each reach the depth cut through a struct field spends the budget as a rule's errors do */
 func TestValidator_ADepthCutReachedThroughAStructFieldSpendsTheBudget(t *testing.T) {
     type payload struct {
         Items []*depthCutNode `json:"items"`
@@ -3097,7 +3064,6 @@ func TestValidator_ADepthCutReachedThroughAStructFieldSpendsTheBudget(t *testing
     }
 }
 
-/* a malformed tag on every element of a client-sized list spends the budget */
 func TestValidator_AMalformedTagOnEveryElementSpendsTheBudget(t *testing.T) {
     type element struct {
         Name string `json:"name" validate:"notBlank("`
@@ -3114,7 +3080,6 @@ func TestValidator_AMalformedTagOnEveryElementSpendsTheBudget(t *testing.T) {
     }
 }
 
-/* one leaf shared by every element is answered from the memo after its first walk, and the recalled answers spend the budget */
 func TestValidator_AnAnswerRecalledFromTheMemoSpendsTheBudget(t *testing.T) {
     type payload struct {
         Items []*deepPathLeaf `json:"items"`
@@ -3193,7 +3158,6 @@ func TestNewValidator_AdmitsTheNestingDepthCeiling(t *testing.T) {
     }
 }
 
-/* each configured limit binds the answer in place of its default */
 func TestNewValidator_AppliesEachConfiguredLimit(t *testing.T) {
     countErrors := requireValidationErrors(t, NewValidator(ValidatorConfig{MaxErrors: bound.Of(3)}).Validate(testValidationRuntime(), budgetPayload{Items: make([]budgetElement, 10)}))
     if 4 != len(countErrors) || errorLimitExceededCode != countErrors[3].Code() || 3 != countErrors[3].Context()["maxErrors"] {
@@ -3215,7 +3179,6 @@ func TestNewValidator_AppliesEachConfiguredLimit(t *testing.T) {
     if errs := shallowValidator.Validate(testValidationRuntime(), freeFormPayload{Name: "given", Metadata: buildFreeFormNesting(8)}); nil != errs {
         t.Fatalf("expected 8 levels within a depth of 16, got %v", errs)
     }
-    /* the map's own path is spelled only by the member check, the struct chain's cut only by the walk */
     depthErrors := requireValidationErrors(t, shallowValidator.Validate(testValidationRuntime(), freeFormPayload{Name: "given", Metadata: buildFreeFormNesting(9)}))
     if 1 != len(depthErrors) || ErrorNestingDepthExceeded != depthErrors[0].Code() || 16 != depthErrors[0].Context()["maxDepth"] || "metadata[k][k][k][k][k][k][k]" != depthErrors[0].Field() {
         t.Fatalf("expected 9 levels cut once at the configured depth of 16 under the map's path, got %v", depthErrors)
@@ -3239,7 +3202,6 @@ func TestNewValidator_AppliesEachConfiguredLimit(t *testing.T) {
     }
 }
 
-/* 1,000 entries under paths past the bound are counted as the answer spells them, cut: the answer closes at the count, under the byte budget, where counted whole they would have filled it first */
 func TestValidator_AClientSizedAnswerOfDeepPathsStaysUnderTheByteCeiling(t *testing.T) {
     type payload struct {
         Groups map[string]map[string]map[string]map[string]map[string]*deepPathLeaf `json:"groups"`
@@ -3598,7 +3560,6 @@ func TestValidatorVerifyType_RegisteredAfter_Unknown(t *testing.T) {
 }
 
 func TestValidatorVerifyType_AgreesWithValidate(t *testing.T) {
-    /* leftToTheValue: an interface member's type is chosen per value, so only Validate reaches it */
     rows := []struct {
         name           string
         value          any

@@ -77,7 +77,6 @@ func (instance *typedNilDispatchFailure) Error() string {
     return instance.message
 }
 
-/* a command declaring a concrete error type hands back a typed nil boxed into a non-nil interface: read as the failure it is not, the caller of the dispatch would report a run that succeeded as failed, and the first render of it would dereference the nil receiver */
 func TestDispatchCommand_ReadsATypedNilCommandErrorAsSuccess(t *testing.T) {
     command := &testCommand{
         nameValue:        "probe",
@@ -120,11 +119,10 @@ func TestDispatchCommand_WritesTheCommandsOutputToTheGivenWriter(t *testing.T) {
     }
 }
 
-/* the dispatch adds none of what the registration path adds around a command: no banner on the stream, and no scope close under a caller that still owns it */
 func TestDispatchCommand_AddsNoBannerAndClosesNoScope(t *testing.T) {
     buffer := &bytes.Buffer{}
 
-    /* the scope is built here rather than through the shared fixture so the test owns its close: what is asserted is that the dispatch leaves it open */
+    /* built here, not through the fixture, so the test owns its close */
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     defer scope.CloseWithContext(context.Background())
@@ -152,7 +150,6 @@ func TestDispatchCommand_AddsNoBannerAndClosesNoScope(t *testing.T) {
         t.Fatalf("expected nothing but the command's own output on the stream, got %q", buffer.String())
     }
 
-    /* a closed scope refuses every resolution, so a scope that still answers is one the dispatch left alone — which is what a caller driving many commands through one scope depends on */
     container.MustRegisterScoped(
         runtimeInstance.Scope(),
         "probe.service",
@@ -174,7 +171,6 @@ func TestDispatchCommand_PanicsOnANilCommand(t *testing.T) {
     }, "cli command may not be nil")
 }
 
-/* read through the interface: a caller handing back a typed nil of its own command type produces a non-nil interface that a plain comparison lets through, and the command.Name() read after the guard dereferences it */
 func TestDispatchCommand_PanicsOnATypedNilCommand(t *testing.T) {
     var typedNilCommand *testCommand
 
@@ -198,7 +194,6 @@ func TestDispatchCommand_PanicsOnANilRuntime(t *testing.T) {
     }, "runtime instance may not be nil in cli dispatch")
 }
 
-/* the engine reads arguments[0] as the invoked name and parses the rest: handed nothing at all it would index an empty slice inside the engine, which is a refusal worth naming here */
 func TestDispatchCommand_PanicsOnEmptyArguments(t *testing.T) {
     command := &testCommand{
         nameValue:        "probe",
@@ -214,7 +209,6 @@ func TestDispatchCommand_PanicsOnEmptyArguments(t *testing.T) {
     }, "cli dispatch arguments may not be empty")
 }
 
-/* a typed-nil writer is a non-nil io.Writer and must discard as nil does. The probe writes through the engine: its message about a refused flag, written before any command runs, is the one effect this guard alone produces. */
 func TestDispatchCommand_ATypedNilWriterDiscardsRatherThanPanicking(t *testing.T) {
     var absentBuffer *bytes.Buffer
 
@@ -309,7 +303,6 @@ func TestDispatchCommand_APositionalHelpReachesTheCommandAndTheHelpFlagPrintsThe
     }
 }
 
-/* the dispatch hands the command's own flags to the engine, so it runs the same spelling refusal the registration runs */
 func TestDispatchCommand_RefusesARepeatedFlagSpelling(t *testing.T) {
     command := &testCommand{
         nameValue:        "probe",

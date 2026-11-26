@@ -185,7 +185,6 @@ func TestLessThan_RefusesAParameterThatIsNotAnIntegerInItsEntirety(t *testing.T)
     }
 }
 
-/* a value that is not numeric is refused under its own code, not the bound's: a consumer switching on the code does not read a string as a number above the maximum. */
 func TestLessThan_ANonNumericValueIsRefusedUnderItsOwnCode(t *testing.T) {
     validationError := NewLessThan(10).Validate(validationcontract.ValidationContext{Field: "field"}, "abc")
     if nil == validationError || ConstraintLessThanErrorNotNumeric != validationError.Code() {

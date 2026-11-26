@@ -60,7 +60,6 @@ func TestRoot_CommandNamesAnswersTheRegistrationOrder(t *testing.T) {
     }
 }
 
-/* the engine defaults each command's stream on its own, to the process's standard streams, so the tree's streams are stamped on every command at its registration or the command writes past them */
 func TestNewRoot_Config_WritersReachACommandRegisteredLater(t *testing.T) {
     outputBuffer := &bytes.Buffer{}
     errorBuffer := &bytes.Buffer{}
@@ -110,7 +109,6 @@ func TestNewRoot_Config_VersionEmptyIsUnknown(t *testing.T) {
     }
 }
 
-/* a setter beside the config would be a second door for one value */
 func TestRoot_ExportsNoSetter(t *testing.T) {
     fileSet := token.NewFileSet()
     parsedFile, parseErr := parser.ParseFile(fileSet, "root.go", nil, 0)
@@ -136,7 +134,6 @@ func TestRoot_ExportsNoSetter(t *testing.T) {
     }
 }
 
-/* the tree installs an inert exit handler and the whole cli shutdown path depends on what that buys: the engine must hand the exit-coded error back instead of taking the process down from inside Run, or the application's deferred Close and its structured error log never run. This locks that engine contract, so an upgrade that changes it fails here rather than silently skipping teardown in production. */
 func TestNewRoot_ExitCodedErrorLeavesRunInsteadOfExitingInside(t *testing.T) {
     exitedWith := -1
     originalExiter := urfavecli.OsExiter
@@ -174,7 +171,6 @@ func TestNewRoot_ExitCodedErrorLeavesRunInsteadOfExitingInside(t *testing.T) {
     }
 }
 
-/* the control: the same tree WITHOUT the handler the constructor installs — an engine command built by hand — resolves the exit itself from inside Run, which is exactly the path that skipped the application's teardown. It is what makes the assertion above non-vacuous, and it is why the handler has no door to unset it. */
 func TestNewRoot_WithoutTheInertExitHandlerTheEngineExitsFromInsideRun(t *testing.T) {
     exitedWith := -1
     originalExiter := urfavecli.OsExiter
@@ -203,7 +199,6 @@ func TestNewRoot_WithoutTheInertExitHandlerTheEngineExitsFromInsideRun(t *testin
     }
 }
 
-/* a typed nil stream is the untyped nil for the engine, which then defaults the stream of the tree and of every command on it; copied verbatim it would panic in a command's first write */
 func TestNewRoot_Config_TypedNilWriter_IsTheStandardStream(t *testing.T) {
     rootCommand := NewRoot("app", "desc", RootConfig{Writer: (*bytes.Buffer)(nil), ErrorWriter: (*bytes.Buffer)(nil)})
     rootCommand.Register(&testCommand{nameValue: "probe", descriptionValue: "probe"}, newTestRuntime(t))

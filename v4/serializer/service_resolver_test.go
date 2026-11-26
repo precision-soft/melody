@@ -29,7 +29,6 @@ func TestSoftResolvers_AnswerNilWhenTheLoggerIsMissingToo(t *testing.T) {
     }
 }
 
-/* the container itself refuses a factory handing back a typed nil, so the resolver's own typed-nil branch is LATENT: this pins the whole path, not that branch. */
 func TestSerializerFromRuntime_RefusesATypedNilSerializer(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
@@ -96,7 +95,6 @@ func TestSoftResolvers_AnswerTheRegisteredServices(t *testing.T) {
     }
 }
 
-/* the empty-container pin above proves only that the reporting branch does not panic: a resolver that answered nil without recording anything looks identical from the caller's side, which is why the record is asserted here against a resolvable logger. */
 func TestSoftResolvers_RecordTheResolutionFailureThroughTheLogger(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
@@ -179,7 +177,7 @@ func TestMustResolvers_HandBackTheRegisteredServices(t *testing.T) {
     }
 }
 
-/* both doors panic with the same message, so a message-only assertion is SHADOWED: the service name asked for travels in the context, and that is what each test reads. */
+/* both doors panic with the same message, so the service name in the context is what is asserted */
 func TestSerializerMustFromRuntime_PanicsNamingTheServiceItAskedFor(t *testing.T) {
     assertMustResolverPanicsForService(t, ServiceSerializer, func(runtimeInstance containercontract.Runtime) {
         _ = SerializerMustFromRuntime(runtimeInstance)

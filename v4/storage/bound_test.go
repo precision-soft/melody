@@ -44,7 +44,6 @@ func TestBound_ForwardsEveryRuntimeDoorOfTheContract(t *testing.T) {
             t.Fatalf("the view does not forward %s", door.Name)
         }
 
-        /* the view's method type carries its receiver first */
         if viewMethod.Type.NumIn() != door.Type.NumIn() || viewMethod.Type.NumOut() != door.Type.NumOut() || viewMethod.Type.IsVariadic() != door.Type.IsVariadic() {
             t.Fatalf("%s: the view's signature %s is not the contract's %s less the runtime", door.Name, viewMethod.Type, door.Type)
         }
@@ -123,7 +122,6 @@ func (instance *boundRecordingStorage) PresignedUrl(runtimeInstance containercon
     return "https://signed.example/" + key, boundStorageRecordedErr
 }
 
-/* every field distinct, so a view that drops or rebuilds a part of the info is seen */
 func boundStorageObjectInfo(prefix string) storagecontract.ObjectInfo {
     return storagecontract.ObjectInfo{
         Size:        int64(len(prefix)) + 40,
@@ -170,7 +168,6 @@ func TestBound_EveryMethodReachesItsDoorWithTheBoundRuntimeAndAnswersWhatItAnswe
         }
     }
 
-    /* the reader is handed on as it was given, never wrapped or drained */
     if io.Reader(reader) != recordingStorage.callList[0].arguments[1] {
         t.Fatalf("expected Put to hand the caller's reader by identity")
     }
@@ -221,7 +218,7 @@ func TestBound_AViewOverNoStorageRefusesEveryDoor(t *testing.T) {
     }
 }
 
-/* a package variable, so the direct call is made through the contract as the view makes it, never devirtualized */
+/* a package variable, so the call goes through the contract and is never devirtualized */
 var boundAllocationStorage storagecontract.Storage
 
 func TestBound_BindingAddsNoAllocationToTheContractsCall(t *testing.T) {

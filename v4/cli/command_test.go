@@ -120,7 +120,6 @@ func TestRegister_AppendsCommandAndBindsFields(t *testing.T) {
         t.Fatalf("expected 1 flag, got %d", len(registered.Flags))
     }
 
-    /* the registered flag is the one the command declared: what the registration owes is that the declaration reached the engine under the name it carries */
     registeredFlagNames := registered.Flags[0].Names()
     if 1 != len(registeredFlagNames) || "name" != registeredFlagNames[0] {
         t.Fatalf("expected flag name %q, got %v", "name", registeredFlagNames)
@@ -156,7 +155,6 @@ func TestRegister_PanicsOnDuplicateCommandName(t *testing.T) {
     }, "cli command name already registered")
 }
 
-/* the scope close is weighed beside the container close: its failure reached nothing before, so a scoped service whose teardown failed — a transaction left unfinished, a file left unflushed — ended a command that reported success */
 type closeCountingScope struct {
     containercontract.Scope
     closeCalls int
@@ -168,7 +166,6 @@ func (instance *closeCountingScope) CloseWithContext(closeContext context.Contex
     return instance.Scope.CloseWithContext(closeContext)
 }
 
-/* the positive half of the action's teardown: on a fixture that hands the action an open scope, the close is made */
 func TestRegister_ActionClosesTheScopeOnce(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := &closeCountingScope{Scope: serviceContainer.NewScope()}
@@ -239,7 +236,6 @@ func TestRegister_ActionReportsAFailingScopeClose(t *testing.T) {
     }
 }
 
-/* a close error filed under no name is dropped rather than reported as an anonymous failure: the name is the only thing telling an operator which teardown broke, and "" beside a message is a report that cannot be acted on */
 func TestAggregateCliErrors_DropsAnUnnamedFailure(t *testing.T) {
     runErr := errors.New("command failed")
 
@@ -250,7 +246,6 @@ func TestAggregateCliErrors_DropsAnUnnamedFailure(t *testing.T) {
     }
 }
 
-/* a name registered with a nil error is not a failure: reported as one it would reach Error() on a nil error while building the report */
 func TestAggregateCliErrors_DropsANamedNilFailure(t *testing.T) {
     runErr := errors.New("command failed")
 
@@ -261,7 +256,6 @@ func TestAggregateCliErrors_DropsANamedNilFailure(t *testing.T) {
     }
 }
 
-/* a command that failed WITHOUT an exit code hands back the aggregate itself: wrapping it in an exit error regardless would invent a code the command never chose, and answering the command error alone would drop the shutdown failures that exist nowhere else */
 func TestAggregateCliErrors_AnswersThePlainAggregateWhenTheCommandCarriesNoExitCode(t *testing.T) {
     runErr := errors.New("command failed")
 
@@ -329,7 +323,6 @@ func TestRegister_ActionCallsRunWithRuntimeInstance(t *testing.T) {
     if runtimeInstance != capturedRuntime {
         t.Fatalf("expected runtime to be passed to Run")
     }
-    /* Run receives melody's context bound to the command the engine dispatched, not the engine command itself: the binding is asserted through the stream, which is the registered command's own and nothing else's */
     if nil == capturedCommandContext {
         t.Fatalf("expected a command context to be passed to Run")
     }
@@ -418,7 +411,6 @@ func runRegisteredStandardFlagsCommand(
     return buffer.String()
 }
 
-/* quiet is the documented governor of decoration and the banner is decoration: StandardFlags defaults it to true, so a scripted invocation reads the command's own output alone, and the frame comes back with one explicit --quiet=false */
 func TestRegister_ActionHonoursQuietForTheBanner(t *testing.T) {
     written := runRegisteredStandardFlagsCommand(t, nil)
 
@@ -496,7 +488,6 @@ func runRegisteredCommandWithRuntime(
     return written + errorWritten, runErr
 }
 
-/* runRegisteredCommandOnTwoStreams answers the output stream and the error stream apart, as a shell redirecting one of them sees them */
 func runRegisteredCommandOnTwoStreams(
     runtimeInstance containercontract.Runtime,
     command clicontract.Command,
@@ -637,7 +628,6 @@ func TestRegister_ActionLeavesTheContainerOpenWhenTheCommandSucceeds(t *testing.
     }
 }
 
-/* a panic in the command prints the failed banner and is re-raised unchanged, so the recover handler that owns the process boundary still sees it */
 func TestRegister_ActionPrintsTheFailedBannerAndRepanicsWhenTheCommandPanics(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
 
@@ -684,7 +674,6 @@ func TestRegister_ActionPrintsTheFailedBannerAndRepanicsWhenTheCommandPanics(t *
     }
 }
 
-/* the closes are deliberately left to the outer layers on the panic path: closing the container here would hand the recover handler that resolves the exit logger a closed container, downgrading the fatal record to the emergency fallback */
 func TestRegister_ActionLeavesTheContainerOpenOnThePanicPath(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
 
@@ -706,7 +695,7 @@ func TestRegister_ActionLeavesTheContainerOpenOnThePanicPath(t *testing.T) {
 
     func() {
         defer func() {
-            /* the sentinel: a nil recover means the action's panic was swallowed somewhere below, and the test would pass whatever the container did */
+            /* a nil recover means the panic was swallowed below, and the test would pass whatever happened */
             if nil == recover() {
                 t.Fatalf("expected the action's panic to reach the test")
             }
@@ -732,7 +721,6 @@ func (instance *typedNilErrorCommandFailure) Error() string {
     return instance.message
 }
 
-/* a command that returns its error through a concrete typed pointer hands over a non-nil interface around a nil value: read as a failure it reached Error() on a nil receiver on the printing line and killed the request with a masked panic in place of the success it meant */
 func TestRegister_ActionReadsATypedNilCommandErrorAsSuccess(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
 
@@ -774,7 +762,6 @@ func (instance *failingCloseService) CloseWithContext(closeContext context.Conte
     return errors.New("the backend connection refused to close")
 }
 
-/* asking before closing mirrors the application teardown: a repeated Close answers the first teardown's memoized error, so a command that already closed the container itself — and folded the failure into its own result — would have that one failure presented again as a fresh shutdown incident */
 func TestRegister_ActionDoesNotReportTheCloseFailureOfAContainerTheCommandAlreadyClosed(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
     serviceContainer := runtimeInstance.containerValue
@@ -799,7 +786,6 @@ func TestRegister_ActionDoesNotReportTheCloseFailureOfAContainerTheCommandAlread
         runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             _ = runtimeInstance.Scope().MustGet(runtimeInstance.Context(), "test.failing-close")
 
-            /* the command takes the teardown failure into its own hands: the close error is its to fold into the result */
             closeErr := serviceContainer.CloseWithContext(context.Background())
             if nil == closeErr {
                 t.Fatalf("expected the container close to fail through the registered service")
@@ -820,7 +806,6 @@ func TestRegister_ActionDoesNotReportTheCloseFailureOfAContainerTheCommandAlread
     }
 }
 
-/* a --no-color run redirected into a file carries no escape codes in its banner */
 func TestRegister_ActionPrintsThePlainBannerUnderNoColor(t *testing.T) {
     written := runRegisteredCommand(t, []string{"--no-color"})
 
@@ -832,7 +817,6 @@ func TestRegister_ActionPrintsThePlainBannerUnderNoColor(t *testing.T) {
     }
 }
 
-/* the colored banner is the default: the no-color branch must not take the ansi sequences away from the run that never asked for that */
 func TestRegister_ActionKeepsTheColoredBannerByDefault(t *testing.T) {
     written := runRegisteredCommand(t, nil)
 
@@ -841,7 +825,6 @@ func TestRegister_ActionKeepsTheColoredBannerByDefault(t *testing.T) {
     }
 }
 
-/* chainedCliError carries a cause the way a wrapped command failure does, so errors.As can be walked onto a typed-nil link */
 type chainedCliError struct {
     cause error
 }
@@ -854,7 +837,6 @@ func (instance *chainedCliError) Unwrap() error {
     return instance.cause
 }
 
-/* errors.As matches *ExitError on a typed-nil link and answers code 0, which NewExitError refuses with a panic — after the container was already closed, so the record would reach stderr alone */
 func TestAggregateCliErrors_ATypedNilExitLinkKeepsTheAggregateUnwrapped(t *testing.T) {
     var typedNilExitError *exception.ExitError
     var cause error = typedNilExitError
@@ -896,13 +878,12 @@ func TestAggregateCliErrors_ARealExitLinkKeepsItsCode(t *testing.T) {
         t.Fatalf("expected the command's exit code to survive the aggregation, got %d", exitError.ExitCode())
     }
 
-    /* the aggregate carries the command's own exit error as a cause, so errors.As finds an exit error either way: the one found must be the wrapper around the aggregate, or the shutdown failures never reach the record the exit writes */
     if false == strings.Contains(exitError.Error(), "cli command failed with shutdown errors") {
         t.Fatalf("expected the exit error to carry the shutdown failures, got %q", exitError.Error())
     }
 }
 
-/* the no-color run is the clean proof, because the colored branch writes the framework's own ansi codes around the data: under --no-color every escape byte in the output can only have come from the data, and the flag's comment promises a redirected file free of them. The negative assertions are what the eye cannot check — a raw \r and a raw escape byte render invisibly. */
+/* under --no-color every escape byte in the output can only come from the data */
 func TestRegister_ActionEscapesTheCommandErrorInTheStatusLine(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
 
@@ -964,7 +945,6 @@ func TestRegister_ActionEscapesTheCommandNameInTheStartedBanner(t *testing.T) {
     }
 }
 
-/* the finish banner colours the verdict red on failure, after the escaping that keeps client-derived text from repainting the line: the verdict's own sequence reaches the terminal raw, and a control character in the data around it — here the command's own name — is still spelled visibly. Colour is on by default, so this is the banner of every failed run. */
 func TestRegister_ActionColoursTheFailedVerdictAfterEscapingTheBanner(t *testing.T) {
     command := &testCommand{
         nameValue:        "bo\rom",
@@ -993,7 +973,6 @@ func TestRegister_ActionColoursTheFailedVerdictAfterEscapingTheBanner(t *testing
     }
 }
 
-/* the error line is the one line of the banner on a red background, and the finish lines around it stay green */
 func TestRegister_ActionPrintsTheErrorLineOnTheRedBackground(t *testing.T) {
     command := &testCommand{
         nameValue:        "boom",
@@ -1050,7 +1029,6 @@ func requireSpellingRefusal(t *testing.T, flags []clicontract.Flag, expectedMess
     refuseRepeatedFlagSpellings(flags)
 }
 
-/* the parser resolves a spelling to the FIRST flag declaring it and says nothing about the second: an alias repeating another flag's name is refused at registration */
 func TestRefuseRepeatedFlagSpellings_RefusesAnAliasThatRepeatsAnotherFlagsName(t *testing.T) {
     requireSpellingRefusal(t, []clicontract.Flag{
         &clicontract.StringFlag{Name: "alpha"},
@@ -1065,7 +1043,6 @@ func TestRefuseRepeatedFlagSpellings_RefusesTwoFlagsSharingAnAlias(t *testing.T)
     }, "cli flag spelling declared twice", "a")
 }
 
-/* the engine mounts its own help flag on every command, so a spelling of it declared by the command is parsed in its place and -h runs the command instead of printing the usage */
 func TestRefuseRepeatedFlagSpellings_RefusesASpellingOfTheEnginesHelpFlag(t *testing.T) {
     requireSpellingRefusal(t, []clicontract.Flag{
         &clicontract.StringFlag{Name: "host", Aliases: []string{"h"}},
@@ -1076,7 +1053,6 @@ func TestRefuseRepeatedFlagSpellings_RefusesASpellingOfTheEnginesHelpFlag(t *tes
     }, "cli flag spelling declared twice", "help")
 }
 
-/* a nil HelpFlag is the engine's own way to mount no help flag; there is then no spelling to take over, and the seed must not read it */
 func TestRefuseRepeatedFlagSpellings_AcceptsAnEngineThatMountsNoHelpFlag(t *testing.T) {
     helpFlag := urfavecli.HelpFlag
     urfavecli.HelpFlag = nil
@@ -1087,7 +1063,6 @@ func TestRefuseRepeatedFlagSpellings_AcceptsAnEngineThatMountsNoHelpFlag(t *test
     refuseRepeatedFlagSpellings([]clicontract.Flag{&clicontract.StringFlag{Name: "host", Aliases: []string{"h"}}})
 }
 
-/* a nil flag in the list is refused at registration rather than reaching the engine, which dereferences it on its first parse */
 func TestRefuseRepeatedFlagSpellings_RefusesANilFlag(t *testing.T) {
     var typedNilFlag *clicontract.StringFlag
 
@@ -1165,7 +1140,6 @@ func TestRegister_AFailingCommandWritesItsErrorLineWhateverQuietSays(t *testing.
     }
 }
 
-/* the error line goes to the error stream, so a command whose output is a document never ends it with the line, in text and in json */
 func TestRegister_AFailingCommandWritesItsErrorLineOnTheErrorStream(t *testing.T) {
     for _, formatArgument := range []string{"", "--format=json"} {
         outputBuffer := &bytes.Buffer{}
@@ -1201,7 +1175,6 @@ func TestRegister_AFailingCommandWritesItsErrorLineOnTheErrorStream(t *testing.T
     }
 }
 
-/* the root command an application builds installs the inert exit handler: the engine must hand the exit-coded error back instead of taking the process down from inside Run, or the application's deferred Close and its structured error log never run */
 func TestNewCommandContext_ExitCodedErrorLeavesRunInsteadOfExitingInside(t *testing.T) {
     exitedWith := -1
     originalExiter := urfavecli.OsExiter
@@ -1245,7 +1218,6 @@ func TestNewCommandContext_SetsNameAndUsage(t *testing.T) {
     }
 }
 
-/* the root's streams travel with the registration, since the engine defaults each command's own separately: a command registered on a root that was given its streams writes to them */
 func TestRegister_CopiesTheRootStreamsOntoTheCommand(t *testing.T) {
     outputBuffer := &bytes.Buffer{}
     errorBuffer := &bytes.Buffer{}
@@ -1284,7 +1256,6 @@ func TestRegister_CopiesTheRootStreamsOntoTheCommand(t *testing.T) {
     }
 }
 
-/* the root command's list is the caller's as well, who may append to it directly: a nil entry is skipped by the duplicate walk rather than dereferenced */
 func TestRegister_SkipsANilEntryTheCallerAppended(t *testing.T) {
     rootCommand := NewCommandContext("app", "desc")
     rootCommand.Commands = append(rootCommand.Commands, nil)
@@ -1306,7 +1277,6 @@ func TestRegister_SkipsANilEntryTheCallerAppended(t *testing.T) {
     }
 }
 
-/* the registration runs the spelling refusal over the command's own flags, so a command declaring the engine's help spelling is refused where it is registered */
 func TestRegister_RefusesARepeatedFlagSpelling(t *testing.T) {
     rootCommand := NewCommandContext("app", "desc")
 
@@ -1326,7 +1296,6 @@ func TestRegister_RefusesARepeatedFlagSpelling(t *testing.T) {
     }, "cli flag spelling declared twice")
 }
 
-/* a typed nil stream on the root is the untyped nil for the engine, which then defaults the command's stream; copied verbatim it would panic in the command's first write */
 func TestRegister_CopiesATypedNilRootStreamAsTheNilTheEngineDefaults(t *testing.T) {
     rootCommand := NewCommandContext("app", "desc")
     rootCommand.Writer = (*bytes.Buffer)(nil)

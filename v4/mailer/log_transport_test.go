@@ -188,9 +188,6 @@ func TestLogTransportIsNoOpWithoutLogger(t *testing.T) {
     }
 }
 
-/* the GoDoc of Send says the constructor's logger is PREFERRED and that a nil one falls through to the runtime's, and the constructor's logger is the caller's own value: an application wiring NewLogTransport from a field it resolved into and left nil hands a *capturingLogger that is nil — an interface that is not. The first guard answered false, the runtime was never asked, and the message a request-scoped logger was there to record was dropped; with no runtime logger either it went further and dereferenced at Info, where the document promises a safe no-op.
-
-   The runtime logger is what pins the FIRST guard on its own: the second one reads the same variable, so a probe that only asks whether the send survived is answered by either of them. */
 func TestLogTransport_ATypedNilConstructorLoggerFallsThroughToTheRuntimes(t *testing.T) {
     var absentLogger *capturingLogger
 
@@ -216,7 +213,6 @@ func TestLogTransport_ATypedNilConstructorLoggerFallsThroughToTheRuntimes(t *tes
     }
 }
 
-/* the same typed nil with no runtime logger either: the second guard is the one that keeps the promise, and what it answers is the no-op. */
 func TestLogTransport_ATypedNilLoggerKeepsTheSendASafeNoOp(t *testing.T) {
     var absentLogger *capturingLogger
 

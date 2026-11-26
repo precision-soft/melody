@@ -36,7 +36,6 @@ func TestHandlerDecorator_TracesShortCircuitedRequest(t *testing.T) {
         t.Fatalf("unexpected decorator error: %v", decoratorErr)
     }
 
-    /* the inner handler stands in for the kernel writing a 401 short-circuit before any middleware ran — the exact request shape the middleware seam never observes */
     denied := nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         writer.WriteHeader(nethttp.StatusUnauthorized)
         _, _ = writer.Write([]byte(`{"error":"unauthorized"}`))
@@ -72,7 +71,6 @@ func TestHandlerDecorator_InnerSpanParentsToLifecycleSpan(t *testing.T) {
         t.Fatalf("unexpected decorator error: %v", decoratorErr)
     }
 
-    /* the inner handler starts a child span from the request context, standing in for the routed tracing middleware */
     routed := nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         _, span := tracer.Start(request.Context(), "GET /hello")
         span.End()
@@ -89,7 +87,6 @@ func TestHandlerDecorator_InnerSpanParentsToLifecycleSpan(t *testing.T) {
         t.Fatalf("expected the lifecycle span plus the routed child span, got %d", len(spans))
     }
 
-    /* Ended() lists the child first (it ends first); the child must parent to the lifecycle span */
     child := spans[0]
     lifecycle := spans[1]
 
@@ -130,7 +127,6 @@ func TestHandlerDecorator_RequiresTracer(t *testing.T) {
     }
 }
 
-/* a middleware wrapper between the recorder and the connection that forwards Unwrap alone */
 type unwrapOnlyResponseWriter struct {
     nethttp.ResponseWriter
 }
@@ -161,7 +157,6 @@ func TestStatusRecordingResponseWriter_FlushReachesThroughAWrapperThatForwardsUn
     }
 }
 
-/* the error the server's own writer answers once the client has gone: the header is already committed, and the flush reports the write that failed */
 type failingFlushResponseWriter struct {
     *httptest.ResponseRecorder
 }
@@ -181,7 +176,6 @@ func TestStatusRecordingResponseWriter_AFailedFlushKeepsTheStatusTheConnectionCa
     }
 }
 
-/* a writer with no flusher behind it is a writer the flush committed nothing on */
 type plainResponseWriter struct {
     header nethttp.Header
 }
@@ -371,7 +365,6 @@ func TestHandlerDecorator_TheLifecycleSeamRecordsOneHistogramInSecondsOutsideThe
     }
 }
 
-/* without a meter no lifecycle histogram is built, so boundaries set for it would be dropped; they are refused naming both fields */
 func TestNewHandlerDecorator_DurationBoundariesWithoutAMeterAreRefused(t *testing.T) {
     _, decoratorErr := NewHandlerDecorator(tracenoop.NewTracerProvider().Tracer("boundaries"), HandlerDecoratorConfig{DurationBoundaries: []float64{1, 2}})
     if nil == decoratorErr || false == strings.Contains(decoratorErr.Error(), "HandlerDecoratorConfig.DurationBoundaries is set without HandlerDecoratorConfig.Meter") {

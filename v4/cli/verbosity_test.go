@@ -6,7 +6,6 @@ import (
     "github.com/precision-soft/melody/v4/cli/output"
 )
 
-/* the short verbosity flags are rewritten before the cli library parses anything, because the library has no notion of a repeated letter: -vv means level two here and nothing at all there. Everything else must pass through untouched — a lone dash, a long flag, a short flag that merely starts with v, and everything after the end-of-options terminator, which belongs to the command and not to the runtime. */
 func TestNormalizeVerbosityArguments_RewritesOnlyTheRepeatedVerbosityFlag(t *testing.T) {
     cases := []struct {
         name      string

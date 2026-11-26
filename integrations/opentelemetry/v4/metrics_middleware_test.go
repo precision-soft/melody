@@ -185,7 +185,6 @@ func TestMetricsMiddleware_AnEarlyHintDoesNotHideTheFinalStatus(t *testing.T) {
     }
 }
 
-/* typedNilProneResponse exists so a test can hand the middleware the typed-nil shape a userland error branch produces. Its accessors DEREFERENCE the receiver, like every real response's do: a method body that ignores the receiver would run happily on a nil pointer, and the guard's mutant would survive against a fixture that cannot reproduce the panic it guards against. */
 type typedNilProneResponse struct {
     statusCode int
     headers    nethttp.Header
@@ -347,7 +346,6 @@ func TestCompletedStatusCode_ACommittedStatusDecidesThenTheErrorThenTheResponseT
     }
 }
 
-/* a handler that committed a status and then returned something else has already answered the client: the committed status is the one graphed, over a returned response as over a returned error */
 func TestMetricsMiddleware_ACommittedStatusWinsOverWhatTheHandlerReturnsAfterIt(t *testing.T) {
     for name, returned := range map[string]func() (httpcontract.Response, error){
         "a returned response": func() (httpcontract.Response, error) {
@@ -477,7 +475,6 @@ func TestMetricsMiddleware_RecordsTheConventionsDurationInSecondsWithAnIntegerSt
     }
 }
 
-/* behind a TLS-terminating trusted proxy the connection is plain while the kernel resolved https: the series follows the kernel, as the access log does, and a request with no resolved scheme reads its connection */
 func TestMetricsMiddleware_UrlSchemeFollowsTheKernelsResolvedScheme(t *testing.T) {
     for _, scenario := range []struct {
         name           string
@@ -553,7 +550,6 @@ func TestDefaultDurationBoundaries_AnswersAFreshCopyOfTheConventionsList(t *test
     }
 }
 
-/* an empty list would build a histogram with no buckets, a sum and a count only, so it is refused rather than read as left out */
 func TestNewMetricsMiddleware_AnEmptyDurationBoundariesListIsRefused(t *testing.T) {
     meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewManualReader())).Meter("empty")
 

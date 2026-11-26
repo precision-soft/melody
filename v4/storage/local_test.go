@@ -98,7 +98,6 @@ func TestNewLocalStorage_RefusesABaseDirectoryThatIsAFile(t *testing.T) {
     }
 }
 
-/* root opens a directory whatever its mode, so this pin runs only off-root: in the root container of the gate it is skipped */
 func TestNewLocalStorage_RefusesABaseDirectoryItCannotOpen(t *testing.T) {
     if 0 == os.Geteuid() {
         t.Skip("root opens a directory whatever its mode")
@@ -122,7 +121,6 @@ func TestNewLocalStorage_RefusesABaseDirectoryItCannotOpen(t *testing.T) {
     }
 }
 
-/* every operation reopens the base directory, so one replaced after the construction is the one written to */
 func TestLocalStorage_PutWritesIntoABaseDirectoryReplacedAfterTheConstruction(t *testing.T) {
     base := filepath.Join(t.TempDir(), "base")
     local := NewLocalStorage(base, LocalStorageConfig{})
@@ -166,7 +164,6 @@ func TestLocalStorage_RejectsPathTraversal(t *testing.T) {
     }
 }
 
-/* an application that isolates its callers by key prefix and appends a client-chosen name is crossed by a ".." segment once it folds, so every door refuses it by name and the other prefix's object is neither read, overwritten, deleted nor reported */
 func TestLocalStorage_RefusesAParentSegmentAtEveryDoor(t *testing.T) {
     local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
     runtimeInstance := testRuntime()
@@ -351,7 +348,6 @@ func TestLocalStorage_PutRemovesPartialObjectOnReaderError(t *testing.T) {
         t.Fatalf("expected put to fail when the source reader errors mid-stream")
     }
 
-    /* "copy", not "write": io.Copy answers one error for both sides, and on an upload streamed from a request body the likelier one is the READER dying with the client — a message blaming the storage write sends the operator at the disk when the source connection failed */
     if false == strings.Contains(putErr.Error(), "could not copy the payload") {
         t.Fatalf("expected the failure to name the copy, got %v", putErr)
     }
@@ -364,8 +360,6 @@ func TestLocalStorage_PutRemovesPartialObjectOnReaderError(t *testing.T) {
         t.Fatalf("expected no object on disk after a failed put, but a partial object remains")
     }
 }
-
-/* a failed overwrite must not destroy the object already stored (atomic put) */
 
 func TestLocalStorage_FailedOverwritePreservesPriorObject(t *testing.T) {
     base := t.TempDir()
@@ -498,7 +492,6 @@ func TestLocalStorage_NegativeSizeMeansUnknownAndSkipsTheLengthCheck(t *testing.
     storage := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
-    /* the contract's documented convention: a negative size is "length unknown" (the io convention http.Request.ContentLength uses), so the backend stores whatever the reader yields — while a non-negative declaration is verified strictly */
     if putErr := storage.Put(runtimeInstance, "unknown-size.txt", strings.NewReader("payload"), -1, storagecontract.PutOptions{}); nil != putErr {
         t.Fatalf("expected the unknown-size put to succeed, got %v", putErr)
     }
@@ -508,7 +501,7 @@ func TestLocalStorage_NegativeSizeMeansUnknownAndSkipsTheLengthCheck(t *testing.
     }
 }
 
-/* the reserved temporary name is spelled here from the digest rather than read from the helper, so a change to the namespace fails this file instead of moving with it */
+/* spelled from the digest, not read from the helper, so a namespace change fails here */
 func reservedTemporaryName(leaf string, randomPart string) string {
     digest := sha256.Sum256([]byte(leaf))
 
@@ -539,13 +532,9 @@ func TestLocalStorage_PutSweepsStaleTemporaryObjectsAndKeepsLiveOnes(t *testing.
         return planted
     }
 
-    /* a crash mid-write leaves this shape behind, which nothing sweeps but a later Put of the same key */
     staleTemporary := plant(reservedTemporaryName("report.txt", "00112233445566aa"), "orphan", true)
-    /* a fresh temporary is a concurrent writer still at work */
     freshTemporary := plant(reservedTemporaryName("report.txt", "ffeeddccbbaa9988"), "in flight", false)
-    /* a stale temporary of another key is that key's to sweep, and only that key's */
     otherKeyTemporary := plant(reservedTemporaryName("invoice.txt", "00112233445566aa"), "orphan of another key", true)
-    /* an ordinary key that reads like a temporary name is an object the application stored */
     lookalikeKey := plant("report.txt.tmp-00112233445566aa", "application data", true)
     reservedButNotGenerated := plant(reservedTemporaryName("report.txt", "notahexsuffix!!!"), "operator data", true)
 
@@ -712,7 +701,6 @@ func TestLocalStorage_RefusesAKeySpelledLikeAReservedTemporaryObject(t *testing.
     }
 }
 
-/* a leaf of 255 bytes is the longest a filesystem component admits; the temporary object beside it must fit the same component */
 func TestLocalStorage_PutStoresAKeyWhoseLeafFillsTheFilesystemComponent(t *testing.T) {
     baseDirectory := t.TempDir()
     storage := NewLocalStorage(baseDirectory, LocalStorageConfig{})
@@ -743,7 +731,6 @@ func TestLocalStorage_PutStoresAKeyWhoseLeafFillsTheFilesystemComponent(t *testi
     }
 }
 
-/* a local directory has no signing authority to delegate a read or a write to, so the door refuses with the sentinel a caller falls back on, rather than handing out a path a client could not use */
 func TestLocalStorage_PresignedUrlIsRefusedAsUnsupported(t *testing.T) {
     local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
 
@@ -759,7 +746,6 @@ func TestLocalStorage_PresignedUrlIsRefusedAsUnsupported(t *testing.T) {
     }
 }
 
-/* a key whose directory cannot be created inside the base is refused by its own sentence, apart from the base directory's, and the refusal names the directory. */
 func TestLocalStorage_ADirectoryInTheWayIsRefusedNamingTheObjectDirectory(t *testing.T) {
     baseDirectory := t.TempDir()
     if writeErr := os.WriteFile(filepath.Join(baseDirectory, "labels"), []byte("in the way"), 0o644); nil != writeErr {
@@ -779,7 +765,6 @@ func TestLocalStorage_ADirectoryInTheWayIsRefusedNamingTheObjectDirectory(t *tes
     }
 }
 
-/* countingReader yields a stream far longer than any declared size in these tests, a megabyte, and counts how many bytes it handed out */
 type countingReader struct {
     yielded int64
 }
@@ -801,7 +786,6 @@ func (instance *countingReader) Read(buffer []byte) (int, error) {
     return int(count), nil
 }
 
-/* a declared size bounds the copy at one byte past it: a reader that runs longer is refused once that byte arrives instead of being read, and written to disk, to its end */
 func TestLocalStorage_PutStopsReadingOneBytePastTheDeclaredSize(t *testing.T) {
     local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
     reader := &countingReader{}
@@ -820,7 +804,6 @@ func TestLocalStorage_PutStopsReadingOneBytePastTheDeclaredSize(t *testing.T) {
     }
 }
 
-/* a nil reader is refused by name before anything is created, so neither a temporary object nor a directory is left behind */
 func TestLocalStorage_PutRefusesANilReaderBeforeCreatingAnything(t *testing.T) {
     base := filepath.Join(t.TempDir(), "base")
     local := NewLocalStorage(base, LocalStorageConfig{})
@@ -835,7 +818,6 @@ func TestLocalStorage_PutRefusesANilReaderBeforeCreatingAnything(t *testing.T) {
     }
 }
 
-/* a key naming a directory is a prefix, not an object: Delete refuses it with ErrKeyIsDirectory and removes nothing, an empty directory included, which Remove alone would delete */
 func TestLocalStorage_DeleteOfAKeyNamingADirectoryIsRefused(t *testing.T) {
     base := t.TempDir()
     local := NewLocalStorage(base, LocalStorageConfig{})
@@ -874,7 +856,6 @@ func TestLocalStorage_DeleteOfAKeyNamingADirectoryIsRefused(t *testing.T) {
     }
 }
 
-/* the leaf is read without following a symlink: a link to a directory inside the base is an object of its own and is removed as a link, its target kept */
 func TestLocalStorage_DeleteRemovesASymlinkToADirectoryAsALink(t *testing.T) {
     base := t.TempDir()
     local := NewLocalStorage(base, LocalStorageConfig{})
@@ -901,7 +882,6 @@ func TestLocalStorage_DeleteRemovesASymlinkToADirectoryAsALink(t *testing.T) {
     }
 }
 
-/* a key that runs through a regular file names no object: Exists answers false and Delete answers nil, where both answered the operating system's "not a directory" */
 func TestLocalStorage_AKeyUnderARegularFileIsAbsent(t *testing.T) {
     local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
     runtimeInstance := testRuntime()
@@ -920,7 +900,6 @@ func TestLocalStorage_AKeyUnderARegularFileIsAbsent(t *testing.T) {
     }
 }
 
-/* removingDirectoryReader removes a directory once it is read, standing in for a temporary object or its directory removed under a short write */
 type removingDirectoryReader struct {
     directory string
     done      bool
@@ -939,7 +918,6 @@ func (instance *removingDirectoryReader) Read(buffer []byte) (int, error) {
     return 1, nil
 }
 
-/* a temporary object lost on a write far shorter than the stale age was not swept: the error says it is gone, and does not claim the sweep */
 func TestLocalStorage_ATempLostOnAShortWriteIsNotBlamedOnTheSweep(t *testing.T) {
     base := t.TempDir()
     local := NewLocalStorage(base, LocalStorageConfig{})
@@ -1001,7 +979,6 @@ func TestLocalStorage_GetAnswersTheObjectWithItsInfo(t *testing.T) {
         t.Fatalf("expected the modification time of the put, got %v outside %v..%v", object.Info.ModifiedAt, before, after)
     }
 
-    /* the key asked, as given, not the path it folds to */
     if "labels\\awb-1.txt" != object.Info.Key {
         t.Fatalf("expected the key asked, got %q", object.Info.Key)
     }
@@ -1054,7 +1031,6 @@ func TestLocalStorage_TheEntityTagMovesWithEveryStore(t *testing.T) {
     }
 }
 
-/* every refusal answers the zero object, so a caller that forgets the error closes nothing and reads nothing */
 func TestLocalStorage_GetAnswersNoBodyBesideAnError(t *testing.T) {
     base := t.TempDir()
     local := NewLocalStorage(base, LocalStorageConfig{})
@@ -1096,7 +1072,6 @@ func TestLocalStorage_StatAnswersTheInfoGetAnswers(t *testing.T) {
     }
 }
 
-/* each row runs against both doors and is compared by cause, so the two cannot drift on what an object is */
 func TestLocalStorage_StatRefusesWhatGetRefuses(t *testing.T) {
     base := t.TempDir()
     outside := t.TempDir()
@@ -1263,7 +1238,7 @@ func TestLocalStorage_GetReadsTheRangeAsked(t *testing.T) {
     }
 }
 
-/* the metadata name is spelled here from the digest rather than read from the helper, so a change to the namespace fails this file instead of moving with it */
+/* spelled from the digest, not read from the helper, so a namespace change fails here */
 func reservedMetadataName(leaf string) string {
     digest := sha256.Sum256([]byte(leaf))
 
@@ -1445,7 +1420,6 @@ func TestLocalStorage_UnreadableMetadataIsNoContentType(t *testing.T) {
     }
 }
 
-/* a metadata object far past the bound, sparse so it costs no disk, is read no further than the bound: the read allocates a fraction of its size */
 func TestLocalStorage_AMetadataObjectIsReadNoFurtherThanItsBound(t *testing.T) {
     base := t.TempDir()
     local := NewLocalStorage(base, LocalStorageConfig{})
@@ -1493,7 +1467,7 @@ func TestLocalStorage_GetRefusesANegativeRangeBeforeLookingForTheObject(t *testi
     }
 }
 
-/* the metadata encoding of the longest size and modification time spends 87 bytes beside the content type, so 4009 ascii bytes is the longest one admitted */
+/* the longest size and modification time spend 87 metadata bytes, leaving 4009 for the content type */
 func TestLocalStorage_PutRefusesAContentTypeTooLongToBeReadBack(t *testing.T) {
     base := t.TempDir()
     local := NewLocalStorage(base, LocalStorageConfig{})
@@ -1548,7 +1522,6 @@ func TestLocalStorage_RefusesAReservedNameAsAnySegmentOfTheKey(t *testing.T) {
     }
 }
 
-/* temporaryRemovingReader unlinks the key's temporary objects once it is read, so the write completes on an unlinked file and its rename fails */
 type temporaryRemovingReader struct {
     directory string
     done      bool
@@ -1595,7 +1568,6 @@ func TestLocalStorage_AFailedObjectRenameKeepsThePreviousContentType(t *testing.
     }
 }
 
-/* only a writer of the base directory can squat the metadata name now that no key may name it, but a failure there still answers the Put an error over the object it stored */
 func TestLocalStorage_AMetadataWriteThatFailsAnswersAnErrorOverTheStoredObject(t *testing.T) {
     base := t.TempDir()
     local := NewLocalStorage(base, LocalStorageConfig{})
@@ -1620,7 +1592,6 @@ func TestLocalStorage_AMetadataWriteThatFailsAnswersAnErrorOverTheStoredObject(t
     }
 }
 
-/* every door refuses a nil runtime before it touches the base directory, as the cache, the http client and the session do */
 func TestLocalStorage_EveryDoorRefusesANilRuntimeFirst(t *testing.T) {
     local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
 

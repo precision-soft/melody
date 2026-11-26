@@ -89,7 +89,6 @@ func TestExitError_CarriesItsErrorThroughUnwrapAndErrorValue(t *testing.T) {
     }
 }
 
-/* Unwrap is the one door errors.Is calls on every link, so a typed-nil *ExitError stored as a cause reached it before any guard */
 func TestExitError_UnwrapOnANilReceiverAnswersNil(t *testing.T) {
     var typedNil *ExitError
 
@@ -116,7 +115,6 @@ func TestExitError_NilReceiverAccessorsAnswerInsteadOfDereferencing(t *testing.T
         t.Fatalf("expected a nil receiver to answer no error value")
     }
 
-    /* the shape that reaches it: a typed-nil wrapper found through the chain by errors.As */
     wrapped := NewError("command failed", nil, typedNil)
 
     var found *ExitError

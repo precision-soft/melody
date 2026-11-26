@@ -216,7 +216,6 @@ func TestAsHttpException_TypedNilIsRefusedInsteadOfDereferenced(t *testing.T) {
     }
 }
 
-/* errors.Is walks through this link on a nil receiver whenever a typed-nil *HttpException sits in a chain as a cause; errors.As with the http target does not, because it finds the typed nil assignable before unwrapping it */
 func TestHttpException_UnwrapOnANilReceiverAnswersNil(t *testing.T) {
     var typedNil *HttpException
 
@@ -236,7 +235,6 @@ func TestHttpException_UnwrapOnANilReceiverAnswersNil(t *testing.T) {
     }
 }
 
-/* the guard Error.Error carries, on this type: a typed-nil *HttpException stored as a cause is rendered through Error before any caller's guard */
 func TestHttpException_ErrorOnANilReceiverAnswersInsteadOfDereferencing(t *testing.T) {
     var typedNil *HttpException
 
@@ -250,7 +248,6 @@ func TestHttpException_ErrorOnANilReceiverAnswersInsteadOfDereferencing(t *testi
     }
 }
 
-/* every accessor answers the nil receiver, as every accessor of ExitError does. */
 func TestHttpException_EveryAccessorAnswersTheNilReceiver(t *testing.T) {
     var typedNil *HttpException
 
@@ -263,7 +260,6 @@ func TestHttpException_EveryAccessorAnswersTheNilReceiver(t *testing.T) {
     typedNil.MarkAsLogged()
 }
 
-/* AsHttpException is asked by the kernel's recovery about whatever a panic carried; an As that panicked raised a second panic there */
 func TestAsHttpException_AChainWhoseSearchPanicsHoldsNone(t *testing.T) {
     if nil != AsHttpException(panickingAsError{}) || nil != AsHttpException(panickingUnwrapError{}) {
         t.Fatalf("expected a chain that cannot be searched to hold no http exception")
