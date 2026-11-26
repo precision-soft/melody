@@ -103,7 +103,7 @@ func (instance *FileServer) ServeReader(
     request httpcontract.Request,
     logger loggingcontract.Logger,
 ) (int, nethttp.Header, io.ReadCloser, bool) {
-    logger = logging.EnsureLogger(logger)
+    logger = resolveServeLogger(logger, "FileServer.ServeReader")
 
     if true == internal.IsNilInterface(request) {
         logger.Warning("static serve reader skipped because request is nil", nil)
@@ -168,7 +168,7 @@ func (instance *FileServer) Serve(
     request httpcontract.Request,
     logger loggingcontract.Logger,
 ) (int, nethttp.Header, []byte, bool) {
-    logger = logging.EnsureLogger(logger)
+    logger = resolveServeLogger(logger, "FileServer.Serve")
 
     if true == internal.IsNilInterface(request) {
         logger.Warning("static serve skipped because request is nil", nil)
@@ -553,8 +553,6 @@ func (instance *FileServer) serveForStreaming(
     request httpcontract.Request,
     logger loggingcontract.Logger,
 ) (int, nethttp.Header, fs.File, fs.FileInfo, bool) {
-    logger = logging.EnsureLogger(logger)
-
     if true == internal.IsNilInterface(request) {
         return 0, nil, nil, nil, false
     }
@@ -630,4 +628,14 @@ func logOpenFailure(logger loggingcontract.Logger, relativePath string, openErr 
     }
 
     logger.Debug("static serve open failed", logContext)
+}
+
+/* resolveServeLogger answers the logger a serve reports its read failures and refusals in: the emergency logger when none is handed; a typed nil is a wiring defect and panics, naming the door's argument. */
+func resolveServeLogger(logger loggingcontract.Logger, door string) loggingcontract.Logger {
+    resolved, resolveErr := logging.ResolveOptionalLogger(logger, "static file server", door+".logger")
+    if nil != resolveErr {
+        exception.Panic(exception.FromError(resolveErr))
+    }
+
+    return resolved
 }

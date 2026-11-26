@@ -189,7 +189,7 @@ Implemented in:
 #### Utilities
 
 - [`GenerateProcessId()`](../../logging/process_id.go)
-- [`EnsureLogger(logger loggingcontract.Logger)`](../../logging/nop_logger.go)
+- [`ResolveOptionalLogger(logger loggingcontract.Logger, component string, field string) (loggingcontract.Logger, error)`](../../logging/optional_logger.go) — the reading of an optional logger, the [optional dependency](./CONTAINER.md#optional-dependencies) rule: the handed one, the emergency logger when nil, reached on every record so a component built before `CloseEmergencyLogger` still writes after it, and a typed nil refused as `<component> logger is a typed nil` naming `field`
 - [`IsValidLevel(value loggingcontract.Level)`](../../logging/logger.go)
 - [`LogError(logger loggingcontract.Logger, err error)`](../../logging/logger.go)
 

@@ -8,7 +8,6 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
-    clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -220,17 +219,13 @@ func TestMemoryNonceGuard_ExpiryRunsOnTheInjectedClock(t *testing.T) {
 }
 
 func TestNewMemoryNonceGuard_ANilClockIsTheSystemClock(t *testing.T) {
-    var unassignedClock *clock.FrozenClock
+    guard := NewMemoryNonceGuard(MemoryNonceGuardConfig{})
 
-    for _, clockInstance := range []clockcontract.Clock{nil, unassignedClock} {
-        guard := NewMemoryNonceGuard(MemoryNonceGuardConfig{Clock: clockInstance})
+    guard.Remember(nil, "n", bound.Of(time.Minute))
 
-        guard.Remember(nil, "n", bound.Of(time.Minute))
-
-        expiry := guard.expiryByNonce["n"]
-        if true == expiry.Before(time.Now().Add(59*time.Second)) || true == expiry.After(time.Now().Add(61*time.Second)) {
-            t.Fatalf("expected the expiry stamped on the system clock, got %v", expiry)
-        }
+    expiry := guard.expiryByNonce["n"]
+    if true == expiry.Before(time.Now().Add(59*time.Second)) || true == expiry.After(time.Now().Add(61*time.Second)) {
+        t.Fatalf("expected the expiry stamped on the system clock, got %v", expiry)
     }
 }
 

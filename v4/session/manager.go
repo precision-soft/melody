@@ -118,9 +118,9 @@ func NewManager(storage sessioncontract.Storage, config ManagerConfig) *Manager 
         exception.Panic(exception.FromError(storageTimeoutErr))
     }
 
-    clockInstance := config.Clock
-    if true == internal.IsNilInterface(clockInstance) {
-        clockInstance = clock.NewSystemClock()
+    clockInstance, clockErr := clock.ResolveOptionalClock(config.Clock, "session manager", "ManagerConfig.Clock")
+    if nil != clockErr {
+        exception.Panic(exception.FromError(clockErr))
     }
 
     manager := &Manager{

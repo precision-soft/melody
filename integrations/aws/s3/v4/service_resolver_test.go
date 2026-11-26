@@ -43,7 +43,7 @@ func newOfflineTestClient(t *testing.T) *minio.Client {
 func TestRegisterStorageServiceUsesCoreStorageName(t *testing.T) {
     registrar := &recordingRegistrar{}
 
-    RegisterStorageService(registrar, newOfflineTestClient(t), "example-bucket", StorageConfig{})
+    registerStorageService(registrar, newOfflineTestClient(t), "example-bucket", StorageConfig{}, BucketCheckConfig{})
 
     if 0 == len(registrar.names) || melodystorage.ServiceStorage != registrar.names[0] {
         t.Fatalf("expected %q to be registered, got %v", melodystorage.ServiceStorage, registrar.names)
@@ -62,7 +62,7 @@ func TestRegisterStorageServiceRefusesANilClientAtRegistration(t *testing.T) {
         }
     }()
 
-    RegisterStorageService(&recordingRegistrar{}, nil, "example-bucket", StorageConfig{})
+    registerStorageService(&recordingRegistrar{}, nil, "example-bucket", StorageConfig{}, BucketCheckConfig{})
 }
 
 func TestRegisterStorageServiceRefusesAnEmptyBucketAtRegistration(t *testing.T) {
@@ -77,7 +77,7 @@ func TestRegisterStorageServiceRefusesAnEmptyBucketAtRegistration(t *testing.T) 
         }
     }()
 
-    RegisterStorageService(&recordingRegistrar{}, newOfflineTestClient(t), "", StorageConfig{})
+    registerStorageService(&recordingRegistrar{}, newOfflineTestClient(t), "", StorageConfig{}, BucketCheckConfig{})
 }
 
 func recoveredText(recovered any) string {
@@ -105,7 +105,7 @@ func TestRegisterStorageServiceRefusesALimitOutsideItsRuleAtRegistration(t *test
             }
         }()
 
-        RegisterStorageService(registrar, newOfflineTestClient(t), "example-bucket", StorageConfig{PutSpoolLimit: bound.Of(0)})
+        registerStorageService(registrar, newOfflineTestClient(t), "example-bucket", StorageConfig{PutSpoolLimit: bound.Of(0)}, BucketCheckConfig{})
     }()
 
     if 0 != len(registrar.names) {
@@ -116,7 +116,7 @@ func TestRegisterStorageServiceRefusesALimitOutsideItsRuleAtRegistration(t *test
 func TestRegisterStorageServiceHandsTheGivenConfigToTheStorage(t *testing.T) {
     registrar := &recordingRegistrar{}
 
-    RegisterStorageService(registrar, newOfflineTestClient(t), "example-bucket", StorageConfig{PutSpoolLimit: bound.Of(1024), MultipartAbortTimeout: bound.Of(time.Second)})
+    registerStorageService(registrar, newOfflineTestClient(t), "example-bucket", StorageConfig{PutSpoolLimit: bound.Of(1024), MultipartAbortTimeout: bound.Of(time.Second)}, BucketCheckConfig{})
 
     factory, isFactory := registrar.providers[0].(func(resolver containercontract.Resolver) (storagecontract.Storage, error))
     if false == isFactory {

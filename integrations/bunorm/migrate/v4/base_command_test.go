@@ -35,10 +35,10 @@ func (instance *stubProvider) OpenForMigration(runtimeInstance containercontract
 
 func TestResolveDatabase_UnknownManagerReturnsErrorInsteadOfPanic(t *testing.T) {
     registry, registryErr := bunorm.NewManagerRegistry(
-        logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
             bunorm.ProviderDefinition{Name: "primary", Provider: &stubProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
+        bunorm.ManagerRegistryConfig{Logger: logging.NewNopLogger()},
     )
     if nil != registryErr {
         t.Fatalf("failed to build manager registry: %s", registryErr.Error())
@@ -98,11 +98,11 @@ func pinTestRegistry(t *testing.T) *bunorm.ManagerRegistry {
     paymentDatabase, _ := newFakeBunDatabase()
 
     registry, registryErr := bunorm.NewManagerRegistry(
-        logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
             bunorm.ProviderDefinition{Name: "platform", Provider: &fakeDatabaseProvider{database: platformDatabase}, Parameters: testConnectionParameters, IsDefault: true},
             bunorm.ProviderDefinition{Name: "payment", Provider: &fakeDatabaseProvider{database: paymentDatabase}, Parameters: testConnectionParameters},
         },
+        bunorm.ManagerRegistryConfig{Logger: logging.NewNopLogger()},
     )
     if nil != registryErr {
         t.Fatalf("failed to build manager registry: %s", registryErr.Error())
@@ -285,7 +285,6 @@ func TestResolveDatabase_PrefersTheDedicatedMigrationConnection(t *testing.T) {
     migrationDatabase, _ := newFakeBunDatabase()
 
     registry, registryErr := bunorm.NewManagerRegistry(
-        logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
             bunorm.ProviderDefinition{
                 Name:       "primary",
@@ -294,6 +293,7 @@ func TestResolveDatabase_PrefersTheDedicatedMigrationConnection(t *testing.T) {
                 IsDefault:  true,
             },
         },
+        bunorm.ManagerRegistryConfig{Logger: logging.NewNopLogger()},
     )
     if nil != registryErr {
         t.Fatalf("failed to build manager registry: %s", registryErr.Error())
@@ -431,10 +431,10 @@ func TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection(t *testin
     }
 
     registry, registryErr := bunorm.NewManagerRegistry(
-        logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
             bunorm.ProviderDefinition{Name: "primary", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
+        bunorm.ManagerRegistryConfig{Logger: logging.NewNopLogger()},
     )
     if nil != registryErr {
         t.Fatalf("failed to build manager registry: %s", registryErr.Error())
@@ -507,10 +507,10 @@ func TestResolveDatabase_TheReleaseReportsAFailedClose(t *testing.T) {
     }
 
     registry, registryErr := bunorm.NewManagerRegistry(
-        logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
             bunorm.ProviderDefinition{Name: "primary", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
+        bunorm.ManagerRegistryConfig{Logger: logging.NewNopLogger()},
     )
     if nil != registryErr {
         t.Fatalf("failed to build manager registry: %s", registryErr.Error())
@@ -597,10 +597,10 @@ func TestResolveDatabase_TheSuccessfulReleaseIsSilent(t *testing.T) {
     }
 
     registry, registryErr := bunorm.NewManagerRegistry(
-        logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
             bunorm.ProviderDefinition{Name: "primary", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
+        bunorm.ManagerRegistryConfig{Logger: logging.NewNopLogger()},
     )
     if nil != registryErr {
         t.Fatalf("failed to build manager registry: %s", registryErr.Error())
@@ -771,10 +771,10 @@ func TestResolveDatabase_ACancelledRunRefusesBeforeTheDial(t *testing.T) {
     provider := &migrationCapableTestProvider{migrationDatabase: migrationDatabase}
 
     registry, registryErr := bunorm.NewManagerRegistry(
-        logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
             bunorm.ProviderDefinition{Name: "primary", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
+        bunorm.ManagerRegistryConfig{Logger: logging.NewNopLogger()},
     )
     if nil != registryErr {
         t.Fatalf("failed to build manager registry: %s", registryErr.Error())

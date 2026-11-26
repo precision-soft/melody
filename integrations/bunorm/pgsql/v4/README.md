@@ -110,19 +110,13 @@ defer namedLock.Release(runtime)
 
 ### Registering it
 
-Publish the locker under the core locker service name, so handlers resolve it through `lock.LockerMustFromResolver` without naming this package:
+The module publishes the locker under the core locker service name, so handlers resolve it through `lock.LockerMustFromResolver` without naming this package. `ModuleConfig.Locker` is the locker's configuration: nil registers none, a pointer registers it, and one handed with a nil database is refused at boot naming the field:
 
 ```go
-pgsql.RegisterLockerService(registrar, database, pgsql.LockerConfig{})
+app.RegisterModule(pgsql.NewModule(pgsql.ModuleConfig{Database: database, Locker: &pgsql.LockerConfig{}}))
 ```
 
-The configuration is resolved at the call, so a refused `ReleaseTimeout` panics at the wiring, not at the first lock. Or bundle it as a self-registering application module — one `RegisterModule` call registers the locker (opt-in via `AsLocker`, refused at boot when the database is nil), configured by `ModuleConfig.Locker`:
-
-```go
-app.RegisterModule(pgsql.NewModule(pgsql.ModuleConfig{Database: database, AsLocker: true}))
-```
-
-A process that wires two lock backends registers the second under a name of its own rather than calling this twice: the door claims the framework's one locker name, and the point of that name is that an application asks for "the locker" and receives whichever backend it configured.
+The configuration is resolved at the registration, so a refused `ReleaseTimeout` panics at the wiring, not at the first lock. A process that wires two lock backends registers the second under a name of its own: the module claims the framework's one locker name, and the point of that name is that an application asks for "the locker" and receives whichever backend it configured.
 
 ## Advanced connector customization
 

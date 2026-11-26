@@ -15,7 +15,9 @@ import (
     "unicode/utf8"
 
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/exception"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     redisclient "github.com/redis/rueidis"
@@ -256,13 +258,14 @@ func TestProvider_OpenWithRetry_ReportsEachRetryAndTheExhaustionOnTheLoggerItIsH
 }
 
 func TestProvider_WithoutALoggerTheRetryReportsReachTheEmergencyLogger(t *testing.T) {
-    if logging.EmergencyLogger() != NewProvider("melody", ProviderConfig{}).resolvedLogger() {
+    emergencyDefault, _ := logging.ResolveOptionalLogger(nil, "test", "Test.Logger")
+    if emergencyDefault != NewProvider("melody", ProviderConfig{}).resolvedLogger() {
         t.Fatalf("expected the emergency logger when no logger is handed")
     }
 
-    if logging.EmergencyLogger() != NewProvider("melody", ProviderConfig{Logger: (*capturingLogger)(nil)}).resolvedLogger() {
-        t.Fatalf("expected a typed-nil logger to be read as absent")
-    }
+    expectPanicNamingField(t, "ProviderConfig.Logger", func() {
+        NewProvider("melody", ProviderConfig{Logger: (*capturingLogger)(nil)})
+    })
 
     logger := &capturingLogger{}
     if logger != NewProvider("melody", ProviderConfig{Logger: logger}).resolvedLogger() {
@@ -635,5 +638,50 @@ func TestProvider_OpenHandsTheNamespaceToTheConnection(t *testing.T) {
 
     if "shop" != connection.Namespace() {
         t.Fatalf("expected the provider's namespace on the connection, got %q", connection.Namespace())
+    }
+}
+
+/* one row per constructor of the sweep: an absent logger or clock builds, a typed nil is refused naming the field */
+func TestOptionalDependencies_NilIsTheDefaultAndATypedNilIsRefused(t *testing.T) {
+    client := newTokenStoreClient(t)
+
+    rows := []struct {
+        name  string
+        field string
+        build func(typedNil bool)
+    }{
+        {"NewProvider", "ProviderConfig.Logger", func(typedNil bool) {
+            config := ProviderConfig{}
+            if true == typedNil {
+                config.Logger = (*capturingLogger)(nil)
+            }
+
+            NewProvider("melody", config)
+        }},
+        {"NewServerSentEventBackplane", "ServerSentEventBackplaneConfig.Logger", func(typedNil bool) {
+            config := ServerSentEventBackplaneConfig{}
+            if true == typedNil {
+                config.Logger = (*capturingLogger)(nil)
+            }
+
+            backplane := NewServerSentEventBackplane(newTestConnection(client), melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), config)
+            _ = backplane.CloseWithContext(context.Background())
+        }},
+        {"NewTokenStore", "TokenStoreConfig.Clock", func(typedNil bool) {
+            config := TokenStoreConfig{}
+            if true == typedNil {
+                config.Clock = (*clock.FrozenClock)(nil)
+            }
+
+            NewTokenStore(newTestConnection(client), config)
+        }},
+    }
+
+    for _, row := range rows {
+        t.Run(row.name, func(t *testing.T) {
+            row.build(false)
+
+            expectPanicNamingField(t, row.field, func() { row.build(true) })
+        })
     }
 }

@@ -3,7 +3,6 @@ package rueidis
 import (
     "context"
     "net"
-    "reflect"
     "strconv"
     "strings"
     "time"
@@ -26,11 +25,16 @@ func NewProvider(namespace string, config ProviderConfig) *Provider {
         exception.Panic(exception.FromError(resolveErr))
     }
 
+    logger, loggerErr := logging.ResolveOptionalLogger(config.Logger, "rueidis provider", "ProviderConfig.Logger")
+    if nil != loggerErr {
+        exception.Panic(exception.FromError(loggerErr))
+    }
+
     return &Provider{
         namespace: namespace,
         client:    resolved.client,
         retry:     resolved.retry,
-        logger:    config.Logger,
+        logger:    logger,
     }
 }
 
@@ -44,7 +48,7 @@ type Provider struct {
 
 /* resolvedLogger is the journal the retry reports in: the configured one, else the emergency logger, so a re-dial is never silent */
 func (instance *Provider) resolvedLogger() loggingcontract.Logger {
-    if true == isAbsentLogger(instance.logger) {
+    if nil == instance.logger {
         return logging.EmergencyLogger()
     }
 
@@ -316,17 +320,3 @@ func (instance *Provider) Ping(runtimeInstance containercontract.Runtime, connec
     return client.Do(runtimeInstance.Context(), client.B().Ping().Build()).Error()
 }
 
-/* isAbsentLogger answers whether a logger is nil, the nil interface or a nil value of a nilable kind behind it */
-func isAbsentLogger(logger loggingcontract.Logger) bool {
-    if nil == logger {
-        return true
-    }
-
-    value := reflect.ValueOf(logger)
-    switch value.Kind() {
-    case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan, reflect.Interface:
-        return value.IsNil()
-    default:
-        return false
-    }
-}

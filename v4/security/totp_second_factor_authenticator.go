@@ -94,9 +94,9 @@ func NewTotpSecondFactorAuthenticator(primary securitycontract.Authenticator, en
         )
     }
 
-    clockInstance := config.Clock
-    if true == internal.IsNilInterface(clockInstance) {
-        clockInstance = clock.NewSystemClock()
+    clockInstance, clockErr := clock.ResolveOptionalClock(config.Clock, "totp second factor authenticator", "TotpSecondFactorAuthenticatorConfig.Clock")
+    if nil != clockErr {
+        exception.Panic(exception.FromError(clockErr))
     }
 
     totpConfig := config.Totp

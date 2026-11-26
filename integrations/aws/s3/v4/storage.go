@@ -40,7 +40,7 @@ func normalizeObjectKey(key string) (string, error) {
     return cleaned, nil
 }
 
-/* StorageConfig declares the storage's bounds. A limit outside its rule is refused at NewStorage, and at the registration call through RegisterStorageService, naming the field. */
+/* StorageConfig declares the storage's bounds. A limit outside its rule is refused at NewStorage, and at the module's registration, naming the field. */
 type StorageConfig struct {
     /* PutSpoolLimit is what a Put may hold in memory: a body that cannot seek, declared at or below it, is spooled and sized in full before the upload, while a larger one is streamed under an over-read check that cuts the upload off. 16 MiB by default, minio's part size, at least 1, unlimited refused, since it is a memory bound. Whether the upload goes up as one request or multipart is minio's decision by its own part size, whatever the limit. */
     PutSpoolLimit bound.Count

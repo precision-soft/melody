@@ -10,16 +10,12 @@ import (
     storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
-type ServiceRegistrar interface {
+type serviceRegistrar interface {
     RegisterService(serviceName string, provider any, options containercontract.RegisterOptions)
 }
 
-/* RegisterStorageService validates its arguments and resolves the config at registration rather than deferring to the provider closure: NewStorage panics on a nil client, an empty bucket or a limit outside its rule, and inside the closure that panic would fire at the FIRST RESOLUTION — possibly on a request path — instead of at boot, where every other integration reports an unusable configuration. */
-func RegisterStorageService(registrar ServiceRegistrar, client *minio.Client, bucket string, config StorageConfig) {
-    registerStorageService(registrar, client, bucket, config, BucketCheckConfig{})
-}
-
-func registerStorageService(registrar ServiceRegistrar, client *minio.Client, bucket string, config StorageConfig, bucketCheck BucketCheckConfig) {
+/* registerStorageService validates its arguments and resolves the config at registration rather than deferring to the provider closure: NewStorage panics on a nil client, an empty bucket or a limit outside its rule, and inside the closure that panic would fire at the FIRST RESOLUTION — possibly on a request path — instead of at boot, where every other integration reports an unusable configuration. */
+func registerStorageService(registrar serviceRegistrar, client *minio.Client, bucket string, config StorageConfig, bucketCheck BucketCheckConfig) {
     if nil == client {
         exception.Panic(exception.NewError("object storage client is nil", exceptioncontract.Context{"argument": "client"}, nil))
     }

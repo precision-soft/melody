@@ -56,10 +56,15 @@ type Provider struct {
     tlsConfig     *tls.Config
 }
 
-/* Open opens under the runtime's context: a nil runtime, or one carrying no context, is refused before anything is routed; an already-cancelled context is refused before the attempt, the retry sleeps watch it beside the clock, and the configuration hook and the boot ping derive their budgets from it; pgdialect makes no server round trip at construction, so the first packet is the boot ping's dial. A nil logger reads as the emergency logger for the open's own records, since the terminal branches mark the returned error as logged; the diagnostics routing takes the logger as handed, so a nil, like an already-cancelled context, routes nothing and leaves bun's channel where the last routing put it. */
+/* Open opens under the runtime's context: a nil runtime, or one carrying no context, is refused before anything is routed; an already-cancelled context is refused before the attempt, the retry sleeps watch it beside the clock, and the configuration hook and the boot ping derive their budgets from it; pgdialect makes no server round trip at construction, so the first packet is the boot ping's dial. A nil logger reads as the emergency logger for the open's own records and a typed nil is refused naming the argument, since the terminal branches mark the returned error as logged; the diagnostics routing takes the logger as handed, so a nil, like an already-cancelled context, routes nothing and leaves bun's channel where the last routing put it. */
 func (instance *Provider) Open(runtimeInstance containercontract.Runtime, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance, "pgsql.Provider.Open"); nil != runtimeErr {
         return nil, runtimeErr
+    }
+
+    resolvedLogger, loggerErr := logging.ResolveOptionalLogger(logger, "pgsql provider", "pgsql.Provider.Open.logger")
+    if nil != loggerErr {
+        return nil, loggerErr
     }
 
     ctx := runtimeInstance.Context()
@@ -69,11 +74,7 @@ func (instance *Provider) Open(runtimeInstance containercontract.Runtime, parame
         bunorm.RouteDiagnostics(logger)
     }
 
-    if true == isNilInterface(logger) {
-        logger = logging.EmergencyLogger()
-    }
-
-    return instance.openWithRetry(ctx, parameters, logger)
+    return instance.openWithRetry(ctx, parameters, resolvedLogger)
 }
 
 /* OpenForMigration opens the same database with the driver deadlines lifted: ReadTimeout and WriteTimeout are per-operation socket deadlines baked into the connector, sized for request traffic, and a DDL statement that legitimately runs past them — an ALTER TABLE adding constraints on a large table, a long CREATE INDEX — is cut mid-statement with an i/o timeout. The connect timeout stays armed (a down database must still fail fast), the pool is kept to the two connections a sequential migration run needs, and no connection is recycled mid-run — a lifetime rotation under a running statement is the same cut by another name. It runs under the runtime as Open does. */

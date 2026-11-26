@@ -229,6 +229,11 @@ type resolvedTokenStore struct {
 }
 
 func resolveTokenStoreConfig(config TokenStoreConfig) (resolvedTokenStore, error) {
+    /* only the refusal is taken here: an absent clock stays absent so the module can hand the container's */
+    if _, clockErr := melodyclock.ResolveOptionalClock(config.Clock, "rueidis token store", "TokenStoreConfig.Clock"); nil != clockErr {
+        return resolvedTokenStore{}, clockErr
+    }
+
     scanCount, scanCountErr := bound.Resolve(config.ScanCount, tokenStoreScanCountRule)
     if nil != scanCountErr {
         return resolvedTokenStore{}, scanCountErr

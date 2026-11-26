@@ -55,9 +55,9 @@ func NewInMemoryStorage(config InMemoryStorageConfig) *InMemoryStorage {
         exception.Panic(exception.FromError(maxSessionsErr))
     }
 
-    clockInstance := config.Clock
-    if true == internal.IsNilInterface(clockInstance) {
-        clockInstance = clock.NewSystemClock()
+    clockInstance, clockErr := clock.ResolveOptionalClock(config.Clock, "session in-memory storage", "InMemoryStorageConfig.Clock")
+    if nil != clockErr {
+        exception.Panic(exception.FromError(clockErr))
     }
 
     cleanupContext, cleanupCancel := context.WithCancel(context.Background())

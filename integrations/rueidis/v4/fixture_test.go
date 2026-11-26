@@ -6,6 +6,7 @@ import (
     "crypto/tls"
     "errors"
     "fmt"
+    "io"
     "net"
     "os"
     "strings"
@@ -19,6 +20,7 @@ import (
     "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
+    "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     redisclient "github.com/redis/rueidis"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
@@ -606,4 +608,33 @@ func subscribeTestTopic(t *testing.T, hub *melodyhttp.ServerSentEventHub, topic 
     }
 
     return subscriber
+}
+
+/* captureStandardError reopens the emergency logger on a pipe for the action, so a record an absent logger filed there is read back */
+func captureStandardError(t *testing.T, action func()) string {
+    t.Helper()
+
+    readEnd, writeEnd, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("pipe: %v", pipeErr)
+    }
+
+    savedStandardError := os.Stderr
+    logging.CloseEmergencyLogger()
+    os.Stderr = writeEnd
+    _ = logging.EmergencyLogger()
+    os.Stderr = savedStandardError
+
+    action()
+
+    logging.CloseEmergencyLogger()
+    _ = writeEnd.Close()
+
+    written, readErr := io.ReadAll(readEnd)
+    _ = readEnd.Close()
+    if nil != readErr {
+        t.Fatalf("read: %v", readErr)
+    }
+
+    return string(written)
 }

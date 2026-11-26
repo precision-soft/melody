@@ -15,8 +15,15 @@ import (
     "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
+
+/* ManagerRegistryConfig is what the registry declares at construction; the zero value is the default. */
+type ManagerRegistryConfig struct {
+    /* Logger is the journal of the registry's opens and closes and of bun's diagnostics; absent, the emergency logger. */
+    Logger loggingcontract.Logger
+}
 
 type ManagerRegistry struct {
     /* written once by the constructor and read without the lock */
@@ -51,10 +58,11 @@ type managerOpen struct {
     endedByOpenerContext bool
 }
 
-/* NewManagerRegistry builds a container-level registry over lazily-dialed pools; it captures no context, each open running under the runtime of the caller that asked for it. Container-level deliberately: a *bun.DB is a connection pool — the process-lifetime shape of database/sql — and per-unit work takes a transaction or a Conn from the pool, not a pool per scope. The logger is the one the registry and its providers report through for its whole life, so the registry is built where the application's logger resolves, inside its provider. A nil logger is refused. The definitions are read in order and refused by position: an empty name, a nil provider, an empty Parameters.Host or Parameters.Database, a duplicate name, more than one default. */
-func NewManagerRegistry(logger loggingcontract.Logger, providerDefinitions []ProviderDefinition) (*ManagerRegistry, error) {
-    if true == isNilInterface(logger) {
-        return nil, ErrLoggerIsRequired
+/* NewManagerRegistry builds a container-level registry over lazily-dialed pools; it captures no context, each open running under the runtime of the caller that asked for it. Container-level deliberately: a *bun.DB is a connection pool — the process-lifetime shape of database/sql — and per-unit work takes a transaction or a Conn from the pool, not a pool per scope. The configuration's logger is the one the registry and its providers report through for its whole life, so the registry is built where the application's logger resolves, inside its provider; absent, the emergency logger, and a typed nil is refused naming ManagerRegistryConfig.Logger. The definitions are read in order and refused by position: an empty name, a nil provider, an empty Parameters.Host or Parameters.Database, a duplicate name, more than one default. */
+func NewManagerRegistry(providerDefinitions []ProviderDefinition, config ManagerRegistryConfig) (*ManagerRegistry, error) {
+    logger, loggerErr := logging.ResolveOptionalLogger(config.Logger, "manager registry", "ManagerRegistryConfig.Logger")
+    if nil != loggerErr {
+        return nil, loggerErr
     }
 
     if 0 == len(providerDefinitions) {

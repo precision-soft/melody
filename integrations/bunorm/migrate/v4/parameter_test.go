@@ -68,10 +68,10 @@ func newRuntimeWithDatabaseAndParameters(t *testing.T, database *bun.DB, values 
     t.Helper()
 
     registry, registryErr := bunorm.NewManagerRegistry(
-        logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
             bunorm.ProviderDefinition{Name: "primary", Provider: &fakeDatabaseProvider{database: database}, Parameters: testConnectionParameters, IsDefault: true},
         },
+        bunorm.ManagerRegistryConfig{Logger: logging.NewNopLogger()},
     )
     if nil != registryErr {
         t.Fatalf("failed to build manager registry: %s", registryErr.Error())

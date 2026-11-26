@@ -70,10 +70,10 @@ func TestReadWriteSplitter_ReaderFallsBackToPrimaryWithoutReplicas(t *testing.T)
 
 func TestReadWriteSplitter_ReaderRefusesAnUnknownReplicaName(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
+        ManagerRegistryConfig{Logger: &fakeLogger{}},
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
@@ -93,11 +93,11 @@ func TestReadWriteSplitter_ReaderRefusesAnUnknownReplicaName(t *testing.T) {
 
 func TestReadWriteSplitter_ReaderFallsBackToPrimaryWhenTheReplicaIsUnreachable(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
             ProviderDefinition{Name: "replica", Provider: &unreachableSplitProvider{}, Parameters: testConnectionParameters},
         },
+        ManagerRegistryConfig{Logger: &fakeLogger{}},
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
@@ -122,11 +122,11 @@ func TestReadWriteSplitter_ReaderFallsBackToPrimaryWhenTheReplicaIsUnreachable(t
 
 func TestReadWriteSplitter_ReaderNamesBothFailuresWhenThePrimaryFailsToo(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "primary", Provider: &unreachableSplitProvider{}, Parameters: testConnectionParameters, IsDefault: true},
             ProviderDefinition{Name: "replica", Provider: &unreachableSplitProvider{}, Parameters: testConnectionParameters},
         },
+        ManagerRegistryConfig{Logger: &fakeLogger{}},
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
@@ -146,10 +146,10 @@ func TestReadWriteSplitter_ReaderNamesBothFailuresWhenThePrimaryFailsToo(t *test
 
 func TestNewReadWriteSplitter_RefusesAnEmptyReplicaName(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
+        ManagerRegistryConfig{Logger: &fakeLogger{}},
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
@@ -182,11 +182,11 @@ func (instance *noDatabaseSplitProvider) OpenForMigration(runtimeInstance contai
 /* a provider answering neither a database nor an error is the wiring mistake the registry refuses by name; folded into the fallback it routed every read of that replica to the primary forever, with no signal that the replica was dead */
 func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderAnsweredNoDatabase(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
             ProviderDefinition{Name: "replica", Provider: &noDatabaseSplitProvider{}, Parameters: testConnectionParameters},
         },
+        ManagerRegistryConfig{Logger: &fakeLogger{}},
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
@@ -208,11 +208,11 @@ func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderAnsweredNoDatabase(
 /* a replica whose provider REFUSED — a parameter left empty, a password the server refused, a database that does not exist, or a provider that files nothing under the unreachable class — is refused with the provider's own answer, not served from the primary: the denylist of registry sentinels this replaced let every refusal it did not name fall to the primary, silently and for the life of the process */
 func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderRefused(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
             ProviderDefinition{Name: "replica", Provider: &refusingSplitProvider{}, Parameters: testConnectionParameters},
         },
+        ManagerRegistryConfig{Logger: &fakeLogger{}},
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
@@ -255,11 +255,11 @@ func TestReadWriteSplitter_ADoubleFailureOverAJournaledPrimaryStaysMarkedLogged(
         }
 
         registry, registryErr := NewManagerRegistry(
-            &fakeLogger{},
             []ProviderDefinition{
                 ProviderDefinition{Name: "primary", Provider: primaryProvider, Parameters: testConnectionParameters, IsDefault: true},
                 ProviderDefinition{Name: "replica", Provider: &unreachableSplitProvider{}, Parameters: testConnectionParameters},
             },
+            ManagerRegistryConfig{Logger: &fakeLogger{}},
         )
         if nil != registryErr {
             t.Fatalf("registry: %v", registryErr)
@@ -301,11 +301,11 @@ func (instance *switchableSplitProvider) OpenForMigration(runtimeInstance contai
 func TestReadWriteSplitter_AnUnreachableReplicaIsRememberedForTheInterval(t *testing.T) {
     replica := &switchableSplitProvider{down: true}
     registry, registryErr := NewManagerRegistry(
-        &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
             ProviderDefinition{Name: "replica", Provider: replica, Parameters: testConnectionParameters},
         },
+        ManagerRegistryConfig{Logger: &fakeLogger{}},
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
@@ -340,11 +340,11 @@ func TestReadWriteSplitter_WritesOneWarningPerTransition(t *testing.T) {
     logger := &capturingDiagnosticLogger{}
     replica := &switchableSplitProvider{down: true}
     registry, registryErr := NewManagerRegistry(
-        logger,
         []ProviderDefinition{
             ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
             ProviderDefinition{Name: "replica", Provider: replica, Parameters: testConnectionParameters},
         },
+        ManagerRegistryConfig{Logger: logger},
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
@@ -380,7 +380,7 @@ func TestReadWriteSplitter_WritesOneWarningPerTransition(t *testing.T) {
 
 /* the option refuses a negative interval where it is written, and a zero one keeps the default */
 func TestNewReadWriteSplitter_AnAbsentReplicaRetryIntervalTakesFiveSeconds(t *testing.T) {
-    registry, registryErr := NewManagerRegistry(&fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
+    registry, registryErr := NewManagerRegistry([]ProviderDefinition{ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true}}, ManagerRegistryConfig{Logger: &fakeLogger{}})
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
     }
@@ -391,7 +391,7 @@ func TestNewReadWriteSplitter_AnAbsentReplicaRetryIntervalTakesFiveSeconds(t *te
 }
 
 func TestNewReadWriteSplitter_RefusesAReplicaRetryIntervalOutsideItsRuleNamingTheField(t *testing.T) {
-    registry, registryErr := NewManagerRegistry(&fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
+    registry, registryErr := NewManagerRegistry([]ProviderDefinition{ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true}}, ManagerRegistryConfig{Logger: &fakeLogger{}})
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
     }
@@ -461,11 +461,11 @@ func (instance *cyclicSplitProvider) OpenForMigration(runtimeInstance containerc
 
 func TestReadWriteSplitter_ReaderReturnsOnACyclicChainFromAProvider(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        &fakeLogger{},
         []ProviderDefinition{
             {Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
             {Name: "replica", Provider: &cyclicSplitProvider{}, Parameters: testConnectionParameters},
         },
+        ManagerRegistryConfig{Logger: &fakeLogger{}},
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
@@ -502,11 +502,11 @@ func (instance *stallingSplitProvider) OpenForMigration(runtimeInstance containe
 func TestReadWriteSplitter_OneReaderProbesALapsedReplicaWhileTheOthersKeepThePrimary(t *testing.T) {
     replica := &stallingSplitProvider{stall: make(chan struct{}), entered: make(chan struct{}, 1)}
     registry, registryErr := NewManagerRegistry(
-        &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
             ProviderDefinition{Name: "replica", Provider: replica, Parameters: testConnectionParameters},
         },
+        ManagerRegistryConfig{Logger: &fakeLogger{}},
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
@@ -590,11 +590,11 @@ func TestReadWriteSplitter_AReplicaOpenTheCallerLeftIsNeitherRememberedNorServed
     replica := &departingCallerReplicaProvider{entered: make(chan struct{})}
 
     registry, registryErr := NewManagerRegistry(
-        &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "primary", Provider: primary, Parameters: testConnectionParameters, IsDefault: true},
             ProviderDefinition{Name: "replica", Provider: replica, Parameters: testConnectionParameters},
         },
+        ManagerRegistryConfig{Logger: &fakeLogger{}},
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
@@ -643,11 +643,11 @@ func TestReadWriteSplitter_AReplicaOpenTheCallerLeftIsNeitherRememberedNorServed
 func TestReadWriteSplitter_AProbeTheCallerCutGivesTheReservationBack(t *testing.T) {
     replica := &switchableSplitProvider{down: true}
     registry, registryErr := NewManagerRegistry(
-        &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
             ProviderDefinition{Name: "replica", Provider: replica, Parameters: testConnectionParameters},
         },
+        ManagerRegistryConfig{Logger: &fakeLogger{}},
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
@@ -685,10 +685,10 @@ func TestReadWriteSplitter_AProbeTheCallerCutGivesTheReservationBack(t *testing.
 /* a reservation given back leaves the replica alone when another reader dated it since: the later failure stands */
 func TestReadWriteSplitter_AReservationGivenBackLeavesALaterDateStanding(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
-        &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
+        ManagerRegistryConfig{Logger: &fakeLogger{}},
     )
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)

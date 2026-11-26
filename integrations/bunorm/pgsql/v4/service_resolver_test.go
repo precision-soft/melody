@@ -13,7 +13,7 @@ import (
 func TestRegisterLockerServiceUsesTheFrameworkLockerName(t *testing.T) {
     registrar := &spyServiceRegistrar{}
 
-    RegisterLockerService(registrar, newUndialedDatabase(), LockerConfig{})
+    registerLockerService(registrar, newUndialedDatabase(), LockerConfig{})
 
     if 1 != len(registrar.names) {
         t.Fatalf("expected exactly one registration, got %v", registrar.names)
@@ -29,7 +29,7 @@ func TestRegisterLockerServiceProviderAnswersAPgsqlLocker(t *testing.T) {
     var captured any
 
     registrar := &capturingServiceRegistrar{}
-    RegisterLockerService(registrar, newUndialedDatabase(), LockerConfig{})
+    registerLockerService(registrar, newUndialedDatabase(), LockerConfig{})
     captured = registrar.provider
 
     provider, ok := captured.(func(containercontract.Resolver) (lockcontract.Locker, error))
@@ -60,7 +60,7 @@ func (instance *capturingServiceRegistrar) RegisterService(serviceName string, p
 func TestRegisterLockerService_TheRegisteredLockerCarriesTheConfiguredReleaseTimeout(t *testing.T) {
     registrar := &capturingServiceRegistrar{}
 
-    RegisterLockerService(registrar, newUndialedDatabase(), LockerConfig{ReleaseTimeout: bound.Of(2 * time.Second)})
+    registerLockerService(registrar, newUndialedDatabase(), LockerConfig{ReleaseTimeout: bound.Of(2 * time.Second)})
 
     provider, isProvider := registrar.provider.(func(containercontract.Resolver) (lockcontract.Locker, error))
     if false == isProvider {
@@ -77,7 +77,7 @@ func TestRegisterLockerService_RefusesAReleaseTimeoutOutsideItsRuleAtTheCall(t *
     registrar := &capturingServiceRegistrar{}
 
     expectPanicNamingField(t, "LockerConfig.ReleaseTimeout", func() {
-        RegisterLockerService(registrar, newUndialedDatabase(), LockerConfig{ReleaseTimeout: bound.UnlimitedDuration()})
+        registerLockerService(registrar, newUndialedDatabase(), LockerConfig{ReleaseTimeout: bound.UnlimitedDuration()})
     })
 
     if 0 != len(registrar.names) {

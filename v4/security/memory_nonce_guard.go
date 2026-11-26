@@ -10,7 +10,6 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
-    "github.com/precision-soft/melody/v4/internal"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -51,9 +50,9 @@ func NewMemoryNonceGuard(config MemoryNonceGuardConfig) *MemoryNonceGuard {
         exception.Panic(exception.FromError(purgeIntervalErr))
     }
 
-    clockInstance := config.Clock
-    if true == internal.IsNilInterface(clockInstance) {
-        clockInstance = clock.NewSystemClock()
+    clockInstance, clockErr := clock.ResolveOptionalClock(config.Clock, "memory nonce guard", "MemoryNonceGuardConfig.Clock")
+    if nil != clockErr {
+        exception.Panic(exception.FromError(clockErr))
     }
 
     /* 0 is the unlimited ceiling */

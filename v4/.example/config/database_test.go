@@ -54,7 +54,6 @@ func TestInsecureSwitch_ArmsOnTheExactSpellingAndRefusesAnyOtherValueByName(t *t
 /* the registry's refusal reads the same for either database — "database connection failed" over a host — so the handle providers name the manager and where it is: the operator reading a console knows WHICH database refused before knowing why, and the registry's refusal stays the cause */
 func TestDatabaseOpenedBy_NamesTheManagerAndItsLocationWhenTheOpenRefuses(t *testing.T) {
     registry, registryErr := melodybunorm.NewManagerRegistry(
-        melodylogging.NewNopLogger(),
         []melodybunorm.ProviderDefinition{
             melodybunorm.ProviderDefinition{
                 Name:       "declared",
@@ -63,6 +62,7 @@ func TestDatabaseOpenedBy_NamesTheManagerAndItsLocationWhenTheOpenRefuses(t *tes
                 IsDefault:  true,
             },
         },
+        melodybunorm.ManagerRegistryConfig{Logger: melodylogging.NewNopLogger()},
     )
     if nil != registryErr {
         t.Fatalf("build the registry: %v", registryErr)

@@ -309,6 +309,16 @@ A container registration with `RegisterOptions{BuiltAtBoot: true}` is built by t
 
 `debug:container` lists every registered service with its lifetime, and `debug:container --build` the concrete type each one resolves to, which together are the inventory the rule is checked against; the live harness pins the example's inventory — every process service classified by name, concrete type and category, so a service nobody classified fails the band, and so does one whose type changed since its state was measured.
 
+### Optional dependencies
+
+A collaborator a constructor can do without — a logger, a clock — sits in its config struct, and the framework reads it one way everywhere:
+
+- **nil**, the field left out, is absent and takes the default: the system clock for a clock; for a logger the emergency logger, standard error, wherever the component reports a failure nobody else would see — a terminal stop, a dead letter, an outage, a dropped event — never silence.
+- **a typed nil**, an interface holding a nil pointer, is a wiring defect and is refused at construction as `<component> logger is a typed nil` or `<component> clock is a typed nil`, the context naming the `field`; a constructor that panics on a refused field panics, one that answers an error answers it.
+- a **required** collaborator is a positional argument, and both nils are refused naming the argument.
+
+[`logging.ResolveOptionalLogger`](../../logging/optional_logger.go) and [`clock.ResolveOptionalClock`](../../clock/optional_clock.go) are the two readings, for a constructor of the application's own that takes the same kind of field.
+
 ### Scoped services
 
 A service registered with `RegisterScoped` belongs to one scope — one http request, one command run — instead of to the process. It is built lazily on the first resolution through a scope, shared by everything inside that scope, and closed when the scope closes. The root container never sees it, and two scopes never share one instance.

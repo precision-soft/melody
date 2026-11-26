@@ -73,9 +73,9 @@ func NewInMemoryTokenStore(config InMemoryTokenStoreConfig) *InMemoryTokenStore 
         exception.Panic(exception.FromError(sweepIntervalErr))
     }
 
-    clockInstance := config.Clock
-    if true == internal.IsNilInterface(clockInstance) {
-        clockInstance = clock.NewSystemClock()
+    clockInstance, clockErr := clock.ResolveOptionalClock(config.Clock, "in-memory token store", "InMemoryTokenStoreConfig.Clock")
+    if nil != clockErr {
+        exception.Panic(exception.FromError(clockErr))
     }
 
     /* 0 is the unlimited retention and the unlimited ceiling */

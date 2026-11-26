@@ -689,18 +689,14 @@ func TestNewInMemoryBackend_ACleanupIntervalBelowItsMinimumIsRefused(t *testing.
 }
 
 func TestNewInMemoryBackend_ANilClockReadsTheSystemClock(t *testing.T) {
-    var typedNilClock *cacheTestClock
+    backend := NewInMemoryBackend(InMemoryBackendConfig{})
 
-    for _, absentClock := range []clockcontract.Clock{nil, typedNilClock} {
-        backend := NewInMemoryBackend(InMemoryBackendConfig{Clock: absentClock})
+    if _, isSystemClock := backend.clock.(*clock.SystemClock); false == isSystemClock {
+        t.Fatalf("expected an absent clock to read the system clock, got %T", backend.clock)
+    }
 
-        if _, isSystemClock := backend.clock.(*clock.SystemClock); false == isSystemClock {
-            t.Fatalf("expected an absent clock to read the system clock, got %T", backend.clock)
-        }
-
-        if err := backend.CloseWithContext(t.Context()); nil != err {
-            t.Fatalf("unexpected close error: %v", err)
-        }
+    if err := backend.CloseWithContext(t.Context()); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
     }
 }
 

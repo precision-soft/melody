@@ -1208,14 +1208,27 @@ func TestNewServerSentEventBackplane_RefusesANilHubNamingTheArgument(t *testing.
     }
 }
 
-func TestNewServerSentEventBackplane_ATypedNilLoggerRecordsNothing(t *testing.T) {
+func TestNewServerSentEventBackplane_ATypedNilLoggerIsRefused(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     var typedNil *recordingBackplaneLogger
-    backplane := NewServerSentEventBackplane(hub, FromDialer(refusingDialer), ServerSentEventBackplaneConfig{Logger: typedNil})
+
+    expectPanicNamingField(t, "ServerSentEventBackplaneConfig.Logger", func() {
+        NewServerSentEventBackplane(hub, FromDialer(refusingDialer), ServerSentEventBackplaneConfig{Logger: typedNil})
+    })
+}
+
+func TestServerSentEventBackplane_AnAbsentLoggerRecordsATerminalStopOnTheEmergencyLogger(t *testing.T) {
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+    backplane := NewServerSentEventBackplane(hub, FromDialer(refusingDialer), ServerSentEventBackplaneConfig{})
     defer backplane.CloseWithContext(context.Background())
 
-    if nil != backplane.logger {
-        t.Fatalf("expected a typed-nil logger read as none, got %v", backplane.logger)
+    written := captureStandardError(t, func() {
+        backplane.logTerminal("amqp backplane receive stopped for good", errors.New("channel gone"))
+        backplane.logError("amqp backplane publish failed", errors.New("broker away"))
+    })
+
+    if false == strings.Contains(written, "amqp backplane receive stopped for good") || false == strings.Contains(written, "amqp backplane publish failed") {
+        t.Fatalf("expected the terminal stop and the failure on the emergency logger, got %q", written)
     }
 }
 

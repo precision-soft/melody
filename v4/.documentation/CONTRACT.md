@@ -167,9 +167,7 @@ The module exports no interface.
 
 ## Module `integrations/aws/s3/v4`
 
-| Interface | Implemented by | Reason |
-|---|---|---|
-| [`ServiceRegistrar`](../../integrations/aws/s3/v4/service_resolver.go) | framework | the boot's registrar satisfies it; only the application builder implements it |
+The module exports no interface.
 
 ## Module `integrations/bunorm/migrate/v4`
 
@@ -177,15 +175,11 @@ The module exports no interface.
 
 ## Module `integrations/bunorm/mysql/v4`
 
-| Interface | Implemented by | Reason |
-|---|---|---|
-| [`ServiceRegistrar`](../../integrations/bunorm/mysql/v4/service_resolver.go) | framework | the boot's registrar satisfies it; only the application builder implements it |
+The module exports no interface.
 
 ## Module `integrations/bunorm/pgsql/v4`
 
-| Interface | Implemented by | Reason |
-|---|---|---|
-| [`ServiceRegistrar`](../../integrations/bunorm/pgsql/v4/service_resolver.go) | framework | the boot's registrar satisfies it; only the application builder implements it |
+The module exports no interface.
 
 ## Module `integrations/bunorm/v4`
 

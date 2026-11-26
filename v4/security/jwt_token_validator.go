@@ -107,9 +107,9 @@ func NewJwtTokenValidator(keySet securitycontract.JwtKeySet, config JwtConfig) *
         rolesClaim = jwtDefaultRoles
     }
 
-    clockInstance := config.Clock
-    if true == internal.IsNilInterface(clockInstance) {
-        clockInstance = clock.NewSystemClock()
+    clockInstance, clockErr := clock.ResolveOptionalClock(config.Clock, "jwt token validator", "JwtConfig.Clock")
+    if nil != clockErr {
+        exception.Panic(exception.FromError(clockErr))
     }
 
     return &JwtTokenValidator{

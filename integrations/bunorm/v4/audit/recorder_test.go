@@ -442,3 +442,45 @@ func TestNewRecorder_AnOwnedStorageCarryingCloseAloneIsRefusedAndABorrowedOneAdm
         t.Fatalf("expected a borrowed plain-close storage admitted")
     }
 }
+
+/* one row per constructor of the sweep: an absent logger is the one emergency default, a typed nil is refused with one text naming the field */
+func TestOptionalDependencies_NilIsTheDefaultAndATypedNilIsRefused(t *testing.T) {
+    var typedNil *fakeLogger
+
+    rows := []struct {
+        name    string
+        message string
+        field   string
+        build   func(logger loggingcontract.Logger) loggingcontract.Logger
+    }{
+        {"NewRecorder", "audit recorder logger is a typed nil", "RecorderConfig.Logger", func(logger loggingcontract.Logger) loggingcontract.Logger {
+            return NewRecorder(&fakeStorage{}, RecorderConfig{Logger: logger}).logger
+        }},
+        {"NewAsyncStorage", "async audit storage logger is a typed nil", "AsyncStorageConfig.Logger", func(logger loggingcontract.Logger) loggingcontract.Logger {
+            storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{Logger: logger})
+            defer storage.CloseWithContext(context.Background())
+
+            return storage.logger
+        }},
+    }
+
+    for _, row := range rows {
+        t.Run(row.name, func(t *testing.T) {
+            if defaultAuditLogger() != row.build(nil) {
+                t.Fatalf("expected an absent logger to be the emergency default")
+            }
+
+            func() {
+                defer func() {
+                    var refusal *exception.Error
+                    recoveredErr, _ := recover().(error)
+                    if false == errors.As(recoveredErr, &refusal) || row.message != refusal.Message() || row.field != refusal.Context()["field"] {
+                        t.Fatalf("expected %q naming %s, got %v", row.message, row.field, recoveredErr)
+                    }
+                }()
+
+                row.build(typedNil)
+            }()
+        })
+    }
+}

@@ -17,7 +17,6 @@ import (
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
-    "github.com/precision-soft/melody/v4/internal"
 )
 
 const (
@@ -99,9 +98,9 @@ func (instance Config) Resolve() (Resolved, error) {
         return Resolved{}, skewErr
     }
 
-    clockInstance := instance.Clock
-    if true == internal.IsNilInterface(clockInstance) {
-        clockInstance = clock.NewSystemClock()
+    clockInstance, clockErr := clock.ResolveOptionalClock(instance.Clock, "totp", "totp.Config.Clock")
+    if nil != clockErr {
+        return Resolved{}, clockErr
     }
 
     return Resolved{

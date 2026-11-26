@@ -1262,7 +1262,7 @@ func TestNewEventDispatcher_RefusesATypedNilClock(t *testing.T) {
         func() {
             _ = NewEventDispatcher(EventDispatcherConfig{Clock: clockInstance})
         },
-        "EventDispatcherConfig.Clock may not be a typed nil",
+        "event dispatcher clock is a typed nil",
     )
 }
 

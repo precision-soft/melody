@@ -132,7 +132,7 @@ func newBoundRecordingRegistry(t *testing.T, names ...string) (*ManagerRegistry,
         definitions = append(definitions, ProviderDefinition{Name: name, Provider: &boundRecordingProvider{name: name, mutex: mutex, records: records}, Parameters: testConnectionParameters, IsDefault: 0 == index})
     }
 
-    registry, registryErr := NewManagerRegistry(&fakeLogger{}, definitions)
+    registry, registryErr := NewManagerRegistry(definitions, ManagerRegistryConfig{Logger: &fakeLogger{}})
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
     }

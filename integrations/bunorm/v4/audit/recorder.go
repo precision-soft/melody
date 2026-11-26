@@ -25,7 +25,7 @@ func isNilInterface(value any) bool {
     }
 }
 
-/* RecorderConfig declares what a recorder is built with beside its storage: Registry, the entity registry, a registry over DefaultTable when nil; OwnsStorage, whether CloseWithContext closes the storage too, for a composition root that builds both by hand, false on the container path where the storage is a service the container closes itself, since a recorder that closed it too would close it twice; Logger, the dead-letter logger a failed save is journaled through before its error is answered, none when nil, a typed nil refused. */
+/* RecorderConfig declares what a recorder is built with beside its storage: Registry, the entity registry, a registry over DefaultTable when nil; OwnsStorage, whether CloseWithContext closes the storage too, for a composition root that builds both by hand, false on the container path where the storage is a service the container closes itself, since a recorder that closed it too would close it twice; Logger, the dead-letter logger a failed save is journaled through before its error is answered, the emergency logger when nil, a typed nil refused. */
 type RecorderConfig struct {
     Registry    *Registry
     OwnsStorage bool
@@ -38,9 +38,7 @@ func NewRecorder(storage Storage, config RecorderConfig) *Recorder {
         exception.Panic(exception.NewError("audit storage is nil", nil, nil))
     }
 
-    if nil != config.Logger && true == isNilInterface(config.Logger) {
-        exception.Panic(exception.NewError("audit recorder logger is nil", map[string]any{"field": "RecorderConfig.Logger"}, nil))
-    }
+    logger := resolveAuditLogger(config.Logger, "audit recorder", "RecorderConfig.Logger")
 
     /* an owned storage is closed through CloseWithContext alone, so one carrying a plain Close would be leaked by the recorder's close */
     if true == config.OwnsStorage && true == storageCarriesOnlyPlainClose(storage) {
@@ -60,7 +58,7 @@ func NewRecorder(storage Storage, config RecorderConfig) *Recorder {
         storage:     storage,
         registry:    registry,
         ownsStorage: config.OwnsStorage,
-        logger:      config.Logger,
+        logger:      logger,
     }
 }
 

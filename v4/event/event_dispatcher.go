@@ -29,13 +29,9 @@ type EventDispatcherConfig struct {
 }
 
 func NewEventDispatcher(config EventDispatcherConfig) *EventDispatcher {
-    clockInstance := config.Clock
-    if nil == clockInstance {
-        clockInstance = clock.NewSystemClock()
-    } else if true == internal.IsNilInterface(clockInstance) {
-        exception.Panic(
-            exception.NewError("EventDispatcherConfig.Clock may not be a typed nil", nil, nil),
-        )
+    clockInstance, clockErr := clock.ResolveOptionalClock(config.Clock, "event dispatcher", "EventDispatcherConfig.Clock")
+    if nil != clockErr {
+        exception.Panic(exception.FromError(clockErr))
     }
 
     return &EventDispatcher{

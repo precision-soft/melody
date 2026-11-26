@@ -75,9 +75,9 @@ func resolveLimiterConfig(name string, limit int, window time.Duration, config L
         exception.Panic(exception.FromError(cleanupIntervalErr))
     }
 
-    clockInstance := config.Clock
-    if true == internal.IsNilInterface(clockInstance) {
-        clockInstance = clock.NewSystemClock()
+    clockInstance, clockErr := clock.ResolveOptionalClock(config.Clock, "rate limiter", "LimiterConfig.Clock")
+    if nil != clockErr {
+        exception.Panic(exception.FromError(clockErr))
     }
 
     return limiterSettings{

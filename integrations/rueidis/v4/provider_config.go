@@ -10,7 +10,7 @@ type ProviderConfig struct {
 
     Retry RetryConfig
 
-    /* Logger is the journal the connection retry reports in: a warning per re-dial, an error when the attempts run out and an info record when a later attempt succeeds. The provider is built before the container resolves a logger, so it cannot take the application's on its own; nil or a typed nil reaches the emergency logger, standard error, outside the application's journal, rather than nothing. */
+    /* Logger is the journal the connection retry reports in: a warning per re-dial, an error when the attempts run out and an info record when a later attempt succeeds. The provider is built before the container resolves a logger, so it cannot take the application's on its own; nil reaches the emergency logger, standard error, outside the application's journal, rather than nothing; a typed nil is refused. */
     Logger loggingcontract.Logger
 }
 

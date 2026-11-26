@@ -25,8 +25,26 @@ var asyncStorageBufferSizeRule = bound.Rule[int]{
     Minimum: 1,
 }
 
-/* defaultAsyncStorageLogger is the emergency logger a dead-letter goes through when the config names none, so no failed save is silent in an assembly that wired no logger. A variable so the test can capture it. */
-var defaultAsyncStorageLogger = logging.EmergencyLogger
+/* defaultAuditLogger is the logger a dead-letter goes through when the config names none, the emergency logger, so no failed save is silent in an assembly that wired no logger; one instance for the recorder and the storage, so an entry is journaled once. A variable so the test can capture it. */
+var defaultAuditLogger = func() loggingcontract.Logger {
+    logger, _ := logging.ResolveOptionalLogger(nil, "audit", "Logger")
+
+    return logger
+}
+
+/* resolveAuditLogger answers the configured logger, the default when none is, and panics on a typed nil naming field. */
+func resolveAuditLogger(logger loggingcontract.Logger, component string, field string) loggingcontract.Logger {
+    if nil == logger {
+        return defaultAuditLogger()
+    }
+
+    resolved, resolveErr := logging.ResolveOptionalLogger(logger, component, field)
+    if nil != resolveErr {
+        exception.Panic(exception.FromError(resolveErr))
+    }
+
+    return resolved
+}
 
 type AsyncStorage struct {
     delegate Storage
@@ -88,12 +106,7 @@ func NewAsyncStorage(delegate Storage, config AsyncStorageConfig) *AsyncStorage 
         exception.Panic(exception.FromError(bufferSizeErr))
     }
 
-    logger := config.Logger
-    if nil == logger {
-        logger = defaultAsyncStorageLogger()
-    } else if true == isNilInterface(logger) {
-        exception.Panic(exception.NewError("async audit storage logger is nil", map[string]any{"field": "AsyncStorageConfig.Logger"}, nil))
-    }
+    logger := resolveAuditLogger(config.Logger, "async audit storage", "AsyncStorageConfig.Logger")
 
     workerContext, workerCancel := context.WithCancel(context.Background())
 

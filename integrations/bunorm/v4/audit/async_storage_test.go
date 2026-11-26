@@ -96,10 +96,10 @@ func installDefaultAsyncStorageLogger(t *testing.T) *capturingLogger {
     t.Helper()
 
     logger := &capturingLogger{}
-    previous := defaultAsyncStorageLogger
-    defaultAsyncStorageLogger = func() loggingcontract.Logger { return logger }
+    previous := defaultAuditLogger
+    defaultAuditLogger = func() loggingcontract.Logger { return logger }
     t.Cleanup(func() {
-        defaultAsyncStorageLogger = previous
+        defaultAuditLogger = previous
     })
 
     return logger

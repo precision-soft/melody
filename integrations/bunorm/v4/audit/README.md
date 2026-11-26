@@ -62,7 +62,7 @@ recorder := audit.NewRecorder(audit.NewBunStorage(auditDb), audit.RecorderConfig
 })
 ```
 
-Left out, `Logger` journals nothing at the recorder: the failed save's error is still answered to the caller, and an `AsyncStorage` underneath dead-letters through its own logger.
+Left out, `Logger` is the emergency logger, standard error, shared with an `AsyncStorage` left without one, so an entry both would dead-letter is journaled once; a typed nil is refused naming `RecorderConfig.Logger`. The failed save's error is answered to the caller either way.
 
 `Storage.Save(ctx, table, entries []Entry)` takes the entries as a slice; a nil or empty slice is a no-op on every storage of this package, and a storage of your own answers the same.
 

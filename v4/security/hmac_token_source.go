@@ -73,9 +73,9 @@ func NewHmacTokenSource(secrets HmacSecretProvider, applications HmacApplication
         headerName = DefaultHmacHeaderName
     }
 
-    clockInstance := config.Clock
-    if true == internal.IsNilInterface(clockInstance) {
-        clockInstance = clock.NewSystemClock()
+    clockInstance, clockErr := clock.ResolveOptionalClock(config.Clock, "hmac token source", "HmacTokenSourceConfig.Clock")
+    if nil != clockErr {
+        exception.Panic(exception.FromError(clockErr))
     }
 
     var nonceGuard securitycontract.NonceGuard = config.NonceGuard

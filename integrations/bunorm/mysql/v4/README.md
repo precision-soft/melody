@@ -32,17 +32,13 @@ defer namedLock.Release(runtime)
 
 ### Plug-and-play registration
 
-Register the locker under the core `lock.ServiceLocker` service name in one call, so handlers resolve it with `lock.LockerMustFromResolver`:
+The module registers the locker under the core `lock.ServiceLocker` service name, so handlers resolve it with `lock.LockerMustFromResolver`. `ModuleConfig.Locker` is the locker's configuration: nil registers none, a pointer registers it, and one handed with a nil database is refused at boot naming the field:
 
 ```go
-mysql.RegisterLockerService(registrar, database, mysql.LockerConfig{})
+app.RegisterModule(mysql.NewModule(mysql.ModuleConfig{Database: database, Locker: &mysql.LockerConfig{}}))
 ```
 
-The configuration is resolved at the call, so a refused `ReleaseTimeout` panics at the wiring, not at the first lock. Or bundle it as a self-registering application module — one `RegisterModule` call registers the locker (opt-in via `AsLocker`, refused at boot when the database is nil), configured by `ModuleConfig.Locker`:
-
-```go
-app.RegisterModule(mysql.NewModule(mysql.ModuleConfig{Database: database, AsLocker: true}))
-```
+The configuration is resolved at the registration, so a refused `ReleaseTimeout` panics at the wiring, not at the first lock.
 
 ## Semantics
 

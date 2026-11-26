@@ -15,6 +15,7 @@ import (
     "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
+    "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
@@ -515,6 +516,15 @@ func TestNewServerSentEventHub_RefusesATypedNilLogger(t *testing.T) {
         "server sent event hub logger is a typed nil",
         "ServerSentEventHubConfig.Logger",
     )
+}
+
+func TestNewServerSentEventHub_AnAbsentLoggerIsTheEmergencyLogger(t *testing.T) {
+    emergencyDefault, _ := logging.ResolveOptionalLogger(nil, "test", "Test.Logger")
+
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
+    if emergencyDefault != hub.logger {
+        t.Fatalf("expected an absent logger to be the emergency logger, got %T", hub.logger)
+    }
 }
 
 func TestServerSentEventHub_FilesItsFailuresIntoTheConfiguredLogger(t *testing.T) {

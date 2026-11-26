@@ -12,6 +12,7 @@ import (
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
+    "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -37,16 +38,15 @@ type CacheFailedAttemptStoreConfig struct {
 /* NewCacheFailedAttemptStore builds the FailedAttemptStore over a cache: a fixed-window counter per key, and beside it a second key holding the window's deadline, written by the count that opens the window. The two writes are not atomic: when the deadline key is missing, because the opening count's write of it failed or has not landed yet, or the cache evicted it, the store answers a zero remainder and the count stands. A typed nil Cache or Clock panics naming the field. */
 func NewCacheFailedAttemptStore(config CacheFailedAttemptStoreConfig) *CacheFailedAttemptStore {
     refuseTypedNilField("failed attempt store cache is a typed nil", "CacheFailedAttemptStoreConfig.Cache", "NewCacheFailedAttemptStore", config.Cache)
-    refuseTypedNilField("failed attempt store clock is a typed nil", "CacheFailedAttemptStoreConfig.Clock", "NewCacheFailedAttemptStore", config.Clock)
 
     keyPrefix := config.KeyPrefix
     if "" == keyPrefix {
         keyPrefix = DefaultFailedAttemptKeyPrefix
     }
 
-    clockInstance := config.Clock
-    if nil == clockInstance {
-        clockInstance = clock.NewSystemClock()
+    clockInstance, clockErr := clock.ResolveOptionalClock(config.Clock, "failed attempt store", "CacheFailedAttemptStoreConfig.Clock")
+    if nil != clockErr {
+        exception.Panic(exception.FromError(clockErr))
     }
 
     return &CacheFailedAttemptStore{

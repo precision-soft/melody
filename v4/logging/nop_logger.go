@@ -1,7 +1,6 @@
 package logging
 
 import (
-    "github.com/precision-soft/melody/v4/internal"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
@@ -31,14 +30,6 @@ func (instance *nopLogger) Enabled(level loggingcontract.Level) bool {
 
 func (instance *nopLogger) CauseChainDepth() int {
     return causeChainDefaultDepth
-}
-
-func EnsureLogger(logger loggingcontract.Logger) loggingcontract.Logger {
-    if false == internal.IsNilInterface(logger) {
-        return logger
-    }
-
-    return NewNopLogger()
 }
 
 var _ loggingcontract.Logger = (*nopLogger)(nil)

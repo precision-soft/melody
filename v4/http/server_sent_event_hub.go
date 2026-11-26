@@ -11,6 +11,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
+    "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
@@ -26,7 +27,7 @@ type ServerSentEventHubConfig struct {
     /* SubscriberBuffer is the capacity of every subscriber's channel, the events a slow reader can lag behind before the hub drops for it: 16 by default, at least 1, unlimited refused. */
     SubscriberBuffer bound.Count
 
-    /* Logger is the journal the hub files its own failures into: a failed backplane publish, a subscriber's first dropped event; nil records none, a typed nil is refused. */
+    /* Logger is the journal the hub files its own failures into: a failed backplane publish, a subscriber's first dropped event; nil is the emergency logger, a typed nil is refused. */
     Logger loggingcontract.Logger
 }
 
@@ -43,20 +44,15 @@ func NewServerSentEventHub(config ServerSentEventHubConfig) *ServerSentEventHub 
         exception.Panic(exception.FromError(subscriberBufferErr))
     }
 
-    if nil != config.Logger && true == internal.IsNilInterface(config.Logger) {
-        exception.Panic(
-            exception.NewError(
-                "server sent event hub logger is a typed nil",
-                exceptioncontract.Context{"field": "ServerSentEventHubConfig.Logger"},
-                nil,
-            ),
-        )
+    logger, loggerErr := logging.ResolveOptionalLogger(config.Logger, "server sent event hub", "ServerSentEventHubConfig.Logger")
+    if nil != loggerErr {
+        exception.Panic(exception.FromError(loggerErr))
     }
 
     return &ServerSentEventHub{
         subscribersByTopic: make(map[string]map[*ServerSentEventSubscriber]struct{}),
         subscriberBuffer:   subscriberBuffer.Value,
-        logger:             config.Logger,
+        logger:             logger,
     }
 }
 

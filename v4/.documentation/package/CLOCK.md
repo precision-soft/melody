@@ -136,6 +136,10 @@ func example(ctx context.Context) (time.Time, error) {
     - `NewTicker(interval time.Duration) clockcontract.Ticker`
     - `NewTimer(duration time.Duration) clockcontract.Timer` — on real wall time, sending the frozen `Now` of the moment it fires; `Advance` and `TravelTo` neither fire nor suppress it; `Stop` and `Reset` drop a value not yet received, as `time.Timer`'s do since Go 1.23
 
+### Optional clocks (`clock`)
+
+- [`ResolveOptionalClock(clockInstance clockcontract.Clock, component string, field string) (clockcontract.Clock, error)`](../../clock/optional_clock.go) — the reading of a config's `Clock`, the [optional dependency](./CONTAINER.md#optional-dependencies) rule every framework constructor follows: the handed clock, the system clock when nil, a typed nil refused as `<component> clock is a typed nil` naming `field`
+
 ### Container helpers (`clock`)
 
 - [`const ServiceClock`](../../clock/service_resolver.go)

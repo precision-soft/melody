@@ -6,7 +6,6 @@ import (
     "encoding/hex"
     "encoding/json"
     "errors"
-    "reflect"
     "sync"
     "time"
 
@@ -78,7 +77,7 @@ type ServerSentEventBackplane struct {
     wait   sync.WaitGroup
 }
 
-/* ServerSentEventBackplaneConfig declares the backplane beside its hub and its connection source: Exchange is used verbatim, <namespace>.sse when empty: the namespace of the provider that built the backplane, melody for the package's own constructor, and a nil or typed-nil Logger records nothing. A limit outside its rule is refused before the backplane is installed on the hub or its listener starts, naming the field. */
+/* ServerSentEventBackplaneConfig declares the backplane beside its hub and its connection source: Exchange is used verbatim, <namespace>.sse when empty: the namespace of the provider that built the backplane, melody for the package's own constructor, a nil Logger is the emergency logger and a typed nil is refused. A limit outside its rule is refused before the backplane is installed on the hub or its listener starts, naming the field. */
 type ServerSentEventBackplaneConfig struct {
     Exchange   string
     Logger     loggingcontract.Logger
@@ -122,9 +121,9 @@ func newServerSentEventBackplane(hub *melodyhttp.ServerSentEventHub, source Conn
         exception.Panic(exception.FromError(closeTimeoutErr))
     }
 
-    logger := config.Logger
-    if true == isAbsentLogger(logger) {
-        logger = nil
+    logger, loggerErr := logging.ResolveOptionalLogger(config.Logger, "amqp server sent event backplane", "ServerSentEventBackplaneConfig.Logger")
+    if nil != loggerErr {
+        exception.Panic(exception.FromError(loggerErr))
     }
 
     ctx, cancel := context.WithCancel(context.Background())
@@ -728,15 +727,15 @@ func (instance *ServerSentEventBackplane) logError(message string, err error) {
     instance.logger.Error(message, exception.LogContext(err, exception.LogContextConfig{}))
 }
 
-/* logTerminal reports a permanent capability loss even when no logger was configured, through the framework's last-resort stderr channel, since with the zero-value config logError discards everything and the receive half would die with no signal. */
+/* logTerminal reports a permanent capability loss: an absent logger was resolved to the emergency one at construction, so the receive half never dies with no signal. */
 func (instance *ServerSentEventBackplane) logTerminal(message string, err error) {
-    if nil != instance.logger {
-        instance.logger.Error(message, exception.LogContext(err, exception.LogContextConfig{}))
+    if nil == instance.logger {
+        logging.EmergencyLogger().Emergency(message, exception.LogContext(err, exception.LogContextConfig{}))
 
         return
     }
 
-    logging.EmergencyLogger().Emergency(message, exception.LogContext(err, exception.LogContextConfig{}))
+    instance.logger.Error(message, exception.LogContext(err, exception.LogContextConfig{}))
 }
 
 func newServerSentEventBackplaneOrigin() string {
@@ -760,17 +759,3 @@ func (instance *ServerSentEventBackplane) dialAttempt() string {
     return "first"
 }
 
-/* isAbsentLogger reads a nil logger and a typed-nil one alike as none, so a nil pointer handed through the interface records nothing instead of panicking at the first record. */
-func isAbsentLogger(logger loggingcontract.Logger) bool {
-    if nil == logger {
-        return true
-    }
-
-    value := reflect.ValueOf(logger)
-    switch value.Kind() {
-    case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan, reflect.Interface:
-        return value.IsNil()
-    default:
-        return false
-    }
-}

@@ -90,9 +90,9 @@ func newFileStorage(path string, file *os.File, config FileStorageConfig) (*File
         )
     }
 
-    clockInstance := config.Clock
-    if true == internal.IsNilInterface(clockInstance) {
-        clockInstance = clock.NewSystemClock()
+    clockInstance, clockErr := clock.ResolveOptionalClock(config.Clock, "session file storage", "FileStorageConfig.Clock")
+    if nil != clockErr {
+        return nil, clockErr
     }
 
     var storage *FileStorage

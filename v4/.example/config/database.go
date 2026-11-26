@@ -159,7 +159,7 @@ func (instance *Module) registerDatabaseServices(registrar melodyapplicationcont
                 return nil, loggerErr
             }
 
-            return melodybunorm.NewManagerRegistry(logger, definitionList)
+            return melodybunorm.NewManagerRegistry(definitionList, melodybunorm.ManagerRegistryConfig{Logger: logger})
         },
         /* built at boot: the construction judges the definitions and opens nothing, so a definition left without its database fails the boot rather than the first request that reads it */
         melodycontainer.RegisterOptions{BuiltAtBoot: true, BootFailure: melodycontainer.BootFailureFailsBoot},

@@ -10,8 +10,6 @@ import (
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
-    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
-    "github.com/precision-soft/melody/v4/internal"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
 )
 
@@ -36,19 +34,9 @@ var inMemoryLockerPurgeIntervalRule = bound.Rule[int]{
 
 /* NewInMemoryLocker answers a locker holding its leases in the process; a typed nil clock and a PurgeInterval its rule does not admit panic naming the field. */
 func NewInMemoryLocker(config InMemoryLockerConfig) *InMemoryLocker {
-    var clockInstance clockcontract.Clock = clock.NewSystemClock()
-    if nil != config.Clock {
-        if true == internal.IsNilInterface(config.Clock) {
-            exception.Panic(
-                exception.NewError(
-                    "lock clock is nil",
-                    exceptioncontract.Context{"field": "InMemoryLockerConfig.Clock"},
-                    nil,
-                ),
-            )
-        }
-
-        clockInstance = config.Clock
+    clockInstance, clockErr := clock.ResolveOptionalClock(config.Clock, "in-memory locker", "InMemoryLockerConfig.Clock")
+    if nil != clockErr {
+        exception.Panic(exception.FromError(clockErr))
     }
 
     purgeInterval, purgeIntervalErr := bound.Resolve(config.PurgeInterval, inMemoryLockerPurgeIntervalRule)

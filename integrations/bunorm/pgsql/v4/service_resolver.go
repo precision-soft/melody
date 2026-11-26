@@ -7,12 +7,12 @@ import (
     "github.com/uptrace/bun"
 )
 
-type ServiceRegistrar interface {
+type serviceRegistrar interface {
     RegisterService(serviceName string, provider any, options containercontract.RegisterOptions)
 }
 
-/* RegisterLockerService publishes the PostgreSQL advisory-lock Locker under the framework's own locker service name, the one lock.LockerMustFromResolver reads, so the backend is a matter of configuration. It is built with config when it is first resolved; the configuration is resolved here, so a ReleaseTimeout outside its rule panics at the wiring, naming the field, not at the first lock. A process wiring two backends registers the second under a name of its own. */
-func RegisterLockerService(registrar ServiceRegistrar, database *bun.DB, config LockerConfig) {
+/* registerLockerService publishes the PostgreSQL advisory-lock Locker under the framework's own locker service name, the one lock.LockerMustFromResolver reads, so the backend is a matter of configuration. It is built with config when it is first resolved; the configuration is resolved here, so a ReleaseTimeout outside its rule panics at the wiring, naming the field, not at the first lock. A process wiring two backends registers the second under a name of its own. */
+func registerLockerService(registrar serviceRegistrar, database *bun.DB, config LockerConfig) {
     releaseTimeout := mustResolveLockerReleaseTimeout(config)
 
     registrar.RegisterService(

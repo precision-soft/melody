@@ -12,6 +12,7 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
+    "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     "github.com/redis/rueidis"
 )
@@ -46,7 +47,7 @@ type ServerSentEventBackplaneConfig struct {
     /* Channel is the pub/sub channel every instance shares, used verbatim: <namespace>:sse when empty, the connection's namespace. */
     Channel string
 
-    /* Logger is the journal of subscription failures and reconnects; nil or a typed nil records none. */
+    /* Logger is the journal of subscription failures and reconnects; nil is the emergency logger, a typed nil is refused. */
     Logger loggingcontract.Logger
 
     /* Reconnect is the re-subscribe backoff. */
@@ -81,9 +82,9 @@ func NewServerSentEventBackplane(connection *Connection, hub *melodyhttp.ServerS
         channel = connection.namespacedName(serverSentEventBackplaneChannelSuffix)
     }
 
-    logger := config.Logger
-    if true == isAbsentLogger(logger) {
-        logger = nil
+    logger, loggerErr := logging.ResolveOptionalLogger(config.Logger, "rueidis server sent event backplane", "ServerSentEventBackplaneConfig.Logger")
+    if nil != loggerErr {
+        exception.Panic(exception.FromError(loggerErr))
     }
 
     ctx, cancel := context.WithCancel(context.Background())

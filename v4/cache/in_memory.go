@@ -19,7 +19,6 @@ import (
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
-    "github.com/precision-soft/melody/v4/internal"
 )
 
 const (
@@ -80,9 +79,9 @@ func NewInMemoryBackend(config InMemoryBackendConfig) *InMemoryBackend {
         exception.Panic(exception.FromError(cleanupIntervalErr))
     }
 
-    clockInstance := config.Clock
-    if true == internal.IsNilInterface(clockInstance) {
-        clockInstance = clock.NewSystemClock()
+    clockInstance, clockErr := clock.ResolveOptionalClock(config.Clock, "in-memory cache backend", "InMemoryBackendConfig.Clock")
+    if nil != clockErr {
+        exception.Panic(exception.FromError(clockErr))
     }
 
     /* 0 is the unlimited ceiling */

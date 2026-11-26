@@ -3,6 +3,7 @@ package rueidis
 import (
     "context"
     "errors"
+    "strings"
     "sync"
     "testing"
     "time"
@@ -12,6 +13,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
+    "github.com/precision-soft/melody/v4/logging"
 )
 
 func TestServerSentEventBackplane_ReplicatesBroadcastToAnotherInstance(t *testing.T) {
@@ -95,15 +97,42 @@ func TestServerSentEventBackplane_TheDefaultReconnectWaitsDoubleFromOneSecondToT
     }
 }
 
+func TestNewServerSentEventBackplane_ATypedNilLoggerIsRefused(t *testing.T) {
+    client := newTokenStoreClient(t)
+
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+
+    expectPanicNamingField(t, "ServerSentEventBackplaneConfig.Logger", func() {
+        NewServerSentEventBackplane(newTestConnection(client), hub, ServerSentEventBackplaneConfig{Logger: (*capturingLogger)(nil)})
+    })
+}
+
+func TestServerSentEventBackplane_AnAbsentLoggerRecordsATerminalStopOnTheEmergencyLogger(t *testing.T) {
+    client := newTokenStoreClient(t)
+
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+    backplane := NewServerSentEventBackplane(newTestConnection(client), hub, ServerSentEventBackplaneConfig{})
+    defer backplane.CloseWithContext(context.Background())
+
+    written := captureStandardError(t, func() {
+        backplane.logError("redis backplane subscription stopped", errors.New("connection gone"))
+    })
+
+    if false == strings.Contains(written, "redis backplane subscription stopped") {
+        t.Fatalf("expected the failure on the emergency logger, got %q", written)
+    }
+}
+
 func TestNewServerSentEventBackplane_AnAbsentConfigTakesTheDefaults(t *testing.T) {
     client := newTokenStoreClient(t)
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(newTestConnection(client), hub, ServerSentEventBackplaneConfig{Logger: (*capturingLogger)(nil)})
+    backplane := NewServerSentEventBackplane(newTestConnection(client), hub, ServerSentEventBackplaneConfig{})
     defer backplane.CloseWithContext(context.Background())
 
-    if "melody:sse" != backplane.channel || time.Second != backplane.callTimeout || nil != backplane.logger {
-        t.Fatalf("expected the default channel, a 1s budget and a typed-nil logger read as none, got %q, %v, %v", backplane.channel, backplane.callTimeout, backplane.logger)
+    emergencyDefault, _ := logging.ResolveOptionalLogger(nil, "test", "Test.Logger")
+    if "melody:sse" != backplane.channel || time.Second != backplane.callTimeout || emergencyDefault != backplane.logger {
+        t.Fatalf("expected the default channel, a 1s budget and the emergency logger, got %q, %v, %v", backplane.channel, backplane.callTimeout, backplane.logger)
     }
 
     expected := bound.ResolvedBackoff{Initial: time.Second, Max: 30 * time.Second, Factor: 2.0}

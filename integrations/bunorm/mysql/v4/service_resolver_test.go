@@ -23,7 +23,7 @@ func (instance *recordingRegistrar) RegisterService(serviceName string, provider
 func TestRegisterLockerServiceUsesCoreLockerName(t *testing.T) {
     registrar := &recordingRegistrar{}
 
-    RegisterLockerService(registrar, nil, LockerConfig{})
+    registerLockerService(registrar, nil, LockerConfig{})
 
     if 0 == len(registrar.names) || melodylock.ServiceLocker != registrar.names[0] {
         t.Fatalf("expected %q to be registered, got %v", melodylock.ServiceLocker, registrar.names)
@@ -33,7 +33,7 @@ func TestRegisterLockerServiceUsesCoreLockerName(t *testing.T) {
 func TestRegisterLockerService_TheRegisteredLockerCarriesTheConfiguredReleaseTimeout(t *testing.T) {
     registrar := &recordingRegistrar{}
 
-    RegisterLockerService(registrar, newReleaseRecordingDatabase(t, &releaseRecordingConnector{}), LockerConfig{ReleaseTimeout: bound.Of(2 * time.Second)})
+    registerLockerService(registrar, newReleaseRecordingDatabase(t, &releaseRecordingConnector{}), LockerConfig{ReleaseTimeout: bound.Of(2 * time.Second)})
 
     provider, isProvider := registrar.providers[0].(func(containercontract.Resolver) (lockcontract.Locker, error))
     if false == isProvider {
@@ -50,7 +50,7 @@ func TestRegisterLockerService_RefusesAReleaseTimeoutOutsideItsRuleAtTheCall(t *
     registrar := &recordingRegistrar{}
 
     expectPanicNamingField(t, "LockerConfig.ReleaseTimeout", func() {
-        RegisterLockerService(registrar, nil, LockerConfig{ReleaseTimeout: bound.UnlimitedDuration()})
+        registerLockerService(registrar, nil, LockerConfig{ReleaseTimeout: bound.UnlimitedDuration()})
     })
 
     if 0 != len(registrar.names) {

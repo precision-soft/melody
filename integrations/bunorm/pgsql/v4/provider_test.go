@@ -1647,3 +1647,54 @@ func TestProvider_OpenForMigrationNamesItselfWhenHandedNoRuntime(t *testing.T) {
         t.Fatalf("expected the refusal to name the migration door, got %v", openErr)
     }
 }
+
+/* the provider's one optional dependency, the open's logger: an absent one reaches the dial, a typed nil is refused before anything is routed or dialled */
+func TestOptionalDependencies_NilIsTheDefaultAndATypedNilIsRefused(t *testing.T) {
+    provider := NewProvider(ProviderConfig{Retry: RetryConfig{MaxAttempts: bound.Of(1)}})
+    parameters := newTestParameters("127.0.0.1", "1", "melody_unreachable", "melody", "melody")
+
+    captureStandardErrorOf(t, func() {
+        database, openErr := provider.Open(testRuntime(), parameters, nil)
+        if nil != database {
+            _ = database.Close()
+        }
+
+        var refusal *exception.Error
+        if true == errors.As(openErr, &refusal) && "pgsql provider logger is a typed nil" == refusal.Message() {
+            t.Fatalf("expected an absent logger to reach the dial, got %v", openErr)
+        }
+    })
+
+    database, openErr := provider.Open(testRuntime(), parameters, (*capturingProviderLogger)(nil))
+    if nil != database {
+        _ = database.Close()
+        t.Fatalf("expected no database for a typed-nil logger")
+    }
+
+    var refusal *exception.Error
+    if false == errors.As(openErr, &refusal) || "pgsql provider logger is a typed nil" != refusal.Message() || "pgsql.Provider.Open.logger" != refusal.Context()["field"] {
+        t.Fatalf("expected the typed-nil refusal naming pgsql.Provider.Open.logger, got %v", openErr)
+    }
+}
+
+func captureStandardErrorOf(t *testing.T, action func()) {
+    t.Helper()
+
+    readEnd, writeEnd, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("pipe: %v", pipeErr)
+    }
+
+    savedStandardError := os.Stderr
+    logging.CloseEmergencyLogger()
+    os.Stderr = writeEnd
+    _ = logging.EmergencyLogger()
+    os.Stderr = savedStandardError
+
+    action()
+
+    logging.CloseEmergencyLogger()
+    _ = writeEnd.Close()
+    _, _ = io.ReadAll(readEnd)
+    _ = readEnd.Close()
+}

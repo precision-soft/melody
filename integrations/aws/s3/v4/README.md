@@ -52,19 +52,13 @@ The zero `Config` dials **https**. `Config.Insecure` selects plain http: credent
 
 ### Plug-and-play registration
 
-Register the S3 backend under the core `storage.ServiceStorage` service name in one call, so a handler binds it with `storage.FromRuntime(runtimeInstance)` and a provider resolves it with `storage.StorageMustFromResolver`:
-
-```go
-awss3.RegisterStorageService(registrar, client, "documents", awss3.StorageConfig{})
-```
-
-Or bundle it as a self-registering application module — one `RegisterModule` call registers the storage service (an empty `ModuleConfig{}` registers nothing; a bucket or a storage configuration with no client, or a configured client with an empty bucket or a limit outside its rule is refused at boot):
+The module registers the S3 backend under the core `storage.ServiceStorage` service name, so a handler binds it with `storage.FromRuntime(runtimeInstance)` and a provider resolves it with `storage.StorageMustFromResolver`; one `RegisterModule` call registers the storage service (an empty `ModuleConfig{}` registers nothing; a bucket or a storage configuration with no client, or a configured client with an empty bucket or a limit outside its rule is refused at boot):
 
 ```go
 app.RegisterModule(awss3.NewModule(awss3.ModuleConfig{Client: client, Bucket: "documents"}))
 ```
 
-`StorageConfig` declares the storage's two bounds, each its default when left out and refused at `NewStorage`, at the `RegisterStorageService` call and through the module, naming the field, when below its minimum or unlimited:
+`StorageConfig` declares the storage's two bounds, each its default when left out and refused at `NewStorage` and through the module, naming the field, when below its minimum or unlimited:
 
 | Field                   | Meaning                                                                                                        | Default  |
 |-------------------------|----------------------------------------------------------------------------------------------------------------|----------|

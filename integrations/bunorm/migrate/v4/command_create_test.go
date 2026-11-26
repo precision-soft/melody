@@ -205,10 +205,10 @@ func newRuntimeWithProvider(t *testing.T, provider bunorm.Provider) containercon
     t.Helper()
 
     registry, registryErr := bunorm.NewManagerRegistry(
-        logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
             bunorm.ProviderDefinition{Name: "primary", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
+        bunorm.ManagerRegistryConfig{Logger: logging.NewNopLogger()},
     )
     if nil != registryErr {
         t.Fatalf("failed to build manager registry: %s", registryErr.Error())
@@ -346,10 +346,10 @@ func TestCreateCommand_ALostReportWriteIsAWarningInTheJournalNotAFailure(t *test
     journal := &journalRecorder{Logger: logging.NewNopLogger()}
 
     registry, registryErr := bunorm.NewManagerRegistry(
-        logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
             bunorm.ProviderDefinition{Name: "primary", Provider: &refusingCountingProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
+        bunorm.ManagerRegistryConfig{Logger: logging.NewNopLogger()},
     )
     if nil != registryErr {
         t.Fatalf("failed to build manager registry: %s", registryErr.Error())

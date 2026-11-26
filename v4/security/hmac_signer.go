@@ -71,9 +71,9 @@ func NewHmacEnvelopeSigner(
         headerName = DefaultHmacHeaderName
     }
 
-    clockInstance := config.Clock
-    if true == internal.IsNilInterface(clockInstance) {
-        clockInstance = clock.NewSystemClock()
+    clockInstance, clockErr := clock.ResolveOptionalClock(config.Clock, "hmac envelope signer", "HmacEnvelopeSignerConfig.Clock")
+    if nil != clockErr {
+        exception.Panic(exception.FromError(clockErr))
     }
 
     signer := &HmacEnvelopeSigner{
