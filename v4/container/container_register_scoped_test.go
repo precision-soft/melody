@@ -1,6 +1,7 @@
 package container
 
 import (
+    "context"
     "reflect"
     "testing"
 
@@ -267,7 +268,7 @@ func TestMustRegisterScopedTypeGeneric_RegistersOnTheHappyPath(t *testing.T) {
 func TestRegisterScopedTypeGeneric_TypeRegistrationDisabledRegistersUnderTheDerivedNameOnly(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
     scopeInstance := serviceContainer.NewScope()
-    defer func() { _ = scopeInstance.Close() }()
+    defer func() { _ = scopeInstance.CloseWithContext(context.Background()) }()
 
     for _, testCase := range []struct {
         name      string

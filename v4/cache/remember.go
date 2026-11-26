@@ -329,7 +329,7 @@ func openRememberFlightRuntime(
     }
 
     return flightRuntime, func() {
-        closeErr := flightRuntime.Scope().Close()
+        closeErr := flightRuntime.Scope().CloseWithContext(context.Background())
         if nil != closeErr {
             logging.EmergencyLogger().Error(
                 "failed to close the cache remember flight scope",

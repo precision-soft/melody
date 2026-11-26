@@ -1271,7 +1271,7 @@ func TestConsume_MessageRuntimeOpensAChildScopeAndKeepsTheRunsWhenItsScopeClosed
     }
     closeScope()
 
-    _ = baseScope.Close()
+    _ = baseScope.CloseWithContext(context.Background())
 
     closedRuntime, closeClosed := session.messageRuntime(runtimeInstance, envelope)
     defer closeClosed()

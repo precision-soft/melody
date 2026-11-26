@@ -263,7 +263,7 @@ func TestNewApplication_TheScopeTeardownTimeoutFieldReachesTheContainersScopes(t
     scope := serviceContainer.NewScope()
     probe := container.MustFromResolver[*scopeTeardownTimeoutProbe](context.Background(), scope, "app.scope.teardown.timeout")
 
-    if closeErr := scope.Close(); nil != closeErr {
+    if closeErr := scope.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 

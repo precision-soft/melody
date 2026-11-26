@@ -1,6 +1,7 @@
 package application
 
 import (
+    "context"
     "fmt"
     "io"
     "os"
@@ -186,7 +187,7 @@ func (instance *Application) runCli() error {
 
     /* a last-resort net for a panic between the scope's creation and the action dispatch; a run that reaches the action has its scope closed there, so this second close answers nil */
     defer func() {
-        scopeCloseErr := scope.Close()
+        scopeCloseErr := scope.CloseWithContext(context.Background())
         if nil != scopeCloseErr {
             logging.EmergencyLogger().Error("failed to close service container scope", exception.LogContext(scopeCloseErr, exception.LogContextConfig{}))
         }

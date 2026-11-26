@@ -4,6 +4,7 @@ import (
     "context"
     "errors"
     "fmt"
+    "io"
     "os"
     "path/filepath"
     "strings"
@@ -14,6 +15,7 @@ import (
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
 )
 
 func TestReopenableFileWriter_WritesToTheFileItOpened(t *testing.T) {
@@ -23,7 +25,7 @@ func TestReopenableFileWriter_WritesToTheFileItOpened(t *testing.T) {
     if nil != newErr {
         t.Fatalf("unexpected constructor error: %v", newErr)
     }
-    defer func() { _ = writer.Close() }()
+    defer func() { _ = writer.CloseWithContext(context.Background()) }()
 
     _, writeErr := writer.Write([]byte("first record\n"))
     if nil != writeErr {
@@ -48,7 +50,7 @@ func TestReopenableFileWriter_ReopenFollowsARenameToTheFreshFile(t *testing.T) {
     if nil != newErr {
         t.Fatalf("unexpected constructor error: %v", newErr)
     }
-    defer func() { _ = writer.Close() }()
+    defer func() { _ = writer.CloseWithContext(context.Background()) }()
 
     _, _ = writer.Write([]byte("before rotation\n"))
 
@@ -91,7 +93,7 @@ func TestReopenableFileWriter_AFailedReopenKeepsTheCurrentDescriptorWriting(t *t
     if nil != newErr {
         t.Fatalf("unexpected constructor error: %v", newErr)
     }
-    defer func() { _ = writer.Close() }()
+    defer func() { _ = writer.CloseWithContext(context.Background()) }()
 
     renameErr := os.Rename(logPath, rotatedPath)
     if nil != renameErr {
@@ -128,10 +130,10 @@ func TestReopenableFileWriter_CloseRefusesLaterWritesAndStaysIdempotent(t *testi
         t.Fatalf("unexpected constructor error: %v", newErr)
     }
 
-    if closeErr := writer.Close(); nil != closeErr {
+    if closeErr := writer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
-    if closeErr := writer.Close(); nil != closeErr {
+    if closeErr := writer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("expected the second close to answer nil, got %v", closeErr)
     }
 
@@ -156,7 +158,7 @@ func TestReopenableFileWriter_ArmRefusesADoubleArmAndAnEmptySignalSet(t *testing
     if nil != newErr {
         t.Fatalf("unexpected constructor error: %v", newErr)
     }
-    defer func() { _ = writer.Close() }()
+    defer func() { _ = writer.CloseWithContext(context.Background()) }()
 
     if armErr := writer.ArmReopenOnSignal(nil); nil == armErr {
         t.Fatalf("expected the empty signal set to be refused")
@@ -185,7 +187,7 @@ func TestReopenableFileWriter_ASighupReopensTheJournalWhileArmed(t *testing.T) {
     if nil != newErr {
         t.Fatalf("unexpected constructor error: %v", newErr)
     }
-    defer func() { _ = writer.Close() }()
+    defer func() { _ = writer.CloseWithContext(context.Background()) }()
 
     if armErr := writer.ArmReopenOnSignal([]os.Signal{syscall.SIGHUP}); nil != armErr {
         t.Fatalf("unexpected arm error: %v", armErr)
@@ -231,7 +233,7 @@ func TestReopenableFileWriter_ARefusedCloseOfTheReplacedDescriptorIsStillARotati
     if nil != newErr {
         t.Fatalf("unexpected constructor error: %v", newErr)
     }
-    defer func() { _ = writer.Close() }()
+    defer func() { _ = writer.CloseWithContext(context.Background()) }()
 
     _, _ = writer.Write([]byte("before rotation\n"))
 
@@ -284,7 +286,7 @@ func TestReopenableFileWriter_AFailedOpenDoesNotCarryTheRotatedDescriptorSentine
     if nil != newErr {
         t.Fatalf("unexpected constructor error: %v", newErr)
     }
-    defer func() { _ = writer.Close() }()
+    defer func() { _ = writer.CloseWithContext(context.Background()) }()
 
     renameErr := os.Rename(logPath, rotatedPath)
     if nil != renameErr {
@@ -310,7 +312,7 @@ func TestReopenableFileWriter_AFailedOpenDoesNotCarryTheRotatedDescriptorSentine
     if nil != closedWriterErr {
         t.Fatalf("unexpected constructor error: %v", closedWriterErr)
     }
-    if closeErr := closedWriter.Close(); nil != closeErr {
+    if closeErr := closedWriter.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -330,7 +332,7 @@ func TestReopenableFileWriter_WritesStayWholeWhileReopenSwapsTheDescriptor(t *te
     if nil != newErr {
         t.Fatalf("unexpected constructor error: %v", newErr)
     }
-    defer func() { _ = writer.Close() }()
+    defer func() { _ = writer.CloseWithContext(context.Background()) }()
 
     release := make(chan struct{})
 
@@ -442,11 +444,45 @@ func TestReopenableFileWriter_CloseWithContextRefusesANilContext(t *testing.T) {
     if nil != writerErr {
         t.Fatalf("unexpected writer error: %v", writerErr)
     }
-    defer func() { _ = writer.Close() }()
+    defer func() { _ = writer.CloseWithContext(context.Background()) }()
 
     //nolint:staticcheck // the nil context is the input under test
-    if closeErr := writer.CloseWithContext(nil); nil == closeErr || "the close context is nil" != closeErr.Error() {
-        t.Fatalf("expected the nil context refused, got %v", closeErr)
+    if closeErr := writer.CloseWithContext(nil); nil == closeErr || "the close context is nil" != closeErr.Error() || "ReopenableFileWriter.CloseWithContext" != exception.FromError(closeErr).Context()["door"] {
+        t.Fatalf("expected the nil context refused naming the door, got %v", closeErr)
+    }
+}
+
+func TestReopenableFileWriter_CloseWithContextDisarmsThenSurrendersOnce(t *testing.T) {
+    writer, writerErr := NewReopenableFileWriter(filepath.Join(t.TempDir(), "app.log"), ReopenableFileWriterConfig{})
+    if nil != writerErr {
+        t.Fatalf("unexpected writer error: %v", writerErr)
+    }
+
+    if armErr := writer.ArmReopenOnSignal([]os.Signal{syscall.SIGUSR2}); nil != armErr {
+        t.Fatalf("unexpected arm error: %v", armErr)
+    }
+
+    if closeErr := writer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    select {
+    case <-writer.doneChannel:
+    default:
+        t.Fatalf("expected the watcher disarmed before the close answered")
+    }
+
+    if _, statErr := writer.file.Stat(); nil == statErr {
+        t.Fatalf("expected the descriptor surrendered")
+    }
+
+    if closeErr := writer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("expected a second close to answer nil, got %v", closeErr)
+    }
+
+    var plainCloser any = writer
+    if _, isCloser := plainCloser.(io.Closer); true == isCloser {
+        t.Fatalf("expected the writer to have one close door, CloseWithContext")
     }
 }
 
@@ -457,7 +493,7 @@ func TestNewReopenableFileWriter_ZeroConfigOpensWithTodaysMode(t *testing.T) {
     if nil != newErr {
         t.Fatalf("unexpected constructor error: %v", newErr)
     }
-    defer func() { _ = writer.Close() }()
+    defer func() { _ = writer.CloseWithContext(context.Background()) }()
 
     information, statErr := os.Stat(logPath)
     if nil != statErr {

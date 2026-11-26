@@ -361,7 +361,7 @@ func TestGeneratedServices_ConcurrentScopesKeepRequestStateSeparate(t *testing.T
         go func(requestId string, requestScope melodycontainercontract.Scope) {
             defer workers.Done()
             defer func() {
-                if closeErr := requestScope.Close(); nil != closeErr {
+                if closeErr := requestScope.CloseWithContext(context.Background()); nil != closeErr {
                     t.Errorf("close the %s scope: %v", requestId, closeErr)
                 }
             }()

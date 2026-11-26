@@ -1959,6 +1959,36 @@ func (instance *contextClosingWriter) CloseWithContext(closeContext context.Cont
     return nil
 }
 
+type contextOnlyClosingWriter struct {
+    closedWith context.Context
+}
+
+func (instance *contextOnlyClosingWriter) Write(data []byte) (int, error) {
+    return len(data), nil
+}
+
+func (instance *contextOnlyClosingWriter) CloseWithContext(closeContext context.Context) error {
+    instance.closedWith = closeContext
+
+    return nil
+}
+
+func TestJsonLogger_ClosesAContextCloserThroughItsContextDoor(t *testing.T) {
+    writer := &contextOnlyClosingWriter{}
+    logger := newJsonLogger(writer, JsonLoggerConfig{})
+
+    closeContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    if closeErr := logger.CloseWithContext(closeContext); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if closeContext != writer.closedWith || false == logger.Closed() {
+        t.Fatalf("expected a writer with the context door alone closed through it, got %v", writer.closedWith)
+    }
+}
+
 func TestJsonLogger_CloseHandsTheContextToAWriterThatTakesOne(t *testing.T) {
     writer := &contextClosingWriter{}
     closeContext, cancel := context.WithCancel(context.Background())

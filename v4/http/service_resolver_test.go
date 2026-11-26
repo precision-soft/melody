@@ -1,6 +1,7 @@
 package http
 
 import (
+    "context"
     "errors"
     "testing"
     "time"
@@ -123,7 +124,7 @@ func TestRequestContextFromRuntime_ResolvesTheInstalledContext(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     requestScope := serviceContainer.NewScope()
-    defer requestScope.Close()
+    defer requestScope.CloseWithContext(context.Background())
 
     startedAt := time.Date(2026, time.August, 7, 12, 0, 0, 0, time.UTC)
     installed := NewRequestContext("request-1", startedAt)

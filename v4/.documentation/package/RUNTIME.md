@@ -82,7 +82,7 @@ func example() int64 {
         "service.clock",
     )
 
-    closeErr := scope.Close()
+    closeErr := scope.CloseWithContext(context.Background())
     if nil != closeErr {
         exception.Panic(
             exception.NewError("failed to close scope", nil, closeErr),

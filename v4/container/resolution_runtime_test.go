@@ -39,7 +39,7 @@ func boundScope(t *testing.T, serviceContainer containercontract.Container, kind
 
     scopeInstance := serviceContainer.NewScope()
     t.Cleanup(func() {
-        _ = scopeInstance.Close()
+        _ = scopeInstance.CloseWithContext(context.Background())
     })
 
     if bindErr := scopeInstance.(runtimeseam.KindBinder).BindRuntimeKind(runtimeseam.Token{}, kind); nil != bindErr {
@@ -70,7 +70,7 @@ func TestRuntime_AContainerServiceFirstResolvedThroughABoundScopeReadsItsKindThe
             }, RegisterOptions{})
             overrideErr := suspended.OverrideInstance("app.scoped.only", &testService{}, containercontract.OverrideOptions{})
             protectedErr := suspended.OverrideProtectedInstance("app.scoped.only", &testService{}, containercontract.OverrideOptions{})
-            refusals <- []error{scopedErr, registerErr, overrideErr, protectedErr, suspended.Close(), suspended.CloseWithContext(context.Background())}
+            refusals <- []error{scopedErr, registerErr, overrideErr, protectedErr, suspended.CloseWithContext(context.Background()), suspended.CloseWithContext(context.Background())}
 
             return &testService{Value: "singleton"}, nil
         }, RegisterOptions{})
@@ -153,7 +153,7 @@ func TestRuntime_AScopedProviderReadsAScopeThatHandsItsChangesToTheRealScope(t *
         t.Fatalf("expected the override made through the provider's runtime to reach the real scope, got %v, %v", installed, getErr)
     }
 
-    if closeErr := runtimeInstance.Scope().Close(); nil != closeErr {
+    if closeErr := runtimeInstance.Scope().CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -269,7 +269,7 @@ func TestRuntime_TheContainerDoorAndAnUnboundScopeReadADetachedRuntimeOverTheCon
 
     unbound := serviceContainer.NewScope()
     defer func() {
-        _ = unbound.Close()
+        _ = unbound.CloseWithContext(context.Background())
     }()
 
     if _, getErr := unbound.Get(givenContext, "app.through.unbound"); nil != getErr {
@@ -369,7 +369,7 @@ func TestBindRuntimeKind_TheFirstKindWinsTheSameKindAgainIsAdmittedAndAnotherIsR
     serviceContainer := NewContainer(ContainerConfig{})
     scopeInstance := serviceContainer.NewScope()
     defer func() {
-        _ = scopeInstance.Close()
+        _ = scopeInstance.CloseWithContext(context.Background())
     }()
 
     binder := scopeInstance.(runtimeseam.KindBinder)
@@ -572,7 +572,7 @@ func TestRuntime_AProvidersRuntimeScopeForwardsTheCapabilitiesOfItsResolver(t *t
         t.Fatalf("expected the scoped provider's runtime scope to report an open scope")
     }
 
-    _ = scopeInstance.Close()
+    _ = scopeInstance.CloseWithContext(context.Background())
 
     if false == scoped.runtimeScope.(interface{ Closed() bool }).Closed() || false == scoped.runtimeScope.(closedScopeChecker).isScopeClosed() {
         t.Fatalf("expected the scoped provider's runtime scope to report its scope closed")

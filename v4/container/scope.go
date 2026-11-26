@@ -532,24 +532,32 @@ func (instance *scope) Closed() bool {
     return nil == instance.container.Load()
 }
 
-/* Close ends the request the scope stands for and closes only the services the scope built: overrides belong to their installers, but one installed ClosedWithScope, and singletons to the root container. It is CloseWithContext under the container's ScopeTeardownTimeout, with no deadline where that is unlimited. */
-func (instance *scope) Close() error {
-    if true == instance.teardownTimeout.Unlimited {
-        return instance.CloseWithContext(context.Background())
-    }
-
-    closeContext, cancel := context.WithTimeout(context.Background(), instance.teardownTimeout.Value)
-    defer cancel()
-
-    return instance.CloseWithContext(closeContext)
-}
-
-/* CloseWithContext is Close under the caller's deadline, handed to every scoped service carrying CloseWithContext. */
+/* CloseWithContext ends the request the scope stands for and closes only the services the scope built: overrides belong to their installers, but one installed ClosedWithScope, and singletons to the root container. The caller's context and the container's ScopeTeardownTimeout bound it, the earlier ending it, and each scoped service carrying CloseWithContext is handed that bound; a failure past the configured bound names it. */
 func (instance *scope) CloseWithContext(closeContext context.Context) error {
     if true == internal.IsNilInterface(closeContext) {
-        return exception.NewError("the close context is nil", exceptioncontract.Context{"door": "scope.CloseWithContext"}, nil)
+        return exception.NewError("the close context is nil", exceptioncontract.Context{"door": "Scope.CloseWithContext"}, nil)
     }
 
+    if true == instance.teardownTimeout.Unlimited {
+        return instance.closeWithin(closeContext)
+    }
+
+    boundedContext, cancel := context.WithTimeout(closeContext, instance.teardownTimeout.Value)
+    defer cancel()
+
+    closeErr := instance.closeWithin(boundedContext)
+    if nil == closeErr || nil == boundedContext.Err() || nil != closeContext.Err() {
+        return closeErr
+    }
+
+    return exception.NewError(
+        "the scope's close ended at its configured bound",
+        exceptioncontract.Context{"door": "Scope.CloseWithContext", "bound": ScopeTeardownTimeoutRule().Name},
+        closeErr,
+    )
+}
+
+func (instance *scope) closeWithin(closeContext context.Context) error {
     /* the dependency graph is guarded by the container mutex, so the snapshot takes the container lock first; an edge a racing creation misses degrades to creation order */
     dependencyGraph := map[string]map[string]struct{}(nil)
 

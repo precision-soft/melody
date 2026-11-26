@@ -1,6 +1,7 @@
 package container
 
 import (
+    "context"
     "errors"
     "testing"
 
@@ -104,7 +105,7 @@ func TestAllImplementing_CollectsThroughAScope(t *testing.T) {
 
     requestScope := serviceContainer.NewScope()
     defer func() {
-        _ = requestScope.Close()
+        _ = requestScope.CloseWithContext(context.Background())
     }()
 
     handlers, allImplementingErr := AllImplementing[collectableHandler](t.Context(), requestScope)
@@ -259,7 +260,7 @@ func TestAllImplementing_ScopeOverrideTakesPart(t *testing.T) {
 
     requestScope := serviceContainer.NewScope()
     defer func() {
-        _ = requestScope.Close()
+        _ = requestScope.CloseWithContext(context.Background())
     }()
 
     overrideErr := requestScope.OverrideProtectedInstance("handler.invoice", &auditHandler{}, OverrideOptions{})
@@ -315,7 +316,7 @@ func TestAllImplementing_RefusesAClosedScope(t *testing.T) {
 
     requestScope := serviceContainer.NewScope()
 
-    closeErr := requestScope.Close()
+    closeErr := requestScope.CloseWithContext(context.Background())
     if nil != closeErr {
         t.Fatalf("expected the scope to close, got %v", closeErr)
     }
@@ -558,7 +559,7 @@ func TestAllImplementing_RefusesAClosedScopeThroughAProvidersResolver(t *testing
         t.Fatalf("expected the provider to have captured its resolver")
     }
 
-    if closeErr := requestScope.Close(); nil != closeErr {
+    if closeErr := requestScope.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("expected the scope to close, got %v", closeErr)
     }
 
@@ -600,7 +601,7 @@ func TestAllImplementing_ExcludesTheScopedServiceBeingCreatedByType(t *testing.T
 
     scopeInstance := serviceContainer.NewScope()
     defer func() {
-        _ = scopeInstance.Close()
+        _ = scopeInstance.CloseWithContext(context.Background())
     }()
 
     dispatcher, getErr := FromResolverByType[*compositeDispatcher](t.Context(), scopeInstance)
@@ -627,7 +628,7 @@ func TestAllImplementing_ExcludesTheScopedServiceBeingCreatedByName(t *testing.T
 
     scopeInstance := serviceContainer.NewScope()
     defer func() {
-        _ = scopeInstance.Close()
+        _ = scopeInstance.CloseWithContext(context.Background())
     }()
 
     dispatcher, getErr := FromResolver[*compositeDispatcher](t.Context(), scopeInstance, "dispatcher.request")
@@ -659,7 +660,7 @@ func TestAllImplementing_AScopedReplacementOutsideTheInterfaceHidesTheContainerR
 
     scopeInstance := serviceContainer.NewScope()
     defer func() {
-        _ = scopeInstance.Close()
+        _ = scopeInstance.CloseWithContext(context.Background())
     }()
 
     handlers, err := AllImplementing[collectableHandler](t.Context(), scopeInstance)
@@ -685,7 +686,7 @@ func TestAllImplementing_AScopedReplacementInsideTheInterfaceIsCollectedInItsPla
 
     scopeInstance := serviceContainer.NewScope()
     defer func() {
-        _ = scopeInstance.Close()
+        _ = scopeInstance.CloseWithContext(context.Background())
     }()
 
     handlers, err := AllImplementing[collectableHandler](t.Context(), scopeInstance)

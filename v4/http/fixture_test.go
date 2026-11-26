@@ -146,14 +146,14 @@ func (instance *closeRecordingScope) OverrideProtectedInstance(serviceName strin
     return instance.Scope.OverrideProtectedInstance(serviceName, value, options)
 }
 
-func (instance *closeRecordingScope) Close() error {
+func (instance *closeRecordingScope) CloseWithContext(closeContext context.Context) error {
     instance.closed = true
 
     if nil != instance.onClose {
         instance.onClose()
     }
 
-    return instance.Scope.Close()
+    return instance.Scope.CloseWithContext(closeContext)
 }
 
 type scopeRecordingContainer struct {

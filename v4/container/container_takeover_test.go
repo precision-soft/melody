@@ -488,7 +488,7 @@ func TestCreationGuard_AScopedCreationIsTakenOverAndAClosedScopeIsNot(t *testing
             t.Fatalf("close scope %v: expected %d runs, got %d", closeScope, expectedRuns, provider.runCount())
         }
 
-        _ = scopeInstance.Close()
+        _ = scopeInstance.CloseWithContext(context.Background())
     }
 }
 

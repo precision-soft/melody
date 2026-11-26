@@ -837,7 +837,7 @@ func (instance *RunnerCommand) invokeRun(runtimeInstance containercontract.Runti
 
     childScope := childRuntime.Scope()
     defer func() {
-        closeErr := childScope.Close()
+        closeErr := childScope.CloseWithContext(context.Background())
         if nil == closeErr {
             return
         }

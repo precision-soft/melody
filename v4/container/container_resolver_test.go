@@ -185,7 +185,7 @@ func TestResolve_AScopedValueWhoseScopeClosedWhileItsProviderRanIsClosedThroughC
 
     <-providerStarted
 
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("scope close: %v", closeErr)
     }
 
@@ -526,7 +526,7 @@ func TestCreationGuard_ScopeClosedDuringCreation_ClosesBuiltValue(t *testing.T) 
 
     <-providerEntered
 
-    closeErr := scopeInstance.Close()
+    closeErr := scopeInstance.CloseWithContext(context.Background())
     if nil != closeErr {
         t.Fatalf("unexpected scope close error: %v", closeErr)
     }
@@ -1219,7 +1219,7 @@ func TestCreationGuard_AWaiterCoalescedBehindAScopedCreationWhoseScopeClosesIsRe
             defer group.Done()
 
             _, getErr := scopeInstance.Get(t.Context(), "scoped.coalesced")
-            _ = scopeInstance.Close()
+            _ = scopeInstance.CloseWithContext(context.Background())
             results <- getErr
         }()
 
@@ -1468,7 +1468,7 @@ func TestCreationGuard_ScopeCloseReleasesAWaiterParkedOnTheScopesCreation(t *tes
 
     awaitScopedCreationWaiter(t, serviceContainer, scopeInstance, "scoped.release", 1)
 
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected scope close error: %v", closeErr)
     }
 
@@ -1543,7 +1543,7 @@ func TestCreationGuard_ScopeCloseReleasesAWaiterParkedOnTheScopesTypeKeyedCreati
         time.Sleep(time.Millisecond)
     }
 
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected scope close error: %v", closeErr)
     }
 
@@ -1596,7 +1596,7 @@ func TestCreationGuard_ScopeCloseLeavesAWaiterOnAContainerCreationParked(t *test
 
     awaitCreationWaiter(t, serviceContainer, "app.singleton.shared", 1)
 
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected scope close error: %v", closeErr)
     }
 
@@ -2141,7 +2141,7 @@ func TestCreationGuard_AScopedCreationsWaiterLeavesWithItsContext(t *testing.T) 
 
     scopeInstance := serviceContainer.NewScope()
     defer func() {
-        _ = scopeInstance.Close()
+        _ = scopeInstance.CloseWithContext(context.Background())
     }()
 
     ownerDone := make(chan error, 1)

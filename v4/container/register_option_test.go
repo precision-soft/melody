@@ -330,7 +330,7 @@ func TestRegisterOptionsCloser_ACloserThatDoesNotTakeTheServicesTypeIsRefusedAtR
 func TestRegisterOptionsCloser_TheScopedRegistrationsRefuseEveryFormOfACloser(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
     scopeInstance := serviceContainer.NewScope()
-    defer func() { _ = scopeInstance.Close() }()
+    defer func() { _ = scopeInstance.CloseWithContext(context.Background()) }()
 
     provider := func(resolver containercontract.Resolver) (*foreignClosingService, error) {
         return &foreignClosingService{}, nil

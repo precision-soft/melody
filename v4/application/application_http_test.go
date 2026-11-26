@@ -3239,7 +3239,7 @@ func TestApplicationClose_HandedOut_BoundsTheWindDownByTheShutdownTimeout(t *tes
     go func() {
         defer close(closed)
 
-        applicationInstance.Close()
+        applicationInstance.CloseWithContext(context.Background())
     }()
 
     select {
@@ -3395,7 +3395,7 @@ func TestApplicationClose_HandedOut_WaitsForAHookWithinTheShutdownTimeout(t *tes
     })
     mustHttpHandler(t, applicationInstance)
 
-    applicationInstance.Close()
+    applicationInstance.CloseWithContext(context.Background())
 
     if false == hookReturned.Load() {
         t.Fatalf("expected the close to wait for the hook within the 5s shutdown timeout")

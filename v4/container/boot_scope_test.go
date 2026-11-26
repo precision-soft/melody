@@ -33,7 +33,7 @@ func TestNewBootScope_RefusesAScopedServiceByNameAndByTypeAndAScopedRegistration
 
     bootScope := serviceContainer.NewBootScope()
     defer func() {
-        _ = bootScope.Close()
+        _ = bootScope.CloseWithContext(context.Background())
     }()
 
     MustRegisterScopedType[*bootLateScopedProbe](serviceContainer, func(resolver containercontract.Resolver) (*bootLateScopedProbe, error) {
@@ -91,7 +91,7 @@ func TestReservePhaseService_AScopeOfAnotherKindRefusesTheNameNamingBothKinds(t 
 
     bootScope := serviceContainer.NewBootScope()
     defer func() {
-        _ = bootScope.Close()
+        _ = bootScope.CloseWithContext(context.Background())
     }()
 
     _, bootErr := bootScope.Get(context.Background(), "app.phase.request")
@@ -110,7 +110,7 @@ func TestReservePhaseService_AScopeOfAnotherKindRefusesTheNameNamingBothKinds(t 
 
     unboundScope := serviceContainer.NewScope()
     defer func() {
-        _ = unboundScope.Close()
+        _ = unboundScope.CloseWithContext(context.Background())
     }()
 
     for name, resolver := range map[string]containercontract.Resolver{
@@ -178,7 +178,7 @@ func TestNewBootScope_RefusesAScopedServiceThatReplacesAContainerOne(t *testing.
 
     bootScope := serviceContainer.NewBootScope()
     defer func() {
-        _ = bootScope.Close()
+        _ = bootScope.CloseWithContext(context.Background())
     }()
 
     if _, nameErr := bootScope.Get(context.Background(), "app.boot.replaced"); false == errors.Is(nameErr, ErrScopedServiceAtBoot) {
@@ -202,7 +202,7 @@ func TestNewBootScope_RefusesACollectionWithAScopedMember(t *testing.T) {
 
     bootScope := serviceContainer.NewBootScope()
     defer func() {
-        _ = bootScope.Close()
+        _ = bootScope.CloseWithContext(context.Background())
     }()
 
     if _, collectErr := AllImplementing[bootCollectedMember](context.Background(), bootScope); false == errors.Is(collectErr, ErrScopedServiceAtBoot) {
@@ -211,7 +211,7 @@ func TestNewBootScope_RefusesACollectionWithAScopedMember(t *testing.T) {
 
     requestScope := serviceContainer.NewScope()
     defer func() {
-        _ = requestScope.Close()
+        _ = requestScope.CloseWithContext(context.Background())
     }()
 
     members, collectErr := AllImplementing[bootCollectedMember](context.Background(), requestScope)
@@ -263,7 +263,7 @@ func TestBuiltAtBoot_IsRecordedInRegistrationOrderOnlyWhenTheRegistrationSucceed
 
     liveScope := serviceContainer.NewScope()
     defer func() {
-        _ = liveScope.Close()
+        _ = liveScope.CloseWithContext(context.Background())
     }()
 
     if scopedErr := liveScope.RegisterScoped("app.built.scope.own", func(resolver containercontract.Resolver) (*builtAtBootRecordProbe, error) {

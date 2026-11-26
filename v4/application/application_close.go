@@ -4,24 +4,43 @@ import (
     "context"
     "errors"
 
+    "github.com/precision-soft/melody/v4/config"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
 )
 
-func (instance *Application) Close() {
-    _ = instance.close(context.Background())
-}
-
-/* CloseWithContext is Close under the caller's context, whose deadline and cancel every phase of the close is handed, a closer that ignores it not cut at the deadline, and returns the teardown failure when this call discovered it. An application that handed its http handler out is wound down first, bounded by the http shutdown timeout or the caller's context, whichever ends earlier: its shutdown hooks are started unless BeginHttpShutdown started them, then awaited with its open request scopes; the teardown that follows runs under what is left of the caller's context, never a context of its own. */
+/* CloseWithContext tears the application down under the caller's context, whose deadline and cancel every phase of the close is handed, a closer that ignores it not cut at the deadline, and returns the teardown failure when this call discovered it. An application that runs its own server closes under the caller's context and its TeardownTimeout, the earlier ending it, and a failure past the configured bound names it. An application that handed its http handler out is wound down first, bounded by the http shutdown timeout or the caller's context, whichever ends earlier: its shutdown hooks are started unless BeginHttpShutdown started them, then awaited with its open request scopes; the teardown that follows runs under what is left of the caller's context, never a context of its own. */
 func (instance *Application) CloseWithContext(closeContext context.Context) error {
     /* refused before the once the close claims, so a refused call leaves the teardown to a later one */
     if true == internal.IsNilInterface(closeContext) {
         return exception.NewError("the close context is nil", exceptioncontract.Context{"door": "Application.CloseWithContext"}, nil)
     }
 
-    return instance.close(closeContext)
+    if nil != instance.handedOutHttpHandler() {
+        return instance.close(closeContext)
+    }
+
+    teardownBudget := instance.teardownBudget()
+    if true == teardownBudget.IsUnlimited() {
+        return instance.close(closeContext)
+    }
+
+    teardownTimeout, _ := teardownBudget.Value()
+    boundedContext, cancel := context.WithTimeout(closeContext, teardownTimeout)
+    defer cancel()
+
+    closeErr := instance.close(boundedContext)
+    if nil == closeErr || nil == boundedContext.Err() || nil != closeContext.Err() {
+        return closeErr
+    }
+
+    return exception.NewError(
+        "the application's close ended at its configured bound",
+        exceptioncontract.Context{"door": "Application.CloseWithContext", "bound": config.TeardownTimeoutKey},
+        closeErr,
+    )
 }
 
 /* closeBeforeExit is the exit handler's before-exit hook; it carries the deadline the shield holds the teardown to. */

@@ -850,7 +850,7 @@ func TestResolveExitLogger_RefusesATypedNilContainerLogger(t *testing.T) {
 func TestClose_SurvivesANilKernel(t *testing.T) {
     applicationInstance := &Application{}
 
-    applicationInstance.Close()
+    applicationInstance.CloseWithContext(context.Background())
 }
 
 /* the marker tells a re-executed test binary that it is the child whose Boot must die and take the teardown hook with it rather than the parent that watches */

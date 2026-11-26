@@ -198,7 +198,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         defer func() {
             defer instance.openRequestScopes.Add(-1)
 
-            scopeCloseErr := scope.Close()
+            scopeCloseErr := scope.CloseWithContext(context.Background())
             if nil == scopeCloseErr {
                 return
             }

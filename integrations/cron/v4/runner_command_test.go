@@ -2214,7 +2214,7 @@ func TestRunnerCommand_InvokeInstallsThePerRunIdentity(t *testing.T) {
 
     parentScope := serviceContainer.NewScope()
     defer func() {
-        _ = parentScope.Close()
+        _ = parentScope.CloseWithContext(context.Background())
     }()
     parentScope.MustOverrideProtectedInstance(
         logging.ServiceLogger,
@@ -4471,7 +4471,7 @@ func TestInvoke_AClosedRunScopeFailsTheRunBeforeTheCommand(t *testing.T) {
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     closedScope := serviceContainer.NewScope()
-    _ = closedScope.Close()
+    _ = closedScope.CloseWithContext(context.Background())
 
     invokeErr := runner.invokeRun(runtime.NewRun(context.Background(), closedScope), runner.entries[0], logging.GenerateProcessId())
     if false == errors.Is(invokeErr, container.ErrScopeClosed) || false == strings.Contains(invokeErr.Error(), "could not be opened") {

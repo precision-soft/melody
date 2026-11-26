@@ -173,10 +173,6 @@ func (instance *suspendedScope) MustOverrideProtectedInstance(serviceName string
     exception.Panic(refuseSuspendedScopeDoor("MustOverrideProtectedInstance", serviceName))
 }
 
-func (instance *suspendedScope) Close() error {
-    return nil
-}
-
 func (instance *suspendedScope) CloseWithContext(closeContext context.Context) error {
     return nil
 }
@@ -231,10 +227,6 @@ func (instance *providerScope) OverrideProtectedInstance(serviceName string, val
 
 func (instance *providerScope) MustOverrideProtectedInstance(serviceName string, value any, options containercontract.OverrideOptions) {
     instance.scope.MustOverrideProtectedInstance(serviceName, value, options)
-}
-
-func (instance *providerScope) Close() error {
-    return instance.scope.Close()
 }
 
 func (instance *providerScope) CloseWithContext(closeContext context.Context) error {

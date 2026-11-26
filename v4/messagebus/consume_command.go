@@ -567,7 +567,7 @@ func (instance *consumeSession) messageRuntime(
     baseLogger := logging.LoggerFromRuntime(runtimeInstance)
 
     closeScope := func() {
-        scopeCloseErr := messageScope.Close()
+        scopeCloseErr := messageScope.CloseWithContext(context.Background())
         if nil != scopeCloseErr && false == internal.IsNilInterface(baseLogger) {
             baseLogger.Error(
                 "failed to close message scope",

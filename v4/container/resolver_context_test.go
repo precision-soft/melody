@@ -475,7 +475,7 @@ func TestResolverContext_AScopedParentWritesNoEdgeIntoTheContainerGraph(t *testi
     }
 
     scopeInstance := serviceContainer.NewScope()
-    defer scopeInstance.Close()
+    defer scopeInstance.CloseWithContext(context.Background())
 
     if _, getErr := scopeInstance.Get(t.Context(), "app.scoped.parent"); nil != getErr {
         t.Fatalf("unexpected scoped resolution error: %v", getErr)

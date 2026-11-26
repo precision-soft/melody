@@ -1,6 +1,7 @@
 package application
 
 import (
+    "context"
     "errors"
     "regexp"
     "testing"
@@ -78,7 +79,7 @@ func TestProcessContextFromRuntime_ResolvesTheInstalledContext(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     runScope := serviceContainer.NewScope()
-    defer runScope.Close()
+    defer runScope.CloseWithContext(context.Background())
 
     startedAt := time.Date(2026, time.August, 7, 12, 0, 0, 0, time.UTC)
     installed := NewProcessContext("process-1", startedAt)

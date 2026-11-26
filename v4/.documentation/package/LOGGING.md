@@ -82,7 +82,7 @@ func runWithScopedLogger(
 ) {
     scope := serviceContainer.NewScope()
     defer func() {
-        scopeCloseErr := scope.Close()
+        scopeCloseErr := scope.CloseWithContext(context.Background())
         if nil != scopeCloseErr {
             logging.EmergencyLogger().Error("failed to close scope", map[string]any{"error": scopeCloseErr.Error()})
         }
@@ -178,7 +178,7 @@ Implemented in:
 #### Constructors
 
 - [`NewJsonLogger(output io.Writer, config JsonLoggerConfig)`](../../logging/json_logger.go) — the output is required; [`JsonLoggerConfig`](../../logging/json_logger.go) holds `MinLevel`, info when left out and an unknown level refused, `Labels`, the default labels when nil, `Clock`, the process clock when nil and a typed nil refused, `CauseChainDepth`, the links of an error's cause chain `LogError` writes, 8 when left out, at least 1, unlimited refused, and `ContextNormalizationDepth`, how deep a record's context is walked before the depth marker, 10000 when left out, from 1 to 10000; a field outside its rule is refused with a panic naming it
-- [`NewReopenableFileWriter(path string, config ReopenableFileWriterConfig) (*ReopenableFileWriter, error)`](../../logging/reopenable_file_writer.go) — the config holds no field yet and opens the file with mode `0o644`; the journal writer rename-based rotation needs, closed by `Close` or, as a container service, by `CloseWithContext`: [`Reopen()`](../../logging/reopenable_file_writer.go) opens the path fresh and swaps the descriptor, [`ArmReopenOnSignal(signals []os.Signal)`](../../logging/reopenable_file_writer.go) does it on each delivered signal — `SIGHUP` is the conventional choice, and the container arms exactly that — and [`Close()`](../../logging/reopenable_file_writer.go) disarms the watcher before surrendering the descriptor
+- [`NewReopenableFileWriter(path string, config ReopenableFileWriterConfig) (*ReopenableFileWriter, error)`](../../logging/reopenable_file_writer.go) — the config holds no field yet and opens the file with mode `0o644`; the journal writer rename-based rotation needs, closed by `CloseWithContext`, its one close door, so it is not an `io.Closer`: [`Reopen()`](../../logging/reopenable_file_writer.go) opens the path fresh and swaps the descriptor, [`ArmReopenOnSignal(signals []os.Signal)`](../../logging/reopenable_file_writer.go) does it on each delivered signal — `SIGHUP` is the conventional choice, and the container arms exactly that — and [`CloseWithContext(closeContext)`](../../logging/reopenable_file_writer.go) disarms the watcher before surrendering the descriptor, stops waiting for a watcher stuck in a reopen when the context ends, answering its error while the close finishes in the background, and refuses a nil context naming `door` `ReopenableFileWriter.CloseWithContext`; the json logger closes a writer through its `CloseWithContext` first and through `io.Closer` only when it has no such door
 - [`NewDefaultLogger(config DefaultLoggerConfig)`](../../logging/default_logger.go) — [`DefaultLoggerConfig`](../../logging/default_logger.go) holds `Labels`, the default labels when nil, and `CauseChainDepth`, as the json logger's
 - [`NewNopLogger()`](../../logging/nop_logger.go)
 - [`NewRequestLogger(logger loggingcontract.Logger, requestId string, contextKey string)`](../../logging/request_logger.go) — the http path's correlation rule: the real id wins the context key, and a different non-empty string claim survives beside it under the key suffixed `Claimed`

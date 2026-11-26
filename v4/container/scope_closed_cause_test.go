@@ -34,7 +34,7 @@ func closedScopeRefusals(t *testing.T, boot bool) map[string]error {
     retainedView := newScopeResolverContext(serviceContainer, closedScope.(*scope))
     handle := Lazy[*closedCauseCloser](closedScope, "app.closed.cause.closer")
 
-    if closeErr := closedScope.Close(); nil != closeErr {
+    if closeErr := closedScope.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("close the scope: %v", closeErr)
     }
 

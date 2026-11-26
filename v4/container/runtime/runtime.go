@@ -82,7 +82,7 @@ func NewBoot(ctx context.Context, serviceContainer containercontract.Container) 
     finish := func() error {
         var closeErr error
         finishOnce.Do(func() {
-            closeErr = bootScope.Close()
+            closeErr = bootScope.CloseWithContext(context.Background())
             cancel(containercontract.ErrBootFinished)
         })
 

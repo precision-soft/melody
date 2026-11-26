@@ -337,10 +337,6 @@ func (instance *testScope) MustRegisterScoped(serviceName string, provider any, 
 }
 
 func (instance *testScope) CloseWithContext(closeContext context.Context) error {
-    return instance.Close()
-}
-
-func (instance *testScope) Close() error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 

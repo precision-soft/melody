@@ -564,7 +564,7 @@ func TestBootCli_TheRegisteredContainerCommandDescribesTheApplicationsContainer(
         containercontract.RegisterOptions{},
     )
     scope := serviceContainer.NewScope()
-    defer func() { _ = scope.Close() }()
+    defer func() { _ = scope.CloseWithContext(context.Background()) }()
 
     buffer := &bytes.Buffer{}
     dispatchErr := cli.DispatchCommand(

@@ -4894,7 +4894,7 @@ func TestRegister_AConcreteTypeCarryingCloseAloneIsRefusedAtEveryRegistrationDoo
             registerErr := RegisterScoped[*plainCloseOnlyService](serviceContainer, "plain.close", provider, RegisterOptions{})
             scope := serviceContainer.NewScope()
             defer func() {
-                _ = scope.Close()
+                _ = scope.CloseWithContext(context.Background())
             }()
 
             return registerErr, scope.Has("plain.close") || scope.HasType(serviceType)
@@ -4902,7 +4902,7 @@ func TestRegister_AConcreteTypeCarryingCloseAloneIsRefusedAtEveryRegistrationDoo
         "scope RegisterScoped": func(serviceContainer containercontract.Container) (error, bool) {
             scope := serviceContainer.NewScope()
             defer func() {
-                _ = scope.Close()
+                _ = scope.CloseWithContext(context.Background())
             }()
 
             registerErr := scope.(containercontract.ScopedRegistrar).RegisterScoped("plain.close", provider, RegisterOptions{})
@@ -5010,7 +5010,7 @@ func TestScopeOverrideInstance_AValueCarryingCloseAloneIsRefusedOnlyWhenTheScope
 
     scope := serviceContainer.NewScope()
     defer func() {
-        _ = scope.Close()
+        _ = scope.CloseWithContext(context.Background())
     }()
 
     overrideErr := scope.OverrideInstance("overridden", &plainCloseOnlyService{}, containercontract.OverrideOptions{ClosedWithScope: true})
@@ -5107,7 +5107,7 @@ func TestScopeResolve_ACloseOnlyValueBehindAnInterfaceProviderIsRefusedAtCreatio
         t.Fatalf("expected the scoped creation refused with ErrCloseDoorRequired, got %v", getErr)
     }
 
-    if closeErr := scope.Close(); nil != closeErr {
+    if closeErr := scope.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected scope close error: %v", closeErr)
     }
 

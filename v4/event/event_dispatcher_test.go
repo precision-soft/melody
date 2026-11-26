@@ -800,7 +800,7 @@ func TestEventDispatcher_Dispatch_UsesListenerSnapshot(t *testing.T) {
         t.Fatalf("expected listener to be called in subsequent dispatch")
     }
 
-    closeErr := scope.Close()
+    closeErr := scope.CloseWithContext(context.Background())
     if nil != closeErr {
         t.Fatalf("unexpected scope close error: %v", closeErr)
     }

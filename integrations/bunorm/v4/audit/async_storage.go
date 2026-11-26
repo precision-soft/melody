@@ -13,24 +13,16 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-/* AsyncStorageConfig declares the storage's queue and its teardown: BufferSize, the entries the queue holds before a save is refused as ErrAsyncStorageQueueFull, 1024 when left out, at least 1, unlimited refused, since an unbuffered queue would block the request path on the worker; Logger, the dead-letter logger, the emergency logger when nil, a typed nil refused; CloseGrace, the time CloseWithContext spends on each of its two stretches, the drain and the wait for the cancelled save, when its caller declares no deadline, 5s when left out, at least 1ms, unlimited refused, since the request path it keeps unblocked must not wait on a delegate that ignores its context. */
+/* AsyncStorageConfig declares the storage's queue: BufferSize, the entries the queue holds before a save is refused as ErrAsyncStorageQueueFull, 1024 when left out, at least 1, unlimited refused, since an unbuffered queue would block the request path on the worker; Logger, the dead-letter logger, the emergency logger when nil, a typed nil refused. */
 type AsyncStorageConfig struct {
     BufferSize bound.Count
     Logger     loggingcontract.Logger
-    CloseGrace bound.Duration
 }
 
 var asyncStorageBufferSizeRule = bound.Rule[int]{
     Name:    "AsyncStorageConfig.BufferSize",
     Default: 1024,
     Minimum: 1,
-}
-
-/* a delegate that ignores its context cannot be interrupted, so past the second grace the worker is abandoned with what it holds, the trade this storage makes by keeping the request path unblocked */
-var asyncStorageCloseGraceRule = bound.Rule[time.Duration]{
-    Name:    "AsyncStorageConfig.CloseGrace",
-    Default: 5 * time.Second,
-    Minimum: bound.TimeoutMinimum,
 }
 
 /* defaultAsyncStorageLogger is the emergency logger a dead-letter goes through when the config names none, so no failed save is silent in an assembly that wired no logger. A variable so the test can capture it. */
@@ -46,8 +38,6 @@ type AsyncStorage struct {
 
     workerContext context.Context
     workerCancel  context.CancelFunc
-
-    closeGrace time.Duration
 
     /* outstanding counts what the queue accepted and the worker has not finished storing, the entry in hand included, so a close can tell whether anything is left to abandon without waiting on a goroutine. outstanding and failed are one state under counterMutex, read as one snapshot, so a save that fails between two reads is never counted in neither. */
     counterMutex sync.Mutex
@@ -87,7 +77,7 @@ type asyncEntry struct {
     entry Entry
 }
 
-/* NewAsyncStorage wraps a delegate so entries persist on a background worker; a nil or typed-nil delegate, a typed-nil Logger and a BufferSize or CloseGrace outside its rule panic, the last three naming the field. */
+/* NewAsyncStorage wraps a delegate so entries persist on a background worker; a nil or typed-nil delegate, a typed-nil Logger and a BufferSize outside its rule panic, the last two naming the field. */
 func NewAsyncStorage(delegate Storage, config AsyncStorageConfig) *AsyncStorage {
     if true == isNilInterface(delegate) {
         exception.Panic(exception.NewError("async audit storage delegate is nil", nil, nil))
@@ -96,11 +86,6 @@ func NewAsyncStorage(delegate Storage, config AsyncStorageConfig) *AsyncStorage 
     bufferSize, bufferSizeErr := bound.Resolve(config.BufferSize, asyncStorageBufferSizeRule)
     if nil != bufferSizeErr {
         exception.Panic(exception.FromError(bufferSizeErr))
-    }
-
-    closeGrace, closeGraceErr := bound.Resolve(config.CloseGrace, asyncStorageCloseGraceRule)
-    if nil != closeGraceErr {
-        exception.Panic(exception.FromError(closeGraceErr))
     }
 
     logger := config.Logger
@@ -118,7 +103,6 @@ func NewAsyncStorage(delegate Storage, config AsyncStorageConfig) *AsyncStorage 
         logger:        logger,
         workerContext: workerContext,
         workerCancel:  workerCancel,
-        closeGrace:    closeGrace.Value,
     }
 
     instance.wait.Add(1)
@@ -201,43 +185,43 @@ func (instance *AsyncStorage) Failed() uint64 {
     return failed
 }
 
-/* closeGracesWithin splits what the caller's deadline leaves, read once at entry, into the drain and the cancellation stretch: each is half the remainder less a margin kept back so the cooperative stretch ends before the deadline, and neither exceeds CloseGrace, since a declared budget bounds the whole teardown. The floor is bound.TimeoutMinimum, the shortest stretch that is a measurement of a delegate's reaction. Between one and two floors the drain keeps its half and the cancellation gives its half up, since no reaction can be observed in it; below the floor, or on a cancelled context, both are zero, and no deadline gives both CloseGrace. */
-func (instance *AsyncStorage) closeGracesWithin(closeContext context.Context) (drainGrace time.Duration, cancellationGrace time.Duration) {
+/* closeGracesWithin splits what the caller's deadline leaves, read once at entry, into the drain and the cancellation stretch: each is half the remainder less a margin kept back so the cooperative stretch ends before the deadline. The floor is bound.TimeoutMinimum, the shortest stretch that is a measurement of a delegate's reaction. Between one and two floors the drain keeps its half and the cancellation gives its half up, since no reaction can be observed in it; below the floor, or on a cancelled context, both are zero. A context with no deadline answers unbounded: the drain waits for the worker however long it takes. */
+func (instance *AsyncStorage) closeGracesWithin(closeContext context.Context) (drainGrace time.Duration, cancellationGrace time.Duration, bounded bool) {
     if nil != closeContext.Err() {
-        return 0, 0
+        return 0, 0, true
     }
 
     deadline, hasDeadline := closeContext.Deadline()
     if false == hasDeadline {
-        return instance.closeGrace, instance.closeGrace
+        return 0, 0, false
     }
 
     remaining := time.Until(deadline)
 
     if bound.TimeoutMinimum > remaining {
-        return 0, 0
+        return 0, 0, true
     }
 
     /* a margin is kept back before the halves, so the cancellation stretch's own timer ends before the caller's deadline: with the halves summing to the deadline exactly, the two fired in one instant. A stretch that overran by more than the margin meets the deadline instead, which the close reads as the budget running out, never as the caller cancelling it */
     margin := max(bound.TimeoutMinimum, remaining/asyncStorageCloseMarginDivisor)
-    grace := min((remaining-margin)/2, instance.closeGrace)
+    grace := (remaining - margin) / 2
 
     if bound.TimeoutMinimum > grace {
-        return grace, 0
+        return grace, 0, true
     }
 
-    return grace, grace
+    return grace, grace, true
 }
 
 /* asyncStorageCloseMarginDivisor sizes the margin a deadline-bound close keeps back before it splits the remainder into its two stretches: an eighth of it, and never less than the floor */
 const asyncStorageCloseMarginDivisor = 8
 
-/* CloseWithContext spends a deadline its caller declares on two stretches, the drain and the cancellation. With no deadline, CloseWithContext drains the queue and joins the worker under CloseGrace on each of two stretches. Past the first grace the worker's context is cancelled and the answer counts the entries dead-lettered and those a delegate that ignored the cancellation stored; past the second the worker is abandoned with the entries it still holds, and the answer names how many. The delegate is never closed, since it belongs to whoever built it, and a close with nothing outstanding, or a second close while the first drains, answers nil at once. A storage with nothing outstanding answers nil whatever the deadline. A deadline already passed leaves both stretches at zero: the queue is closed, the worker cancelled, and the answer counts what was still outstanding — the save in hand included — without claiming the save ignored a cancellation it was given no grace to react to, which is the whole of what the operator can still be told once the budget is gone. */
+/* CloseWithContext spends a deadline its caller declares on two stretches, the drain and the cancellation. With no deadline, CloseWithContext drains the queue and joins the worker however long it takes, a cancellation of the caller's context still ending the wait; the application's teardown timeout is what bounds it. Past the first grace the worker's context is cancelled and the answer counts the entries dead-lettered and those a delegate that ignored the cancellation stored; past the second the worker is abandoned with the entries it still holds, and the answer names how many. The delegate is never closed, since it belongs to whoever built it, and a close with nothing outstanding, or a second close while the first drains, answers nil at once. A storage with nothing outstanding answers nil whatever the deadline. A deadline already passed leaves both stretches at zero: the queue is closed, the worker cancelled, and the answer counts what was still outstanding — the save in hand included — without claiming the save ignored a cancellation it was given no grace to react to, which is the whole of what the operator can still be told once the budget is gone. */
 func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) error {
     /* read once, before anything waits: only a context already ended here is one the caller ended before the close began */
     entryErr := closeContext.Err()
 
-    drainGrace, cancellationGrace := instance.closeGracesWithin(closeContext)
+    drainGrace, cancellationGrace, bounded := instance.closeGracesWithin(closeContext)
 
     instance.mutex.Lock()
     alreadyClosed := instance.closed
@@ -267,12 +251,12 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
     budgetWithdrawn := false
     budgetSpentDuringDrain := false
 
-    switch awaitDrain(drained, closeContext.Done(), drainGrace) {
+    switch awaitDrain(drained, closeContext.Done(), drainGrace, bounded) {
     case drainedInTime:
         return nil
     case drainBudgetWithdrawn:
         /* a deadline passed at entry leaves the drain no grace and makes Done ready together with the zero timer: that is the spent budget named below, not a withdrawal; a deadline reached during the drain is read just after, and only a cancellation is the caller withdrawing the budget */
-        budgetWithdrawn = 0 < drainGrace && false == closeDeadlineReached(closeContext)
+        budgetWithdrawn = (false == bounded || 0 < drainGrace) && false == closeDeadlineReached(closeContext)
     }
 
     /* a drain that was given a grace and ends with the deadline reached leaves the cancellation none to observe a reaction in, whichever case answered: on a stalled machine the drain timer and the deadline are ready together, and select picks at random */
@@ -318,7 +302,7 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
     var abandonCause error
     cancellationStartedAt := time.Now()
 
-    switch awaitDrain(drained, closeContext.Done(), cancellationGrace) {
+    switch awaitDrain(drained, closeContext.Done(), cancellationGrace, bounded) {
     case drainedInTime:
         drainedAfterCancellation = true
     case drainBudgetWithdrawn:
@@ -373,8 +357,13 @@ const (
     drainGraceRanOut
 )
 
-/* awaitDrain waits for the drain under a grace, watching the caller's Done beside the clock. When the drain and another case are ready in the same instant the select picks at random, so the drain is read again and a drain that is done is answered as done. */
-func awaitDrain(drained <-chan struct{}, done <-chan struct{}, grace time.Duration) drainOutcome {
+/* awaitDrain waits for the drain under a grace, watching the caller's Done beside the clock; an unbounded wait has no clock. When the drain and another case are ready in the same instant the select picks at random, so the drain is read again and a drain that is done is answered as done. */
+func awaitDrain(drained <-chan struct{}, done <-chan struct{}, grace time.Duration, bounded bool) drainOutcome {
+    var graceRanOut <-chan time.Time
+    if true == bounded {
+        graceRanOut = time.After(grace)
+    }
+
     select {
     case <-drained:
         return drainedInTime
@@ -386,7 +375,7 @@ func awaitDrain(drained <-chan struct{}, done <-chan struct{}, grace time.Durati
         }
 
         return drainBudgetWithdrawn
-    case <-time.After(grace):
+    case <-graceRanOut:
         select {
         case <-drained:
             return drainedInTime

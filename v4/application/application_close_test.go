@@ -9,8 +9,11 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
 )
 
@@ -25,7 +28,7 @@ func TestApplicationClose_AnApplicationWithoutAKernelHasNothingToTearDown(t *tes
     }
 
     /* the exported form swallows the result on purpose; what it must not do is panic */
-    applicationInstance.Close()
+    applicationInstance.CloseWithContext(context.Background())
 }
 
 /* the teardown closes the container the kernel holds, and it has to be idempotent: the cli action closes the container right after the command runs, and the deferred Close arrives afterwards. */
@@ -370,3 +373,75 @@ func TestApplicationClose_AnOverrunSomebodyElseAlreadyCarriedAwayIsNotReportedAg
         t.Fatalf("expected the overrun somebody else carried away not to be reported again, got %q", written)
     }
 }
+
+type teardownDeadlineProbe struct {
+    waitsForTheDeadline bool
+    deadline            time.Time
+    hasDeadline         bool
+}
+
+func (instance *teardownDeadlineProbe) CloseWithContext(closeContext context.Context) error {
+    instance.deadline, instance.hasDeadline = closeContext.Deadline()
+
+    if true == instance.waitsForTheDeadline {
+        <-closeContext.Done()
+
+        return closeContext.Err()
+    }
+
+    return nil
+}
+
+func bootApplicationWithTeardownProbe(t *testing.T, teardownTimeout bound.Duration, probe *teardownDeadlineProbe) *Application {
+    t.Helper()
+
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), TeardownTimeout: teardownTimeout})
+    applicationInstance.RegisterService("app.teardown.probe", func(resolver containercontract.Resolver) (*teardownDeadlineProbe, error) {
+        return probe, nil
+    }, containercontract.RegisterOptions{BuiltAtBoot: true, BootFailure: containercontract.BootFailureFailsBoot})
+    applicationInstance.Boot()
+
+    return applicationInstance
+}
+
+func TestApplication_CloseWithContextAppliesTheTeardownTimeout(t *testing.T) {
+    bounded := &teardownDeadlineProbe{}
+    if closeErr := bootApplicationWithTeardownProbe(t, bound.Of(40*time.Second), bounded).CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if remaining := time.Until(bounded.deadline); false == bounded.hasDeadline || remaining > 40*time.Second || remaining < 35*time.Second {
+        t.Fatalf("expected the teardown timeout to bound a close the caller set no deadline on, got %v (has deadline: %v)", remaining, bounded.hasDeadline)
+    }
+
+    shorter := &teardownDeadlineProbe{}
+    callerContext, cancel := context.WithTimeout(context.Background(), time.Second)
+    defer cancel()
+
+    if closeErr := bootApplicationWithTeardownProbe(t, bound.Of(40*time.Second), shorter).CloseWithContext(callerContext); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if remaining := time.Until(shorter.deadline); false == shorter.hasDeadline || remaining > time.Second {
+        t.Fatalf("expected the caller's shorter deadline to end the close, got %v", remaining)
+    }
+
+    unlimited := &teardownDeadlineProbe{}
+    if closeErr := bootApplicationWithTeardownProbe(t, bound.UnlimitedDuration(), unlimited).CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if true == unlimited.hasDeadline {
+        t.Fatalf("expected no deadline under an unlimited teardown timeout, got %v", unlimited.deadline)
+    }
+}
+
+func TestApplication_ACloseEndedByTheTeardownTimeoutNamesIt(t *testing.T) {
+    probe := &teardownDeadlineProbe{waitsForTheDeadline: true}
+
+    closeErr := bootApplicationWithTeardownProbe(t, bound.Of(30*time.Millisecond), probe).CloseWithContext(context.Background())
+    if nil == closeErr || config.TeardownTimeoutKey != exception.FromError(closeErr).Context()["bound"] {
+        t.Fatalf("expected the close to name the teardown timeout, got %v", closeErr)
+    }
+}
+

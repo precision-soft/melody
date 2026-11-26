@@ -453,7 +453,7 @@ func TestScope_AScopedServiceIsClosedWhenTheScopeCloses(t *testing.T) {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    closeErr := scopeInstance.Close()
+    closeErr := scopeInstance.CloseWithContext(context.Background())
     if nil != closeErr {
         t.Fatalf("unexpected scope close error: %v", closeErr)
     }
@@ -504,7 +504,7 @@ func TestScope_ScopedServicesAreClosedDependentsBeforeDependencies(t *testing.T)
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    closeErr := scopeInstance.Close()
+    closeErr := scopeInstance.CloseWithContext(context.Background())
     if nil != closeErr {
         t.Fatalf("unexpected scope close error: %v", closeErr)
     }
@@ -562,7 +562,7 @@ func TestScopedResolution_ExistingInstanceRecordsDependencyEdge(t *testing.T) {
         t.Fatalf("unexpected dependent resolution error: %v", getErr)
     }
 
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -629,7 +629,7 @@ func TestScopedServiceByType_BuildsATypeOnlyScopedServiceAndClosesItWithTheScope
         t.Fatalf("expected the provider to run exactly once, got %d", buildCount)
     }
 
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -701,7 +701,7 @@ func TestScopedResolution_ExistingInstanceEdgeOutranksTheCreationOrder(t *testin
         t.Fatalf("unexpected late resolution error: %v", lateErr)
     }
 
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 

@@ -669,8 +669,6 @@ func (instance *testScope) RegisterScoped(serviceName string, provider any, opti
 func (instance *testScope) MustRegisterScoped(serviceName string, provider any, options containercontract.RegisterOptions) {
 }
 
-func (instance *testScope) Close() error { return nil }
-
 func (instance *testScope) CloseWithContext(closeContext context.Context) error { return nil }
 
 var _ containercontract.Scope = (*testScope)(nil)

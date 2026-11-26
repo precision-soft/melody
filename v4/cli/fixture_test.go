@@ -17,7 +17,7 @@ func newTestRuntime(t *testing.T) *testRuntime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     t.Cleanup(func() {
-        _ = scope.Close()
+        _ = scope.CloseWithContext(context.Background())
     })
 
     return &testRuntime{

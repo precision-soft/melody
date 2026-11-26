@@ -701,7 +701,7 @@ func TestRuntime_TheContainerAndAScopeAnswerADetachedRuntimeOverBackground(t *te
     serviceContainer := NewContainer(ContainerConfig{})
     scopeInstance := serviceContainer.NewScope()
     defer func() {
-        _ = scopeInstance.Close()
+        _ = scopeInstance.CloseWithContext(context.Background())
     }()
 
     for name, resolver := range map[string]containercontract.Resolver{
@@ -754,7 +754,7 @@ func TestResolverDoors_ANilContextIsRefused(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
     defer func() {
-        _ = scopeInstance.Close()
+        _ = scopeInstance.CloseWithContext(context.Background())
     }()
 
     for name, resolver := range map[string]containercontract.Resolver{"container": serviceContainer, "scope": scopeInstance} {
@@ -1044,7 +1044,7 @@ func TestForGoroutine_AScopedProvidersGoroutineResolvesAsItsDependency(t *testin
 
     scopeInstance := serviceContainer.NewScope()
     defer func() {
-        _ = scopeInstance.Close()
+        _ = scopeInstance.CloseWithContext(context.Background())
     }()
 
     if _, workerErr := scopeInstance.Get(t.Context(), "app.goroutine.scoped.worker"); nil != workerErr {
@@ -1064,7 +1064,7 @@ func TestForGoroutine_TheContainerAScopeAForeignAndANilResolverAreAnsweredAsThey
     serviceContainer := NewContainer(ContainerConfig{})
     scopeInstance := serviceContainer.NewScope()
     defer func() {
-        _ = scopeInstance.Close()
+        _ = scopeInstance.CloseWithContext(context.Background())
     }()
 
     foreignResolver := &resolverTestResolver{}
@@ -1172,7 +1172,7 @@ func TestForGoroutine_AHandleOverAScopedProvidersViewTurnsTerminalWithTheScope(t
         t.Fatalf("unexpected worker error: %v", workerErr)
     }
 
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected scope close error: %v", closeErr)
     }
 
@@ -1209,7 +1209,7 @@ func TestForGoroutine_AContainerProvidersViewReadsOnlyTheContainerUnderAScope(t 
 
     scopeInstance := serviceContainer.NewScope()
     defer func() {
-        _ = scopeInstance.Close()
+        _ = scopeInstance.CloseWithContext(context.Background())
     }()
 
     if _, workerErr := scopeInstance.Get(t.Context(), "app.goroutine.suspended.worker"); nil != workerErr {

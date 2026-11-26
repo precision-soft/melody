@@ -9,6 +9,8 @@ import (
     "sync"
 
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    "github.com/precision-soft/melody/v4/internal"
 )
 
 /* ErrRotatedDescriptorNotClosed marks the failure Reopen reports after the rotation happened: the fresh descriptor takes the writes, and only the replaced one refused to close. A caller reading it must not report a failed rotation. */
@@ -171,15 +173,15 @@ func (instance *ReopenableFileWriter) watchReopenSignals() {
     }
 }
 
-/* CloseWithContext is Close under the caller's deadline, the door a container closes the writer through: Close waits for the watcher, which may be inside a reopen on a stuck filesystem, and goes on finishing in the background when the context ends first. */
+/* CloseWithContext disarms the signal watcher before it surrenders the descriptor, in that order, so no signal reopens a file nobody owns, and is safe to call more than once. The disarm waits for the watcher, which may be inside a reopen on a stuck filesystem: the call stops waiting when the context ends first, answering the context's error, and the close goes on finishing in the background. */
 func (instance *ReopenableFileWriter) CloseWithContext(closeContext context.Context) error {
-    if nil == closeContext {
-        return exception.NewError("the close context is nil", nil, nil)
+    if true == internal.IsNilInterface(closeContext) {
+        return exception.NewError("the close context is nil", exceptioncontract.Context{"door": "ReopenableFileWriter.CloseWithContext"}, nil)
     }
 
     closed := make(chan error, 1)
     go func() {
-        closed <- instance.Close()
+        closed <- instance.disarmThenSurrender()
     }()
 
     select {
@@ -190,8 +192,7 @@ func (instance *ReopenableFileWriter) CloseWithContext(closeContext context.Cont
     }
 }
 
-/* Close disarms the signal watcher before it surrenders the descriptor, in that order, so no signal reopens a file nobody owns. It is safe to call more than once. */
-func (instance *ReopenableFileWriter) Close() error {
+func (instance *ReopenableFileWriter) disarmThenSurrender() error {
     instance.mutex.Lock()
     alreadyClosed := instance.closed
     watcherArmed := instance.watcherArmed

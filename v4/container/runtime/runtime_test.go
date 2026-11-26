@@ -115,7 +115,7 @@ func TestNewChildRun_OpensANewScopeOfTheSameContainer(t *testing.T) {
         t.Fatalf("expected the child scope to resolve the container's service, got %q, %v", value, resolveErr)
     }
 
-    if closeErr := child.Scope().Close(); nil != closeErr {
+    if closeErr := child.Scope().CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("expected the child scope to close, got %v", closeErr)
     }
 
@@ -128,7 +128,7 @@ func TestNewChildRun_RefusesAClosedParentScopeAndAForeignScope(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     closedScope := serviceContainer.NewScope()
-    _ = closedScope.Close()
+    _ = closedScope.CloseWithContext(context.Background())
 
     if _, childErr := NewChildRun(NewRun(context.Background(), closedScope), context.Background()); false == errors.Is(childErr, container.ErrScopeClosed) {
         t.Fatalf("expected a closed parent scope to answer ErrScopeClosed, got %v", childErr)
@@ -174,7 +174,7 @@ func TestRuntime_ScopeCloseReturnsErrorOnGet(t *testing.T) {
 
     runtimeInstance := NewRun(context.Background(), serviceContainer.NewScope())
 
-    _ = runtimeInstance.Scope().Close()
+    _ = runtimeInstance.Scope().CloseWithContext(context.Background())
 
     _, getErr := runtimeInstance.Scope().Get(runtimeInstance.Context(), "x")
     if nil == getErr {

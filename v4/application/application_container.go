@@ -1,6 +1,7 @@
 package application
 
 import (
+    "context"
     "errors"
     "io"
     "os"
@@ -376,7 +377,7 @@ func newContainerLogger(
             armErr := fileWriter.ArmReopenOnSignal([]os.Signal{syscall.SIGHUP})
             if nil != armErr {
                 /* closed before the panic: the container does not memoize a creation failure, so each resolution would open another file */
-                _ = fileWriter.Close()
+                _ = fileWriter.CloseWithContext(context.Background())
 
                 exception.Panic(
                     exception.NewError(

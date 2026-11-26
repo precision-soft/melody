@@ -280,7 +280,7 @@ func (instance *jsonLogger) Emergency(message string, context loggingcontract.Co
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
-/* CloseWithContext takes the lock the writes take, since a goroutine outliving the teardown can still be inside Write; a writer carrying CloseWithContext is closed under the context, any other through Close. The process console, recognized by identity as os.Stdout or os.Stderr, is left open, and the flag is set only where the writer was really closed. */
+/* CloseWithContext takes the lock the writes take, since a goroutine outliving the teardown can still be inside Write; a writer carrying CloseWithContext is closed through it under the context, any other through Close. The process console, recognized by identity as os.Stdout or os.Stderr, is left open, and the flag is set only where the writer was really closed. */
 func (instance *jsonLogger) CloseWithContext(closeContext context.Context) error {
     instance.writeMutex.Lock()
     defer instance.writeMutex.Unlock()
@@ -293,19 +293,25 @@ func (instance *jsonLogger) CloseWithContext(closeContext context.Context) error
         return nil
     }
 
+    /* a writer that bounds its own close, the reopenable file writer joining its watcher, is closed under the teardown's deadline */
+    if contextCloser, isContextCloser := instance.output.(interface {
+        CloseWithContext(closeContext context.Context) error
+    }); true == isContextCloser && false == internal.IsNilInterface(contextCloser) {
+        instance.closed.Store(true)
+
+        if true == internal.IsNilInterface(closeContext) {
+            return contextCloser.CloseWithContext(context.Background())
+        }
+
+        return contextCloser.CloseWithContext(closeContext)
+    }
+
     closer, isCloser := instance.output.(io.Closer)
     if false == isCloser || true == internal.IsNilInterface(closer) {
         return nil
     }
 
     instance.closed.Store(true)
-
-    /* a writer that bounds its own close, the reopenable file writer joining its watcher, is closed under the teardown's deadline */
-    if contextCloser, isContextCloser := instance.output.(interface {
-        CloseWithContext(closeContext context.Context) error
-    }); true == isContextCloser && nil != closeContext {
-        return contextCloser.CloseWithContext(closeContext)
-    }
 
     return closer.Close()
 }

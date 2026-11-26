@@ -2479,7 +2479,7 @@ func TestRemember_TheFlightComputesInAScopeOfItsOwnThatOutlivesTheLeadersRequest
         waiterError <- rememberErr
     }()
 
-    if closeErr := leaderScope.Close(); nil != closeErr {
+    if closeErr := leaderScope.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("closing the leader's scope: %v", closeErr)
     }
     close(releaseCallback)
@@ -2571,7 +2571,7 @@ func TestRemember_AWaiterThatComputesResolvesThroughItsOwnScope(t *testing.T) {
     flightRuntime := runtime.NewRun(context.Background(), flightScope)
 
     call := newRememberInFlightCall(true)
-    executeRememberInFlightLeader(&rememberInFlightShard{inFlightByKey: map[rememberFlightKey]*rememberInFlightCall{}}, rememberFlightKey{key: "key"}, "key", bound.Of(time.Minute), call, flightRuntime, func() { _ = flightScope.Close() }, nil, testRememberOperations(scriptedCache, "key", func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
+    executeRememberInFlightLeader(&rememberInFlightShard{inFlightByKey: map[rememberFlightKey]*rememberInFlightCall{}}, rememberFlightKey{key: "key"}, "key", bound.Of(time.Minute), call, flightRuntime, func() { _ = flightScope.CloseWithContext(context.Background()) }, nil, testRememberOperations(scriptedCache, "key", func(runtimeInstance containercontract.Runtime, _ *RememberItem) (any, error) {
         if contextErr := runtimeInstance.Context().Err(); nil != contextErr {
             return nil, contextErr
         }
@@ -2653,7 +2653,7 @@ func TestRemember_AViewKeptPastItsClosedScopeIsAnsweredTheClosedScopeAndStoresNo
 
     keptScope := serviceContainer.NewScope()
     keptView := For(runtime.NewRequest(context.Background(), keptScope), cacheManager)
-    if closeErr := keptScope.Close(); nil != closeErr {
+    if closeErr := keptScope.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 

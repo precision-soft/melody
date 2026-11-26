@@ -211,7 +211,7 @@ func runCommandAction(
     closeErrorByName := map[string]error{}
 
     /* the container is not closed here on either outcome: the recover handler that owns the exit resolves the final record's logger through it and closes it between the record and os.Exit. The scope is this action's to close and report. */
-    scopeCloseErr := normalizeCliError(runtimeInstance.Scope().Close())
+    scopeCloseErr := normalizeCliError(runtimeInstance.Scope().CloseWithContext(context.Background()))
     if nil != scopeCloseErr {
         closeErrorByName["scope"] = scopeCloseErr
     }

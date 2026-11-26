@@ -338,7 +338,7 @@ func TestLazyService_AClosedScopeTurnsTheHandleTerminal(t *testing.T) {
         t.Fatalf("expected the live scope to serve the value")
     }
 
-    if closeErr := requestScope.Close(); nil != closeErr {
+    if closeErr := requestScope.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -386,7 +386,7 @@ func TestLazyService_AScopeClosedBeforeFirstUseNeverRunsTheResolver(t *testing.T
 
     lazyService := Lazy[*lazyProbeItem](requestScope, "app.unit")
 
-    if closeErr := requestScope.Close(); nil != closeErr {
+    if closeErr := requestScope.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -420,7 +420,7 @@ func TestLazyService_TheTerminalHandleDropsItsReferences(t *testing.T) {
     lazyService := Lazy[*lazyProbeItem](requestScope, "app.unit")
     _ = lazyService.getOver(t.Context())
 
-    if closeErr := requestScope.Close(); nil != closeErr {
+    if closeErr := requestScope.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -460,7 +460,7 @@ func TestLazyService_AContainerBackedHandleIsUntouchedByScopeLifecycles(t *testi
     first := lazyService.getOver(t.Context())
 
     requestScope := serviceContainer.NewScope()
-    if closeErr := requestScope.Close(); nil != closeErr {
+    if closeErr := requestScope.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -670,7 +670,7 @@ func TestLazyService_AScopeBackedHandleAndTheScopeDoorRefuseTogetherDuringTheSco
 
     MustFromResolver[*lazyTeardownReader](t.Context(), scopeInstance, "scoped.reader")
 
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected scope close error: %v", closeErr)
     }
 
@@ -714,7 +714,7 @@ func TestLazyService_AScopedProviderResolverBackedHandleTurnsTerminalWithTheScop
         t.Fatalf("expected the live scope to serve the value, got %v", resolveErr)
     }
 
-    if closeErr := requestScope.Close(); nil != closeErr {
+    if closeErr := requestScope.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected scope close error: %v", closeErr)
     }
 
@@ -760,7 +760,7 @@ func TestLazyService_ASingletonsCapturedHandleOutlivesTheRequestThatBuiltIt(t *t
         t.Fatalf("unexpected resolve error inside the first request: %v", resolveErr)
     }
 
-    if closeErr := firstRequest.Close(); nil != closeErr {
+    if closeErr := firstRequest.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected scope close error: %v", closeErr)
     }
 

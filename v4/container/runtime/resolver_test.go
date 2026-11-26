@@ -43,7 +43,7 @@ func TestFromRuntime_UsesScopeWhenPresentAndUsesContainerWhenScopeDoesNotHaveIns
         t.Fatalf("expected scope value")
     }
 
-    err = scope.Close()
+    err = scope.CloseWithContext(context.Background())
     if nil != err {
         t.Fatalf("close error: %v", err)
     }
@@ -226,7 +226,7 @@ func TestFromRuntime_TheRuntimesContextBoundsTheWaitOnACreationAnotherGoroutineR
 
     scope := serviceContainer.NewScope()
     defer func() {
-        _ = scope.Close()
+        _ = scope.CloseWithContext(context.Background())
     }()
 
     if _, fromRuntimeErr := FromRuntime[string](NewRun(runtimeContext, scope), "service.held"); false == errors.Is(fromRuntimeErr, context.Canceled) {

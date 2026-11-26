@@ -658,7 +658,7 @@ func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
         melodyRequest := melodyhttp.NewRequest(request, runtimeInstance, melodyhttp.RequestConfig{})
         handler(runtimeInstance, writer, melodyRequest)
         /* mimic the kernel's deferred scope.Close() the instant the handler returns */
-        _ = scope.Close()
+        _ = scope.CloseWithContext(context.Background())
     }))
     defer server.Close()
 
@@ -1374,7 +1374,7 @@ func TestDispatchOnMessage_APanicAfterTheScopeClosedStillLeavesARecordThroughThe
 
     captured := newConnectionLogger(runtimeInstance)
 
-    if closeErr := scope.Close(); nil != closeErr {
+    if closeErr := scope.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("close the scope: %v", closeErr)
     }
 

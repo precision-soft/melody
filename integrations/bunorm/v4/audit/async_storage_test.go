@@ -106,12 +106,22 @@ func installDefaultAsyncStorageLogger(t *testing.T) *capturingLogger {
 }
 
 /* awaitClose runs Close on its own goroutine under a two-second bound, so a disarmed grace fails the test in seconds instead of hanging the suite until the go test timeout; two seconds sits well under the real grace and well over the shortened one the tests install. */
-func awaitClose(t *testing.T, storage *AsyncStorage) error {
+/* contextGivingEachStretch is a close deadline whose two stretches each come to grace: a stretch is seven sixteenths of the remainder, half of it once the margin of an eighth is kept back */
+func contextGivingEachStretch(t *testing.T, grace time.Duration) context.Context {
+    t.Helper()
+
+    closeContext, cancel := context.WithTimeout(context.Background(), grace*16/7)
+    t.Cleanup(cancel)
+
+    return closeContext
+}
+
+func awaitClose(t *testing.T, storage *AsyncStorage, closeContext context.Context) error {
     t.Helper()
 
     closeDone := make(chan error, 1)
     go func() {
-        closeDone <- storage.CloseWithContext(t.Context())
+        closeDone <- storage.CloseWithContext(closeContext)
     }()
 
     select {
@@ -164,10 +174,6 @@ func TestNewAsyncStorage_AnAbsentConfigTakesTheDefaults(t *testing.T) {
         t.Fatalf("expected a buffer of 1024, got %d", cap(storage.queue))
     }
 
-    if 5*time.Second != storage.closeGrace {
-        t.Fatalf("expected a close grace of 5s, got %s", storage.closeGrace)
-    }
-
     if defaultLogger != storage.deadLetterLogger() {
         t.Fatalf("expected the emergency logger when the config names none")
     }
@@ -176,11 +182,11 @@ func TestNewAsyncStorage_AnAbsentConfigTakesTheDefaults(t *testing.T) {
 func TestNewAsyncStorage_TakesTheConfiguredValues(t *testing.T) {
     logger := &capturingLogger{}
 
-    storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{BufferSize: bound.Of(1), Logger: logger, CloseGrace: bound.Of(time.Millisecond)})
+    storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{BufferSize: bound.Of(1), Logger: logger})
     defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
-    if 1 != cap(storage.queue) || time.Millisecond != storage.closeGrace || logger != storage.deadLetterLogger() {
-        t.Fatalf("expected buffer 1, grace 1ms and the configured logger, got %d, %s, %v", cap(storage.queue), storage.closeGrace, storage.deadLetterLogger())
+    if 1 != cap(storage.queue) || logger != storage.deadLetterLogger() {
+        t.Fatalf("expected buffer 1 and the configured logger, got %d, %v", cap(storage.queue), storage.deadLetterLogger())
     }
 }
 
@@ -193,8 +199,6 @@ func TestNewAsyncStorage_RefusesAFieldOutsideItsRuleNamingIt(t *testing.T) {
     }{
         {field: "AsyncStorageConfig.BufferSize", config: AsyncStorageConfig{BufferSize: bound.Of(0)}},
         {field: "AsyncStorageConfig.BufferSize", config: AsyncStorageConfig{BufferSize: bound.UnlimitedCount()}},
-        {field: "AsyncStorageConfig.CloseGrace", config: AsyncStorageConfig{CloseGrace: bound.Of(time.Microsecond)}},
-        {field: "AsyncStorageConfig.CloseGrace", config: AsyncStorageConfig{CloseGrace: bound.UnlimitedDuration()}},
         {field: "AsyncStorageConfig.Logger", config: AsyncStorageConfig{Logger: typedNilLogger}},
     } {
         func() {
@@ -426,7 +430,7 @@ func (instance *wedgedStorage) Save(ctx context.Context, table string, entries [
 
 func TestAsyncStorage_CloseCancelsAWedgedSaveAfterTheGrace(t *testing.T) {
     delegate := &wedgedStorage{entered: make(chan struct{})}
-    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(2), CloseGrace: bound.Of(50 * time.Millisecond)})
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(2)})
 
     if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: "wedged"}}); nil != saveErr {
         t.Fatalf("first save: %v", saveErr)
@@ -440,7 +444,7 @@ func TestAsyncStorage_CloseCancelsAWedgedSaveAfterTheGrace(t *testing.T) {
 
     closeDone := make(chan error, 1)
     go func() {
-        closeDone <- storage.CloseWithContext(t.Context())
+        closeDone <- storage.CloseWithContext(contextGivingEachStretch(t, 50*time.Millisecond))
     }()
 
     /* Close is called on its own goroutine and bounded here, so a disarmed cancel-after-grace fails this test in seconds instead of hanging the suite until the go test timeout */
@@ -486,6 +490,29 @@ func (instance *releasedStorage) Save(ctx context.Context, table string, entries
     return nil
 }
 
+func TestAsyncStorage_CloseWithoutADeadlineDrainsUnbounded(t *testing.T) {
+    delegate := &releasedStorage{entered: make(chan struct{}), released: make(chan struct{})}
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(2)})
+
+    if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: "slow"}}); nil != saveErr {
+        t.Fatalf("save: %v", saveErr)
+    }
+
+    <-delegate.entered
+
+    time.AfterFunc(300*time.Millisecond, func() {
+        close(delegate.released)
+    })
+
+    if closeErr := closeWithin(t, storage, context.Background(), 5*time.Second); nil != closeErr {
+        t.Fatalf("expected a close with no deadline to wait for the save and answer nil, got %v", closeErr)
+    }
+
+    if 0 != storage.Failed() || 0 != storage.outstandingEntries() {
+        t.Fatalf("expected the slow save stored, not cancelled, got failed=%d outstanding=%d", storage.Failed(), storage.outstandingEntries())
+    }
+}
+
 /* settlingAtTheDrainContext settles the save in hand at the drain's first read of Done, which the drain's select evaluates after the entry count and before it arms its timer: the timer then fires with nothing outstanding, deterministically */
 type settlingAtTheDrainContext struct {
     context.Context
@@ -502,7 +529,7 @@ func (instance *settlingAtTheDrainContext) Done() <-chan struct{} {
 /* the drain timer firing after the worker's last settle and before its drained signal finds nothing in hand: the close answers nil, as it does for nothing outstanding at entry, where the counted verdict reported a cancelled save that never was. The test holds the drained signal back itself, standing for the worker between its settle and its exit. */
 func TestAsyncStorage_CloseAnswersNilWhenTheLastSaveSettledBeforeTheDrainTimer(t *testing.T) {
     delegate := &releasedStorage{entered: make(chan struct{}), released: make(chan struct{})}
-    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(2), CloseGrace: bound.Of(50 * time.Millisecond)})
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(2)})
 
     if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: "settles"}}); nil != saveErr {
         t.Fatalf("save: %v", saveErr)
@@ -514,7 +541,7 @@ func TestAsyncStorage_CloseAnswersNilWhenTheLastSaveSettledBeforeTheDrainTimer(t
     defer storage.wait.Done()
 
     closeContext := &settlingAtTheDrainContext{
-        Context: context.Background(),
+        Context: contextGivingEachStretch(t, 50*time.Millisecond),
         settle: func() {
             close(delegate.released)
 
@@ -668,7 +695,7 @@ func TestAsyncStorage_CloseAbandonsADelegateThatIgnoresTheCancellationAfterASeco
     delegate := newContextIgnoringStorage()
     defer close(delegate.release)
 
-    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(2), CloseGrace: bound.Of(50 * time.Millisecond)})
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(2)})
 
     if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: "wedged"}}); nil != saveErr {
         t.Fatalf("first save: %v", saveErr)
@@ -680,7 +707,7 @@ func TestAsyncStorage_CloseAbandonsADelegateThatIgnoresTheCancellationAfterASeco
         t.Fatalf("second save: %v", saveErr)
     }
 
-    closeErr := awaitClose(t, storage)
+    closeErr := awaitClose(t, storage, contextGivingEachStretch(t, 50*time.Millisecond))
     if nil == closeErr {
         t.Fatalf("expected the abandoned worker to be reported")
     }
@@ -708,13 +735,13 @@ func TestAsyncStorage_CloseAbandonsAFileStorageParkedOnAFifo(t *testing.T) {
         t.Fatalf("mkfifo: %v", mkfifoErr)
     }
 
-    storage := NewAsyncStorage(NewFileStorage(fifo), AsyncStorageConfig{BufferSize: bound.Of(2), CloseGrace: bound.Of(50 * time.Millisecond)})
+    storage := NewAsyncStorage(NewFileStorage(fifo), AsyncStorageConfig{BufferSize: bound.Of(2)})
 
     if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: "wedged"}}); nil != saveErr {
         t.Fatalf("save: %v", saveErr)
     }
 
-    closeErr := awaitClose(t, storage)
+    closeErr := awaitClose(t, storage, contextGivingEachStretch(t, 50*time.Millisecond))
     if nil == closeErr {
         t.Fatalf("expected the parked open to be reported as abandoned")
     }
@@ -724,20 +751,20 @@ func TestAsyncStorage_CloseAbandonsAFileStorageParkedOnAFifo(t *testing.T) {
     }
 }
 
-/* the two stretches of a close are halves of what the caller's deadline leaves, so neither can be sized without the other: a drain given the whole budget leaves the cancellation nothing to be noticed in, and the entries behind a wedged save are lost with no word about them. With no deadline the close grace stands in for both. */
 func TestAsyncStorage_CloseGracesWithin_SplitsTheCallersDeadlineInTwo(t *testing.T) {
     storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{BufferSize: bound.Of(4)})
     defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
-    drainGrace, cancellationGrace := storage.closeGracesWithin(context.Background())
-    if asyncStorageCloseGraceRule.Default != drainGrace || asyncStorageCloseGraceRule.Default != cancellationGrace {
-        t.Fatalf("a context with no deadline answered %s/%s, wanted the close grace twice", drainGrace, cancellationGrace)
+    if _, _, bounded := storage.closeGracesWithin(context.Background()); true == bounded {
+        t.Fatalf("expected a context with no deadline to leave the close unbounded")
     }
+
+    var drainGrace, cancellationGrace time.Duration
 
     boundedContext, cancelBounded := context.WithTimeout(context.Background(), 400*time.Millisecond)
     defer cancelBounded()
 
-    drainGrace, cancellationGrace = storage.closeGracesWithin(boundedContext)
+    drainGrace, cancellationGrace, _ = storage.closeGracesWithin(boundedContext)
 
     if drainGrace != cancellationGrace {
         t.Fatalf("the two stretches differ: %s and %s", drainGrace, cancellationGrace)
@@ -752,23 +779,22 @@ func TestAsyncStorage_CloseGracesWithin_SplitsTheCallersDeadlineInTwo(t *testing
 
     time.Sleep(5 * time.Millisecond)
 
-    drainGrace, cancellationGrace = storage.closeGracesWithin(spentContext)
+    drainGrace, cancellationGrace, _ = storage.closeGracesWithin(spentContext)
     if 0 != drainGrace || 0 != cancellationGrace {
         t.Fatalf("a spent deadline answered %s/%s, wanted zero twice", drainGrace, cancellationGrace)
     }
 }
 
-/* neither half exceeds the close grace: a declared budget bounds the TOTAL a teardown spends, so an operator who raises the budget to an hour for a slow component does not make this storage wait thirty minutes for a drain it abandons after five seconds. */
-func TestAsyncStorage_CloseGracesWithin_ClampsEachHalfToTheCloseGrace(t *testing.T) {
-    storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{BufferSize: bound.Of(4), CloseGrace: bound.Of(3 * time.Second)})
+func TestAsyncStorage_CloseGracesWithin_ADeclaredBudgetIsSplitWithoutACap(t *testing.T) {
+    storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{BufferSize: bound.Of(4)})
     defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
     generousContext, cancelGenerous := context.WithTimeout(context.Background(), time.Hour)
     defer cancelGenerous()
 
-    drainGrace, cancellationGrace := storage.closeGracesWithin(generousContext)
-    if 3*time.Second != drainGrace || 3*time.Second != cancellationGrace {
-        t.Fatalf("an hour-long deadline gave the stretches %s/%s, wanted both clamped to the 3s close grace", drainGrace, cancellationGrace)
+    drainGrace, cancellationGrace, bounded := storage.closeGracesWithin(generousContext)
+    if false == bounded || drainGrace != cancellationGrace || 26*time.Minute > drainGrace || 27*time.Minute < drainGrace {
+        t.Fatalf("an hour-long deadline gave the stretches %s/%s, wanted seven sixteenths of it each", drainGrace, cancellationGrace)
     }
 }
 
@@ -784,7 +810,7 @@ func TestAsyncStorage_CloseGracesWithin_ACancelledContextWithoutADeadlineDoesNot
         t.Fatalf("the probe needs a context with a cancellation and NO deadline, this one carries a deadline")
     }
 
-    drainGrace, cancellationGrace := storage.closeGracesWithin(cancelledContext)
+    drainGrace, cancellationGrace, _ := storage.closeGracesWithin(cancelledContext)
     if 0 != drainGrace || 0 != cancellationGrace {
         t.Fatalf("a cancelled context answered %s/%s, wanted zero twice", drainGrace, cancellationGrace)
     }
@@ -1073,7 +1099,7 @@ func TestAsyncStorage_CloseGraces_ABudgetBelowTheFloorIsNoGrace(t *testing.T) {
     shortContext, cancelShort := context.WithTimeout(context.Background(), 500*time.Microsecond)
     defer cancelShort()
 
-    drainGrace, cancellationGrace := storage.closeGracesWithin(shortContext)
+    drainGrace, cancellationGrace, _ := storage.closeGracesWithin(shortContext)
     if 0 != drainGrace || 0 != cancellationGrace {
         t.Fatalf("expected a remainder below the floor to read as no grace, got %v and %v", drainGrace, cancellationGrace)
     }
@@ -1081,7 +1107,7 @@ func TestAsyncStorage_CloseGraces_ABudgetBelowTheFloorIsNoGrace(t *testing.T) {
     roomyContext, cancelRoomy := context.WithTimeout(context.Background(), 10*time.Millisecond)
     defer cancelRoomy()
 
-    drainGrace, cancellationGrace = storage.closeGracesWithin(roomyContext)
+    drainGrace, cancellationGrace, _ = storage.closeGracesWithin(roomyContext)
     if 0 >= drainGrace || 0 >= cancellationGrace {
         t.Fatalf("expected a remainder above the floor to keep its graces, got %v and %v", drainGrace, cancellationGrace)
     }
@@ -1090,7 +1116,7 @@ func TestAsyncStorage_CloseGraces_ABudgetBelowTheFloorIsNoGrace(t *testing.T) {
     for attempt := 0; ; attempt = attempt + 1 {
         narrowContext, cancelNarrow := context.WithTimeout(context.Background(), 1900*time.Microsecond)
 
-        drainGrace, cancellationGrace = storage.closeGracesWithin(narrowContext)
+        drainGrace, cancellationGrace, _ = storage.closeGracesWithin(narrowContext)
         deadline, _ := narrowContext.Deadline()
         remainderAfter := time.Until(deadline)
 
@@ -1237,7 +1263,7 @@ func TestAsyncStorage_CloseWithContext_ACancellationDuringTheDrainEndsIt(t *test
     ignoring := newContextIgnoringStorage()
     defer close(ignoring.release)
 
-    storage := NewAsyncStorage(ignoring, AsyncStorageConfig{BufferSize: bound.Of(4), CloseGrace: bound.Of(2 * time.Second)})
+    storage := NewAsyncStorage(ignoring, AsyncStorageConfig{BufferSize: bound.Of(4)})
     if saveErr := storage.Save(context.Background(), "audit", []Entry{Entry{Entity: "order", EntityId: "1"}}); nil != saveErr {
         t.Fatalf("the entry was not queued: %v", saveErr)
     }
@@ -1283,7 +1309,7 @@ func TestAsyncStorage_CloseWithContext_ACancellationDuringTheCancellationGraceEn
     ignoring := newContextIgnoringStorage()
     defer close(ignoring.release)
 
-    storage := NewAsyncStorage(ignoring, AsyncStorageConfig{BufferSize: bound.Of(4), CloseGrace: bound.Of(300 * time.Millisecond)})
+    storage := NewAsyncStorage(ignoring, AsyncStorageConfig{BufferSize: bound.Of(4)})
     if saveErr := storage.Save(context.Background(), "audit", []Entry{Entry{Entity: "order", EntityId: "1"}}); nil != saveErr {
         t.Fatalf("the entry was not queued: %v", saveErr)
     }
@@ -1294,7 +1320,7 @@ func TestAsyncStorage_CloseWithContext_ACancellationDuringTheCancellationGraceEn
         t.Fatalf("the delegate was never reached; there is no wedged save to cancel")
     }
 
-    closeContext, cancel := context.WithCancel(context.Background())
+    closeContext, cancel := context.WithCancel(contextGivingEachStretch(t, 300*time.Millisecond))
     go func() {
         /* inside the second stretch: after the 300 ms drain grace, before its 300 ms cancellation grace ends */
         time.Sleep(450 * time.Millisecond)
@@ -1315,7 +1341,7 @@ func TestAsyncStorage_CloseCountsWhatTheDelegateStoredAfterTheCancellation(t *te
     installDefaultAsyncStorageLogger(t)
 
     ignoring := newContextIgnoringStorage()
-    storage := NewAsyncStorage(ignoring, AsyncStorageConfig{BufferSize: bound.Of(4), CloseGrace: bound.Of(200 * time.Millisecond)})
+    storage := NewAsyncStorage(ignoring, AsyncStorageConfig{BufferSize: bound.Of(4)})
 
     if saveErr := storage.Save(context.Background(), "audit", []Entry{Entry{Entity: "order", EntityId: "in-hand"}}); nil != saveErr {
         t.Fatalf("the first entry was not queued: %v", saveErr)
@@ -1337,7 +1363,7 @@ func TestAsyncStorage_CloseCountsWhatTheDelegateStoredAfterTheCancellation(t *te
         close(ignoring.release)
     }()
 
-    closeErr := closeWithin(t, storage, context.Background(), 2*time.Second)
+    closeErr := closeWithin(t, storage, contextGivingEachStretch(t, 200*time.Millisecond), 2*time.Second)
     if nil == closeErr || false == strings.Contains(closeErr.Error(), "stored every entry then outstanding") {
         t.Fatalf("expected the close to say the delegate stored the entries after the cancellation, got: %v", closeErr)
     }
@@ -1376,7 +1402,7 @@ func (instance *firstSaveHonouringStorage) Save(ctx context.Context, table strin
 func TestAsyncStorage_CloseCountsTheDeadLetteredAndTheStoredApart(t *testing.T) {
     installDefaultAsyncStorageLogger(t)
     delegate := &firstSaveHonouringStorage{entered: make(chan struct{})}
-    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(4), CloseGrace: bound.Of(50 * time.Millisecond)})
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(4)})
 
     if saveErr := storage.Save(context.Background(), "audit", []Entry{Entry{Entity: "order", EntityId: "in-hand"}}); nil != saveErr {
         t.Fatalf("the first entry was not queued: %v", saveErr)
@@ -1392,7 +1418,7 @@ func TestAsyncStorage_CloseCountsTheDeadLetteredAndTheStoredApart(t *testing.T) 
         t.Fatalf("the second entry was not queued: %v", saveErr)
     }
 
-    closeErr := closeWithin(t, storage, context.Background(), 2*time.Second)
+    closeErr := closeWithin(t, storage, contextGivingEachStretch(t, 50*time.Millisecond), 2*time.Second)
     if nil == closeErr || false == strings.Contains(closeErr.Error(), "some were dead-lettered and the delegate stored the rest") {
         t.Fatalf("expected the close to count both outcomes apart, got: %v", closeErr)
     }
@@ -1892,6 +1918,9 @@ func (instance *earlyDeadlineContext) Value(key any) any {
     return nil
 }
 
+/* the declared deadline that gives each stretch 400ms, which the wedged-close cases cut at the instants they name */
+const wedgedCloseDeadline = 400 * time.Millisecond * 16 / 7
+
 func closeWedgedStorageUnder(t *testing.T, buildCloseContext func() context.Context) error {
     t.Helper()
 
@@ -1900,7 +1929,7 @@ func closeWedgedStorageUnder(t *testing.T, buildCloseContext func() context.Cont
         close(delegate.release)
     })
 
-    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(2), CloseGrace: bound.Of(400 * time.Millisecond)})
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(2)})
     if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: "wedged"}}); nil != saveErr {
         t.Fatalf("save: %v", saveErr)
     }
@@ -1916,7 +1945,7 @@ func TestAsyncStorage_ADeadlineReachedDuringTheCancellationStretchIsReportedAban
 
     /* both stretches take the 400ms grace; the deadline lands halfway through the second, 200ms clear of either end */
     closeErr := closeWedgedStorageUnder(t, func() context.Context {
-        return newEarlyDeadlineContext(10*time.Second, 600*time.Millisecond)
+        return newEarlyDeadlineContext(wedgedCloseDeadline, 600*time.Millisecond)
     })
 
     if nil == closeErr || false == strings.Contains(closeErr.Error(), "abandoned") || true == strings.Contains(closeErr.Error(), "cancelled by its caller") {
@@ -1936,7 +1965,7 @@ func TestAsyncStorage_ADeadlineReadyWithTheCancellationTimerIsTheCause(t *testin
 
     /* the deadline lands halfway through the second 400ms stretch, but Done never answers, so the stretch's own timer ends the wait */
     closeErr := closeWedgedStorageUnder(t, func() context.Context {
-        return newSilentDeadlineContext(10*time.Second, 600*time.Millisecond)
+        return newSilentDeadlineContext(wedgedCloseDeadline, 600*time.Millisecond)
     })
 
     if nil == closeErr || false == errors.Is(closeErr, context.DeadlineExceeded) {
@@ -1953,7 +1982,7 @@ func TestAsyncStorage_ADeadlineReachedDuringTheDrainIsReportedAsTheBudgetSpent(t
 
     /* the deadline lands a quarter of the way through the 400ms drain */
     closeErr := closeWedgedStorageUnder(t, func() context.Context {
-        return newEarlyDeadlineContext(10*time.Second, 100*time.Millisecond)
+        return newEarlyDeadlineContext(wedgedCloseDeadline, 100*time.Millisecond)
     })
 
     if nil == closeErr || false == strings.Contains(closeErr.Error(), "budget already spent") || true == strings.Contains(closeErr.Error(), "cancelled by its caller") {

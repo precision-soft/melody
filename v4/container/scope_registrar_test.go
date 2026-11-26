@@ -121,7 +121,7 @@ func TestScopeRegisterScoped_ClosedScopeRefused(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    closeErr := scopeInstance.Close()
+    closeErr := scopeInstance.CloseWithContext(context.Background())
     if nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
@@ -591,7 +591,7 @@ func TestRegisterScoped_OnTheScopeHonoursTheCollectionPriority(t *testing.T) {
 
     requestScope := serviceContainer.NewScope()
     defer func() {
-        _ = requestScope.Close()
+        _ = requestScope.CloseWithContext(context.Background())
     }()
 
     requestScope.MustRegisterScoped(
@@ -636,7 +636,7 @@ func TestRegisterScoped_OnTheScopeRefusesATeardownDependency(t *testing.T) {
 
     requestScope := serviceContainer.NewScope()
     defer func() {
-        _ = requestScope.Close()
+        _ = requestScope.CloseWithContext(context.Background())
     }()
 
     registerErr := requestScope.RegisterScoped(
@@ -662,7 +662,7 @@ func TestRegisterScoped_OnTheScopeRefusesATeardownDependencyKeyedByType(t *testi
 
     requestScope := serviceContainer.NewScope()
     defer func() {
-        _ = requestScope.Close()
+        _ = requestScope.CloseWithContext(context.Background())
     }()
 
     registerErr := requestScope.RegisterScoped(
@@ -695,7 +695,7 @@ func TestScope_RegisterScoped_RefusesAnOptionalTeardownDependency(t *testing.T) 
             options,
         )
 
-        _ = requestScope.Close()
+        _ = requestScope.CloseWithContext(context.Background())
 
         if false == errors.Is(registerErr, ErrScopedTeardownDependencyUnsupported) {
             t.Fatalf("expected the refusal to carry ErrScopedTeardownDependencyUnsupported for %+v, got %v", options, registerErr)

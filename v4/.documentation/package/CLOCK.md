@@ -89,7 +89,7 @@ func example(ctx context.Context) (time.Time, error) {
     scope := serviceContainer.NewScope()
     now := readCurrentTime(runtime.NewRun(ctx, scope))
 
-    return now, scope.Close()
+    return now, scope.CloseWithContext(context.Background())
 }
 ```
 

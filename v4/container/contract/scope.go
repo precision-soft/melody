@@ -19,9 +19,6 @@ type Scope interface {
 
     OverrideService
 
-    /* Close is CloseWithContext under the container's ScopeTeardownTimeout, the form the framework closes a request's, a command's and a message's scope through. */
-    Close() error
-
-    /* CloseWithContext closes the services the scope built under the caller's deadline, in place of the container's ScopeTeardownTimeout. */
+    /* CloseWithContext closes the services the scope built under the caller's context and the container's ScopeTeardownTimeout, the earlier ending it; context.Background() leaves the timeout alone, and an unlimited timeout leaves the caller's. */
     CloseWithContext(closeContext context.Context) error
 }

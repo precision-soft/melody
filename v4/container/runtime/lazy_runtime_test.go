@@ -166,7 +166,7 @@ func TestLazy_TheCreatedProvidersScopeIsSuspended(t *testing.T) {
         t.Fatalf("expected the suspended scope to refuse an override")
     }
 
-    if closeErr := created.scope.Close(); nil != closeErr {
+    if closeErr := created.scope.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("the suspended scope's close answered %v", closeErr)
     }
 
@@ -347,7 +347,7 @@ func TestLazy_ATerminalHandleAnswersItsClosedSentinelWhateverTheRuntime(t *testi
     scope := serviceContainer.NewScope()
     scopeHandle := container.Lazy[*lazyRuntimeCreated](scope, lazyRuntimeCreatedName)
     scopeRuntime := runtime.NewRequest(t.Context(), scope)
-    if closeErr := scope.Close(); nil != closeErr {
+    if closeErr := scope.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("close the scope: %v", closeErr)
     }
 
@@ -556,7 +556,7 @@ func TestLazy_TheDoneContextIsJudgedAfterTheTerminalAndTheMemoizedAnswers(t *tes
 
     scope := serviceContainer.NewScope()
     scopeHandle := container.Lazy[*lazyRuntimeCreated](scope, lazyRuntimeCreatedName)
-    if closeErr := scope.Close(); nil != closeErr {
+    if closeErr := scope.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("close the scope: %v", closeErr)
     }
 

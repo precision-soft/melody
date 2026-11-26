@@ -182,7 +182,7 @@ func TestScope_CloseReturnsErrorOnGet(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     scope := serviceContainer.NewScope()
-    _ = scope.Close()
+    _ = scope.CloseWithContext(context.Background())
 
     _, getErr := scope.Get(t.Context(), "service.test")
     if nil == getErr {
@@ -210,7 +210,7 @@ func TestScope_CloseKeepsMustGetPanicking(t *testing.T) {
     }
 
     scopeInstance := serviceContainer.NewScope()
-    _ = scopeInstance.Close()
+    _ = scopeInstance.CloseWithContext(context.Background())
 
     defer func() {
         recovered := recover()
@@ -249,7 +249,7 @@ func TestScope_HasReturnsFalseWhenClosed(t *testing.T) {
         t.Fatalf("expected the live scope to answer for the registered name")
     }
 
-    _ = scopeInstance.Close()
+    _ = scopeInstance.CloseWithContext(context.Background())
 
     if true == scopeInstance.Has("a") {
         t.Fatalf("expected false")
@@ -279,11 +279,11 @@ func TestScope_CloseIsIdempotent(t *testing.T) {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if err := scopeInstance.Close(); nil != err {
+    if err := scopeInstance.CloseWithContext(context.Background()); nil != err {
         t.Fatalf("unexpected first close error: %v", err)
     }
 
-    if err := scopeInstance.Close(); nil != err {
+    if err := scopeInstance.CloseWithContext(context.Background()); nil != err {
         t.Fatalf("unexpected second close error: %v", err)
     }
 
@@ -296,7 +296,7 @@ func TestScope_OverrideAfterCloseReturnsError(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     scopeInstance := serviceContainer.NewScope()
-    _ = scopeInstance.Close()
+    _ = scopeInstance.CloseWithContext(context.Background())
 
     overrideErr := scopeInstance.OverrideProtectedInstance("service.after_close", &scopeTestService{value: "late"}, OverrideOptions{})
     if nil == overrideErr {
@@ -316,7 +316,7 @@ func TestScope_OverrideAfterCloseKeepsMustPanicking(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     scopeInstance := serviceContainer.NewScope()
-    _ = scopeInstance.Close()
+    _ = scopeInstance.CloseWithContext(context.Background())
 
     defer func() {
         recovered := recover()
@@ -338,7 +338,7 @@ func TestScope_GetByTypeAfterCloseReturnsError(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     scopeInstance := serviceContainer.NewScope()
-    _ = scopeInstance.Close()
+    _ = scopeInstance.CloseWithContext(context.Background())
 
     _, getByTypeErr := scopeInstance.GetByType(t.Context(), reflect.TypeOf((*scopeTestService)(nil)))
     if nil == getByTypeErr {
@@ -365,7 +365,7 @@ func TestScope_GetByTypeAfterCloseKeepsMustPanicking(t *testing.T) {
     }
 
     scopeInstance := serviceContainer.NewScope()
-    _ = scopeInstance.Close()
+    _ = scopeInstance.CloseWithContext(context.Background())
 
     defer func() {
         recovered := recover()
@@ -405,7 +405,7 @@ func TestScope_HasTypeReturnsFalseWhenClosed(t *testing.T) {
         t.Fatalf("expected the live scope to answer for the registered type")
     }
 
-    _ = scopeInstance.Close()
+    _ = scopeInstance.CloseWithContext(context.Background())
 
     if true == scopeInstance.HasType(reflect.TypeOf((*scopeTestService)(nil))) {
         t.Fatalf("expected false after close")
@@ -469,7 +469,7 @@ func TestScope_ConcurrentGetAndClose(t *testing.T) {
     go func() {
         defer waitGroup.Done()
         <-closeSignal
-        _ = scopeInstance.Close()
+        _ = scopeInstance.CloseWithContext(context.Background())
     }()
 
     waitGroup.Wait()
@@ -556,7 +556,7 @@ func TestScope_ConcurrentHasAndClose(t *testing.T) {
     go func() {
         defer waitGroup.Done()
         <-closeSignal
-        _ = scopeInstance.Close()
+        _ = scopeInstance.CloseWithContext(context.Background())
     }()
 
     waitGroup.Wait()
@@ -604,14 +604,14 @@ func TestScope_ServiceThatReadsNothingFromTheScopeStaysASingleton(t *testing.T) 
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
-    _ = firstScope.Close()
+    _ = firstScope.CloseWithContext(context.Background())
 
     secondScope := serviceContainer.NewScope()
     second, getErr := secondScope.Get(t.Context(), "app.shared")
     if nil != getErr {
         t.Fatalf("unexpected get error: %v", getErr)
     }
-    _ = secondScope.Close()
+    _ = secondScope.CloseWithContext(context.Background())
 
     if 1 != calls {
         t.Fatalf("expected the provider to run once for the whole process, ran %d times", calls)
@@ -663,7 +663,7 @@ func TestScope_RootContainerDoesNotSeeTheScopeBoundInstance(t *testing.T) {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    _ = scopeInstance.Close()
+    _ = scopeInstance.CloseWithContext(context.Background())
 
     fromContainer, getErr := serviceContainer.Get(t.Context(), "app.consumer")
     if nil != getErr {
@@ -732,7 +732,7 @@ func TestScope_CloseLeavesOverridesAndRootSingletonsAlone(t *testing.T) {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    closeErr := scopeInstance.Close()
+    closeErr := scopeInstance.CloseWithContext(context.Background())
     if nil != closeErr {
         t.Fatalf("unexpected scope close error: %v", closeErr)
     }
@@ -808,7 +808,7 @@ func TestScope_AContainerServiceStaysASingletonWhenResolvedThroughAScope(t *test
             t.Fatalf("request %d: unexpected get error: %v", requestIndex, getErr)
         }
 
-        if closeErr := requestScope.Close(); nil != closeErr {
+        if closeErr := requestScope.CloseWithContext(context.Background()); nil != closeErr {
             t.Fatalf("request %d: unexpected close error: %v", requestIndex, closeErr)
         }
     }
@@ -847,7 +847,7 @@ func TestScope_AContainerProviderCannotReachAScopeOnlyEntry(t *testing.T) {
     }
 
     requestScope := serviceContainer.NewScope()
-    defer requestScope.Close()
+    defer requestScope.CloseWithContext(context.Background())
 
     if overrideErr := requestScope.OverrideProtectedInstance("request.context", "the-request", OverrideOptions{}); nil != overrideErr {
         t.Fatalf("unexpected override error: %v", overrideErr)
@@ -904,7 +904,7 @@ func TestScopeClose_TypeAliasClosesAfterDependent(t *testing.T) {
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -964,7 +964,7 @@ func TestScopeClose_DualFiledUncomparableValue_ClosedOnce(t *testing.T) {
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -1005,7 +1005,7 @@ func TestScopeClose_EvictedCreatedInstanceClosedAtTeardown(t *testing.T) {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -1093,7 +1093,7 @@ func TestScopeClose_TwoFailingEvictedInstancesAreBothRecorded(t *testing.T) {
         t.Fatalf("unexpected override error: %v", secondOverrideErr)
     }
 
-    closeErr := scopeInstance.Close()
+    closeErr := scopeInstance.CloseWithContext(context.Background())
     if nil == closeErr {
         t.Fatalf("expected the two failing evicted closes to be reported")
     }
@@ -1172,7 +1172,7 @@ func TestScope_MustOverrideProtectedInstance_InstallsAndNamesItsOwnFailure(t *te
         t.Fatalf("expected the protected door to install the override, got %#v", value)
     }
 
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -1333,7 +1333,7 @@ func TestScope_Close_ReportsAFailingServiceClose(t *testing.T) {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    closeErr := scopeInstance.Close()
+    closeErr := scopeInstance.CloseWithContext(context.Background())
     if nil == closeErr {
         t.Fatalf("expected the failing service close to be reported")
     }
@@ -1389,7 +1389,7 @@ func TestNewScope_ANilPlanBecomesAnEmptyPlanRatherThanANilDereference(t *testing
         t.Fatalf("expected a scope on an empty plan to hold no type")
     }
 
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 }
@@ -1430,7 +1430,7 @@ func TestScope_OverridePropagatesToEveryRegisteredTypeOfTheName(t *testing.T) {
     _ = serviceContainer.MustGet(t.Context(), "app.greeter")
 
     requestScope := serviceContainer.NewScope()
-    defer requestScope.Close()
+    defer requestScope.CloseWithContext(context.Background())
 
     override := &overrideScopeGreeter{}
     if overrideErr := requestScope.OverrideInstance("app.greeter", override, OverrideOptions{}); nil != overrideErr {
@@ -1482,13 +1482,13 @@ func TestScope_OverridePropagationDoesNotPolluteTheContainer(t *testing.T) {
     }
 
     otherScope := serviceContainer.NewScope()
-    defer otherScope.Close()
+    defer otherScope.CloseWithContext(context.Background())
 
     if containerOwn != otherScope.MustGetByType(t.Context(), greeterType) {
         t.Fatalf("expected a sibling scope to keep resolving the container's instance")
     }
 
-    if closeErr := requestScope.Close(); nil != closeErr {
+    if closeErr := requestScope.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -1515,7 +1515,7 @@ func TestScope_OverrideRefusesAValueARegisteredTypeCannotHold(t *testing.T) {
     containerOwn := serviceContainer.MustGet(t.Context(), "app.greeter")
 
     requestScope := serviceContainer.NewScope()
-    defer requestScope.Close()
+    defer requestScope.CloseWithContext(context.Background())
 
     overrideErr := requestScope.OverrideInstance("app.greeter", &scopeOverrideOutsider{}, OverrideOptions{})
     if nil == overrideErr {
@@ -1555,7 +1555,7 @@ func TestScope_AClosedWithScopeOverrideUnderARegisteredTypeClosesOnce(t *testing
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    if closeErr := requestScope.Close(); nil != closeErr {
+    if closeErr := requestScope.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -1578,7 +1578,7 @@ func TestScope_ClosedAnswersTheLifecycle(t *testing.T) {
         t.Fatalf("expected a fresh scope to report open")
     }
 
-    if closeErr := requestScope.Close(); nil != closeErr {
+    if closeErr := requestScope.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -1603,7 +1603,7 @@ func TestScope_OverridePropagationCoversTheScopedPlanLayer(t *testing.T) {
     }
 
     requestScope := serviceContainer.NewScope()
-    defer requestScope.Close()
+    defer requestScope.CloseWithContext(context.Background())
 
     greeterType := reflect.TypeOf((*scopeOverrideGreeter)(nil)).Elem()
 
@@ -1627,7 +1627,7 @@ func TestScope_OverridePropagationCoversTheScopeOwnRegistrations(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     requestScope := serviceContainer.NewScope()
-    defer requestScope.Close()
+    defer requestScope.CloseWithContext(context.Background())
 
     registerErr := requestScope.RegisterScoped(
         "app.greeter",
@@ -1667,7 +1667,7 @@ func TestScope_TypesImplementingReturnsEmptyWhenClosed(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    closeErr := scopeInstance.Close()
+    closeErr := scopeInstance.CloseWithContext(context.Background())
     if nil != closeErr {
         t.Fatalf("expected the scope to close, got %v", closeErr)
     }
@@ -1747,7 +1747,7 @@ func TestScopeClose_TypeAliasStampedAfterItsDependentClosesAfterIt(t *testing.T)
         t.Fatalf("unexpected late resolution error: %v", heldErr)
     }
 
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -1811,7 +1811,7 @@ func TestScopeClose_TypeAliasOfAnOverrideClosesAfterItsDependent(t *testing.T) {
         t.Fatalf("unexpected late resolution error: %v", overriddenErr)
     }
 
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -1892,7 +1892,7 @@ func TestScopeClose_AnAliasGroupIsAsOldAsItsOldestMember(t *testing.T) {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -2109,7 +2109,7 @@ func newScopeWithContextDoorService(t *testing.T) (containercontract.Scope, *sco
 func TestScope_Close_PrefersTheContextDoorOfAScopedService(t *testing.T) {
     scopeInstance, service := newScopeWithContextDoorService(t)
 
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -2172,7 +2172,7 @@ func TestScope_Close_ContainsAPanickingContextDoor(t *testing.T) {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    closeErr := scopeInstance.Close()
+    closeErr := scopeInstance.CloseWithContext(context.Background())
     if nil == closeErr {
         t.Fatalf("expected the panicking context door to be reported as a failed close")
     }
@@ -2215,7 +2215,7 @@ func TestScope_Close_CarriesTheFailureDetailsOfAPanickingCloseBesideItsLine(t *t
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    closeErr := scopeInstance.Close()
+    closeErr := scopeInstance.CloseWithContext(context.Background())
     if nil == closeErr {
         t.Fatalf("expected the panicking close to be reported")
     }
@@ -2295,7 +2295,7 @@ func TestScope_Close_ACloseErrorWhoseUnwrapPanicsDoesNotEndTheTeardown(t *testin
     }
 
     var typedError *exception.Error
-    if false == errors.As(scopeInstance.Close(), &typedError) {
+    if false == errors.As(scopeInstance.CloseWithContext(context.Background()), &typedError) {
         t.Fatalf("expected the failed close to be reported rather than ending the teardown")
     }
 
@@ -2305,7 +2305,7 @@ func TestScope_Close_ACloseErrorWhoseUnwrapPanicsDoesNotEndTheTeardown(t *testin
     }
 }
 
-func TestScope_CloseWithContext_HandsTheCallersContextToTheEvictedAndTheReplacementInstance(t *testing.T) {
+func TestScope_CloseWithContext_HandsAContextWithinTheCallersToTheEvictedAndTheReplacementInstance(t *testing.T) {
     for _, expired := range []bool{false, true} {
         t.Run(map[bool]string{false: "live", true: "expired"}[expired], func(t *testing.T) {
             closeContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Minute))
@@ -2336,7 +2336,7 @@ func TestScope_CloseWithContext_HandsTheCallersContextToTheEvictedAndTheReplacem
             if nil != closeErr {
                 t.Fatalf("close: %v", closeErr)
             }
-            secondCloseErr := requestScope.Close()
+            secondCloseErr := requestScope.CloseWithContext(context.Background())
             if nil != secondCloseErr {
                 t.Fatalf("second close: %v", secondCloseErr)
             }
@@ -2345,11 +2345,12 @@ func TestScope_CloseWithContext_HandsTheCallersContextToTheEvictedAndTheReplacem
                 if 0 != probe.plainCalls || 1 != len(probe.contexts) {
                     t.Fatalf("expected the %s instance closed once through CloseWithContext, got %d context and %d plain closes", label, len(probe.contexts), probe.plainCalls)
                 }
-                if closeContext != probe.contexts[0] {
-                    t.Fatalf("expected the %s instance to receive the caller's context", label)
+                callerDeadline, _ := closeContext.Deadline()
+                if probeDeadline, hasDeadline := probe.contexts[0].Deadline(); false == hasDeadline || true == probeDeadline.After(callerDeadline) {
+                    t.Fatalf("expected the %s instance to receive a context within the caller's, got %v", label, probeDeadline)
                 }
-                if expired != (nil != probe.contexts[0].Err()) {
-                    t.Fatalf("expected the %s instance to observe the caller's cancellation=%v", label, expired)
+                if true == expired && false == errors.Is(context.Cause(probe.contexts[0]), context.Canceled) {
+                    t.Fatalf("expected the %s instance to observe the caller's cancellation", label)
                 }
             }
         })
@@ -2400,7 +2401,7 @@ func TestScope_ARingClosedThroughALazyHandleIsRefusedAtTheResolutionThatClosesIt
         t.Fatalf("expected the lazy resolution closing the scoped ring refused with ErrCircularDependency, got %v", resolveErr)
     }
 
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("expected a clean scope teardown, got %v", closeErr)
     }
 
@@ -2587,7 +2588,7 @@ func TestScope_ARingClosedThroughALazyByTypeHandleIsRefused(t *testing.T) {
         t.Fatalf("expected the by-type lazy resolution closing the ring refused with ErrCircularDependency, got %v", resolveErr)
     }
 
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("expected a clean scope teardown, got %v", closeErr)
     }
 }
@@ -2673,7 +2674,7 @@ func TestScope_MustOverrideDoors_CarryTheOptionsToTheTeardown(t *testing.T) {
                 var closeCount atomic.Int64
                 testCase.override(requestScope, &scopeLifetimeProbe{closed: &closeCount}, options)
 
-                if closeErr := requestScope.Close(); nil != closeErr {
+                if closeErr := requestScope.CloseWithContext(context.Background()); nil != closeErr {
                     t.Fatalf("unexpected close error: %v", closeErr)
                 }
 
@@ -2730,7 +2731,7 @@ func TestScope_CloseHandsItsServicesTheConfiguredTeardownTimeout(t *testing.T) {
     scopeInstance, service := newScopeWithDeadlineRecordingService(t, ContainerConfig{ScopeTeardownTimeout: bound.Of(40 * time.Second)})
 
     before := time.Now()
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -2747,7 +2748,7 @@ func TestScope_CloseHandsItsServicesTheDefaultTeardownTimeoutWhenLeftOut(t *test
     scopeInstance, service := newScopeWithDeadlineRecordingService(t, ContainerConfig{})
 
     before := time.Now()
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -2759,7 +2760,7 @@ func TestScope_CloseHandsItsServicesTheDefaultTeardownTimeoutWhenLeftOut(t *test
 func TestScope_CloseHandsNoDeadlineUnderAnUnlimitedTeardownTimeout(t *testing.T) {
     scopeInstance, service := newScopeWithDeadlineRecordingService(t, ContainerConfig{ScopeTeardownTimeout: bound.UnlimitedDuration()})
 
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -2768,15 +2769,74 @@ func TestScope_CloseHandsNoDeadlineUnderAnUnlimitedTeardownTimeout(t *testing.T)
     }
 }
 
-func TestScope_CloseWithContextTakesTheCallersTermOverTheConfiguredOne(t *testing.T) {
-    scopeInstance, service := newScopeWithDeadlineRecordingService(t, ContainerConfig{ScopeTeardownTimeout: bound.Of(40 * time.Second)})
+func TestScope_CloseWithContextAppliesTheConfiguredBoundWithinTheCallers(t *testing.T) {
+    for _, testCase := range []struct {
+        name             string
+        callerTerm       time.Duration
+        expectedDeadline time.Duration
+    }{
+        {name: "the caller's shorter deadline ends it", callerTerm: time.Second, expectedDeadline: time.Second},
+        {name: "the configured bound ends it under a longer caller deadline", callerTerm: 5 * time.Minute, expectedDeadline: 40 * time.Second},
+        {name: "the configured bound ends it under no caller deadline", callerTerm: 0, expectedDeadline: 40 * time.Second},
+    } {
+        scopeInstance, service := newScopeWithDeadlineRecordingService(t, ContainerConfig{ScopeTeardownTimeout: bound.Of(40 * time.Second)})
 
-    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
-        t.Fatalf("unexpected close error: %v", closeErr)
+        closeContext := context.Background()
+        if 0 < testCase.callerTerm {
+            var cancel context.CancelFunc
+            closeContext, cancel = context.WithTimeout(context.Background(), testCase.callerTerm)
+            defer cancel()
+        }
+
+        if closeErr := scopeInstance.CloseWithContext(closeContext); nil != closeErr {
+            t.Fatalf("%s: unexpected close error: %v", testCase.name, closeErr)
+        }
+
+        if false == service.hasDeadline {
+            t.Fatalf("%s: expected a deadline", testCase.name)
+        }
+
+        if remaining := time.Until(service.deadline); remaining > testCase.expectedDeadline || remaining < testCase.expectedDeadline-5*time.Second {
+            t.Fatalf("%s: expected a deadline about %v away, got %v", testCase.name, testCase.expectedDeadline, remaining)
+        }
+    }
+}
+
+func TestScope_AFailurePastTheConfiguredBoundNamesIt(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{ScopeTeardownTimeout: bound.Of(time.Millisecond)})
+    MustRegisterScoped[*contextWaitingScopedService](serviceContainer, "waiting", func(containercontract.Resolver) (*contextWaitingScopedService, error) {
+        return &contextWaitingScopedService{}, nil
+    }, RegisterOptions{})
+
+    requestScope := serviceContainer.NewScope()
+    requestScope.MustGet(context.Background(), "waiting")
+
+    closeErr := requestScope.CloseWithContext(context.Background())
+    if nil == closeErr || "ContainerConfig.ScopeTeardownTimeout" != exception.FromError(closeErr).Context()["bound"] {
+        t.Fatalf("expected the failure to name the configured bound, got %v", closeErr)
     }
 
-    if true == service.hasDeadline {
-        t.Fatalf("expected the caller's context, which has no deadline, got %v", service.deadline)
+    callerScope := serviceContainer.NewScope()
+    callerScope.MustGet(context.Background(), "waiting")
+
+    callerContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    callerErr := callerScope.CloseWithContext(callerContext)
+    if nil == callerErr || nil != exception.FromError(callerErr).Context()["bound"] {
+        t.Fatalf("expected a close the caller ended not to name the configured bound, got %v", callerErr)
+    }
+}
+
+var _ interface {
+    CloseWithContext(closeContext context.Context) error
+} = containercontract.Scope(nil)
+
+func TestScope_HasNoPlainClose(t *testing.T) {
+    var scopeInstance any = NewContainer(ContainerConfig{}).NewScope()
+
+    if _, hasPlainClose := scopeInstance.(interface{ Close() error }); true == hasPlainClose {
+        t.Fatalf("expected the scope to have one close door, CloseWithContext")
     }
 }
 
@@ -2806,7 +2866,7 @@ func TestScope_CloseReturnsAtTheTimeoutAndReportsTheServiceThatDidNotFinish(t *t
 
     closed := make(chan error, 1)
     go func() {
-        closed <- scopeInstance.Close()
+        closed <- scopeInstance.CloseWithContext(context.Background())
     }()
 
     /* under the 3s default, so a close running on the default instead of the configured term is caught */
@@ -2832,7 +2892,7 @@ func TestScope_CloseWithContextRefusesANilContextAndLeavesTheCloseToALaterCall(t
         t.Fatalf("expected the nil context refused, got %v", closeErr)
     }
 
-    if closeErr := scopeInstance.Close(); nil != closeErr {
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 

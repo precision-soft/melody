@@ -162,10 +162,10 @@ type closeCountingScope struct {
     closeCalls int
 }
 
-func (instance *closeCountingScope) Close() error {
+func (instance *closeCountingScope) CloseWithContext(closeContext context.Context) error {
     instance.closeCalls++
 
-    return instance.Scope.Close()
+    return instance.Scope.CloseWithContext(closeContext)
 }
 
 /* the positive half of the action's teardown: on a fixture that hands the action an open scope, the close is made */
@@ -471,7 +471,7 @@ type closeFailingScope struct {
     closeErr error
 }
 
-func (instance *closeFailingScope) Close() error {
+func (instance *closeFailingScope) CloseWithContext(closeContext context.Context) error {
     return instance.closeErr
 }
 
