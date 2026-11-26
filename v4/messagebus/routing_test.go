@@ -16,7 +16,7 @@ func TestRouting_RouteTypeDispatchesToTransport(t *testing.T) {
 
     dispatchBus := NewManager("default", []messagebuscontract.Middleware{NewSendMessageMiddleware(routing)})
 
-    sentEnvelope, dispatchErr := dispatchBus.Dispatch(newTestRuntime(), taskCreated{TaskId: 9}, nil)
+    sentEnvelope, dispatchErr := dispatchBus.Dispatch(newTestRuntime(), taskCreated{TaskId: 9}, messagebuscontract.DispatchOptions{})
     if nil != dispatchErr {
         t.Fatalf("unexpected dispatch error: %v", dispatchErr)
     }
@@ -37,7 +37,7 @@ func TestRouting_BuildSnapshotIgnoresRoutesAddedAfterBuild(t *testing.T) {
 
     dispatchBus := NewManager("default", []messagebuscontract.Middleware{middleware})
 
-    sentEnvelope, dispatchErr := dispatchBus.Dispatch(newTestRuntime(), taskCreated{TaskId: 7}, nil)
+    sentEnvelope, dispatchErr := dispatchBus.Dispatch(newTestRuntime(), taskCreated{TaskId: 7}, messagebuscontract.DispatchOptions{})
     if nil != dispatchErr {
         t.Fatalf("unexpected dispatch error: %v", dispatchErr)
     }

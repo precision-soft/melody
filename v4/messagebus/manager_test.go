@@ -19,9 +19,9 @@ func TestDispatch_RunsRegisteredHandler(t *testing.T) {
         return nil
     })
 
-    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})})
 
-    envelopeInstance, dispatchErr := bus.Dispatch(newTestRuntime(), taskCreated{TaskId: 42}, nil)
+    envelopeInstance, dispatchErr := bus.Dispatch(newTestRuntime(), taskCreated{TaskId: 42}, messagebuscontract.DispatchOptions{})
     if nil != dispatchErr {
         t.Fatalf("unexpected dispatch error: %v", dispatchErr)
     }
@@ -39,9 +39,9 @@ func TestDispatch_RunsRegisteredHandler(t *testing.T) {
 func TestDispatch_NilMessageReturnsErrorInsteadOfPanicking(t *testing.T) {
     locator := NewHandlerLocator()
 
-    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})})
 
-    if _, dispatchErr := bus.Dispatch(newTestRuntime(), nil, nil); nil == dispatchErr {
+    if _, dispatchErr := bus.Dispatch(newTestRuntime(), nil, messagebuscontract.DispatchOptions{}); nil == dispatchErr {
         t.Fatalf("expected an error when dispatching a nil message")
     }
 }
@@ -53,7 +53,7 @@ func TestDispatch_WarnsWhenNothingSentOrHandledTheMessage(t *testing.T) {
     runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
 
     /* a send-only bus with no route for the type answers success, so this record is the one channel that tells "delivered somewhere" from "did nothing" */
-    if _, dispatchErr := bus.Dispatch(runtimeInstance, taskCreated{TaskId: 1}, nil); nil != dispatchErr {
+    if _, dispatchErr := bus.Dispatch(runtimeInstance, taskCreated{TaskId: 1}, messagebuscontract.DispatchOptions{}); nil != dispatchErr {
         t.Fatalf("unexpected dispatch error: %v", dispatchErr)
     }
 
@@ -72,7 +72,7 @@ func TestDispatch_DoesNotWarnWhenTheMessageWasSent(t *testing.T) {
 
     runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
 
-    if _, dispatchErr := bus.Dispatch(runtimeInstance, taskCreated{TaskId: 1}, nil); nil != dispatchErr {
+    if _, dispatchErr := bus.Dispatch(runtimeInstance, taskCreated{TaskId: 1}, messagebuscontract.DispatchOptions{}); nil != dispatchErr {
         t.Fatalf("unexpected dispatch error: %v", dispatchErr)
     }
 
@@ -87,11 +87,11 @@ func TestDispatch_DoesNotWarnWhenTheMessageWasHandled(t *testing.T) {
         return nil
     })
 
-    bus := NewManager("handling", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
+    bus := NewManager("handling", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})})
 
     runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
 
-    if _, dispatchErr := bus.Dispatch(runtimeInstance, taskCreated{TaskId: 1}, nil); nil != dispatchErr {
+    if _, dispatchErr := bus.Dispatch(runtimeInstance, taskCreated{TaskId: 1}, messagebuscontract.DispatchOptions{}); nil != dispatchErr {
         t.Fatalf("unexpected dispatch error: %v", dispatchErr)
     }
 
@@ -103,13 +103,13 @@ func TestDispatch_DoesNotWarnWhenTheMessageWasHandled(t *testing.T) {
 func TestDispatch_DoesNotWarnForAReceivedEnvelope(t *testing.T) {
     locator := NewHandlerLocator()
 
-    bus := NewManager("consume", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{AllowMissingHandler: true})})
+    bus := NewManager("consume", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{AllowMissingHandler: true})})
 
     runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
 
     /* the consume path dispatches received envelopes, and the handle middleware owns the missing-handler verdict there — the untouched-dispatch record must not fire beside it */
     received := NewEnvelope(taskCreated{TaskId: 1}, nil).WithStamps([]messagebuscontract.Stamp{ReceivedStamp{TransportName: "async"}})
-    if _, dispatchErr := bus.Dispatch(runtimeInstance, received, nil); nil != dispatchErr {
+    if _, dispatchErr := bus.Dispatch(runtimeInstance, received, messagebuscontract.DispatchOptions{}); nil != dispatchErr {
         t.Fatalf("unexpected dispatch error: %v", dispatchErr)
     }
 
@@ -119,7 +119,7 @@ func TestDispatch_DoesNotWarnForAReceivedEnvelope(t *testing.T) {
 }
 
 func TestNewManager_RefusesANilMiddlewareByItsIndex(t *testing.T) {
-    middlewares := []messagebuscontract.Middleware{NewHandleMessageMiddleware(NewHandlerLocator(), HandleOptions{}), nil}
+    middlewares := []messagebuscontract.Middleware{NewHandleMessageMiddleware(NewHandlerLocator(), HandleMiddlewareConfig{}), nil}
 
     testhelper.AssertPanicsWithError(t, func() {
         NewManager("default", middlewares)
@@ -133,13 +133,31 @@ func TestNewManager_RefusesANilMiddlewareByItsIndex(t *testing.T) {
     }
 }
 
+func TestManager_DispatchAddsTheOptionsStampsInOrder(t *testing.T) {
+    bus := NewManager("default", nil)
+
+    result, dispatchErr := bus.Dispatch(
+        newTestRuntime(),
+        taskCreated{TaskId: 1},
+        messagebuscontract.DispatchOptions{Stamps: []messagebuscontract.Stamp{DelayStamp{Delay: time.Second}, MessageIdStamp{MessageId: "second"}}},
+    )
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    stamps := result.Stamps()
+    if 3 != len(stamps) || StampNameDelay != stamps[0].StampName() || StampNameMessageId != stamps[1].StampName() || StampNameBusName != stamps[2].StampName() {
+        t.Fatalf("expected the options' stamps in their order, then the bus name, got %v", stamps)
+    }
+}
+
 func TestManager_DispatchAddsTheStampsAfterTheEnvelopeOwn(t *testing.T) {
     bus := NewManager("default", nil)
 
     result, dispatchErr := bus.Dispatch(
         newTestRuntime(),
         NewEnvelope(taskCreated{TaskId: 1}, []messagebuscontract.Stamp{MessageIdStamp{MessageId: "own"}}),
-        []messagebuscontract.Stamp{DelayStamp{Delay: time.Second}},
+        messagebuscontract.DispatchOptions{Stamps: []messagebuscontract.Stamp{DelayStamp{Delay: time.Second}}},
     )
     if nil != dispatchErr {
         t.Fatalf("unexpected dispatch error: %v", dispatchErr)

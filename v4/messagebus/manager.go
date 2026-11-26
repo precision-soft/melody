@@ -42,13 +42,13 @@ type Manager struct {
 func (instance *Manager) Dispatch(
     runtimeInstance containercontract.Runtime,
     message any,
-    stamps []messagebuscontract.Stamp,
+    options messagebuscontract.DispatchOptions,
 ) (messagebuscontract.Envelope, error) {
     if nil == message {
         return nil, exception.NewError("cannot dispatch a nil message", nil, nil)
     }
 
-    envelopeInstance := EnsureEnvelope(message).WithStamps(stamps)
+    envelopeInstance := EnsureEnvelope(message).WithStamps(options.Stamps)
     envelopeInstance = envelopeInstance.WithStamps([]messagebuscontract.Stamp{BusNameStamp{BusName: instance.name}})
 
     chain := instance.buildChain(0)

@@ -168,3 +168,14 @@ func redisTestClient(t *testing.T) rueidis.Client {
 
     return client
 }
+
+func subscribeTestTopic(t *testing.T, hub *melodyhttp.ServerSentEventHub, topic string) *melodyhttp.ServerSentEventSubscriber {
+    t.Helper()
+
+    subscriber, subscribeErr := hub.Subscribe(topic, melodyhttp.SubscribeOptions{})
+    if nil != subscribeErr {
+        t.Fatalf("unexpected subscribe error: %v", subscribeErr)
+    }
+
+    return subscriber
+}

@@ -46,6 +46,12 @@ func StreamHandler(slots *StreamSlots) melodyhttpcontract.Handler {
         }
         defer release()
 
+        subscriber, subscribeErr := hub.Subscribe(topic, melodyhttp.SubscribeOptions{})
+        if nil != subscribeErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the event stream is unavailable", subscribeErr), nil
+        }
+        defer hub.Unsubscribe(subscriber)
+
         /* the server arms its write deadline once, from the request line, so the writer re-arms it per frame with the server's own write timeout as the budget, and with the framework's when the server declares none. It bounds a write: a client that stops reading is cut one budget after the socket stops buffering, and the application declares no bound on a stream's whole life. */
         writeBudget := serverWriteTimeoutOf(request)
 
@@ -53,9 +59,6 @@ func StreamHandler(slots *StreamSlots) melodyhttpcontract.Handler {
         if nil != serverSentEventErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "streaming is not supported", serverSentEventErr), nil
         }
-
-        subscriber := hub.Subscribe(topic)
-        defer hub.Unsubscribe(subscriber)
 
         commentErr := serverSentEventWriter.Comment("connected")
         if nil != commentErr {

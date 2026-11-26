@@ -10,7 +10,8 @@ import (
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
 )
 
-type HandleOptions struct {
+/* HandleMiddlewareConfig is what NewHandleMessageMiddleware declares; the zero value refuses a message with no handler. */
+type HandleMiddlewareConfig struct {
     /* AllowMissingHandler lets a message with no registered handler pass through with a warning instead of failing the dispatch. The default refuses, since on the consume path a pass-through is acked, and a forgotten registration would drain a queue past the retry and dead-letter machinery. */
     AllowMissingHandler bool
 }
@@ -18,7 +19,7 @@ type HandleOptions struct {
 /* NewHandleMessageMiddleware runs every handler the locator answers for the message; a nil locator is refused. */
 func NewHandleMessageMiddleware(
     locator messagebuscontract.HandlerLocator,
-    options HandleOptions,
+    config HandleMiddlewareConfig,
 ) messagebuscontract.Middleware {
     if true == internal.IsNilInterface(locator) {
         exception.Panic(exception.NewError("message handler locator is nil", nil, nil))
@@ -32,7 +33,7 @@ func NewHandleMessageMiddleware(
         handlers := locator.HandlersFor(envelopeInstance.Message())
 
         if 0 == len(handlers) {
-            if missingErr := noHandler(runtimeInstance, envelopeInstance, options); nil != missingErr {
+            if missingErr := noHandler(runtimeInstance, envelopeInstance, config); nil != missingErr {
                 return envelopeInstance, missingErr
             }
 
@@ -55,7 +56,7 @@ func NewHandleMessageMiddleware(
 func noHandler(
     runtimeInstance containercontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
-    options HandleOptions,
+    config HandleMiddlewareConfig,
 ) error {
     if _, handled := LastStampOfType[HandledStamp](envelopeInstance); true == handled {
         return nil
@@ -66,7 +67,7 @@ func noHandler(
         messageType = reflect.TypeOf(message).String()
     }
 
-    if false == options.AllowMissingHandler {
+    if false == config.AllowMissingHandler {
         return exception.NewError(
             "no handler is registered for the message",
             map[string]any{"type": messageType},

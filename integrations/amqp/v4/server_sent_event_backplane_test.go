@@ -145,7 +145,7 @@ func TestServerSentEventBackplane_ReplicatesBroadcastToAnotherInstance(t *testin
     backplaneB := NewServerSentEventBackplane(hubB, borrowedSource(connection), ServerSentEventBackplaneConfig{Exchange: exchange})
     defer backplaneB.CloseWithContext(context.Background())
 
-    subscriber := hubB.Subscribe("orders")
+    subscriber := subscribeTestTopic(t, hubB, "orders")
     defer hubB.Unsubscribe(subscriber)
 
     deadline := time.After(10 * time.Second)
@@ -187,7 +187,7 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
     backplane := NewServerSentEventBackplane(hub, borrowedSource(connection), ServerSentEventBackplaneConfig{Exchange: "melody.sse.test.echo"})
     defer backplane.CloseWithContext(context.Background())
 
-    subscriber := hub.Subscribe("orders")
+    subscriber := subscribeTestTopic(t, hub, "orders")
     defer hub.Unsubscribe(subscriber)
 
     if delivered := hub.Broadcast(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "once"}); 1 != delivered {

@@ -46,13 +46,13 @@ func (instance *Module) buildMessageBus() {
         "default",
         []melodymessagebuscontract.Middleware{
             melodymessagebus.NewSendMessageMiddleware(routing),
-            melodymessagebus.NewHandleMessageMiddleware(locator, melodymessagebus.HandleOptions{}),
+            melodymessagebus.NewHandleMessageMiddleware(locator, melodymessagebus.HandleMiddlewareConfig{}),
         },
     )
     instance.messageBusConsume = melodymessagebus.NewManager(
         "default.consume",
         []melodymessagebuscontract.Middleware{
-            melodymessagebus.NewHandleMessageMiddleware(locator, melodymessagebus.HandleOptions{}),
+            melodymessagebus.NewHandleMessageMiddleware(locator, melodymessagebus.HandleMiddlewareConfig{}),
         },
     )
 }

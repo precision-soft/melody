@@ -104,7 +104,7 @@ Every module below has one section, headed by its directory, and one row per exp
 | [`mailer/contract.Mailer`](../mailer/contract/mailer.go) | application | an application may replace the mailer it resolves, and its tests double it |
 | [`mailer/contract.Transport`](../mailer/contract/mailer.go) | application | a delivery transport is written by the application or an integration |
 | [`messagebus.ServiceRegistrar`](../messagebus/service_resolver.go) | framework | the boot's registrar satisfies it; only the application builder implements it |
-| [`messagebus/contract.Bus`](../messagebus/contract/bus.go) | framework | the framework's bus |
+| [`messagebus/contract.Bus`](../messagebus/contract/bus.go) | framework | the framework's bus; its `Dispatch` takes a `DispatchOptions`, the struct a later field of one dispatch is added to |
 | [`messagebus/contract.Envelope`](../messagebus/contract/envelope.go) | framework | the bus builds every envelope |
 | [`messagebus/contract.HandlerLocator`](../messagebus/contract/locator.go) | application | an application may locate its own handlers |
 | [`messagebus/contract.MessageHandler`](../messagebus/contract/handler.go) | application | every message handler of an application implements it |

@@ -103,12 +103,31 @@ func (instance *ServerSentEventSubscriber) Topic() string {
     return instance.topic
 }
 
-/* Subscribe registers a subscriber for a topic with the hub's buffer. On a hub that has been closed the subscriber is handed back with its channel already closed and is not registered; IsClosed tells that apart from an ordinary end of stream. */
-func (instance *ServerSentEventHub) Subscribe(topic string) *ServerSentEventSubscriber {
+/* SubscribeOptions is what one subscription declares beside its topic; the zero value takes the hub's configuration. */
+type SubscribeOptions struct {
+    /* Buffer is this subscriber's channel capacity: the hub's SubscriberBuffer when left out, at least 1, unlimited refused. */
+    Buffer bound.Count
+}
+
+/* Subscribe registers a subscriber for a topic with the buffer the options declare, the hub's when left out; a buffer outside its rule is refused naming SubscribeOptions.Buffer. On a hub that has been closed the subscriber is handed back with its channel already closed, not registered and with no error; IsClosed tells that apart from an ordinary end of stream. */
+func (instance *ServerSentEventHub) Subscribe(topic string, options SubscribeOptions) (*ServerSentEventSubscriber, error) {
     bufferSize := instance.subscriberBuffer
     if 0 == bufferSize {
         bufferSize = defaultServerSentEventBufferSize
     }
+
+    subscriberBuffer, subscriberBufferErr := bound.Resolve(
+        options.Buffer,
+        bound.Rule[int]{
+            Name:    "SubscribeOptions.Buffer",
+            Default: bufferSize,
+            Minimum: 1,
+        },
+    )
+    if nil != subscriberBufferErr {
+        return nil, subscriberBufferErr
+    }
+    bufferSize = subscriberBuffer.Value
 
     subscriber := &ServerSentEventSubscriber{
         topic:   topic,
@@ -121,7 +140,7 @@ func (instance *ServerSentEventHub) Subscribe(topic string) *ServerSentEventSubs
     if true == instance.closed {
         close(subscriber.channel)
 
-        return subscriber
+        return subscriber, nil
     }
 
     /* the zero-value hub is reachable, since the struct is exported, so its map is built here, under the lock that owns it */
@@ -137,7 +156,7 @@ func (instance *ServerSentEventHub) Subscribe(topic string) *ServerSentEventSubs
 
     subscribers[subscriber] = struct{}{}
 
-    return subscriber
+    return subscriber, nil
 }
 
 /* the default is the rule's and the zero-value hub's alike, which reads its unresolved zero field as it */

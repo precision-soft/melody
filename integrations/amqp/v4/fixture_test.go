@@ -16,6 +16,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/exception"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
     amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
@@ -747,4 +748,15 @@ func listenSilently(t *testing.T) (string, *atomic.Int64) {
     }()
 
     return listener.Addr().String(), accepts
+}
+
+func subscribeTestTopic(t *testing.T, hub *melodyhttp.ServerSentEventHub, topic string) *melodyhttp.ServerSentEventSubscriber {
+    t.Helper()
+
+    subscriber, subscribeErr := hub.Subscribe(topic, melodyhttp.SubscribeOptions{})
+    if nil != subscribeErr {
+        t.Fatalf("unexpected subscribe error: %v", subscribeErr)
+    }
+
+    return subscriber
 }

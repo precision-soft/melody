@@ -52,7 +52,7 @@ func (instance *MessageBusDispatchCommand) Run(
     }
 
     for _, messageInstance := range messages {
-        _, dispatchErr := instance.dispatchBus.Dispatch(runtimeInstance, messageInstance, nil)
+        _, dispatchErr := instance.dispatchBus.Dispatch(runtimeInstance, messageInstance, melodymessagebuscontract.DispatchOptions{})
         if nil != dispatchErr {
             return dispatchErr
         }
@@ -70,7 +70,7 @@ func (instance *MessageBusDispatchCommand) Run(
     for index := 0; index < len(messages); index++ {
         select {
         case envelopeInstance := <-queue:
-            _, consumeErr := instance.consumeBus.Dispatch(runtimeInstance, envelopeInstance, nil)
+            _, consumeErr := instance.consumeBus.Dispatch(runtimeInstance, envelopeInstance, melodymessagebuscontract.DispatchOptions{})
             if nil != consumeErr {
                 return consumeErr
             }

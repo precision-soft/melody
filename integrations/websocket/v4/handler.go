@@ -200,7 +200,12 @@ func newStreamHandler(hub *melodyhttp.ServerSentEventHub, resolved resolvedStrea
 
         connection.SetReadLimit(resolved.readLimit)
 
-        subscriber := hub.Subscribe(topic)
+        subscriber, subscribeErr := hub.Subscribe(topic, melodyhttp.SubscribeOptions{})
+        if nil != subscribeErr {
+            logger.error("websocket subscribe failed", subscribeErr, nil)
+
+            return nil, nil
+        }
         defer hub.Unsubscribe(subscriber)
 
         /* the hub can shut down between the check above and this Subscribe, handing back a closed channel; it is named at debug so a stream that never delivered is not silent in the journal, and the deferred CloseNow tears the socket down before any read or ping goroutine starts */

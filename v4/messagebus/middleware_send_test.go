@@ -18,7 +18,7 @@ func TestSendMiddleware_RoutesToTransportAndWorkerHandles(t *testing.T) {
 
     runtimeInstance := newTestRuntime()
 
-    sentEnvelope, dispatchErr := dispatchBus.Dispatch(runtimeInstance, taskCreated{TaskId: 7}, nil)
+    sentEnvelope, dispatchErr := dispatchBus.Dispatch(runtimeInstance, taskCreated{TaskId: 7}, messagebuscontract.DispatchOptions{})
     if nil != dispatchErr {
         t.Fatalf("unexpected dispatch error: %v", dispatchErr)
     }
@@ -35,7 +35,7 @@ func TestSendMiddleware_RoutesToTransportAndWorkerHandles(t *testing.T) {
         return nil
     })
 
-    consumeBus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
+    consumeBus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})})
 
     queueSubscription, receiveErr := transport.Receive(runtimeInstance)
 
@@ -45,7 +45,7 @@ func TestSendMiddleware_RoutesToTransportAndWorkerHandles(t *testing.T) {
     }
 
     received := <-queue
-    _, dispatchErr = consumeBus.Dispatch(runtimeInstance, received, nil)
+    _, dispatchErr = consumeBus.Dispatch(runtimeInstance, received, messagebuscontract.DispatchOptions{})
     if nil != dispatchErr {
         t.Fatalf("unexpected consume error: %v", dispatchErr)
     }

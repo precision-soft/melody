@@ -630,7 +630,7 @@ func (instance *consumeSession) dispatchSafely(
         )
     }()
 
-    _, err := instance.bus.Dispatch(runtimeInstance, envelopeInstance, nil)
+    _, err := instance.bus.Dispatch(runtimeInstance, envelopeInstance, messagebuscontract.DispatchOptions{})
 
     return err
 }

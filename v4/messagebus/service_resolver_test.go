@@ -74,7 +74,7 @@ func TestNewConsumeCommand_ResolvesTheBusAndTransportsAtRunAndKeepsTheConfigsRet
 
         return nil
     })
-    consumeBus := NewManager("consume", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
+    consumeBus := NewManager("consume", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})})
 
     serviceContainer.MustRegister(ServiceConsumeBus, func(containercontract.Resolver) (messagebuscontract.Bus, error) {
         return consumeBus, nil

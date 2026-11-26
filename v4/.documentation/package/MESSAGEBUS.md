@@ -77,7 +77,7 @@ Any service, handler, or command then resolves the same bus and dispatches:
 
 ```go
 bus := messagebus.BusMustFromRuntime(runtimeInstance)
-bus.Dispatch(runtimeInstance, WelcomeEmail{UserId: 1}, nil)
+bus.Dispatch(runtimeInstance, WelcomeEmail{UserId: 1}, messagebuscontract.DispatchOptions{})
 ```
 
 `BusMustFromRuntime` resolves through the runtime's scope; a provider, which holds a resolver, writes `messagebus.BusMustFromResolver(resolver.Runtime().Context(), resolver)`. The factory result is cached, so every resolver shares the one configured bus — configure it once, dispatch from many places. The example application wires this end-to-end: the bus is registered in [`.example/config/service.go`](../../.example/config/service.go) and resolved in the [`/messagebus/dispatch`](../../.example/handler/welcome_email_dispatch_handler.go) HTTP handler. Set `AMQP_DSN` before launching the example to route the bus over RabbitMQ via the [`amqp`](../../../integrations/amqp/v4) integration instead of the in-process transport: without a broker the HTTP dispatch door answers `503` naming `AMQP_DSN`, since nothing in the process would consume what it accepted, while the `messagebus:dispatch` console command dispatches over the in-process transport.
@@ -116,7 +116,7 @@ func buildBus() (*melodymessagebus.Manager, *melodymessagebus.InMemoryTransport)
         "default",
         []melodymessagebuscontract.Middleware{
             melodymessagebus.NewSendMessageMiddleware(routing),
-            melodymessagebus.NewHandleMessageMiddleware(locator, melodymessagebus.HandleOptions{}),
+            melodymessagebus.NewHandleMessageMiddleware(locator, melodymessagebus.HandleMiddlewareConfig{}),
         },
     )
 
@@ -192,9 +192,9 @@ A runnable end-to-end demonstration lives in the example application: [`messageb
     - [`NewHandlerLocator() *HandlerLocator`](../../messagebus/locator.go)
     - [`RegisterHandler[T any](locator *HandlerLocator, handle func(containercontract.Runtime, T) error)`](../../messagebus/locator.go)
 - [`type Manager`](../../messagebus/manager.go)
-    - [`NewManager(name string, middlewares []messagebuscontract.Middleware) *Manager`](../../messagebus/manager.go) — nil is a bus with no middleware, a nil middleware is refused by its index; `Dispatch(runtimeInstance, message, stamps)` adds the stamps, nil for none
-- [`NewHandleMessageMiddleware(locator messagebuscontract.HandlerLocator, options HandleOptions) messagebuscontract.Middleware`](../../messagebus/middleware_handle.go) — a nil locator is refused
-- [`type HandleOptions`](../../messagebus/middleware_handle.go) (`AllowMissingHandler bool`) — the default REFUSES a message with no registered handler — an envelope already carrying a `HandledStamp` passes, since it was handled upstream —, because on the consume path a pass-through is immediately Acked and the queue drains; `AllowMissingHandler: true` restores the pass-through with a warning
+    - [`NewManager(name string, middlewares []messagebuscontract.Middleware) *Manager`](../../messagebus/manager.go) — nil is a bus with no middleware, a nil middleware is refused by its index; `Dispatch(runtimeInstance, message, options)` adds the stamps of its [`messagebuscontract.DispatchOptions`](../../messagebus/contract/bus.go) (`Stamps []Stamp`, in order, nil for none)
+- [`NewHandleMessageMiddleware(locator messagebuscontract.HandlerLocator, config HandleMiddlewareConfig) messagebuscontract.Middleware`](../../messagebus/middleware_handle.go) — a nil locator is refused
+- [`type HandleMiddlewareConfig`](../../messagebus/middleware_handle.go) (`AllowMissingHandler bool`) — the default REFUSES a message with no registered handler — an envelope already carrying a `HandledStamp` passes, since it was handled upstream —, because on the consume path a pass-through is immediately Acked and the queue drains; `AllowMissingHandler: true` restores the pass-through with a warning
 - [`NewSendMessageMiddleware(routing *Routing) messagebuscontract.Middleware`](../../messagebus/middleware_send.go) — a nil routing is refused
 - [`type Routing`](../../messagebus/routing.go) — type-safe routing builder
     - [`NewRouting() *Routing`](../../messagebus/routing.go)

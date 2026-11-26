@@ -767,3 +767,14 @@ func serveUrlEncodedForm(handler nethttp.Handler, path string, valueBytes int) *
 
     return recorder
 }
+
+func subscribeTestTopic(t *testing.T, hub *ServerSentEventHub, topic string) *ServerSentEventSubscriber {
+    t.Helper()
+
+    subscriber, subscribeErr := hub.Subscribe(topic, SubscribeOptions{})
+    if nil != subscribeErr {
+        t.Fatalf("unexpected subscribe error: %v", subscribeErr)
+    }
+
+    return subscriber
+}

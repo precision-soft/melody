@@ -1009,7 +1009,7 @@ func TestBootContainer_ARelativeLogPathIsAnchoredToTheProjectDirectoryUnderACrea
 
 type teardownOrderProbeBus struct{}
 
-func (instance *teardownOrderProbeBus) Dispatch(runtimeInstance containercontract.Runtime, message any, stamps []messagebuscontract.Stamp) (messagebuscontract.Envelope, error) {
+func (instance *teardownOrderProbeBus) Dispatch(runtimeInstance containercontract.Runtime, message any, options messagebuscontract.DispatchOptions) (messagebuscontract.Envelope, error) {
     return nil, nil
 }
 

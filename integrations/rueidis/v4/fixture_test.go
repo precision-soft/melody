@@ -18,6 +18,7 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     redisclient "github.com/redis/rueidis"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
@@ -594,4 +595,15 @@ func expectPanicNamingTheArgument(t *testing.T, argument string, callback func()
     }()
 
     callback()
+}
+
+func subscribeTestTopic(t *testing.T, hub *melodyhttp.ServerSentEventHub, topic string) *melodyhttp.ServerSentEventSubscriber {
+    t.Helper()
+
+    subscriber, subscribeErr := hub.Subscribe(topic, melodyhttp.SubscribeOptions{})
+    if nil != subscribeErr {
+        t.Fatalf("unexpected subscribe error: %v", subscribeErr)
+    }
+
+    return subscriber
 }

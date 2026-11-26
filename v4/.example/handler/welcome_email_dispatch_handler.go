@@ -9,6 +9,7 @@ import (
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodymessagebus "github.com/precision-soft/melody/v4/messagebus"
+    melodymessagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
 )
 
 /* WelcomeEmailDispatchHandler hands a welcome email to the message bus and answers once the bus has accepted it: sending is slow and may fail for reasons the caller cannot act on, so the transport carries it from there. Without a broker the door answers 503 naming AMQP_DSN, since nothing in this process would read what it accepted. */
@@ -20,7 +21,7 @@ func WelcomeEmailDispatchHandler(transportConfigured bool) melodyhttpcontract.Ha
 
         bus := melodymessagebus.BusMustFromRuntime(runtimeInstance)
 
-        _, dispatchErr := bus.Dispatch(runtimeInstance, message.WelcomeEmail{UserId: 1, Address: "new-user@example.com"}, nil)
+        _, dispatchErr := bus.Dispatch(runtimeInstance, message.WelcomeEmail{UserId: 1, Address: "new-user@example.com"}, melodymessagebuscontract.DispatchOptions{})
         if nil != dispatchErr {
             return nil, dispatchErr
         }

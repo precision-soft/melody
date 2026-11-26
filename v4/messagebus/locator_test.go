@@ -98,8 +98,8 @@ func TestHandleMessageMiddleware_HandsTheDispatchedEnvelopeToTheHandler(t *testi
         return nil
     })
 
-    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
-    if _, dispatchErr := bus.Dispatch(newTestRuntime(), taskCreated{}, []messagebuscontract.Stamp{MessageIdStamp{MessageId: "dispatched-1"}}); nil != dispatchErr {
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})})
+    if _, dispatchErr := bus.Dispatch(newTestRuntime(), taskCreated{}, messagebuscontract.DispatchOptions{Stamps: []messagebuscontract.Stamp{MessageIdStamp{MessageId: "dispatched-1"}}}); nil != dispatchErr {
         t.Fatalf("dispatch: %v", dispatchErr)
     }
 

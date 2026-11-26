@@ -16,16 +16,16 @@ type sendingBus struct {
     transport melodymessagebuscontract.Transport
 }
 
-func (instance *sendingBus) Dispatch(runtimeInstance melodycontainercontract.Runtime, message any, stamps []melodymessagebuscontract.Stamp) (melodymessagebuscontract.Envelope, error) {
-    envelope := melodymessagebus.NewEnvelope(message, stamps)
+func (instance *sendingBus) Dispatch(runtimeInstance melodycontainercontract.Runtime, message any, options melodymessagebuscontract.DispatchOptions) (melodymessagebuscontract.Envelope, error) {
+    envelope := melodymessagebus.NewEnvelope(message, options.Stamps)
 
     return envelope, instance.transport.Send(runtimeInstance, envelope)
 }
 
 type acceptingBus struct{}
 
-func (instance *acceptingBus) Dispatch(runtimeInstance melodycontainercontract.Runtime, message any, stamps []melodymessagebuscontract.Stamp) (melodymessagebuscontract.Envelope, error) {
-    return melodymessagebus.NewEnvelope(message, stamps), nil
+func (instance *acceptingBus) Dispatch(runtimeInstance melodycontainercontract.Runtime, message any, options melodymessagebuscontract.DispatchOptions) (melodymessagebuscontract.Envelope, error) {
+    return melodymessagebus.NewEnvelope(message, options.Stamps), nil
 }
 
 func TestMessageBusDispatchCommandReportsOnTheCommandWriter(t *testing.T) {

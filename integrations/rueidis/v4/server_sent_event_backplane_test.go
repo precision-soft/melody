@@ -27,7 +27,7 @@ func TestServerSentEventBackplane_ReplicatesBroadcastToAnotherInstance(t *testin
     backplaneB := NewServerSentEventBackplane(newTestConnection(client), hubB, config)
     defer backplaneB.CloseWithContext(context.Background())
 
-    subscriber := hubB.Subscribe("orders")
+    subscriber := subscribeTestTopic(t, hubB, "orders")
     defer hubB.Unsubscribe(subscriber)
 
     deadline := time.After(5 * time.Second)
@@ -58,7 +58,7 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
     backplane := NewServerSentEventBackplane(newTestConnection(client), hub, ServerSentEventBackplaneConfig{Channel: "melody:sse:test:echo"})
     defer backplane.CloseWithContext(context.Background())
 
-    subscriber := hub.Subscribe("orders")
+    subscriber := subscribeTestTopic(t, hub, "orders")
     defer hub.Unsubscribe(subscriber)
 
     if delivered := hub.Broadcast(newTokenStoreRuntime(), "orders", melodyhttp.ServerSentEvent{Data: "once"}); 1 != delivered {
@@ -145,7 +145,7 @@ func TestNewServerSentEventBackplane_ARefusedConfigLeavesTheHubWithoutABackplane
     listening := NewServerSentEventBackplane(newTestConnection(client), listeningHub, ServerSentEventBackplaneConfig{Channel: channel})
     defer listening.CloseWithContext(context.Background())
 
-    subscriber := listeningHub.Subscribe("orders")
+    subscriber := subscribeTestTopic(t, listeningHub, "orders")
     defer listeningHub.Unsubscribe(subscriber)
 
     /* the listener's subscription is asynchronous; a probe from a valid publisher proves it is live before the refused hub broadcasts */

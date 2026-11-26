@@ -21,8 +21,8 @@ import (
 func TestServerSentEventHub_BroadcastDeliversToTopicSubscribers(t *testing.T) {
     hub := NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.Of(4)})
 
-    subscriber := hub.Subscribe("demo")
-    other := hub.Subscribe("other")
+    subscriber := subscribeTestTopic(t, hub, "demo")
+    other := subscribeTestTopic(t, hub, "other")
 
     delivered := hub.Broadcast(newTestRuntime(), "demo", ServerSentEvent{Event: "ping", Data: "hello"})
     if 1 != delivered {
@@ -48,7 +48,7 @@ func TestServerSentEventHub_BroadcastDeliversToTopicSubscribers(t *testing.T) {
 func TestServerSentEventHub_BroadcastCountsDroppedEventsOnFullBuffer(t *testing.T) {
     hub := NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.Of(1)})
 
-    hub.Subscribe("demo")
+    subscribeTestTopic(t, hub, "demo")
 
     if delivered := hub.Broadcast(newTestRuntime(), "demo", ServerSentEvent{Data: "first"}); 1 != delivered {
         t.Fatalf("expected the first event to be delivered, got %d", delivered)
@@ -66,8 +66,8 @@ func TestServerSentEventHub_BroadcastCountsDroppedEventsOnFullBuffer(t *testing.
 func TestServerSentEventHub_CloseClosesSubscribersAndStopsDelivery(t *testing.T) {
     hub := NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.Of(4)})
 
-    first := hub.Subscribe("demo")
-    second := hub.Subscribe("other")
+    first := subscribeTestTopic(t, hub, "demo")
+    second := subscribeTestTopic(t, hub, "other")
 
     _ = hub.CloseWithContext(t.Context())
 
@@ -93,7 +93,7 @@ func TestServerSentEventHub_SubscribeAfterCloseReturnsClosedChannel(t *testing.T
     hub := NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.Of(4)})
     _ = hub.CloseWithContext(t.Context())
 
-    subscriber := hub.Subscribe("demo")
+    subscriber := subscribeTestTopic(t, hub, "demo")
 
     select {
     case _, open := <-subscriber.Events():
@@ -108,7 +108,7 @@ func TestServerSentEventHub_SubscribeAfterCloseReturnsClosedChannel(t *testing.T
 func TestServerSentEventHub_UnsubscribeStopsDelivery(t *testing.T) {
     hub := NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.Of(4)})
 
-    subscriber := hub.Subscribe("demo")
+    subscriber := subscribeTestTopic(t, hub, "demo")
     hub.Unsubscribe(subscriber)
 
     delivered := hub.Broadcast(newTestRuntime(), "demo", ServerSentEvent{Data: "x"})
@@ -163,7 +163,7 @@ func TestServerSentEventHub_BroadcastReplicatesAndDeliversLocally(t *testing.T) 
     backplane := &recordingBackplane{}
     hub.SetBackplane(backplane)
 
-    subscriber := hub.Subscribe("orders")
+    subscriber := subscribeTestTopic(t, hub, "orders")
     defer hub.Unsubscribe(subscriber)
 
     if delivered := hub.Broadcast(newTestRuntime(), "orders", ServerSentEvent{Data: "hello"}); 1 != delivered {
@@ -189,7 +189,7 @@ func TestServerSentEventHub_DeliverLocalDoesNotReplicate(t *testing.T) {
     backplane := &recordingBackplane{}
     hub.SetBackplane(backplane)
 
-    subscriber := hub.Subscribe("orders")
+    subscriber := subscribeTestTopic(t, hub, "orders")
     defer hub.Unsubscribe(subscriber)
 
     hub.DeliverLocal("orders", ServerSentEvent{Data: "remote"})
@@ -256,7 +256,7 @@ func TestServerSentEventHub_ABroadcastUnderADoneContextDeliversLocallyAndCountsO
     backplane := &recordingBackplane{}
     hub.SetBackplane(backplane)
 
-    subscriber := hub.Subscribe("orders")
+    subscriber := subscribeTestTopic(t, hub, "orders")
     defer hub.Unsubscribe(subscriber)
 
     cancelledContext, cancel := context.WithCancel(context.Background())
@@ -289,7 +289,7 @@ func TestServerSentEventHub_ANilRuntimePanicsNamingTheDoor(t *testing.T) {
     backplane := &recordingBackplane{}
     hub.SetBackplane(backplane)
 
-    subscriber := hub.Subscribe("orders")
+    subscriber := subscribeTestTopic(t, hub, "orders")
     defer hub.Unsubscribe(subscriber)
 
     recoveredValue := func() (recoveredValue any) {
@@ -522,7 +522,7 @@ func TestServerSentEventHub_FilesItsFailuresIntoTheConfiguredLogger(t *testing.T
     hub := NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.Of(1), Logger: logger})
     hub.SetBackplane(&recordingBackplane{publishErr: exception.NewError("redis is down", nil, nil)})
 
-    hub.Subscribe("topic")
+    subscribeTestTopic(t, hub, "topic")
     hub.Broadcast(newTestRuntime(), "topic", ServerSentEvent{Data: "first"})
     hub.Broadcast(newTestRuntime(), "topic", ServerSentEvent{Data: "second"})
 
@@ -662,7 +662,7 @@ func TestServerSentEventHub_RecordsTheFirstDropOfASubscriberAtWarningAndNotEvery
     logger := &hubRecordingLogger{}
     hub := NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.Of(1), Logger: logger})
 
-    subscriber := hub.Subscribe("topic")
+    subscriber := subscribeTestTopic(t, hub, "topic")
 
     for index := 0; index < 5; index++ {
         hub.DeliverLocal("topic", ServerSentEvent{Data: "payload"})
@@ -682,7 +682,7 @@ func TestServerSentEventHub_ZeroValueSubscribesInsteadOfPanickingOnANilMap(t *te
     hub := &ServerSentEventHub{}
 
     /* the struct is exported with only unexported fields, so a composition root that writes &ServerSentEventHub{} compiles, boots and reports a subscriber count, then panicked on an assignment to a nil map inside the first request that connected */
-    subscriber := hub.Subscribe("topic")
+    subscriber := subscribeTestTopic(t, hub, "topic")
     if nil == subscriber {
         t.Fatalf("expected a subscriber")
     }
@@ -695,7 +695,7 @@ func TestServerSentEventHub_ZeroValueSubscribesInsteadOfPanickingOnANilMap(t *te
 func TestServerSentEventHub_ZeroConfigSubscribesWithTheDefaultBuffer(t *testing.T) {
     hub := NewServerSentEventHub(ServerSentEventHubConfig{})
 
-    subscriber := hub.Subscribe("topic")
+    subscriber := subscribeTestTopic(t, hub, "topic")
 
     if 16 != cap(subscriber.channel) {
         t.Fatalf("expected the default buffer of 16, got %d", cap(subscriber.channel))
@@ -705,10 +705,86 @@ func TestServerSentEventHub_ZeroConfigSubscribesWithTheDefaultBuffer(t *testing.
 func TestServerSentEventHub_SubscribesWithTheConfiguredBuffer(t *testing.T) {
     hub := NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.Of(3)})
 
-    subscriber := hub.Subscribe("topic")
+    subscriber := subscribeTestTopic(t, hub, "topic")
 
     if 3 != cap(subscriber.channel) {
         t.Fatalf("expected the configured buffer of 3, got %d", cap(subscriber.channel))
+    }
+}
+
+func TestServerSentEventHub_ASubscribersBufferOverridesTheHubs(t *testing.T) {
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.Of(4)})
+
+    narrow, subscribeErr := hub.Subscribe("topic", SubscribeOptions{Buffer: bound.Of(1)})
+    if nil != subscribeErr {
+        t.Fatalf("unexpected subscribe error: %v", subscribeErr)
+    }
+    wide := subscribeTestTopic(t, hub, "topic")
+
+    if delivered := hub.DeliverLocal("topic", ServerSentEvent{Data: "first"}); 2 != delivered {
+        t.Fatalf("expected the first event to reach both subscribers, got %d", delivered)
+    }
+    if delivered := hub.DeliverLocal("topic", ServerSentEvent{Data: "second"}); 1 != delivered {
+        t.Fatalf("expected the second event to reach the default subscriber only, got %d", delivered)
+    }
+
+    if 1 != narrow.DroppedCount() || 0 != wide.DroppedCount() {
+        t.Fatalf("expected the subscriber of buffer 1 to drop the second event alone, got %d and %d", narrow.DroppedCount(), wide.DroppedCount())
+    }
+    if 1 != cap(narrow.channel) || 4 != cap(wide.channel) {
+        t.Fatalf("expected the buffers 1 and 4, got %d and %d", cap(narrow.channel), cap(wide.channel))
+    }
+}
+
+func TestServerSentEventHub_ABufferOutsideItsRuleIsRefusedNamingTheField(t *testing.T) {
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
+
+    for _, testCase := range []struct {
+        name    string
+        buffer  bound.Count
+        message string
+    }{
+        {name: "below one", buffer: bound.Of(0), message: "the limit is below its minimum"},
+        {name: "unlimited", buffer: bound.UnlimitedCount(), message: "the limit does not admit unlimited"},
+    } {
+        subscriber, subscribeErr := hub.Subscribe("topic", SubscribeOptions{Buffer: testCase.buffer})
+        if nil != subscriber {
+            t.Fatalf("%s: expected no subscriber beside the refusal", testCase.name)
+        }
+
+        requireRefusalNamingField(t, subscribeErr, testCase.message, "SubscribeOptions.Buffer")
+    }
+
+    if 0 != hub.SubscriberCount("topic") {
+        t.Fatalf("expected a refused subscription to register nothing, got %d", hub.SubscriberCount("topic"))
+    }
+}
+
+func TestServerSentEventHub_AnAbsentBufferTakesTheHubsConfiguredOne(t *testing.T) {
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.Of(5)})
+
+    subscriber, subscribeErr := hub.Subscribe("topic", SubscribeOptions{})
+    if nil != subscribeErr {
+        t.Fatalf("unexpected subscribe error: %v", subscribeErr)
+    }
+
+    if 5 != cap(subscriber.channel) {
+        t.Fatalf("expected the hub's configured buffer of 5, got %d", cap(subscriber.channel))
+    }
+}
+
+func TestServerSentEventHub_SubscribeOnAClosedHubAnswersAClosedSubscriberWithoutAnError(t *testing.T) {
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
+    if closeErr := hub.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    subscriber, subscribeErr := hub.Subscribe("topic", SubscribeOptions{Buffer: bound.Of(2)})
+    if nil != subscribeErr || nil == subscriber {
+        t.Fatalf("expected a closed subscriber and no error, got %v, %v", subscriber, subscribeErr)
+    }
+    if _, open := <-subscriber.Events(); true == open {
+        t.Fatalf("expected the subscriber's channel to be closed")
     }
 }
 

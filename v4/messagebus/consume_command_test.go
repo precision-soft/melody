@@ -71,7 +71,7 @@ func TestConsumeFrom_StopsAtLimitAndHandlesMessages(t *testing.T) {
         return nil
     })
 
-    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})})
     command := newConsumeCommandOver(bus, ConsumeCommandConfig{})
 
     consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, transport, 2, 1)
@@ -103,7 +103,7 @@ func TestConsumeFrom_DoesNotOvershootLimitWithConcurrency(t *testing.T) {
         return nil
     })
 
-    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})})
     command := newConsumeCommandOver(bus, ConsumeCommandConfig{})
 
     consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, transport, 2, 8)
@@ -134,7 +134,7 @@ func TestConsume_ExhaustsRetriesAndRoutesToFailureTransport(t *testing.T) {
         return exception.NewError("handler always fails", nil, nil)
     })
 
-    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})})
     command := newConsumeCommandOverTransports(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), FailureTransportName: "failed", Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond)}, MaxDeadLetterAttempts: bound.UnlimitedCount()}}, map[string]messagebuscontract.Transport{"failed": failure})
 
     if consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, source, 3, 1); nil != consumeErr {
@@ -176,7 +176,7 @@ func TestConsume_AMessageExhaustedOnTheFailureTransportItselfIsNotSentBackToIt(t
         return exception.NewError("handler always fails", nil, nil)
     })
 
-    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})})
     command := newConsumeCommandOverTransports(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), FailureTransportName: "failed", Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond)}, MaxDeadLetterAttempts: bound.UnlimitedCount()}}, map[string]messagebuscontract.Transport{"failed": failure})
 
     if consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, failure, 1, 1); nil != consumeErr {
@@ -214,7 +214,7 @@ func TestConsume_ExhaustedWithoutFailureTransportDropsMessage(t *testing.T) {
         return exception.NewError("handler always fails", nil, nil)
     })
 
-    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})})
     command := newConsumeCommandOver(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond)}, MaxDeadLetterAttempts: bound.UnlimitedCount()}})
 
     if consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, source, 3, 1); nil != consumeErr {
@@ -299,7 +299,7 @@ func newAlwaysFailingConsumeCommand(t *testing.T, policy RetryPolicy) (*consumeC
         return exception.NewError("handler always fails", nil, nil)
     })
 
-    return newConsumeCommandOverTransports(NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})}), ConsumeCommandConfig{Retry: policy}, map[string]messagebuscontract.Transport{"failed": &alwaysFailingTransport{}}), runtimeInstance
+    return newConsumeCommandOverTransports(NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})}), ConsumeCommandConfig{Retry: policy}, map[string]messagebuscontract.Transport{"failed": &alwaysFailingTransport{}}), runtimeInstance
 }
 
 func TestConsume_BoundedDeadLetterStopsRequeueAfterMax(t *testing.T) {
@@ -441,7 +441,7 @@ func TestConsumeFrom_AbnormalChannelCloseReturnsError(t *testing.T) {
     queue := make(chan messagebuscontract.Envelope)
     close(queue)
 
-    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(NewHandlerLocator(), HandleOptions{})})
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(NewHandlerLocator(), HandleMiddlewareConfig{})})
     command := newConsumeCommandOver(bus, ConsumeCommandConfig{})
 
     consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, &closedQueueTransport{queue: queue}, 0, 1)
@@ -459,7 +459,7 @@ func TestConsumeFrom_AStreamThatEndsWithAReasonAnswersIt(t *testing.T) {
 
     streamErr := errors.New("the broker connection is gone")
 
-    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(NewHandlerLocator(), HandleOptions{})})
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(NewHandlerLocator(), HandleMiddlewareConfig{})})
     command := newConsumeCommandOver(bus, ConsumeCommandConfig{})
 
     consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, &closedQueueTransport{queue: queue, streamErr: streamErr}, 0, 1)
@@ -481,7 +481,7 @@ func TestConsumeFrom_AStreamThatEndsAfterTheStopAnswersNilWhateverItsReason(t *t
     queue := make(chan messagebuscontract.Envelope)
     close(queue)
 
-    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(NewHandlerLocator(), HandleOptions{})})
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(NewHandlerLocator(), HandleMiddlewareConfig{})})
     command := newConsumeCommandOver(bus, ConsumeCommandConfig{})
 
     consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, &closedQueueTransport{queue: queue, streamErr: errors.New("ignored after the stop")}, 0, 1)
@@ -543,7 +543,7 @@ func TestConsumeFrom_ShutdownTimeoutTimesOutWedgedHandler(t *testing.T) {
         <-release
         return nil
     })
-    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})})
 
     command := newConsumeCommandOver(bus, ConsumeCommandConfig{ShutdownTimeout: bound.Of(50 * time.Millisecond)})
 
@@ -635,7 +635,7 @@ func TestConsumeFrom_ShutdownTimeoutKeepsTheHandlerAndAckContextAlive(t *testing
         return nil
     })
 
-    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})})
     command := newConsumeCommandOver(bus, ConsumeCommandConfig{ShutdownTimeout: bound.Of(5 * time.Second)})
 
     done := make(chan error, 1)
@@ -694,7 +694,7 @@ func TestConsumeFrom_ShutdownTimeoutKeepsTheNackContextAlive(t *testing.T) {
         return exception.NewError("handler always fails", nil, nil)
     })
 
-    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})})
     command := newConsumeCommandOver(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond)}, MaxDeadLetterAttempts: bound.UnlimitedCount()}, ShutdownTimeout: bound.Of(5 * time.Second)})
 
     done := make(chan error, 1)
@@ -807,7 +807,7 @@ func TestConsume_PanickingHandlerFlowsIntoRetryPipeline(t *testing.T) {
         panic("poison message handler")
     })
 
-    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})})
     command := newConsumeCommandOverTransports(bus, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), FailureTransportName: "failed", Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond)}, MaxDeadLetterAttempts: bound.UnlimitedCount()}}, map[string]messagebuscontract.Transport{"failed": failure})
 
     if consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, source, 3, 1); nil != consumeErr {
@@ -840,7 +840,7 @@ func TestDispatchSafely_ConvertsErrorPanicIntoDispatchError(t *testing.T) {
         panic(exception.NewError("handler exploded", nil, nil))
     })
 
-    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})})
     command := newConsumeCommandOver(bus, ConsumeCommandConfig{})
 
     dispatchErr := mustConsumeSession(command, runtimeInstance).dispatchSafely(runtimeInstance, NewEnvelope(consumeTestMessage{Value: 1}, nil))
@@ -873,7 +873,7 @@ func TestDispatchSafely_ATypedNilPanicIsAnsweredWithoutACause(t *testing.T) {
         panic(typedNil)
     })
 
-    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})})
     command := newConsumeCommandOver(bus, ConsumeCommandConfig{})
 
     dispatchErr := mustConsumeSession(command, runtimeInstance).dispatchSafely(runtimeInstance, NewEnvelope(consumeTestMessage{Value: 1}, nil))
@@ -932,7 +932,7 @@ func TestConsumeRecovered_ATypedNilPanicOutsideTheHandlerIsLoggedWithoutACause(t
         return nil
     })
 
-    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})})
     command := newConsumeCommandOver(bus, ConsumeCommandConfig{})
 
     mustConsumeSession(command, runtimeInstance).consumeRecovered(runtimeInstance, &typedNilAckPanickingTransport{}, NewEnvelope(consumeTestMessage{Value: 1}, nil))
@@ -975,7 +975,7 @@ func TestConsume_MessagesGetIsolatedScopes(t *testing.T) {
         return nil
     })
 
-    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})})
     command := newConsumeCommandOver(bus, ConsumeCommandConfig{})
 
     if consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, transport, 2, 1); nil != consumeErr {
@@ -1045,7 +1045,7 @@ func TestConsume_MessageScopeCarriesMessageIdLogger(t *testing.T) {
         return nil
     })
 
-    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})})
     command := newConsumeCommandOver(bus, ConsumeCommandConfig{})
 
     if consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, transport, 1, 1); nil != consumeErr {
@@ -1072,7 +1072,7 @@ func TestRun_OverlappingRunsShareNoMutableState(t *testing.T) {
     RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         return nil
     })
-    consumeBus := NewManager("consume", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
+    consumeBus := NewManager("consume", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})})
 
     serviceContainer.MustRegister(ServiceConsumeBus, func(containercontract.Resolver) (messagebuscontract.Bus, error) {
         return consumeBus, nil
@@ -1245,7 +1245,7 @@ func TestConsumeFrom_AStoppedWorkerTakesNoFurtherDelivery(t *testing.T) {
             return nil
         })
 
-        command := newConsumeCommandOver(NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})}), ConsumeCommandConfig{})
+        command := newConsumeCommandOver(NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})}), ConsumeCommandConfig{})
 
         _ = mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, &closedQueueTransport{queue: queue}, 0, 1)
 
@@ -1377,7 +1377,7 @@ func TestConsumeCommand_ARunOfTheFailureTransportOfValueKindDoesNotSendItBack(t 
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(ServiceBus, func(resolver containercontract.Resolver) (messagebuscontract.Bus, error) {
-        return NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})}), nil
+        return NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleMiddlewareConfig{})}), nil
     }, container.RegisterOptions{})
     serviceContainer.MustRegister(ServiceTransports, func(resolver containercontract.Resolver) (map[string]messagebuscontract.Transport, error) {
         return map[string]messagebuscontract.Transport{"failed": failure}, nil
