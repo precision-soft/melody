@@ -55,6 +55,7 @@ func resolveLeaseTtl(ttl bound.Duration, rule bound.Rule[time.Duration]) (time.D
     return resolved.Value, nil
 }
 
+/* Lock is the door a locker implements; userland runs under RunExclusive or NewLeaderGate of the lock package instead, which release on a runtime detached from the caller's cancellation. It has no runtime-bound view: a lock outlives the runtime that took it, and Release bound to a cancelled request could not run until the ttl. */
 type Lock interface {
     Acquire(runtimeInstance containercontract.Runtime) (bool, error)
 

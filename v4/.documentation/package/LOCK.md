@@ -52,21 +52,7 @@ ran, runErr := lock.RunExclusive(runtimeInstance, locker, "picking:order:42", lo
 })
 ```
 
-The raw doors stay for a caller that drives the backend itself, a readiness probe that checks `Refresh` among them. Such a caller releases on a runtime detached from its cancellation, as the helpers do: a backend that runs the release under the runtime's context, the redis locker among them, refuses a request that already ended, and the lock stays held until its ttl. The mysql and pgsql lockers detach the release themselves, and the in-memory one reads no context:
-
-```go
-pickingLock, createErr := locker.CreateLock("picking:order:42", bound.Of(30*time.Second))
-if nil != createErr {
-    return createErr
-}
-
-acquired, acquireErr := pickingLock.Acquire(runtimeInstance)
-if nil != acquireErr || false == acquired {
-    return acquireErr
-}
-
-defer pickingLock.Release(runtime.WithContext(runtimeInstance, context.WithoutCancel(runtimeInstance.Context())))
-```
+The lock has no runtime-bound view, unlike [cache](CACHE.md#the-bound-view), [storage](STORAGE.md#the-bound-view), the token store, the [http client](HTTPCLIENT.md#the-bound-view) and the bunorm registry: a lock acts between runtimes, it is taken under one and must be released even when that one has ended, and a view bound to a request would hand `Release` a context the request's cancellation ends, leaving the lock held until its ttl. The [`Lock`](../../lock/contract/lock.go) doors are for [implementing a locker](#implementing-a-locker).
 
 Redis-backed (`integrations/rueidis`):
 
@@ -205,6 +191,26 @@ exclusiveCommand := lock.NewExclusiveCommand(inner, locker, lock.ExclusiveComman
 
 A failed resolution never panics: `CreateLock` resolves nothing and always hands back a lock, whose method reports the resolution error it met, so `LeaderGate` and `RunExclusive` see it as the acquire error they already handle (and fail closed), and the resolution is retried at the next method call.
 
+## Implementing a locker
+
+A backend implements [`Locker`](../../lock/contract/lock.go) and its [`Lock`](../../lock/contract/lock.go): `CreateLock` reaches no store, `Acquire` is one non-blocking attempt, `Release` bounds its own round trip and may be handed a context that is never done, and `Refresh` answers the lost lease as an error; a lease locker reads the ttl through `ResolveLeaseTtl` and `ResolveLeaseRefreshTtl`.
+
+A test or a backend probe that drives the doors itself releases on a runtime detached from its cancellation, as the helpers do: a backend that runs the release under the runtime's context, the redis locker among them, refuses a request that already ended, and the lock stays held until its ttl. The mysql and pgsql lockers detach the release themselves, and the in-memory one reads no context:
+
+```go
+pickingLock, createErr := locker.CreateLock("picking:order:42", bound.Of(30*time.Second))
+if nil != createErr {
+    return createErr
+}
+
+acquired, acquireErr := pickingLock.Acquire(runtimeInstance)
+if nil != acquireErr || false == acquired {
+    return acquireErr
+}
+
+defer pickingLock.Release(runtime.WithContext(runtimeInstance, context.WithoutCancel(runtimeInstance.Context())))
+```
+
 ## Footguns & caveats
 
 - Locking is opt-in and userland-wired; the framework registers no default `Locker`.
@@ -222,7 +228,7 @@ A failed resolution never panics: `CreateLock` resolves nothing and always hands
 
 ### Contracts (`lock/contract`)
 
-- [`Lock`](../../lock/contract/lock.go)
+- [`Lock`](../../lock/contract/lock.go) — the door a locker implements; userland runs under `RunExclusive` or `LeaderGate`
 - [`Locker`](../../lock/contract/lock.go)
 - [`LockTtlRule()`](../../lock/contract/lock.go) — 30s, at least 1ms, unlimited admitted
 - [`ResolveLeaseTtl(ttl bound.Duration) (time.Duration, error)`](../../lock/contract/lock.go) — the reading of a lease locker at `Acquire`, unlimited refused

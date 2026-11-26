@@ -1,2 +1,2 @@
-/* Package lock provides named distributed-lock contracts with an in-memory locker; Redis and SQL backends are available via integrations. */
+/* Package lock provides named distributed-lock contracts with an in-memory locker; Redis and SQL backends are available via integrations. It has no runtime-bound view, unlike cache, storage, the token store, the http client and the bunorm registry: a lock acts between runtimes, and a view bound to a request would hand Release a context the request's cancellation ends, leaving the lock held until its ttl. Userland takes a lock through RunExclusive or NewLeaderGate, which release on a detached runtime; the Lock doors are for implementing a locker. */
 package lock

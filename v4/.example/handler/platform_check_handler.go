@@ -2,14 +2,12 @@ package handler
 
 import (
     "bytes"
-    "context"
     "io"
     nethttp "net/http"
     "time"
 
     melodybound "github.com/precision-soft/melody/v4/bound"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylock "github.com/precision-soft/melody/v4/lock"
@@ -17,54 +15,30 @@ import (
     melodystoragecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
-/* PlatformCheckHandler is a readiness probe: it takes the distributed lock, refreshes it, then writes, reads back and removes one object in storage, answering whether the two backends a request needs are reachable and behaving. */
+/* PlatformCheckHandler is a readiness probe: under the distributed lock it writes, reads back and removes one object in storage, answering whether the two backends a request needs are reachable and behaving. */
 func PlatformCheckHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        boundStorage := melodystorage.FromRuntime(runtimeInstance)
         locker := melodylock.LockerMustFromRuntime(runtimeInstance)
 
-        /* a probe of the lock backend calls its doors one by one, Refresh included, which RunExclusive would hide */
-        lockInstance, createErr := locker.CreateLock("example.platform.check", melodybound.Of(5*time.Second))
-        if nil != createErr {
-            return nil, createErr
-        }
+        var stored []byte
+        acquired, runErr := melodylock.RunExclusive(
+            runtimeInstance,
+            locker,
+            "example.platform.check",
+            melodylock.ExclusiveConfig{Ttl: melodybound.Of(5 * time.Second)},
+            func(exclusiveRuntime melodycontainercontract.Runtime) error {
+                var checkErr error
+                stored, checkErr = checkStorage(melodystorage.FromRuntime(exclusiveRuntime))
 
-        acquired, acquireErr := lockInstance.Acquire(runtimeInstance)
-        if nil != acquireErr {
-            return nil, acquireErr
+                return checkErr
+            },
+        )
+        if nil != runErr {
+            return nil, runErr
         }
 
         if false == acquired {
             return melodyhttp.JsonResponse(nethttp.StatusConflict, map[string]string{"status": "busy"})
-        }
-
-        /* released on a runtime the request's cancellation does not reach, so a client that hung up does not leave the lock held for its ttl */
-        defer lockInstance.Release(melodyruntime.WithContext(runtimeInstance, context.WithoutCancel(runtimeInstance.Context())))
-
-        if refreshErr := lockInstance.Refresh(runtimeInstance, melodybound.Of(5*time.Second)); nil != refreshErr {
-            return nil, refreshErr
-        }
-
-        key := "example/platform-check.txt"
-        payload := []byte("the storage backend accepted a write and returned it")
-
-        if putErr := boundStorage.Put(key, bytes.NewReader(payload), int64(len(payload)), melodystoragecontract.PutOptions{ContentType: "text/plain"}); nil != putErr {
-            return nil, putErr
-        }
-
-        object, getErr := boundStorage.Get(key, melodystoragecontract.GetOptions{})
-        if nil != getErr {
-            return nil, getErr
-        }
-
-        stored, readErr := io.ReadAll(object.Body)
-        object.Body.Close()
-        if nil != readErr {
-            return nil, readErr
-        }
-
-        if deleteErr := boundStorage.Delete(key); nil != deleteErr {
-            return nil, deleteErr
         }
 
         return melodyhttp.JsonResponse(nethttp.StatusOK, map[string]any{
@@ -72,4 +46,30 @@ func PlatformCheckHandler() melodyhttpcontract.Handler {
             "stored": string(stored),
         })
     }
+}
+
+func checkStorage(boundStorage melodystorage.Bound) ([]byte, error) {
+    key := "example/platform-check.txt"
+    payload := []byte("the storage backend accepted a write and returned it")
+
+    if putErr := boundStorage.Put(key, bytes.NewReader(payload), int64(len(payload)), melodystoragecontract.PutOptions{ContentType: "text/plain"}); nil != putErr {
+        return nil, putErr
+    }
+
+    object, getErr := boundStorage.Get(key, melodystoragecontract.GetOptions{})
+    if nil != getErr {
+        return nil, getErr
+    }
+
+    stored, readErr := io.ReadAll(object.Body)
+    object.Body.Close()
+    if nil != readErr {
+        return nil, readErr
+    }
+
+    if deleteErr := boundStorage.Delete(key); nil != deleteErr {
+        return nil, deleteErr
+    }
+
+    return stored, nil
 }
