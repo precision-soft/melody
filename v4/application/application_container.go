@@ -5,7 +5,6 @@ import (
     "errors"
     "io"
     "os"
-    "path/filepath"
     "reflect"
     "syscall"
 
@@ -194,6 +193,7 @@ func (instance *Application) bootContainer() {
 
                 return newContainerLogger(
                     resolveRuntimePath(resolvedConfiguration.Kernel().ProjectDirectory(), resolvedConfiguration.Kernel().LogPath()),
+                    kernelLogFileConfig(resolvedConfiguration.Kernel()),
                     resolvedConfiguration.Kernel().LogLevel(),
                     instance.moduleConfigurations,
                     clock.ClockMustFromResolver(resolutionContext, resolver),
@@ -332,9 +332,17 @@ func consoleLogWriter(mode string) io.Writer {
     return os.Stdout
 }
 
+func kernelLogFileConfig(kernelView configcontract.KernelConfiguration) logging.ReopenableFileWriterConfig {
+    return logging.ReopenableFileWriterConfig{
+        FileMode:      kernelView.LogFileMode(),
+        DirectoryMode: kernelView.LogDirectoryMode(),
+    }
+}
+
 /* the configuration is read before the file is opened, since it panics and an opened file would have no owner */
 func newContainerLogger(
     logPath string,
+    logFileConfig logging.ReopenableFileWriterConfig,
     logLevel loggingcontract.Level,
     moduleConfigurations map[string]any,
     clockInstance clockcontract.Clock,
@@ -346,21 +354,7 @@ func newContainerLogger(
     writer := consoleWriter
 
     if "" != logPath {
-        mkdirErr := os.MkdirAll(filepath.Dir(logPath), 0o755)
-        if nil != mkdirErr {
-            exception.Panic(
-                exception.NewError(
-                    "failed to create the log directory",
-                    exceptioncontract.Context{
-                        "path":      logPath,
-                        "directory": filepath.Dir(logPath),
-                    },
-                    mkdirErr,
-                ),
-            )
-        }
-
-        fileWriter, openFileErr := logging.NewReopenableFileWriter(logPath, logging.ReopenableFileWriterConfig{})
+        fileWriter, openFileErr := logging.NewReopenableFileWriter(logPath, logFileConfig)
         if nil != openFileErr {
             exception.Panic(
                 exception.NewError(

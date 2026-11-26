@@ -29,6 +29,8 @@ func TestRegisterDefaultParameters_DeclaresTheDefaultsAnApplicationInheritsByDec
         CliNameKey:                   "melody",
         CliDescriptionKey:            "",
         LogLevelKey:                  string(loggingcontract.LevelDebug),
+        LogFileModeKey:               "0640",
+        LogDirectoryModeKey:          "0750",
         DefaultLocaleKey:             "en",
         PublicDirectoryKey:           "public",
         StaticIndexFileKey:           "index.html",

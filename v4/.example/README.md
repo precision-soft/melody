@@ -92,7 +92,7 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 ├── validation/       # the example's own constraints (the currency code)
 ├── wiring/           # the bind set melody:wiring:generate scans with, and the generator that writes generated/ without the application
 ├── public/           # static assets (CSS / JS)
-├── var/              # runtime cache and logs
+├── var/              # runtime cache and logs (the journal created 0640 under 0750 directories, MELODY_LOG_FILE_MODE / MELODY_LOG_DIRECTORY_MODE)
 ├── embedded_*.go     # build-tag–controlled embedding for env and static assets
 ├── main.go           # application entry point
 ├── go.mod / go.sum   # standalone module manifest

@@ -556,6 +556,7 @@ func TestNewContainerLogger_LeavesNoDescriptorBehindWhenTheModuleConfigurationIs
         func() {
             _ = newContainerLogger(
                 logPath,
+                logging.ReopenableFileWriterConfig{},
                 loggingcontract.LevelDebug,
                 map[string]any{
                     loggingcontract.LoggingConfigurationName: "not a logging configuration",
@@ -577,7 +578,7 @@ func TestNewContainerLogger_LeavesNoDescriptorBehindWhenTheModuleConfigurationIs
 func TestNewContainerLogger_OpensTheLogFileWhenEverythingItNeedsIsSound(t *testing.T) {
     logPath := filepath.Join(t.TempDir(), "application.log")
 
-    logger := newContainerLogger(logPath, loggingcontract.LevelDebug, nil, clock.NewSystemClock(), false, os.Stdout)
+    logger := newContainerLogger(logPath, logging.ReopenableFileWriterConfig{}, loggingcontract.LevelDebug, nil, clock.NewSystemClock(), false, os.Stdout)
     if nil == logger {
         t.Fatalf("expected a logger")
     }
@@ -632,7 +633,7 @@ func TestBootContainer_AFailingLoggerProviderFailsTheBoot(t *testing.T) {
 func TestNewContainerLogger_CreatesTheLogDirectory(t *testing.T) {
     logPath := filepath.Join(t.TempDir(), "nested", "deep", "app.log")
 
-    logger := newContainerLogger(logPath, loggingcontract.LevelDebug, nil, clock.NewSystemClock(), false, os.Stdout)
+    logger := newContainerLogger(logPath, logging.ReopenableFileWriterConfig{}, loggingcontract.LevelDebug, nil, clock.NewSystemClock(), false, os.Stdout)
 
     logger.Emergency("directory created", nil)
 
@@ -1172,16 +1173,21 @@ func TestNewContainerLogger_RefusesADirectoryItCannotCreateNamingTheDirectory(t 
 
     defer func() {
         panicErr, isPanicErr := recover().(*exception.Error)
-        if false == isPanicErr || "failed to create the log directory" != panicErr.Message() {
-            t.Fatalf("expected the directory to be refused, got %v", panicErr)
+        if false == isPanicErr || "failed to open log file" != panicErr.Message() {
+            t.Fatalf("expected the log file to be refused, got %v", panicErr)
         }
 
-        if inTheWay != panicErr.Context()["directory"] || logPath != panicErr.Context()["path"] {
-            t.Fatalf("expected the refusal to name the directory beside the file, got %v", panicErr.Context())
+        var directoryErr *exception.Error
+        if false == errors.As(panicErr.Unwrap(), &directoryErr) || "failed to create the log directory" != directoryErr.Message() {
+            t.Fatalf("expected the writer's directory refusal as the cause, got %v", panicErr.Unwrap())
+        }
+
+        if inTheWay != directoryErr.Context()["directory"] || logPath != directoryErr.Context()["path"] {
+            t.Fatalf("expected the refusal to name the directory beside the file, got %v", directoryErr.Context())
         }
     }()
 
-    _ = newContainerLogger(logPath, loggingcontract.LevelDebug, nil, clock.NewSystemClock(), false, os.Stdout)
+    _ = newContainerLogger(logPath, logging.ReopenableFileWriterConfig{}, loggingcontract.LevelDebug, nil, clock.NewSystemClock(), false, os.Stdout)
 }
 
 func TestBootContainer_TheConsoleJournalOfACommandIsStandardError(t *testing.T) {
@@ -1580,5 +1586,79 @@ func TestApplicationBoot_VerifiesRequestTypesInCliMode(t *testing.T) {
     exitError, isExitError := runErr.(*exec.ExitError)
     if false == isExitError || 1 != exitError.ExitCode() || false == strings.Contains(string(output), "a route's request type declares a validate tag no value can pass") {
         t.Fatalf("expected the cli boot to exit 1 over the request type, got err %v with output: %s", runErr, string(output))
+    }
+}
+
+func TestNewContainerLogger_HandsTheWriterTheKernelModes(t *testing.T) {
+    previousUmask := syscall.Umask(0)
+    defer syscall.Umask(previousUmask)
+
+    logsDirectory := filepath.Join(t.TempDir(), "var", "log")
+    logPath := filepath.Join(logsDirectory, "application.log")
+
+    applicationInstance := newEnvironmentRefusalApplication(
+        t,
+        config.ModeCli,
+        map[string]string{
+            config.EnvironmentNameKey:  "dev",
+            config.LogPathKey:          logPath,
+            config.LogFileModeKey:      "0600",
+            config.LogDirectoryModeKey: "0700",
+        },
+    )
+    openBootRuntime(t, applicationInstance)
+    applicationInstance.bootContainer()
+
+    logger, resolveErr := logging.LoggerFromResolver(t.Context(), applicationInstance.kernel.ServiceContainer())
+    if nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+    defer func() { _ = applicationInstance.kernel.ServiceContainer().CloseWithContext(context.Background()) }()
+
+    logger.Emergency("moded", nil)
+
+    for path, expected := range map[string]os.FileMode{logPath: 0o600, logsDirectory: 0o700, filepath.Dir(logsDirectory): 0o700} {
+        information, statErr := os.Stat(path)
+        if nil != statErr {
+            t.Fatalf("unexpected stat error on %s: %v", path, statErr)
+        }
+
+        if expected != information.Mode().Perm() {
+            t.Fatalf("expected %s at mode %o, got %o", path, expected, information.Mode().Perm())
+        }
+    }
+}
+
+func TestExitFileLogger_HandsTheWriterTheKernelModes(t *testing.T) {
+    previousUmask := syscall.Umask(0)
+    defer syscall.Umask(previousUmask)
+
+    logPath := filepath.Join(t.TempDir(), "log", "application.log")
+
+    applicationInstance := newEnvironmentRefusalApplication(
+        t,
+        config.ModeCli,
+        map[string]string{
+            config.EnvironmentNameKey:  "dev",
+            config.LogPathKey:          logPath,
+            config.LogFileModeKey:      "0620",
+            config.LogDirectoryModeKey: "0710",
+        },
+    )
+
+    emergencyLogger := logging.NewNopLogger()
+    if emergencyLogger == applicationInstance.exitFileLogger(emergencyLogger) {
+        t.Fatalf("expected the exit logger built on the configured file")
+    }
+
+    for path, expected := range map[string]os.FileMode{logPath: 0o620, filepath.Dir(logPath): 0o710} {
+        information, statErr := os.Stat(path)
+        if nil != statErr {
+            t.Fatalf("unexpected stat error on %s: %v", path, statErr)
+        }
+
+        if expected != information.Mode().Perm() {
+            t.Fatalf("expected %s at mode %o, got %o", path, expected, information.Mode().Perm())
+        }
     }
 }

@@ -16,6 +16,7 @@ import (
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/internal"
 )
 
 func TestReopenableFileWriter_WritesToTheFileItOpened(t *testing.T) {
@@ -486,8 +487,11 @@ func TestReopenableFileWriter_CloseWithContextDisarmsThenSurrendersOnce(t *testi
     }
 }
 
-func TestNewReopenableFileWriter_ZeroConfigOpensWithTodaysMode(t *testing.T) {
-    logPath := filepath.Join(t.TempDir(), "application.log")
+func TestNewReopenableFileWriter_TheDefaultsAre0640And0750(t *testing.T) {
+    withZeroUmask(t)
+
+    logsDirectory := filepath.Join(t.TempDir(), "var", "log")
+    logPath := filepath.Join(logsDirectory, "application.log")
 
     writer, newErr := NewReopenableFileWriter(logPath, ReopenableFileWriterConfig{})
     if nil != newErr {
@@ -495,12 +499,159 @@ func TestNewReopenableFileWriter_ZeroConfigOpensWithTodaysMode(t *testing.T) {
     }
     defer func() { _ = writer.CloseWithContext(context.Background()) }()
 
-    information, statErr := os.Stat(logPath)
-    if nil != statErr {
-        t.Fatalf("unexpected stat error: %v", statErr)
+    assertPermission(t, logPath, DefaultLogFileMode)
+    assertPermission(t, logsDirectory, DefaultLogDirectoryMode)
+    assertPermission(t, filepath.Dir(logsDirectory), DefaultLogDirectoryMode)
+
+    if os.FileMode(0o640) != DefaultLogFileMode || os.FileMode(0o750) != DefaultLogDirectoryMode {
+        t.Fatalf("expected the defaults 0640 and 0750, got %o and %o", DefaultLogFileMode, DefaultLogDirectoryMode)
+    }
+}
+
+func TestNewReopenableFileWriter_CreatesTheFileAndItsDirectoriesAtTheConfiguredModes(t *testing.T) {
+    withZeroUmask(t)
+
+    logsDirectory := filepath.Join(t.TempDir(), "var", "log")
+    logPath := filepath.Join(logsDirectory, "application.log")
+
+    writer, newErr := NewReopenableFileWriter(logPath, ReopenableFileWriterConfig{FileMode: 0o660, DirectoryMode: 0o770})
+    if nil != newErr {
+        t.Fatalf("unexpected constructor error: %v", newErr)
+    }
+    defer func() { _ = writer.CloseWithContext(context.Background()) }()
+
+    assertPermission(t, logPath, 0o660)
+    assertPermission(t, logsDirectory, 0o770)
+    assertPermission(t, filepath.Dir(logsDirectory), 0o770)
+}
+
+func TestNewReopenableFileWriter_AModeUnderTheFloorIsRefusedNamingTheField(t *testing.T) {
+    for _, testCase := range []struct {
+        config  ReopenableFileWriterConfig
+        field   string
+        value   string
+        message string
+    }{
+        {config: ReopenableFileWriterConfig{FileMode: 0o400}, field: "ReopenableFileWriterConfig.FileMode", value: "0400", message: internal.JournalFileModeRefusal},
+        {config: ReopenableFileWriterConfig{FileMode: 0o240}, field: "ReopenableFileWriterConfig.FileMode", value: "0240", message: internal.JournalFileModeRefusal},
+        {config: ReopenableFileWriterConfig{FileMode: os.ModeSetuid | 0o640}, field: "ReopenableFileWriterConfig.FileMode", value: fmt.Sprintf("%#o", uint32(os.ModeSetuid|0o640)), message: internal.JournalFileModeRefusal},
+        {config: ReopenableFileWriterConfig{DirectoryMode: 0o600}, field: "ReopenableFileWriterConfig.DirectoryMode", value: "0600", message: internal.JournalDirectoryModeRefusal},
+        {config: ReopenableFileWriterConfig{DirectoryMode: 0o650}, field: "ReopenableFileWriterConfig.DirectoryMode", value: "0650", message: internal.JournalDirectoryModeRefusal},
+        {config: ReopenableFileWriterConfig{DirectoryMode: os.ModeDir | 0o750}, field: "ReopenableFileWriterConfig.DirectoryMode", value: fmt.Sprintf("%#o", uint32(os.ModeDir|0o750)), message: internal.JournalDirectoryModeRefusal},
+    } {
+        logPath := filepath.Join(t.TempDir(), "log", "application.log")
+
+        writer, newErr := NewReopenableFileWriter(logPath, testCase.config)
+        if nil != writer {
+            _ = writer.CloseWithContext(context.Background())
+            t.Fatalf("%s: expected no writer", testCase.field)
+        }
+
+        refusal, isRefusal := newErr.(*exception.Error)
+        if false == isRefusal || testCase.message != refusal.Message() {
+            t.Fatalf("%s: expected the refusal %q, got %v", testCase.field, testCase.message, newErr)
+        }
+
+        if testCase.field != refusal.Context()["field"] || testCase.value != refusal.Context()["value"] {
+            t.Fatalf("%s: expected the refusal to name the field and the value %s, got %v", testCase.field, testCase.value, refusal.Context())
+        }
+
+        if _, statErr := os.Stat(filepath.Dir(logPath)); false == os.IsNotExist(statErr) {
+            t.Fatalf("%s: expected nothing created before the refusal, stat answered %v", testCase.field, statErr)
+        }
+    }
+}
+
+func TestNewReopenableFileWriter_ADirectoryItCannotCreateIsRefusedNamingIt(t *testing.T) {
+    inTheWay := filepath.Join(t.TempDir(), "file")
+    if writeErr := os.WriteFile(inTheWay, []byte("x"), 0o600); nil != writeErr {
+        t.Fatalf("could not put a file in the way: %v", writeErr)
     }
 
-    if os.FileMode(0o644) != information.Mode().Perm() {
-        t.Fatalf("expected the file opened with mode 0644, got %o", information.Mode().Perm())
+    logPath := filepath.Join(inTheWay, "application.log")
+
+    _, newErr := NewReopenableFileWriter(logPath, ReopenableFileWriterConfig{})
+
+    refusal, isRefusal := newErr.(*exception.Error)
+    if false == isRefusal || "failed to create the log directory" != refusal.Message() {
+        t.Fatalf("expected the directory refused, got %v", newErr)
     }
+
+    if inTheWay != refusal.Context()["directory"] || logPath != refusal.Context()["path"] {
+        t.Fatalf("expected the refusal to name the path and the directory, got %v", refusal.Context())
+    }
+}
+
+func TestReopen_RecreatesARemovedDirectoryAtTheConfiguredMode(t *testing.T) {
+    withZeroUmask(t)
+
+    logsDirectory := filepath.Join(t.TempDir(), "var", "log")
+    logPath := filepath.Join(logsDirectory, "application.log")
+
+    writer, newErr := NewReopenableFileWriter(logPath, ReopenableFileWriterConfig{FileMode: 0o620, DirectoryMode: 0o710})
+    if nil != newErr {
+        t.Fatalf("unexpected constructor error: %v", newErr)
+    }
+    defer func() { _ = writer.CloseWithContext(context.Background()) }()
+
+    if removeErr := os.RemoveAll(filepath.Dir(logsDirectory)); nil != removeErr {
+        t.Fatalf("could not remove the directory: %v", removeErr)
+    }
+
+    if reopenErr := writer.Reopen(); nil != reopenErr {
+        t.Fatalf("expected the reopen to recreate the directory, got %v", reopenErr)
+    }
+
+    assertPermission(t, logPath, 0o620)
+    assertPermission(t, logsDirectory, 0o710)
+    assertPermission(t, filepath.Dir(logsDirectory), 0o710)
+}
+
+func TestReopen_DoesNotChmodAnExistingFile(t *testing.T) {
+    withZeroUmask(t)
+
+    logsDirectory := filepath.Join(t.TempDir(), "log")
+    if mkdirErr := os.Mkdir(logsDirectory, 0o755); nil != mkdirErr {
+        t.Fatalf("could not create the directory: %v", mkdirErr)
+    }
+
+    logPath := filepath.Join(logsDirectory, "application.log")
+    if writeErr := os.WriteFile(logPath, nil, 0o644); nil != writeErr {
+        t.Fatalf("could not create the file: %v", writeErr)
+    }
+
+    writer, newErr := NewReopenableFileWriter(logPath, ReopenableFileWriterConfig{})
+    if nil != newErr {
+        t.Fatalf("unexpected constructor error: %v", newErr)
+    }
+    defer func() { _ = writer.CloseWithContext(context.Background()) }()
+
+    if reopenErr := writer.Reopen(); nil != reopenErr {
+        t.Fatalf("unexpected reopen error: %v", reopenErr)
+    }
+
+    assertPermission(t, logPath, 0o644)
+    assertPermission(t, logsDirectory, 0o755)
+}
+
+func TestReopen_RecreatesARotatedFileAtTheConfiguredMode(t *testing.T) {
+    withZeroUmask(t)
+
+    logPath := filepath.Join(t.TempDir(), "application.log")
+
+    writer, newErr := NewReopenableFileWriter(logPath, ReopenableFileWriterConfig{FileMode: 0o600})
+    if nil != newErr {
+        t.Fatalf("unexpected constructor error: %v", newErr)
+    }
+    defer func() { _ = writer.CloseWithContext(context.Background()) }()
+
+    if renameErr := os.Rename(logPath, logPath+".1"); nil != renameErr {
+        t.Fatalf("could not rotate: %v", renameErr)
+    }
+
+    if reopenErr := writer.Reopen(); nil != reopenErr {
+        t.Fatalf("unexpected reopen error: %v", reopenErr)
+    }
+
+    assertPermission(t, logPath, 0o600)
 }

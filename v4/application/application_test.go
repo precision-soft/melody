@@ -9,6 +9,7 @@ import (
     "path/filepath"
     "strings"
     "sync/atomic"
+    "syscall"
     "testing"
     "testing/fstest"
     "time"
@@ -1629,4 +1630,23 @@ func TestRun_ASecondRunIsRefusedBeforeAnythingIsTouched(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         applicationInstance.Run()
     }, "application run called twice")
+}
+
+func TestApplicationEnsureRuntimeDirectories_TheLogsDirectoryTakesTheKernelMode(t *testing.T) {
+    previousUmask := syscall.Umask(0)
+    defer syscall.Umask(previousUmask)
+
+    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvironmentNameKey: "dev", config.LogDirectoryModeKey: "0710"})
+    applicationInstance.ensureRuntimeDirectories()
+
+    logsDirectory := resolveRuntimePath(applicationInstance.configuration.Kernel().ProjectDirectory(), applicationInstance.configuration.Kernel().LogsDirectory())
+
+    information, statErr := os.Stat(logsDirectory)
+    if nil != statErr {
+        t.Fatalf("unexpected stat error: %v", statErr)
+    }
+
+    if os.FileMode(0o710) != information.Mode().Perm() {
+        t.Fatalf("expected the logs directory at 0710, got %o", information.Mode().Perm())
+    }
 }

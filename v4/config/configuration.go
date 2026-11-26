@@ -663,6 +663,19 @@ func (instance *Configuration) buildKernelConfiguration() error {
 
     kernelConfigurationInstance.namespace = namespace
 
+    logFileMode, logFileModeErr := checkedParameterJournalMode(instance.MustGet(KernelLogFileMode), LogFileModeKey, internal.JournalFileModeFloor, internal.JournalFileModeRefusal)
+    if nil != logFileModeErr {
+        return logFileModeErr
+    }
+
+    logDirectoryMode, logDirectoryModeErr := checkedParameterJournalMode(instance.MustGet(KernelLogDirectoryMode), LogDirectoryModeKey, internal.JournalDirectoryModeFloor, internal.JournalDirectoryModeRefusal)
+    if nil != logDirectoryModeErr {
+        return logDirectoryModeErr
+    }
+
+    kernelConfigurationInstance.logFileMode = logFileMode
+    kernelConfigurationInstance.logDirectoryMode = logDirectoryMode
+
     instance.kernel = kernelConfigurationInstance
 
     instance.logger.Info("configuration kernel initialized", nil)

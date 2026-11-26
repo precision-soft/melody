@@ -317,6 +317,14 @@ func (instance *stubKernelConfiguration) LogLevel() loggingcontract.Level {
     return loggingcontract.LevelInfo
 }
 
+func (instance *stubKernelConfiguration) LogFileMode() os.FileMode {
+    return 0o640
+}
+
+func (instance *stubKernelConfiguration) LogDirectoryMode() os.FileMode {
+    return 0o750
+}
+
 func (instance *stubKernelConfiguration) TeardownTimeout() bound.Duration {
     return bound.Duration{}
 }

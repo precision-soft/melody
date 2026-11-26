@@ -3,11 +3,13 @@ package config
 import (
     "context"
     "errors"
+    "os"
     "strings"
     "testing"
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/internal"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
@@ -233,5 +235,68 @@ func TestParseKernelLogLevel_MapsEveryKnownNameAndRefusesTheRest(t *testing.T) {
     }
     if loggingcontract.LevelUnknown != unknownLevel {
         t.Fatalf("expected the unknown level, got %q", unknownLevel)
+    }
+}
+
+func TestKernelConfiguration_TheModeKeysDefaultTo0640And0750(t *testing.T) {
+    kernel := mustConfigurationFromValues(t, map[string]string{}).Kernel()
+
+    if os.FileMode(0o640) != kernel.LogFileMode() || os.FileMode(0o750) != kernel.LogDirectoryMode() {
+        t.Fatalf("expected 0640 and 0750, got %o and %o", kernel.LogFileMode(), kernel.LogDirectoryMode())
+    }
+}
+
+func TestKernelConfiguration_TheModeKeysAreReadAsOctal(t *testing.T) {
+    for _, testCase := range []struct {
+        fileText      string
+        directoryText string
+        fileMode      os.FileMode
+        directoryMode os.FileMode
+    }{
+        {fileText: "0644", directoryText: "0755", fileMode: 0o644, directoryMode: 0o755},
+        {fileText: "600", directoryText: "700", fileMode: 0o600, directoryMode: 0o700},
+        {fileText: " 0o660 ", directoryText: "0o770", fileMode: 0o660, directoryMode: 0o770},
+    } {
+        kernel := mustConfigurationFromValues(t, map[string]string{LogFileModeKey: testCase.fileText, LogDirectoryModeKey: testCase.directoryText}).Kernel()
+
+        if testCase.fileMode != kernel.LogFileMode() || testCase.directoryMode != kernel.LogDirectoryMode() {
+            t.Fatalf("%q, %q: expected %o and %o, got %o and %o", testCase.fileText, testCase.directoryText, testCase.fileMode, testCase.directoryMode, kernel.LogFileMode(), kernel.LogDirectoryMode())
+        }
+    }
+}
+
+func TestKernelConfiguration_TheModeKeysRule(t *testing.T) {
+    for _, testCase := range []struct {
+        key     string
+        value   string
+        message string
+    }{
+        {key: LogFileModeKey, value: "rw-r-----", message: internal.JournalFileModeRefusal},
+        {key: LogFileModeKey, value: "0648", message: internal.JournalFileModeRefusal},
+        {key: LogFileModeKey, value: "01640", message: internal.JournalFileModeRefusal},
+        {key: LogFileModeKey, value: "0400", message: internal.JournalFileModeRefusal},
+        {key: LogFileModeKey, value: "0200", message: internal.JournalFileModeRefusal},
+        {key: LogFileModeKey, value: "", message: internal.JournalFileModeRefusal},
+        {key: LogFileModeKey, value: "  ", message: internal.JournalFileModeRefusal},
+        {key: LogDirectoryModeKey, value: "0x1ed", message: internal.JournalDirectoryModeRefusal},
+        {key: LogDirectoryModeKey, value: "02750", message: internal.JournalDirectoryModeRefusal},
+        {key: LogDirectoryModeKey, value: "0600", message: internal.JournalDirectoryModeRefusal},
+        {key: LogDirectoryModeKey, value: "0650", message: internal.JournalDirectoryModeRefusal},
+        {key: LogDirectoryModeKey, value: "", message: internal.JournalDirectoryModeRefusal},
+    } {
+        _, err := newConfigurationFromValues(map[string]string{testCase.key: testCase.value})
+        assertLimitRefusal(t, err, testCase.key, "")
+
+        found := false
+        for current := err; nil != current; current = errors.Unwrap(current) {
+            refusal, isRefusal := current.(*exception.Error)
+            if true == isRefusal && testCase.message == refusal.Message() && testCase.value == refusal.Context()["value"] {
+                found = true
+            }
+        }
+
+        if false == found {
+            t.Fatalf("%s=%q: expected the refusal %q carrying the value, got %v", testCase.key, testCase.value, testCase.message, err)
+        }
     }
 }

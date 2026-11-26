@@ -21,26 +21,34 @@ func resolveRuntimePath(projectDirectory string, path string) string {
     return filepath.Join(projectDirectory, path)
 }
 
+const cacheDirectoryMode os.FileMode = 0o755
+
 func ensureRuntimeDirectories(
     projectDirectory string,
     logsDirectory string,
     cacheDirectory string,
+    logDirectoryMode os.FileMode,
 ) error {
     logsPath := resolveRuntimePath(projectDirectory, logsDirectory)
 
     cachePath := resolveRuntimePath(projectDirectory, cacheDirectory)
 
-    runtimeDirectories := []string{
-        logsPath,
-        cachePath,
+    /* the cache directory has no key of its own yet, and the journal's must not govern it */
+    runtimeDirectories := []struct {
+        path string
+        mode os.FileMode
+    }{
+        {path: logsPath, mode: logDirectoryMode},
+        {path: cachePath, mode: cacheDirectoryMode},
     }
 
-    for _, directory := range runtimeDirectories {
+    for _, runtimeDirectory := range runtimeDirectories {
+        directory := runtimeDirectory.path
         if "" == directory {
             continue
         }
 
-        mkdirAllErr := os.MkdirAll(directory, 0o755)
+        mkdirAllErr := os.MkdirAll(directory, runtimeDirectory.mode)
         if nil != mkdirAllErr {
             return exception.NewError(
                 "failed to create runtime directory",

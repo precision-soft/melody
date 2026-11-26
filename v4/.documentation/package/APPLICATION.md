@@ -77,6 +77,9 @@ A middleware that answers a request itself, without calling `next`, short-circui
 
 In a filesystem build, `New` refuses an explicitly set `MELODY_PUBLIC_DIRECTORY` that is not an existing directory, in every process role, resolved against the project directory as the static file server resolves it, a blank value reading as `public`; the default `public` may be absent, for an application that serves no asset. An embedded build is checked by [`static.NewFileServer`](../../http/static/file_server.go) against the embedded filesystem instead.
 
+
+The boot creates the logs directory at `MELODY_LOG_DIRECTORY_MODE`, `0750` by default, and the cache directory at `0755`; the container's journal file is created at `MELODY_LOG_FILE_MODE`, `0640` by default, every missing directory of `MELODY_LOG_PATH` at the directory mode, by the writer itself on the first open and on every reopen after a rotation. An existing file or directory keeps its mode (see [Journal modes](CONFIG.md#journal-modes)).
+
 The chain is not the outermost thing there is, though: a request that a `kernel.request` listener answers or refuses never reaches it at all; a refusal is rendered through `kernel.exception`. Wrapping *those* too is what [Handler decorators](#handler-decorators) are for.
 
 ## Handler decorators

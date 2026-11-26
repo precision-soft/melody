@@ -477,6 +477,7 @@ func (instance *Application) ensureRuntimeDirectories() {
         projectDirectory,
         logsDirectory,
         cacheDirectory,
+        configuration.Kernel().LogDirectoryMode(),
     )
     if nil != ensureRuntimeDirectoriesErr {
         exception.Panic(
@@ -562,6 +563,7 @@ func (instance *Application) exitFileLogger(emergencyLogger loggingcontract.Logg
 
     return newContainerLogger(
         resolveRuntimePath(kernelView.ProjectDirectory(), kernelView.LogPath()),
+        kernelLogFileConfig(kernelView),
         kernelView.LogLevel(),
         instance.moduleConfigurations,
         clock.NewSystemClock(),

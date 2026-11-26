@@ -87,6 +87,8 @@ Keys and parameters are two tables. A key is not a parameter: `Get("MELODY_HTTP_
 | `MELODY_CLI_BOOT_WARNINGS_DISABLED`       | `kernel.cli_boot_warnings_disabled`       | `""` (`false`)                                     |
 | `MELODY_LOG_PATH`                         | `kernel.log_path`                         | `%kernel.logs_directory%/%kernel.environment%.log` |
 | `MELODY_LOG_LEVEL`                        | `kernel.log_level`                        | `"debug"`                                          |
+| `MELODY_LOG_FILE_MODE`                    | `kernel.log_file_mode`                    | `"0640"` (see [Journal modes](#journal-modes))     |
+| `MELODY_LOG_DIRECTORY_MODE`               | `kernel.log_directory_mode`               | `"0750"` (see [Journal modes](#journal-modes))     |
 | `MELODY_DEFAULT_LOCALE`                   | `kernel.default_locale`                   | `"en"`                                             |
 | `MELODY_PUBLIC_DIRECTORY`                 | `kernel.public_directory`                 | `"public"` (set explicitly, it must exist)         |
 | `MELODY_STATIC_INDEX_FILE`                | `kernel.static.index_file`                | `"index.html"`                                     |
@@ -316,6 +318,17 @@ The one namespace of the application, the stem of every name a store family deri
 
 The two store families are handed the namespace once, positionally, on `rueidis.NewProvider`, `rueidis.NewConnection` and `amqp.NewProvider`; the two framework lock names read it from the runtime's configuration at each run. A name set on a component is used verbatim. Not namespaced: a transport's queue, exchange and routing key, the migration tables, the outbox table, service, parameter and command names and the websocket route name.
 
+### Journal modes
+
+The permissions the container's journal file and every directory created for it are created with: the logs directory the boot creates and each missing directory of `MELODY_LOG_PATH`, the cache directory keeping `0755`. Read through [`KernelConfiguration.LogFileMode()`](../../config/contract/kernel.go) and [`LogDirectoryMode()`](../../config/contract/kernel.go) and handed to [`logging.ReopenableFileWriterConfig`](../../logging/reopenable_file_writer.go); the key is the one source, no `ApplicationConfig` field carries them.
+
+| Environment key             | Parameter name              | Default  |
+|-----------------------------|-----------------------------|----------|
+| `MELODY_LOG_FILE_MODE`      | `kernel.log_file_mode`      | `"0640"` |
+| `MELODY_LOG_DIRECTORY_MODE` | `kernel.log_directory_mode` | `"0750"` |
+
+A value is octal, `0640`, `640` or `0o640`. A mode is a creation mode only: the process umask still narrows it, and a file or directory that already exists keeps its own, so logrotate's `create <mode>` decides what a rotated journal gets. The boot refuses an empty value (the key has a default, so an empty line is a typo), a value that is not octal, one holding a bit outside `0777`, a file mode without the owner's read and write and a directory mode without the owner's read, write and search, with `the journal file mode must be an octal permission that lets the owner read and write` or `the journal directory mode must be an octal permission that lets the owner read, write and search`, naming `environmentKey` and `value`. A log shipper outside the process's user and group reads nothing under the defaults: put it in the group, or widen the modes, `0644` and `0755` being the third major's.
+
 ### Session storage outage
 
 Whether a request that reads the session while the session storage cannot answer is served an empty session marked unavailable, saved nowhere and with no cookie written, where the default answers its reader the marked error, `503` with `Retry-After` when a handler returns it (see [SESSION.md](SESSION.md)). Read through [`HttpConfiguration.SessionEmptyOnOutage()`](../../config/contract/http.go) as a [`Switch`](../../config/contract/kernel.go) and decided by the application against its own [`ApplicationConfig.HttpKernel.SessionPolicy.EmptyOnOutage`](../../application/application_new.go): the key wins over the field.
@@ -512,11 +525,11 @@ func example() configcontract.Configuration {
 
 ### Environment variable keys (`config`)
 
-- [`EnvironmentNameKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpSessionMaxSessionsKey`, `HttpShutdownTimeoutKey`, `HttpUnavailableRetryAfterKey`, `HttpSessionEmptyOnOutageKey`, `HttpSessionCookieSecureKey`, `TeardownTimeoutKey`, `ScopeTeardownTimeoutKey`, `ContainerCreationWaitersKey`, `ContainerTeardownSequentialKey`, `NamespaceKey`, `CliNameKey`, `CliDescriptionKey`, `CliBootWarningsIgnoredKey`, `CliBootWarningsDisabledKey`, `LogPathKey`, `LogLevelKey`, `DefaultLocaleKey`, `PublicDirectoryKey`, `StaticIndexFileKey`, `StaticCacheDisabledKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
+- [`EnvironmentNameKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpSessionMaxSessionsKey`, `HttpShutdownTimeoutKey`, `HttpUnavailableRetryAfterKey`, `HttpSessionEmptyOnOutageKey`, `HttpSessionCookieSecureKey`, `TeardownTimeoutKey`, `ScopeTeardownTimeoutKey`, `ContainerCreationWaitersKey`, `ContainerTeardownSequentialKey`, `NamespaceKey`, `CliNameKey`, `CliDescriptionKey`, `CliBootWarningsIgnoredKey`, `CliBootWarningsDisabledKey`, `LogPathKey`, `LogLevelKey`, `LogFileModeKey`, `LogDirectoryModeKey`, `DefaultLocaleKey`, `PublicDirectoryKey`, `StaticIndexFileKey`, `StaticCacheDisabledKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
 
 ### Kernel parameter names (`config`)
 
-- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnvironment`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpSessionMaxSessions`, `KernelHttpShutdownTimeout`, `KernelHttpUnavailableRetryAfter`, `KernelHttpSessionEmptyOnOutage`, `KernelHttpSessionCookieSecure`, `KernelTeardownTimeout`, `KernelScopeTeardownTimeout`, `KernelContainerCreationWaiters`, `KernelContainerTeardownSequential`, `KernelNamespace`, `KernelCliName`, `KernelCliDescription`, `KernelCliBootWarningsIgnored`, `KernelCliBootWarningsDisabled`, `KernelLogPath`, `KernelLogLevel`, `KernelDefaultLocale`, `KernelPublicDirectory`, `KernelStaticIndexFile`, `KernelStaticCacheDisabled`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDirectory`, `KernelLogsDirectory`, `KernelCacheDirectory`](../../config/environment.go)
+- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnvironment`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpSessionMaxSessions`, `KernelHttpShutdownTimeout`, `KernelHttpUnavailableRetryAfter`, `KernelHttpSessionEmptyOnOutage`, `KernelHttpSessionCookieSecure`, `KernelTeardownTimeout`, `KernelScopeTeardownTimeout`, `KernelContainerCreationWaiters`, `KernelContainerTeardownSequential`, `KernelNamespace`, `KernelCliName`, `KernelCliDescription`, `KernelCliBootWarningsIgnored`, `KernelCliBootWarningsDisabled`, `KernelLogPath`, `KernelLogLevel`, `KernelLogFileMode`, `KernelLogDirectoryMode`, `KernelDefaultLocale`, `KernelPublicDirectory`, `KernelStaticIndexFile`, `KernelStaticCacheDisabled`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDirectory`, `KernelLogsDirectory`, `KernelCacheDirectory`](../../config/environment.go)
 
 ### Environment / mode / role constants (`config`)
 

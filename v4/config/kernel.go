@@ -1,6 +1,7 @@
 package config
 
 import (
+    "os"
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
@@ -67,6 +68,8 @@ type kernelConfiguration struct {
     containerCreationWaiters    bound.Count
     containerTeardownSequential configcontract.Switch
     namespace                   string
+    logFileMode                 os.FileMode
+    logDirectoryMode            os.FileMode
 }
 
 func (instance *kernelConfiguration) DefaultMode() string {
@@ -95,6 +98,16 @@ func (instance *kernelConfiguration) LogPath() string {
 
 func (instance *kernelConfiguration) LogLevel() loggingcontract.Level {
     return instance.logLevel
+}
+
+/* LogFileMode is MELODY_LOG_FILE_MODE, logging.DefaultLogFileMode when the key is unset. */
+func (instance *kernelConfiguration) LogFileMode() os.FileMode {
+    return instance.logFileMode
+}
+
+/* LogDirectoryMode is MELODY_LOG_DIRECTORY_MODE, logging.DefaultLogDirectoryMode when the key is unset. */
+func (instance *kernelConfiguration) LogDirectoryMode() os.FileMode {
+    return instance.logDirectoryMode
 }
 
 func (instance *kernelConfiguration) CacheDirectory() string {

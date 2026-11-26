@@ -1,10 +1,12 @@
 package config
 
 import (
+    "fmt"
     "path/filepath"
     "strconv"
 
     configcontract "github.com/precision-soft/melody/v4/config/contract"
+    "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
@@ -21,6 +23,8 @@ func frameworkEnvironmentKeys() []configcontract.EnvironmentKey {
         frameworkEnvironmentKey(CliBootWarningsDisabledKey, KernelCliBootWarningsDisabled, ""),
         frameworkEnvironmentKey(LogPathKey, KernelLogPath, filepath.Join("%"+KernelLogsDirectory+"%", "%"+KernelEnvironment+"%.log")),
         frameworkEnvironmentKey(LogLevelKey, KernelLogLevel, string(loggingcontract.LevelDebug)),
+        frameworkEnvironmentKey(LogFileModeKey, KernelLogFileMode, fmt.Sprintf("%#o", uint32(logging.DefaultLogFileMode))),
+        frameworkEnvironmentKey(LogDirectoryModeKey, KernelLogDirectoryMode, fmt.Sprintf("%#o", uint32(logging.DefaultLogDirectoryMode))),
         frameworkEnvironmentKey(DefaultLocaleKey, KernelDefaultLocale, "en"),
         frameworkEnvironmentKey(PublicDirectoryKey, KernelPublicDirectory, "public"),
         frameworkEnvironmentKey(StaticIndexFileKey, KernelStaticIndexFile, "index.html"),

@@ -1,6 +1,10 @@
 package logging
 
 import (
+    "os"
+    "syscall"
+    "testing"
+
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -71,4 +75,25 @@ func recoveredPanicContext(callback func()) (context exceptioncontract.Context) 
     callback()
 
     return nil
+}
+
+/* the umask is process-wide: no logging test runs in parallel, so setting it here narrows no other test's files */
+func withZeroUmask(t *testing.T) {
+    t.Helper()
+
+    previousUmask := syscall.Umask(0)
+    t.Cleanup(func() { syscall.Umask(previousUmask) })
+}
+
+func assertPermission(t *testing.T, path string, expected os.FileMode) {
+    t.Helper()
+
+    information, statErr := os.Stat(path)
+    if nil != statErr {
+        t.Fatalf("unexpected stat error on %s: %v", path, statErr)
+    }
+
+    if expected != information.Mode().Perm() {
+        t.Fatalf("expected %s at mode %o, got %o", path, expected, information.Mode().Perm())
+    }
 }

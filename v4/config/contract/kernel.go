@@ -1,6 +1,8 @@
 package contract
 
 import (
+    "os"
+
     "github.com/precision-soft/melody/v4/bound"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
@@ -21,6 +23,12 @@ type KernelConfiguration interface {
     LogPath() string
 
     LogLevel() loggingcontract.Level
+
+    /* LogFileMode is MELODY_LOG_FILE_MODE, the permission the journal file is created with: 0640 by default. */
+    LogFileMode() os.FileMode
+
+    /* LogDirectoryMode is MELODY_LOG_DIRECTORY_MODE, the permission the logs directory and every missing directory of MELODY_LOG_PATH are created with: 0750 by default. */
+    LogDirectoryMode() os.FileMode
 
     /* TeardownTimeout is MELODY_TEARDOWN_TIMEOUT as the deployment set it, absent when the key says nothing: the application decides it against its own config, the key winning. */
     TeardownTimeout() bound.Duration

@@ -2,6 +2,8 @@ package config
 
 import (
     "fmt"
+    "os"
+    "strconv"
     "strings"
     "time"
 
@@ -153,6 +155,30 @@ func checkedSessionCookieSecure(parameter configcontract.Parameter) (string, err
     }
 
     return "", exception.NewError("invalid environment value", refusalContext, nil)
+}
+
+/* an empty value is refused, not read as the default: the key has a default, so an empty line is a typo, and a second spelling of the default would be a second source */
+func checkedParameterJournalMode(parameter configcontract.Parameter, environmentKey string, floor os.FileMode, refusal string) (os.FileMode, error) {
+    value := parameter.Value()
+
+    text, isString := value.(string)
+    if true == isString {
+        text = strings.TrimPrefix(strings.TrimSpace(text), "0o")
+
+        if "" != text {
+            mode, parseErr := strconv.ParseUint(text, 8, 32)
+            if nil == parseErr && true == internal.IsJournalMode(os.FileMode(mode), floor) {
+                return os.FileMode(mode), nil
+            }
+        }
+    }
+
+    refusalContext := limitRefusalContext(parameter, environmentKey)
+    if false == parameter.IsSecret() {
+        refusalContext["value"] = value
+    }
+
+    return 0, exception.NewError(refusal, refusalContext, nil)
 }
 
 /* an overridden parameter does not read its key, so the refusal names the parameter the override wrote */

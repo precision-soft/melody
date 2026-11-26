@@ -6,6 +6,7 @@ import (
     "fmt"
     "os"
     "os/signal"
+    "path/filepath"
     "sync"
 
     "github.com/precision-soft/melody/v4/exception"
@@ -16,28 +17,72 @@ import (
 /* ErrRotatedDescriptorNotClosed marks the failure Reopen reports after the rotation happened: the fresh descriptor takes the writes, and only the replaced one refused to close. A caller reading it must not report a failed rotation. */
 var ErrRotatedDescriptorNotClosed = errors.New("the descriptor replaced by the rotation could not be closed")
 
-/* ReopenableFileWriterConfig is what a reopenable file writer is built from beside its path; it holds no field yet, and its zero value opens the file with mode 0o644. */
+const (
+    /* DefaultLogFileMode is the permission a journal file is created with when ReopenableFileWriterConfig.FileMode is left out. */
+    DefaultLogFileMode os.FileMode = 0o640
+    /* DefaultLogDirectoryMode is the permission a missing journal directory is created with when ReopenableFileWriterConfig.DirectoryMode is left out. */
+    DefaultLogDirectoryMode os.FileMode = 0o750
+)
+
+/* ReopenableFileWriterConfig is what a reopenable file writer is built from beside its path. Both modes are creation modes: the process umask still narrows them, and a file or directory that already exists keeps its own. */
 type ReopenableFileWriterConfig struct {
+    /* FileMode is the permission the file is created with, on the first open and on every reopen that finds no file: DefaultLogFileMode when left out; permission bits only, the owner's read and write required. */
+    FileMode os.FileMode
+    /* DirectoryMode is the permission every missing directory of the path is created with, on the first open and on every reopen: DefaultLogDirectoryMode when left out; permission bits only, the owner's read, write and search required. */
+    DirectoryMode os.FileMode
 }
 
-/* NewReopenableFileWriter opens the file for appending and answers a writer that can reopen it under the same path, which rename-based rotation needs. Every write, the reopen and the close serialize on one lock, so a record is never torn across the swap nor written to a closed descriptor. */
+/* NewReopenableFileWriter creates the missing directories of the path, opens the file for appending and answers a writer that can reopen it under the same path, which rename-based rotation needs. Every write, the reopen and the close serialize on one lock, so a record is never torn across the swap nor written to a closed descriptor. */
 func NewReopenableFileWriter(path string, config ReopenableFileWriterConfig) (*ReopenableFileWriter, error) {
-    file, openErr := openReopenableFile(path)
+    fileMode, fileModeErr := resolveJournalMode(config.FileMode, DefaultLogFileMode, internal.JournalFileModeFloor, internal.JournalFileModeRefusal, "ReopenableFileWriterConfig.FileMode")
+    if nil != fileModeErr {
+        return nil, fileModeErr
+    }
+
+    directoryMode, directoryModeErr := resolveJournalMode(config.DirectoryMode, DefaultLogDirectoryMode, internal.JournalDirectoryModeFloor, internal.JournalDirectoryModeRefusal, "ReopenableFileWriterConfig.DirectoryMode")
+    if nil != directoryModeErr {
+        return nil, directoryModeErr
+    }
+
+    file, openErr := openReopenableFile(path, fileMode, directoryMode)
     if nil != openErr {
         return nil, openErr
     }
 
     return &ReopenableFileWriter{
-        path: path,
-        file: file,
+        path:          path,
+        fileMode:      fileMode,
+        directoryMode: directoryMode,
+        file:          file,
     }, nil
 }
 
+func resolveJournalMode(mode os.FileMode, defaultMode os.FileMode, floor os.FileMode, refusal string, field string) (os.FileMode, error) {
+    if 0 == mode {
+        return defaultMode, nil
+    }
+
+    if false == internal.IsJournalMode(mode, floor) {
+        return 0, exception.NewError(
+            refusal,
+            exceptioncontract.Context{
+                "field": field,
+                "value": fmt.Sprintf("%#o", uint32(mode)),
+            },
+            nil,
+        )
+    }
+
+    return mode, nil
+}
+
 type ReopenableFileWriter struct {
-    mutex  sync.Mutex
-    path   string
-    file   *os.File
-    closed bool
+    mutex         sync.Mutex
+    path          string
+    fileMode      os.FileMode
+    directoryMode os.FileMode
+    file          *os.File
+    closed        bool
 
     watcherArmed  bool
     signalChannel chan os.Signal
@@ -63,7 +108,7 @@ func (instance *ReopenableFileWriter) Write(payload []byte) (int, error) {
     return instance.file.Write(payload)
 }
 
-/* Reopen opens the path fresh, swaps the descriptor and closes the one it replaces. A path that cannot be opened keeps the current descriptor and reports the failure, meaning no rotation; a replaced descriptor that refuses to close after the swap reports ErrRotatedDescriptorNotClosed, meaning the rotation happened. */
+/* Reopen opens the path fresh, recreating a missing directory and file at the configured modes, swaps the descriptor and closes the one it replaces. A path that cannot be opened keeps the current descriptor and reports the failure, meaning no rotation; a replaced descriptor that refuses to close after the swap reports ErrRotatedDescriptorNotClosed, meaning the rotation happened. */
 func (instance *ReopenableFileWriter) Reopen() error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -78,7 +123,7 @@ func (instance *ReopenableFileWriter) Reopen() error {
         )
     }
 
-    freshFile, openErr := openReopenableFile(instance.path)
+    freshFile, openErr := openReopenableFile(instance.path, instance.fileMode, instance.directoryMode)
     if nil != openErr {
         return openErr
     }
@@ -237,11 +282,25 @@ func (instance *ReopenableFileWriter) disarmReopenWatcher() {
     <-instance.doneChannel
 }
 
-func openReopenableFile(path string) (*os.File, error) {
+func openReopenableFile(path string, fileMode os.FileMode, directoryMode os.FileMode) (*os.File, error) {
+    directory := filepath.Dir(path)
+
+    mkdirErr := os.MkdirAll(directory, directoryMode)
+    if nil != mkdirErr {
+        return nil, exception.NewError(
+            "failed to create the log directory",
+            map[string]any{
+                "path":      path,
+                "directory": directory,
+            },
+            mkdirErr,
+        )
+    }
+
     file, openErr := os.OpenFile(
         path,
         os.O_CREATE|os.O_APPEND|os.O_WRONLY,
-        0o644,
+        fileMode,
     )
     if nil != openErr {
         return nil, exception.NewError(
