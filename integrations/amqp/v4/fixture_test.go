@@ -1,6 +1,7 @@
 package amqp
 
 import (
+    "context"
     "encoding/binary"
     "errors"
     "fmt"
@@ -19,8 +20,47 @@ import (
 )
 
 /* refusingDialer is a dialer no broker answers: every dial fails at once, so a component built over it publishes into a refusal instead of a connection */
-func refusingDialer() (*amqp091.Connection, error) {
+func refusingDialer(dialContext context.Context) (*Connection, error) {
     return nil, errors.New("refused by the test dialer")
+}
+
+func refusingSource() ConnectionSource {
+    return FromDialer(refusingDialer)
+}
+
+/* ownerOf wraps a test's raw connection in the owner a dialer answers; nil stays nil */
+func ownerOf(raw *amqp091.Connection) *Connection {
+    if nil == raw {
+        return nil
+    }
+
+    return NewConnection(raw, ConnectionConfig{})
+}
+
+func ownedDial(dsn string) (*Connection, error) {
+    raw, dialErr := amqp091.Dial(dsn)
+    if nil != dialErr {
+        return nil, dialErr
+    }
+
+    return ownerOf(raw), nil
+}
+
+func borrowedSource(raw *amqp091.Connection) ConnectionSource {
+    return FromConnection(ownerOf(raw))
+}
+
+/* connectionThenDialerSource answers the connection on the first dial and the dialer after it */
+func connectionThenDialerSource(raw *amqp091.Connection, dialer Dialer) ConnectionSource {
+    var handedOut atomic.Bool
+
+    return FromDialer(func(dialContext context.Context) (*Connection, error) {
+        if false == handedOut.Swap(true) && nil != raw {
+            return ownerOf(raw), nil
+        }
+
+        return dialer(dialContext)
+    })
 }
 
 func expectErrorNamingField(t *testing.T, err error, field string) {
@@ -256,7 +296,7 @@ func newGatedDialer(t *testing.T, dsn string) *gatedDialer {
     return &gatedDialer{t: t, dsn: dsn}
 }
 
-func (instance *gatedDialer) Dial() (*amqp091.Connection, error) {
+func (instance *gatedDialer) Dial(dialContext context.Context) (*Connection, error) {
     instance.dials.Add(1)
 
     connection, gated := dialGated(instance.t, instance.dsn)
@@ -265,7 +305,7 @@ func (instance *gatedDialer) Dial() (*amqp091.Connection, error) {
     instance.latest = gated
     instance.mutex.Unlock()
 
-    return connection, nil
+    return ownerOf(connection), nil
 }
 
 func (instance *gatedDialer) Dials() int64 {
@@ -655,4 +695,56 @@ func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
     case <-time.After(5 * time.Second):
         t.Fatal("expected the call to return on an error chain that reaches itself")
     }
+}
+
+/* listenFakeBroker serves the fake broker's handshake to each connection it accepts and answers nothing after it */
+func listenFakeBroker(t *testing.T) string {
+    t.Helper()
+
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("listen: %v", listenErr)
+    }
+    t.Cleanup(func() { _ = listener.Close() })
+
+    go func() {
+        for {
+            brokerSide, acceptErr := listener.Accept()
+            if nil != acceptErr {
+                return
+            }
+            t.Cleanup(func() { _ = brokerSide.Close() })
+
+            go func() { _ = serveFakeBrokerHandshake(brokerSide) }()
+        }
+    }()
+
+    return listener.Addr().String()
+}
+
+/* listenSilently accepts and never speaks, counting what it accepted, as a host that takes the socket and never begins the handshake */
+func listenSilently(t *testing.T) (string, *atomic.Int64) {
+    t.Helper()
+
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("listen: %v", listenErr)
+    }
+    t.Cleanup(func() { _ = listener.Close() })
+
+    accepts := &atomic.Int64{}
+
+    go func() {
+        for {
+            brokerSide, acceptErr := listener.Accept()
+            if nil != acceptErr {
+                return
+            }
+
+            accepts.Add(1)
+            t.Cleanup(func() { _ = brokerSide.Close() })
+        }
+    }()
+
+    return listener.Addr().String(), accepts
 }

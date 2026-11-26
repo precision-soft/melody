@@ -9,7 +9,6 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
-    "github.com/precision-soft/melody/v4/exception"
 )
 
 type recordingRegistrar struct {
@@ -35,7 +34,7 @@ func (instance *recordingRegistrar) has(serviceName string) bool {
 func TestRegisterConnectionServiceUsesConnectionName(t *testing.T) {
     registrar := &recordingRegistrar{}
 
-    RegisterConnectionService(registrar, nil, ConnectionServiceConfig{})
+    registerConnectionService(registrar, nil)
 
     if false == registrar.has(ServiceConnection) {
         t.Fatalf("expected %q to be registered, got %v", ServiceConnection, registrar.names)
@@ -45,7 +44,7 @@ func TestRegisterConnectionServiceUsesConnectionName(t *testing.T) {
 func TestRegisterTransportServiceUsesGivenName(t *testing.T) {
     registrar := &recordingRegistrar{}
 
-    RegisterTransportService(registrar, "async", nil)
+    registerTransportService(registrar, "async", nil)
 
     if false == registrar.has("async") {
         t.Fatalf("expected %q to be registered, got %v", "async", registrar.names)
@@ -55,8 +54,8 @@ func TestRegisterTransportServiceUsesGivenName(t *testing.T) {
 func TestRegisterConnectionAndTransportService_AreNotWalkedAndTheTransportClosesBeforeTheConnection(t *testing.T) {
     registrar := &recordingRegistrar{}
 
-    RegisterConnectionService(registrar, nil, ConnectionServiceConfig{})
-    RegisterTransportService(registrar, "async", nil)
+    registerConnectionService(registrar, nil)
+    registerTransportService(registrar, "async", nil)
 
     if false == registrar.options[0].TeardownReflectionDisabled || false == registrar.options[1].TeardownReflectionDisabled {
         t.Fatalf("expected neither the connection nor the transport walked, got %+v", registrar.options)
@@ -76,14 +75,28 @@ func (instance *containerRegistrar) RegisterService(serviceName string, provider
     instance.serviceContainer.MustRegister(serviceName, provider, options)
 }
 
+func (instance *containerRegistrar) Register(serviceName string, provider any, options containercontract.RegisterOptions) error {
+    return instance.serviceContainer.Register(serviceName, provider, options)
+}
+
+func (instance *containerRegistrar) MustRegister(serviceName string, provider any, options containercontract.RegisterOptions) {
+    instance.serviceContainer.MustRegister(serviceName, provider, options)
+}
+
+func (instance *containerRegistrar) ReservePhaseService(serviceName string, kind containercontract.Kind) error {
+    return instance.serviceContainer.ReservePhaseService(serviceName, kind)
+}
+
 func TestRegisterConnectionService_TheContainerClosesTheConnectionUnderItsDeadlineWhileTheClientShutdownIsStalled(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginClientShutdown(t)
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    RegisterConnectionService(&containerRegistrar{serviceContainer: serviceContainer}, wedge.connection, ConnectionServiceConfig{})
+    registerConnectionService(&containerRegistrar{serviceContainer: serviceContainer}, func(resolver containercontract.Resolver) (*Connection, error) {
+        return NewConnection(wedge.connection, ConnectionConfig{}), nil
+    })
 
-    if wedge.connection != ConnectionMustFromResolver(t.Context(), serviceContainer) {
+    if wedge.connection != ConnectionMustFromResolver(t.Context(), serviceContainer).Raw() {
         t.Fatal("expected the registered connection resolved as itself")
     }
 
@@ -106,27 +119,14 @@ func TestRegisterConnectionService_TheContainerClosesTheConnectionUnderItsDeadli
     }
 }
 
-func TestRegisterConnectionService_RefusesACloseTimeoutItsRuleRefusesNamingTheField(t *testing.T) {
-    for name, limit := range map[string]bound.Duration{"below the minimum": bound.Of(time.Microsecond), "unlimited": bound.UnlimitedDuration()} {
-        t.Run(name, func(t *testing.T) {
-            defer func() {
-                recovered, isException := recover().(*exception.Error)
-                if false == isException || "ConnectionServiceConfig.CloseTimeout" != recovered.Context()["field"] {
-                    t.Fatalf("expected a refusal naming the field, got %v", recovered)
-                }
-            }()
-
-            RegisterConnectionService(&containerRegistrar{serviceContainer: container.NewContainer(container.ContainerConfig{})}, nil, ConnectionServiceConfig{CloseTimeout: limit})
-        })
-    }
-}
-
 func TestRegisterConnectionService_TheConfiguredCloseTimeoutBoundsTheStretchUnderNoDeadline(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginClientShutdown(t)
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    RegisterConnectionService(&containerRegistrar{serviceContainer: serviceContainer}, wedge.connection, ConnectionServiceConfig{CloseTimeout: bound.Of(100 * time.Millisecond)})
+    registerConnectionService(&containerRegistrar{serviceContainer: serviceContainer}, func(resolver containercontract.Resolver) (*Connection, error) {
+        return NewConnection(wedge.connection, ConnectionConfig{CloseTimeout: bound.Of(100 * time.Millisecond)}), nil
+    })
     ConnectionMustFromResolver(t.Context(), serviceContainer)
 
     closed := make(chan error, 1)

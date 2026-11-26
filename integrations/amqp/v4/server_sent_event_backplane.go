@@ -6,7 +6,6 @@ import (
     "encoding/hex"
     "encoding/json"
     "errors"
-    "fmt"
     "reflect"
     "sync"
     "time"
@@ -49,7 +48,7 @@ type serverSentEventWireEvent struct {
 
 type ServerSentEventBackplane struct {
     connection *amqp091.Connection
-    dialer     func() (*amqp091.Connection, error)
+    dialer     Dialer
     /* connectedOnce says a connection was ever held, so a dial refusal names itself the first dial or a reconnect */
     connectedOnce bool
     hub           *melodyhttp.ServerSentEventHub
@@ -75,10 +74,8 @@ type ServerSentEventBackplane struct {
     wait   sync.WaitGroup
 }
 
-/* ServerSentEventBackplaneConfig declares the backplane: Connection or Dialer is required, Exchange is melody.sse when empty, and a nil or typed-nil Logger records nothing. A limit outside its rule is refused before the backplane is installed on the hub or its listener starts, naming the field. */
+/* ServerSentEventBackplaneConfig declares the backplane beside its hub and its connection source: Exchange is melody.sse when empty, and a nil or typed-nil Logger records nothing. A limit outside its rule is refused before the backplane is installed on the hub or its listener starts, naming the field. */
 type ServerSentEventBackplaneConfig struct {
-    Connection *amqp091.Connection
-    Dialer     func() (*amqp091.Connection, error)
     Exchange   string
     Logger     loggingcontract.Logger
     /* Reconnect is the re-subscribe backoff, each field left out inherited from the provider that built the backplane, or the package default. */
@@ -89,19 +86,17 @@ type ServerSentEventBackplaneConfig struct {
     CloseTimeout bound.Duration
 }
 
-/* NewServerSentEventBackplane fans hub's broadcasts out across instances; a nil hub panics naming the argument. */
-func NewServerSentEventBackplane(hub *melodyhttp.ServerSentEventHub, config ServerSentEventBackplaneConfig) *ServerSentEventBackplane {
-    return newServerSentEventBackplane(hub, config, defaultComponentParent)
+/* NewServerSentEventBackplane fans hub's broadcasts out across instances over the connection source handed; a nil hub or the zero source panics naming the argument. */
+func NewServerSentEventBackplane(hub *melodyhttp.ServerSentEventHub, source ConnectionSource, config ServerSentEventBackplaneConfig) *ServerSentEventBackplane {
+    return newServerSentEventBackplane(hub, source, config, defaultComponentParent)
 }
 
-func newServerSentEventBackplane(hub *melodyhttp.ServerSentEventHub, config ServerSentEventBackplaneConfig, parent componentParent) *ServerSentEventBackplane {
-    if nil == config.Connection && nil == config.Dialer {
-        exception.Panic(exception.NewError("amqp sse backplane needs a connection or a dialer", exceptioncontract.Context{"field": "ServerSentEventBackplaneConfig.Connection", "alternative": "ServerSentEventBackplaneConfig.Dialer"}, nil))
-    }
-
+func newServerSentEventBackplane(hub *melodyhttp.ServerSentEventHub, source ConnectionSource, config ServerSentEventBackplaneConfig, parent componentParent) *ServerSentEventBackplane {
     if nil == hub {
         exception.Panic(exception.NewError("amqp sse backplane hub is nil", exceptioncontract.Context{"argument": "hub"}, nil))
     }
+
+    refuseEmptySource(source, "amqp sse backplane connection source is empty")
 
     exchange := config.Exchange
     if "" == exchange {
@@ -131,9 +126,9 @@ func newServerSentEventBackplane(hub *melodyhttp.ServerSentEventHub, config Serv
     ctx, cancel := context.WithCancel(context.Background())
 
     backplane := &ServerSentEventBackplane{
-        connection:    config.Connection,
-        dialer:        config.Dialer,
-        connectedOnce: nil != config.Connection,
+        connection:    source.connection.Raw(),
+        dialer:        source.dialer,
+        connectedOnce: nil != source.connection,
         hub:           hub,
         exchange:      exchange,
         origin:        newServerSentEventBackplaneOrigin(),
@@ -555,15 +550,7 @@ func (instance *ServerSentEventBackplane) declareExchange(channel *amqp091.Chann
 func (instance *ServerSentEventBackplane) dialWithContext() (*amqp091.Connection, error) {
     outcome := make(chan dialOutcome, 1)
     go func() {
-        /* the application's dialer runs on this goroutine; its panic is handed back as the dial's outcome, as the transport hands it back */
-        defer func() {
-            if recovered := recover(); nil != recovered {
-                outcome <- dialOutcome{err: exception.NewError("amqp sse backplane dialer panicked", map[string]any{"exchange": instance.exchange, "panic": fmt.Sprint(recovered)}, exception.PanicCause(recovered))}
-            }
-        }()
-
-        connection, dialErr := instance.dialer()
-        outcome <- dialOutcome{connection: connection, err: dialErr}
+        outcome <- runDialer(instance.ctx, instance.dialer, "amqp sse backplane dialer panicked", map[string]any{"exchange": instance.exchange})
     }()
 
     select {

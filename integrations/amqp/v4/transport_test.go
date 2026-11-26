@@ -9,6 +9,7 @@ import (
     "strconv"
     "strings"
     "sync"
+    "sync/atomic"
     "testing"
     "time"
 
@@ -225,17 +226,17 @@ func TestTransport_SendReceiveAck(t *testing.T) {
     }
 
     provider := NewProvider(ProviderConfig{})
-    connection, openErr := provider.Open(dsn)
+    connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
     }
-    defer provider.Close(connection)
+    connection := connectionOwner.Raw()
+    defer connectionOwner.CloseWithContext(context.Background())
 
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "amqp.test.message")
 
-    transport := NewTransport("melody.amqp.v4.test", registry, TransportConfig{
-        Connection: connection,
+    transport := NewTransport("melody.amqp.v4.test", registry, borrowedSource(connection), TransportConfig{
         Prefetch:   bound.Of(10),
     })
 
@@ -300,18 +301,18 @@ func TestTransport_RequeuePersistsRedeliveryCountThenDeadLetters(t *testing.T) {
     }
 
     provider := NewProvider(ProviderConfig{})
-    connection, openErr := provider.Open(dsn)
+    connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
     }
-    defer provider.Close(connection)
+    connection := connectionOwner.Raw()
+    defer connectionOwner.CloseWithContext(context.Background())
 
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "amqp.test.retry")
 
     queueName := "melody.amqp.v4.retry"
-    transport := NewTransport(queueName, registry, TransportConfig{
-        Connection: connection,
+    transport := NewTransport(queueName, registry, borrowedSource(connection), TransportConfig{
         Prefetch:   bound.Of(1),
     })
 
@@ -365,17 +366,17 @@ func TestTransport_DelayStampRoutesThroughDelayQueue(t *testing.T) {
     }
 
     provider := NewProvider(ProviderConfig{})
-    connection, openErr := provider.Open(dsn)
+    connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
     }
-    defer provider.Close(connection)
+    connection := connectionOwner.Raw()
+    defer connectionOwner.CloseWithContext(context.Background())
 
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "amqp.test.delay")
 
-    transport := NewTransport("melody.amqp.v4.delay", registry, TransportConfig{
-        Connection: connection,
+    transport := NewTransport("melody.amqp.v4.delay", registry, borrowedSource(connection), TransportConfig{
         Prefetch:   bound.Of(1),
     })
 
@@ -436,18 +437,17 @@ func TestTransport_ReconnectsAfterConnectionDrop(t *testing.T) {
     }
 
     provider := NewProvider(ProviderConfig{})
-    connection, openErr := provider.Open(dsn)
+    connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
     }
+    connection := connectionOwner.Raw()
 
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "amqp.test.reconnect")
 
     queueName := "melody.amqp.v4.reconnect"
-    transport := NewTransport(queueName, registry, TransportConfig{
-        Connection: connection,
-        Dialer:     provider.Dialer(dsn),
+    transport := NewTransport(queueName, registry, connectionThenDialerSource(connection, provider.Dialer(dsn)), TransportConfig{
         Prefetch:   bound.Of(1),
     })
 
@@ -470,14 +470,13 @@ func TestTransport_ReconnectsAfterConnectionDrop(t *testing.T) {
         t.Fatalf("drop connection: %v", dropErr)
     }
 
-    publisherConnection, publisherErr := provider.Open(dsn)
+    publisherConnection, publisherErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != publisherErr {
         t.Fatalf("open publisher connection: %v", publisherErr)
     }
-    defer provider.Close(publisherConnection)
+    defer publisherConnection.CloseWithContext(context.Background())
 
-    publisher := NewTransport(queueName, registry, TransportConfig{
-        Connection: publisherConnection,
+    publisher := NewTransport(queueName, registry, FromConnection(publisherConnection), TransportConfig{
     })
     defer publisher.CloseWithContext(context.Background())
 
@@ -536,7 +535,7 @@ func TestConnect_DialFailureIsWrapped(t *testing.T) {
     calls := 0
     instance := &Transport{
         queue: "orders",
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             calls++
             return nil, exception.NewError("dial refused", nil, nil)
         },
@@ -573,7 +572,7 @@ func TestSubscribeWithRetry_RetriesThenStopsOnContextCancel(t *testing.T) {
         queue:       "orders",
         closeSignal: make(chan struct{}),
         reconnect:   bound.ResolvedBackoff{Initial: time.Millisecond, Max: time.Millisecond, Factor: 2},
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             calls++
             if 3 <= calls {
                 cancel()
@@ -601,7 +600,7 @@ func TestSubscribeWithRetry_ZeroBackoffDoesNotBusyLoop(t *testing.T) {
         queue:       "orders",
         closeSignal: make(chan struct{}),
         reconnect:   bound.ResolvedBackoff{Initial: 0, Max: time.Second, Factor: 2},
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             calls++
 
             return nil, exception.NewError("dial refused", nil, nil)
@@ -631,7 +630,7 @@ func TestConsumeLoop_ZeroBackoffDoesNotBusyLoop(t *testing.T) {
         queue:       "orders",
         closeSignal: make(chan struct{}),
         reconnect:   bound.ResolvedBackoff{Initial: 0, Max: time.Second, Factor: 2},
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             calls++
 
             return nil, exception.NewError("dial refused", nil, nil)
@@ -672,7 +671,7 @@ func TestConnect_SingleFlight(t *testing.T) {
 
     instance := &Transport{
         queue: "orders",
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             close(entered)
             <-release
             return nil, exception.NewError("dial refused", nil, nil)
@@ -866,7 +865,7 @@ func TestPublishRetryable_LiveStaticConnectionRetriesWithoutDialer(t *testing.T)
         t.Fatalf("expected no retry when there is no dialer and no live connection")
     }
 
-    dialerBacked := &Transport{queue: "orders", dialer: func() (*amqp091.Connection, error) { return nil, nil }}
+    dialerBacked := &Transport{queue: "orders", dialer: func(dialContext context.Context) (*Connection, error) { return nil, nil }}
     if false == dialerBacked.publishRetryable() {
         t.Fatalf("expected a dialer-backed transport to stay retryable")
     }
@@ -888,7 +887,7 @@ func TestSubscribeRetryable_LiveStaticConnectionRetriesWithoutDialer(t *testing.
         t.Fatalf("expected no retry when there is no dialer and no live connection")
     }
 
-    dialerBacked := &Transport{queue: "orders", dialer: func() (*amqp091.Connection, error) { return nil, nil }}
+    dialerBacked := &Transport{queue: "orders", dialer: func(dialContext context.Context) (*Connection, error) { return nil, nil }}
     if false == dialerBacked.subscribeRetryable() {
         t.Fatalf("expected a dialer-backed transport to stay retryable")
     }
@@ -1128,8 +1127,7 @@ func TestForwardDeliveries_CloseUnblocksGoroutineParkedOnOutput(t *testing.T) {
     registry := NewMessageRegistry()
     RegisterMessage[closeUnblockMessage](registry, "amqp.test.close-unblock")
 
-    transport := NewTransport("melody.amqp.v4.close-unblock", registry, TransportConfig{
-        Dialer:   func() (*amqp091.Connection, error) { return nil, nil },
+    transport := NewTransport("melody.amqp.v4.close-unblock", registry, FromDialer(func(dialContext context.Context) (*Connection, error) { return nil, nil }), TransportConfig{
     })
 
     ctx, cancel := context.WithCancel(context.Background())
@@ -1172,8 +1170,7 @@ func TestForwardDeliveries_CloseUnblocksGoroutineParkedOnOutput(t *testing.T) {
 }
 
 func TestReopenConsume_CloseUnblocksGoroutineParkedOnBackoff(t *testing.T) {
-    transport := NewTransport("melody.amqp.v4.reopen-backoff", NewMessageRegistry(), TransportConfig{
-        Dialer:   func() (*amqp091.Connection, error) { return nil, errors.New("broker down") },
+    transport := NewTransport("melody.amqp.v4.reopen-backoff", NewMessageRegistry(), FromDialer(func(dialContext context.Context) (*Connection, error) { return nil, errors.New("broker down") }), TransportConfig{
     })
 
     ctx, cancel := context.WithCancel(context.Background())
@@ -1283,7 +1280,7 @@ func TestClose_ReturnsPromptlyWhileALoopIsStuckInTheDialer(t *testing.T) {
         queue:       "orders",
         closeSignal: make(chan struct{}),
         reconnect:   bound.ResolvedBackoff{Initial: time.Millisecond, Max: time.Millisecond, Factor: 2},
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             once.Do(func() {
                 close(dialing)
             })
@@ -1333,11 +1330,12 @@ func TestTransport_CloseJoinsTheConsumerStartedByReceive(t *testing.T) {
     }
 
     provider := NewProvider(ProviderConfig{})
-    connection, openErr := provider.Open(dsn)
+    connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
     }
-    defer provider.Close(connection)
+    connection := connectionOwner.Raw()
+    defer connectionOwner.CloseWithContext(context.Background())
 
     registry := NewMessageRegistry()
     RegisterMessage[closeJoinMessage](registry, "amqp.test.close-join.live")
@@ -1345,8 +1343,7 @@ func TestTransport_CloseJoinsTheConsumerStartedByReceive(t *testing.T) {
     queueName := "melody.amqp.v4.close-join"
     serializer := newBlockingDeserializer()
 
-    transport := NewTransport(queueName, registry, TransportConfig{
-        Connection: connection,
+    transport := NewTransport(queueName, registry, borrowedSource(connection), TransportConfig{
         Prefetch:   bound.Of(1),
         Serializer: serializer,
     })
@@ -1420,19 +1417,19 @@ func TestTransport_SendSurfacesUnroutablePublishAfterQueueDelete(t *testing.T) {
     }
 
     provider := NewProvider(ProviderConfig{})
-    connection, openErr := provider.Open(dsn)
+    connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
     }
-    defer provider.Close(connection)
+    connection := connectionOwner.Raw()
+    defer connectionOwner.CloseWithContext(context.Background())
 
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "amqp.confirm.message")
 
     queueName := "melody.amqp.v4.confirm-unroutable"
 
-    transport := NewTransport(queueName, registry, TransportConfig{
-        Connection: connection,
+    transport := NewTransport(queueName, registry, borrowedSource(connection), TransportConfig{
     })
 
     ctx, cancel := context.WithCancel(context.Background())
@@ -1474,14 +1471,14 @@ func TestEnsurePublishChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
     }
 
     provider := NewProvider(ProviderConfig{})
-    connection, openErr := provider.Open(dsn)
+    connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
     }
-    defer provider.Close(connection)
+    connection := connectionOwner.Raw()
+    defer connectionOwner.CloseWithContext(context.Background())
 
-    transport := NewTransport("melody.amqp.v4.reopen-publish", NewMessageRegistry(), TransportConfig{
-        Connection: connection,
+    transport := NewTransport("melody.amqp.v4.reopen-publish", NewMessageRegistry(), borrowedSource(connection), TransportConfig{
     })
 
     first, _, _, firstErr := transport.ensurePublishChannel()
@@ -1513,14 +1510,14 @@ func TestEnsureConsumeChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
     }
 
     provider := NewProvider(ProviderConfig{})
-    connection, openErr := provider.Open(dsn)
+    connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
     }
-    defer provider.Close(connection)
+    connection := connectionOwner.Raw()
+    defer connectionOwner.CloseWithContext(context.Background())
 
-    transport := NewTransport("melody.amqp.v4.reopen-consume", NewMessageRegistry(), TransportConfig{
-        Connection: connection,
+    transport := NewTransport("melody.amqp.v4.reopen-consume", NewMessageRegistry(), borrowedSource(connection), TransportConfig{
     })
 
     first, firstGeneration, firstErr := transport.ensureConsumeChannel()
@@ -1629,8 +1626,7 @@ func TestRedeliveryCountFromHeader(t *testing.T) {
 
 func TestNewTransport_RefusesAPrefetchAboveTheWireMaximum(t *testing.T) {
     newInstance := func(prefetch int) *Transport {
-        return newTransport("orders", NewMessageRegistry(), TransportConfig{
-            Dialer:   func() (*amqp091.Connection, error) { return nil, nil },
+        return newTransport("orders", NewMessageRegistry(), FromDialer(func(dialContext context.Context) (*Connection, error) { return nil, nil }), TransportConfig{
             Prefetch: bound.Of(prefetch),
         }, defaultComponentParent)
     }
@@ -1745,17 +1741,17 @@ func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
     }
 
     provider := NewProvider(ProviderConfig{})
-    connection, openErr := provider.Open(dsn)
+    connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
     }
-    defer provider.Close(connection)
+    connection := connectionOwner.Raw()
+    defer connectionOwner.CloseWithContext(context.Background())
 
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "amqp.test.delay.bucket")
 
-    transport := NewTransport("melody.amqp.v4.delay.bucket", registry, TransportConfig{
-        Connection:   connection,
+    transport := NewTransport("melody.amqp.v4.delay.bucket", registry, borrowedSource(connection), TransportConfig{
         Prefetch:     bound.Of(2),
         DelayBuckets: []time.Duration{2 * time.Second, 8 * time.Second},
     })
@@ -1883,7 +1879,7 @@ func TestPublishRequeue_RetriesABoundedNumberOfTimesBeforeGivingUp(t *testing.T)
         queue:       "orders",
         closeSignal: make(chan struct{}),
         reconnect:   bound.ResolvedBackoff{Initial: time.Millisecond, Max: time.Millisecond, Factor: 1},
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             dialCount++
 
             return nil, exception.NewError("dial refused", nil, nil)
@@ -1913,7 +1909,7 @@ func TestPublishRequeue_ClosingTransportStopsWithoutRetrying(t *testing.T) {
         closeSignal: make(chan struct{}),
         reconnect:   bound.ResolvedBackoff{Initial: time.Millisecond, Max: time.Millisecond, Factor: 1},
         closing:     true,
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             dialCount++
 
             return nil, exception.NewError("dial refused", nil, nil)
@@ -1936,18 +1932,18 @@ func TestTransport_RequeueThatCannotCarryItsCountersDeadLettersInsteadOfLooping(
     }
 
     provider := NewProvider(ProviderConfig{})
-    connection, openErr := provider.Open(dsn)
+    connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
     }
-    defer provider.Close(connection)
+    connection := connectionOwner.Raw()
+    defer connectionOwner.CloseWithContext(context.Background())
 
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "amqp.test.uncounted")
 
     queueName := "melody.amqp.v4.uncounted"
-    transport := NewTransport(queueName, registry, TransportConfig{
-        Connection: connection,
+    transport := NewTransport(queueName, registry, borrowedSource(connection), TransportConfig{
         Prefetch:   bound.Of(1),
     })
 
@@ -2100,7 +2096,7 @@ func TestPublishRecoverable_ACancelledCallerContextDoesNotRetryOrResetTheSharedC
     instance := &Transport{
         queue:       "orders",
         closeSignal: make(chan struct{}),
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             dialCalls++
 
             return nil, exception.NewError("dial refused", nil, nil)
@@ -2137,7 +2133,7 @@ func TestClose_DrainsAConnectionTheDialYieldsAfterTheInterrupt(t *testing.T) {
         queue:       "orders",
         closeSignal: make(chan struct{}),
         reconnect:   bound.ResolvedBackoff{Initial: time.Millisecond, Max: time.Millisecond, Factor: 2},
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             once.Do(func() {
                 close(dialing)
             })
@@ -2149,7 +2145,7 @@ func TestClose_DrainsAConnectionTheDialYieldsAfterTheInterrupt(t *testing.T) {
                 dialed <- connection
             }
 
-            return connection, dialErr
+            return ownerOf(connection), dialErr
         },
         publishHalf: publishHalf{joinBound: closeJoinTimeout},
     }
@@ -2193,8 +2189,7 @@ func TestForwardDeliveries_StampsTheGenerationOfItsOwnChannelNotTheTransportCoun
 
     serializer := melodyserializer.NewJsonSerializer()
 
-    transport := NewTransport("melody.amqp.v4.paired-generation", registry, TransportConfig{
-        Dialer:     func() (*amqp091.Connection, error) { return nil, errors.New("no broker in this test") },
+    transport := NewTransport("melody.amqp.v4.paired-generation", registry, FromDialer(func(dialContext context.Context) (*Connection, error) { return nil, errors.New("no broker in this test") }), TransportConfig{
         Serializer: serializer,
     })
 
@@ -2259,8 +2254,7 @@ func TestForwardDeliveries_StampsTheGenerationOfItsOwnChannelNotTheTransportCoun
 }
 
 func TestEnsureConsumeChannel_AnswersTheCachedChannelWithItsOwnGeneration(t *testing.T) {
-    transport := NewTransport("melody.amqp.v4.cached-generation", NewMessageRegistry(), TransportConfig{
-        Dialer:   func() (*amqp091.Connection, error) { return nil, errors.New("no broker in this test") },
+    transport := NewTransport("melody.amqp.v4.cached-generation", NewMessageRegistry(), FromDialer(func(dialContext context.Context) (*Connection, error) { return nil, errors.New("no broker in this test") }), TransportConfig{
     })
 
     cachedChannel := &amqp091.Channel{}
@@ -2290,15 +2284,20 @@ const (
     wedgeCloseTimeout      = time.Second
 )
 
-func newWedgeTestTransport(t *testing.T, connection *amqp091.Connection, dialer func() (*amqp091.Connection, error)) (*Transport, containercontract.Runtime) {
+func newWedgeTestTransport(t *testing.T, connection *amqp091.Connection, dialer Dialer) (*Transport, containercontract.Runtime) {
     t.Helper()
 
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "amqp.test.wedge.message")
 
-    transport := NewTransport("melody.amqp.v4.test.wedge", registry, TransportConfig{
-        Connection:     connection,
-        Dialer:         dialer,
+    var source ConnectionSource
+    if nil != connection {
+        source = borrowedSource(connection)
+    } else {
+        source = FromDialer(dialer)
+    }
+
+    transport := NewTransport("melody.amqp.v4.test.wedge", registry, source, TransportConfig{
         CallTimeout:    bound.Of(wedgeWarmupCallTimeout),
         CloseTimeout:   bound.Of(wedgeCloseTimeout),
     })
@@ -2463,8 +2462,7 @@ func TestTransport_AnOwnedConnectionClosesUnderCloseTimeout(t *testing.T) {
     for _, testCase := range cases {
         fake := dialFakeBroker(t)
 
-        transport := NewTransport("melody.amqp.v4.test.close.stretch", NewMessageRegistry(), TransportConfig{
-            Dialer:       func() (*amqp091.Connection, error) { return fake.connection, nil },
+        transport := NewTransport("melody.amqp.v4.test.close.stretch", NewMessageRegistry(), FromDialer(func(dialContext context.Context) (*Connection, error) { return ownerOf(fake.connection), nil }), TransportConfig{
             CallTimeout:  bound.Of(testCase.callTimeout),
             CloseTimeout: bound.Of(testCase.closeTimeout),
         })
@@ -2932,8 +2930,7 @@ func TestTransport_CloseChannelsWithinAnswersNothingToCloseAtAZeroBound(t *testi
 func TestTransport_CloseWithContextClosesAnOwnedConnectionUnderACancelledContext(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
 
-    transport := NewTransport("melody.amqp.v4.test.spent.teardown", NewMessageRegistry(), TransportConfig{
-        Dialer:   func() (*amqp091.Connection, error) { return amqp091.Dial(dsn) },
+    transport := NewTransport("melody.amqp.v4.test.spent.teardown", NewMessageRegistry(), FromDialer(func(dialContext context.Context) (*Connection, error) { return ownedDial(dsn) }), TransportConfig{
     })
 
     if _, connectErr := transport.connect(); nil != connectErr {
@@ -2959,8 +2956,7 @@ func TestTransport_CloseWithContextClosesAnOwnedConnectionUnderACancelledContext
 func TestTransport_CloseWithContextClosesAnOwnedConnectionUnderASpentDeadline(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
 
-    transport := NewTransport("melody.amqp.v4.test.spent.teardown.deadline", NewMessageRegistry(), TransportConfig{
-        Dialer:   func() (*amqp091.Connection, error) { return amqp091.Dial(dsn) },
+    transport := NewTransport("melody.amqp.v4.test.spent.teardown.deadline", NewMessageRegistry(), FromDialer(func(dialContext context.Context) (*Connection, error) { return ownedDial(dsn) }), TransportConfig{
     })
 
     if _, connectErr := transport.connect(); nil != connectErr {
@@ -2978,7 +2974,7 @@ func TestTransport_CloseWithContextClosesAnOwnedConnectionUnderASpentDeadline(t 
 func TestTransport_CloseWithContextStillReportsACutWedgedWrite(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, gated := dialGated(t, dsn)
-    transport, runtimeInstance := newWedgeTestTransport(t, nil, func() (*amqp091.Connection, error) { return connection, nil })
+    transport, runtimeInstance := newWedgeTestTransport(t, nil, func(dialContext context.Context) (*Connection, error) { return ownerOf(connection), nil })
 
     if false == transport.ownsConnection {
         t.Fatalf("this test needs a transport that OWNS its connection; it measures the cut of the owned branch")
@@ -3077,7 +3073,7 @@ func TestTransport_CloseWithContextStillReportsTheChannelsOfACallerOwnedConnecti
 func TestTransport_CloseWithContextStillReportsAnOwnedConnectionThatOutlivesAPositiveBound(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, gated := dialGated(t, dsn)
-    transport, _ := newWedgeTestTransport(t, nil, func() (*amqp091.Connection, error) { return connection, nil })
+    transport, _ := newWedgeTestTransport(t, nil, func(dialContext context.Context) (*Connection, error) { return ownerOf(connection), nil })
 
     if _, connectErr := transport.connect(); nil != connectErr {
         t.Fatalf("the connection was not opened: %v", connectErr)
@@ -3113,11 +3109,12 @@ func TestTransport_SendRoutesThroughTheConfiguredExchangeAndRoutingKey(t *testin
     dsn := amqpDsnOrSkip(t)
 
     provider := NewProvider(ProviderConfig{})
-    connection, openErr := provider.Open(dsn)
+    connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
     }
-    defer provider.Close(connection)
+    connection := connectionOwner.Raw()
+    defer connectionOwner.CloseWithContext(context.Background())
 
     suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
     queueName := "melody.amqp.v4.test.routed." + suffix
@@ -3126,8 +3123,7 @@ func TestTransport_SendRoutesThroughTheConfiguredExchangeAndRoutingKey(t *testin
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "amqp.test.message")
 
-    transport := NewTransport(queueName, registry, TransportConfig{
-        Connection: connection,
+    transport := NewTransport(queueName, registry, borrowedSource(connection), TransportConfig{
         Exchange:   exchangeName,
         RoutingKey: "orders",
     })
@@ -3202,8 +3198,7 @@ func TestTransport_CloseWithContextReturnsWithinTheDeadlineWhileTheClientShutdow
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginClientShutdown(t)
 
-    transport := NewTransport("melody.amqp.v4.test.fake.broker", NewMessageRegistry(), TransportConfig{
-        Dialer:   func() (*amqp091.Connection, error) { return nil, errors.New("the fake broker is dialed once, by the test") },
+    transport := NewTransport("melody.amqp.v4.test.fake.broker", NewMessageRegistry(), FromDialer(func(dialContext context.Context) (*Connection, error) { return nil, errors.New("the fake broker is dialed once, by the test") }), TransportConfig{
     })
 
     transport.mutex.Lock()
@@ -3301,10 +3296,10 @@ func TestTransport_ACutOwnedConnectionIsLetGoBeforeTheAbandonReturns(t *testing.
         publishChannel: wedge.channel,
         publishReturns: publishReturns,
         consumeChannel: wedge.channel,
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             dials++
 
-            return redialed.connection, nil
+            return ownerOf(redialed.connection), nil
         },
     }
     instance.joinBound = 2 * time.Second
@@ -3339,8 +3334,7 @@ func TestTransport_CloseNamesTheWriteLeftBlockedOnAConnectionAnEarlierAbandonCut
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginClientShutdown(t)
 
-    transport := NewTransport("melody.amqp.v4.test.fake.broker", NewMessageRegistry(), TransportConfig{
-        Dialer:         func() (*amqp091.Connection, error) { return nil, errors.New("the fake broker is dialed once, by the test") },
+    transport := NewTransport("melody.amqp.v4.test.fake.broker", NewMessageRegistry(), FromDialer(func(dialContext context.Context) (*Connection, error) { return nil, errors.New("the fake broker is dialed once, by the test") }), TransportConfig{
         CallTimeout:    bound.Of(200 * time.Millisecond),
         CloseTimeout:   bound.Of(300 * time.Millisecond),
     })
@@ -3434,8 +3428,7 @@ func TestTransport_CloseWithContextReturnsWithinTheDeadlineWhenAnEarlierCutHasNo
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginUnfreedCut(t, 4*time.Second)
 
-    transport := NewTransport("melody.amqp.v4.test.fake.broker", NewMessageRegistry(), TransportConfig{
-        Dialer:         func() (*amqp091.Connection, error) { return nil, errors.New("the fake broker is dialed once, by the test") },
+    transport := NewTransport("melody.amqp.v4.test.fake.broker", NewMessageRegistry(), FromDialer(func(dialContext context.Context) (*Connection, error) { return nil, errors.New("the fake broker is dialed once, by the test") }), TransportConfig{
         CallTimeout:    bound.Of(200 * time.Millisecond),
     })
 
@@ -3474,14 +3467,14 @@ func TestConnect_ADialThatLandsAfterCloseBeganIsClosedOffTheMutexUnderCloseTimeo
         callTimeout:    time.Hour,
         publishHalf:    publishHalf{joinBound: time.Second},
         closeSignal:    make(chan struct{}),
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             transport.mutex.Lock()
             transport.closing = true
             transport.mutex.Unlock()
 
             fake.gated.Wedge()
 
-            return fake.connection, nil
+            return ownerOf(fake.connection), nil
         },
     }
 
@@ -3521,12 +3514,12 @@ func TestTransport_AnAbandonedDialIsDrainedUnderCloseTimeout(t *testing.T) {
         callTimeout:    time.Hour,
         publishHalf:    publishHalf{joinBound: 200 * time.Millisecond},
         closeSignal:    make(chan struct{}),
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             <-release
 
             fake.gated.Wedge()
 
-            return fake.connection, nil
+            return ownerOf(fake.connection), nil
         },
     }
 
@@ -3559,7 +3552,7 @@ func TestTransport_AnAbandonedDialIsDrainedUnderCloseTimeout(t *testing.T) {
 func TestConnect_TheFirstDialIsNotAReconnect(t *testing.T) {
     instance := &Transport{
         queue: "orders",
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             return nil, exception.NewError("dial refused", nil, nil)
         },
     }
@@ -3582,7 +3575,7 @@ func TestConnect_TheFirstDialIsNotAReconnect(t *testing.T) {
 func TestConnect_APanickingDialerIsAnsweredAsADialFailure(t *testing.T) {
     instance := &Transport{
         queue: "orders",
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             panic("the application's dialer exploded")
         },
     }
@@ -3638,10 +3631,10 @@ func TestConnect_TheAttemptWordIsReadUnderTheMutex(t *testing.T) {
         release := make(chan struct{})
         instance := &Transport{
             queue: "melody.amqp.v4.attempt",
-            dialer: func() (*amqp091.Connection, error) {
+            dialer: func(dialContext context.Context) (*Connection, error) {
                 <-release
 
-                return liveDialer()
+                return liveDialer(dialContext)
             },
             publishHalf: publishHalf{joinBound: closeJoinTimeout},
         }
@@ -3695,10 +3688,9 @@ func TestTransport_SendReturnsOnACyclicChainFromTheDialer(t *testing.T) {
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "test")
 
-    transport := NewTransport("q", registry, TransportConfig{
-        Dialer: func() (*amqp091.Connection, error) {
+    transport := NewTransport("q", registry, FromDialer(func(dialContext context.Context) (*Connection, error) {
             return nil, newCyclicChainError()
-        },
+        }), TransportConfig{
     })
 
     assertReturnsOnACyclicChain(t, func() {
@@ -3865,20 +3857,20 @@ func TestTransport_SendOverAConnectionThatIsGoneIsMarkedUnavailable(t *testing.T
     }
 
     provider := NewProvider(ProviderConfig{})
-    connection, openErr := provider.Open(dsn)
+    connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
     }
+    connection := connectionOwner.Raw()
 
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "amqp.unavailable.message")
 
-    transport := NewTransport("melody.amqp.v4.unavailable-mark", registry, TransportConfig{
-        Connection: connection,
+    transport := NewTransport("melody.amqp.v4.unavailable-mark", registry, borrowedSource(connection), TransportConfig{
     })
     defer transport.CloseWithContext(context.Background())
 
-    provider.Close(connection)
+    connectionOwner.CloseWithContext(context.Background())
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
@@ -3899,7 +3891,7 @@ func TestSubscribeWithRetry_TheWaitGrowsByTheFactorOverConsecutiveFailures(t *te
         queue:       "orders",
         closeSignal: make(chan struct{}),
         reconnect:   bound.ResolvedBackoff{Initial: 20 * time.Millisecond, Max: 10 * time.Second, Factor: 3},
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             mutex.Lock()
             dialedAt = append(dialedAt, time.Now())
             if 4 <= len(dialedAt) {
@@ -3937,7 +3929,7 @@ func TestConsumeLoop_TheReopenWaitGrowsFromTheWaitAfterTheLostChannel(t *testing
         queue:       "orders",
         closeSignal: make(chan struct{}),
         reconnect:   bound.ResolvedBackoff{Initial: 20 * time.Millisecond, Max: 10 * time.Second, Factor: 3},
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             mutex.Lock()
             dialedAt = append(dialedAt, time.Now())
             if 3 <= len(dialedAt) {
@@ -3988,10 +3980,11 @@ func TestConsumeLoop_AChannelLostAfterLivingTheInitialBackoffReopensAtOnce(t *te
     }
 
     provider := NewProvider(ProviderConfig{})
-    connection, openErr := provider.Open(dsn)
+    connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
     }
+    connection := connectionOwner.Raw()
 
     providerDialer := provider.Dialer(dsn)
     dialedAt := make(chan time.Time, 8)
@@ -3999,13 +3992,11 @@ func TestConsumeLoop_AChannelLostAfterLivingTheInitialBackoffReopensAtOnce(t *te
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "amqp.test.reconnect.reset")
 
-    transport := NewTransport("melody.amqp.v4.reconnect.reset", registry, TransportConfig{
-        Connection: connection,
-        Dialer: func() (*amqp091.Connection, error) {
+    transport := NewTransport("melody.amqp.v4.reconnect.reset", registry, connectionThenDialerSource(connection, func(dialContext context.Context) (*Connection, error) {
             dialedAt <- time.Now()
 
-            return providerDialer()
-        },
+            return providerDialer(dialContext)
+        }), TransportConfig{
         Prefetch:  bound.Of(1),
         Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(400 * time.Millisecond), Max: bound.Of(10 * time.Second)}},
     })
@@ -4042,7 +4033,7 @@ func openTopologyFor(t *testing.T, connection *amqp091.Connection, queueName str
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "amqp.test.message")
 
-    transport := NewTransport(queueName, registry, TransportConfig{Connection: connection, DeadLetterDisabled: deadLetterDisabled})
+    transport := NewTransport(queueName, registry, borrowedSource(connection), TransportConfig{DeadLetterDisabled: deadLetterDisabled})
     defer transport.CloseWithContext(context.Background())
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
@@ -4081,11 +4072,12 @@ func TestTransport_ZeroConfigDeclaresTheDeadLetterTopology(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
 
     provider := NewProvider(ProviderConfig{})
-    connection, openErr := provider.Open(dsn)
+    connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
     }
-    defer provider.Close(connection)
+    connection := connectionOwner.Raw()
+    defer connectionOwner.CloseWithContext(context.Background())
 
     queueName := "melody.amqp.v4.test.dead-letter-default." + strconv.FormatInt(time.Now().UnixNano(), 10)
     defer deleteTopologyOf(connection, queueName)
@@ -4103,11 +4095,12 @@ func TestTransport_DeadLetterDisabledDeclaresNoDeadLetterTopology(t *testing.T) 
     dsn := amqpDsnOrSkip(t)
 
     provider := NewProvider(ProviderConfig{})
-    connection, openErr := provider.Open(dsn)
+    connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
     }
-    defer provider.Close(connection)
+    connection := connectionOwner.Raw()
+    defer connectionOwner.CloseWithContext(context.Background())
 
     queueName := "melody.amqp.v4.test.dead-letter-disabled." + strconv.FormatInt(time.Now().UnixNano(), 10)
     defer deleteTopologyOf(connection, queueName)
@@ -4126,11 +4119,12 @@ func TestTransport_AQueueDeclaredWithoutTheDeadLetterArgumentNamesTheDoor(t *tes
     dsn := amqpDsnOrSkip(t)
 
     provider := NewProvider(ProviderConfig{})
-    connection, openErr := provider.Open(dsn)
+    connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
     }
-    defer provider.Close(connection)
+    connection := connectionOwner.Raw()
+    defer connectionOwner.CloseWithContext(context.Background())
 
     queueName := "melody.amqp.v4.test.dead-letter-upgrade." + strconv.FormatInt(time.Now().UnixNano(), 10)
     defer deleteTopologyOf(connection, queueName)
@@ -4165,12 +4159,140 @@ func TestTransport_AQueueDeclaredWithoutTheDeadLetterArgumentNamesTheDoor(t *tes
 func TestNewTransport_DeadLetterIsOnUnlessItsDoorIsSet(t *testing.T) {
     registry := NewMessageRegistry()
 
-    if false == NewTransport("orders", registry, TransportConfig{Dialer: func() (*amqp091.Connection, error) { return nil, nil }}).deadLetter {
+    if false == NewTransport("orders", registry, FromDialer(func(dialContext context.Context) (*Connection, error) { return nil, nil }), TransportConfig{}).deadLetter {
         t.Fatal("expected the dead-letter topology on with the field left out")
     }
 
-    disabled := NewTransport("orders", registry, TransportConfig{Dialer: func() (*amqp091.Connection, error) { return nil, nil }, DeadLetterDisabled: true})
+    disabled := NewTransport("orders", registry, FromDialer(func(dialContext context.Context) (*Connection, error) { return nil, nil }), TransportConfig{DeadLetterDisabled: true})
     if true == disabled.deadLetter || false == requeueOnRejectedRepublish(disabled.deadLetter) {
         t.Fatal("expected the off door to drop the topology and requeue a rejected republish")
+    }
+}
+
+/* a dialer that only returns when its context ends: the close cancels it, so neither the dial nor the drain waits on the dialer's own bound */
+func cancellableDialer(started chan<- struct{}, observed chan<- error) Dialer {
+    return func(dialContext context.Context) (*Connection, error) {
+        started <- struct{}{}
+        <-dialContext.Done()
+        observed <- dialContext.Err()
+
+        return nil, dialContext.Err()
+    }
+}
+
+func TestTransport_AClosedTransportCancelsADialInFlight(t *testing.T) {
+    started := make(chan struct{}, 1)
+    observed := make(chan error, 1)
+
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.cancel.message")
+
+    transport := NewTransport("melody.amqp.v4.test.cancel", registry, FromDialer(cancellableDialer(started, observed)), TransportConfig{})
+
+    sent := make(chan error, 1)
+    go func() {
+        sent <- transport.Send(newReconnectRuntime(t.Context()), melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "cancel"}, nil))
+    }()
+
+    select {
+    case <-started:
+    case <-time.After(5 * time.Second):
+        t.Fatal("the send never dialed")
+    }
+
+    closeStarted := time.Now()
+    if closeErr := transport.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    select {
+    case dialErr := <-observed:
+        if false == errors.Is(dialErr, context.Canceled) {
+            t.Fatalf("expected the dial's context cancelled, got %v", dialErr)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("the close did not cancel the dial in flight")
+    }
+
+    if elapsed := time.Since(closeStarted); 2*time.Second <= elapsed {
+        t.Fatalf("expected the close to return at once, it took %s", elapsed)
+    }
+
+    if sendErr := awaitOutcome(t, "send", sent, 5*time.Second); nil == sendErr {
+        t.Fatal("expected the send refused by the close")
+    }
+}
+
+func TestTransport_ADialerAnsweringNoConnectionAndNoErrorIsRefused(t *testing.T) {
+    transport := NewTransport("melody.amqp.v4.test.nil-dial", NewMessageRegistry(), FromDialer(func(dialContext context.Context) (*Connection, error) { return nil, nil }), TransportConfig{})
+    defer transport.CloseWithContext(context.Background())
+
+    _, connectErr := transport.connect()
+    if nil == connectErr || false == errorChainContains(connectErr, "amqp dialer answered no connection and no error") {
+        t.Fatalf("expected a dialer answering nothing refused, got %v", connectErr)
+    }
+}
+
+/* a transport handed a connection has no dialer: once that connection is gone, nothing redials */
+func TestTransport_AStaticConnectionLostIsTerminal(t *testing.T) {
+    fake := dialFakeBroker(t)
+
+    transport := NewTransport("melody.amqp.v4.test.static", NewMessageRegistry(), FromConnection(NewConnection(fake.connection, ConnectionConfig{})), TransportConfig{})
+
+    if nil != transport.dialer || true == transport.ownsConnection || false == transport.connectedOnce {
+        t.Fatalf("expected a borrowed connection and no dialer, got dialer %v, owns %v", nil != transport.dialer, transport.ownsConnection)
+    }
+
+    _ = fake.connection.CloseDeadline(time.Now())
+
+    _, connectErr := transport.connect()
+    if nil == connectErr || false == errorChainContains(connectErr, "no dialer is configured") {
+        t.Fatalf("expected a lost static connection to be terminal, got %v", connectErr)
+    }
+}
+
+/* a transport handed a dialer holds no connection until its first use, and dials again after a failure */
+func TestTransport_ADialerRedials(t *testing.T) {
+    var dials atomic.Int64
+
+    transport := NewTransport("melody.amqp.v4.test.redial", NewMessageRegistry(), FromDialer(func(dialContext context.Context) (*Connection, error) {
+        dials.Add(1)
+
+        return nil, errors.New("no broker in this test")
+    }), TransportConfig{})
+    defer transport.CloseWithContext(context.Background())
+
+    if nil != transport.connection || true == transport.connectedOnce || 0 != dials.Load() {
+        t.Fatalf("expected no connection and no dial before the first use, got %d dials", dials.Load())
+    }
+
+    _, _ = transport.connect()
+    _, _ = transport.connect()
+
+    if 2 != dials.Load() {
+        t.Fatalf("expected a dial on each use after a failure, got %d", dials.Load())
+    }
+}
+
+/* a dialer answering a connection beside its error still handed the connection over, so the transport closes it rather than leak it */
+func TestTransport_AConnectionADialerAnsweredBesideItsErrorIsClosed(t *testing.T) {
+    fake := dialFakeBroker(t)
+
+    transport := NewTransport("melody.amqp.v4.test.dial-error", NewMessageRegistry(), FromDialer(func(dialContext context.Context) (*Connection, error) {
+        return ownerOf(fake.connection), errors.New("the dialer failed after it connected")
+    }), TransportConfig{})
+    defer transport.CloseWithContext(context.Background())
+
+    if _, connectErr := transport.connect(); nil == connectErr {
+        t.Fatal("expected the dialer's error")
+    }
+
+    deadline := time.Now().Add(5 * time.Second)
+    for false == fake.connection.IsClosed() {
+        if time.Now().After(deadline) {
+            t.Fatal("expected the connection answered beside the error closed")
+        }
+
+        time.Sleep(10 * time.Millisecond)
     }
 }

@@ -2,9 +2,9 @@ package amqp
 
 import (
     "context"
+    "crypto/tls"
     "errors"
     "fmt"
-    "net"
     neturl "net/url"
     "strings"
     "testing"
@@ -12,17 +12,16 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
     amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
 func newTestTransportConfig() TransportConfig {
-    return TransportConfig{
-        Dialer: func() (*amqp091.Connection, error) { return nil, nil },
-    }
+    return TransportConfig{}
 }
 
 func TestNewTransport_DefaultReconnectAndBuffer(t *testing.T) {
-    instance := NewTransport("orders", NewMessageRegistry(), newTestTransportConfig())
+    instance := NewTransport("orders", NewMessageRegistry(), refusingSource(), newTestTransportConfig())
 
     if defaultReconnect != instance.reconnect {
         t.Fatalf("expected the default reconnect, got %+v", instance.reconnect)
@@ -45,7 +44,7 @@ func TestNewTransport_PerTransportOverride(t *testing.T) {
     config.CallTimeout = bound.Of(3 * time.Second)
     config.CloseTimeout = bound.Of(4 * time.Second)
 
-    instance := NewTransport("orders", NewMessageRegistry(), config)
+    instance := NewTransport("orders", NewMessageRegistry(), refusingSource(), config)
 
     if 5*time.Second != instance.reconnect.Initial {
         t.Fatalf("expected overridden initial backoff 5s, got %s", instance.reconnect.Initial)
@@ -83,16 +82,39 @@ func TestNewTransport_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T) {
             testCase.mutate(&config)
 
             expectPanicNamingField(t, testCase.field, func() {
-                NewTransport("orders", NewMessageRegistry(), config)
+                NewTransport("orders", NewMessageRegistry(), refusingSource(), config)
             })
         })
     }
 }
 
-func TestNewTransport_AMissingDependencyIsRefusedNamingTheField(t *testing.T) {
-    expectPanicNamingField(t, "TransportConfig.Connection", func() {
-        NewTransport("orders", NewMessageRegistry(), TransportConfig{})
-    })
+func TestConnectionSource_TheZeroValueIsRefusedNamingBothDoors(t *testing.T) {
+    for name, build := range map[string]func(){
+        "transport":                 func() { NewTransport("orders", NewMessageRegistry(), ConnectionSource{}, TransportConfig{}) },
+        "transport through provider": func() { NewProvider(ProviderConfig{}).NewTransport("orders", NewMessageRegistry(), ConnectionSource{}, TransportConfig{}) },
+        "backplane": func() {
+            NewServerSentEventBackplane(melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), ConnectionSource{}, ServerSentEventBackplaneConfig{})
+        },
+        "backplane through provider": func() {
+            NewProvider(ProviderConfig{}).NewServerSentEventBackplane(melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), ConnectionSource{}, ServerSentEventBackplaneConfig{})
+        },
+    } {
+        t.Run(name, func(t *testing.T) {
+            defer func() {
+                recoveredErr, isError := recover().(error)
+                if false == isError {
+                    t.Fatal("expected the zero source refused")
+                }
+
+                context := exception.LogContext(recoveredErr, exception.LogContextConfig{})
+                if "source" != context["argument"] || "amqp.FromConnection, amqp.FromDialer" != context["doors"] {
+                    t.Fatalf("expected the refusal to name the argument and both doors, got %v", context)
+                }
+            }()
+
+            build()
+        })
+    }
 }
 
 func TestNewTransport_RefusesAMissingRequiredArgumentByName(t *testing.T) {
@@ -109,7 +131,7 @@ func TestNewTransport_RefusesAMissingRequiredArgumentByName(t *testing.T) {
     for _, testCase := range cases {
         t.Run(testCase.name, func(t *testing.T) {
             expectPanicNamingTheArgument(t, testCase.argument, func() {
-                NewTransport(testCase.queue, testCase.registry, TransportConfig{Dialer: refusingDialer})
+                NewTransport(testCase.queue, testCase.registry, FromDialer(refusingDialer), TransportConfig{})
             })
         })
     }
@@ -119,7 +141,7 @@ func TestNewTransport_APrefetchAtTheWireLimitIsAdmitted(t *testing.T) {
     config := newTestTransportConfig()
     config.Prefetch = bound.Of(maxPrefetch)
 
-    if instance := NewTransport("orders", NewMessageRegistry(), config); maxPrefetch != instance.prefetch {
+    if instance := NewTransport("orders", NewMessageRegistry(), refusingSource(), config); maxPrefetch != instance.prefetch {
         t.Fatalf("expected prefetch %d, got %d", maxPrefetch, instance.prefetch)
     }
 }
@@ -178,7 +200,7 @@ func TestNewProvider_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T) {
 func TestProviderNewTransport_GeneralLayerInherited(t *testing.T) {
     provider := NewProvider(ProviderConfig{Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(2 * time.Second), Max: bound.Of(time.Minute)}}, CloseTimeout: bound.Of(7 * time.Second)})
 
-    instance := provider.NewTransport("orders", NewMessageRegistry(), newTestTransportConfig())
+    instance := provider.NewTransport("orders", NewMessageRegistry(), refusingSource(), newTestTransportConfig())
 
     if 2*time.Second != instance.reconnect.Initial {
         t.Fatalf("expected general initial backoff 2s, got %s", instance.reconnect.Initial)
@@ -204,7 +226,7 @@ func TestProviderNewTransport_TransportOverridesGeneral(t *testing.T) {
     config.Reconnect = ReconnectConfig{Backoff: bound.Backoff{Max: bound.Of(10 * time.Second)}}
     config.CloseTimeout = bound.Of(3 * time.Second)
 
-    instance := provider.NewTransport("orders", NewMessageRegistry(), config)
+    instance := provider.NewTransport("orders", NewMessageRegistry(), refusingSource(), config)
 
     if 2*time.Second != instance.reconnect.Initial {
         t.Fatalf("expected inherited initial backoff 2s, got %s", instance.reconnect.Initial)
@@ -226,7 +248,7 @@ func TestProviderNewTransport_ACapLoweredUnderTheProvidersInitialIsRefusedNaming
     config.Reconnect = ReconnectConfig{Backoff: bound.Backoff{Max: bound.Of(500 * time.Millisecond)}}
 
     expectPanicNamingField(t, "ReconnectConfig.Backoff.Initial", func() {
-        provider.NewTransport("orders", NewMessageRegistry(), config)
+        provider.NewTransport("orders", NewMessageRegistry(), refusingSource(), config)
     })
 }
 
@@ -260,7 +282,7 @@ func TestProviderOpen_DoesNotLeakPasswordThroughDialErrorCause(t *testing.T) {
 
     provider := NewProvider(ProviderConfig{})
 
-    _, openErr := provider.Open(dsn)
+    _, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil == openErr {
         t.Fatalf("expected Open to fail on the malformed dsn")
     }
@@ -364,7 +386,7 @@ func TestProvider_OpenRecordsNeitherTheDsnNorItsHeadOnAMisparsedPassword(t *test
         "amqp://localhost:1/Pass@broker/":       "Pass",
         "amqp://melody.invalid:#secret@broker/": "secret",
     } {
-        _, openErr := provider.Open(dsn)
+        _, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
         if nil == openErr {
             t.Fatalf("expected Open of %q to fail", dsn)
         }
@@ -387,18 +409,18 @@ func TestProvider_OpenRecordsNeitherTheDsnNorItsHeadOnAMisparsedPassword(t *test
 }
 
 /* the close is asserted on the deadline it arms on the socket, not on its return: the return is bounded by closeJoinTimeout, thirty seconds, while a plain close arms nothing and never returns over a wedged socket */
-func TestProvider_CloseArmsADeadlineOnAWedgedConnection(t *testing.T) {
+func TestConnection_CloseArmsADeadlineOnAWedgedConnection(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, gated := dialGated(t, dsn)
 
     gated.Wedge()
 
-    go func() { _ = NewProvider(ProviderConfig{}).Close(connection) }()
+    go func() { _ = NewConnection(connection, ConnectionConfig{}).CloseWithContext(context.Background()) }()
 
     awaitArmedDeadline(t, gated)
 }
 
-func TestProvider_CloseWithContextReturnsWithinTheCallersDeadlineWhileTheClientShutdownIsStalled(t *testing.T) {
+func TestConnection_CloseWithContextReturnsWithinTheCallersDeadlineWhileTheClientShutdownIsStalled(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginClientShutdown(t)
 
@@ -408,7 +430,7 @@ func TestProvider_CloseWithContextReturnsWithinTheCallersDeadlineWhileTheClientS
 
     closed := make(chan error, 1)
     go func() {
-        closed <- NewProvider(ProviderConfig{}).CloseWithContext(closeContext, wedge.connection)
+        closed <- NewConnection(wedge.connection, ConnectionConfig{}).CloseWithContext(closeContext)
     }()
 
     select {
@@ -421,13 +443,13 @@ func TestProvider_CloseWithContextReturnsWithinTheCallersDeadlineWhileTheClientS
     }
 }
 
-func TestProvider_CloseWithContextAnswersTheClientsOwnTimeoutWhenNoShutdownIsInProgress(t *testing.T) {
+func TestConnection_CloseWithContextAnswersTheClientsOwnTimeoutWhenNoShutdownIsInProgress(t *testing.T) {
     fake := dialFakeBroker(t)
 
     closeContext, cancel := context.WithTimeout(context.Background(), time.Second)
     defer cancel()
 
-    closeErr := NewProvider(ProviderConfig{}).CloseWithContext(closeContext, fake.connection)
+    closeErr := NewConnection(fake.connection, ConnectionConfig{}).CloseWithContext(closeContext)
     if nil == closeErr || true == strings.Contains(closeErr.Error(), "did not return within the bound") {
         t.Fatalf("expected the client's own answer to an unanswered close, got %v", closeErr)
     }
@@ -435,46 +457,250 @@ func TestProvider_CloseWithContextAnswersTheClientsOwnTimeoutWhenNoShutdownIsInP
 
 /* the fake broker proposes no heartbeat, so the connection runs the client's: the one the provider installed */
 func TestProvider_OpenInstallsTheGivenHeartbeat(t *testing.T) {
-    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
-    if nil != listenErr {
-        t.Fatalf("listen: %v", listenErr)
-    }
-    t.Cleanup(func() { _ = listener.Close() })
-
-    go func() {
-        brokerSide, acceptErr := listener.Accept()
-        if nil != acceptErr {
-            return
-        }
-        t.Cleanup(func() { _ = brokerSide.Close() })
-
-        _ = serveFakeBrokerHandshake(brokerSide)
-    }()
+    address := listenFakeBroker(t)
 
     provider := NewProvider(ProviderConfig{Heartbeat: bound.Of(3 * time.Second)})
 
-    connection, openErr := provider.Open("amqp://guest:guest@" + listener.Addr().String() + "/")
+    connection, openErr := provider.Open(newReconnectRuntime(t.Context()), "amqp://guest:guest@"+address+"/")
     if nil != openErr {
         t.Fatalf("open the fake broker: %v", openErr)
     }
-    t.Cleanup(func() { _ = connection.CloseDeadline(time.Now()) })
+    t.Cleanup(func() { _ = connection.Raw().CloseDeadline(time.Now()) })
 
-    if 3*time.Second != connection.Config.Heartbeat {
-        t.Fatalf("expected the given 3s heartbeat on the connection, got %s", connection.Config.Heartbeat)
+    if 3*time.Second != connection.Raw().Config.Heartbeat {
+        t.Fatalf("expected the given 3s heartbeat on the connection, got %s", connection.Raw().Config.Heartbeat)
     }
 }
 
-/* the fake broker reads nothing after its handshake, so a close is never answered and returns at the bound: the provider's close timeout, not the 30s default */
-func TestProvider_CloseWithContextReturnsWithinTheProvidersCloseTimeout(t *testing.T) {
-    fake := dialFakeBroker(t)
+/* the fake broker reads nothing after its handshake, so a close is never answered and returns at the bound: the provider's close timeout the owner carries, not the 30s default; the second close answers the first's error at once */
+func TestConnection_CloseWithContextIsIdempotentAndCarriesTheProvidersTimeout(t *testing.T) {
+    address := listenFakeBroker(t)
 
     provider := NewProvider(ProviderConfig{CloseTimeout: bound.Of(200 * time.Millisecond)})
 
+    connection, openErr := provider.Open(newReconnectRuntime(t.Context()), "amqp://guest:guest@"+address+"/?heartbeat=0")
+    if nil != openErr {
+        t.Fatalf("open the fake broker: %v", openErr)
+    }
+
     started := time.Now()
-    _ = provider.CloseWithContext(context.Background(), fake.connection)
+    firstErr := connection.CloseWithContext(context.Background())
 
     if elapsed := time.Since(started); 5*time.Second <= elapsed {
         t.Fatalf("expected the close bounded by the provider's 200ms close timeout and a grace, it took %s", elapsed)
+    }
+
+    started = time.Now()
+    secondErr := connection.CloseWithContext(context.Background())
+
+    if elapsed := time.Since(started); 50*time.Millisecond <= elapsed || fmt.Sprint(firstErr) != fmt.Sprint(secondErr) {
+        t.Fatalf("expected the second close to answer the first's error at once, got %v after %s (first %v)", secondErr, elapsed, firstErr)
+    }
+}
+
+func TestConnection_ANilOwnerAndANilRawCloseAsNothing(t *testing.T) {
+    var nilOwner *Connection
+    if closeErr := nilOwner.CloseWithContext(context.Background()); nil != closeErr || nil != nilOwner.Raw() {
+        t.Fatalf("expected a nil owner to close as nothing, got %v", closeErr)
+    }
+
+    if closeErr := (&Connection{}).CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("expected an owner with no connection to close as nothing, got %v", closeErr)
+    }
+}
+
+func TestNewConnection_RefusesANilConnectionAndACloseTimeoutItsRuleRefuses(t *testing.T) {
+    expectPanicNamingTheArgument(t, "raw", func() {
+        NewConnection(nil, ConnectionConfig{})
+    })
+
+    for name, limit := range map[string]bound.Duration{"below the minimum": bound.Of(time.Microsecond), "unlimited": bound.UnlimitedDuration()} {
+        t.Run(name, func(t *testing.T) {
+            expectPanicNamingField(t, "ConnectionConfig.CloseTimeout", func() {
+                NewConnection(&amqp091.Connection{}, ConnectionConfig{CloseTimeout: limit})
+            })
+        })
+    }
+}
+
+func TestProviderOpen_RefusesANilRuntimeNamingTheDoor(t *testing.T) {
+    _, openErr := NewProvider(ProviderConfig{}).Open(nil, "amqp://guest:guest@127.0.0.1:1/")
+    if nil == openErr || false == strings.Contains(fmt.Sprint(exception.LogContext(openErr, exception.LogContextConfig{})), "amqp.Provider.Open") {
+        t.Fatalf("expected the nil runtime refused naming the door, got %v", openErr)
+    }
+}
+
+func TestProviderOpen_ADoneContextRefusesBeforeTheDial(t *testing.T) {
+    address, accepts := listenSilently(t)
+
+    doneContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    _, openErr := NewProvider(ProviderConfig{}).Open(newReconnectRuntime(doneContext), "amqp://guest:guest@"+address+"/")
+    if nil == openErr || false == strings.Contains(openErr.Error(), "the caller's context is done") || false == errors.Is(openErr, context.Canceled) {
+        t.Fatalf("expected the done context refused before the dial with its cause, got %v", openErr)
+    }
+
+    time.Sleep(50 * time.Millisecond)
+
+    if 0 != accepts.Load() {
+        t.Fatalf("expected no dial under a done context, the listener accepted %d", accepts.Load())
+    }
+}
+
+func TestProviderOpen_AContextEndedDuringTheHandshakeReturnsAtOnce(t *testing.T) {
+    address, accepts := listenSilently(t)
+
+    dialContext, cancel := context.WithCancel(context.Background())
+    go func() {
+        for 0 == accepts.Load() {
+            time.Sleep(5 * time.Millisecond)
+        }
+
+        cancel()
+    }()
+
+    started := time.Now()
+    _, openErr := NewProvider(ProviderConfig{}).Open(newReconnectRuntime(dialContext), "amqp://guest:guest@"+address+"/")
+
+    if elapsed := time.Since(started); 5*time.Second <= elapsed {
+        t.Fatalf("expected the open to return when the context ended, it took %s", elapsed)
+    }
+
+    if nil == openErr || false == strings.Contains(openErr.Error(), "amqp connection failed") || false == errors.Is(openErr, context.Canceled) {
+        t.Fatalf("expected the failed handshake to carry the context's cause, got %v", openErr)
+    }
+}
+
+func TestProviderConfig_DialTimeoutRule(t *testing.T) {
+    if 30*time.Second != NewProvider(ProviderConfig{}).dialTimeout {
+        t.Fatalf("expected a 30s dial timeout by default, got %s", NewProvider(ProviderConfig{}).dialTimeout)
+    }
+
+    if bound.TimeoutMinimum != NewProvider(ProviderConfig{DialTimeout: bound.Of(bound.TimeoutMinimum)}).dialTimeout {
+        t.Fatal("expected the minimum dial timeout admitted")
+    }
+
+    for name, limit := range map[string]bound.Duration{"below the minimum": bound.Of(time.Microsecond), "unlimited": bound.UnlimitedDuration()} {
+        t.Run(name, func(t *testing.T) {
+            expectPanicNamingField(t, "ProviderConfig.DialTimeout", func() {
+                NewProvider(ProviderConfig{DialTimeout: limit})
+            })
+        })
+    }
+}
+
+func TestProviderOpen_DialTimeoutEndsASilentHandshake(t *testing.T) {
+    address, _ := listenSilently(t)
+
+    started := time.Now()
+    _, openErr := NewProvider(ProviderConfig{DialTimeout: bound.Of(300 * time.Millisecond)}).Open(newReconnectRuntime(t.Context()), "amqp://guest:guest@"+address+"/")
+
+    if elapsed := time.Since(started); 5*time.Second <= elapsed {
+        t.Fatalf("expected the silent handshake ended by the 300ms dial timeout, it took %s", elapsed)
+    }
+
+    if nil == openErr || false == errors.Is(openErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the dial timeout's cause on the refusal, got %v", openErr)
+    }
+}
+
+func TestProviderDialer_RunsUnderTheContextHanded(t *testing.T) {
+    address, accepts := listenSilently(t)
+
+    dialer := NewProvider(ProviderConfig{}).Dialer("amqp://guest:guest@" + address + "/")
+
+    dialContext, cancel := context.WithCancel(context.Background())
+    go func() {
+        for 0 == accepts.Load() {
+            time.Sleep(5 * time.Millisecond)
+        }
+
+        cancel()
+    }()
+
+    started := time.Now()
+    if _, dialErr := dialer(dialContext); nil == dialErr || false == errors.Is(dialErr, context.Canceled) {
+        t.Fatalf("expected the dial ended by its context, got %v", dialErr)
+    }
+
+    if elapsed := time.Since(started); 5*time.Second <= elapsed {
+        t.Fatalf("expected the dial to return when its context ended, it took %s", elapsed)
+    }
+}
+
+func TestProviderOpen_TlsConfigAndConnectionNameReachTheClientConfig(t *testing.T) {
+    tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+    provider := NewProvider(ProviderConfig{TlsConfig: tlsConfig, ConnectionName: "orders-worker"})
+
+    tlsConfig.MinVersion = tls.VersionTLS10
+
+    config := provider.clientConfig(nil)
+
+    if nil == config.TLSClientConfig || provider.tlsConfig == config.TLSClientConfig || tls.VersionTLS12 != config.TLSClientConfig.MinVersion {
+        t.Fatalf("expected a clone of the tls configuration copied at NewProvider handed to the client, got %+v", config.TLSClientConfig)
+    }
+
+    if "orders-worker" != config.Properties["connection_name"] || nil == config.Properties["product"] {
+        t.Fatalf("expected the connection name beside the client's own properties, got %v", config.Properties)
+    }
+
+    if plain := NewProvider(ProviderConfig{}).clientConfig(nil); nil != plain.TLSClientConfig || 0 != len(plain.Properties) {
+        t.Fatalf("expected the client's defaults without a tls configuration or a name, got %+v", plain)
+    }
+}
+
+func TestProvider_TlsConfigWithAPlainDsnIsRefused(t *testing.T) {
+    provider := NewProvider(ProviderConfig{TlsConfig: &tls.Config{}})
+
+    _, openErr := provider.Open(newReconnectRuntime(t.Context()), "amqp://guest:guest@127.0.0.1:1/")
+    expectErrorNamingField(t, openErr, "ProviderConfig.TlsConfig")
+
+    expectPanicNamingField(t, "ProviderConfig.TlsConfig", func() {
+        provider.Dialer("amqp://guest:guest@127.0.0.1:1/")
+    })
+
+    provider.Dialer("amqps://guest:guest@127.0.0.1:1/")
+}
+
+func TestProviderDialer_RefusesAnEmptyDsnAtWiring(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatal("expected the empty dsn refused when the dialer is built")
+        }
+    }()
+
+    NewProvider(ProviderConfig{}).Dialer("")
+}
+
+func TestProviderConfig_ConnectionNameRule(t *testing.T) {
+    for name, connectionName := range map[string]string{"too long": strings.Repeat("a", 256), "a control character": "orders\nworker"} {
+        t.Run(name, func(t *testing.T) {
+            expectPanicNamingField(t, "ProviderConfig.ConnectionName", func() {
+                NewProvider(ProviderConfig{ConnectionName: connectionName})
+            })
+        })
+    }
+
+    NewProvider(ProviderConfig{ConnectionName: strings.Repeat("a", 255)})
+}
+
+func TestConnectionSource_ANilConnectionAndANilDialerAreRefusedAtTheDoor(t *testing.T) {
+    for door, callback := range map[string]func(){
+        "amqp.FromConnection": func() { FromConnection(nil) },
+        "amqp.FromConnection with no connection": func() { FromConnection(&Connection{}) },
+        "amqp.FromDialer": func() { FromDialer(nil) },
+    } {
+        t.Run(door, func(t *testing.T) {
+            defer func() {
+                recoveredErr, isError := recover().(error)
+                if false == isError || false == strings.HasPrefix(door, fmt.Sprint(exception.LogContext(recoveredErr, exception.LogContextConfig{})["door"])) {
+                    t.Fatalf("expected a refusal naming the door %s, got %v", door, recoveredErr)
+                }
+            }()
+
+            callback()
+        })
     }
 }
 

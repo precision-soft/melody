@@ -78,16 +78,12 @@ var errBrokerVerdict = errors.New("the broker refused the message")
 /* a nack says the broker cannot take a message now, so it is an outage and never a verdict */
 var errBrokerNack = errors.New("the broker nacked the publish")
 
-/* NewTransport sends and consumes the messages registry knows over queue; an empty queue or a nil registry panics naming the argument. */
-func NewTransport(queue string, registry *MessageRegistry, config TransportConfig) *Transport {
-    return newTransport(queue, registry, config, defaultComponentParent)
+/* NewTransport sends and consumes the messages registry knows over queue, on the connection source handed; an empty queue, a nil registry or the zero source panics naming the argument. */
+func NewTransport(queue string, registry *MessageRegistry, source ConnectionSource, config TransportConfig) *Transport {
+    return newTransport(queue, registry, source, config, defaultComponentParent)
 }
 
-func newTransport(queue string, registry *MessageRegistry, config TransportConfig, parent componentParent) *Transport {
-    if nil == config.Connection && nil == config.Dialer {
-        exception.Panic(exception.NewError("amqp transport needs a connection or a dialer", exceptioncontract.Context{"field": "TransportConfig.Connection", "alternative": "TransportConfig.Dialer"}, nil))
-    }
-
+func newTransport(queue string, registry *MessageRegistry, source ConnectionSource, config TransportConfig, parent componentParent) *Transport {
     if "" == queue {
         exception.Panic(exception.NewError("amqp transport queue is empty", exceptioncontract.Context{"argument": "queue"}, nil))
     }
@@ -95,6 +91,8 @@ func newTransport(queue string, registry *MessageRegistry, config TransportConfi
     if nil == registry {
         exception.Panic(exception.NewError("amqp transport registry is nil", exceptioncontract.Context{"argument": "registry"}, nil))
     }
+
+    refuseEmptySource(source, "amqp transport connection source is empty")
 
     serializerInstance := config.Serializer
     if nil == serializerInstance {
@@ -129,9 +127,9 @@ func newTransport(queue string, registry *MessageRegistry, config TransportConfi
     delayBuckets := resolveDelayBuckets(config.DelayBuckets)
 
     return &Transport{
-        connection:          config.Connection,
-        connectedOnce:       nil != config.Connection,
-        dialer:              config.Dialer,
+        connection:          source.connection.Raw(),
+        connectedOnce:       nil != source.connection,
+        dialer:              source.dialer,
         queue:               queue,
         exchange:            config.Exchange,
         routingKey:          config.RoutingKey,
@@ -148,10 +146,8 @@ func newTransport(queue string, registry *MessageRegistry, config TransportConfi
     }
 }
 
-/* TransportConfig declares one transport beside its queue and registry; Connection or Dialer is required. */
+/* TransportConfig declares one transport beside its queue, its registry and its connection source. */
 type TransportConfig struct {
-    Connection *amqp091.Connection
-    Dialer     func() (*amqp091.Connection, error)
     Exchange   string
     RoutingKey string
     /* Prefetch is the unacknowledged deliveries in flight: 10 by default, 1 to 65535. */
@@ -174,7 +170,7 @@ type TransportConfig struct {
 type Transport struct {
     connection *amqp091.Connection
     connectedOnce bool
-    dialer        func() (*amqp091.Connection, error)
+    dialer        Dialer
     queue         string
     exchange      string
     routingKey    string
@@ -577,24 +573,21 @@ func (instance *Transport) connect() (*amqp091.Connection, error) {
     return connection, nil
 }
 
+/* dialInterruptibly cancels the dial's context when the close stops waiting for it; the drain stays for a dialer that ignores its context. */
 func (instance *Transport) dialInterruptibly() (*amqp091.Connection, error) {
+    dialContext, cancelDial := context.WithCancel(context.Background())
     outcome := make(chan dialOutcome, 1)
     go func() {
-        /* a panic in the application's dialer has no handler on this goroutine, so it is the dial's failure */
-        defer func() {
-            if recovered := recover(); nil != recovered {
-                outcome <- dialOutcome{err: exception.NewError("amqp dialer panicked", map[string]any{"queue": instance.queue, "panic": fmt.Sprint(recovered)}, exception.PanicCause(recovered))}
-            }
-        }()
-
-        connection, dialErr := instance.dialer()
-        outcome <- dialOutcome{connection: connection, err: dialErr}
+        outcome <- runDialer(dialContext, instance.dialer, "amqp dialer panicked", map[string]any{"queue": instance.queue})
     }()
 
     select {
     case result := <-outcome:
+        cancelDial()
+
         return result.connection, result.err
     case <-instance.closeSignal:
+        cancelDial()
         drainAbandonedDial(outcome, instance.joinBound)
 
         return nil, exception.NewError("amqp transport is closing", nil, nil)

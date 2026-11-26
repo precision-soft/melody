@@ -84,7 +84,7 @@ const (
     outboxRelayLockTtl = 30 * time.Second
 )
 
-/* buildOutboxTransport hands the transport ONLY a dialer, no pre-opened connection: the transport closes a connection it dialed itself, while one opened here and handed over would be owned by nobody — the exact leak registering the transport exists to close. The first publish dials; a bad DSN surfaces there through the relay's own backoff-and-retry loop rather than killing the resolution. Without AMQP_DSN no transport is built and the resolution is refused by name, message.ErrTransportNotConfigured: a process-local queue would hold what the relay publishes with nothing in the process reading it, and the rows stay in the outbox until a broker is configured. */
+/* buildOutboxTransport hands the transport a dialer, no pre-opened connection: the transport owns and closes each connection it dials, while one opened here and handed over would be owned by nobody — the exact leak registering the transport exists to close. The first publish dials; a bad DSN surfaces there through the relay's own backoff-and-retry loop rather than killing the resolution. Without AMQP_DSN no transport is built and the resolution is refused by name, message.ErrTransportNotConfigured: a process-local queue would hold what the relay publishes with nothing in the process reading it, and the rows stay in the outbox until a broker is configured. */
 func (instance *Module) buildOutboxTransport() (melodymessagebuscontract.Transport, error) {
     dsn := instance.parameterValue(parameterAmqpDsn)
     if "" == dsn {
@@ -94,9 +94,7 @@ func (instance *Module) buildOutboxTransport() (melodymessagebuscontract.Transpo
     registry := amqp.NewMessageRegistry()
     amqp.RegisterMessage[message.OutboxNotice](registry, outboxNoticeType)
 
-    return amqp.NewTransport("outbox_notice", registry, amqp.TransportConfig{
-        Dialer:     amqp.NewProvider(amqp.ProviderConfig{}).Dialer(dsn),
-    }), nil
+    return amqp.NewTransport("outbox_notice", registry, amqp.FromDialer(amqp.NewProvider(amqp.ProviderConfig{}).Dialer(dsn)), amqp.TransportConfig{}), nil
 }
 
 type outboxNoticeCodec struct{}

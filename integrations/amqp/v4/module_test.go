@@ -1,15 +1,28 @@
 package amqp
 
 import (
+    "context"
     "testing"
     "time"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
+    messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
     amqp091 "github.com/rabbitmq/amqp091-go"
 )
+
+type transportProviders = map[string]func(resolver containercontract.Resolver) (*Transport, error)
+
+func staticConnectionFactory(resolver containercontract.Resolver) (*Connection, error) {
+    return NewConnection(&amqp091.Connection{}, ConnectionConfig{}), nil
+}
+
+func emptyTransportProvider(resolver containercontract.Resolver) (*Transport, error) {
+    return &Transport{}, nil
+}
 
 type spyServiceRegistrar struct {
     names []string
@@ -66,8 +79,8 @@ func TestModule_RegisterServices(t *testing.T) {
 
     registrar = &spyServiceRegistrar{}
     NewModule(ModuleConfig{
-        Connection: &amqp091.Connection{},
-        Transports: map[string]*Transport{"orders": {}},
+        Connection: staticConnectionFactory,
+        Transports: transportProviders{"orders": emptyTransportProvider},
     }).RegisterServices(registrar)
 
     if false == containsName(registrar.names, ServiceConnection) {
@@ -99,29 +112,68 @@ func TestModule_ANilTransportIsRefusedNamingItBeforeAnythingIsRegistered(t *test
     }()
 
     NewModule(ModuleConfig{
-        Connection: &amqp091.Connection{},
-        Transports: map[string]*Transport{"discarded": nil},
+        Connection: staticConnectionFactory,
+        Transports: transportProviders{"discarded": nil},
     }).RegisterServices(registrar)
 }
 
-func TestModule_ACloseTimeoutWithNoConnectionIsRefusedNamingIt(t *testing.T) {
-    expectPanicNamingField(t, "ModuleConfig.CloseTimeout", func() {
-        NewModule(ModuleConfig{CloseTimeout: bound.Of(time.Second)}).RegisterServices(&spyServiceRegistrar{})
-    })
+/* the fake broker never answers the close, so the container's teardown of the registered connection ends at the close timeout the owner carries from its provider, the module having none of its own */
+func TestModule_HasNoCloseTimeoutOfItsOwn(t *testing.T) {
+    address := listenFakeBroker(t)
+    provider := NewProvider(ProviderConfig{CloseTimeout: bound.Of(200 * time.Millisecond)})
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    NewModule(ModuleConfig{
+        Connection: func(resolver containercontract.Resolver) (*Connection, error) {
+            return provider.Open(resolver.Runtime(), "amqp://guest:guest@"+address+"/?heartbeat=0")
+        },
+    }).RegisterServices(&containerRegistrar{serviceContainer: serviceContainer})
+
+    ConnectionMustFromResolver(t.Context(), serviceContainer)
+
+    started := time.Now()
+    _ = serviceContainer.(containercontract.ContextCloser).CloseWithContext(context.Background())
+
+    if elapsed := time.Since(started); 5*time.Second <= elapsed {
+        t.Fatalf("expected the teardown bounded by the provider's 200ms close timeout, it took %s", elapsed)
+    }
 }
 
-func TestModule_AnAbsentCloseTimeoutWithNoConnectionRegistersNothing(t *testing.T) {
-    registrar := &spyServiceRegistrar{}
-    NewModule(ModuleConfig{CloseTimeout: bound.Duration{}}).RegisterServices(registrar)
+/* a transport provider resolves the shared connection, which a transport built at wiring could not */
+func TestModule_ATransportProviderBuildsOverTheResolvedConnection(t *testing.T) {
+    raw := &amqp091.Connection{}
 
-    if 0 != len(registrar.names) {
-        t.Fatalf("expected no services, got %v", registrar.names)
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    NewModule(ModuleConfig{
+        Connection: func(resolver containercontract.Resolver) (*Connection, error) {
+            return NewConnection(raw, ConnectionConfig{}), nil
+        },
+        Transports: transportProviders{"melody.amqp.v4.orders": func(resolver containercontract.Resolver) (*Transport, error) {
+            return NewTransport("melody.amqp.v4.orders", NewMessageRegistry(), FromConnection(ConnectionMustFromResolver(resolver.Runtime().Context(), resolver)), TransportConfig{}), nil
+        }},
+    }).RegisterServices(&containerRegistrar{serviceContainer: serviceContainer})
+
+    transport, isTransport := TransportMustFromResolver(t.Context(), serviceContainer, "melody.amqp.v4.orders").(*Transport)
+    if false == isTransport || raw != transport.connection || true == transport.ownsConnection {
+        t.Fatalf("expected the transport to borrow the registered connection, got %+v", transport)
+    }
+}
+
+func TestModule_ATransportProviderAnsweringNoTransportIsRefusedAtResolution(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    NewModule(ModuleConfig{
+        Transports: transportProviders{"orders": func(resolver containercontract.Resolver) (*Transport, error) { return nil, nil }},
+    }).RegisterServices(&containerRegistrar{serviceContainer: serviceContainer})
+
+    _, resolveErr := container.FromResolver[messagebuscontract.Transport](t.Context(), serviceContainer, "orders")
+    if nil == resolveErr || false == errorChainContains(resolveErr, "the amqp transport provider answered no transport and no error") {
+        t.Fatalf("expected a provider answering no transport refused naming itself, got %v", resolveErr)
     }
 }
 
 func TestModule_TransportsWithNoConnectionAreRegistered(t *testing.T) {
     registrar := &spyServiceRegistrar{}
-    NewModule(ModuleConfig{Transports: map[string]*Transport{"orders": {}}}).RegisterServices(registrar)
+    NewModule(ModuleConfig{Transports: transportProviders{"orders": emptyTransportProvider}}).RegisterServices(registrar)
 
     if 1 != len(registrar.names) || "orders" != registrar.names[0] {
         t.Fatalf("expected only the orders transport service, got %v", registrar.names)
@@ -138,7 +190,7 @@ func TestModule_SeveralNilTransportsAreRefusedNamingTheFirstInNameOrder(t *testi
                 }
             }()
 
-            NewModule(ModuleConfig{Transports: map[string]*Transport{"gamma": nil, "alpha": nil, "beta": nil, "delta": nil}}).RegisterServices(&spyServiceRegistrar{})
+            NewModule(ModuleConfig{Transports: transportProviders{"gamma": nil, "alpha": nil, "beta": nil, "delta": nil}}).RegisterServices(&spyServiceRegistrar{})
         }()
     }
 }

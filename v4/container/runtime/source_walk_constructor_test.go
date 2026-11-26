@@ -24,8 +24,6 @@ var constructorArgumentRuleException = map[string]string{
 var configRequiredFieldException = map[string]string{
     "v4/lock:InMemoryLockerConfig.Clock":                             "optional, the system clock when left out; only a typed nil is refused",
     "v4/translation:ManagerConfig.FallbackLocales":                   "required only beside catalogs, and an empty entry of the list is refused by its index",
-    "integrations/amqp/v4:TransportConfig.Connection":                "one of Connection or Dialer, the connection source the amqp module reshapes",
-    "integrations/amqp/v4:ServerSentEventBackplaneConfig.Connection": "one of Connection or Dialer, the connection source the amqp module reshapes",
     "integrations/bunorm/v4/audit:RecorderConfig.Logger":             "the required logger convention is decided once for every module",
     "integrations/bunorm/v4/audit:AsyncStorageConfig.Logger":         "the required logger convention is decided once for every module",
     "integrations/bunorm/v4/encrypt:ModuleConfig.Cipher":             "a module's one argument is its declaration",

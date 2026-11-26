@@ -19,10 +19,9 @@ import (
 
 func TestServerSentEventBackplane_PublishAfterCloseDoesNotRetry(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Dialer: func() (*amqp091.Connection, error) {
+    backplane := NewServerSentEventBackplane(hub, FromDialer(func(dialContext context.Context) (*Connection, error) {
             return nil, errors.New("no broker")
-        },
+        }), ServerSentEventBackplaneConfig{
     })
 
     if closeErr := backplane.CloseWithContext(t.Context()); nil != closeErr {
@@ -49,15 +48,14 @@ func TestServerSentEventBackplane_CloseDoesNotDeadlockDuringReconnect(t *testing
     dialUnblock := make(chan struct{})
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Dialer: func() (*amqp091.Connection, error) {
+    backplane := NewServerSentEventBackplane(hub, FromDialer(func(dialContext context.Context) (*Connection, error) {
             select {
             case dialStarted <- struct{}{}:
             default:
             }
             <-dialUnblock
             return nil, errors.New("dial cancelled")
-        },
+        }), ServerSentEventBackplaneConfig{
     })
 
     select {
@@ -87,15 +85,14 @@ func TestServerSentEventBackplane_CloseReturnsWhileDialStillBlocked(t *testing.T
     dialUnblock := make(chan struct{})
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Dialer: func() (*amqp091.Connection, error) {
+    backplane := NewServerSentEventBackplane(hub, FromDialer(func(dialContext context.Context) (*Connection, error) {
             select {
             case dialStarted <- struct{}{}:
             default:
             }
             <-dialUnblock
             return nil, errors.New("dial released")
-        },
+        }), ServerSentEventBackplaneConfig{
     })
 
     select {
@@ -129,20 +126,21 @@ func TestServerSentEventBackplane_ReplicatesBroadcastToAnotherInstance(t *testin
     }
 
     provider := NewProvider(ProviderConfig{})
-    connection, openErr := provider.Open(dsn)
+    connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
     }
-    defer provider.Close(connection)
+    connection := connectionOwner.Raw()
+    defer connectionOwner.CloseWithContext(context.Background())
 
     exchange := "melody.sse.test"
 
     hubA := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplaneA := NewServerSentEventBackplane(hubA, ServerSentEventBackplaneConfig{Connection: connection, Exchange: exchange})
+    backplaneA := NewServerSentEventBackplane(hubA, borrowedSource(connection), ServerSentEventBackplaneConfig{Exchange: exchange})
     defer backplaneA.CloseWithContext(context.Background())
 
     hubB := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplaneB := NewServerSentEventBackplane(hubB, ServerSentEventBackplaneConfig{Connection: connection, Exchange: exchange})
+    backplaneB := NewServerSentEventBackplane(hubB, borrowedSource(connection), ServerSentEventBackplaneConfig{Exchange: exchange})
     defer backplaneB.CloseWithContext(context.Background())
 
     subscriber := hubB.Subscribe("orders")
@@ -176,14 +174,15 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
     }
 
     provider := NewProvider(ProviderConfig{})
-    connection, openErr := provider.Open(dsn)
+    connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
     }
-    defer provider.Close(connection)
+    connection := connectionOwner.Raw()
+    defer connectionOwner.CloseWithContext(context.Background())
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{Connection: connection, Exchange: "melody.sse.test.echo"})
+    backplane := NewServerSentEventBackplane(hub, borrowedSource(connection), ServerSentEventBackplaneConfig{Exchange: "melody.sse.test.echo"})
     defer backplane.CloseWithContext(context.Background())
 
     subscriber := hub.Subscribe("orders")
@@ -258,14 +257,14 @@ func TestServerSentEventBackplane_EnsurePublishChannel_ReopensClosedChannel(t *t
     }
 
     provider := NewProvider(ProviderConfig{})
-    connection, openErr := provider.Open(dsn)
+    connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
     }
-    defer provider.Close(connection)
+    connection := connectionOwner.Raw()
+    defer connectionOwner.CloseWithContext(context.Background())
 
-    backplane := NewServerSentEventBackplane(melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), ServerSentEventBackplaneConfig{
-        Connection: connection,
+    backplane := NewServerSentEventBackplane(melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), borrowedSource(connection), ServerSentEventBackplaneConfig{
         Exchange:   "melody.sse.reopen-publish",
     })
 
@@ -306,8 +305,7 @@ func TestBackplane_TerminalStopIsReportedThroughTheConfiguredLogger(t *testing.T
     logger := &recordingBackplaneLogger{}
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Connection: connection,
+    backplane := NewServerSentEventBackplane(hub, borrowedSource(connection), ServerSentEventBackplaneConfig{
         Logger:     logger,
     })
     defer backplane.CloseWithContext(context.Background())
@@ -397,8 +395,7 @@ func TestServerSentEventBackplane_PublishReturnsWithinTheCallTimeoutOnAWedgedWri
     connection, gated := dialGated(t, dsn)
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Connection:  connection,
+    backplane := NewServerSentEventBackplane(hub, borrowedSource(connection), ServerSentEventBackplaneConfig{
         Exchange:    "melody.sse.test.wedge",
         CallTimeout: bound.Of(200 * time.Millisecond),
     })
@@ -432,8 +429,7 @@ func TestServerSentEventBackplane_ATimedOutPublishOnAnOwnedConnectionRedialsOnTh
     dialer := newGatedDialer(t, dsn)
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Dialer:      dialer.Dial,
+    backplane := NewServerSentEventBackplane(hub, FromDialer(dialer.Dial), ServerSentEventBackplaneConfig{
         Exchange:    "melody.sse.test.wedge",
         CallTimeout: bound.Of(200 * time.Millisecond),
     })
@@ -486,10 +482,10 @@ func TestServerSentEventBackplane_ACutOwnedConnectionIsLetGoBeforeTheAbandonRetu
         connection:     wedge.connection,
         publishChannel: wedge.channel,
         consumeChannel: wedge.channel,
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             dials++
 
-            return redialed.connection, nil
+            return ownerOf(redialed.connection), nil
         },
     }
     instance.joinBound = 2 * time.Second
@@ -523,8 +519,7 @@ func TestServerSentEventBackplane_ASecondPublishOnAWedgedCallerOwnedConnectionIs
     connection, gated := dialGated(t, dsn)
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Connection:  connection,
+    backplane := NewServerSentEventBackplane(hub, borrowedSource(connection), ServerSentEventBackplaneConfig{
         Exchange:    "melody.sse.test.wedge",
         CallTimeout: bound.Of(200 * time.Millisecond),
     })
@@ -561,8 +556,7 @@ func TestServerSentEventBackplane_CloseReturnsWhileAPublishWriteIsWedged(t *test
     dialer := newGatedDialer(t, dsn)
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Dialer:       dialer.Dial,
+    backplane := NewServerSentEventBackplane(hub, FromDialer(dialer.Dial), ServerSentEventBackplaneConfig{
         Exchange:     "melody.sse.test.wedge",
         CallTimeout:  bound.Of(200 * time.Millisecond),
         CloseTimeout: bound.Of(time.Second),
@@ -590,8 +584,7 @@ func TestServerSentEventBackplane_HubShutdownReturnsWhileABroadcastIsWedged(t *t
     connection, gated := dialGated(t, dsn)
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Connection:  connection,
+    backplane := NewServerSentEventBackplane(hub, borrowedSource(connection), ServerSentEventBackplaneConfig{
         Exchange:    "melody.sse.test.wedge",
         CallTimeout: bound.Of(200 * time.Millisecond),
     })
@@ -629,8 +622,7 @@ func TestServerSentEventBackplane_CloseReturnsWhenTheSocketWedgedWhileIdle(t *te
     dialer := newGatedDialer(t, dsn)
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Dialer:       dialer.Dial,
+    backplane := NewServerSentEventBackplane(hub, FromDialer(dialer.Dial), ServerSentEventBackplaneConfig{
         Exchange:     "melody.sse.test.wedge",
         CallTimeout:  bound.Of(200 * time.Millisecond),
         CloseTimeout: bound.Of(time.Second),
@@ -654,8 +646,7 @@ func TestServerSentEventBackplane_CloseNamesTheBlockedWriteOnAWedgedCallerOwnedC
     connection, gated := dialGated(t, dsn)
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Connection:  connection,
+    backplane := NewServerSentEventBackplane(hub, borrowedSource(connection), ServerSentEventBackplaneConfig{
         Exchange:    "melody.sse.test.wedge",
         CallTimeout: bound.Of(200 * time.Millisecond),
     })
@@ -709,8 +700,7 @@ func TestServerSentEventBackplane_IsClosingAnswersWhileAChannelCloseIsOnAWedgedS
     connection, gated := dialGated(t, dsn)
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Connection:  connection,
+    backplane := NewServerSentEventBackplane(hub, borrowedSource(connection), ServerSentEventBackplaneConfig{
         Exchange:    "melody.sse.test.mutex",
         CallTimeout: bound.Of(200 * time.Millisecond),
     })
@@ -770,8 +760,7 @@ func TestServerSentEventBackplane_CloseClosesTheChannelsWhenNoWriteIsInFlight(t 
     connection, _ := dialGated(t, dsn)
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Connection:  connection,
+    backplane := NewServerSentEventBackplane(hub, borrowedSource(connection), ServerSentEventBackplaneConfig{
         Exchange:    "melody.sse.test.wedge",
         CallTimeout: bound.Of(200 * time.Millisecond),
     })
@@ -815,8 +804,7 @@ func TestServerSentEventBackplane_ABroadcastQueuedBehindAnotherIsNotReportedAsAW
     connection, _ := dialGated(t, dsn)
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Connection:  connection,
+    backplane := NewServerSentEventBackplane(hub, borrowedSource(connection), ServerSentEventBackplaneConfig{
         Exchange:    "melody.sse.test.wedge",
         CallTimeout: bound.Of(200 * time.Millisecond),
     })
@@ -864,8 +852,7 @@ func TestServerSentEventBackplane_ABroadcastAbandonedWhileQueuedIsNeverWritten(t
     connection, _ := dialGated(t, dsn)
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Connection:  connection,
+    backplane := NewServerSentEventBackplane(hub, borrowedSource(connection), ServerSentEventBackplaneConfig{
         Exchange:    "melody.sse.test.wedge",
         CallTimeout: bound.Of(200 * time.Millisecond),
     })
@@ -926,8 +913,7 @@ func TestServerSentEventBackplane_CloseWaitsForACallerOwnedChannelCloseBeyondThe
     connection, gated := dialGated(t, dsn)
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Connection:  connection,
+    backplane := NewServerSentEventBackplane(hub, borrowedSource(connection), ServerSentEventBackplaneConfig{
         Exchange:    "melody.sse.test.slowclose",
         CallTimeout: bound.Of(200 * time.Millisecond),
     })
@@ -953,8 +939,7 @@ func TestServerSentEventBackplane_ResolveExpiredWriteAnswersAWriteThatAlreadyRet
     dialer := newGatedDialer(t, dsn)
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Dialer:      dialer.Dial,
+    backplane := NewServerSentEventBackplane(hub, FromDialer(dialer.Dial), ServerSentEventBackplaneConfig{
         Exchange:    "melody.sse.test.wedge",
         CallTimeout: bound.Of(200 * time.Millisecond),
     })
@@ -1035,8 +1020,7 @@ func TestServerSentEventBackplane_CloseGivesAnOwnedConnectionItsHandshakeWhenNot
     dialer := newGatedDialer(t, dsn)
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Dialer:      dialer.Dial,
+    backplane := NewServerSentEventBackplane(hub, FromDialer(dialer.Dial), ServerSentEventBackplaneConfig{
         Exchange:    "melody.sse.test.wedge",
         CallTimeout: bound.Of(200 * time.Millisecond),
     })
@@ -1066,8 +1050,7 @@ func TestServerSentEventBackplane_CloseWithContextClosesAnOwnedConnectionUnderAC
     dialer := newGatedDialer(t, dsn)
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Dialer:      dialer.Dial,
+    backplane := NewServerSentEventBackplane(hub, FromDialer(dialer.Dial), ServerSentEventBackplaneConfig{
         Exchange:    "melody.sse.test.spent",
         CallTimeout: bound.Of(200 * time.Millisecond),
     })
@@ -1098,8 +1081,7 @@ func TestServerSentEventBackplane_CloseWithContextClosesAnOwnedConnectionUnderAS
     dialer := newGatedDialer(t, dsn)
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Dialer:      dialer.Dial,
+    backplane := NewServerSentEventBackplane(hub, FromDialer(dialer.Dial), ServerSentEventBackplaneConfig{
         Exchange:    "melody.sse.test.spent.deadline",
         CallTimeout: bound.Of(200 * time.Millisecond),
     })
@@ -1122,8 +1104,7 @@ func TestServerSentEventBackplane_CloseWithContextStillReportsACutWedgedWrite(t 
     dialer := newGatedDialer(t, dsn)
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Dialer:      dialer.Dial,
+    backplane := NewServerSentEventBackplane(hub, FromDialer(dialer.Dial), ServerSentEventBackplaneConfig{
         Exchange:    "melody.sse.test.spent.wedged",
         CallTimeout: bound.Of(200 * time.Millisecond),
     })
@@ -1179,7 +1160,7 @@ func TestServerSentEventBackplane_CloseWithContextStillReportsACutWedgedWrite(t 
 
 func TestNewServerSentEventBackplane_ResolvesEveryLimitToItsDefault(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{Dialer: refusingDialer})
+    backplane := NewServerSentEventBackplane(hub, FromDialer(refusingDialer), ServerSentEventBackplaneConfig{})
     defer backplane.CloseWithContext(context.Background())
 
     if time.Second != backplane.callTimeout || closeJoinTimeout != backplane.joinBound || defaultReconnect != backplane.reconnect {
@@ -1190,8 +1171,7 @@ func TestNewServerSentEventBackplane_ResolvesEveryLimitToItsDefault(t *testing.T
 func TestNewServerSentEventBackplane_AGivenConfigReachesTheBackplane(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     logger := &recordingBackplaneLogger{}
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Dialer:       refusingDialer,
+    backplane := NewServerSentEventBackplane(hub, FromDialer(refusingDialer), ServerSentEventBackplaneConfig{
         Exchange:     "melody.custom",
         Logger:       logger,
         Reconnect:    ReconnectConfig{Backoff: bound.Backoff{Factor: 3}},
@@ -1209,21 +1189,14 @@ func TestNewServerSentEventBackplane_AGivenConfigReachesTheBackplane(t *testing.
     }
 }
 
-func TestNewServerSentEventBackplane_AMissingDependencyIsRefusedNamingTheField(t *testing.T) {
-    expectPanicNamingField(t, "ServerSentEventBackplaneConfig.Connection", func() {
-        NewServerSentEventBackplane(melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), ServerSentEventBackplaneConfig{})
-    })
-
-}
-
 func TestNewServerSentEventBackplane_RefusesANilHubNamingTheArgument(t *testing.T) {
     cases := []struct {
         name     string
         build    func()
         argument string
     }{
-        {"a nil hub", func() { NewServerSentEventBackplane(nil, ServerSentEventBackplaneConfig{Dialer: refusingDialer}) }, "hub"},
-        {"a nil hub through a provider", func() { NewProvider(ProviderConfig{}).NewServerSentEventBackplane(nil, ServerSentEventBackplaneConfig{Dialer: refusingDialer}) }, "hub"},
+        {"a nil hub", func() { NewServerSentEventBackplane(nil, FromDialer(refusingDialer), ServerSentEventBackplaneConfig{}) }, "hub"},
+        {"a nil hub through a provider", func() { NewProvider(ProviderConfig{}).NewServerSentEventBackplane(nil, FromDialer(refusingDialer), ServerSentEventBackplaneConfig{}) }, "hub"},
     }
 
     for _, testCase := range cases {
@@ -1236,7 +1209,7 @@ func TestNewServerSentEventBackplane_RefusesANilHubNamingTheArgument(t *testing.
 func TestNewServerSentEventBackplane_ATypedNilLoggerRecordsNothing(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     var typedNil *recordingBackplaneLogger
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{Dialer: refusingDialer, Logger: typedNil})
+    backplane := NewServerSentEventBackplane(hub, FromDialer(refusingDialer), ServerSentEventBackplaneConfig{Logger: typedNil})
     defer backplane.CloseWithContext(context.Background())
 
     if nil != backplane.logger {
@@ -1261,10 +1234,9 @@ func TestNewServerSentEventBackplane_ARefusedLimitLeavesTheHubWithoutABackplane(
         t.Run(testCase.name, func(t *testing.T) {
             hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
             config := testCase.config
-            config.Dialer = refusingDialer
 
             expectPanicNamingField(t, testCase.field, func() {
-                NewServerSentEventBackplane(hub, config)
+                NewServerSentEventBackplane(hub, refusingSource(), config)
             })
 
             hub.Broadcast("orders", melodyhttp.ServerSentEvent{Data: "probe"})
@@ -1276,7 +1248,7 @@ func TestNewServerSentEventBackplane_ARefusedLimitLeavesTheHubWithoutABackplane(
 
     /* the control: an admitted config over the same refusing dialer is installed, so the probe broadcast reaches it and fails */
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{Dialer: refusingDialer})
+    backplane := NewServerSentEventBackplane(hub, FromDialer(refusingDialer), ServerSentEventBackplaneConfig{})
     defer backplane.CloseWithContext(context.Background())
 
     hub.Broadcast("orders", melodyhttp.ServerSentEvent{Data: "probe"})
@@ -1288,7 +1260,7 @@ func TestNewServerSentEventBackplane_ARefusedLimitLeavesTheHubWithoutABackplane(
 func TestProviderNewServerSentEventBackplane_InheritsTheProvidersReconnectAndCloseTimeout(t *testing.T) {
     provider := NewProvider(ProviderConfig{Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(2 * time.Second)}}, CloseTimeout: bound.Of(6 * time.Second)})
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := provider.NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{Dialer: refusingDialer})
+    backplane := provider.NewServerSentEventBackplane(hub, FromDialer(refusingDialer), ServerSentEventBackplaneConfig{})
     defer backplane.CloseWithContext(context.Background())
 
     if 2*time.Second != backplane.reconnect.Initial || 6*time.Second != backplane.joinBound {
@@ -1349,7 +1321,7 @@ func TestServerSentEventBackplane_ARedialOverAWedgedPublishChannelDoesNotHoldThe
         connection:     wedge.connection,
         ownsConnection: true,
         publishChannel: wedge.channel,
-        dialer:         func() (*amqp091.Connection, error) { return fresh.connection, nil },
+        dialer:         func(dialContext context.Context) (*Connection, error) { return ownerOf(fresh.connection), nil },
         reconnect:      defaultReconnect,
         ctx:            ctx,
         cancel:         cancel,
@@ -1464,14 +1436,14 @@ func TestServerSentEventBackplane_ADialThatLandsAfterCloseBeganIsClosedOffTheCal
     backplane = &ServerSentEventBackplane{
         ctx:         context.Background(),
         callTimeout: time.Hour,
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             backplane.mutex.Lock()
             backplane.closing = true
             backplane.mutex.Unlock()
 
             fake.gated.Wedge()
 
-            return fake.connection, nil
+            return ownerOf(fake.connection), nil
         },
         publishHalf: publishHalf{joinBound: time.Second},
     }
@@ -1509,12 +1481,12 @@ func TestServerSentEventBackplane_ADialThatLandsAfterTheCancellationIsClosedWith
         cancel:      cancel,
         callTimeout: time.Hour,
         publishHalf: publishHalf{joinBound: 200 * time.Millisecond},
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             <-release
 
             fake.gated.Wedge()
 
-            return fake.connection, nil
+            return ownerOf(fake.connection), nil
         },
     }
 
@@ -1552,7 +1524,7 @@ func TestServerSentEventBackplane_TheFirstDialIsNotAReconnect(t *testing.T) {
     instance := &ServerSentEventBackplane{
         ctx:    ctx,
         cancel: cancel,
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             return nil, errors.New("dial refused")
         },
         publishHalf: publishHalf{joinBound: closeJoinTimeout},
@@ -1579,7 +1551,7 @@ func TestServerSentEventBackplane_APanickingDialerIsAnsweredAsADialFailure(t *te
     instance := &ServerSentEventBackplane{
         ctx:    ctx,
         cancel: cancel,
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             panic("the application's dialer exploded")
         },
         publishHalf: publishHalf{joinBound: closeJoinTimeout},
@@ -1602,7 +1574,7 @@ func TestServerSentEventBackplane_PublishReturnsOnACyclicChainFromTheDialer(t *t
     instance := &ServerSentEventBackplane{
         ctx:    ctx,
         cancel: cancel,
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             return nil, newCyclicChainError()
         },
     }
@@ -1623,7 +1595,7 @@ func TestServerSentEventBackplane_ListenReturnsOnACyclicChainFromTheDialer(t *te
         reconnect: defaultReconnect,
         ctx:       ctx,
         cancel:    cancel,
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             select {
             case dialed <- struct{}{}:
             default:
@@ -1657,7 +1629,7 @@ func TestServerSentEventBackplane_ListenGrowsTheWaitOverConsecutiveSubscribeFail
         reconnect:   bound.ResolvedBackoff{Initial: 20 * time.Millisecond, Max: 10 * time.Second, Factor: 2},
         ctx:         ctx,
         cancel:      cancel,
-        dialer: func() (*amqp091.Connection, error) {
+        dialer: func(dialContext context.Context) (*Connection, error) {
             mutex.Lock()
             dialedAt = append(dialedAt, time.Now())
             if 4 <= len(dialedAt) {
@@ -1707,9 +1679,7 @@ func TestServerSentEventBackplane_ASubscriptionThatLivedTheInitialBackoffResubsc
     connections := make(chan *amqp091.Connection, 8)
     dialedAt := make(chan time.Time, 8)
 
-    backplane := NewServerSentEventBackplane(melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), ServerSentEventBackplaneConfig{
-        Exchange: "melody.sse.test.reset",
-        Dialer: func() (*amqp091.Connection, error) {
+    backplane := NewServerSentEventBackplane(melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), FromDialer(func(dialContext context.Context) (*Connection, error) {
             dialedAt <- time.Now()
 
             connection, dialErr := amqp091.Dial(dsn)
@@ -1717,8 +1687,9 @@ func TestServerSentEventBackplane_ASubscriptionThatLivedTheInitialBackoffResubsc
                 connections <- connection
             }
 
-            return connection, dialErr
-        },
+            return ownerOf(connection), dialErr
+        }), ServerSentEventBackplaneConfig{
+        Exchange: "melody.sse.test.reset",
         Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(400 * time.Millisecond), Max: bound.Of(10 * time.Second)}},
     })
     defer backplane.CloseWithContext(context.Background())
@@ -1745,5 +1716,34 @@ func TestServerSentEventBackplane_ASubscriptionThatLivedTheInitialBackoffResubsc
         }
     case <-time.After(10 * time.Second):
         t.Fatal("the backplane never redialed")
+    }
+}
+
+func TestServerSentEventBackplane_AClosedBackplaneCancelsADialInFlight(t *testing.T) {
+    started := make(chan struct{}, 1)
+    observed := make(chan error, 1)
+
+    backplane := NewServerSentEventBackplane(melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), FromDialer(cancellableDialer(started, observed)), ServerSentEventBackplaneConfig{Exchange: "melody.amqp.v4.sse.cancel"})
+
+    select {
+    case <-started:
+    case <-time.After(5 * time.Second):
+        t.Fatal("the listener never dialed")
+    }
+
+    closeStarted := time.Now()
+    _ = backplane.CloseWithContext(context.Background())
+
+    select {
+    case dialErr := <-observed:
+        if false == errors.Is(dialErr, context.Canceled) {
+            t.Fatalf("expected the dial's context cancelled, got %v", dialErr)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("the close did not cancel the dial in flight")
+    }
+
+    if elapsed := time.Since(closeStarted); 2*time.Second <= elapsed {
+        t.Fatalf("expected the close to return at once, it took %s", elapsed)
     }
 }

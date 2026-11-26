@@ -63,12 +63,11 @@ func (instance *Module) buildMessageBusTransport() melodymessagebuscontract.Tran
         return melodymessagebus.NewInMemoryTransport(melodymessagebus.InMemoryTransportConfig{BufferSize: melodybound.Of(64)})
     }
 
-    /* the transport is handed only a dialer and nothing dials at boot: it closes only a connection it dialed itself, so a connection opened here would be owned by nobody. A dsn that cannot be dialed surfaces at the first publish, through the transport's retry loop. */
+    /* the transport is handed a dialer and nothing dials at boot: it owns and closes each connection it dials, and redials after a loss. A dsn that cannot be dialed surfaces at the first publish, through the transport's retry loop. */
     registry := amqp.NewMessageRegistry()
     amqp.RegisterMessage[message.WelcomeEmail](registry, messageBusWelcomeType)
 
-    return amqp.NewTransport(messageBusQueue, registry, amqp.TransportConfig{
-        Dialer:     amqp.NewProvider(amqp.ProviderConfig{}).Dialer(dsn),
-        Prefetch:   melodybound.Of(10),
+    return amqp.NewTransport(messageBusQueue, registry, amqp.FromDialer(amqp.NewProvider(amqp.ProviderConfig{}).Dialer(dsn)), amqp.TransportConfig{
+        Prefetch: melodybound.Of(10),
     })
 }

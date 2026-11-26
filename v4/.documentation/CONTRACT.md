@@ -163,9 +163,7 @@ Every module below has one section, headed by its directory, and one row per exp
 
 ## Module `integrations/amqp/v4`
 
-| Interface | Implemented by | Reason |
-|---|---|---|
-| [`ServiceRegistrar`](../../integrations/amqp/v4/service_resolver.go) | framework | the boot's registrar satisfies it; only the application builder implements it |
+The module exports no interface.
 
 ## Module `integrations/aws/s3/v4`
 

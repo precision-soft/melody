@@ -16,11 +16,13 @@ import (
 )
 
 func TestConnectionMustFromRuntime_AnswersTheSiblingsInstanceThroughTheRuntimesScope(t *testing.T) {
-    first := &amqp091.Connection{}
-    second := &amqp091.Connection{}
+    first := NewConnection(&amqp091.Connection{}, ConnectionConfig{})
+    second := NewConnection(&amqp091.Connection{}, ConnectionConfig{})
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    RegisterConnectionService(&containerRegistrar{serviceContainer: serviceContainer}, first, ConnectionServiceConfig{})
+    registerConnectionService(&containerRegistrar{serviceContainer: serviceContainer}, func(resolver containercontract.Resolver) (*Connection, error) {
+        return first, nil
+    })
 
     runtimeInstance := runtime.NewRequest(t.Context(), serviceContainer.NewScope())
     if first != ConnectionMustFromRuntime(runtimeInstance) || first != ConnectionMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope()) {
@@ -90,12 +92,12 @@ func TestConnectionMustFromRuntime_ResolvesUnderTheRuntimesContext(t *testing.T)
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     var seen any
-    connection := &amqp091.Connection{}
-    container.MustRegister[*amqp091.Connection](serviceContainer, ServiceConnection, func(resolver containercontract.Resolver) (*amqp091.Connection, error) {
+    connection := NewConnection(&amqp091.Connection{}, ConnectionConfig{})
+    container.MustRegister[*Connection](serviceContainer, ServiceConnection, func(resolver containercontract.Resolver) (*Connection, error) {
         seen = resolver.Runtime().Context().Value(twinContextKey{})
 
         return connection, nil
-    }, containercontract.RegisterOptions{TeardownReflectionDisabled: true, Closer: container.NewCloser(func(closeContext context.Context, value *amqp091.Connection) error { return nil })})
+    }, containercontract.RegisterOptions{TeardownReflectionDisabled: true})
 
     runtimeInstance := runtime.NewRun(context.WithValue(t.Context(), twinContextKey{}, "run"), serviceContainer.NewScope())
     if connection != ConnectionMustFromRuntime(runtimeInstance) || "run" != seen {
