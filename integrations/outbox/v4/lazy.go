@@ -46,13 +46,13 @@ func (instance *lazyRepository) resolveStore(runtimeInstance containercontract.R
     return store, nil
 }
 
-func (instance *lazyRepository) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration) ([]Pending, error) {
+func (instance *lazyRepository) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration, options ClaimOptions) ([]Pending, error) {
     store, resolveErr := instance.resolveStore(runtimeInstance, "outbox.lazyRepository.ClaimDueMessages")
     if nil != resolveErr {
         return nil, resolveErr
     }
 
-    return store.ClaimDueMessages(runtimeInstance, limit, visibility)
+    return store.ClaimDueMessages(runtimeInstance, limit, visibility, options)
 }
 
 func (instance *lazyRepository) RecordDeliveryAttempt(runtimeInstance containercontract.Runtime, id int64, claimToken string) (int, bool, error) {

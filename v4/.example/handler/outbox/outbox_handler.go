@@ -15,6 +15,9 @@ import (
     bun "github.com/uptrace/bun"
 )
 
+/* OutboxHeaderRequestId names the header the enqueue hands the notice: the id the kernel minted for the request. */
+const OutboxHeaderRequestId = "request-id"
+
 /* EnqueueHandler writes a notice to the outbox inside a transaction that in real use also carries the business change, so the message is published if and only if that write commits; the relay publishes it later. The database and the store are container.Lazy handles resolved at the first request. */
 func EnqueueHandler(database *melodycontainer.LazyService[*bun.DB], store *melodycontainer.LazyService[*outboxintegration.Store]) melodyhttpcontract.Handler {
     return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
@@ -38,9 +41,15 @@ func EnqueueHandler(database *melodycontainer.LazyService[*bun.DB], store *melod
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the outbox database is unavailable", databaseErr), nil
         }
 
+        /* the request id travels with the notice as a header, so the consumer's record follows back to this request's journal line */
+        options := outboxintegration.EnqueueOptions{}
+        if requestContext := request.RequestContext(); nil != requestContext && "" != requestContext.RequestId() {
+            options.Headers = map[string]string{OutboxHeaderRequestId: requestContext.RequestId()}
+        }
+
         enqueueErr := databaseInstance.RunInTx(runtimeInstance.Context(), nil, func(ctx context.Context, tx bun.Tx) error {
             /* the business write belongs on tx here, so it and the outbox write commit atomically */
-            return storeInstance.Enqueue(ctx, tx, message.OutboxNotice{Reference: reference, Text: text})
+            return storeInstance.Enqueue(ctx, tx, message.OutboxNotice{Reference: reference, Text: text}, options)
         })
         if nil != enqueueErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not enqueue the outbox message", enqueueErr), nil
@@ -78,7 +87,8 @@ func RelayHandler(relay *melodycontainer.LazyService[*outboxintegration.Relay]) 
 /* StatusHandler reports the outbox row counts by status. It resolves the lazy store first, so the outbox schema exists before the count query. */
 func StatusHandler(database *melodycontainer.LazyService[*bun.DB], store *melodycontainer.LazyService[*outboxintegration.Store]) melodyhttpcontract.Handler {
     return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        if _, resolveErr := store.Resolve(runtimeInstance); nil != resolveErr {
+        storeInstance, resolveErr := store.Resolve(runtimeInstance)
+        if nil != resolveErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the outbox store is unavailable", resolveErr), nil
         }
 
@@ -87,7 +97,7 @@ func StatusHandler(database *melodycontainer.LazyService[*bun.DB], store *melody
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the outbox database is unavailable", databaseErr), nil
         }
 
-        rows, queryErr := databaseInstance.QueryContext(runtimeInstance.Context(), "SELECT status, COUNT(*) FROM melody_outbox GROUP BY status")
+        rows, queryErr := databaseInstance.QueryContext(runtimeInstance.Context(), "SELECT status, COUNT(*) FROM ? GROUP BY status", bun.Ident(storeInstance.TableName()))
         if nil != queryErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the outbox status", queryErr), nil
         }

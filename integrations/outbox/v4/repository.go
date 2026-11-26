@@ -1,14 +1,18 @@
 package outbox
 
 import (
+    "regexp"
     "time"
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
 /* Repository is the persistence the relay drives. The bun-backed Store implements it; abstracting it keeps the relay's retry/dead-letter logic unit-testable without a database. Every door takes the runtime it runs under first and reads its context; a nil runtime, a typed nil and one carrying no context are refused. */
 type Repository interface {
-    ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration) ([]Pending, error)
+    /* ClaimDueMessages claims the due rows of options.Transport alone: a named transport claims the rows enqueued for it, an empty one the rows that name none. */
+    ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration, options ClaimOptions) ([]Pending, error)
 
     /* RecordDeliveryAttempt increments and persists a single row's delivery_attempts and returns the post-increment count. It is called for each row as the relay attempts it, not for the batch at claim time, so a row that crashes or hangs the relay advances only its own crash-poison counter. The claimToken fences the write: claimed is false when this claim does not hold the row any more, re-claimed by another instance or already resolved, and the relay skips it. */
     RecordDeliveryAttempt(runtimeInstance containercontract.Runtime, id int64, claimToken string) (deliveryAttempts int, claimed bool, err error)
@@ -44,4 +48,34 @@ type PruneSentOptions struct {
     SentBefore time.Time
 
     Limit int
+}
+
+/* EnqueueOptions is what one enqueue declares beside its message. */
+type EnqueueOptions struct {
+    /* Headers travel with the message to the consumer, as a messagebus.HeadersStamp, bounded by StoreConfig.Headers. */
+    Headers map[string]string
+
+    /* Transport names the relay that publishes the row: the relay whose RelayConfig.TransportName equals it; left out, the relay that names none. */
+    Transport string
+}
+
+/* ClaimOptions narrows a claim. */
+type ClaimOptions struct {
+    /* Transport claims the rows enqueued for that name; empty claims the rows that name none. */
+    Transport string
+}
+
+var transportNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`)
+
+/* validateTransportName admits empty, the rows that name no transport, or 1 to 64 characters of letters, digits, ".", "_", ":" and "-" beginning with a letter or a digit. */
+func validateTransportName(name string, field string) error {
+    if "" == name || true == transportNamePattern.MatchString(name) {
+        return nil
+    }
+
+    return exception.NewError(
+        "outbox transport name must be 1 to 64 characters of letters, digits, \".\", \"_\", \":\" and \"-\"",
+        exceptioncontract.Context{"field": field, "value": name},
+        nil,
+    )
 }

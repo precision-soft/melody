@@ -3,6 +3,7 @@ package messagebus
 import (
     "bytes"
     "context"
+    "errors"
     "os"
     "strings"
     "sync"
@@ -11,6 +12,7 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container/runtime"
+    "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
@@ -462,4 +464,44 @@ func TestInMemoryTransport_TheConfiguredLoggerJournalsADropWhenTheRuntimeHasNone
     if logger != transport.resolveLogger(newTestRuntime()) {
         t.Fatalf("expected the configured logger where the runtime carries none")
     }
+}
+
+func TestInMemoryTransport_RefusesHeadersAboveItsLimit(t *testing.T) {
+    transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(4), Headers: HeaderLimitsConfig{MaxCount: bound.Of(1)}})
+    defer transport.CloseWithContext(context.Background())
+
+    refused := NewEnvelope("payload", []messagebuscontract.Stamp{HeadersStamp{Headers: map[string]string{"a": "1", "b": "2"}}})
+    sendErr := transport.Send(newTestRuntime(), refused)
+    if false == errors.Is(sendErr, ErrHeadersRefused) {
+        t.Fatalf("expected the send refused by ErrHeadersRefused, got %v", sendErr)
+    }
+
+    if "InMemoryTransportConfig.Headers.MaxCount" != exception.LogContext(sendErr, exception.LogContextConfig{})["field"] {
+        t.Fatalf("expected the refusal to name the in-memory field, got %v", exception.LogContext(sendErr, exception.LogContextConfig{}))
+    }
+
+    if 0 != len(transport.queue) {
+        t.Fatalf("expected nothing queued for a refused send, got %d", len(transport.queue))
+    }
+
+    admitted := NewEnvelope("payload", []messagebuscontract.Stamp{HeadersStamp{Headers: map[string]string{"a": "1"}}})
+    if sendErr := transport.Send(newTestRuntime(), admitted); nil != sendErr {
+        t.Fatalf("expected one header admitted, got %v", sendErr)
+    }
+
+    received := <-transport.queue
+    if "1" != Headers(received)["a"] {
+        t.Fatalf("expected the header to cross, got %v", Headers(received))
+    }
+}
+
+func TestNewInMemoryTransport_RefusesUnlimitedHeaderLimitsNamingTheField(t *testing.T) {
+    defer func() {
+        recoveredErr, isError := recover().(error)
+        if false == isError || "InMemoryTransportConfig.Headers.MaxBytes" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+            t.Fatalf("expected a refusal naming InMemoryTransportConfig.Headers.MaxBytes, got %v", recoveredErr)
+        }
+    }()
+
+    NewInMemoryTransport(InMemoryTransportConfig{Headers: HeaderLimitsConfig{MaxBytes: bound.UnlimitedCount()}})
 }

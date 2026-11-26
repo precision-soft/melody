@@ -5,11 +5,15 @@ import (
     "crypto/rand"
     "database/sql"
     "encoding/base64"
+    "encoding/json"
     "errors"
+    "regexp"
     "time"
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    melodymessagebus "github.com/precision-soft/melody/v4/messagebus"
     bun "github.com/uptrace/bun"
 )
 
@@ -28,56 +32,123 @@ type Message struct {
     SentAt           time.Time `bun:"sent_at,nullzero"`
     LastError        string    `bun:"last_error,nullzero"`
     ClaimToken       string    `bun:"claim_token,nullzero"`
+    Headers          string    `bun:"headers,type:text,nullzero"`
+    Transport        string    `bun:"transport,type:varchar(64),nullzero"`
 }
 
-func NewStore(database *bun.DB, codec MessageCodec) *Store {
+/* StoreConfig configures a store beside its database and its codec; the zero value is the framework's. */
+type StoreConfig struct {
+    /* TableName is the store's table: DefaultTableName when left out, a plain identifier of at most 64 characters. */
+    TableName string
+
+    /* Headers bounds the headers one enqueue stores. */
+    Headers melodymessagebus.HeaderLimitsConfig
+}
+
+var tableNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
+
+/* select, update and delete keep the model's alias, which bun qualifies every column with; insert and create admit no alias */
+const (
+    aliasedTableExpression = "? AS ?TableAlias"
+    bareTableExpression    = "?"
+)
+
+func NewStore(database *bun.DB, codec MessageCodec, config StoreConfig) *Store {
     if nil == database {
-        exception.Panic(exception.NewError("outbox store database is nil", nil, nil))
+        exception.Panic(exception.NewError("outbox store database is nil", exceptioncontract.Context{"argument": "database"}, nil))
     }
 
     if nil == codec {
-        exception.Panic(exception.NewError("outbox store codec is nil", nil, nil))
+        exception.Panic(exception.NewError("outbox store codec is nil", exceptioncontract.Context{"argument": "codec"}, nil))
+    }
+
+    tableName := config.TableName
+    if "" == tableName {
+        tableName = DefaultTableName
+    }
+
+    if false == tableNamePattern.MatchString(tableName) {
+        exception.Panic(exception.NewError("outbox store table name must be a plain identifier", exceptioncontract.Context{"field": "StoreConfig.TableName", "value": tableName}, nil))
+    }
+
+    headerLimits, headerLimitsErr := melodymessagebus.ResolveHeaderLimits(config.Headers, "StoreConfig.Headers")
+    if nil != headerLimitsErr {
+        exception.Panic(exception.FromError(headerLimitsErr))
     }
 
     return &Store{
-        database: database,
-        codec:    codec,
+        database:     database,
+        codec:        codec,
+        tableName:    tableName,
+        table:        bun.Ident(tableName),
+        headerLimits: headerLimits,
     }
 }
 
 type Store struct {
-    database *bun.DB
-    codec    MessageCodec
+    database     *bun.DB
+    codec        MessageCodec
+    tableName    string
+    table        bun.Ident
+    headerLimits melodymessagebus.HeaderLimits
 }
 
-/* EnsureSchema creates the outbox table for demos and tests, and adds sent_at to a table created before the column existed. Production code would express this through the bunorm migrate package. */
-func (instance *Store) EnsureSchema(ctx context.Context) error {
+/* TableName answers the table the store reads and writes. */
+func (instance *Store) TableName() string {
+    return instance.tableName
+}
+
+/* EnsureSchema creates the outbox table for demos and tests, and adds sent_at, headers and transport to a table created before those columns existed. Production code would express this through the bunorm migrate package. */
+func (instance *Store) EnsureSchema(runtimeInstance containercontract.Runtime) error {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "outbox.Store.EnsureSchema"); nil != refuseErr {
+        return refuseErr
+    }
+
+    ctx := runtimeInstance.Context()
+
     if _, execErr := instance.database.NewCreateTable().
         Model((*Message)(nil)).
+        ModelTableExpr(bareTableExpression, instance.table).
         IfNotExists().
         Exec(ctx); nil != execErr {
         return execErr
     }
 
-    return instance.ensureSentAtColumn(ctx)
+    /* DATETIME, the type bun gives every time column of the table on MySQL, so a created and an upgraded table agree */
+    columns := []struct {
+        name      string
+        mysqlType string
+        pgsqlType string
+    }{
+        {name: "sent_at", mysqlType: "DATETIME", pgsqlType: "TIMESTAMPTZ"},
+        {name: "headers", mysqlType: "TEXT", pgsqlType: "TEXT"},
+        {name: "transport", mysqlType: "VARCHAR(64)", pgsqlType: "VARCHAR(64)"},
+    }
+
+    for _, column := range columns {
+        if columnErr := instance.ensureColumn(ctx, column.name, column.mysqlType, column.pgsqlType); nil != columnErr {
+            return columnErr
+        }
+    }
+
+    return nil
 }
 
 /* PostgreSQL adds the column only when it is missing, in one statement; MySQL has no such form, so the column is looked up and, when a replica added it in between, the duplicate is read back as done */
-func (instance *Store) ensureSentAtColumn(ctx context.Context) error {
+func (instance *Store) ensureColumn(ctx context.Context, name string, mysqlType string, pgsqlType string) error {
     if "mysql" != instance.database.Dialect().Name().String() {
-        _, alterErr := instance.database.NewRaw("ALTER TABLE melody_outbox ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ NULL").Exec(ctx)
+        _, alterErr := instance.database.NewRaw("ALTER TABLE ? ADD COLUMN IF NOT EXISTS ? "+pgsqlType+" NULL", instance.table, bun.Ident(name)).Exec(ctx)
 
         return alterErr
     }
 
-    present, presentErr := instance.mysqlSentAtColumnPresent(ctx)
+    present, presentErr := instance.mysqlColumnPresent(ctx, name)
     if nil != presentErr || true == present {
         return presentErr
     }
 
-    /* DATETIME, the type bun gives every time column of the table on MySQL, so a created and an upgraded table agree */
-    if _, alterErr := instance.database.NewRaw("ALTER TABLE melody_outbox ADD COLUMN sent_at DATETIME NULL").Exec(ctx); nil != alterErr {
-        if presentAfter, _ := instance.mysqlSentAtColumnPresent(ctx); true == presentAfter {
+    if _, alterErr := instance.database.NewRaw("ALTER TABLE ? ADD COLUMN ? "+mysqlType+" NULL", instance.table, bun.Ident(name)).Exec(ctx); nil != alterErr {
+        if presentAfter, _ := instance.mysqlColumnPresent(ctx, name); true == presentAfter {
             return nil
         }
 
@@ -87,12 +158,12 @@ func (instance *Store) ensureSentAtColumn(ctx context.Context) error {
     return nil
 }
 
-func (instance *Store) mysqlSentAtColumnPresent(ctx context.Context) (bool, error) {
+func (instance *Store) mysqlColumnPresent(ctx context.Context, name string) (bool, error) {
     columns := 0
     if scanErr := instance.database.NewRaw(
         "SELECT count(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?",
-        "melody_outbox",
-        "sent_at",
+        instance.tableName,
+        name,
     ).Scan(ctx, &columns); nil != scanErr {
         return false, scanErr
     }
@@ -100,8 +171,26 @@ func (instance *Store) mysqlSentAtColumnPresent(ctx context.Context) (bool, erro
     return 0 < columns, nil
 }
 
-/* Enqueue serializes a message and inserts it as a pending outbox row using the given executor — pass the caller's bun.Tx so the outbox write commits atomically with the business write, which is the whole point of the pattern. */
-func (instance *Store) Enqueue(ctx context.Context, executor bun.IDB, message any) error {
+/* Enqueue serializes a message and inserts it as a pending outbox row using the given executor — pass the caller's bun.Tx so the outbox write commits atomically with the business write, which is the whole point of the pattern. It stays on a context, since it runs inside the caller's transaction. Headers above StoreConfig.Headers and a malformed transport name are refused before the insert. */
+func (instance *Store) Enqueue(ctx context.Context, executor bun.IDB, message any, options EnqueueOptions) error {
+    if transportErr := validateTransportName(options.Transport, "EnqueueOptions.Transport"); nil != transportErr {
+        return transportErr
+    }
+
+    if headersErr := melodymessagebus.ValidateHeaders(options.Headers, instance.headerLimits); nil != headersErr {
+        return headersErr
+    }
+
+    storedHeaders := ""
+    if 0 < len(options.Headers) {
+        encodedHeaders, encodeHeadersErr := json.Marshal(options.Headers)
+        if nil != encodeHeadersErr {
+            return exception.NewError("could not encode outbox message headers", nil, encodeHeadersErr)
+        }
+
+        storedHeaders = string(encodedHeaders)
+    }
+
     typeName, payload, encodeErr := instance.codec.Encode(message)
     if nil != encodeErr {
         return exception.NewError("could not encode outbox message", nil, encodeErr)
@@ -117,9 +206,11 @@ func (instance *Store) Enqueue(ctx context.Context, executor bun.IDB, message an
         DeliveryAttempts: 0,
         AvailableAt:      now,
         CreatedAt:        now,
+        Headers:          storedHeaders,
+        Transport:        options.Transport,
     }
 
-    if _, insertErr := executor.NewInsert().Model(row).Exec(ctx); nil != insertErr {
+    if _, insertErr := executor.NewInsert().Model(row).ModelTableExpr(bareTableExpression, instance.table).Exec(ctx); nil != insertErr {
         return exception.NewError("could not enqueue outbox message", nil, insertErr)
     }
 
@@ -127,9 +218,13 @@ func (instance *Store) Enqueue(ctx context.Context, executor bun.IDB, message an
 }
 
 /* ClaimDueMessages atomically claims a batch of due rows so that concurrent relay instances — even without a shared Locker — never grab the same row. It requires a backend that supports SELECT … FOR UPDATE SKIP LOCKED (PostgreSQL, or MySQL 8+). It selects due rows FOR UPDATE SKIP LOCKED inside a transaction (so a row another instance is claiming is skipped, not blocked on) and flips them to the in-flight state with available_at pushed out by the visibility timeout. A claimed row is therefore invisible to every other claimer until either the relay resolves it (sent/rescheduled/dead) or the visibility timeout lapses — which re-surfaces rows an instance claimed but crashed before resolving. A due row is one that is pending, or already in-flight but past its visibility deadline. Claiming does NOT touch delivery_attempts — that counter is advanced per row when the relay actually attempts delivery (RecordDeliveryAttempt), so a row the relay never reaches (a batch-mate behind a crashing row) is not charged a delivery attempt it never received. */
-func (instance *Store) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration) ([]Pending, error) {
+func (instance *Store) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration, options ClaimOptions) ([]Pending, error) {
     if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "outbox.Store.ClaimDueMessages"); nil != refuseErr {
         return nil, refuseErr
+    }
+
+    if transportErr := validateTransportName(options.Transport, "ClaimOptions.Transport"); nil != transportErr {
+        return nil, transportErr
     }
 
     ctx := runtimeInstance.Context()
@@ -150,15 +245,21 @@ func (instance *Store) ClaimDueMessages(runtimeInstance containercontract.Runtim
     claimErr := instance.database.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
         now := time.Now()
 
-        selectErr := tx.NewSelect().
+        claimed := tx.NewSelect().
             Model(&rows).
+            ModelTableExpr(aliasedTableExpression, instance.table).
             Where("status IN (?)", bun.In([]string{StatusPending, StatusInFlight})).
             Where("available_at <= ?", now).
             Order("id ASC").
             Limit(limit).
-            For("UPDATE SKIP LOCKED").
-            Scan(ctx)
-        if nil != selectErr {
+            For("UPDATE SKIP LOCKED")
+        if "" == options.Transport {
+            claimed = claimed.Where("transport IS NULL")
+        } else {
+            claimed = claimed.Where("transport = ?", options.Transport)
+        }
+
+        if selectErr := claimed.Scan(ctx); nil != selectErr {
             return selectErr
         }
 
@@ -174,6 +275,7 @@ func (instance *Store) ClaimDueMessages(runtimeInstance containercontract.Runtim
         /* stamp this claim's fencing token on every claimed row so the resolution/record writes below can pin themselves to this claim. A later re-claim (after the visibility timeout) overwrites the token, which is what makes a stale run's guarded writes match no row. */
         _, updateErr := tx.NewUpdate().
             Model((*Message)(nil)).
+            ModelTableExpr(aliasedTableExpression, instance.table).
             Set("status = ?", StatusInFlight).
             Set("available_at = ?", now.Add(visibility)).
             Set("claim_token = ?", claimToken).
@@ -195,6 +297,8 @@ func (instance *Store) ClaimDueMessages(runtimeInstance containercontract.Runtim
             Attempts:         row.Attempts,
             DeliveryAttempts: row.DeliveryAttempts,
             ClaimToken:       claimToken,
+            Headers:          row.Headers,
+            Transport:        row.Transport,
         })
     }
 
@@ -240,6 +344,7 @@ func (instance *Store) RecordDeliveryAttempt(runtimeInstance containercontract.R
 
         selectErr := tx.NewSelect().
             Model(row).
+            ModelTableExpr(aliasedTableExpression, instance.table).
             Column("id", "status", "delivery_attempts", "claim_token").
             Where("id = ?", id).
             For("UPDATE").
@@ -260,6 +365,7 @@ func (instance *Store) RecordDeliveryAttempt(runtimeInstance containercontract.R
 
         _, updateErr := tx.NewUpdate().
             Model((*Message)(nil)).
+            ModelTableExpr(aliasedTableExpression, instance.table).
             Set("delivery_attempts = ?", deliveryAttempts).
             Where("id = ?", id).
             Where("status = ?", StatusInFlight).
@@ -285,6 +391,7 @@ func (instance *Store) MarkSent(runtimeInstance containercontract.Runtime, id in
 
     _, updateErr := instance.database.NewUpdate().
         Model((*Message)(nil)).
+        ModelTableExpr(aliasedTableExpression, instance.table).
         Set("status = ?", StatusSent).
         Set("sent_at = ?", time.Now()).
         Where("id = ?", id).
@@ -315,6 +422,7 @@ func (instance *Store) Reschedule(
     /* a rescheduled row was claimed (in-flight); return it to pending so it is eligible again once available_at arrives, rather than waiting out the visibility timeout. Guarded on in-flight AND the claim token so a stale run whose claim already lapsed cannot revive a row another instance has since re-claimed, marked sent or dead. */
     _, updateErr := instance.database.NewUpdate().
         Model((*Message)(nil)).
+        ModelTableExpr(aliasedTableExpression, instance.table).
         Set("status = ?", StatusPending).
         Set("attempts = ?", attempts).
         Set("available_at = ?", availableAt).
@@ -339,6 +447,7 @@ func (instance *Store) RescheduleUncharged(runtimeInstance containercontract.Run
 
     _, updateErr := instance.database.NewUpdate().
         Model((*Message)(nil)).
+        ModelTableExpr(aliasedTableExpression, instance.table).
         Set("status = ?", StatusPending).
         Set("delivery_attempts = CASE WHEN delivery_attempts > 0 THEN delivery_attempts - 1 ELSE 0 END").
         Set("available_at = ?", availableAt).
@@ -363,6 +472,7 @@ func (instance *Store) MarkDead(runtimeInstance containercontract.Runtime, id in
 
     _, updateErr := instance.database.NewUpdate().
         Model((*Message)(nil)).
+        ModelTableExpr(aliasedTableExpression, instance.table).
         Set("status = ?", StatusDead).
         Set("attempts = ?", attempts).
         Set("last_error = ?", lastError).
@@ -396,6 +506,7 @@ func (instance *Store) ReleaseClaims(runtimeInstance containercontract.Runtime, 
 
     result, updateErr := instance.database.NewUpdate().
         Model((*Message)(nil)).
+        ModelTableExpr(aliasedTableExpression, instance.table).
         Set("status = ?", StatusPending).
         Set("available_at = ?", time.Now()).
         Where("id IN (?)", bun.In(ids)).
@@ -427,6 +538,7 @@ func (instance *Store) RequeueDead(runtimeInstance containercontract.Runtime, op
 
     selected := instance.database.NewSelect().
         Model((*Message)(nil)).
+        ModelTableExpr(aliasedTableExpression, instance.table).
         Column("id").
         Where("status = ?", StatusDead).
         Order("id ASC").
@@ -446,6 +558,7 @@ func (instance *Store) RequeueDead(runtimeInstance containercontract.Runtime, op
 
     result, updateErr := instance.database.NewUpdate().
         Model((*Message)(nil)).
+        ModelTableExpr(aliasedTableExpression, instance.table).
         Set("status = ?", StatusPending).
         Set("attempts = 0").
         Set("delivery_attempts = 0").
@@ -479,6 +592,7 @@ func (instance *Store) PruneSent(runtimeInstance containercontract.Runtime, opti
     ids := make([]int64, 0)
     scanErr := instance.database.NewSelect().
         Model((*Message)(nil)).
+        ModelTableExpr(aliasedTableExpression, instance.table).
         Column("id").
         Where("status = ?", StatusSent).
         Where("sent_at < ?", options.SentBefore).
@@ -495,6 +609,7 @@ func (instance *Store) PruneSent(runtimeInstance containercontract.Runtime, opti
 
     result, deleteErr := instance.database.NewDelete().
         Model((*Message)(nil)).
+        ModelTableExpr(aliasedTableExpression, instance.table).
         Where("id IN (?)", bun.In(ids)).
         Where("status = ?", StatusSent).
         Exec(ctx)

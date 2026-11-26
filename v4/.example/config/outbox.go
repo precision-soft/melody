@@ -22,15 +22,15 @@ const outboxNoticeType = "outbox_notice"
 
 /* the transactional outbox: a message enqueued in the same transaction as a business write is drained to the transport by the relay with a stable id, so a consumer can deduplicate the at-least-once delivery. The store and the relay are built from the container at first use. */
 
-/* outboxStoreFactory is the service.outbox.store provider: it resolves the shared *bun.DB from the container and ensures the outbox schema at the first resolution, not at boot, on the process context, so a signal ends the DDL and no request's connection owns it. The relay publishes each row to a dedicated amqp queue; without AMQP_DSN it is refused by name and the rows wait. */
+/* outboxStoreFactory is the service.outbox.store provider: it resolves the shared *bun.DB from the container and ensures the outbox schema at the first resolution, under the runtime of whoever resolves it, as the catalogue schema is prepared. The relay publishes each row to a dedicated amqp queue; without AMQP_DSN it is refused by name and the rows wait. */
 func (instance *Module) outboxStoreFactory(resolver melodycontainercontract.Resolver) (*outbox.Store, error) {
     database, resolveErr := melodycontainer.FromResolver[*bun.DB](resolver.Runtime().Context(), resolver, serviceDatabase)
     if nil != resolveErr {
         return nil, resolveErr
     }
 
-    store := outbox.NewStore(database, &outboxNoticeCodec{})
-    if schemaErr := store.EnsureSchema(instance.processContext); nil != schemaErr {
+    store := outbox.NewStore(database, &outboxNoticeCodec{}, outbox.StoreConfig{})
+    if schemaErr := store.EnsureSchema(resolver.Runtime()); nil != schemaErr {
         return nil, schemaErr
     }
 

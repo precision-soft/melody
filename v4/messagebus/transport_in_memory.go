@@ -23,6 +23,9 @@ type InMemoryTransportConfig struct {
 
     /* Logger journals a requeue dropped at close when the runtime carries no logger; nil journals nothing, a typed nil is refused. */
     Logger loggingcontract.Logger
+
+    /* Headers bounds the envelope headers one send carries, as a broker transport bounds them. */
+    Headers HeaderLimitsConfig
 }
 
 var inMemoryTransportBufferSizeRule = bound.Rule[int]{
@@ -50,10 +53,16 @@ func NewInMemoryTransport(config InMemoryTransportConfig) *InMemoryTransport {
         )
     }
 
+    headerLimits, headerLimitsErr := ResolveHeaderLimits(config.Headers, "InMemoryTransportConfig.Headers")
+    if nil != headerLimitsErr {
+        exception.Panic(exception.FromError(headerLimitsErr))
+    }
+
     return &InMemoryTransport{
-        queue:  make(chan messagebuscontract.Envelope, bufferSize.Value),
-        done:   make(chan struct{}),
-        logger: config.Logger,
+        queue:        make(chan messagebuscontract.Envelope, bufferSize.Value),
+        done:         make(chan struct{}),
+        logger:       config.Logger,
+        headerLimits: headerLimits,
     }
 }
 
@@ -66,12 +75,19 @@ type InMemoryTransport struct {
     sendMutex sync.RWMutex
 
     logger loggingcontract.Logger
+
+    headerLimits HeaderLimits
 }
 
+/* Send refuses headers above the limits before the envelope is queued, so a test on it meets the refusal a broker transport answers. */
 func (instance *InMemoryTransport) Send(
     runtimeInstance containercontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
 ) error {
+    if headersErr := ValidateHeaders(Headers(envelopeInstance), instance.headerLimits); nil != headersErr {
+        return headersErr
+    }
+
     if _, received := LastStampOfType[ReceivedStamp](envelopeInstance); false == received {
         envelopeInstance = envelopeInstance.WithStamps([]messagebuscontract.Stamp{ReceivedStamp{TransportName: "in_memory"}})
     }

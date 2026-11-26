@@ -50,7 +50,7 @@ func TestLazyRepository_ResolutionFailureSurfacesAsAnErrorAndIsRetried(t *testin
 
     repository := NewLazyRepository(serviceContainer)
 
-    _, claimErr := repository.ClaimDueMessages(outboxTestRuntime(context.Background()), 1, time.Minute)
+    _, claimErr := repository.ClaimDueMessages(outboxTestRuntime(context.Background()), 1, time.Minute, ClaimOptions{})
     if nil == claimErr {
         t.Fatal("expected the resolution failure to surface as the call's error")
     }
@@ -88,7 +88,7 @@ func TestLazyRepository_ResolvesTheStoreUnderTheDoorsContext(t *testing.T) {
 
     repository := NewLazyRepository(serviceContainer)
     doorContext := context.WithValue(t.Context(), lazyRepositoryContextKey{}, "door")
-    if _, claimErr := repository.ClaimDueMessages(outboxTestRuntime(doorContext), 1, time.Second); nil == claimErr {
+    if _, claimErr := repository.ClaimDueMessages(outboxTestRuntime(doorContext), 1, time.Second, ClaimOptions{}); nil == claimErr {
         t.Fatalf("expected the failing store to fail the door")
     }
 
@@ -96,7 +96,7 @@ func TestLazyRepository_ResolvesTheStoreUnderTheDoorsContext(t *testing.T) {
         t.Fatalf("the store's provider read %v, wanted the door's context", seen)
     }
 
-    if _, nilErr := repository.ClaimDueMessages(nil, 1, time.Second); nil == nilErr || false == strings.Contains(nilErr.Error(), "the runtime is nil or carries no context") {
+    if _, nilErr := repository.ClaimDueMessages(nil, 1, time.Second, ClaimOptions{}); nil == nilErr || false == strings.Contains(nilErr.Error(), "the runtime is nil or carries no context") {
         t.Fatalf("expected a nil runtime refused as an error, got %v", nilErr)
     }
 }
@@ -154,7 +154,7 @@ func TestLazyRepository_ReleaseClaimsReachesTheStore(t *testing.T) {
     }, container.RegisterOptions{})
 
     runtimeInstance := outboxTestRuntime(t.Context())
-    claimed, claimErr := store.ClaimDueMessages(runtimeInstance, 1, time.Hour)
+    claimed, claimErr := store.ClaimDueMessages(runtimeInstance, 1, time.Hour, ClaimOptions{})
     if nil != claimErr || 1 != len(claimed) {
         t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
     }

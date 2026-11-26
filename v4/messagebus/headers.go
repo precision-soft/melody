@@ -1,0 +1,148 @@
+package messagebus
+
+import (
+    "errors"
+    "sort"
+    "unicode"
+    "unicode/utf8"
+
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    "github.com/precision-soft/melody/v4/internal"
+)
+
+const (
+    HeaderNameMaxLength   = 64
+    DefaultHeaderMaxCount = 32
+    DefaultHeaderMaxBytes = 8 * 1024
+)
+
+/* ErrHeadersRefused is the cause of every refusal ValidateHeaders answers, so a caller tells a refused message from an unreachable transport. */
+var ErrHeadersRefused = errors.New("messagebus: the envelope's headers are refused")
+
+/* HeaderLimitsConfig bounds the headers a transport or a store writes; they are never bounded where they are read. */
+type HeaderLimitsConfig struct {
+    /* MaxCount is how many headers one message may carry: 32 by default, at least 1, unlimited refused. */
+    MaxCount bound.Count
+    /* MaxBytes bounds the names and values together: 8 KiB by default, at least 64, unlimited refused, since the bound is what keeps a message inside a broker frame and a row inside a page. */
+    MaxBytes bound.Count
+}
+
+/* HeaderLimits is a HeaderLimitsConfig resolved under its owner's field; the zero value is the defaults. */
+type HeaderLimits struct {
+    maxCount int
+    maxBytes int
+    field    string
+}
+
+/* ResolveHeaderLimits resolves the two limits under the owner's field name, "TransportConfig.Headers" for example, so a refusal names the field the application wrote. */
+func ResolveHeaderLimits(config HeaderLimitsConfig, field string) (HeaderLimits, error) {
+    maxCount, maxCountErr := bound.Resolve(
+        config.MaxCount,
+        bound.Rule[int]{Name: field + ".MaxCount", Default: DefaultHeaderMaxCount, Minimum: 1},
+    )
+    if nil != maxCountErr {
+        return HeaderLimits{}, maxCountErr
+    }
+
+    maxBytes, maxBytesErr := bound.Resolve(
+        config.MaxBytes,
+        bound.Rule[int]{Name: field + ".MaxBytes", Default: DefaultHeaderMaxBytes, Minimum: 64},
+    )
+    if nil != maxBytesErr {
+        return HeaderLimits{}, maxBytesErr
+    }
+
+    return HeaderLimits{maxCount: maxCount.Value, maxBytes: maxBytes.Value, field: field}, nil
+}
+
+/* ValidateHeaders is the rule every transport and store applies before it writes: a name is 1 to 64 characters of letters, digits, ".", "_" and "-" beginning with a letter or a digit, a value is valid utf-8 with no control character, and the count and the bytes stay within the limits; a refusal never carries a value. */
+func ValidateHeaders(headers map[string]string, limits HeaderLimits) error {
+    if 0 == limits.maxCount {
+        limits.maxCount = DefaultHeaderMaxCount
+        limits.maxBytes = DefaultHeaderMaxBytes
+    }
+
+    if limits.maxCount < len(headers) {
+        return exception.NewError(
+            "the message carries more headers than its limit",
+            exceptioncontract.Context{"count": len(headers), "limit": limits.maxCount, "field": limits.field + ".MaxCount"},
+            ErrHeadersRefused,
+        )
+    }
+
+    names := make([]string, 0, len(headers))
+    for name := range headers {
+        names = append(names, name)
+    }
+    sort.Strings(names)
+
+    size := 0
+    for _, name := range names {
+        if false == validHeaderName(name) {
+            return exception.NewError(
+                "a message header name must be 1 to 64 characters of letters, digits, \".\", \"_\" and \"-\", beginning with a letter or a digit",
+                exceptioncontract.Context{"header": internal.BoundDiagnosticText(name), "field": limits.field},
+                ErrHeadersRefused,
+            )
+        }
+
+        value := headers[name]
+        if false == validHeaderValue(value) {
+            return exception.NewError(
+                "a message header value must be valid utf-8 with no control character",
+                exceptioncontract.Context{"header": name, "field": limits.field},
+                ErrHeadersRefused,
+            )
+        }
+
+        size += len(name) + len(value)
+    }
+
+    if limits.maxBytes < size {
+        return exception.NewError(
+            "the message's headers are larger than their limit",
+            exceptioncontract.Context{"bytes": size, "limit": limits.maxBytes, "field": limits.field + ".MaxBytes"},
+            ErrHeadersRefused,
+        )
+    }
+
+    return nil
+}
+
+func validHeaderName(name string) bool {
+    if 0 == len(name) || HeaderNameMaxLength < len(name) {
+        return false
+    }
+
+    for index := 0; index < len(name); index++ {
+        character := name[index]
+
+        alphanumeric := ('a' <= character && 'z' >= character) || ('A' <= character && 'Z' >= character) || ('0' <= character && '9' >= character)
+        if true == alphanumeric {
+            continue
+        }
+
+        if 0 == index || ('.' != character && '_' != character && '-' != character) {
+            return false
+        }
+    }
+
+    return true
+}
+
+/* a control character, carriage return and line feed included, would split the log line or the outbound header the value reaches */
+func validHeaderValue(value string) bool {
+    if false == utf8.ValidString(value) {
+        return false
+    }
+
+    for _, character := range value {
+        if true == unicode.IsControl(character) {
+            return false
+        }
+    }
+
+    return true
+}

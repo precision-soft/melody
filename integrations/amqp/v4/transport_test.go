@@ -4,6 +4,7 @@ import (
     "context"
     "encoding/json"
     "errors"
+    "fmt"
     "math"
     "os"
     "strconv"
@@ -87,6 +88,7 @@ func newReconnectRuntime(ctx context.Context) containercontract.Runtime {
 type logRecord struct {
     level   loggingcontract.Level
     message string
+    context loggingcontract.Context
 }
 
 type recordingLogger struct {
@@ -98,7 +100,7 @@ func (instance *recordingLogger) Log(level loggingcontract.Level, message string
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    instance.records = append(instance.records, logRecord{level: level, message: message})
+    instance.records = append(instance.records, logRecord{level: level, message: message, context: logContext})
 }
 
 func (instance *recordingLogger) Debug(message string, logContext loggingcontract.Context) {
@@ -4295,4 +4297,289 @@ func TestTransport_AConnectionADialerAnsweredBesideItsErrorIsClosed(t *testing.T
 
         time.Sleep(10 * time.Millisecond)
     }
+}
+
+func openHeadersTestConnection(t *testing.T) *amqp091.Connection {
+    t.Helper()
+
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    connectionOwner, openErr := NewProvider("melody", ProviderConfig{}).Open(newReconnectRuntime(t.Context()), dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+    t.Cleanup(func() {
+        connectionOwner.CloseWithContext(context.Background())
+    })
+
+    return connectionOwner.Raw()
+}
+
+/* deleteHeadersTestQueues drops what an earlier run left on the broker, so the first delivery is this run's */
+func deleteHeadersTestQueues(t *testing.T, connection *amqp091.Connection, queueName string) {
+    t.Helper()
+
+    channel, channelErr := connection.Channel()
+    if nil != channelErr {
+        t.Fatalf("open cleanup channel: %v", channelErr)
+    }
+    defer channel.Close()
+
+    for _, name := range []string{queueName, queueName + ".dlq", queueName + ".delay"} {
+        if _, deleteErr := channel.QueueDelete(name, false, false, false); nil != deleteErr {
+            t.Fatalf("delete %s: %v", name, deleteErr)
+        }
+    }
+}
+
+func headersStampsOf(envelopeInstance messagebuscontract.Envelope) []melodymessagebus.HeadersStamp {
+    stamps := make([]melodymessagebus.HeadersStamp, 0)
+    for _, stamp := range envelopeInstance.Stamps() {
+        if headersStamp, isHeaders := stamp.(melodymessagebus.HeadersStamp); true == isHeaders {
+            stamps = append(stamps, headersStamp)
+        }
+    }
+
+    return stamps
+}
+
+func expectTheTwoHeaders(t *testing.T, label string, envelopeInstance messagebuscontract.Envelope) {
+    t.Helper()
+
+    stamps := headersStampsOf(envelopeInstance)
+    if 1 != len(stamps) {
+        t.Fatalf("%s: expected one headers stamp, got %d", label, len(stamps))
+    }
+
+    if 2 != len(stamps[0].Headers) || "request-7" != stamps[0].Headers["request-id"] || "north" != stamps[0].Headers["tenant"] {
+        t.Fatalf("%s: expected the two headers, got %v", label, stamps[0].Headers)
+    }
+}
+
+func TestTransport_HeadersCrossTheBroker(t *testing.T) {
+    connection := openHeadersTestConnection(t)
+
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.headers.cross")
+
+    deleteHeadersTestQueues(t, connection, "melody.amqp.v4.headers.cross")
+
+    transport := NewTransport("melody.amqp.v4.headers.cross", registry, borrowedSource(connection), TransportConfig{Prefetch: bound.Of(1)})
+    defer transport.CloseWithContext(context.Background())
+
+    runtimeInstance := newReconnectRuntime(t.Context())
+
+    sent := melodymessagebus.NewEnvelope(
+        testMessage{Id: 1, Name: "headers"},
+        []messagebuscontract.Stamp{melodymessagebus.HeadersStamp{Headers: map[string]string{"request-id": "request-7", "tenant": "north"}}},
+    )
+
+    publishing, buildErr := transport.buildPublishing(sent, "")
+    if nil != buildErr {
+        t.Fatalf("build publishing: %v", buildErr)
+    }
+
+    if "request-7" != publishing.Headers["x-melody-header-request-id"] || "north" != publishing.Headers["x-melody-header-tenant"] {
+        t.Fatalf("expected the amqp table to carry x-melody-header-<name>, got %v", publishing.Headers)
+    }
+
+    if sendErr := transport.Send(runtimeInstance, sent); nil != sendErr {
+        t.Fatalf("send: %v", sendErr)
+    }
+
+    subscriptionInstance, receiveErr := transport.Receive(runtimeInstance)
+    if nil != receiveErr {
+        t.Fatalf("receive: %v", receiveErr)
+    }
+
+    received := receiveWithin(t, subscriptionInstance.Envelopes(), 10*time.Second)
+    expectTheTwoHeaders(t, "received", received)
+
+    if ackErr := transport.Ack(runtimeInstance, received); nil != ackErr {
+        t.Fatalf("ack: %v", ackErr)
+    }
+}
+
+func TestTransport_HeadersSurviveADelayARedeliveryAndADeadLetter(t *testing.T) {
+    connection := openHeadersTestConnection(t)
+
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.headers.survive")
+
+    queueName := "melody.amqp.v4.headers.survive"
+    deleteHeadersTestQueues(t, connection, queueName)
+    transport := NewTransport(queueName, registry, borrowedSource(connection), TransportConfig{Prefetch: bound.Of(1)})
+    defer transport.CloseWithContext(context.Background())
+
+    runtimeInstance := newReconnectRuntime(t.Context())
+
+    sent := melodymessagebus.NewEnvelope(
+        testMessage{Id: 1, Name: "survive"},
+        []messagebuscontract.Stamp{melodymessagebus.HeadersStamp{Headers: map[string]string{"request-id": "request-7", "tenant": "north"}}},
+    )
+    if sendErr := transport.Send(runtimeInstance, sent); nil != sendErr {
+        t.Fatalf("send: %v", sendErr)
+    }
+
+    subscriptionInstance, receiveErr := transport.Receive(runtimeInstance)
+    if nil != receiveErr {
+        t.Fatalf("receive: %v", receiveErr)
+    }
+    queue := subscriptionInstance.Envelopes()
+
+    first := receiveWithin(t, queue, 10*time.Second)
+    expectTheTwoHeaders(t, "first", first)
+
+    redelivered := first.WithStamps([]messagebuscontract.Stamp{melodymessagebus.RedeliveryStamp{Count: 1}})
+    if nackErr := transport.Nack(runtimeInstance, redelivered, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
+        t.Fatalf("nack requeue: %v", nackErr)
+    }
+
+    second := receiveWithin(t, queue, 10*time.Second)
+    expectTheTwoHeaders(t, "redelivered", second)
+
+    /* below the smallest bucket, so the republish carries a per-message expiration through <queue>.delay */
+    delayed := second.WithStamps([]messagebuscontract.Stamp{melodymessagebus.RedeliveryStamp{Count: 2}, melodymessagebus.DelayStamp{Delay: 300 * time.Millisecond}})
+    if nackErr := transport.Nack(runtimeInstance, delayed, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
+        t.Fatalf("nack delay: %v", nackErr)
+    }
+
+    third := receiveWithin(t, queue, 10*time.Second)
+    expectTheTwoHeaders(t, "delayed", third)
+
+    if nackErr := transport.Nack(runtimeInstance, third, messagebuscontract.NackConfig{}); nil != nackErr {
+        t.Fatalf("nack dead-letter: %v", nackErr)
+    }
+
+    channel, channelErr := connection.Channel()
+    if nil != channelErr {
+        t.Fatalf("open inspection channel: %v", channelErr)
+    }
+    defer channel.Close()
+
+    deadline := time.Now().Add(5 * time.Second)
+    for {
+        message, found, getErr := channel.Get(queueName+".dlq", true)
+        if nil != getErr {
+            t.Fatalf("get from dead-letter queue: %v", getErr)
+        }
+
+        if true == found {
+            if "request-7" != message.Headers["x-melody-header-request-id"] || "north" != message.Headers["x-melody-header-tenant"] {
+                t.Fatalf("expected the dead letter to keep the headers, got %v", message.Headers)
+            }
+
+            return
+        }
+
+        if time.Now().After(deadline) {
+            t.Fatalf("expected the message to land in the dead-letter queue")
+        }
+
+        time.Sleep(100 * time.Millisecond)
+    }
+}
+
+func TestTransport_AHeaderRefusalIsNotAnOutage(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.headers.refused")
+
+    dials := atomic.Int64{}
+    dialer := func(dialContext context.Context) (*Connection, error) {
+        dials.Add(1)
+
+        return nil, errors.New("no broker")
+    }
+
+    transport := NewTransport("melody.amqp.v4.headers.refused", registry, FromDialer(dialer), TransportConfig{Headers: melodymessagebus.HeaderLimitsConfig{MaxCount: bound.Of(1)}})
+    defer transport.CloseWithContext(context.Background())
+
+    refused := melodymessagebus.NewEnvelope(
+        testMessage{Id: 1},
+        []messagebuscontract.Stamp{melodymessagebus.HeadersStamp{Headers: map[string]string{"a": "1", "b": "2"}}},
+    )
+
+    sendErr := transport.Send(newReconnectRuntime(t.Context()), refused)
+    if false == errors.Is(sendErr, melodymessagebus.ErrHeadersRefused) {
+        t.Fatalf("expected the send refused by ErrHeadersRefused, got %v", sendErr)
+    }
+
+    if "TransportConfig.Headers.MaxCount" != exception.LogContext(sendErr, exception.LogContextConfig{})["field"] {
+        t.Fatalf("expected the refusal to name TransportConfig.Headers.MaxCount, got %v", exception.LogContext(sendErr, exception.LogContextConfig{}))
+    }
+
+    if true == exception.IsInfrastructureFailure(sendErr) {
+        t.Fatalf("expected a header refusal not marked as an outage")
+    }
+
+    if 0 != dials.Load() {
+        t.Fatalf("expected no write and no dial for a refused message, got %d dials", dials.Load())
+    }
+}
+
+func TestTransport_APrefixedHeaderOfAnotherTypeIsSkippedWithAWarning(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.headers.foreign")
+
+    instance := &Transport{queue: "orders", registry: registry, serializer: melodyserializer.NewJsonSerializer(), closeSignal: make(chan struct{})}
+
+    body, serializeErr := instance.serializer.Serialize(testMessage{Id: 1})
+    if nil != serializeErr {
+        t.Fatalf("serialize: %v", serializeErr)
+    }
+
+    secret := int64(424242)
+    deliveries := make(chan amqp091.Delivery, 1)
+    deliveries <- amqp091.Delivery{
+        Headers: amqp091.Table{
+            headerMessageType:             "amqp.test.headers.foreign",
+            "x-melody-header-request-id":  "request-7",
+            "x-melody-header-count":       secret,
+            "x-other":                     int64(1),
+        },
+        Body: body,
+    }
+    close(deliveries)
+
+    runtimeInstance, logger := newRecordingLoggerRuntime(t.Context())
+    out := make(chan messagebuscontract.Envelope, 1)
+    instance.forwardDeliveries(runtimeInstance, nil, 1, deliveries, out)
+
+    received := <-out
+    headers := melodymessagebus.Headers(received)
+    if 1 != len(headers) || "request-7" != headers["request-id"] {
+        t.Fatalf("expected only the string header, got %v", headers)
+    }
+
+    logger.mutex.Lock()
+    defer logger.mutex.Unlock()
+
+    warnings := 0
+    for _, record := range logger.records {
+        if loggingcontract.LevelWarning != record.level {
+            continue
+        }
+
+        warnings++
+        if "x-melody-header-count" != record.context["header"] || "int64" != record.context["headerType"] {
+            t.Fatalf("expected the warning to name the header and its go type, got %v", record.context)
+        }
+
+        if true == strings.Contains(fmt.Sprint(record.context), strconv.FormatInt(secret, 10)) {
+            t.Fatalf("expected the warning to carry no value, got %v", record.context)
+        }
+    }
+
+    if 1 != warnings {
+        t.Fatalf("expected one warning, got %d", warnings)
+    }
+}
+
+func TestNewTransport_RefusesUnlimitedHeaderLimitsNamingTheField(t *testing.T) {
+    expectPanicNamingField(t, "TransportConfig.Headers.MaxBytes", func() {
+        NewTransport("melody.amqp.v4.headers.limits", NewMessageRegistry(), refusingSource(), TransportConfig{Headers: melodymessagebus.HeaderLimitsConfig{MaxBytes: bound.UnlimitedCount()}})
+    })
 }

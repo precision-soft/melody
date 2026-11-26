@@ -78,6 +78,7 @@ type resolvedRelay struct {
     Codec                 MessageCodec
     Locker                lockcontract.Locker
     LockName              string
+    TransportName         string
     LockTtl               time.Duration
     VisibilityTimeout     time.Duration
     BatchSize             int
@@ -89,9 +90,14 @@ type resolvedRelay struct {
 }
 
 func resolveRelayConfig(config RelayConfig) (resolvedRelay, error) {
+    if transportErr := validateTransportName(config.TransportName, "RelayConfig.TransportName"); nil != transportErr {
+        return resolvedRelay{}, transportErr
+    }
+
     resolved := resolvedRelay{
-        Locker:     config.Locker,
-        LockName:   config.LockName,
+        Locker:        config.Locker,
+        LockName:      config.LockName,
+        TransportName: config.TransportName,
     }
 
     durations := []struct {

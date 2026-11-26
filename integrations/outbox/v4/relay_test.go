@@ -120,6 +120,7 @@ type fakeRepository struct {
     due           []Pending
     calls         []repoCall
     claimLimits   []int
+    claimOptions  []ClaimOptions
     claimDelay    time.Duration
     markDeadErr   error
     rescheduleErr error
@@ -138,8 +139,9 @@ type releaseCall struct {
     hasDeadline     bool
 }
 
-func (instance *fakeRepository) ClaimDueMessages(_ containercontract.Runtime, limit int, _ time.Duration) ([]Pending, error) {
+func (instance *fakeRepository) ClaimDueMessages(_ containercontract.Runtime, limit int, _ time.Duration, options ClaimOptions) ([]Pending, error) {
     instance.claimLimits = append(instance.claimLimits, limit)
+    instance.claimOptions = append(instance.claimOptions, options)
 
     if 0 < instance.claimDelay {
         time.Sleep(instance.claimDelay)
@@ -677,10 +679,10 @@ type cancellingRepository struct {
     cancel context.CancelFunc
 }
 
-func (instance *cancellingRepository) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration) ([]Pending, error) {
+func (instance *cancellingRepository) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration, options ClaimOptions) ([]Pending, error) {
     instance.cancel()
 
-    return instance.fakeRepository.ClaimDueMessages(runtimeInstance, limit, visibility)
+    return instance.fakeRepository.ClaimDueMessages(runtimeInstance, limit, visibility, options)
 }
 
 /* a signal cancels the run context mid-drain, so a release riding it would never reach the backend and the lease would survive its whole ttl, stalling every other replica. */
@@ -2139,5 +2141,83 @@ func TestRelay_TheDefaultLockNameCarriesTheNamespace(t *testing.T) {
         if 1 != len(locker.names) || testCase.expected != locker.names[0] {
             t.Fatalf("%s: expected the lock %q, got %v", label, testCase.expected, locker.names)
         }
+    }
+}
+
+func TestRelay_PublishesTheRowsHeadersAsAStamp(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{{Id: 42, TypeName: "string", Payload: []byte("hello"), Headers: `{"request-id":"request-7","tenant":"north"}`}}}
+    transport := &fakeTransport{}
+
+    if _, runErr := NewRelay(repository, transport, &stringCodec{}, RelayConfig{}).RunOnce(relayTestRuntime()); nil != runErr {
+        t.Fatalf("run once: %v", runErr)
+    }
+
+    if 1 != len(transport.envelopes) {
+        t.Fatalf("expected one published envelope, got %d", len(transport.envelopes))
+    }
+
+    headers := messagebus.Headers(transport.envelopes[0])
+    if 2 != len(headers) || "request-7" != headers["request-id"] || "north" != headers["tenant"] {
+        t.Fatalf("expected the row's headers on the envelope, got %v", headers)
+    }
+
+    if messageId, present := messagebus.MessageId(transport.envelopes[0]); false == present || "melody-outbox-42" != messageId {
+        t.Fatalf("expected the message id beside the headers, got %q", messageId)
+    }
+
+    if 1 != len(repository.calls) || "sent" != repository.calls[0].kind {
+        t.Fatalf("expected the row marked sent, got %+v", repository.calls)
+    }
+}
+
+func TestRelay_ARowWithoutHeadersPublishesNoHeadersStamp(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{{Id: 42, TypeName: "string", Payload: []byte("hello")}}}
+    transport := &fakeTransport{}
+
+    if _, runErr := NewRelay(repository, transport, &stringCodec{}, RelayConfig{}).RunOnce(relayTestRuntime()); nil != runErr {
+        t.Fatalf("run once: %v", runErr)
+    }
+
+    if _, found := messagebus.LastStampOfType[messagebus.HeadersStamp](transport.envelopes[0]); true == found {
+        t.Fatalf("expected no headers stamp for a row with no headers")
+    }
+}
+
+func TestRelay_UndecodableHeadersAreDeadLettered(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{{Id: 9, TypeName: "string", Payload: []byte("hello"), Headers: `{"request-id":`}}}
+    transport := &fakeTransport{}
+
+    if _, runErr := NewRelay(repository, transport, &stringCodec{}, RelayConfig{}).RunOnce(relayTestRuntime()); nil != runErr {
+        t.Fatalf("run once: %v", runErr)
+    }
+
+    if 0 != len(transport.envelopes) {
+        t.Fatalf("expected nothing published, got %d", len(transport.envelopes))
+    }
+
+    if 1 != len(repository.calls) || "dead" != repository.calls[0].kind || false == strings.HasPrefix(repository.calls[0].lastError, "headers: ") {
+        t.Fatalf("expected the row dead-lettered with a headers: error, got %+v", repository.calls)
+    }
+}
+
+func TestRelay_ClaimsTheRowsOfItsTransportName(t *testing.T) {
+    for _, transportName := range []string{"", "orders"} {
+        repository := &fakeRepository{}
+
+        if _, runErr := NewRelay(repository, &fakeTransport{}, &stringCodec{}, RelayConfig{TransportName: transportName}).RunOnce(relayTestRuntime()); nil != runErr {
+            t.Fatalf("run once: %v", runErr)
+        }
+
+        if 1 != len(repository.claimOptions) || transportName != repository.claimOptions[0].Transport {
+            t.Fatalf("expected the claim narrowed to %q, got %+v", transportName, repository.claimOptions)
+        }
+    }
+}
+
+func TestNewRelay_RefusesAMalformedTransportName(t *testing.T) {
+    for _, transportName := range []string{"-orders", "a b", strings.Repeat("a", 65), "orders/eu"} {
+        expectPanicNamingField(t, "RelayConfig.TransportName", func() {
+            NewRelay(&fakeRepository{}, &fakeTransport{}, &stringCodec{}, RelayConfig{TransportName: transportName})
+        })
     }
 }

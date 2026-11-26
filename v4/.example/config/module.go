@@ -80,7 +80,7 @@ type Module struct {
     databaseDefinitions []melodybunorm.ProviderDefinition
     catalogueWired      bool
 
-    /* processContext is the process's own context, which the archive storage and the outbox schema are bound to */
+    /* processContext is the process's own context, which the archive storage is bound to */
     processContext context.Context
 
     /* trustedProxyResolver is the one client resolver both budgets read the client through; the list it resolves is re-read on a schedule, so a balancer restarted onto a new address is trusted again within the interval */

@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Removed
 
+- **Breaking** — `message.go`: `TableName` is removed; `DefaultTableName` is the table a store left unconfigured reads and writes, `Store.TableName()` the table one store binds.
 - **Breaking** — `service_resolver.go`: `RegisterStoreService`, `RegisterRelayService` and the `ServiceRegistrar` interface they took are removed; the module is the door that registers the store and the relay.
 - **Breaking** — `relay.go`: `RelayConfig.LockReleaseTimeout` is removed; the lease is released on a context detached from the run, the locker bounding its own release.
 
@@ -20,6 +21,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Breaking** — `store.go`: `NewStore(database, codec, config)` takes a `StoreConfig`: `TableName`, `DefaultTableName` when left out, a plain identifier refused naming `StoreConfig.TableName`, bound in every query; `Headers`, a `messagebus.HeaderLimitsConfig` bounding one enqueue. A nil database or codec is refused naming the argument.
+- **Breaking** — `store.go`, `repository.go`: `Enqueue(ctx, executor, message, options)` takes `EnqueueOptions{Headers, Transport}`, the headers judged by `messagebus.ValidateHeaders` and stored as a JSON object in the new `headers` column, the destination in the new `transport` column, both NULL when left out; `Repository.ClaimDueMessages` takes `ClaimOptions{Transport}` and claims the rows of that name alone, an empty name the rows that name none; `Pending` carries `Headers` and `Transport`; a malformed transport name is refused naming its field.
+- **Breaking** — `store.go`: `EnsureSchema(runtimeInstance)` takes the runtime in place of a context, a nil runtime refused naming `outbox.Store.EnsureSchema`, and adds `headers` and `transport` to an older table as it adds `sent_at`.
+- **Breaking** — `relay.go`, `relay_config.go`: `RelayConfig.TransportName` names the destination a relay drains, a relay claiming only its rows and the relay that names none only the rows that name none; the relay publishes a row's headers as a `messagebus.HeadersStamp` beside its message id, and a row whose stored headers do not decode is dead-lettered with `headers: ` before its error. See the framework's `UPGRADE.md`.
 - **Breaking** — `relay.go`, `relay_config.go`: the relay's default lock name is `<namespace>:outbox:relay`, the application namespace read at each run from the runtime's configuration, `melody:outbox:relay` under the default namespace or with no configuration; a `RelayConfig.LockName` set is used verbatim. See the framework's `UPGRADE.md`.
 - **Breaking** — `relay.go`: `NewRelay(repository, transport, codec, config)` takes the repository, the transport and the codec positionally, a nil one refused with the same message and its context naming `argument`; they leave `RelayConfig`.
 - **Breaking** — `store.go`, `repository.go`: the table gains `sent_at`, the send time `MarkSent` records, and `PruneSent` judges `PruneSentOptions.SentBefore` against it, where it judged the enqueue time `created_at`; a sent row with no send time is never pruned. `EnsureSchema` adds the column to a table created without it, `TIMESTAMPTZ` on PostgreSQL and `DATETIME` on MySQL; a table managed by migrations is altered before the new binary is deployed, since `Enqueue` and `ClaimDueMessages` name the column, see `UPGRADE.md`.

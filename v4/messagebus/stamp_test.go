@@ -21,6 +21,7 @@ func TestStampNames_AreTheWireNames(t *testing.T) {
         {stamp: DelayStamp{}, expected: "delay"},
         {stamp: DeadLetterAttemptStamp{}, expected: "dead_letter_attempt"},
         {stamp: MessageIdStamp{}, expected: "message_id"},
+        {stamp: HeadersStamp{}, expected: "headers"},
     } {
         if probe.expected != probe.stamp.StampName() {
             t.Fatalf("%T: expected %q, got %q", probe.stamp, probe.expected, probe.stamp.StampName())
@@ -93,5 +94,32 @@ func TestStampCounters_ReadTheLastStampedValue(t *testing.T) {
     messageId, found := MessageId(stamped)
     if false == found || "order-1" != messageId {
         t.Fatalf("expected the stamped message id, got %q found=%v", messageId, found)
+    }
+}
+
+func TestHeaders_MergesEveryStampTheLaterWinning(t *testing.T) {
+    first := map[string]string{"request-id": "a", "tenant": "north"}
+    envelopeInstance := NewEnvelope(
+        "payload",
+        []messagebuscontract.Stamp{
+            HeadersStamp{Headers: first},
+            SentStamp{TransportName: "amqp"},
+            HeadersStamp{Headers: map[string]string{"request-id": "b"}},
+        },
+    )
+
+    headers := Headers(envelopeInstance)
+    if 2 != len(headers) || "b" != headers["request-id"] || "north" != headers["tenant"] {
+        t.Fatalf("expected the later stamp to win request-id over the merged map, got %v", headers)
+    }
+
+    headers["tenant"] = "south"
+    if "north" != first["tenant"] || "north" != Headers(envelopeInstance)["tenant"] {
+        t.Fatalf("expected a fresh map, an edit reached a stamp")
+    }
+
+    empty := Headers(NewEnvelope("payload", nil))
+    if nil == empty || 0 != len(empty) {
+        t.Fatalf("expected an empty non-nil map for an envelope with no headers stamp, got %#v", empty)
     }
 }

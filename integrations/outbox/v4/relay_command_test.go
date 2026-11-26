@@ -23,7 +23,7 @@ type failingClaimRepository struct {
     claims       int
 }
 
-func (instance *failingClaimRepository) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration) ([]Pending, error) {
+func (instance *failingClaimRepository) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration, options ClaimOptions) ([]Pending, error) {
     instance.claims++
 
     if 0 < instance.failuresLeft {
@@ -32,7 +32,7 @@ func (instance *failingClaimRepository) ClaimDueMessages(runtimeInstance contain
         return nil, errors.New("repository down")
     }
 
-    return instance.fakeRepository.ClaimDueMessages(runtimeInstance, limit, visibility)
+    return instance.fakeRepository.ClaimDueMessages(runtimeInstance, limit, visibility, options)
 }
 
 func runRelayCommand(t *testing.T, runtimeInstance containercontract.Runtime, relay *Relay, arguments []string) error {
@@ -314,12 +314,12 @@ type cancellationEchoRepository struct {
     fakeRepository
 }
 
-func (instance *cancellationEchoRepository) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration) ([]Pending, error) {
+func (instance *cancellationEchoRepository) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration, options ClaimOptions) ([]Pending, error) {
     if nil != runtimeInstance.Context().Err() {
         return nil, fmt.Errorf("claim aborted: %w", runtimeInstance.Context().Err())
     }
 
-    return instance.fakeRepository.ClaimDueMessages(runtimeInstance, limit, visibility)
+    return instance.fakeRepository.ClaimDueMessages(runtimeInstance, limit, visibility, options)
 }
 
 /* capturingCommand delegates to the command under test and keeps its error, so a test can tell a refused command line — which the dispatch answers — from the command's own failure, which is what it is asserting. */
@@ -423,7 +423,7 @@ type cyclicClaimRepository struct {
     fakeRepository
 }
 
-func (instance *cyclicClaimRepository) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration) ([]Pending, error) {
+func (instance *cyclicClaimRepository) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration, options ClaimOptions) ([]Pending, error) {
     return nil, newCyclicChainError()
 }
 
@@ -494,7 +494,7 @@ type scriptedClaimRepository struct {
     claimedAt []time.Time
 }
 
-func (instance *scriptedClaimRepository) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration) ([]Pending, error) {
+func (instance *scriptedClaimRepository) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration, options ClaimOptions) ([]Pending, error) {
     index := len(instance.claimedAt)
     instance.claimedAt = append(instance.claimedAt, time.Now())
 
@@ -502,7 +502,7 @@ func (instance *scriptedClaimRepository) ClaimDueMessages(runtimeInstance contai
         return nil, errors.New("repository down")
     }
 
-    return instance.fakeRepository.ClaimDueMessages(runtimeInstance, limit, visibility)
+    return instance.fakeRepository.ClaimDueMessages(runtimeInstance, limit, visibility, options)
 }
 
 func TestRelayCommand_TheErrorBackoffGrowsOverConsecutiveFailuresAndASuccessResetsIt(t *testing.T) {

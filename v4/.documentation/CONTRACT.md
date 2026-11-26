@@ -110,7 +110,7 @@ Every module below has one section, headed by its directory, and one row per exp
 | [`messagebus/contract.MessageHandler`](../messagebus/contract/handler.go) | application | every message handler of an application implements it |
 | [`messagebus/contract.Stamp`](../messagebus/contract/envelope.go) | application | an application writes its own stamps |
 | [`messagebus/contract.Subscription`](../messagebus/contract/transport.go) | application | a transport the application or an integration writes returns its own, so its author implements it with the `Transport` |
-| [`messagebus/contract.Transport`](../messagebus/contract/transport.go) | application | a broker transport is written by the application or an integration (amqp ships one) |
+| [`messagebus/contract.Transport`](../messagebus/contract/transport.go) | application | a broker transport is written by the application or an integration (amqp ships one); across a process boundary it carries `messagebus.HeadersStamp`, refused through `messagebus.ValidateHeaders` before any write, and the message id, every other stamp being process-local unless it documents otherwise |
 | [`security.HmacApplicationRegistry`](../security/hmac_application_registry.go) | application | the application holds the registry of the services it trusts |
 | [`security.HmacSecretProvider`](../security/hmac_secret_provider.go) | application | the application supplies the secrets the envelope is signed with |
 | [`security/contract.AccessDecisionManager`](../security/contract/access_decision_manager.go) | framework | the framework's access decision manager |

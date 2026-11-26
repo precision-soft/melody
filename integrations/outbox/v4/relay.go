@@ -2,6 +2,7 @@ package outbox
 
 import (
     "context"
+    "encoding/json"
     "errors"
     "fmt"
     "math"
@@ -29,6 +30,9 @@ import (
 /* RelayConfig configures the outbox relay — the loop that drains pending rows to the message transport with retry, exponential backoff and a dead-letter terminal state. Every batch is claimed atomically (FOR UPDATE SKIP LOCKED), so two instances do not claim the same row while its VisibilityTimeout holds, even without a Locker; the relay stays at-least-once — a send still running when the timeout lapses, or a crash between the send and MarkSent, lets the row be claimed and published again —, and this requires a backend that supports SELECT … FOR UPDATE SKIP LOCKED (PostgreSQL, or MySQL 8+). A Locker is still useful as an additional optimization: supply one (for example the Redis locker) so only one instance does any work at a time in a multi-instance deployment. */
 type RelayConfig struct {
     Locker lockcontract.Locker
+
+    /* TransportName is the destination this relay drains: the rows enqueued with EnqueueOptions.Transport equal to it; left out, the rows that name none. One relay per name, so a row is published by exactly one. */
+    TransportName string
 
     /* LockName names the single-drainer lock, used verbatim: the application namespace followed by :outbox:relay when empty, resolved at each run from the runtime's configuration, melody:outbox:relay under the default namespace. */
     LockName string
@@ -109,7 +113,7 @@ func (instance *Relay) RunOnce(runtimeInstance containercontract.Runtime) (int, 
     refreshInterval := instance.config.LockTtl / 2
     lastRefresh := time.Now()
 
-    due, dueErr := instance.config.Repository.ClaimDueMessages(runtimeInstance, instance.config.BatchSize, instance.config.VisibilityTimeout)
+    due, dueErr := instance.config.Repository.ClaimDueMessages(runtimeInstance, instance.config.BatchSize, instance.config.VisibilityTimeout, ClaimOptions{Transport: instance.config.TransportName})
     if nil != dueErr {
         return 0, dueErr
     }
@@ -407,7 +411,24 @@ func (instance *Relay) deliver(runtimeInstance containercontract.Runtime, pendin
     }
 
     /* stamp the outbox row id as the message id so the transport can carry it (for example as the AMQP message id) and a consumer can deduplicate: the outbox is at-least-once (a transport success followed by a crash before MarkSent redelivers the row), so the same logical message must always publish under the same id. */
-    envelope := messagebus.NewEnvelope(message, []messagebuscontract.Stamp{messagebus.MessageIdStamp{MessageId: outboxMessageId(pending.Id)}})
+    stamps := []messagebuscontract.Stamp{messagebus.MessageIdStamp{MessageId: outboxMessageId(pending.Id)}}
+
+    if "" != pending.Headers {
+        headers := map[string]string{}
+        if headersErr := json.Unmarshal([]byte(pending.Headers), &headers); nil != headersErr {
+            /* stored headers that do not decode are poison as an undecodable payload is */
+            storedError := storedLastError("headers: ", headersErr)
+
+            return false, nil, resolutionWriteOutcome(
+                instance.markDead(runtimeInstance, pending, pending.Attempts, storedError),
+                storedError,
+            )
+        }
+
+        stamps = append(stamps, messagebus.HeadersStamp{Headers: headers})
+    }
+
+    envelope := messagebus.NewEnvelope(message, stamps)
 
     var sendErr error
     sendPanic, sendPanicStack := runContainedWithStack(func() {

@@ -23,6 +23,9 @@ import (
     amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
+/* ApplicationHeaderPrefix opens the AMQP header of every envelope header: "x-melody-header-<name>". */
+const ApplicationHeaderPrefix = "x-melody-header-"
+
 const (
     headerMessageType            = "x-message-type"
     headerRedeliveryCount        = "x-redelivery-count"
@@ -124,6 +127,11 @@ func newTransport(queue string, registry *MessageRegistry, source ConnectionSour
         exception.Panic(exception.FromError(closeTimeoutErr))
     }
 
+    headerLimits, headerLimitsErr := melodymessagebus.ResolveHeaderLimits(config.Headers, "TransportConfig.Headers")
+    if nil != headerLimitsErr {
+        exception.Panic(exception.FromError(headerLimitsErr))
+    }
+
     delayBuckets := resolveDelayBuckets(config.DelayBuckets)
 
     return &Transport{
@@ -141,6 +149,7 @@ func newTransport(queue string, registry *MessageRegistry, source ConnectionSour
         reconnect:           reconnect,
         delayBuckets:        delayBuckets,
         callTimeout:         callTimeout.Value,
+        headerLimits:        headerLimits,
         publishHalf:         publishHalf{joinBound: closeTimeout},
         closeSignal:         make(chan struct{}),
     }
@@ -165,6 +174,8 @@ type TransportConfig struct {
     CallTimeout bound.Duration
     /* CloseTimeout bounds each close stretch that cannot observe its signal, the close of an owned connection and of a dial that lands after the close began included: 30s by default, at least 1ms. */
     CloseTimeout bound.Duration
+    /* Headers bounds the envelope headers one publish writes; a refusal is answered before any write and is not an outage. */
+    Headers melodymessagebus.HeaderLimitsConfig
 }
 
 type Transport struct {
@@ -183,6 +194,7 @@ type Transport struct {
     reconnect           bound.ResolvedBackoff
     delayBuckets        []time.Duration
     callTimeout         time.Duration
+    headerLimits        melodymessagebus.HeaderLimits
 
     mutex          sync.Mutex
     publishChannel *amqp091.Channel
@@ -655,21 +667,32 @@ func (instance *Transport) buildPublishing(
         )
     }
 
+    applicationHeaders := melodymessagebus.Headers(envelopeInstance)
+    if headersErr := melodymessagebus.ValidateHeaders(applicationHeaders, instance.headerLimits); nil != headersErr {
+        return amqp091.Publishing{}, headersErr
+    }
+
     body, serializeErr := instance.serializer.Serialize(message)
     if nil != serializeErr {
         return amqp091.Publishing{}, serializeErr
+    }
+
+    headers := amqp091.Table{
+        headerMessageType:            typeName,
+        headerRedeliveryCount:        int64(melodymessagebus.RedeliveryCount(envelopeInstance)),
+        headerDeadLetterAttemptCount: int64(melodymessagebus.DeadLetterAttemptCount(envelopeInstance)),
+    }
+
+    for name, value := range applicationHeaders {
+        headers[ApplicationHeaderPrefix+name] = value
     }
 
     publishing := amqp091.Publishing{
         ContentType:  instance.serializer.ContentType(),
         DeliveryMode: amqp091.Persistent,
         Expiration:   expiration,
-        Headers: amqp091.Table{
-            headerMessageType:            typeName,
-            headerRedeliveryCount:        int64(melodymessagebus.RedeliveryCount(envelopeInstance)),
-            headerDeadLetterAttemptCount: int64(melodymessagebus.DeadLetterAttemptCount(envelopeInstance)),
-        },
-        Body: body,
+        Headers:      headers,
+        Body:         body,
     }
 
     if messageId, hasMessageId := melodymessagebus.MessageId(envelopeInstance); true == hasMessageId {
@@ -1427,6 +1450,8 @@ func (instance *Transport) forwardDeliveries(
                 continue
             }
 
+            instance.warnSkippedApplicationHeaders(runtimeInstance, delivery.Headers)
+
             select {
             case out <- envelopeInstance:
             case <-runtimeInstance.Context().Done():
@@ -1505,7 +1530,52 @@ func (instance *Transport) decode(delivery amqp091.Delivery, generation uint64) 
         stamps = append(stamps, melodymessagebus.MessageIdStamp{MessageId: delivery.MessageId})
     }
 
+    if applicationHeaders := applicationHeadersFromDelivery(delivery.Headers); 0 < len(applicationHeaders) {
+        stamps = append(stamps, melodymessagebus.HeadersStamp{Headers: applicationHeaders})
+    }
+
     return melodymessagebus.NewEnvelope(message, stamps), nil
+}
+
+/* applicationHeadersFromDelivery reads every prefixed header carrying a string; what a producer legally sent is never bounded here. */
+func applicationHeadersFromDelivery(headers amqp091.Table) map[string]string {
+    applicationHeaders := map[string]string{}
+
+    for key, value := range headers {
+        name, prefixed := strings.CutPrefix(key, ApplicationHeaderPrefix)
+        if false == prefixed {
+            continue
+        }
+
+        if text, isText := value.(string); true == isText {
+            applicationHeaders[name] = text
+        }
+    }
+
+    return applicationHeaders
+}
+
+/* warnSkippedApplicationHeaders names each prefixed header of another amqp type and its go type, never its value. */
+func (instance *Transport) warnSkippedApplicationHeaders(runtimeInstance containercontract.Runtime, headers amqp091.Table) {
+    for key, value := range headers {
+        if false == strings.HasPrefix(key, ApplicationHeaderPrefix) {
+            continue
+        }
+
+        if _, isText := value.(string); true == isText {
+            continue
+        }
+
+        logger := logging.LoggerFromRuntime(runtimeInstance)
+        if nil == logger {
+            return
+        }
+
+        logger.Warning(
+            "amqp delivery header is not a string, skipped",
+            map[string]any{"queue": instance.queue, "header": key, "headerType": fmt.Sprintf("%T", value)},
+        )
+    }
 }
 
 func redeliveryCountFromHeader(headers amqp091.Table) int {

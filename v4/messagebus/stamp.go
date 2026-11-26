@@ -15,6 +15,7 @@ const (
     StampNameDelay             = "delay"
     StampNameDeadLetterAttempt = "dead_letter_attempt"
     StampNameMessageId         = "message_id"
+    StampNameHeaders           = "headers"
 )
 
 type BusNameStamp struct {
@@ -82,6 +83,33 @@ func (instance MessageIdStamp) StampName() string {
     return StampNameMessageId
 }
 
+/* HeadersStamp carries the application's string metadata across a transport: a correlation id, a trace context, a tenant. It is the one stamp every transport serializes, beside the message id. */
+type HeadersStamp struct {
+    Headers map[string]string
+}
+
+func (instance HeadersStamp) StampName() string {
+    return StampNameHeaders
+}
+
+/* Headers answers the envelope's headers merged over every HeadersStamp in order, a later stamp winning a name; a fresh map, empty when there is none. */
+func Headers(envelopeInstance messagebuscontract.Envelope) map[string]string {
+    headers := map[string]string{}
+
+    for _, stamp := range envelopeInstance.Stamps() {
+        headersStamp, isHeaders := stamp.(HeadersStamp)
+        if false == isHeaders {
+            continue
+        }
+
+        for name, value := range headersStamp.Headers {
+            headers[name] = value
+        }
+    }
+
+    return headers
+}
+
 func RedeliveryCount(envelopeInstance messagebuscontract.Envelope) int {
     stamp, found := LastStampOfType[RedeliveryStamp](envelopeInstance)
     if false == found {
@@ -134,4 +162,5 @@ var (
     _ messagebuscontract.Stamp = DelayStamp{}
     _ messagebuscontract.Stamp = DeadLetterAttemptStamp{}
     _ messagebuscontract.Stamp = MessageIdStamp{}
+    _ messagebuscontract.Stamp = HeadersStamp{}
 )

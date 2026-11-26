@@ -18,7 +18,7 @@ Claiming is atomic through `SELECT ... FOR UPDATE SKIP LOCKED`, so the backing d
 
 ## The table
 
-`Store.EnsureSchema` creates the `melody_outbox` table for demos and tests (production schemas belong in `bunorm/migrate` migrations):
+`Store.EnsureSchema(runtimeInstance)` creates the store's table for demos and tests (production schemas belong in `bunorm/migrate` migrations), a nil runtime refused naming `outbox.Store.EnsureSchema`. The table is `StoreConfig.TableName`, `DefaultTableName` (`melody_outbox`) when left out, a plain identifier of at most 64 characters (`^[A-Za-z_][A-Za-z0-9_]{0,63}$`) refused at `NewStore` naming the field; `Store.TableName()` answers it. Every query binds that table, so two stores over one database write disjoint tables:
 
 | Column              | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 |---------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -30,6 +30,8 @@ Claiming is atomic through `SELECT ... FOR UPDATE SKIP LOCKED`, so the backing d
 | `delivery_attempts` | Every delivery the relay attempts — drives the `MaxDeliveryAttempts` crash-poison cap; a claim charges none, so a hand-back leaves it as it is.                                                                                                                                                                                                                                                                                                                                                                         |
 | `available_at`      | When the row is next due (backoff scheduling + visibility timeout).                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `sent_at`           | When `MarkSent` resolved the row, NULL until then (`TIMESTAMPTZ` on PostgreSQL, `DATETIME` on MySQL); `PruneSent` judges it, and `EnsureSchema` adds it to a table created without it.                                                                                                                                                                                                                                                                              |
+| `headers`           | The JSON object of the enqueue's `EnqueueOptions.Headers`, NULL for none (`TEXT`); the relay publishes it as a `messagebus.HeadersStamp`, and a row whose stored headers do not decode is dead-lettered with `headers: ` before its error. `EnsureSchema` adds it to an older table. |
+| `transport`         | The destination `EnqueueOptions.Transport` named, NULL for none (`VARCHAR(64)`); a relay claims the rows of its `RelayConfig.TransportName` alone. `EnsureSchema` adds it to an older table. |
 | `last_error`        | Last send/decode failure WITH its cause chain (capped to fit the narrowest default column), for operators.                                                                                                                                                                                                                                                                                                                                                          |
 | `claim_token`       | Fencing token, rewritten on every claim. Every transition write (`RecordDeliveryAttempt`, `MarkSent`, `MarkDead`, the retry reschedule, the uncharged hand-back) is guarded on `claim_token = ?` as well as the in-flight status, so a stale run whose claim already lapsed and was re-claimed by another instance matches no row and cannot clobber the new owner. Guarding on status alone is not enough: a re-claim returns the row to the very in-flight state the stale run also holds. |
 
@@ -47,10 +49,21 @@ func (instance Codec) Encode(message any) (string, []byte, error) { /* switch on
 func (instance Codec) Decode(typeName string, payload []byte) (any, error) { /* inverse */ }
 ```
 
+For a table owned by the application's migrations, the two columns of an older table:
+
+```sql
+-- MySQL
+ALTER TABLE melody_outbox ADD COLUMN headers TEXT NULL, ADD COLUMN transport VARCHAR(64) NULL;
+-- PostgreSQL
+ALTER TABLE melody_outbox ADD COLUMN IF NOT EXISTS headers TEXT NULL, ADD COLUMN IF NOT EXISTS transport VARCHAR(64) NULL;
+```
+
+With two relays, an index on `(transport, status, available_at)` keeps each claim on its own rows.
+
 ### Enqueue inside your transaction
 
 ```go
-store := outbox.NewStore(database, Codec{})
+store := outbox.NewStore(database, Codec{}, outbox.StoreConfig{})
 
 transactionErr := database.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
     if insertErr := tx.NewInsert().Model(&order).Scan(ctx); nil != insertErr {
@@ -58,9 +71,16 @@ transactionErr := database.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx
     }
 
     /* commits atomically with the business write — the point of the pattern */
-    return store.Enqueue(ctx, tx, OrderPlaced{OrderId: order.Id})
+    return store.Enqueue(ctx, tx, OrderPlaced{OrderId: order.Id}, outbox.EnqueueOptions{
+        Headers: map[string]string{"request-id": requestId},
+    })
 })
 ```
+
+`Enqueue` stays on a context, since it runs inside the caller's transaction. [`EnqueueOptions`](./repository.go) declares beside the message:
+
+- `Headers` travel with the message to the consumer as a `messagebus.HeadersStamp`, judged by `messagebus.ValidateHeaders` under `StoreConfig.Headers` (32 headers and 8 KiB by default, unlimited refused), a refusal caused by `messagebus.ErrHeadersRefused` and naming `StoreConfig.Headers.MaxCount` / `.MaxBytes`;
+- `Transport` names the relay that publishes the row: the relay whose `RelayConfig.TransportName` equals it; left out, the relay that names none. A name is 1 to 64 characters of letters, digits, `.`, `_`, `:` and `-` beginning with a letter or a digit, refused naming `EnqueueOptions.Transport`. A row named for a transport no relay names is never published.
 
 ### Wire the relay through the module
 
@@ -73,7 +93,7 @@ app.RegisterModule(
                 return nil, resolveErr
             }
 
-            return outbox.NewStore(database, Codec{}), nil
+            return outbox.NewStore(database, Codec{}, outbox.StoreConfig{}), nil
         },
         Relay: func(resolver containercontract.Resolver) (*outbox.Relay, error) {
             store, resolveErr := container.FromResolver[*outbox.Store](resolver.Runtime().Context(), resolver, outbox.ServiceStore)
@@ -108,6 +128,7 @@ The repository, the transport and the codec are `NewRelay`'s arguments, a nil on
 | `Backoff.Factor`        | `2.0`                    | Growth per prior attempt. A value below `1`, or NaN, is refused.                                                                                                                                                                                                                                       |
 | `VisibilityTimeout`     | `5m`                     | How long a claimed row stays hidden before it re-surfaces — the net that recovers rows whose claimer crashed. Must comfortably exceed the time to drain one batch; at least 1s, a lease like `LockTtl`.                                                                                                |
 | `LockTtl`               | `30s`                    | Lease TTL for the optional single-drainer `Locker`; at least 1s. The lease is refreshed at half of it. A refresh that fails is not retried: the claimed batch is drained under its claim tokens, to its end or to a failed send, then the failure is reported.                                         |
+| `TransportName`         | empty                    | The destination this relay drains: `ClaimDueMessages` is handed `ClaimOptions{Transport: TransportName}`, so a relay claims the rows enqueued for its name alone and the relay that names none only the rows that name none. One relay per name; a malformed name panics naming the field. |
 | `LockName`              | `<namespace>:outbox:relay`| Lock name used with that `Locker`, verbatim when set; the default opens with the application namespace, read at each run from the runtime's configuration, `melody` without one.                                                                                                                       |
 | `ResolutionTimeout`     | `5s`                     | Bound on one resolution write — sent, rescheduled or dead — run on its own detached context so a signal between a send and its mark does not republish the row; at least 1ms.                                                                                                                          |
 | `UnavailableBackoff`    | `15s`, `1m`, `2.0`       | A `bound.Backoff`: the wait of a row whose send met an unreachable transport (a failure marked by `exception.MarkInfrastructureFailure`), no attempt charged; `Initial` first, grown by its own `Factor` per consecutive outage pass up to `Max`; both at least 1ms.                                   |

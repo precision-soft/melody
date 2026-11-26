@@ -3,19 +3,28 @@ package outbox
 import (
     "context"
     "database/sql"
+    "errors"
     "math"
     "os"
     "strings"
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/messagebus"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/pgdialect"
     "github.com/uptrace/bun/driver/pgdriver"
 )
 
 func outboxTestStore(t *testing.T) *Store {
+    t.Helper()
+
+    return outboxTestStoreWith(t, StoreConfig{})
+}
+
+func outboxTestStoreWith(t *testing.T, config StoreConfig) *Store {
     t.Helper()
 
     dsn := os.Getenv("POSTGRES_DSN")
@@ -30,15 +39,15 @@ func outboxTestStore(t *testing.T) *Store {
 
     database := bun.NewDB(sqldb, pgdialect.New())
 
-    store := NewStore(database, &stringCodec{})
+    store := NewStore(database, &stringCodec{}, config)
 
     ctx := context.Background()
-    if schemaErr := store.EnsureSchema(ctx); nil != schemaErr {
+    if schemaErr := store.EnsureSchema(outboxTestRuntime(ctx)); nil != schemaErr {
         t.Fatalf("ensure schema: %v", schemaErr)
     }
 
     /* start from a clean table so counts are deterministic across runs */
-    if _, deleteErr := database.NewDelete().Model((*Message)(nil)).Where("1 = 1").Exec(ctx); nil != deleteErr {
+    if _, deleteErr := database.NewDelete().Model((*Message)(nil)).ModelTableExpr(aliasedTableExpression, bun.Ident(store.TableName())).Where("1 = 1").Exec(ctx); nil != deleteErr {
         t.Fatalf("clear table: %v", deleteErr)
     }
 
@@ -50,7 +59,7 @@ func enqueueOutboxRows(t *testing.T, store *Store, count int) {
 
     ctx := context.Background()
     for index := 0; index < count; index++ {
-        if enqueueErr := store.Enqueue(ctx, store.database, "payload"); nil != enqueueErr {
+        if enqueueErr := store.Enqueue(ctx, store.database, "payload", EnqueueOptions{}); nil != enqueueErr {
             t.Fatalf("enqueue: %v", enqueueErr)
         }
     }
@@ -62,7 +71,7 @@ func TestStore_ClaimMarksInFlightAndHidesFromNextClaim(t *testing.T) {
 
     enqueueOutboxRows(t, store, 3)
 
-    claimed, claimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
+    claimed, claimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute, ClaimOptions{})
     if nil != claimErr {
         t.Fatalf("claim: %v", claimErr)
     }
@@ -71,7 +80,7 @@ func TestStore_ClaimMarksInFlightAndHidesFromNextClaim(t *testing.T) {
     }
 
     /* the same rows are now in-flight with a future visibility, so an immediate second claim sees nothing */
-    again, againErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
+    again, againErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute, ClaimOptions{})
     if nil != againErr {
         t.Fatalf("second claim: %v", againErr)
     }
@@ -109,7 +118,7 @@ func TestStore_ClaimSkipsRowLockedByAnotherTransaction(t *testing.T) {
     claimCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
     defer cancel()
 
-    claimed, claimErr := store.ClaimDueMessages(outboxTestRuntime(claimCtx), rowCount, time.Minute)
+    claimed, claimErr := store.ClaimDueMessages(outboxTestRuntime(claimCtx), rowCount, time.Minute, ClaimOptions{})
     if nil != claimErr {
         t.Fatalf("claim blocked or errored; a held row must be skipped, not waited on: %v", claimErr)
     }
@@ -132,7 +141,7 @@ func TestStore_StaleResolveDoesNotClobberResolvedRow(t *testing.T) {
 
     enqueueOutboxRows(t, store, 1)
 
-    claimed, claimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
+    claimed, claimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute, ClaimOptions{})
     if nil != claimErr || 1 != len(claimed) {
         t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
     }
@@ -165,7 +174,7 @@ func TestStore_RecordDeliveryAttemptIncrementsPerRowNotClaim(t *testing.T) {
 
     enqueueOutboxRows(t, store, 1)
 
-    claimed, claimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
+    claimed, claimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute, ClaimOptions{})
     if nil != claimErr || 1 != len(claimed) {
         t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
     }
@@ -198,7 +207,7 @@ func TestStore_RecordDeliveryAttemptReportsUnclaimedWhenNotInFlight(t *testing.T
 
     enqueueOutboxRows(t, store, 1)
 
-    claimed, claimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
+    claimed, claimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute, ClaimOptions{})
     if nil != claimErr || 1 != len(claimed) {
         t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
     }
@@ -224,7 +233,7 @@ func TestStore_StaleClaimTokenCannotClobberReclaimedRow(t *testing.T) {
 
     enqueueOutboxRows(t, store, 1)
 
-    firstClaim, firstErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, 1*time.Millisecond)
+    firstClaim, firstErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, 1*time.Millisecond, ClaimOptions{})
     if nil != firstErr || 1 != len(firstClaim) {
         t.Fatalf("first claim: %v (got %d)", firstErr, len(firstClaim))
     }
@@ -232,7 +241,7 @@ func TestStore_StaleClaimTokenCannotClobberReclaimedRow(t *testing.T) {
     /* let the visibility window lapse so the row is due again, then re-claim it under a fresh token */
     time.Sleep(10 * time.Millisecond)
 
-    secondClaim, secondErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
+    secondClaim, secondErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute, ClaimOptions{})
     if nil != secondErr || 1 != len(secondClaim) {
         t.Fatalf("second claim: %v (got %d)", secondErr, len(secondClaim))
     }
@@ -271,7 +280,7 @@ func TestStore_InFlightRowResurfacesAfterVisibility(t *testing.T) {
 
     enqueueOutboxRows(t, store, 1)
 
-    first, firstErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, 50*time.Millisecond)
+    first, firstErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, 50*time.Millisecond, ClaimOptions{})
     if nil != firstErr {
         t.Fatalf("first claim: %v", firstErr)
     }
@@ -281,7 +290,7 @@ func TestStore_InFlightRowResurfacesAfterVisibility(t *testing.T) {
 
     time.Sleep(120 * time.Millisecond)
 
-    second, secondErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
+    second, secondErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute, ClaimOptions{})
     if nil != secondErr {
         t.Fatalf("second claim: %v", secondErr)
     }
@@ -316,9 +325,9 @@ func TestStore_ClaimDueMessagesRefusesANonPositiveLimitBeforeAnyQuery(t *testing
         sqldb.Close()
     })
 
-    store := NewStore(bun.NewDB(sqldb, pgdialect.New()), &stringCodec{})
+    store := NewStore(bun.NewDB(sqldb, pgdialect.New()), &stringCodec{}, StoreConfig{})
 
-    pending, claimErr := store.ClaimDueMessages(outboxTestRuntime(context.Background()), 0, time.Minute)
+    pending, claimErr := store.ClaimDueMessages(outboxTestRuntime(context.Background()), 0, time.Minute, ClaimOptions{})
     if nil == claimErr || nil != pending {
         t.Fatalf("expected the zero limit refused before any query, got %v, %v", pending, claimErr)
     }
@@ -348,7 +357,7 @@ func TestStore_AnOversizedClaimLimitIsRefusedBeforeAnyQuery(t *testing.T) {
     hook := &claimQueryHook{}
     store.database.AddQueryHook(hook)
 
-    if _, claimErr := store.ClaimDueMessages(outboxTestRuntime(context.Background()), math.MaxInt32, time.Minute); nil == claimErr {
+    if _, claimErr := store.ClaimDueMessages(outboxTestRuntime(context.Background()), math.MaxInt32, time.Minute, ClaimOptions{}); nil == claimErr {
         t.Fatalf("expected an oversized claim limit refused")
     }
 
@@ -356,7 +365,7 @@ func TestStore_AnOversizedClaimLimitIsRefusedBeforeAnyQuery(t *testing.T) {
         t.Fatalf("expected no query for a refused limit, got %v", hook.queries)
     }
 
-    if _, claimErr := store.ClaimDueMessages(outboxTestRuntime(context.Background()), maximumBatchSize, time.Minute); nil != claimErr {
+    if _, claimErr := store.ClaimDueMessages(outboxTestRuntime(context.Background()), maximumBatchSize, time.Minute, ClaimOptions{}); nil != claimErr {
         t.Fatalf("claim: %v", claimErr)
     }
 
@@ -375,7 +384,7 @@ func TestStore_RescheduleUnchargedHandsTheRowBackAsNeverTried(t *testing.T) {
 
     enqueueOutboxRows(t, store, 1)
 
-    claimed, claimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
+    claimed, claimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute, ClaimOptions{})
     if nil != claimErr || 1 != len(claimed) {
         t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
     }
@@ -388,7 +397,7 @@ func TestStore_RescheduleUnchargedHandsTheRowBackAsNeverTried(t *testing.T) {
         t.Fatalf("hand back: %v", handBackErr)
     }
 
-    reclaimed, reclaimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
+    reclaimed, reclaimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute, ClaimOptions{})
     if nil != reclaimErr || 1 != len(reclaimed) {
         t.Fatalf("expected the row pending and due again: %v (got %d)", reclaimErr, len(reclaimed))
     }
@@ -405,7 +414,7 @@ func TestStore_RescheduleUnchargedHandsTheRowBackAsNeverTried(t *testing.T) {
         t.Fatalf("a stale hand back answers no error: %v", staleErr)
     }
 
-    again, _ := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
+    again, _ := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute, ClaimOptions{})
     if 0 != len(again) {
         t.Fatalf("expected the stale claim token to leave the re-claimed row in flight, got %d due", len(again))
     }
@@ -417,7 +426,7 @@ func TestStore_RescheduleUnchargedHandsBackARowWhoseDeliveryCountIsZero(t *testi
 
     enqueueOutboxRows(t, store, 1)
 
-    claimed, claimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
+    claimed, claimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute, ClaimOptions{})
     if nil != claimErr || 1 != len(claimed) {
         t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
     }
@@ -426,7 +435,7 @@ func TestStore_RescheduleUnchargedHandsBackARowWhoseDeliveryCountIsZero(t *testi
         t.Fatalf("hand back: %v", handBackErr)
     }
 
-    reclaimed, reclaimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
+    reclaimed, reclaimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute, ClaimOptions{})
     if nil != reclaimErr || 1 != len(reclaimed) {
         t.Fatalf("expected the row pending and due again with its count left at zero: %v (got %d)", reclaimErr, len(reclaimed))
     }
@@ -453,7 +462,7 @@ func TestStore_ReleaseClaimsHandsBackOnlyTheNamedRowsStillClaimedUnderTheToken(t
 
     enqueueOutboxRows(t, store, 3)
 
-    claimed, claimErr := store.ClaimDueMessages(runtimeInstance, 3, time.Hour)
+    claimed, claimErr := store.ClaimDueMessages(runtimeInstance, 3, time.Hour, ClaimOptions{})
     if nil != claimErr || 3 != len(claimed) {
         t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
     }
@@ -468,7 +477,7 @@ func TestStore_ReleaseClaimsHandsBackOnlyTheNamedRowsStillClaimedUnderTheToken(t
     }
 
     enqueueOutboxRows(t, store, 1)
-    other, otherErr := store.ClaimDueMessages(runtimeInstance, 1, time.Hour)
+    other, otherErr := store.ClaimDueMessages(runtimeInstance, 1, time.Hour, ClaimOptions{})
     if nil != otherErr || 1 != len(other) {
         t.Fatalf("second claim: %v (got %d)", otherErr, len(other))
     }
@@ -506,7 +515,7 @@ func markOutboxRowsDead(t *testing.T, store *Store, count int) []int64 {
     runtimeInstance := outboxTestRuntime(context.Background())
     enqueueOutboxRows(t, store, count)
 
-    claimed, claimErr := store.ClaimDueMessages(runtimeInstance, count, time.Hour)
+    claimed, claimErr := store.ClaimDueMessages(runtimeInstance, count, time.Hour, ClaimOptions{})
     if nil != claimErr || count != len(claimed) {
         t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
     }
@@ -574,7 +583,7 @@ func TestStore_PruneSentDeletesOnlyRowsSentBeforeTheCutOff(t *testing.T) {
     }
 
     enqueueOutboxRows(t, store, 3)
-    claimed, claimErr := store.ClaimDueMessages(runtimeInstance, 3, time.Hour)
+    claimed, claimErr := store.ClaimDueMessages(runtimeInstance, 3, time.Hour, ClaimOptions{})
     if nil != claimErr || 3 != len(claimed) {
         t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
     }
@@ -617,7 +626,7 @@ func TestStore_PruneSentDeletesOnlyRowsSentBeforeTheCutOff(t *testing.T) {
     }
 
     enqueueOutboxRows(t, store, 2)
-    more, moreErr := store.ClaimDueMessages(runtimeInstance, 2, time.Hour)
+    more, moreErr := store.ClaimDueMessages(runtimeInstance, 2, time.Hour, ClaimOptions{})
     if nil != moreErr || 2 != len(more) {
         t.Fatalf("claim: %v (got %d)", moreErr, len(more))
     }
@@ -642,7 +651,7 @@ func TestStore_PruneSentDeletesOnlyRowsSentBeforeTheCutOff(t *testing.T) {
 func TestStore_EveryRepositoryDoorRefusesANilRuntime(t *testing.T) {
     store := &Store{}
 
-    _, claimErr := store.ClaimDueMessages(nil, 1, time.Minute)
+    _, claimErr := store.ClaimDueMessages(nil, 1, time.Minute, ClaimOptions{})
     _, _, recordErr := store.RecordDeliveryAttempt(nil, 1, "token")
     _, releaseErr := store.ReleaseClaims(nil, []int64{1}, "token")
     _, requeueErr := store.RequeueDead(nil, RequeueDeadOptions{})
@@ -703,7 +712,7 @@ func TestStore_MarkSentRecordsTheSendTimeAndARowWithNoSendTimeIsNeverPruned(t *t
     runtimeInstance := outboxTestRuntime(context.Background())
 
     enqueueOutboxRows(t, store, 2)
-    claimed, claimErr := store.ClaimDueMessages(runtimeInstance, 2, time.Hour)
+    claimed, claimErr := store.ClaimDueMessages(runtimeInstance, 2, time.Hour, ClaimOptions{})
     if nil != claimErr || 2 != len(claimed) {
         t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
     }
@@ -742,16 +751,211 @@ func TestStore_EnsureSchemaAddsTheSendTimeToATableCreatedWithoutIt(t *testing.T)
         t.Fatalf("drop the column: %v", dropErr)
     }
 
-    if schemaErr := store.EnsureSchema(context.Background()); nil != schemaErr {
+    if schemaErr := store.EnsureSchema(outboxTestRuntime(context.Background())); nil != schemaErr {
         t.Fatalf("ensure schema: %v", schemaErr)
     }
 
-    if schemaErr := store.EnsureSchema(context.Background()); nil != schemaErr {
+    if schemaErr := store.EnsureSchema(outboxTestRuntime(context.Background())); nil != schemaErr {
         t.Fatalf("ensure schema again: %v", schemaErr)
     }
 
     columns := 0
     if scanErr := store.database.NewRaw("SELECT count(*) FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'melody_outbox' AND column_name = 'sent_at'").Scan(context.Background(), &columns); nil != scanErr || 1 != columns {
         t.Fatalf("expected the column added once, got %d: %v", columns, scanErr)
+    }
+}
+
+func outboxTableRowCount(t *testing.T, store *Store, tableName string) int {
+    t.Helper()
+
+    count := 0
+    if scanErr := store.database.NewRaw("SELECT count(*) FROM ?", bun.Ident(tableName)).Scan(context.Background(), &count); nil != scanErr {
+        t.Fatalf("count %s: %v", tableName, scanErr)
+    }
+
+    return count
+}
+
+func TestStore_TheTableNameIsTheConfigs(t *testing.T) {
+    defaultStore := outboxTestStore(t)
+    enqueueOutboxRows(t, defaultStore, 1)
+
+    if _, dropErr := defaultStore.database.NewRaw("DROP TABLE IF EXISTS orders_outbox").Exec(context.Background()); nil != dropErr {
+        t.Fatalf("drop: %v", dropErr)
+    }
+
+    store := outboxTestStoreWith(t, StoreConfig{TableName: "orders_outbox"})
+    t.Cleanup(func() { _, _ = store.database.NewRaw("DROP TABLE IF EXISTS orders_outbox").Exec(context.Background()) })
+    if "orders_outbox" != store.TableName() {
+        t.Fatalf("expected the configured table name, got %q", store.TableName())
+    }
+
+    runtimeInstance := outboxTestRuntime(context.Background())
+    enqueueOutboxRows(t, store, 5)
+
+    claimed, claimErr := store.ClaimDueMessages(runtimeInstance, 5, time.Hour, ClaimOptions{})
+    if nil != claimErr || 5 != len(claimed) {
+        t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
+    }
+
+    for _, pending := range claimed {
+        if _, recorded, recordErr := store.RecordDeliveryAttempt(runtimeInstance, pending.Id, pending.ClaimToken); nil != recordErr || false == recorded {
+            t.Fatalf("record: %v (recorded %v)", recordErr, recorded)
+        }
+    }
+
+    for _, step := range []error{
+        store.MarkSent(runtimeInstance, claimed[0].Id, claimed[0].ClaimToken),
+        store.Reschedule(runtimeInstance, claimed[1].Id, 1, time.Now().Add(time.Hour), "retry", claimed[1].ClaimToken),
+        store.RescheduleUncharged(runtimeInstance, claimed[2].Id, time.Now().Add(time.Hour), "outage", claimed[2].ClaimToken),
+        store.MarkDead(runtimeInstance, claimed[3].Id, 3, "poison", claimed[3].ClaimToken),
+    } {
+        if nil != step {
+            t.Fatalf("resolution: %v", step)
+        }
+    }
+
+    if released, releaseErr := store.ReleaseClaims(runtimeInstance, []int64{claimed[4].Id}, claimed[4].ClaimToken); nil != releaseErr || 1 != released {
+        t.Fatalf("release: %v (released %d)", releaseErr, released)
+    }
+
+    if requeued, requeueErr := store.RequeueDead(runtimeInstance, RequeueDeadOptions{}); nil != requeueErr || 1 != requeued {
+        t.Fatalf("requeue dead: %v (requeued %d)", requeueErr, requeued)
+    }
+
+    if pruned, pruneErr := store.PruneSent(runtimeInstance, PruneSentOptions{SentBefore: time.Now().Add(time.Hour)}); nil != pruneErr || 1 != pruned {
+        t.Fatalf("prune: %v (pruned %d)", pruneErr, pruned)
+    }
+
+    if 4 != outboxTableRowCount(t, store, "orders_outbox") {
+        t.Fatalf("expected four rows left in orders_outbox, got %d", outboxTableRowCount(t, store, "orders_outbox"))
+    }
+
+    if 1 != outboxTableRowCount(t, store, DefaultTableName) {
+        t.Fatalf("expected melody_outbox untouched, got %d rows", outboxTableRowCount(t, store, DefaultTableName))
+    }
+}
+
+func TestStore_AMalformedTableNameIsRefused(t *testing.T) {
+    database := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN("postgres://nobody@127.0.0.1:1/none?sslmode=disable"))), pgdialect.New())
+    defer database.Close()
+
+    if DefaultTableName != NewStore(database, &stringCodec{}, StoreConfig{}).TableName() {
+        t.Fatalf("expected an empty table name to take the default")
+    }
+
+    if strings.Repeat("a", 64) != NewStore(database, &stringCodec{}, StoreConfig{TableName: strings.Repeat("a", 64)}).TableName() {
+        t.Fatalf("expected a 64-character identifier admitted")
+    }
+
+    for _, tableName := range []string{"a.b", "a b", "a`", "1orders", "orders-outbox", strings.Repeat("a", 65)} {
+        expectPanicNamingField(t, "StoreConfig.TableName", func() {
+            NewStore(database, &stringCodec{}, StoreConfig{TableName: tableName})
+        })
+    }
+
+    expectPanicNamingField(t, "StoreConfig.Headers.MaxCount", func() {
+        NewStore(database, &stringCodec{}, StoreConfig{Headers: messagebus.HeaderLimitsConfig{MaxCount: bound.UnlimitedCount()}})
+    })
+}
+
+func TestStore_EnqueueStoresHeadersAndTransportAndTheClaimReturnsThem(t *testing.T) {
+    store := outboxTestStore(t)
+    ctx := context.Background()
+    runtimeInstance := outboxTestRuntime(ctx)
+
+    if enqueueErr := store.Enqueue(ctx, store.database, "plain", EnqueueOptions{}); nil != enqueueErr {
+        t.Fatalf("enqueue: %v", enqueueErr)
+    }
+
+    if enqueueErr := store.Enqueue(ctx, store.database, "named", EnqueueOptions{Headers: map[string]string{"request-id": "request-7"}, Transport: "orders"}); nil != enqueueErr {
+        t.Fatalf("enqueue: %v", enqueueErr)
+    }
+
+    nullColumns := 0
+    if scanErr := store.database.NewRaw("SELECT count(*) FROM melody_outbox WHERE headers IS NULL AND transport IS NULL").Scan(ctx, &nullColumns); nil != scanErr || 1 != nullColumns {
+        t.Fatalf("expected NULL for both columns left out, got %d: %v", nullColumns, scanErr)
+    }
+
+    plain, plainErr := store.ClaimDueMessages(runtimeInstance, 10, time.Hour, ClaimOptions{})
+    if nil != plainErr || 1 != len(plain) || "" != plain[0].Headers || "" != plain[0].Transport {
+        t.Fatalf("expected the plain row with neither, got %+v: %v", plain, plainErr)
+    }
+
+    named, namedErr := store.ClaimDueMessages(runtimeInstance, 10, time.Hour, ClaimOptions{Transport: "orders"})
+    if nil != namedErr || 1 != len(named) || `{"request-id":"request-7"}` != named[0].Headers || "orders" != named[0].Transport {
+        t.Fatalf("expected the named row with its headers and transport, got %+v: %v", named, namedErr)
+    }
+}
+
+func TestStore_AClaimSeesOnlyItsTransport(t *testing.T) {
+    store := outboxTestStore(t)
+    ctx := context.Background()
+    runtimeInstance := outboxTestRuntime(ctx)
+
+    for _, transportName := range []string{"", "a", "b", "", "a", "b"} {
+        if enqueueErr := store.Enqueue(ctx, store.database, transportName, EnqueueOptions{Transport: transportName}); nil != enqueueErr {
+            t.Fatalf("enqueue: %v", enqueueErr)
+        }
+    }
+
+    seen := map[int64]bool{}
+    for _, transportName := range []string{"", "a", "b"} {
+        claimed, claimErr := store.ClaimDueMessages(runtimeInstance, 10, time.Hour, ClaimOptions{Transport: transportName})
+        if nil != claimErr || 2 != len(claimed) {
+            t.Fatalf("claim %q: %v (got %d)", transportName, claimErr, len(claimed))
+        }
+
+        for _, pending := range claimed {
+            if transportName != pending.Transport || true == seen[pending.Id] {
+                t.Fatalf("claim %q answered a row of %q or a row twice", transportName, pending.Transport)
+            }
+
+            seen[pending.Id] = true
+        }
+    }
+}
+
+func TestStore_EnqueueAndClaimRefuseAMalformedTransportOrHeaders(t *testing.T) {
+    store := outboxTestStoreWith(t, StoreConfig{Headers: messagebus.HeaderLimitsConfig{MaxCount: bound.Of(1)}})
+    ctx := context.Background()
+
+    expectErrorNamingField(t, store.Enqueue(ctx, store.database, "x", EnqueueOptions{Transport: "-orders"}), "EnqueueOptions.Transport")
+
+    headersErr := store.Enqueue(ctx, store.database, "x", EnqueueOptions{Headers: map[string]string{"a": "1", "b": "2"}})
+    if false == errors.Is(headersErr, messagebus.ErrHeadersRefused) {
+        t.Fatalf("expected the enqueue refused by ErrHeadersRefused, got %v", headersErr)
+    }
+    expectErrorNamingField(t, headersErr, "StoreConfig.Headers.MaxCount")
+
+    _, claimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 1, time.Hour, ClaimOptions{Transport: "a b"})
+    expectErrorNamingField(t, claimErr, "ClaimOptions.Transport")
+
+    if 0 != outboxTableRowCount(t, store, DefaultTableName) {
+        t.Fatalf("expected no row written by a refused enqueue")
+    }
+}
+
+func TestStore_EnsureSchemaAddsTheTwoColumnsToAnOlderTable(t *testing.T) {
+    store := outboxTestStore(t)
+    ctx := context.Background()
+
+    if _, dropErr := store.database.NewRaw("ALTER TABLE melody_outbox DROP COLUMN headers, DROP COLUMN transport").Exec(ctx); nil != dropErr {
+        t.Fatalf("drop the columns: %v", dropErr)
+    }
+
+    for range 2 {
+        if schemaErr := store.EnsureSchema(outboxTestRuntime(ctx)); nil != schemaErr {
+            t.Fatalf("ensure schema: %v", schemaErr)
+        }
+    }
+
+    columns := 0
+    if scanErr := store.database.NewRaw("SELECT count(*) FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'melody_outbox' AND column_name IN ('headers', 'transport') AND is_nullable = 'YES'").Scan(ctx, &columns); nil != scanErr || 2 != columns {
+        t.Fatalf("expected the two nullable columns added once, got %d: %v", columns, scanErr)
+    }
+
+    if nilErr := store.EnsureSchema(nil); nil == nilErr || false == strings.Contains(nilErr.Error(), "the runtime is nil or carries no context") {
+        t.Fatalf("expected a nil runtime refused, got %v", nilErr)
     }
 }
