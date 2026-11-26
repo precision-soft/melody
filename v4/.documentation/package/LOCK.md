@@ -22,7 +22,7 @@ Locking is opt-in. The core defines the contract and an in-memory `Locker` (sing
     - [`NewInMemoryLocker`](../../lock/in_memory.go)
 - Provide the patterns built on the contract, so consumers do not hand-roll them:
     - [`CreateLock`](../../lock/create_lock.go) — asks a locker for a lock and refuses one answering neither a lock nor an error with `the locker answered no lock`, naming the lock; `RunExclusive`, `LeaderGate`, `NewExclusiveCommand`, the lazy locker and the outbox relay create their locks through it
-    - [`RunExclusive`](../../lock/run_exclusive.go) — run-once-per-tick around a callback
+    - [`RunExclusive`](../../lock/run_exclusive.go) — one run at a time across instances around a callback, the lock released when it returns
     - [`ExclusiveCommand`](../../lock/exclusive_command.go) — the same, as a CLI command decorator
     - [`LeaderGate`](../../lock/leader_gate.go) — become leader, renew, release on shutdown
     - [`NewLazyLocker`](../../lock/lazy_locker.go) — a `Locker` that resolves the registered one at its locks' first use
@@ -90,7 +90,7 @@ locker := pgsql.NewLocker(database, pgsql.LockerConfig{})
 
 ### Run a block exclusively
 
-[`RunExclusive`](../../lock/run_exclusive.go) acquires the named lock, runs the callback while holding it, and always releases afterwards, so the `ttl` acts only as crash-safety and never as the run cadence. It returns `(false, nil)` **without running the callback** when another holder owns the lock — which is what makes N cron-launched instances run the same work exactly once per tick.
+[`RunExclusive`](../../lock/run_exclusive.go) acquires the named lock, runs the callback while holding it, and always releases afterwards, so the `ttl` acts only as crash-safety and never as the run cadence. It returns `(false, nil)` **without running the callback** when another holder owns the lock — so of N instances launched together, one runs the work. It is overlap protection, not a per-tick dedup: the lock is released when the callback returns, so two instances launched further apart than the work lasts both run it. The in-process cron runner deduplicates ticks itself ([`integrations/cron`](../../../integrations/cron/v4/README.md)), holding a lock for a window past the run with no renewal; on a session-style locker such a hold is a pinned connection.
 
 ```go
 ran, runErr := lock.RunExclusive(
@@ -123,7 +123,7 @@ An `Acquire` that errors fails **closed**: `(false, err)`, because an unreachabl
 
 ### Decorate a CLI command
 
-[`NewExclusiveCommand`](../../lock/exclusive_command.go) wraps any `cli/contract.Command` in `RunExclusive` — the per-tick dedup for cron-launched commands on a multi-instance deployment. The instances that do not get the lock **skip quietly with a zero exit code** (logging at info level through the runtime logger), so cron stays green everywhere.
+[`NewExclusiveCommand`](../../lock/exclusive_command.go) wraps any `cli/contract.Command` in `RunExclusive` — overlap protection for a command launched on several instances: one run at a time, and a run shorter than the skew between two launches runs once per launch. The instances that do not get the lock **skip quietly with a zero exit code** (logging at info level through the runtime logger), so cron stays green everywhere.
 
 ```go
 command := lock.NewExclusiveCommand(

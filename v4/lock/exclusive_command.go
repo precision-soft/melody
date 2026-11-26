@@ -95,7 +95,7 @@ func NewExclusiveCommand(
     }
 }
 
-/* ExclusiveCommand decorates a cli command with RunExclusive, the per-tick dedup for cron-launched commands on a multi-instance deployment. The ttl is crash-safety only, since the lease is refreshed while the command runs and released when it returns, so it is never tuned against the cron interval. */
+/* ExclusiveCommand decorates a cli command with RunExclusive, overlap protection across instances: one run at a time, the lock released when the run returns, so two launches further apart than the run lasts both run it; the in-process cron runner deduplicates ticks itself. The ttl is crash-safety only, since the lease is refreshed while the command runs and released when it returns, so it is never tuned against the cron interval. */
 type ExclusiveCommand struct {
     command         clicontract.Command
     locker          lockcontract.Locker

@@ -14,6 +14,7 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/lock"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
@@ -371,5 +372,59 @@ func TestRunnerCommand_AnUnlimitedTimeoutHandsTheCommandAContextWithNoDeadline(t
 
     if remaining := time.Unix(0, bounded.deadline.Load()).Sub(started); remaining < 59*time.Minute || remaining > 61*time.Minute {
         t.Fatalf("expected a deadline about one hour ahead, got %v", remaining)
+    }
+}
+
+func TestResolveRunnerConfig_RefusesTickDedupOutsideItsRules(t *testing.T) {
+    var typedNilLocker *lock.InMemoryLocker
+
+    testCases := []struct {
+        name        string
+        runner      TickDedupConfig
+        entry       EntryTickDedupConfig
+        field       string
+        commandName string
+        sentinel    error
+    }{
+        {name: "window below a second", runner: TickDedupConfig{Window: bound.Of(500 * time.Millisecond)}, field: "RunnerConfig.TickDedup.Window"},
+        {name: "unlimited window", runner: TickDedupConfig{Window: bound.UnlimitedDuration()}, field: "RunnerConfig.TickDedup.Window"},
+        {name: "zero call timeout", runner: TickDedupConfig{CallTimeout: bound.Of(time.Duration(0))}, field: "RunnerConfig.TickDedup.CallTimeout"},
+        {name: "unlimited call timeout", runner: TickDedupConfig{CallTimeout: bound.UnlimitedDuration()}, field: "RunnerConfig.TickDedup.CallTimeout"},
+        {name: "entry window below a second", entry: EntryTickDedupConfig{Window: bound.Of(500 * time.Millisecond)}, field: "EntryConfig.TickDedup.Window", commandName: "job:top"},
+        {name: "unknown runner mode", runner: TickDedupConfig{FailureMode: "retry"}, field: "RunnerConfig.TickDedup.FailureMode", sentinel: ErrUnknownTickDedupFailureMode},
+        {name: "unknown entry mode", entry: EntryTickDedupConfig{FailureMode: "retry"}, field: "EntryConfig.TickDedup.FailureMode", commandName: "job:top", sentinel: ErrUnknownTickDedupFailureMode},
+        {name: "typed-nil locker", runner: TickDedupConfig{Locker: typedNilLocker}, field: "RunnerConfig.TickDedup.Locker"},
+        {name: "key prefix with whitespace", runner: TickDedupConfig{KeyPrefix: "shop: ticks:"}, field: "RunnerConfig.TickDedup.KeyPrefix"},
+        {name: "key prefix with a control character", runner: TickDedupConfig{KeyPrefix: "shop:\x00"}, field: "RunnerConfig.TickDedup.KeyPrefix"},
+    }
+
+    for _, testCase := range testCases {
+        t.Run(testCase.name, func(t *testing.T) {
+            job := newRecordingCommand("job:top")
+            configuration := NewConfiguration().Schedule("job:top", EntryConfig{TickDedup: testCase.entry})
+
+            refusal := refusalOfRunnerConstruction(t, configuration, RunnerConfig{Commands: []clicontract.Command{job}, TickDedup: testCase.runner})
+
+            if testCase.field != refusal.Context()["field"] {
+                t.Fatalf("expected the refusal to name %s, got %v", testCase.field, refusal.Context())
+            }
+
+            if "" != testCase.commandName && testCase.commandName != refusal.Context()["commandName"] {
+                t.Fatalf("expected the refusal to name the command, got %v", refusal.Context())
+            }
+
+            if nil != testCase.sentinel && false == errors.Is(refusal, testCase.sentinel) {
+                t.Fatalf("expected the refusal to carry %v, got %v", testCase.sentinel, refusal)
+            }
+        })
+    }
+
+    resolved, resolveErr := resolveRunnerConfig(RunnerConfig{})
+    if nil != resolveErr {
+        t.Fatalf("unexpected error: %v", resolveErr)
+    }
+
+    if 5*time.Minute != resolved.tickDedup.window || 5*time.Second != resolved.tickDedup.callTimeout || TickDedupFailureSkip != resolved.tickDedup.failureMode {
+        t.Fatalf("expected the defaults 5m, 5s and skip, got %+v", resolved.tickDedup)
     }
 }

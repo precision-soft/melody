@@ -6,7 +6,10 @@ import (
     "fmt"
     "os"
     "sort"
+    "sync"
+    "sync/atomic"
     "testing"
+    "time"
 
     "io"
 
@@ -19,6 +22,7 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    lockcontract "github.com/precision-soft/melody/v4/lock/contract"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
@@ -277,6 +281,8 @@ func (instance *stubConfiguration) Names() []string {
 
 type stubKernelConfiguration struct {
     projectDirectory string
+    /* empty reads as the default namespace */
+    namespace string
 }
 
 func (instance *stubKernelConfiguration) DefaultMode() string {
@@ -328,7 +334,11 @@ func (instance *stubKernelConfiguration) ContainerTeardownSequential() configcon
 }
 
 func (instance *stubKernelConfiguration) Namespace() string {
-    return "melody"
+    if "" == instance.namespace {
+        return "melody"
+    }
+
+    return instance.namespace
 }
 
 type stubConfigurationWithKernel struct {
@@ -506,4 +516,162 @@ func staticConfiguration(configuration *Configuration) func(kernelInstance kerne
     return func(kernelInstance kernelcontract.Kernel) *Configuration {
         return configuration
     }
+}
+
+/* recordingTickLocker wraps a locker and records every lock name and ttl it is asked for and every release */
+type recordingTickLocker struct {
+    inner lockcontract.Locker
+    /* holds every acquire open, so two acquires of one minute overlap */
+    acquireDelay time.Duration
+    mutex    sync.Mutex
+    names    []string
+    ttls     []bound.Duration
+    releases atomic.Int32
+}
+
+func (instance *recordingTickLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+    instance.mutex.Lock()
+    instance.names = append(instance.names, name)
+    instance.ttls = append(instance.ttls, ttl)
+    instance.mutex.Unlock()
+
+    innerLock, createErr := instance.inner.CreateLock(name, ttl)
+    if nil != createErr {
+        return nil, createErr
+    }
+
+    return &recordingTickLock{inner: innerLock, owner: instance}, nil
+}
+
+func (instance *recordingTickLocker) recordedNames() []string {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]string{}, instance.names...)
+}
+
+func (instance *recordingTickLocker) recordedTtls() []bound.Duration {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]bound.Duration{}, instance.ttls...)
+}
+
+type recordingTickLock struct {
+    inner lockcontract.Lock
+    owner *recordingTickLocker
+}
+
+func (instance *recordingTickLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
+    time.Sleep(instance.owner.acquireDelay)
+
+    return instance.inner.Acquire(runtimeInstance)
+}
+
+func (instance *recordingTickLock) Release(runtimeInstance containercontract.Runtime) error {
+    instance.owner.releases.Add(1)
+
+    return instance.inner.Release(runtimeInstance)
+}
+
+func (instance *recordingTickLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+    return instance.inner.Refresh(runtimeInstance, ttl)
+}
+
+const (
+    failingTickLockerAnswersAnError    = "error"
+    failingTickLockerBlocks            = "block"
+    failingTickLockerPanics            = "panic"
+    failingTickLockerRefusesCreateLock = "create"
+)
+
+/* failingTickLocker fails every acquire the way its mode names: an error, a block until the acquire's context ends, a panic, or a refusal at CreateLock */
+type failingTickLocker struct {
+    mode string
+    err  error
+}
+
+func (instance *failingTickLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+    if failingTickLockerRefusesCreateLock == instance.mode {
+        return nil, instance.err
+    }
+
+    return &failingTickLock{owner: instance}, nil
+}
+
+type failingTickLock struct {
+    owner *failingTickLocker
+}
+
+func (instance *failingTickLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
+    switch instance.owner.mode {
+    case failingTickLockerBlocks:
+        <-runtimeInstance.Context().Done()
+
+        return false, runtimeInstance.Context().Err()
+    case failingTickLockerPanics:
+        panic("the tick locker panicked on purpose")
+    }
+
+    return false, instance.owner.err
+}
+
+func (instance *failingTickLock) Release(runtimeInstance containercontract.Runtime) error {
+    return nil
+}
+
+func (instance *failingTickLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+    return nil
+}
+
+/* sessionTickLocker ignores the ttl and holds a lock until it is released, the pinned-connection stand-in of the mysql and pgsql lockers */
+type sessionTickLocker struct {
+    mutex sync.Mutex
+    held  map[string]bool
+}
+
+func newSessionTickLocker() *sessionTickLocker {
+    return &sessionTickLocker{held: make(map[string]bool)}
+}
+
+func (instance *sessionTickLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+    return &sessionTickLock{owner: instance, name: name}, nil
+}
+
+func (instance *sessionTickLocker) heldCount() int {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return len(instance.held)
+}
+
+type sessionTickLock struct {
+    owner *sessionTickLocker
+    name  string
+}
+
+func (instance *sessionTickLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
+    instance.owner.mutex.Lock()
+    defer instance.owner.mutex.Unlock()
+
+    if true == instance.owner.held[instance.name] {
+        return false, nil
+    }
+
+    instance.owner.held[instance.name] = true
+
+    return true, nil
+}
+
+func (instance *sessionTickLock) Release(runtimeInstance containercontract.Runtime) error {
+    instance.owner.mutex.Lock()
+    defer instance.owner.mutex.Unlock()
+
+    delete(instance.owner.held, instance.name)
+
+    return nil
+}
+
+func (instance *sessionTickLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+    return nil
 }

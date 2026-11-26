@@ -15,7 +15,7 @@ type RunnerConfig struct {
     /* Dialect selects the day-of-month / day-of-week rule. The zero value and RunnerDialectCrontab follow vixie crond, where a star-based day field, plain or stepped, is unrestricted and the day fields combine with and; RunnerDialectKubernetes follows the robfig scheduler behind the k8s template, where only the plain or unit-stepped wildcard, alone or in a list, is unrestricted and a wildcard stepped above one combines with or. Two restricted day fields combine with or in both. */
     Dialect RunnerDialect
 
-    /* Commands are the registered commands the configuration schedules by name; wrap a command in lock.NewExclusiveCommand for multi-instance safety before listing it. */
+    /* Commands are the registered commands the configuration schedules by name; a command wrapped in lock.NewExclusiveCommand is serialised against its own overlapping runs, while one tick per replica is TickDedup's. */
     Commands []clicontract.Command
 
     /* OutputCaptureLimit is what one run may write into the journal, so a job printing a row per record cannot write its whole result set into one log line: 64 KiB by default, at least 1, unlimited refused. */
@@ -29,6 +29,9 @@ type RunnerConfig struct {
 
     /* ShutdownTimeout is how long the command of an entry that names no window of its own is given to unwind after its context was cancelled, by its deadline or by the shutdown, before the runner stops waiting and closes the run's container scope under it: 5m by default, at least 1ms, unlimited refused, since an abandon that never comes is the leak the window ends. */
     ShutdownTimeout bound.Duration
+
+    /* TickDedup is the per-tick dedup of a runner on several replicas: each tick of an entry runs on one replica. Its zero value is on, over the application's registered locker. */
+    TickDedup TickDedupConfig
 }
 
 var runnerOutputCaptureLimitRule = bound.Rule[int]{
@@ -79,6 +82,7 @@ type resolvedRunner struct {
     clockJumpResetThreshold time.Duration
     timeout                 bound.Resolved[time.Duration]
     shutdownTimeout         time.Duration
+    tickDedup               resolvedTickDedup
 }
 
 func resolveRunnerConfig(config RunnerConfig) (resolvedRunner, error) {
@@ -117,12 +121,18 @@ func resolveRunnerConfig(config RunnerConfig) (resolvedRunner, error) {
         return resolvedRunner{}, shutdownTimeoutErr
     }
 
+    tickDedup, tickDedupErr := resolveTickDedupConfig(config.TickDedup)
+    if nil != tickDedupErr {
+        return resolvedRunner{}, tickDedupErr
+    }
+
     return resolvedRunner{
         dialect:                 config.Dialect,
         outputCaptureLimit:      outputCaptureLimit.Value,
         clockJumpResetThreshold: clockJumpResetThreshold.Value,
         timeout:                 timeout,
         shutdownTimeout:         shutdownTimeout.Value,
+        tickDedup:               tickDedup,
     }, nil
 }
 

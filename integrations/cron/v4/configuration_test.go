@@ -212,3 +212,13 @@ func TestConfiguration_InTimezoneSurvivesTheEntriesRegisteredAfterIt(t *testing.
         t.Fatalf("expected the entry to be registered, got %d", len(configuration.Entries()))
     }
 }
+
+func TestSchedule_KeepsTheEntryTickDedup(t *testing.T) {
+    tickDedup := EntryTickDedupConfig{Disabled: true, Window: bound.Of(time.Minute), FailureMode: TickDedupFailureRun}
+
+    entries := NewConfiguration().Schedule("job:top", EntryConfig{TickDedup: tickDedup}).Entries()
+
+    if 1 != len(entries) || tickDedup != entries[0].Config.TickDedup {
+        t.Fatalf("expected the tick dedup to survive both copies, got %+v", entries)
+    }
+}

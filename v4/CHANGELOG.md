@@ -119,6 +119,8 @@ the session apart, `session.NewUnavailableSession` builds one.
 
 ### Changed
 
+- lock: the GoDoc of `NewExclusiveCommand`, `ExclusiveCommand` and `RunExclusive` and the `LOCK.md` guide describe them as what they are, one run at a time across instances, the lock released when the run returns, and no longer as a per-tick dedup: two instances launched further apart than the run lasts both run it. The in-process cron runner deduplicates ticks itself. No behaviour changes.
+- example: the cron heartbeat `app:info` sets `EntryConfig.TickDedup.Disabled`, a per-worker heartbeat; the other entries run once per tick across workers through the registered locker.
 - **Breaking** — config: `configcontract.KernelConfiguration` gains `Namespace()`, a framework-implemented interface; a fake of it adds the method.
 - **Breaking** — lock: the default lock name of `NewExclusiveCommand` is the application namespace, `:command:` and the command's name, resolved at each run from the runtime's configuration, `melody:command:<name>` under the default namespace or with no configuration, where it was the literal `melody:command:<name>`; a `LockName` set is used verbatim. See `UPGRADE.md`.
 - example: `MELODY_NAMESPACE=melody-example-v4`, the namespace handed to the rueidis and amqp providers; the rate limiters, the internal nonce guard and the outbox relay take the inherited defaults, and the token, cache and second-factor names are derived from the namespace, every key byte-identical.

@@ -82,3 +82,13 @@ func TestCronConfiguration_EvaluatesOnTheBucharestDayAndBoundsTheRatesRefresh(t 
         }
     }
 }
+
+/* the heartbeat is per worker by nature, so it alone opts out of the runner's tick dedup: the other entries run once per tick across replicas */
+func TestCronConfiguration_OnlyTheHeartbeatRunsOnEveryReplica(t *testing.T) {
+    for _, entry := range cronConfiguration("catalogue").Entries() {
+        heartbeat := melodycron.CommandName(cli.NewApplicationInformationCommand) == entry.CommandName
+        if heartbeat != entry.Config.TickDedup.Disabled {
+            t.Fatalf("expected only the heartbeat to disable the tick dedup, %q has %v", entry.CommandName, entry.Config.TickDedup.Disabled)
+        }
+    }
+}

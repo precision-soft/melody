@@ -34,6 +34,34 @@ app.RegisterModule(melodycron.NewModule(melodycron.ModuleConfig{
 }))
 ```
 
+## Running on several replicas
+
+The in-process runner (`melody:cron:run`) runs each tick of an entry on one replica. Before it runs a due entry it acquires a marker named `<KeyPrefix><command name>:<digest>:<unix minute>`, the digest covering the command name, the schedule and the arguments, and keeps it past the run for the hold, so a replica evaluating that minute later lists the entry under `skipped` in the minute's document, an empty list when nothing was skipped. A minute of skips only is as silent as an idle one unless `--report-idle` is passed. It is at most one attempt per tick: a tick whose winner failed, timed out or crashed is spent and is not retried elsewhere.
+
+Three wirings: nothing, and an application that registers `service.lock.locker` is deduplicated through it, the locker looked up once per `Run` in the run's scope; `RunnerConfig.TickDedup.Locker` names one; `RunnerConfig.TickDedup.Disabled` turns the dedup off. With neither a named nor a registered locker the runner deduplicates nothing and `Run` writes one warning.
+
+| Door | Default |
+|---|---|
+| `RunnerConfig.TickDedup.Disabled` | `false`, on |
+| `EntryConfig.TickDedup.Disabled` | `false`: the entry follows the runner; `true` runs it on every replica, the door for a job per-replica by nature |
+| `RunnerConfig.TickDedup.Locker` | the registered `service.lock.locker`; a typed nil refused |
+| `RunnerConfig.TickDedup.KeyPrefix` | `<namespace>:cron:tick:`, `melody:cron:tick:` under the default namespace; whitespace or a control character refused |
+| `RunnerConfig.TickDedup.Window`, `EntryConfig.TickDedup.Window` | 5m, the entry's the runner's when left out; at least 1s, unlimited refused |
+| `RunnerConfig.TickDedup.FailureMode`, `EntryConfig.TickDedup.FailureMode` | `cron.TickDedupFailureSkip`; `cron.TickDedupFailureRun` runs through an outage |
+| `RunnerConfig.TickDedup.CallTimeout` | 5s per acquire and per release; at least 1ms, unlimited refused |
+
+Every value is Go-side only; the runner has no env key.
+
+The hold is `Window` for an entry with a wildcard minute or hour, and `Window` plus `RunnerConfig.ClockJumpResetThreshold` for one that pins a minute and an hour, since such an entry is also evaluated in catch-up up to the threshold late. Size `Window` above the worst clock skew plus wake latency between two replicas; the live markers per entry are the ticks inside one hold, five for an every-minute entry at the default. The runner releases each won marker once its hold has elapsed, and nothing at shutdown or after `--once`, so a rolling deploy does not reopen the ticks it won.
+
+The locker: a lease locker, the rueidis one, keeps the marker past its writer; on the rueidis locker the key reads `<namespace>:lock:<namespace>:cron:tick:…`, the lock prefix and the tick prefix both carrying the namespace, which is redundant and harmless. A session locker, the mysql and pgsql ones, pins one connection per held tick and loses the marker with its process, so a replica stopped inside the hold reopens the ticks it won. An in-memory locker deduplicates nothing across processes.
+
+An outage: an acquire that errors, a `CallTimeout`, a panic of the locker, a `CreateLock` refusal or a registered locker that cannot be resolved leaves the tick not run under `TickDedupFailureSkip`, reported as that run's failure under `ErrTickDedupUnavailable`, so `--once` exits non-zero; `TickDedupFailureRun` runs it with one warning naming the key. An acquire the shutdown ended is a cancellation, not a failure.
+
+Clock steps: a replica re-runs a tick it won itself exactly as a single host would, the vixie re-run after a backward step included; a tick another replica holds is skipped. A rolling deploy that changes an entry's schedule or arguments changes that entry's key until the deploy ends.
+
+Overlap is a separate concern: `lock.NewExclusiveCommand` serialises overlapping runs of one command. Used together, the runner wins the tick and the wrapper takes its own run-long lock inside the run; a tick won while the previous run still holds the wrapper's lock is skipped by the wrapper and is spent. The generated crontab and CronJob manifests are not covered: several hosts carrying one manifest need the external scheduler's own single-run mechanism, or the runner.
+
 ## Keys
 
 The module declares ten `.env` keys through the framework's [module keys](../../../v4/.documentation/package/CONFIG.md#module-keys): each key feeds its parameter through `%env(KEY)%`, the `.env` line wins, then the `ModuleConfig.KeyDefaults` field, then the module's default, and a key with a rule is judged at boot in every mode the module is registered in, refused naming the key and the `cron.KeyDefaults.<Field>`. A cli flag still wins over the parameter at generation.

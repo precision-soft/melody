@@ -80,6 +80,14 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** Put the strings a consumer needs in a `messagebus.HeadersStamp`; raise `TransportConfig.Headers`, `StoreConfig.Headers` or `InMemoryTransportConfig.Headers` where a message legitimately carries more.
 
+### Cron: the in-process runner runs each tick of an entry on one replica
+
+**What changed.** The [in-process cron runner](../../integrations/cron/v4/README.md#running-on-several-replicas) takes a per-tick lock for every due entry when the application registers `service.lock.locker` or names `RunnerConfig.TickDedup.Locker`, and keeps it for `TickDedup.Window` past the run, five minutes by default, plus `ClockJumpResetThreshold` for an entry that pins a minute and an hour. Each minute's document carries `skipped`. `lock.NewExclusiveCommand` is overlap protection: one run at a time, the lock released when the run returns; it never was once-per-tick.
+
+**Symptom.** On several replicas a job that ran once per replica runs once, the others listing it under `skipped`. A pool sized tightly sees extra held connections when the registered locker is the mysql or pgsql one, one per held tick, five per every-minute entry at the default window. During a locker outage scheduled runs fail with `cron: the tick dedup locker could not be reached` instead of running, and `--once` exits non-zero. An application with no locker logs one warning at `Run`.
+
+**Remedy.** Nothing for the intended behaviour. `EntryConfig{TickDedup: cron.EntryTickDedupConfig{Disabled: true}}` for a job that must run on every replica; `RunnerConfig{TickDedup: cron.TickDedupConfig{Disabled: true}}` for the third major's behaviour, which also silences the warning; `FailureMode: cron.TickDedupFailureRun` to run through an outage; a lease locker in `TickDedup.Locker`, or a shorter `Window`, where the registered one is a session locker. A command wrapped in `lock.NewExclusiveCommand` for dedup keeps the wrapper only if overlapping runs must be serialised, or when an external scheduler launches it.
+
 ### Security: an unsafe request that rides a session is checked for forgery
 
 **What changed.** Every firewall checks, on `kernel.request` before access control, an unsafe request (anything but `GET`, `HEAD`, `OPTIONS` and `TRACE`) that presents the session cookie: a browser stating another origin, through `Sec-Fetch-Site` or `Origin`, is refused `403`; one stating its own origin passes in the default [`security.CsrfModeOrigin`](../security/csrf.go); one stating nothing over a session holding more than the csrf secret must present a token of [`http.CsrfToken`](../http/csrf.go), in the header `X-CSRF-Token` or the urlencoded field `_csrf_token`. A session the storage cannot answer at that step is refused `503` with the firewall's `Retry-After`. See [Cross-site request forgery](package/SECURITY.md#cross-site-request-forgery).

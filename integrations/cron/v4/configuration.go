@@ -26,6 +26,8 @@ type EntryConfig struct {
     Timeout bound.Duration
     /* ShutdownTimeout is how long the entry's command is given to unwind after Timeout or the runner's shutdown cancelled its context, before the runner stops waiting and closes the run's container scope under it: RunnerConfig.ShutdownTimeout when left out, at least 1ms, unlimited refused. It is reached only by a command that ignores its cancelled context. */
     ShutdownTimeout bound.Duration
+    /* TickDedup is this entry's own posture under the in-process runner's per-tick dedup; the generated manifests ignore it. */
+    TickDedup EntryTickDedupConfig
 }
 
 type ScheduledCommand struct {

@@ -33,6 +33,8 @@ var (
     ErrNilRunnerCommandFlag               = errors.New("cron: runner command answers a nil flag")
     ErrCommandTimeout                     = errors.New("cron: scheduled command exceeded its timeout")
     ErrInvalidApplicationName             = errors.New("cron: application name contains a control character")
+    ErrTickDedupUnavailable               = errors.New("cron: the tick dedup locker could not be reached")
+    ErrUnknownTickDedupFailureMode        = errors.New("cron: unknown tick dedup failure mode")
 )
 
 /* commandTimeoutFailure is the single-valued link that lets one error answer both errors.Is against ErrCommandTimeout and errors.Is against the command's own sentinel. errors.Join is not used because its Unwrap is []error and exception.LogContext follows only the branch a deep errors.As reaches, which would drop the command's own context from the record. */

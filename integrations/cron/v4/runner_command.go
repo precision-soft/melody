@@ -45,9 +45,12 @@ type scheduledRunEntry struct {
     timeout time.Duration
     /* zero means the runner's window */
     shutdownTimeout time.Duration
+    /* computed once, since every tick's key carries it */
+    identityDigest string
+    tickDedup      resolvedEntryTickDedup
 }
 
-/* RunnerCommand runs the cron Configuration in-process instead of emitting a manifest: it evaluates each entry's schedule against the wall clock under the configured RunnerDialect and invokes the registered command when it is due. Due commands run concurrently, each on its own goroutine, so an entry that outlives its interval overlaps itself; wrap the command in lock.NewExclusiveCommand to serialise runs, or gate the runner behind a lock.LeaderGate for multi-instance safety. A deadline set by EntryConfig.Timeout, or the shutdown, cancels the command's context, and a command still running one EntryConfig.ShutdownTimeout later is abandoned: a warning names it, the run is reported as a failure at error and counted in its minute's failures, its scope is closed under it and it stops counting towards the shutdown wait; wall-clock jumps follow the vixie-cron algorithm documented on reconcileWallClock. */
+/* RunnerCommand runs the cron Configuration in-process instead of emitting a manifest: it evaluates each entry's schedule against the wall clock under the configured RunnerDialect and invokes the registered command when it is due. Due commands run concurrently, each on its own goroutine, so an entry that outlives its interval overlaps itself; wrap the command in lock.NewExclusiveCommand to serialise its overlapping runs. On several replicas each tick of an entry runs on one of them, through RunnerConfig.TickDedup: before a due entry runs the runner acquires a marker named after the entry and the minute and keeps it past the run, so a replica evaluating that minute later reports the entry under skipped; a runner with neither a named locker nor a registered service.lock.locker deduplicates nothing and says so in one warning, and a lock.LeaderGate in front of the runner is the alternative that needs no dedup. A deadline set by EntryConfig.Timeout, or the shutdown, cancels the command's context, and a command still running one EntryConfig.ShutdownTimeout later is abandoned: a warning names it, the run is reported as a failure at error and counted in its minute's failures, its scope is closed under it and it stops counting towards the shutdown wait; wall-clock jumps follow the vixie-cron algorithm documented on reconcileWallClock. */
 type RunnerCommand struct {
     entries []*scheduledRunEntry
     now     func() time.Time
@@ -63,6 +66,11 @@ type RunnerCommand struct {
     userIgnoredCommands []string
     /* a scheduled dispatch runs on the process's context, under no tree, so Run hands its own tree's version on */
     applicationVersion atomic.Pointer[string]
+    tickDedup          resolvedTickDedup
+    /* the locker and the key prefix Run resolved once from its runtime */
+    tickDedupRun atomic.Pointer[tickDedupRun]
+    wonTicks     *wonTickLedger
+    elapsedSince func(time.Time) time.Duration
 }
 
 type runReporting struct {
@@ -71,7 +79,7 @@ type runReporting struct {
     reportIdle     bool
 }
 
-/* NewRunnerCommand resolves every scheduled command name against config.Commands and parses each schedule under config.Dialect; a nil configuration is an empty one. It panics at construction on a RunnerConfig or an entry limit outside its rule, naming the field and, for an entry, its command name, an unknown command name, a malformed schedule, an unknown RunnerDialect (ErrUnknownRunnerDialect), two commands sharing a name (ErrDuplicateRunnerCommand), a command whose Flags answers a nil flag (ErrNilRunnerCommandFlag), a configured zone the standard library cannot load (ErrUnknownTimezone), and an entry carrying EntryConfig.Command, several Instances or a DestinationFile, which belong to the generated manifests and would otherwise run twice. An entry naming a system user stays runnable as the process user, and Run logs one warning naming those commands. */
+/* NewRunnerCommand resolves every scheduled command name against config.Commands and parses each schedule under config.Dialect; a nil configuration is an empty one. It panics at construction on a RunnerConfig or an entry limit outside its rule, naming the field and, for an entry, its command name, an unknown command name, a malformed schedule, an unknown RunnerDialect (ErrUnknownRunnerDialect), an unknown tick dedup failure mode (ErrUnknownTickDedupFailureMode), a typed-nil RunnerConfig.TickDedup.Locker, a RunnerConfig.TickDedup.KeyPrefix holding whitespace or a control character, two commands sharing a name (ErrDuplicateRunnerCommand), a command whose Flags answers a nil flag (ErrNilRunnerCommandFlag), a configured zone the standard library cannot load (ErrUnknownTimezone), and an entry carrying EntryConfig.Command, several Instances or a DestinationFile, which belong to the generated manifests and would otherwise run twice. An entry naming a system user stays runnable as the process user, and Run logs one warning naming those commands. */
 func NewRunnerCommand(configuration *Configuration, config RunnerConfig) *RunnerCommand {
     if nil == configuration {
         configuration = NewConfiguration()
@@ -207,15 +215,24 @@ func NewRunnerCommand(configuration *Configuration, config RunnerConfig) *Runner
             )
         }
 
+        tickDedup, tickDedupErr := resolveEntryTickDedup(scheduled.CommandName, scheduled.Config.TickDedup, matcher.fixedTime(), runner)
+        if nil != tickDedupErr {
+            exception.Panic(exception.FromError(tickDedupErr))
+        }
+
+        schedule := scheduled.Config.Schedule.Expression()
+
         entries = append(entries, &scheduledRunEntry{
             commandName:     scheduled.CommandName,
             command:         command,
             arguments:       scheduled.Config.Arguments,
-            schedule:        scheduled.Config.Schedule.Expression(),
+            schedule:        schedule,
             matcher:         matcher,
             fixedTime:       matcher.fixedTime(),
             timeout:         timeout,
             shutdownTimeout: shutdownTimeout,
+            identityDigest:  entryIdentityDigest(scheduled.CommandName, schedule, scheduled.Config.Arguments),
+            tickDedup:       tickDedup,
         })
     }
 
@@ -227,6 +244,9 @@ func NewRunnerCommand(configuration *Configuration, config RunnerConfig) *Runner
         outputCaptureLimit:      runner.outputCaptureLimit,
         clockJumpResetThreshold: runner.clockJumpResetThreshold,
         userIgnoredCommands:     userIgnoredCommands,
+        tickDedup:               runner.tickDedup,
+        wonTicks:                newWonTickLedger(),
+        elapsedSince:            time.Since,
     }
 }
 
@@ -323,6 +343,10 @@ func (instance *RunnerCommand) Run(
 
     instance.declareSchedule(runtimeInstance)
 
+    dedupRun := instance.resolveTickDedupRun(runtimeInstance)
+    instance.tickDedupRun.Store(dedupRun)
+    instance.warnWithoutTickDedupLocker(runtimeInstance, dedupRun)
+
     applicationVersion := output.ApplicationVersionOf(commandContext)
     instance.applicationVersion.Store(&applicationVersion)
 
@@ -379,10 +403,17 @@ func (instance *RunnerCommand) declareSchedule(runtimeInstance containercontract
 
     scheduled := make([]map[string]any, 0, len(instance.entries))
     for _, entry := range instance.entries {
+        tickDedup := "on"
+        if true == instance.tickDedup.disabled || true == entry.tickDedup.disabled {
+            tickDedup = "off"
+        }
+
         scheduled = append(scheduled, map[string]any{
-            "command":   entry.commandName,
-            "schedule":  entry.schedule,
-            "arguments": entry.arguments,
+            "command":       entry.commandName,
+            "schedule":      entry.schedule,
+            "arguments":     entry.arguments,
+            "tickDedup":     tickDedup,
+            "tickDedupHold": entry.tickDedup.hold.String(),
         })
     }
 
@@ -409,10 +440,11 @@ func (instance *RunnerCommand) renderRunReport(
     if false == output.IsJsonFormat(option.Format) {
         _, _ = fmt.Fprintf(
             commandContext.Writer,
-            "%s  dispatched %d of %d configured entries%s\n",
+            "%s  dispatched %d of %d configured entries%s%s\n",
             report.At.Format(time.RFC3339),
             len(report.Ran),
             report.Configured,
+            skippedSuffixOf(report),
             failedSuffixOf(report),
         )
 
@@ -464,6 +496,14 @@ func failedCommandsOf(report dueReport) []string {
     return failed
 }
 
+func skippedSuffixOf(report dueReport) string {
+    if 0 == len(report.Skipped) {
+        return ""
+    }
+
+    return fmt.Sprintf(", skipped %d", len(report.Skipped))
+}
+
 func failedSuffixOf(report dueReport) string {
     failed := failedCommandsOf(report)
     if 0 == len(failed) {
@@ -496,6 +536,8 @@ func (instance *RunnerCommand) runLoop(runtimeInstance containercontract.Runtime
 
         now = instance.nowInZone(location)
 
+        instance.sweepWonTicks(runtimeInstance, now)
+
         if wallMinuteIndex(nextWake) == dispatchedIndex {
             continue
         }
@@ -526,7 +568,7 @@ func (instance *RunnerCommand) runLoop(runtimeInstance containercontract.Runtime
                 report, runErr := waitForMinute()
 
                 /* a minute that dispatched nothing is silent by default; --report-idle asks for it, which is how a consumer tells a live scheduler with nothing due from a dead one */
-                if 0 == len(report.Ran) && false == reporting.reportIdle {
+                if true == isIdleMinute(report) && false == reporting.reportIdle {
                     return
                 }
 
@@ -534,6 +576,11 @@ func (instance *RunnerCommand) runLoop(runtimeInstance containercontract.Runtime
             }(wait, instance.nowInZone(location))
         }
     }
+}
+
+/* isIdleMinute answers whether a minute ran nothing; a minute whose entries were all skipped is idle, so the replicas that lost every tick write nothing by default. */
+func isIdleMinute(report dueReport) bool {
+    return 0 == len(report.Ran)
 }
 
 /* runDue invokes every entry whose schedule matches the given minute and waits for all of them, aggregating command failures so one bad job neither aborts the others nor is silently dropped. It answers the failure alone; the caller that also wants the document dispatches directly. */
@@ -568,11 +615,20 @@ func dueRunSortsBefore(first dueRun, second dueRun) bool {
     return strings.Join(first.Arguments, "\x00") < strings.Join(second.Arguments, "\x00")
 }
 
-/* dueReport is one evaluated minute: the minute, how many entries the runner drives and the runs it dispatched. The configured count is what tells a quiet minute from a scheduler that will never do anything. */
+/* dueSkip is one due entry another instance holds the tick of. */
+type dueSkip struct {
+    Command   string   `json:"command"`
+    Schedule  string   `json:"schedule"`
+    Arguments []string `json:"arguments"`
+    Reason    string   `json:"reason"`
+}
+
+/* dueReport is one evaluated minute: the minute, how many entries the runner drives, the runs it dispatched and the due entries it skipped, an empty list rather than absent. The configured count is what tells a quiet minute from a scheduler that will never do anything. */
 type dueReport struct {
     At         time.Time `json:"at"`
     Configured int       `json:"configured"`
     Ran        []dueRun  `json:"ran"`
+    Skipped    []dueSkip `json:"skipped"`
 }
 
 /* dispatchDue starts every entry of the requested classes whose schedule matches the minute, each on its own goroutine, and logs each failure as its command completes. The returned wait blocks until every launched command finished and answers the minute's document with the aggregated failure; a command that ignores its cancelled context is abandoned one graceful window after the cancellation, and a panic in the runner's own code around a run is that run's failure. */
@@ -588,6 +644,10 @@ func (instance *RunnerCommand) dispatchDue(
     failedCommands := make([]string, 0)
     failures := make([]error, 0)
     runs := make([]dueRun, 0)
+    skips := make([]dueSkip, 0)
+
+    dedupRun := instance.currentTickDedupRun(runtimeInstance)
+    claims := make(map[string]*tickClaim)
 
     for _, entry := range instance.entries {
         if true == entry.fixedTime && false == runFixedTime {
@@ -602,12 +662,44 @@ func (instance *RunnerCommand) dispatchDue(
             continue
         }
 
+        /* one claim per key, taken without i/o on the tick loop, so two entries of one identity share one verdict */
+        var claim *tickClaim
+        if nil != dedupRun && false == entry.tickDedup.disabled {
+            key := tickDedupKey(dedupRun.keyPrefix, entry, at)
+
+            claim = claims[key]
+            if nil == claim {
+                claim = &tickClaim{key: key, tick: at, hold: entry.tickDedup.hold}
+                claims[key] = claim
+            }
+        }
+
         instance.inFlight.Add(1)
         launched.Add(1)
 
-        go func(launchedEntry *scheduledRunEntry) {
+        go func(launchedEntry *scheduledRunEntry, launchedClaim *tickClaim) {
             defer instance.inFlight.Done()
             defer launched.Done()
+
+            if nil != launchedClaim {
+                skip, row, failure, counted, gated := instance.gateTick(runtimeInstance, dedupRun, launchedEntry, launchedClaim)
+                if true == gated {
+                    failureMutex.Lock()
+                    if nil != skip {
+                        skips = append(skips, *skip)
+                    }
+                    if nil != row {
+                        runs = append(runs, *row)
+                    }
+                    if true == counted {
+                        failedCommands = append(failedCommands, launchedEntry.commandName)
+                        failures = append(failures, failure)
+                    }
+                    failureMutex.Unlock()
+
+                    return
+                }
+            }
 
             runId := logging.GenerateProcessId()
             invokedAt := time.Now()
@@ -622,14 +714,14 @@ func (instance *RunnerCommand) dispatchDue(
                 failures = append(failures, failure)
             }
             failureMutex.Unlock()
-        }(entry)
+        }(entry, claim)
     }
 
     return func() (dueReport, error) {
         launched.Wait()
 
         failureMutex.Lock()
-        report := dueReport{At: at, Configured: len(instance.entries), Ran: append([]dueRun{}, runs...)}
+        report := dueReport{At: at, Configured: len(instance.entries), Ran: append([]dueRun{}, runs...), Skipped: append([]dueSkip{}, skips...)}
         aggregated := append([]error{}, failures...)
         aggregatedNames := append([]string{}, failedCommands...)
         failureMutex.Unlock()
@@ -637,6 +729,13 @@ func (instance *RunnerCommand) dispatchDue(
         /* the runs are ordered by command name rather than completion order, which is scheduling luck, so two identical minutes render identical documents */
         sort.Slice(report.Ran, func(first int, second int) bool {
             return dueRunSortsBefore(report.Ran[first], report.Ran[second])
+        })
+
+        sort.Slice(report.Skipped, func(first int, second int) bool {
+            return dueRunSortsBefore(
+                dueRun{Command: report.Skipped[first].Command, Schedule: report.Skipped[first].Schedule, Arguments: report.Skipped[first].Arguments},
+                dueRun{Command: report.Skipped[second].Command, Schedule: report.Skipped[second].Schedule, Arguments: report.Skipped[second].Arguments},
+            )
         })
 
         if 0 < len(aggregatedNames) {
