@@ -553,26 +553,62 @@ func TestHmacTokenSource_NonceFirstBurnDeniesGenuineRequest(t *testing.T) {
     }
 }
 
-/* the per-request override flips the order for a single request: the source defaults to nonce-first, but a route or middleware that calls SetHmacVerifyBodyBeforeNonce(request, true) gets body-first behaviour, so the genuine request survives a mutated-body nonce burn. */
-func TestHmacTokenSource_PerRequestBodyBeforeNonceOverride(t *testing.T) {
+func hmacRequestUnderRoute(method string, path string, body []byte, headerName string, headerValue string, hmacCheckOrder httpcontract.HmacCheckOrder) httpcontract.Request {
+    request := hmacRequest(method, path, body, headerName, headerValue)
+    if httpcontract.HmacCheckOrderInherited != hmacCheckOrder {
+        request.Attributes().Set(melodyhttp.RouteAttributeProtection, httpcontract.RouteProtectionConfig{HmacCheckOrder: hmacCheckOrder})
+    }
+
+    return request
+}
+
+/* a body-first order rejects the mutated replay without burning the nonce, so the genuine request still authenticates; nonce-first burns it */
+func hmacGenuineSurvivesAMutatedReplay(t *testing.T, sourceBodyFirst bool, hmacCheckOrder httpcontract.HmacCheckOrder) bool {
+    t.Helper()
+
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
     body := []byte(`{"sku":"X-1"}`)
     headerValue, _ := signer.Sign(newTestRuntime(), "POST", "/internal/orders", body, nil)
 
-    source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
+    source := NewHmacTokenSource(hmacTestSecrets(), hmacTestApplications(), HmacTokenSourceConfig{
+        NonceGuard:            NewMemoryNonceGuard(MemoryNonceGuardConfig{}),
+        VerifyBodyBeforeNonce: sourceBodyFirst,
+    })
 
-    burnRequest := hmacRequest("POST", "/internal/orders", []byte(`{"sku":"X-999"}`), signer.HeaderName(), headerValue)
-    SetHmacVerifyBodyBeforeNonce(burnRequest, true)
-    burn, _ := source.Resolve(testRuntime(), burnRequest)
+    burn, _ := source.Resolve(testRuntime(), hmacRequestUnderRoute("POST", "/internal/orders", []byte(`{"sku":"X-999"}`), signer.HeaderName(), headerValue, hmacCheckOrder))
     if true == burn.IsAuthenticated() {
-        t.Fatal("expected the mutated-body replay to be rejected under the per-request override")
+        t.Fatal("expected the mutated-body replay to be rejected")
     }
 
-    genuineRequest := hmacRequest("POST", "/internal/orders", body, signer.HeaderName(), headerValue)
-    SetHmacVerifyBodyBeforeNonce(genuineRequest, true)
-    genuine, _ := source.Resolve(testRuntime(), genuineRequest)
-    if false == genuine.IsAuthenticated() {
-        t.Fatal("expected the genuine request to authenticate under the per-request override")
+    genuine, _ := source.Resolve(testRuntime(), hmacRequestUnderRoute("POST", "/internal/orders", body, signer.HeaderName(), headerValue, hmacCheckOrder))
+
+    return genuine.IsAuthenticated()
+}
+
+func TestHmacTokenSource_TheRoutesCheckOrderWinsInBothDirections(t *testing.T) {
+    for _, testCase := range []struct {
+        sourceBodyFirst bool
+        hmacCheckOrder  httpcontract.HmacCheckOrder
+        survives        bool
+    }{
+        {sourceBodyFirst: false, hmacCheckOrder: httpcontract.HmacCheckOrderBodyFirst, survives: true},
+        {sourceBodyFirst: false, hmacCheckOrder: httpcontract.HmacCheckOrderNonceFirst, survives: false},
+        {sourceBodyFirst: true, hmacCheckOrder: httpcontract.HmacCheckOrderBodyFirst, survives: true},
+        {sourceBodyFirst: true, hmacCheckOrder: httpcontract.HmacCheckOrderNonceFirst, survives: false},
+    } {
+        if survives := hmacGenuineSurvivesAMutatedReplay(t, testCase.sourceBodyFirst, testCase.hmacCheckOrder); testCase.survives != survives {
+            t.Fatalf("source body first %v, route %q: expected the genuine request to survive %v, got %v", testCase.sourceBodyFirst, testCase.hmacCheckOrder, testCase.survives, survives)
+        }
+    }
+}
+
+func TestHmacTokenSource_AnInheritedOrderIsTheSources(t *testing.T) {
+    if true == hmacGenuineSurvivesAMutatedReplay(t, false, httpcontract.HmacCheckOrderInherited) {
+        t.Fatal("expected a nonce-first source to keep its order on a route that inherits it")
+    }
+
+    if false == hmacGenuineSurvivesAMutatedReplay(t, true, httpcontract.HmacCheckOrderInherited) {
+        t.Fatal("expected a body-first source to keep its order on a route that inherits it")
     }
 }
 

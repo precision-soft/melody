@@ -216,6 +216,14 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** `application.HttpHandler()` for the handler, served under your own server, with `application.BeginHttpShutdown(ctx)` before its `Shutdown(ctx)` and `application.CloseWithContext(closeCtx)` after it; `http.NewKernel(router, http.KernelConfig{…}).ServeHttp(container)` for a bare kernel in a unit test; a field typed `httpcontract.Kernel` becomes `*http.Kernel`. Drop `HttpKernel()` from a kernel fake.
 
+### Security: a route's HMAC check order is a protection
+
+**What changed.** The order an HMAC firewall checks a request's body and its nonce in is declared per route by `RouteOptions.Protection.HmacCheckOrder`, an [`httpcontract.HmacCheckOrder`](../http/contract/route_option.go): `HmacCheckOrderInherited`, the zero value and the source's own `VerifyBodyBeforeNonce`, `HmacCheckOrderNonceFirst` or `HmacCheckOrderBodyFirst`, winning over the source in either direction. `security.HmacVerifyBodyBeforeNonceAttribute` and `security.SetHmacVerifyBodyBeforeNonce` are removed. See [Internal service-to-service authentication](package/SECURITY.md#internal-service-to-service-authentication-hmac).
+
+**Symptom.** `undefined: security.HmacVerifyBodyBeforeNonceAttribute` or `security.SetHmacVerifyBodyBeforeNonce`; a route that still writes `security.hmac.verifyBodyBeforeNonce` in `RouteOptions.Attributes` panics at registration with `route attribute is retired: declare RouteOptions.Protection.HmacCheckOrder`.
+
+**Remedy.** `RouteOptions{Protection: http.RouteProtectionConfig{HmacCheckOrder: http.HmacCheckOrderBodyFirst}}` on the route. An order chosen per request, which the setter allowed, has no successor: declare two routes.
+
 ### Httpclient: the transport takes a TLS configuration and a proxy
 
 **What changed.** [`TransportConfig`](../httpclient/transport_config.go) gains `TlsConfig`, `Proxy` and `ProxyDisabled`; their zero value is the client it was. See [Footguns & caveats](package/HTTPCLIENT.md#footguns--caveats).

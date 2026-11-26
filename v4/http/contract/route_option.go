@@ -52,4 +52,21 @@ type RouteProtectionConfig struct {
 
     /* MaxBodyBytes is this route's request body cap, larger or smaller than the application's MELODY_HTTP_MAX_REQUEST_BODY_BYTES; absent keeps the application's, unlimited and a value below 1 are refused at registration. */
     MaxBodyBytes bound.Count
+
+    /* HmacCheckOrder replaces, for this route, the order its HMAC firewall checks the body and the nonce in; left out, the source's; a value outside the three is refused at registration. */
+    HmacCheckOrder HmacCheckOrder
 }
+
+/* HmacCheckOrder is the order an HMAC firewall checks a request's body and its nonce in. */
+type HmacCheckOrder string
+
+const (
+    /* HmacCheckOrderInherited is the zero value: the source's own order. */
+    HmacCheckOrderInherited HmacCheckOrder = ""
+
+    /* HmacCheckOrderNonceFirst consumes the nonce before the body is read. */
+    HmacCheckOrderNonceFirst HmacCheckOrder = "nonce_first"
+
+    /* HmacCheckOrderBodyFirst verifies the body before the nonce is consumed. */
+    HmacCheckOrderBodyFirst HmacCheckOrder = "body_first"
+)

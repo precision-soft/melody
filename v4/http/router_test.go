@@ -1158,6 +1158,48 @@ func TestRouter_Protection_ReservedProtectionAttributeWrittenByHand_Refused(t *t
     NewRouter().Handle("/forged", csrfProtectionTestHandler, RouteOptions{Attributes: map[string]any{RouteAttributeProtection: RouteProtectionConfig{CsrfDisabled: true}}})
 }
 
+func TestRouter_AnUnknownHmacCheckOrderIsRefused(t *testing.T) {
+    defer func() {
+        refusal, isError := recover().(*exception.Error)
+        if false == isError || "unknown route hmac check order" != refusal.Error() || "RouteOptions.Protection.HmacCheckOrder" != refusal.Context()["field"] || "body-first" != refusal.Context()["value"] || "/internal" != refusal.Context()["pattern"] {
+            t.Fatalf("expected the unknown order refused naming the field, the value and the pattern, got %v", refusal)
+        }
+    }()
+
+    NewRouter().Handle("/internal", csrfProtectionTestHandler, RouteOptions{Protection: RouteProtectionConfig{HmacCheckOrder: "body-first"}})
+}
+
+func TestRouter_TheRetiredHmacAttributeIsRefusedNamingItsSuccessor(t *testing.T) {
+    defer func() {
+        refusal, isError := recover().(*exception.Error)
+        if false == isError || "route attribute is retired: declare RouteOptions.Protection.HmacCheckOrder" != refusal.Error() || "security.hmac.verifyBodyBeforeNonce" != refusal.Context()["attribute"] || "/internal" != refusal.Context()["pattern"] {
+            t.Fatalf("expected the retired attribute refused naming its successor, got %v", refusal)
+        }
+    }()
+
+    NewRouter().Handle("/internal", csrfProtectionTestHandler, RouteOptions{Attributes: map[string]any{"security.hmac.verifyBodyBeforeNonce": true}})
+}
+
+func TestRouter_AnHmacCheckOrderTravelsInTheProtection(t *testing.T) {
+    router := NewRouter()
+    router.Handle("/inherited", csrfProtectionTestHandler, RouteOptions{Protection: RouteProtectionConfig{HmacCheckOrder: HmacCheckOrderInherited}})
+    router.Handle("/nonce", csrfProtectionTestHandler, RouteOptions{Protection: RouteProtectionConfig{HmacCheckOrder: HmacCheckOrderNonceFirst}})
+    router.Handle("/body", csrfProtectionTestHandler, RouteOptions{Protection: RouteProtectionConfig{HmacCheckOrder: HmacCheckOrderBodyFirst}})
+
+    inherited, _ := router.Match(nethttp.MethodPost, "/inherited", "", "http")
+    if _, carried := inherited.RouteAttributes[RouteAttributeProtection]; true == carried {
+        t.Fatalf("expected an inherited order to write no protection attribute")
+    }
+
+    for path, expected := range map[string]HmacCheckOrder{"/nonce": HmacCheckOrderNonceFirst, "/body": HmacCheckOrderBodyFirst} {
+        match, _ := router.Match(nethttp.MethodPost, path, "", "http")
+        protection, _ := match.RouteAttributes[RouteAttributeProtection].(RouteProtectionConfig)
+        if expected != protection.HmacCheckOrder {
+            t.Fatalf("expected %s to carry %q, got %q", path, expected, protection.HmacCheckOrder)
+        }
+    }
+}
+
 func assertSecurityHeadersDisabledRefused(t *testing.T, names []string, expectedMessage string, expectedValue string) {
     t.Helper()
 

@@ -22,9 +22,6 @@ import (
 
 const hmacTokenSourceName = "hmacInternal"
 
-/* HmacVerifyBodyBeforeNonceAttribute is the request attribute (settable per route or, on demand, through SetHmacVerifyBodyBeforeNonce) that overrides the source's VerifyBodyBeforeNonce default for a single request. Its value must be a bool; a value of any other type is ignored and the source's default applies. */
-const HmacVerifyBodyBeforeNonceAttribute = "security.hmac.verifyBodyBeforeNonce"
-
 /* HmacTokenSourceConfig configures the verifying side of the internal-auth scheme, whose secrets provider and application registry are NewHmacTokenSource's arguments. NonceGuard rejects replayed envelopes (defaults to an in-process guard — supply a shared one for multi-instance deployments); MaxFutureExpiry bounds how far ahead an envelope's expiry may sit. */
 type HmacTokenSourceConfig struct {
     NonceGuard securitycontract.NonceGuard
@@ -42,7 +39,7 @@ type HmacTokenSourceConfig struct {
     /* ServiceIdentity, when set, turns on audience enforcement: an envelope whose signed Audience differs is refused. Empty skips the audience check. */
     ServiceIdentity string
 
-    /* VerifyBodyBeforeNonce selects the default order of the body and nonce checks. When false (the default) the nonce is consumed before the body is read, so a captured valid envelope can force at most one body buffering — but an on-path party who replays the header with a mutated body burns the nonce and fails the legitimate request as a replay. When true the body hash is verified first, so a body mismatch is rejected without consuming the nonce, at the cost of letting a captured envelope force body buffering until it expires. A per-request override (route attribute HmacVerifyBodyBeforeNonceAttribute, or SetHmacVerifyBodyBeforeNonce) takes precedence for routes/calls that need the opposite trade-off. */
+    /* VerifyBodyBeforeNonce selects the default order of the body and nonce checks. When false (the default) the nonce is consumed before the body is read, so a captured valid envelope can force at most one body buffering — but an on-path party who replays the header with a mutated body burns the nonce and fails the legitimate request as a replay. When true the body hash is verified first, so a body mismatch is rejected without consuming the nonce, at the cost of letting a captured envelope force body buffering until it expires. A route's RouteOptions.Protection.HmacCheckOrder takes precedence, in either direction, for a route that needs the opposite trade-off. */
     VerifyBodyBeforeNonce bool
 
     /* Clock is the clock the envelope's time window and the nonce ttl are read from; nil uses the system clock. Inject a frozen clock for deterministic tests. */
@@ -110,11 +107,6 @@ func NewHmacTokenSource(secrets HmacSecretProvider, applications HmacApplication
         serviceIdentity:       config.ServiceIdentity,
         clock:                 clockInstance,
     }
-}
-
-/* SetHmacVerifyBodyBeforeNonce overrides, for the given request only, whether the HMAC source verifies the body before consuming the nonce. An application calls it on demand (for example in a route-scoped middleware that runs before the firewall) to flip the configured default for chosen routes or calls; setting the HmacVerifyBodyBeforeNonceAttribute route attribute has the same effect. */
-func SetHmacVerifyBodyBeforeNonce(request httpcontract.Request, value bool) {
-    request.Attributes().Set(HmacVerifyBodyBeforeNonceAttribute, value)
 }
 
 type HmacTokenSource struct {
@@ -387,10 +379,11 @@ func (instance *HmacTokenSource) guardNonceAndBody(
 }
 
 func (instance *HmacTokenSource) effectiveVerifyBodyBeforeNonce(request httpcontract.Request) bool {
-    if override, exists := request.Attributes().Get(HmacVerifyBodyBeforeNonceAttribute); true == exists {
-        if value, isBool := override.(bool); true == isBool {
-            return value
-        }
+    switch http.RouteProtection(request).HmacCheckOrder {
+    case httpcontract.HmacCheckOrderBodyFirst:
+        return true
+    case httpcontract.HmacCheckOrderNonceFirst:
+        return false
     }
 
     return instance.verifyBodyBeforeNonce

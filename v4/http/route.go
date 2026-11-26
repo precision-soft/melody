@@ -88,7 +88,7 @@ func copyRouteAttributes(attributes map[string]any) map[string]any {
 }
 
 func routeProtectionTurnsNothingOff(protection httpcontract.RouteProtectionConfig) bool {
-    return false == protection.CsrfDisabled && 0 == len(protection.SecurityHeadersDisabled) && true == protection.MaxBodyBytes.IsAbsent()
+    return false == protection.CsrfDisabled && 0 == len(protection.SecurityHeadersDisabled) && true == protection.MaxBodyBytes.IsAbsent() && httpcontract.HmacCheckOrderInherited == protection.HmacCheckOrder
 }
 
 /* RouteZones answers the declared zones in declaration order. */

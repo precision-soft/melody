@@ -185,7 +185,9 @@ func buildRouteValue(pattern string, handler httpcontract.Handler, options httpc
     rejectIncoherentLocaleDeclaration(parts, normalizedPattern, options.Locales, defaults)
     rejectMalformedExposureAttributes(options.Attributes, options.Name, normalizedPattern)
     rejectReservedAttributes(options.Attributes, normalizedPattern)
+    rejectRetiredAttributes(options.Attributes, normalizedPattern)
     rejectCsrfDisabledOnSafeOnlyRoute(options.Protection, options.Methods, normalizedPattern)
+    rejectUnknownHmacCheckOrder(options.Protection.HmacCheckOrder, normalizedPattern)
     protection := options.Protection
     protection.SecurityHeadersDisabled = canonicalSecurityHeadersDisabled(options.Protection.SecurityHeadersDisabled, normalizedPattern)
     rejectMalformedRouteMaxBodyBytes(protection.MaxBodyBytes, normalizedPattern)
@@ -395,6 +397,50 @@ func rejectReservedAttributes(attributes map[string]any, normalizedPattern strin
             )
         }
     }
+}
+
+/* a retired name is refused rather than ignored, since ignoring it would flip a route's check order without a word */
+var retiredRouteAttributeSuccessors = map[string]string{
+    "security.hmac.verifyBodyBeforeNonce": "RouteOptions.Protection.HmacCheckOrder",
+}
+
+func rejectRetiredAttributes(attributes map[string]any, normalizedPattern string) {
+    for key := range attributes {
+        successor, retired := retiredRouteAttributeSuccessors[key]
+        if false == retired {
+            continue
+        }
+
+        exception.Panic(
+            exception.NewError(
+                "route attribute is retired: declare "+successor,
+                map[string]any{
+                    "attribute": key,
+                    "pattern":   normalizedPattern,
+                },
+                nil,
+            ),
+        )
+    }
+}
+
+func rejectUnknownHmacCheckOrder(hmacCheckOrder httpcontract.HmacCheckOrder, normalizedPattern string) {
+    switch hmacCheckOrder {
+    case httpcontract.HmacCheckOrderInherited, httpcontract.HmacCheckOrderNonceFirst, httpcontract.HmacCheckOrderBodyFirst:
+        return
+    }
+
+    exception.Panic(
+        exception.NewError(
+            "unknown route hmac check order",
+            map[string]any{
+                "field":   "RouteOptions.Protection.HmacCheckOrder",
+                "value":   internal.BoundDiagnosticText(string(hmacCheckOrder)),
+                "pattern": normalizedPattern,
+            },
+            nil,
+        ),
+    )
 }
 
 /* rejectCsrfDisabledOnSafeOnlyRoute refuses a switch that turns off a check the route's methods never meet. */
