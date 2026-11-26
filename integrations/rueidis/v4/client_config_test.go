@@ -111,6 +111,6 @@ func TestClientConfig_BootPingTimeoutRule(t *testing.T) {
     }
 
     expectPanicNamingField(t, "ClientConfig.BootPingTimeout", func() {
-        NewProvider(ProviderConfig{Client: ClientConfig{BootPingTimeout: bound.UnlimitedDuration()}})
+        NewProvider("melody", ProviderConfig{Client: ClientConfig{BootPingTimeout: bound.UnlimitedDuration()}})
     })
 }

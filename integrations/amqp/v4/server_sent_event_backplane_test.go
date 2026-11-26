@@ -125,7 +125,7 @@ func TestServerSentEventBackplane_ReplicatesBroadcastToAnotherInstance(t *testin
         t.Skip("AMQP_DSN not set; skipping amqp sse backplane integration test")
     }
 
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
     connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -173,7 +173,7 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
         t.Skip("AMQP_DSN not set; skipping amqp sse backplane integration test")
     }
 
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
     connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -256,7 +256,7 @@ func TestServerSentEventBackplane_EnsurePublishChannel_ReopensClosedChannel(t *t
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
     connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -1196,7 +1196,7 @@ func TestNewServerSentEventBackplane_RefusesANilHubNamingTheArgument(t *testing.
         argument string
     }{
         {"a nil hub", func() { NewServerSentEventBackplane(nil, FromDialer(refusingDialer), ServerSentEventBackplaneConfig{}) }, "hub"},
-        {"a nil hub through a provider", func() { NewProvider(ProviderConfig{}).NewServerSentEventBackplane(nil, FromDialer(refusingDialer), ServerSentEventBackplaneConfig{}) }, "hub"},
+        {"a nil hub through a provider", func() { NewProvider("melody", ProviderConfig{}).NewServerSentEventBackplane(nil, FromDialer(refusingDialer), ServerSentEventBackplaneConfig{}) }, "hub"},
     }
 
     for _, testCase := range cases {
@@ -1258,7 +1258,7 @@ func TestNewServerSentEventBackplane_ARefusedLimitLeavesTheHubWithoutABackplane(
 }
 
 func TestProviderNewServerSentEventBackplane_InheritsTheProvidersReconnectAndCloseTimeout(t *testing.T) {
-    provider := NewProvider(ProviderConfig{Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(2 * time.Second)}}, CloseTimeout: bound.Of(6 * time.Second)})
+    provider := NewProvider("melody", ProviderConfig{Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(2 * time.Second)}}, CloseTimeout: bound.Of(6 * time.Second)})
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     backplane := provider.NewServerSentEventBackplane(hub, FromDialer(refusingDialer), ServerSentEventBackplaneConfig{})
     defer backplane.CloseWithContext(context.Background())

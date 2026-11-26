@@ -113,13 +113,13 @@ func TestBuildSecondFactorBudgetLimiter_AFailedReleaseIsReturnedMarked(t *testin
     }
     client.Close()
 
-    moduleInstance := &Module{redisProvider: melodyrueidis.NewProvider(melodyrueidis.ProviderConfig{})}
+    moduleInstance := &Module{redisProvider: melodyrueidis.NewProvider("melody-example-v4", melodyrueidis.ProviderConfig{})}
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     containerInstance.MustRegister(
         melodyrueidis.ServiceConnection,
         func(resolver melodycontainercontract.Resolver) (*melodyrueidis.Connection, error) {
-            return melodyrueidis.NewConnection(client), nil
+            return melodyrueidis.NewConnection(client, "melody-example-v4"), nil
         },
         melodycontainer.RegisterOptions{},
     )

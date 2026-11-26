@@ -11,6 +11,7 @@ import (
     "time"
     "unicode/utf8"
 
+    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
     "github.com/precision-soft/melody/v4/bound"
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -19,7 +20,7 @@ import (
     "github.com/redis/rueidis"
 )
 
-const defaultBackendPrefix = "melody:cache:"
+const backendPrefixSuffix = "cache:"
 
 const roundTripCauseGrace = 100 * time.Millisecond
 
@@ -42,7 +43,7 @@ func (callTimeoutCause) Timeout() bool {
 
 /* BackendConfig declares the backend; its zero value is the default. */
 type BackendConfig struct {
-    /* Prefix isolates the backend, melody:cache: by default; each application sharing a store needs its own. */
+    /* Prefix isolates the backend, used verbatim: <namespace>:cache: when empty, the connection's namespace, so applications sharing a store are kept apart by their namespaces. */
     Prefix string
 
     /* ScanCount is the COUNT hint of the SCAN walk: 1000 by default, at least 1. */
@@ -111,10 +112,8 @@ func resolveBackendConfig(config BackendConfig) (resolvedBackend, error) {
         return resolvedBackend{}, callTimeoutErr
     }
 
+    /* empty is the connection's default, filled at construction */
     prefix := config.Prefix
-    if "" == prefix {
-        prefix = defaultBackendPrefix
-    }
 
     return resolvedBackend{
         prefix:         prefix,
@@ -125,12 +124,12 @@ func resolveBackendConfig(config BackendConfig) (resolvedBackend, error) {
     }, nil
 }
 
-/* NewBackend builds the redis-backed cache; a nil client or a limit outside its rule is refused. */
-func NewBackend(client rueidis.Client, config BackendConfig) (*Backend, error) {
-    if nil == client {
+/* NewBackend builds the redis-backed cache; a nil connection or a limit outside its rule is refused. */
+func NewBackend(connection *melodyrueidis.Connection, config BackendConfig) (*Backend, error) {
+    if nil == connection {
         return nil, exception.NewError(
-            "redis client is nil",
-            nil,
+            "redis connection is nil",
+            exceptioncontract.Context{"argument": "connection"},
             nil,
         )
     }
@@ -140,13 +139,18 @@ func NewBackend(client rueidis.Client, config BackendConfig) (*Backend, error) {
         return nil, resolveErr
     }
 
-    return newBackendFromResolved(client, resolved), nil
+    return newBackendFromResolved(connection, resolved), nil
 }
 
-func newBackendFromResolved(client rueidis.Client, resolved resolvedBackend) *Backend {
+func newBackendFromResolved(connection *melodyrueidis.Connection, resolved resolvedBackend) *Backend {
+    prefix := resolved.prefix
+    if "" == prefix {
+        prefix = connection.Namespace() + ":" + backendPrefixSuffix
+    }
+
     return &Backend{
-        client:         client,
-        prefix:         resolved.prefix,
+        client:         connection.Client(),
+        prefix:         prefix,
         scanCount:      resolved.scanCount,
         deleteBatch:    resolved.deleteBatch,
         maxKeyLength:   resolved.maxKeyLength,

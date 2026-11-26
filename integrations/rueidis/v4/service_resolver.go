@@ -8,7 +8,6 @@ import (
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
-    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     melodylock "github.com/precision-soft/melody/v4/lock"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
@@ -49,10 +48,7 @@ func ClientMustFromResolver(ctx context.Context, resolver containercontract.Reso
 
 /* registerLockerService resolves the configuration at the call, so a configuration outside its rule fails the boot rather than the first resolve; the locker is built over the resolved connection. */
 func registerLockerService(registrar serviceRegistrar, config LockerConfig) {
-    callTimeout, callTimeoutErr := bound.Resolve(config.CallTimeout, lockerCallTimeoutRule)
-    if nil != callTimeoutErr {
-        exception.Panic(exception.FromError(callTimeoutErr))
-    }
+    callTimeout, keyPrefix := resolveLockerConfig(config)
 
     registrar.RegisterService(
         melodylock.ServiceLocker,
@@ -62,7 +58,7 @@ func registerLockerService(registrar serviceRegistrar, config LockerConfig) {
                 return nil, connectionErr
             }
 
-            return &Locker{client: connection.Client(), callTimeout: callTimeout.Value}, nil
+            return newLockerFromResolved(connection, callTimeout, keyPrefix, config.KeyPrefixDisabled), nil
         },
         container.RegisterOptions{},
     )
@@ -90,7 +86,7 @@ func registerTokenStoreService(registrar serviceRegistrar, config TokenStoreConf
                 }
             }
 
-            return newTokenStoreFromResolved(connection.Client(), storeConfig), nil
+            return newTokenStoreFromResolved(connection, storeConfig), nil
         },
         container.RegisterOptions{},
     )

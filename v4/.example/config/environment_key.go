@@ -196,6 +196,11 @@ func (instance nameKeyRule) Describe() string {
     return "name"
 }
 
+/* namespace is the application namespace every store family is handed, MELODY_NAMESPACE */
+func (instance *Module) namespace() string {
+    return instance.configuration.Kernel().Namespace()
+}
+
 func (instance *Module) parameterValue(name string) string {
     return instance.configuration.MustGet(name).String()
 }

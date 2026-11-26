@@ -214,3 +214,29 @@ func TestRegisterTokenStoreService_HandsTheConfigToTheStore(t *testing.T) {
 func (instance *containerRegistrar) ReservePhaseService(serviceName string, kind containercontract.Kind) error {
     return nil
 }
+
+func TestRegisterServices_TheRegisteredLockerAndTokenStoreDeriveTheirNamesFromTheConnection(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    shopConnection := func(resolver containercontract.Resolver) (*Connection, error) {
+        return NewConnection(fakeClient{}, "shop"), nil
+    }
+
+    NewModule(ModuleConfig{Connection: shopConnection, Locker: &LockerConfig{}, TokenStore: &TokenStoreConfig{}}).RegisterServices(&containerRegistrar{target: serviceContainer})
+
+    lock := mustCreateLock(melodylock.LockerMustFromResolver(t.Context(), serviceContainer).CreateLock("x", bound.Of(time.Minute)))
+    if key := lock.(*redisLock).key; "shop:lock:x" != key {
+        t.Fatalf("expected the registered locker to key shop:lock:x, got %q", key)
+    }
+
+    if store := TokenStoreMustFromResolver(t.Context(), serviceContainer).(*RedisTokenStore); "shop:token" != store.prefix {
+        t.Fatalf("expected the registered token store under shop:token, got %q", store.prefix)
+    }
+
+    disabledContainer := container.NewContainer(container.ContainerConfig{})
+    NewModule(ModuleConfig{Connection: shopConnection, Locker: &LockerConfig{KeyPrefixDisabled: true}}).RegisterServices(&containerRegistrar{target: disabledContainer})
+
+    bareLock := mustCreateLock(melodylock.LockerMustFromResolver(t.Context(), disabledContainer).CreateLock("x", bound.Of(time.Minute)))
+    if key := bareLock.(*redisLock).key; "x" != key {
+        t.Fatalf("expected the registered locker with its prefix disabled to key the bare name, got %q", key)
+    }
+}

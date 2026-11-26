@@ -33,17 +33,39 @@ return 0`)
 var lockReleaseScript = rueidis.NewLuaScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`)
 var lockRefreshScript = rueidis.NewLuaScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`)
 
+/* lockKeyPrefixSuffix opens a lock's key after the namespace, <namespace>:lock:<name> */
+const lockKeyPrefixSuffix = "lock:"
+
 type LockerConfig struct {
+    /* KeyPrefix opens every lock's key, used verbatim: "<namespace>:lock:" when left out, so applications sharing a store never take each other's locks and no lock lands on a key of another type. */
+    KeyPrefix string
+
+    /* KeyPrefixDisabled keys a lock by its bare name: the door of a rolling deploy whose replicas still lock bare keys must exclude them. Refused beside a KeyPrefix. */
+    KeyPrefixDisabled bool
+
     /* CallTimeout bounds one round trip of Acquire, Release and Refresh by capping the runtime context with it, so a request whose context carries no deadline, as melody's http kernel leaves it, fails fast. The earlier of the two deadlines ends the call, so a looser budget a caller declares is cut to this timeout, and the framework's helpers release under no deadline of their own, this timeout bounding the release; a caller that needs longer raises it here. 1s by default, at least 1ms, unlimited refused. */
     CallTimeout bound.Duration
 }
 
 var lockerCallTimeoutRule = callTimeoutRule("LockerConfig.CallTimeout", defaultLockerCallTimeout)
 
-/* NewLocker resolves the configuration once; a nil client or a limit outside its rule panics naming it. */
-func NewLocker(client rueidis.Client, config LockerConfig) *Locker {
-    if nil == client {
-        exception.Panic(exception.NewError("redis lock client is nil", nil, nil))
+/* NewLocker resolves the configuration once; a nil connection, a key prefix beside its disabling door or a limit outside its rule panics naming it. */
+func NewLocker(connection *Connection, config LockerConfig) *Locker {
+    refuseNilConnection(connection)
+
+    callTimeout, keyPrefix := resolveLockerConfig(config)
+
+    return newLockerFromResolved(connection, callTimeout, keyPrefix, config.KeyPrefixDisabled)
+}
+
+/* resolveLockerConfig judges the configuration without a connection, so the module refuses it at registration; an empty prefix is the namespace's default */
+func resolveLockerConfig(config LockerConfig) (time.Duration, string) {
+    if "" != config.KeyPrefix && true == config.KeyPrefixDisabled {
+        exception.Panic(exception.NewError(
+            "the redis locker is handed a key prefix and has its key prefix disabled",
+            map[string]any{"field": "LockerConfig.KeyPrefix", "contradicts": "LockerConfig.KeyPrefixDisabled"},
+            nil,
+        ))
     }
 
     callTimeout, callTimeoutErr := bound.Resolve(config.CallTimeout, lockerCallTimeoutRule)
@@ -51,15 +73,25 @@ func NewLocker(client rueidis.Client, config LockerConfig) *Locker {
         exception.Panic(exception.FromError(callTimeoutErr))
     }
 
+    return callTimeout.Value, config.KeyPrefix
+}
+
+func newLockerFromResolved(connection *Connection, callTimeout time.Duration, keyPrefix string, keyPrefixDisabled bool) *Locker {
+    if "" == keyPrefix && false == keyPrefixDisabled {
+        keyPrefix = connection.namespacedName(lockKeyPrefixSuffix)
+    }
+
     return &Locker{
-        client:      client,
-        callTimeout: callTimeout.Value,
+        client:      connection.Client(),
+        keyPrefix:   keyPrefix,
+        callTimeout: callTimeout,
     }
 }
 
-/* Locker holds a redis client and the per-call timeout, both fixed at construction. It keeps no state of its own, since a lease lives in redis under its key, so one Locker serves concurrent callers without a lock. */
+/* Locker holds a redis client, the key prefix and the per-call timeout, all fixed at construction. It keeps no state of its own, since a lease lives in redis under its key, so one Locker serves concurrent callers without a lock. */
 type Locker struct {
     client      rueidis.Client
+    keyPrefix   string
     callTimeout time.Duration
 }
 
@@ -72,6 +104,7 @@ func (instance *Locker) CreateLock(name string, ttl bound.Duration) (lockcontrac
     return &redisLock{
         client:      instance.client,
         name:        name,
+        key:         instance.keyPrefix + name,
         ttl:         ttl,
         callTimeout: instance.callTimeout,
     }, nil
@@ -80,6 +113,7 @@ func (instance *Locker) CreateLock(name string, ttl bound.Duration) (lockcontrac
 type redisLock struct {
     client      rueidis.Client
     name        string
+    key         string
     ttl         bound.Duration
     callTimeout time.Duration
 
@@ -129,7 +163,7 @@ func (instance *redisLock) Acquire(runtimeInstance containercontract.Runtime) (b
     result := lockAcquireScript.Exec(
         callContext,
         instance.client,
-        []string{instance.name},
+        []string{instance.key},
         []string{acquisitionToken, incumbentToken, milliseconds},
     )
 
@@ -177,7 +211,7 @@ func (instance *redisLock) releaseAmbiguousAcquire(acquisitionToken string) {
         releaseContext, cancel := context.WithTimeout(context.Background(), instance.callTimeout)
         defer cancel()
 
-        _ = lockReleaseScript.Exec(releaseContext, instance.client, []string{instance.name}, []string{acquisitionToken}).Error()
+        _ = lockReleaseScript.Exec(releaseContext, instance.client, []string{instance.key}, []string{acquisitionToken}).Error()
     }()
 }
 
@@ -194,7 +228,7 @@ func (instance *redisLock) Release(runtimeInstance containercontract.Runtime) er
     callContext, cancel := instance.callContext(runtimeInstance)
     defer cancel()
 
-    result := lockReleaseScript.Exec(callContext, instance.client, []string{instance.name}, []string{heldToken})
+    result := lockReleaseScript.Exec(callContext, instance.client, []string{instance.key}, []string{heldToken})
     if resultErr := result.Error(); nil != resultErr {
         return exception.NewError("redis lock release failed", map[string]any{"name": instance.name}, resultErr)
     }
@@ -224,7 +258,7 @@ func (instance *redisLock) Refresh(runtimeInstance containercontract.Runtime, tt
     callContext, cancel := instance.callContext(runtimeInstance)
     defer cancel()
 
-    result := lockRefreshScript.Exec(callContext, instance.client, []string{instance.name}, []string{heldToken, milliseconds})
+    result := lockRefreshScript.Exec(callContext, instance.client, []string{instance.key}, []string{heldToken, milliseconds})
 
     refreshed, resultErr := result.AsInt64()
     if nil != resultErr {

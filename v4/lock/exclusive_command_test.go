@@ -78,7 +78,7 @@ func TestExclusiveCommand_SkipsQuietlyWhenHeld(t *testing.T) {
     locker := NewInMemoryLocker(InMemoryLockerConfig{})
     runtimeInstance := testRuntime()
 
-    holder := mustCreateLock(locker.CreateLock(exclusiveCommandLockNamePrefix+"outbox:dispatch", bound.Of(time.Minute)))
+    holder := mustCreateLock(locker.CreateLock("melody:command:outbox:dispatch", bound.Of(time.Minute)))
     acquired, _ := holder.Acquire(runtimeInstance)
     if false == acquired {
         t.Fatalf("expected external holder to acquire the default lock name")
@@ -128,6 +128,41 @@ func TestExclusiveCommand_CustomLockNameSharesTheLock(t *testing.T) {
     }
 }
 
+func TestExclusiveCommand_TheDefaultLockNameCarriesTheNamespace(t *testing.T) {
+    runtimeInstance := runtimeWithNamespace(t, "shop")
+
+    for _, testCase := range []struct {
+        name        string
+        lockName    string
+        heldName    string
+        expectedRun int
+    }{
+        {name: "the namespace opens the default name", lockName: "", heldName: "shop:command:app:x", expectedRun: 0},
+        {name: "the default namespace's name is another lock", lockName: "", heldName: "melody:command:app:x", expectedRun: 1},
+        {name: "an explicit name is verbatim", lockName: "custom:lease", heldName: "custom:lease", expectedRun: 0},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            locker := NewInMemoryLocker(InMemoryLockerConfig{})
+
+            holder := mustCreateLock(locker.CreateLock(testCase.heldName, bound.Of(time.Minute)))
+            if acquired, _ := holder.Acquire(runtimeInstance); false == acquired {
+                t.Fatalf("expected the external holder to acquire %q", testCase.heldName)
+            }
+
+            inner := &recordingCommand{name: "app:x"}
+            command := NewExclusiveCommand(inner, locker, ExclusiveCommandConfig{LockName: testCase.lockName, Ttl: bound.Of(time.Minute)})
+
+            if runErr := command.Run(runtimeInstance, nil); nil != runErr {
+                t.Fatalf("unexpected run error: %v", runErr)
+            }
+
+            if testCase.expectedRun != inner.calls {
+                t.Fatalf("expected %d runs beside a holder of %q, got %d", testCase.expectedRun, testCase.heldName, inner.calls)
+            }
+        })
+    }
+}
+
 func TestExclusiveCommand_ShutdownSkipNamesTheShutdownNotAPhantomPeer(t *testing.T) {
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -159,7 +194,7 @@ func TestExclusiveCommand_ContentionSkipNamesThePeerInstance(t *testing.T) {
     locker := NewInMemoryLocker(InMemoryLockerConfig{})
     runtimeInstance, logger := runtimeWithRecordingLogger(context.Background())
 
-    holder := mustCreateLock(locker.CreateLock(exclusiveCommandLockNamePrefix+"outbox:dispatch", bound.Of(time.Minute)))
+    holder := mustCreateLock(locker.CreateLock("melody:command:outbox:dispatch", bound.Of(time.Minute)))
     if acquired, _ := holder.Acquire(runtimeInstance); false == acquired {
         t.Fatalf("expected the external holder to acquire the lock")
     }

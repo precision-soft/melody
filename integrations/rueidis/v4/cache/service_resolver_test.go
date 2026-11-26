@@ -157,7 +157,7 @@ func TestRegisterBackendService_AnAbsentConfigBoundsEachRoundTripAtOneSecond(t *
 
     service := container.MustFromResolver[*BackendService](t.Context(), serviceContainer, melodycache.ServiceCacheBackend)
 
-    if time.Second != service.backend.callTimeout || defaultBackendPrefix != service.backend.prefix {
+    if time.Second != service.backend.callTimeout || "melody:cache:" != service.backend.prefix {
         t.Fatalf("expected the default 1s budget and prefix, got %v and %q", service.backend.callTimeout, service.backend.prefix)
     }
 }
@@ -202,7 +202,7 @@ func registerConnectionOver(serviceContainer containercontract.Container, client
     serviceContainer.MustRegister(
         melodyrueidis.ServiceConnection,
         func(resolver containercontract.Resolver) (*melodyrueidis.Connection, error) {
-            return melodyrueidis.NewConnection(client), nil
+            return melodyrueidis.NewConnection(client, "melody"), nil
         },
         containercontract.RegisterOptions{},
     )

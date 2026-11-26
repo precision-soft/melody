@@ -91,12 +91,12 @@ func TestNewTransport_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T) {
 func TestConnectionSource_TheZeroValueIsRefusedNamingBothDoors(t *testing.T) {
     for name, build := range map[string]func(){
         "transport":                 func() { NewTransport("orders", NewMessageRegistry(), ConnectionSource{}, TransportConfig{}) },
-        "transport through provider": func() { NewProvider(ProviderConfig{}).NewTransport("orders", NewMessageRegistry(), ConnectionSource{}, TransportConfig{}) },
+        "transport through provider": func() { NewProvider("melody", ProviderConfig{}).NewTransport("orders", NewMessageRegistry(), ConnectionSource{}, TransportConfig{}) },
         "backplane": func() {
             NewServerSentEventBackplane(melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), ConnectionSource{}, ServerSentEventBackplaneConfig{})
         },
         "backplane through provider": func() {
-            NewProvider(ProviderConfig{}).NewServerSentEventBackplane(melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), ConnectionSource{}, ServerSentEventBackplaneConfig{})
+            NewProvider("melody", ProviderConfig{}).NewServerSentEventBackplane(melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), ConnectionSource{}, ServerSentEventBackplaneConfig{})
         },
     } {
         t.Run(name, func(t *testing.T) {
@@ -147,7 +147,7 @@ func TestNewTransport_APrefetchAtTheWireLimitIsAdmitted(t *testing.T) {
 }
 
 func TestNewProvider_ResolvesEveryFieldToItsDefault(t *testing.T) {
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
 
     if 10*time.Second != provider.heartbeat {
         t.Fatalf("expected the 10s heartbeat, got %s", provider.heartbeat)
@@ -159,7 +159,7 @@ func TestNewProvider_ResolvesEveryFieldToItsDefault(t *testing.T) {
 }
 
 func TestNewProvider_AGivenConfigReachesTheProvider(t *testing.T) {
-    provider := NewProvider(ProviderConfig{
+    provider := NewProvider("melody", ProviderConfig{
         Heartbeat:    bound.Of(time.Second),
         Reconnect:    ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(2 * time.Second), Max: bound.Of(time.Minute), Factor: 3}},
         CloseTimeout: bound.Of(5 * time.Second),
@@ -191,14 +191,14 @@ func TestNewProvider_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T) {
     for _, testCase := range cases {
         t.Run(testCase.name, func(t *testing.T) {
             expectPanicNamingField(t, testCase.field, func() {
-                NewProvider(testCase.config)
+                NewProvider("melody", testCase.config)
             })
         })
     }
 }
 
 func TestProviderNewTransport_GeneralLayerInherited(t *testing.T) {
-    provider := NewProvider(ProviderConfig{Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(2 * time.Second), Max: bound.Of(time.Minute)}}, CloseTimeout: bound.Of(7 * time.Second)})
+    provider := NewProvider("melody", ProviderConfig{Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(2 * time.Second), Max: bound.Of(time.Minute)}}, CloseTimeout: bound.Of(7 * time.Second)})
 
     instance := provider.NewTransport("orders", NewMessageRegistry(), refusingSource(), newTestTransportConfig())
 
@@ -220,7 +220,7 @@ func TestProviderNewTransport_GeneralLayerInherited(t *testing.T) {
 }
 
 func TestProviderNewTransport_TransportOverridesGeneral(t *testing.T) {
-    provider := NewProvider(ProviderConfig{Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(2 * time.Second), Max: bound.Of(time.Minute)}}, CloseTimeout: bound.Of(7 * time.Second)})
+    provider := NewProvider("melody", ProviderConfig{Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(2 * time.Second), Max: bound.Of(time.Minute)}}, CloseTimeout: bound.Of(7 * time.Second)})
 
     config := newTestTransportConfig()
     config.Reconnect = ReconnectConfig{Backoff: bound.Backoff{Max: bound.Of(10 * time.Second)}}
@@ -242,7 +242,7 @@ func TestProviderNewTransport_TransportOverridesGeneral(t *testing.T) {
 }
 
 func TestProviderNewTransport_ACapLoweredUnderTheProvidersInitialIsRefusedNamingBoth(t *testing.T) {
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
 
     config := newTestTransportConfig()
     config.Reconnect = ReconnectConfig{Backoff: bound.Backoff{Max: bound.Of(500 * time.Millisecond)}}
@@ -280,7 +280,7 @@ func TestProviderOpen_DoesNotLeakPasswordThroughDialErrorCause(t *testing.T) {
         t.Fatalf("precondition: expected the raw dial error to quote the password, got %v", rawErr)
     }
 
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
 
     _, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil == openErr {
@@ -380,7 +380,7 @@ func TestRedactDialError_AParseCauseNeverCarriesTheInput(t *testing.T) {
 }
 
 func TestProvider_OpenRecordsNeitherTheDsnNorItsHeadOnAMisparsedPassword(t *testing.T) {
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
 
     for dsn, secret := range map[string]string{
         "amqp://localhost:1/Pass@broker/":       "Pass",
@@ -459,7 +459,7 @@ func TestConnection_CloseWithContextAnswersTheClientsOwnTimeoutWhenNoShutdownIsI
 func TestProvider_OpenInstallsTheGivenHeartbeat(t *testing.T) {
     address := listenFakeBroker(t)
 
-    provider := NewProvider(ProviderConfig{Heartbeat: bound.Of(3 * time.Second)})
+    provider := NewProvider("melody", ProviderConfig{Heartbeat: bound.Of(3 * time.Second)})
 
     connection, openErr := provider.Open(newReconnectRuntime(t.Context()), "amqp://guest:guest@"+address+"/")
     if nil != openErr {
@@ -476,7 +476,7 @@ func TestProvider_OpenInstallsTheGivenHeartbeat(t *testing.T) {
 func TestConnection_CloseWithContextIsIdempotentAndCarriesTheProvidersTimeout(t *testing.T) {
     address := listenFakeBroker(t)
 
-    provider := NewProvider(ProviderConfig{CloseTimeout: bound.Of(200 * time.Millisecond)})
+    provider := NewProvider("melody", ProviderConfig{CloseTimeout: bound.Of(200 * time.Millisecond)})
 
     connection, openErr := provider.Open(newReconnectRuntime(t.Context()), "amqp://guest:guest@"+address+"/?heartbeat=0")
     if nil != openErr {
@@ -524,7 +524,7 @@ func TestNewConnection_RefusesANilConnectionAndACloseTimeoutItsRuleRefuses(t *te
 }
 
 func TestProviderOpen_RefusesANilRuntimeNamingTheDoor(t *testing.T) {
-    _, openErr := NewProvider(ProviderConfig{}).Open(nil, "amqp://guest:guest@127.0.0.1:1/")
+    _, openErr := NewProvider("melody", ProviderConfig{}).Open(nil, "amqp://guest:guest@127.0.0.1:1/")
     if nil == openErr || false == strings.Contains(fmt.Sprint(exception.LogContext(openErr, exception.LogContextConfig{})), "amqp.Provider.Open") {
         t.Fatalf("expected the nil runtime refused naming the door, got %v", openErr)
     }
@@ -536,7 +536,7 @@ func TestProviderOpen_ADoneContextRefusesBeforeTheDial(t *testing.T) {
     doneContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    _, openErr := NewProvider(ProviderConfig{}).Open(newReconnectRuntime(doneContext), "amqp://guest:guest@"+address+"/")
+    _, openErr := NewProvider("melody", ProviderConfig{}).Open(newReconnectRuntime(doneContext), "amqp://guest:guest@"+address+"/")
     if nil == openErr || false == strings.Contains(openErr.Error(), "the caller's context is done") || false == errors.Is(openErr, context.Canceled) {
         t.Fatalf("expected the done context refused before the dial with its cause, got %v", openErr)
     }
@@ -561,7 +561,7 @@ func TestProviderOpen_AContextEndedDuringTheHandshakeReturnsAtOnce(t *testing.T)
     }()
 
     started := time.Now()
-    _, openErr := NewProvider(ProviderConfig{}).Open(newReconnectRuntime(dialContext), "amqp://guest:guest@"+address+"/")
+    _, openErr := NewProvider("melody", ProviderConfig{}).Open(newReconnectRuntime(dialContext), "amqp://guest:guest@"+address+"/")
 
     if elapsed := time.Since(started); 5*time.Second <= elapsed {
         t.Fatalf("expected the open to return when the context ended, it took %s", elapsed)
@@ -573,18 +573,18 @@ func TestProviderOpen_AContextEndedDuringTheHandshakeReturnsAtOnce(t *testing.T)
 }
 
 func TestProviderConfig_DialTimeoutRule(t *testing.T) {
-    if 30*time.Second != NewProvider(ProviderConfig{}).dialTimeout {
-        t.Fatalf("expected a 30s dial timeout by default, got %s", NewProvider(ProviderConfig{}).dialTimeout)
+    if 30*time.Second != NewProvider("melody", ProviderConfig{}).dialTimeout {
+        t.Fatalf("expected a 30s dial timeout by default, got %s", NewProvider("melody", ProviderConfig{}).dialTimeout)
     }
 
-    if bound.TimeoutMinimum != NewProvider(ProviderConfig{DialTimeout: bound.Of(bound.TimeoutMinimum)}).dialTimeout {
+    if bound.TimeoutMinimum != NewProvider("melody", ProviderConfig{DialTimeout: bound.Of(bound.TimeoutMinimum)}).dialTimeout {
         t.Fatal("expected the minimum dial timeout admitted")
     }
 
     for name, limit := range map[string]bound.Duration{"below the minimum": bound.Of(time.Microsecond), "unlimited": bound.UnlimitedDuration()} {
         t.Run(name, func(t *testing.T) {
             expectPanicNamingField(t, "ProviderConfig.DialTimeout", func() {
-                NewProvider(ProviderConfig{DialTimeout: limit})
+                NewProvider("melody", ProviderConfig{DialTimeout: limit})
             })
         })
     }
@@ -594,7 +594,7 @@ func TestProviderOpen_DialTimeoutEndsASilentHandshake(t *testing.T) {
     address, _ := listenSilently(t)
 
     started := time.Now()
-    _, openErr := NewProvider(ProviderConfig{DialTimeout: bound.Of(300 * time.Millisecond)}).Open(newReconnectRuntime(t.Context()), "amqp://guest:guest@"+address+"/")
+    _, openErr := NewProvider("melody", ProviderConfig{DialTimeout: bound.Of(300 * time.Millisecond)}).Open(newReconnectRuntime(t.Context()), "amqp://guest:guest@"+address+"/")
 
     if elapsed := time.Since(started); 5*time.Second <= elapsed {
         t.Fatalf("expected the silent handshake ended by the 300ms dial timeout, it took %s", elapsed)
@@ -608,7 +608,7 @@ func TestProviderOpen_DialTimeoutEndsASilentHandshake(t *testing.T) {
 func TestProviderDialer_RunsUnderTheContextHanded(t *testing.T) {
     address, accepts := listenSilently(t)
 
-    dialer := NewProvider(ProviderConfig{}).Dialer("amqp://guest:guest@" + address + "/")
+    dialer := NewProvider("melody", ProviderConfig{}).Dialer("amqp://guest:guest@" + address + "/")
 
     dialContext, cancel := context.WithCancel(context.Background())
     go func() {
@@ -631,7 +631,7 @@ func TestProviderDialer_RunsUnderTheContextHanded(t *testing.T) {
 
 func TestProviderOpen_TlsConfigAndConnectionNameReachTheClientConfig(t *testing.T) {
     tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
-    provider := NewProvider(ProviderConfig{TlsConfig: tlsConfig, ConnectionName: "orders-worker"})
+    provider := NewProvider("melody", ProviderConfig{TlsConfig: tlsConfig, ConnectionName: "orders-worker"})
 
     tlsConfig.MinVersion = tls.VersionTLS10
 
@@ -645,13 +645,13 @@ func TestProviderOpen_TlsConfigAndConnectionNameReachTheClientConfig(t *testing.
         t.Fatalf("expected the connection name beside the client's own properties, got %v", config.Properties)
     }
 
-    if plain := NewProvider(ProviderConfig{}).clientConfig(nil); nil != plain.TLSClientConfig || 0 != len(plain.Properties) {
+    if plain := NewProvider("melody", ProviderConfig{}).clientConfig(nil); nil != plain.TLSClientConfig || 0 != len(plain.Properties) {
         t.Fatalf("expected the client's defaults without a tls configuration or a name, got %+v", plain)
     }
 }
 
 func TestProvider_TlsConfigWithAPlainDsnIsRefused(t *testing.T) {
-    provider := NewProvider(ProviderConfig{TlsConfig: &tls.Config{}})
+    provider := NewProvider("melody", ProviderConfig{TlsConfig: &tls.Config{}})
 
     _, openErr := provider.Open(newReconnectRuntime(t.Context()), "amqp://guest:guest@127.0.0.1:1/")
     expectErrorNamingField(t, openErr, "ProviderConfig.TlsConfig")
@@ -670,19 +670,19 @@ func TestProviderDialer_RefusesAnEmptyDsnAtWiring(t *testing.T) {
         }
     }()
 
-    NewProvider(ProviderConfig{}).Dialer("")
+    NewProvider("melody", ProviderConfig{}).Dialer("")
 }
 
 func TestProviderConfig_ConnectionNameRule(t *testing.T) {
     for name, connectionName := range map[string]string{"too long": strings.Repeat("a", 256), "a control character": "orders\nworker"} {
         t.Run(name, func(t *testing.T) {
             expectPanicNamingField(t, "ProviderConfig.ConnectionName", func() {
-                NewProvider(ProviderConfig{ConnectionName: connectionName})
+                NewProvider("melody", ProviderConfig{ConnectionName: connectionName})
             })
         })
     }
 
-    NewProvider(ProviderConfig{ConnectionName: strings.Repeat("a", 255)})
+    NewProvider("melody", ProviderConfig{ConnectionName: strings.Repeat("a", 255)})
 }
 
 func TestConnectionSource_ANilConnectionAndANilDialerAreRefusedAtTheDoor(t *testing.T) {
@@ -714,4 +714,48 @@ func TestRedactDialError_ReturnsOnACyclicChain(t *testing.T) {
             t.Error("expected the fixed text")
         }
     })
+}
+
+func TestProvider_TheBackplaneExchangeFollowsTheNamespace(t *testing.T) {
+    provider := NewProvider("shop", ProviderConfig{})
+
+    for label, testCase := range map[string]struct {
+        build    func(hub *melodyhttp.ServerSentEventHub) *ServerSentEventBackplane
+        expected string
+    }{
+        "built through the provider": {
+            build: func(hub *melodyhttp.ServerSentEventHub) *ServerSentEventBackplane {
+                return provider.NewServerSentEventBackplane(hub, FromDialer(refusingDialer), ServerSentEventBackplaneConfig{})
+            },
+            expected: "shop.sse",
+        },
+        "the package's own constructor": {
+            build: func(hub *melodyhttp.ServerSentEventHub) *ServerSentEventBackplane {
+                return NewServerSentEventBackplane(hub, FromDialer(refusingDialer), ServerSentEventBackplaneConfig{})
+            },
+            expected: "melody.sse",
+        },
+        "an explicit exchange": {
+            build: func(hub *melodyhttp.ServerSentEventHub) *ServerSentEventBackplane {
+                return provider.NewServerSentEventBackplane(hub, FromDialer(refusingDialer), ServerSentEventBackplaneConfig{Exchange: "legacy.sse"})
+            },
+            expected: "legacy.sse",
+        },
+    } {
+        backplane := testCase.build(melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}))
+        exchange := backplane.exchange
+        _ = backplane.CloseWithContext(context.Background())
+
+        if testCase.expected != exchange {
+            t.Fatalf("%s: expected the exchange %q, got %q", label, testCase.expected, exchange)
+        }
+    }
+}
+
+func TestNewProvider_AnEmptyNamespaceIsRefused(t *testing.T) {
+    for _, namespace := range []string{"", "a.b", "Shop"} {
+        expectPanicNamingTheArgument(t, "namespace", func() {
+            NewProvider(namespace, ProviderConfig{})
+        })
+    }
 }

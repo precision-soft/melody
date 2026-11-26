@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Breaking** — `relay.go`, `relay_config.go`: the relay's default lock name is `<namespace>:outbox:relay`, the application namespace read at each run from the runtime's configuration, `melody:outbox:relay` under the default namespace or with no configuration; a `RelayConfig.LockName` set is used verbatim. See the framework's `UPGRADE.md`.
 - **Breaking** — `relay.go`: `NewRelay(repository, transport, codec, config)` takes the repository, the transport and the codec positionally, a nil one refused with the same message and its context naming `argument`; they leave `RelayConfig`.
 - **Breaking** — `store.go`, `repository.go`: the table gains `sent_at`, the send time `MarkSent` records, and `PruneSent` judges `PruneSentOptions.SentBefore` against it, where it judged the enqueue time `created_at`; a sent row with no send time is never pruned. `EnsureSchema` adds the column to a table created without it, `TIMESTAMPTZ` on PostgreSQL and `DATETIME` on MySQL; a table managed by migrations is altered before the new binary is deployed, since `Enqueue` and `ClaimDueMessages` name the column, see `UPGRADE.md`.
 

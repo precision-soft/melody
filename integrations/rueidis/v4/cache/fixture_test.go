@@ -9,6 +9,7 @@ import (
     "testing"
     "time"
 
+    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
@@ -53,14 +54,14 @@ func liveBackend(t *testing.T) (*Backend, rueidis.Client) {
 
     prefix := "melody:test:" + t.Name() + ":"
 
-    backend, backendErr := NewBackend(client, BackendConfig{Prefix: prefix})
+    backend, backendErr := NewBackend(newTestConnection(client), BackendConfig{Prefix: prefix})
     if nil != backendErr {
         t.Fatalf("could not build the backend: %v", backendErr)
     }
 
     t.Cleanup(func() {
         /* the cleanup clears through its own backend: a test that closed the one under test would otherwise leave its keys behind, since a closed backend refuses Clear like every other operation */
-        cleaner, cleanerErr := NewBackend(client, BackendConfig{Prefix: prefix})
+        cleaner, cleanerErr := NewBackend(newTestConnection(client), BackendConfig{Prefix: prefix})
         if nil != cleanerErr {
             t.Logf("could not build the cleanup backend: %v", cleanerErr)
 
@@ -235,4 +236,9 @@ func awaitOutcome(t *testing.T, budget time.Duration, call func() error) error {
 
         return nil
     }
+}
+
+/* newTestConnection is the owner a backend under test is built over, under the default namespace */
+func newTestConnection(client rueidis.Client) *melodyrueidis.Connection {
+    return melodyrueidis.NewConnection(client, "melody")
 }

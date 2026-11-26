@@ -460,7 +460,7 @@ func hubTeardownDependencies(t *testing.T, redisWired bool) []string {
     moduleInstance.buildServerSentEvent()
 
     if true == redisWired {
-        moduleInstance.redisProvider = melodyrueidis.NewProvider(melodyrueidis.ProviderConfig{})
+        moduleInstance.redisProvider = melodyrueidis.NewProvider("melody-example-v4", melodyrueidis.ProviderConfig{})
         containerInstance.MustRegister(
             melodyrueidis.ServiceConnection,
             func(resolver melodycontainercontract.Resolver) (*closeableConnectionStub, error) {

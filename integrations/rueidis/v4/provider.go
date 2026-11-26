@@ -17,25 +17,29 @@ import (
     "github.com/redis/rueidis"
 )
 
-/* NewProvider resolves the configuration once and keeps it: a limit outside its rule panics naming the field, before any client is built. */
-func NewProvider(config ProviderConfig) *Provider {
+/* NewProvider resolves the configuration once and keeps it: a limit outside its rule panics naming the field, and a namespace outside config.ValidateNamespace naming the argument, before any client is built. The namespace is the application's, handed to every connection Open answers. */
+func NewProvider(namespace string, config ProviderConfig) *Provider {
+    refuseMalformedNamespace(namespace)
+
     resolved, resolveErr := resolveProviderConfig(config)
     if nil != resolveErr {
         exception.Panic(exception.FromError(resolveErr))
     }
 
     return &Provider{
-        client: resolved.client,
-        retry:  resolved.retry,
-        logger: config.Logger,
+        namespace: namespace,
+        client:    resolved.client,
+        retry:     resolved.retry,
+        logger:    config.Logger,
     }
 }
 
 /* Provider opens the redis client a set of connection values names. It holds only client, timeout and retry tuning and the journal the retry reports in; the address, user and password reach it through ConnectionParameters at open time. Handed the values rather than the configuration keys, it knows no key and names no credential, so it carries no marking door. Arming the framework's credential redaction is the application's call, through the registrar's RegisterSecretParameter for a parameter it declares or MarkParameterSecret for one melody registered from the .env artifacts; the mark propagates to every parameter whose template reads the secret. */
 type Provider struct {
-    client resolvedClient
-    retry  resolvedRetry
-    logger loggingcontract.Logger
+    namespace string
+    client    resolvedClient
+    retry     resolvedRetry
+    logger    loggingcontract.Logger
 }
 
 /* resolvedLogger is the journal the retry reports in: the configured one, else the emergency logger, so a re-dial is never silent */
@@ -81,7 +85,7 @@ func (instance *Provider) Open(runtimeInstance containercontract.Runtime, parame
                 )
             }
 
-            return NewConnection(client), nil
+            return NewConnection(client, instance.namespace), nil
         }
 
         if false == instance.isTransientError(openErr) {

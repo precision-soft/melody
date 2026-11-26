@@ -92,8 +92,8 @@ func TestRateLimiter_SharedLimitAcrossInstances(t *testing.T) {
     client := rateLimiterTestClient(t)
     clearCounter(t, client, rateLimiterTestPrefix+"shared:"+t.Name())
 
-    first := NewRateLimiter(client, "shared", 3, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
-    second := NewRateLimiter(client, "shared", 3, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
+    first := NewRateLimiter(newTestConnection(client), "shared", 3, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
+    second := NewRateLimiter(newTestConnection(client), "shared", 3, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
 
     if false == allowedBy(t, first, t.Name()) || false == allowedBy(t, second, t.Name()) || false == allowedBy(t, first, t.Name()) {
         t.Fatalf("expected the first three requests to be allowed")
@@ -108,7 +108,7 @@ func TestRateLimiter_ResetClearsTheWindow(t *testing.T) {
     client := rateLimiterTestClient(t)
     clearCounter(t, client, rateLimiterTestPrefix+"reset:"+t.Name())
 
-    limiter := NewRateLimiter(client, "reset", 1, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
+    limiter := NewRateLimiter(newTestConnection(client), "reset", 1, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
 
     if false == allowedBy(t, limiter, t.Name()) || true == allowedBy(t, limiter, t.Name()) {
         t.Fatalf("expected the first request allowed and the second denied")
@@ -127,7 +127,7 @@ func TestRateLimiter_WindowExpires(t *testing.T) {
     client := rateLimiterTestClient(t)
     clearCounter(t, client, rateLimiterTestPrefix+"expiry:"+t.Name())
 
-    limiter := NewRateLimiter(client, "expiry", 1, 150*time.Millisecond, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
+    limiter := NewRateLimiter(newTestConnection(client), "expiry", 1, 150*time.Millisecond, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
 
     if false == allowedBy(t, limiter, t.Name()) || true == allowedBy(t, limiter, t.Name()) {
         t.Fatalf("expected the first request allowed and the second denied inside the window")
@@ -144,7 +144,7 @@ func TestRateLimiter_TheRedisLimiterAnswersTheDecision(t *testing.T) {
     client := rateLimiterTestClient(t)
     clearCounter(t, client, rateLimiterTestPrefix+"decision:"+t.Name())
 
-    limiter := NewRateLimiter(client, "decision", 2, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
+    limiter := NewRateLimiter(newTestConnection(client), "decision", 2, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
 
     for index, expected := range []httpcontract.RateLimitDecision{
         {Allowed: true, Remaining: 1, Limit: 2},
@@ -171,7 +171,7 @@ func TestRateLimiter_RedisRetryAfterIsTheCountersTtl(t *testing.T) {
     fullKey := rateLimiterTestPrefix + "ttl:" + t.Name()
     clearCounter(t, client, fullKey)
 
-    limiter := NewRateLimiter(client, "ttl", 1, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
+    limiter := NewRateLimiter(newTestConnection(client), "ttl", 1, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
     allowedBy(t, limiter, t.Name())
 
     if expireErr := client.Do(context.Background(), client.B().Pexpire().Key(fullKey).Milliseconds(7_000).Build()).Error(); nil != expireErr {
@@ -193,7 +193,7 @@ func TestRateLimiter_AKeyWithoutATtlAnswersNoRetryAfterAndIsRearmed(t *testing.T
     fullKey := rateLimiterTestPrefix + "persisted:" + t.Name()
     clearCounter(t, client, fullKey)
 
-    limiter := NewRateLimiter(client, "persisted", 1, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
+    limiter := NewRateLimiter(newTestConnection(client), "persisted", 1, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
     allowedBy(t, limiter, t.Name())
 
     if persistErr := client.Do(context.Background(), client.B().Persist().Key(fullKey).Build()).Error(); nil != persistErr {
@@ -217,11 +217,11 @@ func TestRateLimiter_AKeyWithoutATtlAnswersNoRetryAfterAndIsRearmed(t *testing.T
 
 func TestRateLimiter_TwoLimitersOverOneClientDoNotShareACounter(t *testing.T) {
     client := rateLimiterTestClient(t)
-    clearCounter(t, client, defaultRateLimiterPrefix+"login:"+t.Name())
-    clearCounter(t, client, defaultRateLimiterPrefix+"api:"+t.Name())
+    clearCounter(t, client, "melody:rate_limit:"+"login:"+t.Name())
+    clearCounter(t, client, "melody:rate_limit:"+"api:"+t.Name())
 
-    strict := NewRateLimiter(client, "login", 1, time.Minute, RateLimiterConfig{})
-    loose := NewRateLimiter(client, "api", 100, time.Minute, RateLimiterConfig{})
+    strict := NewRateLimiter(newTestConnection(client), "login", 1, time.Minute, RateLimiterConfig{})
+    loose := NewRateLimiter(newTestConnection(client), "api", 100, time.Minute, RateLimiterConfig{})
 
     for index := 0; index < 5; index++ {
         if false == allowedBy(t, loose, t.Name()) {
@@ -239,7 +239,7 @@ func TestRateLimiter_TheCounterKeyIsPrefixNameKey(t *testing.T) {
     fullKey := "melody:test:frozen:" + "login" + ":" + t.Name()
     clearCounter(t, client, fullKey)
 
-    limiter := NewRateLimiter(client, "login", 5, time.Minute, RateLimiterConfig{KeyPrefix: "melody:test:frozen:"})
+    limiter := NewRateLimiter(newTestConnection(client), "login", 5, time.Minute, RateLimiterConfig{KeyPrefix: "melody:test:frozen:"})
     allowedBy(t, limiter, t.Name())
 
     count, countErr := client.Do(context.Background(), client.B().Get().Key(fullKey).Build()).AsInt64()
@@ -256,11 +256,11 @@ func TestRateLimiter_ALimitersCountersSurviveAChangeOfItsLimitAndWindow(t *testi
     client := rateLimiterTestClient(t)
     clearCounter(t, client, rateLimiterTestPrefix+"survive:"+t.Name())
 
-    before := NewRateLimiter(client, "survive", 2, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
+    before := NewRateLimiter(newTestConnection(client), "survive", 2, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
     allowedBy(t, before, t.Name())
     allowedBy(t, before, t.Name())
 
-    after := NewRateLimiter(client, "survive", 3, 2*time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
+    after := NewRateLimiter(newTestConnection(client), "survive", 3, 2*time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
     decision, allowErr := after.Allow(rateLimiterTestRuntime(), t.Name())
     if nil != allowErr || false == decision.Allowed || 0 != decision.Remaining {
         t.Fatalf("expected the third call charged to the same counter, the last of the new limit, got %+v %v", decision, allowErr)
@@ -271,7 +271,7 @@ func TestRateLimiter_ALimitersCountersSurviveAChangeOfItsLimitAndWindow(t *testi
 func TestRateLimiter_ACallCutByTheCallTimeoutNamesTheBound(t *testing.T) {
     client := rateLimiterTestClient(t)
 
-    limiter := NewRateLimiter(client, "timeout", 100, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
+    limiter := NewRateLimiter(newTestConnection(client), "timeout", 100, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
     limiter.callTimeout = time.Nanosecond
 
     decision, allowErr := limiter.Allow(rateLimiterTestRuntime(), t.Name())
@@ -286,7 +286,7 @@ func TestRateLimiter_ACallCutByTheCallTimeoutNamesTheBound(t *testing.T) {
 
 func TestRateLimiter_AStoreFailureIsReturnedMarked(t *testing.T) {
     for _, failureMode := range []RateLimiterFailureMode{FailureModeClosed, FailureModeOpen} {
-        limiter := NewRateLimiter(closedTestClient(t), "failure", 100, time.Minute, RateLimiterConfig{FailureMode: failureMode})
+        limiter := NewRateLimiter(newTestConnection(closedTestClient(t)), "failure", 100, time.Minute, RateLimiterConfig{FailureMode: failureMode})
 
         decision, allowErr := limiter.Allow(rateLimiterTestRuntime(), "failure:marked")
         if false == exception.IsInfrastructureFailure(allowErr) {
@@ -304,7 +304,7 @@ func TestRateLimiter_AStoreFailureIsReturnedMarked(t *testing.T) {
 }
 
 func TestRateLimiter_ResetReportsAStoreFailureMarked(t *testing.T) {
-    limiter := NewRateLimiter(closedTestClient(t), "reset", 1, time.Minute, RateLimiterConfig{})
+    limiter := NewRateLimiter(newTestConnection(closedTestClient(t)), "reset", 1, time.Minute, RateLimiterConfig{})
 
     resetErr := limiter.Reset(rateLimiterTestRuntime(), "account:user-2")
     if false == exception.IsInfrastructureFailure(resetErr) || false == strings.Contains(resetErr.Error(), "redis rate limiter reset failed") {
@@ -314,7 +314,7 @@ func TestRateLimiter_ResetReportsAStoreFailureMarked(t *testing.T) {
 
 func TestRateLimiter_ResetIsCancelledWithTheRuntimesContext(t *testing.T) {
     client, commands := newCommandCountingClient(t)
-    limiter := NewRateLimiter(client, "reset", 1, time.Minute, RateLimiterConfig{})
+    limiter := NewRateLimiter(newTestConnection(client), "reset", 1, time.Minute, RateLimiterConfig{})
 
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -331,7 +331,7 @@ func TestRateLimiter_ResetIsCancelledWithTheRuntimesContext(t *testing.T) {
 }
 
 func TestRateLimiter_AllowRefusesANilRuntime(t *testing.T) {
-    limiter := NewRateLimiter(&stubClient{}, "nil", 1, time.Minute, RateLimiterConfig{FailureMode: FailureModeOpen})
+    limiter := NewRateLimiter(newTestConnection(&stubClient{}), "nil", 1, time.Minute, RateLimiterConfig{FailureMode: FailureModeOpen})
 
     var typedNil *contextOnlyRuntime
     for name, runtimeInstance := range map[string]containercontract.Runtime{
@@ -351,13 +351,13 @@ func TestRateLimiter_AllowRefusesANilRuntime(t *testing.T) {
 }
 
 func TestNewRateLimiter_AnAbsentConfigTakesTheDefaults(t *testing.T) {
-    limiter := NewRateLimiter(&stubClient{}, "defaults", 1, time.Second, RateLimiterConfig{})
+    limiter := NewRateLimiter(newTestConnection(&stubClient{}), "defaults", 1, time.Second, RateLimiterConfig{})
 
-    if defaultRateLimiterPrefix != limiter.prefix || FailureModeClosed != limiter.failureMode || 250*time.Millisecond != limiter.callTimeout {
+    if "melody:rate_limit:" != limiter.prefix || FailureModeClosed != limiter.failureMode || 250*time.Millisecond != limiter.callTimeout {
         t.Fatalf("expected the default prefix, failure mode and 250ms budget, got %q, %q, %v", limiter.prefix, limiter.failureMode, limiter.callTimeout)
     }
 
-    limiter = NewRateLimiter(&stubClient{}, "given", 1, time.Millisecond, RateLimiterConfig{KeyPrefix: "melody:test:given:", CallTimeout: bound.Of(time.Millisecond)})
+    limiter = NewRateLimiter(newTestConnection(&stubClient{}), "given", 1, time.Millisecond, RateLimiterConfig{KeyPrefix: "melody:test:given:", CallTimeout: bound.Of(time.Millisecond)})
     if time.Millisecond != limiter.window || time.Millisecond != limiter.callTimeout || "melody:test:given:" != limiter.prefix {
         t.Fatalf("expected a 1ms window and budget and the given prefix, got %v, %v, %q", limiter.window, limiter.callTimeout, limiter.prefix)
     }
@@ -376,7 +376,7 @@ func TestNewRateLimiter_RefusesAValueOutsideItsRuleNamingTheField(t *testing.T) 
     for name, testCase := range cases {
         t.Run(name, func(t *testing.T) {
             expectPanicNamingField(t, testCase.field, func() {
-                NewRateLimiter(&stubClient{}, "test", 1, time.Second, testCase.config)
+                NewRateLimiter(newTestConnection(&stubClient{}), "test", 1, time.Second, testCase.config)
             })
         })
     }
@@ -414,7 +414,7 @@ func TestRateLimiter_ALimitBelowOneAndAWindowBelowAMillisecondAreRefusedNamingTh
     } {
         t.Run(name, func(t *testing.T) {
             expectPanicNamingArgument(t, "the limit is below its minimum", testCase.argument, func() {
-                NewRateLimiter(&stubClient{}, "test", testCase.limit, testCase.window, RateLimiterConfig{})
+                NewRateLimiter(newTestConnection(&stubClient{}), "test", testCase.limit, testCase.window, RateLimiterConfig{})
             })
         })
     }
@@ -423,12 +423,12 @@ func TestRateLimiter_ALimitBelowOneAndAWindowBelowAMillisecondAreRefusedNamingTh
 func TestRateLimiter_AnEmptyOrMalformedNameIsRefusedAtConstruction(t *testing.T) {
     for _, refused := range []string{"", "a:b", "a b", strings.Repeat("a", 65), "é", "a/b"} {
         expectPanicNamingArgument(t, "the limiter name is malformed", "name", func() {
-            NewRateLimiter(&stubClient{}, refused, 1, time.Second, RateLimiterConfig{})
+            NewRateLimiter(newTestConnection(&stubClient{}), refused, 1, time.Second, RateLimiterConfig{})
         })
     }
 
     for _, admitted := range []string{"a", "Login-2fa_budget.v1", strings.Repeat("z", 64)} {
-        NewRateLimiter(&stubClient{}, admitted, 1, time.Second, RateLimiterConfig{})
+        NewRateLimiter(newTestConnection(&stubClient{}), admitted, 1, time.Second, RateLimiterConfig{})
     }
 }
 
@@ -439,7 +439,7 @@ func TestRateLimiter_TheCallersCancellationIsNotAStoreFailureAndTakesTheFailureM
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    limiter := NewRateLimiter(client, "cancel", 5, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
+    limiter := NewRateLimiter(newTestConnection(client), "cancel", 5, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
 
     decision, allowErr := limiter.Allow(rateLimiterTestRuntimeWith(cancelledContext), "cancel-classification")
     if nil == allowErr || false == strings.Contains(allowErr.Error(), "cancelled by the caller") {
@@ -450,7 +450,7 @@ func TestRateLimiter_TheCallersCancellationIsNotAStoreFailureAndTakesTheFailureM
         t.Fatalf("expected the default limiter to refuse a cancelled call unmarked, got %+v %v", decision, allowErr)
     }
 
-    openLimiter := NewRateLimiter(client, "cancel", 5, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix, FailureMode: FailureModeOpen})
+    openLimiter := NewRateLimiter(newTestConnection(client), "cancel", 5, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix, FailureMode: FailureModeOpen})
 
     openDecision, openErr := openLimiter.Allow(rateLimiterTestRuntimeWith(cancelledContext), "cancel-classification")
     if nil == openErr || false == openDecision.Allowed {
@@ -462,7 +462,7 @@ func TestRateLimiter_TheCallersCancellationIsNotAStoreFailureAndTakesTheFailureM
 func TestRateLimiter_TheCallersDeadlineIsNotAStoreFailure(t *testing.T) {
     client := rateLimiterTestClient(t)
 
-    limiter := NewRateLimiter(client, "deadline", 5, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
+    limiter := NewRateLimiter(newTestConnection(client), "deadline", 5, time.Minute, RateLimiterConfig{KeyPrefix: rateLimiterTestPrefix})
 
     expiredParent, cancelParent := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
     defer cancelParent()

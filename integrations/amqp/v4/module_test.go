@@ -120,7 +120,7 @@ func TestModule_ANilTransportIsRefusedNamingItBeforeAnythingIsRegistered(t *test
 /* the fake broker never answers the close, so the container's teardown of the registered connection ends at the close timeout the owner carries from its provider, the module having none of its own */
 func TestModule_HasNoCloseTimeoutOfItsOwn(t *testing.T) {
     address := listenFakeBroker(t)
-    provider := NewProvider(ProviderConfig{CloseTimeout: bound.Of(200 * time.Millisecond)})
+    provider := NewProvider("melody", ProviderConfig{CloseTimeout: bound.Of(200 * time.Millisecond)})
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     NewModule(ModuleConfig{

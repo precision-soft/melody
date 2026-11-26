@@ -13,6 +13,7 @@ import (
     "unicode"
 
     "github.com/precision-soft/melody/v4/bound"
+    melodyconfig "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
@@ -60,7 +61,15 @@ var providerDialTimeoutRule = bound.Rule[time.Duration]{
     Minimum: bound.TimeoutMinimum,
 }
 
-func NewProvider(config ProviderConfig) *Provider {
+/* NewProvider resolves the configuration once; a limit outside its rule panics naming the field, and a namespace outside config.ValidateNamespace naming the argument. The namespace is the application's: a backplane built through the provider derives its default exchange from it, <namespace>.sse. */
+func NewProvider(namespace string, config ProviderConfig) *Provider {
+    if validateErr := melodyconfig.ValidateNamespace(namespace); nil != validateErr {
+        refusal := exception.FromError(validateErr)
+        refusal.SetContextValue("argument", "namespace")
+
+        exception.Panic(refusal)
+    }
+
     heartbeat, heartbeatErr := bound.Resolve(config.Heartbeat, providerHeartbeatRule)
     if nil != heartbeatErr {
         exception.Panic(exception.FromError(heartbeatErr))
@@ -100,6 +109,7 @@ func NewProvider(config ProviderConfig) *Provider {
         tlsConfig:      tlsConfig,
         connectionName: config.ConnectionName,
         parent: componentParent{
+            namespace:    namespace,
             reconnect:    reconnect,
             closeTimeout: closeTimeout.Value,
         },
@@ -130,6 +140,7 @@ type Provider struct {
 
 /* componentParent is what a transport or a backplane takes for the fields its config leaves out. */
 type componentParent struct {
+    namespace    string
     reconnect    bound.ResolvedBackoff
     closeTimeout time.Duration
 }
@@ -148,6 +159,7 @@ func resolveInheritedDuration(limit bound.Duration, parent time.Duration, rule b
 }
 
 var defaultComponentParent = componentParent{
+    namespace:    melodyconfig.DefaultNamespace,
     reconnect:    defaultReconnect,
     closeTimeout: closeJoinTimeout,
 }

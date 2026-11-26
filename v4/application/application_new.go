@@ -45,6 +45,9 @@ type ApplicationConfig struct {
     /* ScopeTeardownTimeout bounds the close of a request's, a command's, a message's and a cron run's scope: 3s when left out, at least 1ms, unlimited admitted for no term. */
     ScopeTeardownTimeout bound.Duration
 
+    /* Namespace is the application namespace, the default of MELODY_NAMESPACE, which wins when a deployment sets it: every store family is handed it and derives its default names from it, melody when left out; 1 to 32 characters of a-z, 0-9, _ and -, beginning and ending with a letter or a digit, refused naming the field otherwise. Kernel().Namespace() answers the resolved value. */
+    Namespace string
+
     /* ContainerCreationWaiters bounds the resolutions that may wait on one in-flight creation: 1,024 when left out, at least 1, unlimited admitted. */
     ContainerCreationWaiters bound.Count
     /* ContainerTeardownSequential closes the container's services one after the other instead of in waves, for services whose Close methods touch shared external state the container cannot see; the field is the default of kernel.container_teardown_sequential, which reads MELODY_CONTAINER_TEARDOWN_SEQUENTIAL unless overridden. */
@@ -121,7 +124,7 @@ func NewApplication(
         )
     }
 
-    configuration, newConfigurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{EnvironmentKeys: applicationConfig.EnvironmentKeys, ParameterOverrides: applicationConfig.ParameterOverrides, HttpPublicUrl: applicationConfig.HttpPublicUrl})
+    configuration, newConfigurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{EnvironmentKeys: applicationConfig.EnvironmentKeys, ParameterOverrides: applicationConfig.ParameterOverrides, HttpPublicUrl: applicationConfig.HttpPublicUrl, Namespace: applicationConfig.Namespace})
     if nil != newConfigurationErr {
         /* the wrap names construction, not resolution: NewConfiguration also fails on validation and on building its views, and a resolve failure already carries its own message */
         exception.Panic(

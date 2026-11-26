@@ -21,8 +21,8 @@ import (
 )
 
 const (
-    /* secondFactorReplayGuardPrefix names the codes the sign-in and the verification door burn, so two applications on one redis never refuse each other's codes as replays */
-    secondFactorReplayGuardPrefix = "melody-example-v4:2fa"
+    /* secondFactorReplayGuardSuffix follows the application namespace in the key of the codes the sign-in and the verification door burn, apart from the internal firewall's nonces */
+    secondFactorReplayGuardSuffix = ":2fa"
 
     /* secondFactorBudgetLimiterName keys the per-account budget of presented second factors apart from the per-address write budget under the same prefix */
     secondFactorBudgetLimiterName = "second_factor_budget"

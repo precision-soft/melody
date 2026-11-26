@@ -15,7 +15,7 @@ import (
     "github.com/redis/rueidis"
 )
 
-const defaultServerSentEventBackplaneChannel = "melody:sse"
+const serverSentEventBackplaneChannelSuffix = "sse"
 
 const defaultServerSentEventBackplaneCallTimeout = time.Second
 
@@ -42,7 +42,7 @@ type ServerSentEventBackplane struct {
 
 /* ServerSentEventBackplaneConfig declares the backplane; its zero value is the default backplane. A limit outside its rule is refused before the backplane is installed on the hub or its listener starts. */
 type ServerSentEventBackplaneConfig struct {
-    /* Channel is the pub/sub channel every instance shares, melody:sse when empty. */
+    /* Channel is the pub/sub channel every instance shares, used verbatim: <namespace>:sse when empty, the connection's namespace. */
     Channel string
 
     /* Logger is the journal of subscription failures and reconnects; nil or a typed nil records none. */
@@ -58,10 +58,8 @@ type ServerSentEventBackplaneConfig struct {
 var serverSentEventBackplaneCallTimeoutRule = callTimeoutRule("ServerSentEventBackplaneConfig.CallTimeout", defaultServerSentEventBackplaneCallTimeout)
 
 /* NewServerSentEventBackplane resolves the configuration once, then installs the backplane on the hub and starts its listener; a nil client or hub, or a limit outside its rule, panics naming it and leaves the hub without a backplane. */
-func NewServerSentEventBackplane(client rueidis.Client, hub *melodyhttp.ServerSentEventHub, config ServerSentEventBackplaneConfig) *ServerSentEventBackplane {
-    if nil == client {
-        exception.Panic(exception.NewError("redis sse backplane client is nil", nil, nil))
-    }
+func NewServerSentEventBackplane(connection *Connection, hub *melodyhttp.ServerSentEventHub, config ServerSentEventBackplaneConfig) *ServerSentEventBackplane {
+    refuseNilConnection(connection)
 
     if nil == hub {
         exception.Panic(exception.NewError("redis sse backplane hub is nil", nil, nil))
@@ -79,7 +77,7 @@ func NewServerSentEventBackplane(client rueidis.Client, hub *melodyhttp.ServerSe
 
     channel := config.Channel
     if "" == channel {
-        channel = defaultServerSentEventBackplaneChannel
+        channel = connection.namespacedName(serverSentEventBackplaneChannelSuffix)
     }
 
     logger := config.Logger
@@ -90,7 +88,7 @@ func NewServerSentEventBackplane(client rueidis.Client, hub *melodyhttp.ServerSe
     ctx, cancel := context.WithCancel(context.Background())
 
     backplane := &ServerSentEventBackplane{
-        client:       client,
+        client:       connection.Client(),
         hub:          hub,
         channel:      channel,
         origin:       newBackplaneOrigin(),

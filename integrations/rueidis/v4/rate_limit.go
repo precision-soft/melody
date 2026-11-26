@@ -13,7 +13,7 @@ import (
     "github.com/redis/rueidis"
 )
 
-const defaultRateLimiterPrefix = "melody:rate_limit:"
+const rateLimiterPrefixSuffix = "rate_limit:"
 
 const defaultRateLimiterCallTimeout = 250 * time.Millisecond
 
@@ -40,7 +40,7 @@ const (
 
 /* RateLimiterConfig declares the limiter beside its name, limit and window; every field has a default. */
 type RateLimiterConfig struct {
-    /* KeyPrefix is the namespace of every counter, melody:rate_limit: when empty; a counter is keyed <KeyPrefix><name>:<key>, so a prefix ends with its separator, or two limiters can share a counter. */
+    /* KeyPrefix opens every counter, used verbatim: <namespace>:rate_limit: when empty, the connection's namespace; a counter is keyed <KeyPrefix><name>:<key>, so a prefix ends with its separator, or two limiters can share a counter. */
     KeyPrefix string
 
     /* FailureMode is the answer when the store cannot be reached, FailureModeClosed when left out; any other value is refused, so a misspelt mode is not read as closed. */
@@ -53,10 +53,8 @@ type RateLimiterConfig struct {
 var rateLimiterCallTimeoutRule = callTimeoutRule("RateLimiterConfig.CallTimeout", defaultRateLimiterCallTimeout)
 
 /* NewRateLimiter returns a Redis-backed fixed-window limiter shared by every application instance, the distributed drop-in for the in-process limiters. The counter is one atomic Lua round trip, so N instances enforce one limit, and the fixed window admits up to twice the limit across a window edge; store failures follow the failure mode. The name keys the counters, so two limiters over one client never share one and a limiter keeps its counters when its limit or window changes: 1 to 64 bytes of [A-Za-z0-9._-]. A nil client, a malformed name, a limit below 1, a window below 1ms or a configuration value outside its rule panics naming the argument or the field. */
-func NewRateLimiter(client rueidis.Client, name string, limit int, window time.Duration, config RateLimiterConfig) *RateLimiter {
-    if nil == client {
-        exception.Panic(exception.NewError("redis rate limiter client is nil", nil, nil))
-    }
+func NewRateLimiter(connection *Connection, name string, limit int, window time.Duration, config RateLimiterConfig) *RateLimiter {
+    refuseNilConnection(connection)
 
     refuseMalformedLimiterName(name)
     refuseArgumentBelowMinimum(1 > limit, "limit", name, strconv.Itoa(limit), "1")
@@ -88,11 +86,11 @@ func NewRateLimiter(client rueidis.Client, name string, limit int, window time.D
 
     prefix := config.KeyPrefix
     if "" == prefix {
-        prefix = defaultRateLimiterPrefix
+        prefix = connection.namespacedName(rateLimiterPrefixSuffix)
     }
 
     return &RateLimiter{
-        client:      client,
+        client:      connection.Client(),
         name:        name,
         limit:       limit,
         window:      window,

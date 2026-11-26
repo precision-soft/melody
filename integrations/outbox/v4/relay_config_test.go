@@ -16,7 +16,7 @@ func TestResolveRelayConfig_AnEmptyConfigIsEveryRuleDefault(t *testing.T) {
     }
 
     expected := resolvedRelay{
-        LockName:              "melody:outbox:relay",
+        LockName:              "",
         LockTtl:               30 * time.Second,
         VisibilityTimeout:     5 * time.Minute,
         BatchSize:             100,

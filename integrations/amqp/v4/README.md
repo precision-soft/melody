@@ -27,7 +27,7 @@ The module registers no parameter and declares no key: the application declares 
 ### Open a connection
 
 ```go
-provider := amqp.NewProvider(amqp.ProviderConfig{})
+provider := amqp.NewProvider(configuration.Kernel().Namespace(), amqp.ProviderConfig{})
 
 /* AMQP_DSN is declared in ApplicationConfig.EnvironmentKeys, feeding app.amqp.dsn, Secret */
 connection, openErr := provider.Open(runtimeInstance, configuration.MustGet("app.amqp.dsn").String())
@@ -40,6 +40,8 @@ defer func() {
 ```
 
 `Open` dials under the runtime's context and answers the connection's owner, `*amqp.Connection`: `connection.Raw()` reaches the client's `*amqp091.Connection`, and `connection.CloseWithContext(closeContext)` is its one close, idempotent, arming a deadline on the socket and returning within the close timeout the owner carries, within the caller's deadline, plus a 250 ms grace, even behind a shutdown the client already began, since the client's plain `Close` is an RPC over the send locks and never returns over a wedged socket. A connection dialled outside a provider is wrapped with `amqp.NewConnection(raw, amqp.ConnectionConfig{CloseTimeout: …})`, 30s when left out.
+
+`NewProvider(namespace, ProviderConfig)` takes the application namespace first, `MELODY_NAMESPACE` read as `configuration.Kernel().Namespace()`, a namespace outside `config.ValidateNamespace` panicking naming the argument: a backplane built through the provider derives its default exchange from it, `<namespace>.sse`. A transport's queue, exchange and routing key are the application's own and never take the namespace, since renaming them is a broker migration.
 
 `ProviderConfig` takes six fields, each left out its default:
 
@@ -173,7 +175,7 @@ The container closes the connection through its owner's close, under the teardow
 A transport handed `FromConnection` stops its consumer when that connection drops (run it under a process supervisor). To let the transport recover on its own, hand it a dialer instead — `Provider.Dialer(dsn)` builds one from the DSN, refusing an empty dsn, or a TLS configuration beside a plain one, when it is built:
 
 ```go
-provider := amqp.NewProvider(amqp.ProviderConfig{})
+provider := amqp.NewProvider(configuration.Kernel().Namespace(), amqp.ProviderConfig{})
 
 transport := amqp.NewTransport("welcome_email", registry, amqp.FromDialer(provider.Dialer(dsn)), amqp.TransportConfig{
     Prefetch: bound.Of(10),
@@ -185,7 +187,7 @@ The transport dials on first use. When the consume channel is lost, the delivery
 The backoff window is tunable through a [`ReconnectConfig`](./reconnect_config.go), whose one field `Backoff` is a `bound.Backoff`: `Initial` 1s and `Max` 30s, at least 1ms, unlimited refused, and `Factor` 2, exactly 1 a constant backoff; the wait after attempt n is `Initial × Factor^(n-1)`, capped at `Max`. Set it once for every transport and backplane the provider builds with `ProviderConfig.Reconnect` — the provider-level value only reaches the ones built through `provider.NewTransport(...)` / `provider.NewServerSentEventBackplane(...)`, not the standalone `amqp.NewTransport(...)` constructor — and override it for a single transport through `TransportConfig.Reconnect`:
 
 ```go
-provider := amqp.NewProvider(amqp.ProviderConfig{
+provider := amqp.NewProvider(configuration.Kernel().Namespace(), amqp.ProviderConfig{
     Reconnect: amqp.ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(2 * time.Second), Max: bound.Of(time.Minute), Factor: 1.5}},
 })
 
@@ -234,7 +236,7 @@ A delay **below the smallest bucket** keeps the legacy `<queue>.delay` queue wit
 
 ## Server-Sent Events backplane
 
-`NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{...})` makes the core `http.ServerSentEventHub` fan its broadcasts out across every application instance behind a load balancer over a fanout exchange — without it, a `Broadcast` reaches only the clients connected to the instance that emitted it. Each instance binds its own exclusive, auto-deleted queue to the exchange (default `melody.sse`), so a published broadcast reaches every instance; the events of other instances are forwarded into the hub via `DeliverLocal`, and a tagged per-instance origin makes each instance skip the echo of its own broadcasts. Replication is best-effort in BOTH directions by design: the consumer runs auto-ack over a transient queue, and `Publish` runs no confirm mode — an event the broker discards after accepting the frame is gone with no error, so the hub's backplane-failure counter counts local publish refusals, not broker-side outcomes (the redis backplane behaves identically over pub/sub). A
+`NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{...})` makes the core `http.ServerSentEventHub` fan its broadcasts out across every application instance behind a load balancer over a fanout exchange — without it, a `Broadcast` reaches only the clients connected to the instance that emitted it. Each instance binds its own exclusive, auto-deleted queue to the exchange (default `<namespace>.sse` through `Provider.NewServerSentEventBackplane`, `melody.sse` through the package's own constructor, an `Exchange` set used verbatim), so a published broadcast reaches every instance; the events of other instances are forwarded into the hub via `DeliverLocal`, and a tagged per-instance origin makes each instance skip the echo of its own broadcasts. Replication is best-effort in BOTH directions by design: the consumer runs auto-ack over a transient queue, and `Publish` runs no confirm mode — an event the broker discards after accepting the frame is gone with no error, so the hub's backplane-failure counter counts local publish refusals, not broker-side outcomes (the redis backplane behaves identically over pub/sub). A
 server-sent event is ephemeral fan-out state; the next event or a client refresh corrects a missed one. Over `FromDialer` the subscription and publisher re-establish after a broker restart; over `FromConnection`, a lost connection stops the receive half permanently, and that terminal stop is reported through the configured `Logger` — or on the emergency stderr channel when none was configured. Each of the two stretches a publish spends time in — the wait for its turn behind the broadcasts ahead of it, and the write — is bounded by `ServerSentEventBackplaneConfig.CallTimeout` (1s when left out, the same budget the redis backplane gives one round trip, at least 1ms, unlimited refused), so one attempt over an open channel costs at most two of these budgets — a `Publish` that opens or reopens its channel first, or retries once, pays the channel round trips beyond them, which the amqp client bounds by nothing but the socket: the amqp client discards the context a publish is handed and a broker that
 stops reading its socket would otherwise hold the write — and with it every later broadcast and the hub's shutdown, which waits for the publishes in flight — for good. A broadcast that runs out of budget waiting for its turn is told so and marks nothing; a write that outlives the timeout fails and is not retried; on a connection the backplane dialed itself the connection is cut and redialed on the next publish, on a connection you passed in publishes are refused until that write returns. The backplane carries `CloseWithContext(context.Context) error` and no module registration door, and needs none: the hub owns it — `ServerSentEventHub.Shutdown`, which the container reaches through the hub's `CloseWithContext`, closes the backplane it carries — so register the hub, or call `hub.Shutdown()` at shutdown; closing the backplane directly is allowed and idempotent.
 

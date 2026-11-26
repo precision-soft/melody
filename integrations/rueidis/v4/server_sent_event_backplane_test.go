@@ -19,11 +19,11 @@ func TestServerSentEventBackplane_ReplicatesBroadcastToAnotherInstance(t *testin
     config := ServerSentEventBackplaneConfig{Channel: "melody:sse:test:replicate"}
 
     hubA := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplaneA := NewServerSentEventBackplane(client, hubA, config)
+    backplaneA := NewServerSentEventBackplane(newTestConnection(client), hubA, config)
     defer backplaneA.CloseWithContext(context.Background())
 
     hubB := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplaneB := NewServerSentEventBackplane(client, hubB, config)
+    backplaneB := NewServerSentEventBackplane(newTestConnection(client), hubB, config)
     defer backplaneB.CloseWithContext(context.Background())
 
     subscriber := hubB.Subscribe("orders")
@@ -54,7 +54,7 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
     client := newTokenStoreClient(t)
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(client, hub, ServerSentEventBackplaneConfig{Channel: "melody:sse:test:echo"})
+    backplane := NewServerSentEventBackplane(newTestConnection(client), hub, ServerSentEventBackplaneConfig{Channel: "melody:sse:test:echo"})
     defer backplane.CloseWithContext(context.Background())
 
     subscriber := hub.Subscribe("orders")
@@ -98,10 +98,10 @@ func TestNewServerSentEventBackplane_AnAbsentConfigTakesTheDefaults(t *testing.T
     client := newTokenStoreClient(t)
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(client, hub, ServerSentEventBackplaneConfig{Logger: (*capturingLogger)(nil)})
+    backplane := NewServerSentEventBackplane(newTestConnection(client), hub, ServerSentEventBackplaneConfig{Logger: (*capturingLogger)(nil)})
     defer backplane.CloseWithContext(context.Background())
 
-    if defaultServerSentEventBackplaneChannel != backplane.channel || time.Second != backplane.callTimeout || nil != backplane.logger {
+    if "melody:sse" != backplane.channel || time.Second != backplane.callTimeout || nil != backplane.logger {
         t.Fatalf("expected the default channel, a 1s budget and a typed-nil logger read as none, got %q, %v, %v", backplane.channel, backplane.callTimeout, backplane.logger)
     }
 
@@ -125,7 +125,7 @@ func TestNewServerSentEventBackplane_RefusesALimitOutsideItsRuleNamingTheField(t
     for name, testCase := range cases {
         t.Run(name, func(t *testing.T) {
             expectPanicNamingField(t, testCase.field, func() {
-                NewServerSentEventBackplane(&stubClient{}, melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), testCase.config)
+                NewServerSentEventBackplane(newTestConnection(&stubClient{}), melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), testCase.config)
             })
         })
     }
@@ -137,11 +137,11 @@ func TestNewServerSentEventBackplane_ARefusedConfigLeavesTheHubWithoutABackplane
 
     refusedHub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     expectPanicNamingField(t, "ServerSentEventBackplaneConfig.CallTimeout", func() {
-        NewServerSentEventBackplane(client, refusedHub, ServerSentEventBackplaneConfig{Channel: channel, CallTimeout: bound.UnlimitedDuration()})
+        NewServerSentEventBackplane(newTestConnection(client), refusedHub, ServerSentEventBackplaneConfig{Channel: channel, CallTimeout: bound.UnlimitedDuration()})
     })
 
     listeningHub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    listening := NewServerSentEventBackplane(client, listeningHub, ServerSentEventBackplaneConfig{Channel: channel})
+    listening := NewServerSentEventBackplane(newTestConnection(client), listeningHub, ServerSentEventBackplaneConfig{Channel: channel})
     defer listening.CloseWithContext(context.Background())
 
     subscriber := listeningHub.Subscribe("orders")
@@ -149,7 +149,7 @@ func TestNewServerSentEventBackplane_ARefusedConfigLeavesTheHubWithoutABackplane
 
     /* the listener's subscription is asynchronous; a probe from a valid publisher proves it is live before the refused hub broadcasts */
     probeHub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    probe := NewServerSentEventBackplane(client, probeHub, ServerSentEventBackplaneConfig{Channel: channel})
+    probe := NewServerSentEventBackplane(newTestConnection(client), probeHub, ServerSentEventBackplaneConfig{Channel: channel})
     defer probe.CloseWithContext(context.Background())
 
     deadline := time.After(5 * time.Second)
@@ -185,7 +185,7 @@ func TestNewServerSentEventBackplane_AGivenConfigReachesTheBackplane(t *testing.
     logger := &capturingLogger{}
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(client, hub, ServerSentEventBackplaneConfig{
+    backplane := NewServerSentEventBackplane(newTestConnection(client), hub, ServerSentEventBackplaneConfig{
         Channel: "melody:sse:test:given",
         Logger:  logger,
         Reconnect: ReconnectConfig{
@@ -295,7 +295,7 @@ func TestServerSentEventBackplane_ASubscriptionThatLivedTheInitialBackoffResetsT
     }
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    backplane := NewServerSentEventBackplane(client, hub, ServerSentEventBackplaneConfig{
+    backplane := NewServerSentEventBackplane(newTestConnection(client), hub, ServerSentEventBackplaneConfig{
         Channel:   "melody:sse:test:reset",
         Reconnect: ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(100 * time.Millisecond), Max: bound.Of(10 * time.Second)}},
     })

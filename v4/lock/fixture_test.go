@@ -8,6 +8,8 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/config"
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
@@ -148,4 +150,33 @@ func (instance *noLockLocker) CreateLock(name string, ttl bound.Duration) (lockc
 /* namesNoLock reports whether a refusal's cause chain carries the no-lock refusal */
 func namesNoLock(err error) bool {
     return nil != err && true == strings.Contains(fmt.Sprint(exception.LogContext(err, exception.LogContextConfig{})), "the locker answered no lock")
+}
+
+type namespaceEnvironmentSource struct {
+    namespace string
+}
+
+func (instance *namespaceEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
+    return map[string]string{config.NamespaceKey: instance.namespace}, nil
+}
+
+/* runtimeWithNamespace answers a runtime whose configuration service reads MELODY_NAMESPACE as the namespace given. */
+func runtimeWithNamespace(t *testing.T, namespace string) containercontract.Runtime {
+    t.Helper()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    serviceContainer.MustRegister(
+        config.ServiceConfig,
+        func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+            environment, environmentErr := config.NewEnvironment(context.Background(), &namespaceEnvironmentSource{namespace: namespace})
+            if nil != environmentErr {
+                return nil, environmentErr
+            }
+
+            return config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
+        },
+        container.RegisterOptions{},
+    )
+
+    return runtime.NewRun(context.Background(), serviceContainer.NewScope())
 }

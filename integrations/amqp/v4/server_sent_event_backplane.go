@@ -19,7 +19,7 @@ import (
     amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
-const defaultServerSentEventBackplaneExchange = "melody.sse"
+const serverSentEventBackplaneExchangeSuffix = "sse"
 
 /* the call timeout is the budget the redis backplane gives one round trip: the caller's context typically carries no deadline, and the amqp client discards it anyway */
 var serverSentEventBackplaneCallTimeoutRule = bound.Rule[time.Duration]{
@@ -74,7 +74,7 @@ type ServerSentEventBackplane struct {
     wait   sync.WaitGroup
 }
 
-/* ServerSentEventBackplaneConfig declares the backplane beside its hub and its connection source: Exchange is melody.sse when empty, and a nil or typed-nil Logger records nothing. A limit outside its rule is refused before the backplane is installed on the hub or its listener starts, naming the field. */
+/* ServerSentEventBackplaneConfig declares the backplane beside its hub and its connection source: Exchange is used verbatim, <namespace>.sse when empty: the namespace of the provider that built the backplane, melody for the package's own constructor, and a nil or typed-nil Logger records nothing. A limit outside its rule is refused before the backplane is installed on the hub or its listener starts, naming the field. */
 type ServerSentEventBackplaneConfig struct {
     Exchange   string
     Logger     loggingcontract.Logger
@@ -86,7 +86,7 @@ type ServerSentEventBackplaneConfig struct {
     CloseTimeout bound.Duration
 }
 
-/* NewServerSentEventBackplane fans hub's broadcasts out across instances over the connection source handed; a nil hub or the zero source panics naming the argument. */
+/* NewServerSentEventBackplane fans hub's broadcasts out across instances over the connection source handed; a nil hub or the zero source panics naming the argument. Built outside a provider, it reads the default namespace, so its default exchange is melody.sse; Provider.NewServerSentEventBackplane derives it from the provider's namespace. */
 func NewServerSentEventBackplane(hub *melodyhttp.ServerSentEventHub, source ConnectionSource, config ServerSentEventBackplaneConfig) *ServerSentEventBackplane {
     return newServerSentEventBackplane(hub, source, config, defaultComponentParent)
 }
@@ -100,7 +100,7 @@ func newServerSentEventBackplane(hub *melodyhttp.ServerSentEventHub, source Conn
 
     exchange := config.Exchange
     if "" == exchange {
-        exchange = defaultServerSentEventBackplaneExchange
+        exchange = parent.namespace + "." + serverSentEventBackplaneExchangeSuffix
     }
 
     reconnect, reconnectErr := resolveReconnectOver(parent.reconnect, config.Reconnect)

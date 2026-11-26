@@ -71,8 +71,10 @@ defer pickingLock.Release(runtime.WithContext(runtimeInstance, context.WithoutCa
 Redis-backed (`integrations/rueidis`):
 
 ```go
-locker := rueidis.NewLocker(client, rueidis.LockerConfig{})
+locker := rueidis.NewLocker(connection, rueidis.LockerConfig{})
 ```
+
+A lock of the redis locker is keyed `<namespace>:lock:<name>`, the connection's application namespace opening it, so applications sharing a store never take each other's locks; `LockerConfig.KeyPrefix` sets the prefix verbatim and `LockerConfig.KeyPrefixDisabled` keys a lock by its bare name, the door of a rolling deploy beside replicas still on bare keys.
 
 MySQL-backed (`integrations/bunorm/mysql`):
 
@@ -133,7 +135,7 @@ command := lock.NewExclusiveCommand(
 )
 ```
 
-[`ExclusiveCommandConfig`](../../lock/exclusive_command.go) carries `LockName`, `Ttl` and `StopRenewalLimit` (set it to the cron runner's `ShutdownTimeout` when its commands may wind down longer than 30s), read as `ExclusiveConfig` reads them and resolved when the command is built, a refusal panicking naming the field. `LockName` left empty is `"melody:command:"` plus the wrapped command's name; name one for when two differently-named commands must share one lock or one command needs distinct locks per deployment. `Name`, `Description` and `Flags` delegate to the wrapped command, so the decorator is transparent to the CLI.
+[`ExclusiveCommandConfig`](../../lock/exclusive_command.go) carries `LockName`, `Ttl` and `StopRenewalLimit` (set it to the cron runner's `ShutdownTimeout` when its commands may wind down longer than 30s), read as `ExclusiveConfig` reads them and resolved when the command is built, a refusal panicking naming the field. `LockName` left empty is the application namespace, `:command:` and the wrapped command's name, read at each run from the runtime's configuration, `melody:command:<name>` under the default namespace or with no configuration; a name set is used verbatim. Name one for when two differently-named commands must share one lock or one command needs distinct locks per deployment. `Name`, `Description` and `Flags` delegate to the wrapped command, so the decorator is transparent to the CLI.
 
 ### Elect a leader
 

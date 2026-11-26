@@ -17,7 +17,7 @@ import (
 var constructorArgumentRuleException = map[string]string{
     "v4/kernel:NewKernel":                    "framework-only behind the kernelseam token: the application builds it from its own collaborators",
     "v4/validation:NewValidationError":       "the three values of every validation error and its params map, built at each constraint",
-    "integrations/rueidis/v4:NewRateLimiter": "required collaborators and values, client, name, limit and window, then the config struct",
+    "integrations/rueidis/v4:NewRateLimiter": "required collaborators and values, connection, name, limit and window, then the config struct",
 }
 
 /* the config fields refused as required, each with the reason they stay; an entry the walk does not meet fails */

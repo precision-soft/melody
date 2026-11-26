@@ -21,14 +21,14 @@ func liveService(t *testing.T) *BackendService {
 
     _, client := liveBackend(t)
 
-    service, serviceErr := NewBackendService(client, BackendConfig{Prefix: "melody:test:service:" + t.Name() + ":"})
+    service, serviceErr := NewBackendService(newTestConnection(client), BackendConfig{Prefix: "melody:test:service:" + t.Name() + ":"})
     if nil != serviceErr {
         t.Fatalf("NewBackendService: %v", serviceErr)
     }
 
     t.Cleanup(func() {
         /* the cleanup clears through its own backend: a test that closed the service under test would otherwise leave its keys behind, since a closed backend refuses Clear like every other operation */
-        cleaner, cleanerErr := NewBackend(client, BackendConfig{Prefix: "melody:test:service:" + t.Name() + ":"})
+        cleaner, cleanerErr := NewBackend(newTestConnection(client), BackendConfig{Prefix: "melody:test:service:" + t.Name() + ":"})
         if nil != cleanerErr {
             t.Logf("could not build the cleanup backend: %v", cleanerErr)
 
@@ -43,9 +43,9 @@ func liveService(t *testing.T) *BackendService {
     return service
 }
 
-func TestNewBackendService_RefusesANilClient(t *testing.T) {
+func TestNewBackendService_RefusesANilConnection(t *testing.T) {
     if _, err := NewBackendService(nil, BackendConfig{Prefix: "melody:"}); nil == err {
-        t.Fatal("a service over a nil client must be refused at construction")
+        t.Fatal("a service over a nil connection must be refused at construction")
     }
 }
 
@@ -137,7 +137,7 @@ func TestBackendService_CloseRefusesLaterCallsAndLeavesTheClientOpen(t *testing.
         t.Fatalf("expected the in-memory backend's refusal, got %v", setErr)
     }
 
-    sibling, siblingErr := NewBackend(service.backend.client, BackendConfig{Prefix: "melody:test:service:" + t.Name() + ":sibling:"})
+    sibling, siblingErr := NewBackend(newTestConnection(service.backend.client), BackendConfig{Prefix: "melody:test:service:" + t.Name() + ":sibling:"})
     if nil != siblingErr {
         t.Fatalf("sibling backend: %v", siblingErr)
     }

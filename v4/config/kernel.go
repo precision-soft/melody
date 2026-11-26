@@ -66,6 +66,7 @@ type kernelConfiguration struct {
     scopeTeardownTimeout        bound.Duration
     containerCreationWaiters    bound.Count
     containerTeardownSequential configcontract.Switch
+    namespace                   string
 }
 
 func (instance *kernelConfiguration) DefaultMode() string {
@@ -247,6 +248,11 @@ func (instance *kernelConfiguration) ContainerCreationWaiters() bound.Count {
 /* ContainerTeardownSequential is MELODY_CONTAINER_TEARDOWN_SEQUENTIAL as the deployment set it, unset when the key says nothing; the application decides it against its own config. */
 func (instance *kernelConfiguration) ContainerTeardownSequential() configcontract.Switch {
     return instance.containerTeardownSequential
+}
+
+/* Namespace is MELODY_NAMESPACE as the deployment set it, else ApplicationConfig.Namespace, else DefaultNamespace. */
+func (instance *kernelConfiguration) Namespace() string {
+    return instance.namespace
 }
 
 var _ configcontract.KernelConfiguration = (*kernelConfiguration)(nil)

@@ -74,7 +74,7 @@ func newTokenStoreClient(t *testing.T) redisclient.Client {
         t.Skip("REDIS_ADDRESS not set; skipping redis token store integration test")
     }
 
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
     connection, openErr := provider.Open(openRuntime(t), ConnectionParameters{Address: address})
     if nil != openErr {
         t.Fatalf("open: %v", openErr)
@@ -94,7 +94,7 @@ func openRuntime(t *testing.T) containercontract.Runtime {
 
 /* connectionOver is the module's connection factory over a client the test holds, answering one owner */
 func connectionOver(client redisclient.Client) func(resolver containercontract.Resolver) (*Connection, error) {
-    connection := NewConnection(client)
+    connection := NewConnection(client, "melody")
 
     return func(resolver containercontract.Resolver) (*Connection, error) {
         return connection, nil
@@ -570,4 +570,28 @@ func mustCreateLock(lock lockcontract.Lock, createErr error) lockcontract.Lock {
     }
 
     return lock
+}
+
+/* newTestConnection is the owner a component under test is built over, under the default namespace */
+func newTestConnection(client redisclient.Client) *Connection {
+    return NewConnection(client, "melody")
+}
+
+/* expectPanicNamingArgument runs the callback and fails unless it panics with an exception naming the argument */
+func expectPanicNamingTheArgument(t *testing.T, argument string, callback func()) {
+    t.Helper()
+
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatalf("expected a panic naming the argument %s", argument)
+        }
+
+        recoveredErr, isError := recovered.(error)
+        if false == isError || argument != exceptionContextOf(recoveredErr)["argument"] {
+            t.Fatalf("expected a panic naming the argument %s, got %v", argument, recovered)
+        }
+    }()
+
+    callback()
 }

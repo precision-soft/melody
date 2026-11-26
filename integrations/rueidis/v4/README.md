@@ -12,12 +12,27 @@ Redis-backed building blocks for Melody v4, built on [`rueidis`](https://github.
 
 Import path: `github.com/precision-soft/melody/integrations/rueidis/v4`
 
+## Names
+
+The provider is handed the application namespace, and every component built over a connection derives its default name from it, so applications sharing one Redis differ by their namespace alone. The namespace is the framework's `MELODY_NAMESPACE`, read as `configuration.Kernel().Namespace()`, `melody` when nothing names one; `config.DefaultNamespace` keeps every name of the third major.
+
+| Component | Field | Default |
+|---|---|---|
+| rate limiter | `RateLimiterConfig.KeyPrefix` | `<namespace>:rate_limit:` |
+| server-sent event backplane | `ServerSentEventBackplaneConfig.Channel` | `<namespace>:sse` |
+| nonce guard | `NonceGuardConfig.KeyPrefix` | `<namespace>:nonce` |
+| token store | `TokenStoreConfig.Prefix` | `<namespace>:token` |
+| cache backend | `cache.BackendConfig.Prefix` | `<namespace>:cache:` |
+| locker | `LockerConfig.KeyPrefix` | `<namespace>:lock:` |
+
+A name set on a component is used verbatim, the namespace not added to it. A framework lock name already carries the namespace, so the relay's lock is keyed `<namespace>:lock:<namespace>:outbox:relay` on Redis: the name keeps it for the lockers that have no prefix.
+
 ## Provider
 
-[`NewProvider(ProviderConfig)`](./provider.go) builds a [`Provider`](./provider.go) from one [`ProviderConfig`](./provider_config.go) of `Client`, `Retry` and `Logger`, whose zero value is the default; a limit outside its rule panics at `NewProvider`, naming the field, before any client is built. `Open(runtimeInstance, parameters)` takes the caller's runtime and a [`ConnectionParameters`](./connection_parameters.go) literal (`Address`, `User`, `Password`) and answers the [`*Connection`](./connection.go) that owns the client it opened; a comma-separated address list is used as multiple init addresses. The runtime's context bounds the open: a context already done is refused before any client is built, the retry wait ends with it, answering the context's cause with the last dial error under `lastError` (cut at 512 bytes), and the boot ping runs under the earlier of the context's deadline and `ClientConfig.BootPingTimeout`. A nil runtime is refused naming the door. `Ping(runtimeInstance, connection)` runs one round trip under the runtime's context and no deadline of its own.
+[`NewProvider(namespace, ProviderConfig)`](./provider.go) builds a [`Provider`](./provider.go) from the application namespace and one [`ProviderConfig`](./provider_config.go) of `Client`, `Retry` and `Logger`, whose zero value is the default; a limit outside its rule panics at `NewProvider`, naming the field, and a namespace outside `config.ValidateNamespace` naming the argument, before any client is built. Every connection `Open` answers carries the namespace. `Open(runtimeInstance, parameters)` takes the caller's runtime and a [`ConnectionParameters`](./connection_parameters.go) literal (`Address`, `User`, `Password`) and answers the [`*Connection`](./connection.go) that owns the client it opened; a comma-separated address list is used as multiple init addresses. The runtime's context bounds the open: a context already done is refused before any client is built, the retry wait ends with it, answering the context's cause with the last dial error under `lastError` (cut at 512 bytes), and the boot ping runs under the earlier of the context's deadline and `ClientConfig.BootPingTimeout`. A nil runtime is refused naming the door. `Ping(runtimeInstance, connection)` runs one round trip under the runtime's context and no deadline of its own.
 
 ```go
-provider := rueidis.NewProvider(rueidis.ProviderConfig{})
+provider := rueidis.NewProvider(configuration.Kernel().Namespace(), rueidis.ProviderConfig{})
 
 connection, err := provider.Open(resolver.Runtime(), rueidis.ConnectionParameters{Address: address, User: user, Password: password})
 if err != nil {
@@ -40,14 +55,14 @@ Every refusal the provider writes carries the deadlines that governed the attemp
 
 ### Owning the client
 
-`rueidis.Client.Close` returns nothing, so the raw client cannot join the container's ordered teardown — which closes a value through `CloseWithContext(context.Context) error` or through a closer its registration declared in `RegisterOptions.Closer`, and nothing else; the raw client carries neither. `Open` answers the [`Connection`](./connection.go) that owns the client, whose `CloseWithContext` is the one close: once, the deadline answered as an error. [`NewConnection`](./connection.go) wraps a client built elsewhere in the same shape. Commands through `connection.Client()` are safe while the owner keeps the lifecycle; closing the raw client oneself loses the ordered teardown, the idempotent close and the deadline answer. [`ModuleConfig.Connection`](./module.go) registers the owner's factory as the connection service. Every client-backed service of this package — the locker, the token store, the cache backend — resolves the connection as its dependency, so the teardown closes the connection after them; a run that resolves no connection leaves nothing to close. Every value in this package that could close a client it merely borrows — the cache backend, the rate limiter — deliberately declines to.
+`rueidis.Client.Close` returns nothing, so the raw client cannot join the container's ordered teardown — which closes a value through `CloseWithContext(context.Context) error` or through a closer its registration declared in `RegisterOptions.Closer`, and nothing else; the raw client carries neither. `Open` answers the [`Connection`](./connection.go) that owns the client, whose `CloseWithContext` is the one close: once, the deadline answered as an error. [`NewConnection(client, namespace)`](./connection.go) wraps a client built elsewhere in the same shape, a nil client or a malformed namespace panicking naming the argument; `connection.Namespace()` answers the namespace. Commands through `connection.Client()` are safe while the owner keeps the lifecycle; closing the raw client oneself loses the ordered teardown, the idempotent close and the deadline answer. [`ModuleConfig.Connection`](./module.go) registers the owner's factory as the connection service. Every client-backed service of this package — the locker, the token store, the cache backend — resolves the connection as its dependency, so the teardown closes the connection after them; a run that resolves no connection leaves nothing to close. Every value in this package that could close a client it merely borrows — the cache backend, the rate limiter — deliberately declines to.
 
 ### Connection retry
 
 `Open` re-dials a **transient** failure — a Redis that is not accepting connections yet — with capped exponential backoff, so a cold-start race between containers does not hard-fail the boot. An absent [`RetryConfig`](./retry_config.go) is the default retry; a single attempt is written `MaxAttempts: bound.Of(1)`. A non-transient error is never retried and is returned immediately.
 
 ```go
-provider := rueidis.NewProvider(rueidis.ProviderConfig{
+provider := rueidis.NewProvider(namespace, rueidis.ProviderConfig{
     Retry: rueidis.RetryConfig{MaxAttempts: bound.Of(10), Backoff: bound.Backoff{Initial: bound.Of(time.Second)}},
 })
 ```
@@ -77,17 +92,19 @@ Every attempt is reported in the journal `ProviderConfig.Logger` names: a warnin
 
 ## Distributed lock
 
-[`NewLocker(client, LockerConfig)`](./lock.go) returns a `lock/contract.Locker`; `CreateLock(name, ttl)` returns a `lock/contract.Lock` backed by a Redis key with a TTL, and an error for a ttl it refuses. The ttl is a `bound.Duration` resolved through `lockcontract.ResolveLeaseTtl` at `CreateLock` and `lockcontract.ResolveLeaseRefreshTtl` at `Refresh`: 30s when left out, at least 1ms, and `bound.UnlimitedDuration()` refused, naming `Locker.CreateLock.ttl` or `Lock.Refresh.ttl`, since a key with no expiry would strand the lock forever when its holder died. `Acquire` is a non-blocking try (returns `(false, nil)` when another holder owns the key), `Release` deletes the key only if still owned, and `Refresh` extends the TTL, returning a "lock is no longer held" error if the lease was lost.
+[`NewLocker(connection, LockerConfig)`](./lock.go) returns a `lock/contract.Locker`; `CreateLock(name, ttl)` returns a `lock/contract.Lock` backed by a Redis key `<namespace>:lock:<name>` with a TTL, and an error for a ttl it refuses. The ttl is a `bound.Duration` resolved through `lockcontract.ResolveLeaseTtl` at `CreateLock` and `lockcontract.ResolveLeaseRefreshTtl` at `Refresh`: 30s when left out, at least 1ms, and `bound.UnlimitedDuration()` refused, naming `Locker.CreateLock.ttl` or `Lock.Refresh.ttl`, since a key with no expiry would strand the lock forever when its holder died. `Acquire` is a non-blocking try (returns `(false, nil)` when another holder owns the key), `Release` deletes the key only if still owned, and `Refresh` extends the TTL, returning a "lock is no longer held" error if the lease was lost.
 
 Every door is one Lua round trip on the caller's runtime context, capped at the locker's call timeout; the framework's `RunExclusive` and `LeaderGate` renew under deadlines of their own, a tighter one winning, and release under no deadline of theirs, so the call timeout bounds the release.
 
 An `Acquire` whose reply was lost gives back, detached and best-effort, the lease it may have taken; when that give-back fails as well, the key keeps a token this handle no longer knows, and the same handle is refused like any other until the ttl lapses — the cost of a lost reply is one lost round, bounded by the ttl.
 
+- [`LockerConfig.KeyPrefix`](./lock.go) — opens every lock's key, used verbatim: `<namespace>:lock:` when left out, so applications sharing a store never take each other's locks and no lock lands on a key of another type.
+- [`LockerConfig.KeyPrefixDisabled`](./lock.go) — keys a lock by its bare name, as the third major did: the door of a rolling deploy whose replicas still lock bare keys must exclude them; refused beside a `KeyPrefix`, naming both fields.
 - [`LockerConfig.CallTimeout`](./lock.go) — bounds one round trip of `Acquire`, `Release` and `Refresh`: 1s when left out, at least 1ms, unlimited refused, a value outside the rule panicking at `NewLocker` naming the field. Unbounded, a store that accepts connections but stops answering holds each call for the client's own connection timeout — five seconds at the provider's default — which is what a readiness handler taking the lock on the request path, or a leader gate campaigning on the caller's context, then waits on every attempt; melody's http kernel attaches no deadline to a request.
 
 ## Token store
 
-[`NewTokenStore(client, TokenStoreConfig)`](./token_store.go) returns a `*RedisTokenStore` implementing the security `RevocableTokenStore`. Every door takes the caller's runtime first, refuses a nil one, and runs each round trip on the runtime's context capped by `CallTimeout`, so a write is cancelled with the request; a context already done is refused before any round trip. A round trip that did not answer returns an error marked with `exception.MarkInfrastructureFailure`, naming `TokenStoreConfig.CallTimeout` when that bound's own deadline passed, and a refused argument returns an unmarked one; no door panics. A stored record that is not JSON is unmarked at `Lookup`, removed by `Delete` and `DeleteByUser` and overwritten by `Put`. Code holding a runtime calls the store through the view bound to it, `security.TokenStoreFromRuntime(runtimeInstance, rueidis.ServiceTokenStore)`, whose doors take no runtime; a provider reads it through `EpochRevocableTokenStoreMustFromResolver`.
+[`NewTokenStore(connection, TokenStoreConfig)`](./token_store.go) returns a `*RedisTokenStore` implementing the security `RevocableTokenStore`. Every door takes the caller's runtime first, refuses a nil one, and runs each round trip on the runtime's context capped by `CallTimeout`, so a write is cancelled with the request; a context already done is refused before any round trip. A round trip that did not answer returns an error marked with `exception.MarkInfrastructureFailure`, naming `TokenStoreConfig.CallTimeout` when that bound's own deadline passed, and a refused argument returns an unmarked one; no door panics. A stored record that is not JSON is unmarked at `Lookup`, removed by `Delete` and `DeleteByUser` and overwritten by `Put`. Code holding a runtime calls the store through the view bound to it, `security.TokenStoreFromRuntime(runtimeInstance, rueidis.ServiceTokenStore)`, whose doors take no runtime; a provider reads it through `EpochRevocableTokenStoreMustFromResolver`.
 
 A token is stored under `{<prefix>}:token:<hex SHA-256 of the token>`, and the user's index set holds that key, so neither the keyspace, `MONITOR`, the slow log nor a backup holds a credential. The digest is unkeyed, which is sound for a random credential: a token must carry at least 128 bits of entropy, since a guessable one is found from its digest by whoever reads the keyspace. The claims are stored with camelCase keys.
 
@@ -104,7 +121,7 @@ The instants on both sides of that comparison come from application clocks. `Tok
 
 [`TokenStoreConfig`](./token_store.go), every field left out being the default and a value outside its rule panicking at `NewTokenStore`, naming the field:
 
-- `Prefix` — the key prefix, default `melody:token`.
+- `Prefix` — the key prefix, used verbatim: `<namespace>:token` when left out.
 - `CallTimeout` — bounds one round trip of every door: 1s when left out, at least 1ms, unlimited refused. Unbounded, a store that accepts connections but stops answering would hold `Put`, `Delete`, `Lookup` and `RevokeBefore` — each one Lua script, which the client does not retry — for the client's write deadline and hold `DeleteByUser`, `PurgeExpired` and `RevocationEpoch` for good, since the client retries their read-only `SSCAN`, `SCAN` and `HMGET` commands for as long as a context without deadline allows — and melody's http kernel attaches none to a request. Every door keeps a request deadline that is tighter than the timeout, and a round trip the timeout cut answers an infrastructure failure naming this field. The bound is per round trip, so a walk over a large user's index gets one budget per batch.
 - `ScanCount` — the batch size of the `SSCAN`/`SCAN` walks: 256 when left out, at least 1, unlimited refused.
 - `Clock` — the clock stamping a token's issue instant; nil is the system clock, and the module fills it from the container when the config names none.
@@ -113,13 +130,13 @@ The instants on both sides of that comparison come from application clocks. `Tok
 
 ## Nonce guard
 
-[`NewNonceGuard(client, NonceGuardConfig)`](./nonce_guard.go) returns a `*NonceGuard` implementing the security `NonceGuard` contract — the shared replay guard for multi-instance HMAC deployments. `Remember(runtime, nonce, ttl)` takes the ttl as a `bound.Duration` read against the security contract's `NonceTtlRule()` — an absent ttl, one under a millisecond and an unlimited one are refused as the error, naming the ttl — and records the nonce with a millisecond expiry in a single atomic round-trip (`SET NX PX` via a Lua script) and reports whether it was already seen, so there is no check-then-set race between instances. Because the recorded nonces live in Redis, a nonce replayed against **any** application instance is detected — something the in-process `security.MemoryNonceGuard` cannot do.
+[`NewNonceGuard(connection, NonceGuardConfig)`](./nonce_guard.go) returns a `*NonceGuard` implementing the security `NonceGuard` contract — the shared replay guard for multi-instance HMAC deployments. `Remember(runtime, nonce, ttl)` takes the ttl as a `bound.Duration` read against the security contract's `NonceTtlRule()` — an absent ttl, one under a millisecond and an unlimited one are refused as the error, naming the ttl — and records the nonce with a millisecond expiry in a single atomic round-trip (`SET NX PX` via a Lua script) and reports whether it was already seen, so there is no check-then-set race between instances. Because the recorded nonces live in Redis, a nonce replayed against **any** application instance is detected — something the in-process `security.MemoryNonceGuard` cannot do.
 
-- `NonceGuardConfig.KeyPrefix` — the key prefix; empty is the default `melody:nonce`.
+- `NonceGuardConfig.KeyPrefix` — the key prefix, used verbatim; empty is the default `<namespace>:nonce`.
 - `NonceGuardConfig.CallTimeout` — bounds one round trip of `Remember`: 1s when left out, at least 1ms, unlimited refused, a value outside the rule panicking at `NewNonceGuard` naming the field. Unbounded, a store that accepts connections but stops answering would hold the record for the client's write deadline — and every authenticator that consults the guard runs on the request path, where melody's http kernel attaches none. A request that already carries a tighter deadline keeps it.
 
 ```go
-nonceGuard := rueidis.NewNonceGuard(client, rueidis.NonceGuardConfig{})
+nonceGuard := rueidis.NewNonceGuard(connection, rueidis.NonceGuardConfig{})
 
 tokenSource := security.NewHmacTokenSource(secrets, applications, security.HmacTokenSourceConfig{
     NonceGuard: nonceGuard,
@@ -130,46 +147,46 @@ The same guard fits any `security/contract.NonceGuard` slot, for example the TOT
 
 ## Rate limiter
 
-[`NewRateLimiter(client, name, limit, window, RateLimiterConfig)`](./rate_limit.go) is a Redis-backed fixed-window limiter shared by every application instance — the distributed drop-in for the in-process limiters of the core `http/middleware` package. It implements `http/contract.RateLimiter`, so it goes straight into `middleware.RateLimitMiddleware`: `Allow(runtimeInstance, key)` charges one call on the runtime's context capped by the call timeout and answers a `RateLimitDecision`, `Remaining` and `Limit` on every call and `RetryAfter`, the counter's ttl, on a denial, and `Reset(runtimeInstance, key)` drops one counter and answers its failure; `Name()` answers the name it was built with. The counter is incremented atomically in a single Lua round trip, so N instances enforce one shared limit; because the window is fixed rather than sliding, up to twice the limit can pass across a window edge. A counter is keyed `<KeyPrefix><name>:<key>`, under the `melody:rate_limit:` prefix by default, so two limiters over one client never share a counter, a limiter keeps its counters when its limit or window changes, and the limiter shares a Redis instance with the cache, the lock and the token store without colliding. The name is 1 to 64 bytes of `[A-Za-z0-9._-]`, the colon left out so the key splits one way only; a malformed name, a limit below 1 and a window below 1ms panic at construction naming the argument.
+[`NewRateLimiter(connection, name, limit, window, RateLimiterConfig)`](./rate_limit.go) is a Redis-backed fixed-window limiter shared by every application instance — the distributed drop-in for the in-process limiters of the core `http/middleware` package. It implements `http/contract.RateLimiter`, so it goes straight into `middleware.RateLimitMiddleware`: `Allow(runtimeInstance, key)` charges one call on the runtime's context capped by the call timeout and answers a `RateLimitDecision`, `Remaining` and `Limit` on every call and `RetryAfter`, the counter's ttl, on a denial, and `Reset(runtimeInstance, key)` drops one counter and answers its failure; `Name()` answers the name it was built with. The counter is incremented atomically in a single Lua round trip, so N instances enforce one shared limit; because the window is fixed rather than sliding, up to twice the limit can pass across a window edge. A counter is keyed `<KeyPrefix><name>:<key>`, under the `<namespace>:rate_limit:` prefix by default, so two limiters over one client never share a counter, a limiter keeps its counters when its limit or window changes, and the limiter shares a Redis instance with the cache, the lock and the token store without colliding. The name is 1 to 64 bytes of `[A-Za-z0-9._-]`, the colon left out so the key splits one way only; a malformed name, a limit below 1 and a window below 1ms panic at construction naming the argument.
 
 ```go
-limiter := rueidis.NewRateLimiter(client, "login", 60, time.Minute, rueidis.RateLimiterConfig{})
+limiter := rueidis.NewRateLimiter(connection, "login", 60, time.Minute, rueidis.RateLimiterConfig{})
 
 rateLimit := middleware.RateLimitMiddleware(limiter, middleware.RateLimitConfig{})
 ```
 
 [`RateLimiterConfig`](./rate_limit.go), every field being the default when left out, and a value outside its rule panicking at `NewRateLimiter`, naming the field:
 
-- `KeyPrefix` — the namespace of every counter; empty is the default `melody:rate_limit:`. A prefix ends with its separator, or `app:x` with the name `y` and `app:` with the name `xy` share a counter.
+- `KeyPrefix` — opens every counter, used verbatim; empty is the default `<namespace>:rate_limit:`. A prefix ends with its separator, or `app:x` with the name `y` and `app:` with the name `xy` share a counter.
 - `FailureMode` — `FailureModeClosed` when left out, or `FailureModeOpen`; any other value is refused, so a misspelt mode is not read as closed.
 - `CallTimeout` — bounds one store round trip on top of the runtime's context: 250ms when left out, at least 1ms, unlimited refused.
 
-**The limiter is fail-closed by default.** When Redis cannot be reached, every limited route denies traffic — the right default for login and one-time-password endpoints, where an outage must not lift the limit, but it also means a Redis outage takes those routes down with it. Pick `FailureModeOpen` deliberately for plain traffic shaping, where a store outage must not become an outage of every limited route. A store failure is returned beside the failure mode's decision, marked with `exception.MarkInfrastructureFailure` under both modes and unrecorded, so the http middleware and `RateLimitGate` record it once and, under the closed mode, answer the denial `503` with the kernel's `Retry-After`, not `429`, and do not call `OnLimitExceeded`; the caller's own cancellation or deadline is not marked. A failed `Reset` is returned to its caller, who records it: a failed reset leaves an account's budget spent after a successful login. Construction panics on a nil client.
+**The limiter is fail-closed by default.** When Redis cannot be reached, every limited route denies traffic — the right default for login and one-time-password endpoints, where an outage must not lift the limit, but it also means a Redis outage takes those routes down with it. Pick `FailureModeOpen` deliberately for plain traffic shaping, where a store outage must not become an outage of every limited route. A store failure is returned beside the failure mode's decision, marked with `exception.MarkInfrastructureFailure` under both modes and unrecorded, so the http middleware and `RateLimitGate` record it once and, under the closed mode, answer the denial `503` with the kernel's `Retry-After`, not `429`, and do not call `OnLimitExceeded`; the caller's own cancellation or deadline is not marked. A failed `Reset` is returned to its caller, who records it: a failed reset leaves an account's budget spent after a successful login. Construction panics on a nil connection.
 
 ## Server-Sent Event backplane
 
-[`NewServerSentEventBackplane(client, hub, ServerSentEventBackplaneConfig)`](./server_sent_event_backplane.go) makes the core `http.ServerSentEventHub` fan its broadcasts out across every application instance behind a load balancer over a Redis pub/sub channel — without it, a `Broadcast` reaches only the clients connected to the instance that emitted it. Each broadcast is published to a shared channel tagged with a per-instance random origin; a dedicated subscription forwards the events of other instances into the hub via `DeliverLocal` and skips the echo of its own origin, so nothing is delivered twice. The subscription re-subscribes with bounded backoff after a connection drop. The same hub backs the WebSocket integration, so both transports fan out cluster-wide.
+[`NewServerSentEventBackplane(connection, hub, ServerSentEventBackplaneConfig)`](./server_sent_event_backplane.go) makes the core `http.ServerSentEventHub` fan its broadcasts out across every application instance behind a load balancer over a Redis pub/sub channel — without it, a `Broadcast` reaches only the clients connected to the instance that emitted it. Each broadcast is published to a shared channel tagged with a per-instance random origin; a dedicated subscription forwards the events of other instances into the hub via `DeliverLocal` and skips the echo of its own origin, so nothing is delivered twice. The subscription re-subscribes with bounded backoff after a connection drop. The same hub backs the WebSocket integration, so both transports fan out cluster-wide.
 
 ```go
 hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-backplane := rueidis.NewServerSentEventBackplane(client, hub, rueidis.ServerSentEventBackplaneConfig{Channel: "myapp:sse"})
+backplane := rueidis.NewServerSentEventBackplane(connection, hub, rueidis.ServerSentEventBackplaneConfig{})
 defer func() {
     _ = backplane.CloseWithContext(ctx)
 }()
 ```
 
-`NewServerSentEventBackplane` resolves its configuration first and then calls `hub.SetBackplane` itself, so a refused configuration leaves the hub without a backplane and, after construction, `hub.Broadcast(...)` replicates automatically. The Redis client is caller-owned; `CloseWithContext` detaches the backplane and stops the subscription goroutine cleanly, but does not close the client. Delivery is best-effort like Server-Sent Events itself; `hub.BackplaneFailures()` counts broadcasts that could not be published.
+`NewServerSentEventBackplane` resolves its configuration first and then calls `hub.SetBackplane` itself, so a refused configuration leaves the hub without a backplane and, after construction, `hub.Broadcast(...)` replicates automatically. The connection is caller-owned; `CloseWithContext` detaches the backplane and stops the subscription goroutine cleanly, but does not close the client. Delivery is best-effort like Server-Sent Events itself; `hub.BackplaneFailures()` counts broadcasts that could not be published.
 
 [`ServerSentEventBackplaneConfig`](./server_sent_event_backplane.go), every field left out being the default, and a value outside its rule panicking at `NewServerSentEventBackplane`, naming the field:
 
-- `Channel` — the shared pub/sub channel every instance publishes to and subscribes on; empty is the default `melody:sse`. Give each application its own channel when several share a Redis instance.
+- `Channel` — the shared pub/sub channel every instance publishes to and subscribes on, used verbatim; empty is the default `<namespace>:sse`, so applications sharing a Redis instance are kept apart by their namespaces.
 - `Logger` — a `logging/contract.Logger` for subscription failures and reconnect attempts; nil or a typed nil leaves them silent.
 - `Reconnect` — the backoff the subscription re-subscribes with after a connection drop, a [`ReconnectConfig`](./reconnect_config.go) whose `Backoff` is a `bound.Backoff`: `Initial` 1s and `Max` 30s when left out, both at least 1ms, unlimited refused; `Factor` 2 when left out, exactly 1 a constant backoff. A factor below 1 or NaN is refused, since it would decay the wait toward zero, and so is an initial backoff above the cap, naming both fields.
 - `CallTimeout` — bounds one publish round trip: 1s when left out, at least 1ms, unlimited refused. The caller is typically an http handler broadcasting an event, and its context carries no deadline, so without a bound an unresponsive store holds the request instead of failing it. A publish that runs out of time is counted in `hub.BackplaneFailures()` like any other failed replication — the event reaches the local subscribers but not the other instances — so surface that counter as a metric if cross-instance delivery matters, and raise the timeout for a store whose round trip legitimately exceeds it. The timeout derives from the backplane's own context, so `CloseWithContext` also cancels a publish still in flight.
 
 ## Cache backend
 
-Package: [`cache`](./cache). [`cache.NewBackend(client, BackendConfig)`](./cache/backend.go) wraps a `rueidis.Client` and exposes one runtime-first door per operation (`Get`, `Set`, `Delete`, `Has`, `Clear`, `ClearByPrefix`, `Many`, `SetMultiple`, `DeleteMultiple`, `Increment`, `Decrement`), each round trip bounded by the earlier of the caller's deadline and `CallTimeout`. [`cache.NewBackendService(client, BackendConfig)`](./cache/backend_service.go) is a container-friendly singleton wrapper implementing the core `cache/contract.Backend`. The `rueidis.Client` is owned by the application, not the backend: `Backend.CloseWithContext` does not close the client, so the same client can be shared with the locker, token store, and server-sent-event backplane without one component tearing it down for the others — close the client once during application shutdown.
+Package: [`cache`](./cache). [`cache.NewBackend(connection, BackendConfig)`](./cache/backend.go) wraps the connection's client and exposes one runtime-first door per operation (`Get`, `Set`, `Delete`, `Has`, `Clear`, `ClearByPrefix`, `Many`, `SetMultiple`, `DeleteMultiple`, `Increment`, `Decrement`), each round trip bounded by the earlier of the caller's deadline and `CallTimeout`. [`cache.NewBackendService(connection, BackendConfig)`](./cache/backend_service.go) is a container-friendly singleton wrapper implementing the core `cache/contract.Backend`. The `rueidis.Client` is owned by the application, not the backend: `Backend.CloseWithContext` does not close the client, so the same client can be shared with the locker, token store, and server-sent-event backplane without one component tearing it down for the others — close the client once during application shutdown.
 
 `Increment` and `Decrement` write the count and its expiry in one Lua script, as the `cachecontract.CounterOptions` say: `INCRBY`, then `PEXPIRE` when the call creates the key, finds it without an expiry or `RefreshTtl` is set, or `PERSIST` for an unlimited ttl with `RefreshTtl` set, which removes an expiry the key carries; an unlimited ttl without `RefreshTtl` leaves the key's expiry as it is. The cache's redis user needs `EVALSHA` and `EVAL`, and, since a script's commands run under the caller's permissions, the commands the script runs: `INCRBY`, `PTTL`, `PEXPIRE`, `PERSIST` and `GET`.
 
@@ -177,7 +194,7 @@ Package: [`cache`](./cache). [`cache.NewBackend(client, BackendConfig)`](./cache
 
 [`BackendConfig`](./cache/backend.go), every field left out being the default, and a value outside its rule answered as the error of `NewBackend` and `NewBackendService`, naming the field:
 
-- `Prefix` — the whole of the backend's isolation; empty is the default `melody:cache:`, the same string in every melody application, so give each application and environment sharing a store its own.
+- `Prefix` — the whole of the backend's isolation, used verbatim; empty is the default `<namespace>:cache:`, so applications and environments sharing a store are kept apart by their namespaces.
 - `ScanCount` — the `COUNT` hint of the `SCAN` walk `Clear` and `ClearByPrefix` run: 1000 when left out, at least 1, unlimited refused.
 - `DeleteBatch` — how many keys one `DEL` carries: 500 when left out, at least 1, unlimited refused.
 - `MaxKeyLength` — the key bound the refusals are measured against, on the key the caller hands in, before the prefix: 1024 when left out, at least 1, unlimited refused.
@@ -216,9 +233,9 @@ app.RegisterModule(rueidis.NewModule(rueidis.ModuleConfig{
     ConnectionBuiltAtBoot: true,
     ConnectionBootFailure: container.BootFailureFailsBoot,
     Locker:                &rueidis.LockerConfig{},
-    TokenStore:            &rueidis.TokenStoreConfig{Prefix: "app:token"},
+    TokenStore:            &rueidis.TokenStoreConfig{},
 }))
-app.RegisterModule(rueidiscache.NewModule(rueidiscache.ModuleConfig{Backend: rueidiscache.BackendConfig{Prefix: "app:"}}))
+app.RegisterModule(rueidiscache.NewModule(rueidiscache.ModuleConfig{Backend: rueidiscache.BackendConfig{}}))
 ```
 
 | Field                   | Registers                                                   | Left out                                                  |

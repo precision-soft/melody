@@ -3,15 +3,15 @@ package cache
 import (
     "context"
 
+    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
     "github.com/precision-soft/melody/v4/bound"
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
-    "github.com/redis/rueidis"
 )
 
-func NewBackendService(client rueidis.Client, config BackendConfig) (*BackendService, error) {
-    backend, err := NewBackend(client, config)
+func NewBackendService(connection *melodyrueidis.Connection, config BackendConfig) (*BackendService, error) {
+    backend, err := NewBackend(connection, config)
     if nil != err {
         return nil, err
     }

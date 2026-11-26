@@ -501,3 +501,14 @@ func TestApplicationBoot_InstallsThePipelineThroughTheSeam(t *testing.T) {
         applicationInstance.httpKernel.InstallMiddlewares(httpkernelseam.NewToken(), nil)
     }, "the http kernel's middlewares are already installed")
 }
+
+func TestNewApplication_TheNamespaceFieldReachesTheKernelConfiguration(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), Namespace: "shop"})
+    defer func() {
+        _ = applicationInstance.kernel.ServiceContainer().CloseWithContext(context.Background())
+    }()
+
+    if namespace := applicationInstance.configuration.Kernel().Namespace(); "shop" != namespace {
+        t.Fatalf("expected the field's namespace, got %q", namespace)
+    }
+}

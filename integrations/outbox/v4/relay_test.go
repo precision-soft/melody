@@ -279,11 +279,13 @@ type fakeLocker struct {
     acquire   bool
     lock      *fakeLock
     ttls      []bound.Duration
+    names     []string
     createErr error
 }
 
-func (instance *fakeLocker) CreateLock(_ string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *fakeLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
     instance.ttls = append(instance.ttls, ttl)
+    instance.names = append(instance.names, name)
 
     if nil != instance.createErr {
         return nil, instance.createErr
@@ -2114,5 +2116,28 @@ func TestRelay_AFailedReleaseIsLoggedAndTheBatchsOwnErrorIsAnswered(t *testing.T
 
     if 1 != released {
         t.Fatalf("expected one claim release failure record, got %v", logger.errorMessages())
+    }
+}
+
+func TestRelay_TheDefaultLockNameCarriesTheNamespace(t *testing.T) {
+    for label, testCase := range map[string]struct {
+        lockName        string
+        runtimeInstance containercontract.Runtime
+        expected        string
+    }{
+        "the runtime's namespace":            {lockName: "", runtimeInstance: runtimeWithNamespace(t, "shop"), expected: "shop:outbox:relay"},
+        "a runtime with no configuration":    {lockName: "", runtimeInstance: relayTestRuntime(), expected: "melody:outbox:relay"},
+        "an explicit name under a namespace": {lockName: "legacy:relay", runtimeInstance: runtimeWithNamespace(t, "shop"), expected: "legacy:relay"},
+    } {
+        locker := &fakeLocker{acquire: false}
+        relay := NewRelay(&fakeRepository{}, &fakeTransport{}, &stringCodec{}, RelayConfig{Locker: locker, LockName: testCase.lockName})
+
+        if _, runErr := relay.RunOnce(testCase.runtimeInstance); nil != runErr {
+            t.Fatalf("%s: unexpected run error: %v", label, runErr)
+        }
+
+        if 1 != len(locker.names) || testCase.expected != locker.names[0] {
+            t.Fatalf("%s: expected the lock %q, got %v", label, testCase.expected, locker.names)
+        }
     }
 }

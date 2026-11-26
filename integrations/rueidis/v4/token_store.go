@@ -21,7 +21,7 @@ import (
 )
 
 const (
-    defaultTokenStorePrefix    = "melody:token"
+    tokenStorePrefixSuffix     = "token"
     defaultTokenStoreScanCount = 256
 )
 
@@ -179,7 +179,7 @@ return 1
 
 /* TokenStoreConfig declares the store's tunables, read once at NewTokenStore. */
 type TokenStoreConfig struct {
-    /* Prefix is the namespace of every token, index set and revocation hash, melody:token when empty. */
+    /* Prefix opens every token, index set and revocation hash, used verbatim: <namespace>:token when empty, the connection's namespace. */
     Prefix string
 
     /* ScanCount is the COUNT hint and the batch of the SSCAN and SCAN walks: 256 by default, at least 1, unlimited refused. */
@@ -249,10 +249,8 @@ func resolveTokenStoreConfig(config TokenStoreConfig) (resolvedTokenStore, error
         return resolvedTokenStore{}, epochRetentionErr
     }
 
+    /* empty is the connection's default, filled at construction */
     prefix := config.Prefix
-    if "" == prefix {
-        prefix = defaultTokenStorePrefix
-    }
 
     /* 0 is the revoke script's spelling of a boundary kept for ever */
     epochRetentionMilliseconds := int64(0)
@@ -270,29 +268,32 @@ func resolveTokenStoreConfig(config TokenStoreConfig) (resolvedTokenStore, error
     }, nil
 }
 
-/* NewTokenStore resolves the configuration once; a nil client or a limit outside its rule panics naming it. */
-func NewTokenStore(client rueidis.Client, config TokenStoreConfig) *RedisTokenStore {
-    if nil == client {
-        exception.Panic(exception.NewError("redis token store client is nil", nil, nil))
-    }
+/* NewTokenStore resolves the configuration once; a nil connection or a limit outside its rule panics naming it. */
+func NewTokenStore(connection *Connection, config TokenStoreConfig) *RedisTokenStore {
+    refuseNilConnection(connection)
 
     resolved, resolveErr := resolveTokenStoreConfig(config)
     if nil != resolveErr {
         exception.Panic(exception.FromError(resolveErr))
     }
 
-    return newTokenStoreFromResolved(client, resolved)
+    return newTokenStoreFromResolved(connection, resolved)
 }
 
-func newTokenStoreFromResolved(client rueidis.Client, resolved resolvedTokenStore) *RedisTokenStore {
+func newTokenStoreFromResolved(connection *Connection, resolved resolvedTokenStore) *RedisTokenStore {
+    prefix := resolved.prefix
+    if "" == prefix {
+        prefix = connection.namespacedName(tokenStorePrefixSuffix)
+    }
+
     clockInstance := resolved.clock
     if nil == clockInstance {
         clockInstance = melodyclock.NewSystemClock()
     }
 
     return &RedisTokenStore{
-        client:                     client,
-        prefix:                     resolved.prefix,
+        client:                     connection.Client(),
+        prefix:                     prefix,
         scanCount:                  resolved.scanCount,
         clock:                      clockInstance,
         epochRetentionMilliseconds: resolved.epochRetentionMilliseconds,

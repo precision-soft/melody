@@ -33,6 +33,9 @@ type KernelConfiguration interface {
 
     /* ContainerTeardownSequential is MELODY_CONTAINER_TEARDOWN_SEQUENTIAL as the deployment set it, unset when the key says nothing: the application decides it against its own config, the key winning. */
     ContainerTeardownSequential() Switch
+
+    /* Namespace is the application namespace every store family derives its default names from: MELODY_NAMESPACE as the deployment set it, else the application's own, else melody. */
+    Namespace() string
 }
 
 /* Switch is a boolean key as the deployment set it: IsSet is false when the key says nothing, and Value is then false. */

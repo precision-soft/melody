@@ -5,6 +5,7 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
+    melodyconfig "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -14,11 +15,11 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-const exclusiveCommandLockNamePrefix = "melody:command:"
+const exclusiveCommandLockNameInfix = ":command:"
 
 /* ExclusiveCommandConfig is what an exclusive command declares beyond the command and its locker; its zero value is the default. */
 type ExclusiveCommandConfig struct {
-    /* LockName is the lock every instance competes for: "" reads as "melody:command:" plus the command's name; name one when two differently-named commands must share one lock, or one command needs distinct locks per deployment. */
+    /* LockName is the lock every instance competes for: "" reads as the application namespace, ":command:" and the command's name, melody:command:<name> under the default namespace, resolved at each run from the runtime's configuration; a name set here is used verbatim. Name one when two differently-named commands must share one lock, or one command needs distinct locks per deployment. */
     LockName string
 
     /* Ttl is the lease handed to the locker, the crash safety and never the run cadence, as ExclusiveConfig.Ttl reads it: 30s by default, at least 2ms, unlimited selecting a session-style lock. */
@@ -54,9 +55,10 @@ func NewExclusiveCommand(
         exception.Panic(exception.FromError(ttlErr))
     }
 
+    /* the namespace is known only to the runtime, so the construction check reads the default namespace's name */
     lockName := config.LockName
     if "" == lockName {
-        lockName = exclusiveCommandLockNamePrefix + command.Name()
+        lockName = melodyconfig.DefaultNamespace + exclusiveCommandLockNameInfix + command.Name()
     }
 
     /* created once to read the locker's refusal at construction, a decorated locker's included; every run creates its own */
@@ -85,7 +87,7 @@ func NewExclusiveCommand(
     return &ExclusiveCommand{
         command:  command,
         locker:   locker,
-        lockName: lockName,
+        lockName: config.LockName,
         exclusiveConfig: ExclusiveConfig{
             Ttl:              ttl.Limit(),
             StopRenewalLimit: config.StopRenewalLimit,
@@ -97,8 +99,25 @@ func NewExclusiveCommand(
 type ExclusiveCommand struct {
     command         clicontract.Command
     locker          lockcontract.Locker
+    /* empty is the default name, resolved per run */
     lockName        string
     exclusiveConfig ExclusiveConfig
+}
+
+/* resolvedLockName answers the declared name verbatim, else the default under the runtime's namespace; a runtime with no configuration reads DefaultNamespace */
+func (instance *ExclusiveCommand) resolvedLockName(runtimeInstance containercontract.Runtime) string {
+    if "" != instance.lockName {
+        return instance.lockName
+    }
+
+    namespace := melodyconfig.DefaultNamespace
+    if configuration, configurationErr := melodyconfig.ConfigFromRuntime(runtimeInstance); nil == configurationErr && false == internal.IsNilInterface(configuration) {
+        if kernelConfiguration := configuration.Kernel(); false == internal.IsNilInterface(kernelConfiguration) && "" != kernelConfiguration.Namespace() {
+            namespace = kernelConfiguration.Namespace()
+        }
+    }
+
+    return namespace + exclusiveCommandLockNameInfix + instance.command.Name()
 }
 
 func (instance *ExclusiveCommand) Name() string {
@@ -117,10 +136,12 @@ func (instance *ExclusiveCommand) Run(
     runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
+    lockName := instance.resolvedLockName(runtimeInstance)
+
     ran, runErr := RunExclusive(
         runtimeInstance,
         instance.locker,
-        instance.lockName,
+        lockName,
         instance.exclusiveConfig,
         func(childRuntime containercontract.Runtime) error {
             return instance.command.Run(childRuntime, commandContext)
@@ -143,7 +164,7 @@ func (instance *ExclusiveCommand) Run(
                 skipMessage,
                 loggingcontract.Context{
                     "command": instance.command.Name(),
-                    "lock":    instance.lockName,
+                    "lock":    lockName,
                 },
             )
         }

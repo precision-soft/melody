@@ -80,6 +80,7 @@ Keys and parameters are two tables. A key is not a parameter: `Get("MELODY_HTTP_
 | `MELODY_HTTP_UNAVAILABLE_RETRY_AFTER`     | `kernel.http.unavailable_retry_after`     | `""` (the application's, then `5s`)                |
 | `MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE`     | `kernel.http.session_empty_on_outage`     | `""` (the application's, then `false`)             |
 | `MELODY_HTTP_SESSION_COOKIE_SECURE`       | `kernel.http.session_cookie_secure`       | `""` (the application's, then `from-scheme`)       |
+| `MELODY_NAMESPACE`                        | `kernel.namespace`                        | `""` (the application's, then `melody`)            |
 | `MELODY_CLI_NAME`                         | `kernel.cli_name`                         | `"melody"`                                         |
 | `MELODY_CLI_DESCRIPTION`                  | `kernel.cli_description`                  | `""`                                               |
 | `MELODY_CLI_BOOT_WARNINGS_IGNORED`        | `kernel.cli_boot_warnings_ignored`        | `""`                                               |
@@ -291,6 +292,30 @@ Whether the container closes its services one after the other instead of in depe
 
 The value is a boolean in any spelling the parameter conversion accepts — `true`, `false`, `1`, `0`, `yes`, `no`, `y`, `n`, `on`, `off`, in any case — and anything else fails the boot with `invalid environment value`, naming the key. Left out, the key is unset and the field decides; without the field the teardown runs in waves.
 
+### Application namespace
+
+The one namespace of the application, the stem of every name a store family derives by default: two deployments of one build on one Redis or one broker differ by it. Read through [`KernelConfiguration.Namespace()`](../../config/contract/kernel.go), which answers the key when a deployment sets it, else [`ApplicationConfig.Namespace`](../../application/application_new.go), else [`DefaultNamespace`](../../config/namespace.go), `melody`, under which every name keeps its third-major spelling.
+
+| Environment key    | Parameter name     | Default                                 |
+|--------------------|--------------------|-----------------------------------------|
+| `MELODY_NAMESPACE` | `kernel.namespace` | `""` (the application's, then `melody`) |
+
+[`ValidateNamespace`](../../config/namespace.go) is the one rule: 1 to 32 characters of `a-z`, `0-9`, `_` and `-`, beginning and ending with a letter or a digit, so no separator or glob character of a store enters a name. A key outside it fails the boot naming the key, a field outside it fails `NewApplication` naming the field, judged even when the key is set. It is an operational value, not a protection, so it has a key and no off door.
+
+| Name | Where | Default under the namespace |
+|---|---|---|
+| rate limiter counters | `rueidis.RateLimiterConfig.KeyPrefix` | `<namespace>:rate_limit:` |
+| server-sent event channel | `rueidis.ServerSentEventBackplaneConfig.Channel` | `<namespace>:sse` |
+| nonce guard keys | `rueidis.NonceGuardConfig.KeyPrefix` | `<namespace>:nonce` |
+| token store keys | `rueidis.TokenStoreConfig.Prefix` | `<namespace>:token` |
+| cache backend keys | `rueidis.cache.BackendConfig.Prefix` | `<namespace>:cache:` |
+| redis lock keys | `rueidis.LockerConfig.KeyPrefix` | `<namespace>:lock:` |
+| server-sent event exchange | `amqp.ServerSentEventBackplaneConfig.Exchange` | `<namespace>.sse` |
+| exclusive command lock | `lock.ExclusiveCommandConfig.LockName` | `<namespace>:command:<command>` |
+| outbox relay lock | `outbox.RelayConfig.LockName` | `<namespace>:outbox:relay` |
+
+The two store families are handed the namespace once, positionally, on `rueidis.NewProvider`, `rueidis.NewConnection` and `amqp.NewProvider`; the two framework lock names read it from the runtime's configuration at each run. A name set on a component is used verbatim. Not namespaced: a transport's queue, exchange and routing key, the migration tables, the outbox table, service, parameter and command names and the websocket route name.
+
 ### Session storage outage
 
 Whether a request that reads the session while the session storage cannot answer is served an empty session marked unavailable, saved nowhere and with no cookie written, where the default answers its reader the marked error, `503` with `Retry-After` when a handler returns it (see [SESSION.md](SESSION.md)). Read through [`HttpConfiguration.SessionEmptyOnOutage()`](../../config/contract/http.go) as a [`Switch`](../../config/contract/kernel.go) and decided by the application against its own [`ApplicationConfig.HttpKernel.SessionPolicy.EmptyOnOutage`](../../application/application_new.go): the key wins over the field.
@@ -487,11 +512,11 @@ func example() configcontract.Configuration {
 
 ### Environment variable keys (`config`)
 
-- [`EnvironmentNameKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpSessionMaxSessionsKey`, `HttpShutdownTimeoutKey`, `HttpUnavailableRetryAfterKey`, `HttpSessionEmptyOnOutageKey`, `HttpSessionCookieSecureKey`, `TeardownTimeoutKey`, `ScopeTeardownTimeoutKey`, `ContainerCreationWaitersKey`, `ContainerTeardownSequentialKey`, `CliNameKey`, `CliDescriptionKey`, `CliBootWarningsIgnoredKey`, `CliBootWarningsDisabledKey`, `LogPathKey`, `LogLevelKey`, `DefaultLocaleKey`, `PublicDirectoryKey`, `StaticIndexFileKey`, `StaticCacheDisabledKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
+- [`EnvironmentNameKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpSessionMaxSessionsKey`, `HttpShutdownTimeoutKey`, `HttpUnavailableRetryAfterKey`, `HttpSessionEmptyOnOutageKey`, `HttpSessionCookieSecureKey`, `TeardownTimeoutKey`, `ScopeTeardownTimeoutKey`, `ContainerCreationWaitersKey`, `ContainerTeardownSequentialKey`, `NamespaceKey`, `CliNameKey`, `CliDescriptionKey`, `CliBootWarningsIgnoredKey`, `CliBootWarningsDisabledKey`, `LogPathKey`, `LogLevelKey`, `DefaultLocaleKey`, `PublicDirectoryKey`, `StaticIndexFileKey`, `StaticCacheDisabledKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
 
 ### Kernel parameter names (`config`)
 
-- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnvironment`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpSessionMaxSessions`, `KernelHttpShutdownTimeout`, `KernelHttpUnavailableRetryAfter`, `KernelHttpSessionEmptyOnOutage`, `KernelHttpSessionCookieSecure`, `KernelTeardownTimeout`, `KernelScopeTeardownTimeout`, `KernelContainerCreationWaiters`, `KernelContainerTeardownSequential`, `KernelCliName`, `KernelCliDescription`, `KernelCliBootWarningsIgnored`, `KernelCliBootWarningsDisabled`, `KernelLogPath`, `KernelLogLevel`, `KernelDefaultLocale`, `KernelPublicDirectory`, `KernelStaticIndexFile`, `KernelStaticCacheDisabled`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDirectory`, `KernelLogsDirectory`, `KernelCacheDirectory`](../../config/environment.go)
+- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnvironment`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpSessionMaxSessions`, `KernelHttpShutdownTimeout`, `KernelHttpUnavailableRetryAfter`, `KernelHttpSessionEmptyOnOutage`, `KernelHttpSessionCookieSecure`, `KernelTeardownTimeout`, `KernelScopeTeardownTimeout`, `KernelContainerCreationWaiters`, `KernelContainerTeardownSequential`, `KernelNamespace`, `KernelCliName`, `KernelCliDescription`, `KernelCliBootWarningsIgnored`, `KernelCliBootWarningsDisabled`, `KernelLogPath`, `KernelLogLevel`, `KernelDefaultLocale`, `KernelPublicDirectory`, `KernelStaticIndexFile`, `KernelStaticCacheDisabled`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDirectory`, `KernelLogsDirectory`, `KernelCacheDirectory`](../../config/environment.go)
 
 ### Environment / mode / role constants (`config`)
 
@@ -499,6 +524,8 @@ func example() configcontract.Configuration {
 - [`ModeHttp`, `ModeCli`](../../config/environment.go)
 - [`HttpSessionCookieSecureAlways`](../../config/environment.go) — the one value `MELODY_HTTP_SESSION_COOKIE_SECURE` admits
 - [`RoleWeb`, `RoleWorker`, `RoleAll`](../../config/environment.go)
+- [`DefaultNamespace`](../../config/namespace.go) — the namespace when neither `MELODY_NAMESPACE` nor `ApplicationConfig.Namespace` names one, `melody`
+- [`ValidateNamespace(namespace string) error`](../../config/namespace.go) — the namespace's one rule, the refusal carrying the value
 - [`RoleAllowsBackgroundWork(role string) bool`](../../config/process_role.go) — whether a process with this role should start outbox relays and message consumers. Melody itself gates nothing on the role: it is declared intent for application wiring to query
 - [`RoleAllowsHttp(role string) bool`](../../config/process_role.go) — informational in the same way; the runtime **mode**, not the role, decides whether the http kernel starts
 

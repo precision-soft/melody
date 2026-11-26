@@ -327,6 +327,10 @@ func (instance *stubKernelConfiguration) ContainerTeardownSequential() configcon
     return configcontract.Switch{}
 }
 
+func (instance *stubKernelConfiguration) Namespace() string {
+    return "melody"
+}
+
 type stubConfigurationWithKernel struct {
     *stubConfiguration
     kernel configcontract.KernelConfiguration

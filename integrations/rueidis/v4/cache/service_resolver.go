@@ -30,7 +30,7 @@ func registerBackendService(registrar serviceRegistrar, config BackendConfig) {
             }
 
             return &BackendService{
-                backend: newBackendFromResolved(connection.Client(), resolved),
+                backend: newBackendFromResolved(connection, resolved),
             }, nil
         },
         container.RegisterOptions{TeardownDependencyNames: []string{melodyrueidis.ServiceConnection}},

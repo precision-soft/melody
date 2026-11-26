@@ -225,7 +225,7 @@ func TestTransport_SendReceiveAck(t *testing.T) {
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
     connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -300,7 +300,7 @@ func TestTransport_RequeuePersistsRedeliveryCountThenDeadLetters(t *testing.T) {
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
     connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -365,7 +365,7 @@ func TestTransport_DelayStampRoutesThroughDelayQueue(t *testing.T) {
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
     connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -436,7 +436,7 @@ func TestTransport_ReconnectsAfterConnectionDrop(t *testing.T) {
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
     connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -1329,7 +1329,7 @@ func TestTransport_CloseJoinsTheConsumerStartedByReceive(t *testing.T) {
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
     connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -1416,7 +1416,7 @@ func TestTransport_SendSurfacesUnroutablePublishAfterQueueDelete(t *testing.T) {
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
     connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -1470,7 +1470,7 @@ func TestEnsurePublishChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
     connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -1509,7 +1509,7 @@ func TestEnsureConsumeChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
     connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -1740,7 +1740,7 @@ func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
     connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -1931,7 +1931,7 @@ func TestTransport_RequeueThatCannotCarryItsCountersDeadLettersInsteadOfLooping(
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
     connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -3108,7 +3108,7 @@ func TestTransport_MainTargetIsTheConfiguredExchangeAndRoutingKey(t *testing.T) 
 func TestTransport_SendRoutesThroughTheConfiguredExchangeAndRoutingKey(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
 
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
     connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -3625,7 +3625,7 @@ func TestConnect_TheAttemptWordIsReadUnderTheMutex(t *testing.T) {
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    liveDialer := NewProvider(ProviderConfig{}).Dialer(dsn)
+    liveDialer := NewProvider("melody", ProviderConfig{}).Dialer(dsn)
 
     for round := 0; round < 10; round++ {
         release := make(chan struct{})
@@ -3856,7 +3856,7 @@ func TestTransport_SendOverAConnectionThatIsGoneIsMarkedUnavailable(t *testing.T
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
     connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -3979,7 +3979,7 @@ func TestConsumeLoop_AChannelLostAfterLivingTheInitialBackoffReopensAtOnce(t *te
         t.Skip("AMQP_DSN not set; skipping amqp integration test")
     }
 
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
     connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -4071,7 +4071,7 @@ func queueExists(t *testing.T, connection *amqp091.Connection, queueName string)
 func TestTransport_ZeroConfigDeclaresTheDeadLetterTopology(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
 
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
     connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -4094,7 +4094,7 @@ func TestTransport_ZeroConfigDeclaresTheDeadLetterTopology(t *testing.T) {
 func TestTransport_DeadLetterDisabledDeclaresNoDeadLetterTopology(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
 
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
     connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)
@@ -4118,7 +4118,7 @@ func TestTransport_DeadLetterDisabledDeclaresNoDeadLetterTopology(t *testing.T) 
 func TestTransport_AQueueDeclaredWithoutTheDeadLetterArgumentNamesTheDoor(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
 
-    provider := NewProvider(ProviderConfig{})
+    provider := NewProvider("melody", ProviderConfig{})
     connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
     if nil != openErr {
         t.Fatalf("open connection: %v", openErr)

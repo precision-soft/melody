@@ -12,7 +12,8 @@ import (
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
 )
 
-const defaultLockName = "melody:outbox:relay"
+/* defaultLockNameSuffix follows the application namespace in the relay's default lock name, <namespace>:outbox:relay */
+const defaultLockNameSuffix = ":outbox:relay"
 
 /* maximumBatchSize bounds one claim on both doors that take a batch size — the relay's BatchSize and the store's ClaimDueMessages limit; far above any sensible drain and far below what a mistyped configuration could ask a slice pre-allocation for. */
 const maximumBatchSize = 100000
@@ -91,10 +92,6 @@ func resolveRelayConfig(config RelayConfig) (resolvedRelay, error) {
     resolved := resolvedRelay{
         Locker:     config.Locker,
         LockName:   config.LockName,
-    }
-
-    if "" == resolved.LockName {
-        resolved.LockName = defaultLockName
     }
 
     durations := []struct {

@@ -16,7 +16,7 @@ import (
 
 func TestRedisNonceGuard_FirstUseThenReplay(t *testing.T) {
     client := newTokenStoreClient(t)
-    guard := NewNonceGuard(client, NonceGuardConfig{KeyPrefix: "melody:nonce:test"})
+    guard := NewNonceGuard(newTestConnection(client), NonceGuardConfig{KeyPrefix: "melody:nonce:test"})
 
     /* the nonce carries the clock so two runs of this package inside the remembered window cannot collide: the guard is doing its job when it reports a fixed nonce as already seen, and a test that reads that as a failure is testing the previous run */
     nonce := fmt.Sprintf("nonce-replay-%d", time.Now().UnixNano())
@@ -42,7 +42,7 @@ func TestRedisNonceGuard_FirstUseThenReplay(t *testing.T) {
 
 func TestRedisNonceGuard_RefusesAnAbsentSubMillisecondOrUnlimitedTtl(t *testing.T) {
     client := newTokenStoreClient(t)
-    guard := NewNonceGuard(client, NonceGuardConfig{KeyPrefix: "melody:nonce:test"})
+    guard := NewNonceGuard(newTestConnection(client), NonceGuardConfig{KeyPrefix: "melody:nonce:test"})
     nonce := fmt.Sprintf("nonce-refused-%d", time.Now().UnixNano())
 
     for _, ttl := range []bound.Duration{{}, bound.Of(time.Duration(0)), bound.Of(time.Microsecond), bound.UnlimitedDuration()} {
@@ -67,7 +67,7 @@ func newWedgedNonceGuard(t *testing.T, config NonceGuardConfig) (*NonceGuard, *g
     }
 
     client, guardGate := dialGated(t)
-    guard := NewNonceGuard(client, config)
+    guard := NewNonceGuard(newTestConnection(client), config)
 
     if _, warmErr := guard.Remember(newTokenStoreRuntime(), "warm", bound.Of(time.Second)); nil != warmErr {
         t.Fatalf("warm-up remember: %v", warmErr)
@@ -113,13 +113,13 @@ func TestRedisNonceGuard_RememberKeepsATighterRequestDeadline(t *testing.T) {
 func TestNewNonceGuard_RefusesACallTimeoutOutsideItsRuleNamingTheField(t *testing.T) {
     for _, callTimeout := range []bound.Duration{bound.UnlimitedDuration(), bound.Of(time.Duration(0)), bound.Of(time.Microsecond)} {
         expectPanicNamingField(t, "NonceGuardConfig.CallTimeout", func() {
-            NewNonceGuard(fakeClient{}, NonceGuardConfig{CallTimeout: callTimeout})
+            NewNonceGuard(newTestConnection(fakeClient{}), NonceGuardConfig{CallTimeout: callTimeout})
         })
     }
 }
 
 func TestNewNonceGuard_KeepsAConfiguredCallTimeout(t *testing.T) {
-    guard := NewNonceGuard(fakeClient{}, NonceGuardConfig{CallTimeout: bound.Of(750 * time.Millisecond)})
+    guard := NewNonceGuard(newTestConnection(fakeClient{}), NonceGuardConfig{CallTimeout: bound.Of(750 * time.Millisecond)})
 
     if 750*time.Millisecond != guard.callTimeout {
         t.Fatalf("expected the configured call timeout, got %v", guard.callTimeout)
@@ -127,19 +127,19 @@ func TestNewNonceGuard_KeepsAConfiguredCallTimeout(t *testing.T) {
 }
 
 func TestNewNonceGuard_DefaultCallTimeoutAndPrefix(t *testing.T) {
-    guard := NewNonceGuard(fakeClient{}, NonceGuardConfig{})
+    guard := NewNonceGuard(newTestConnection(fakeClient{}), NonceGuardConfig{})
 
     if defaultNonceGuardCallTimeout != guard.callTimeout {
         t.Fatalf("expected the default call timeout, got %v", guard.callTimeout)
     }
 
-    if defaultNonceGuardPrefix != guard.keyPrefix {
+    if "melody:nonce" != guard.keyPrefix {
         t.Fatalf("expected the default key prefix, got %q", guard.keyPrefix)
     }
 }
 
 func TestNewNonceGuard_HandsThePrefixThroughAndKeepsTheDefaultBudget(t *testing.T) {
-    guard := NewNonceGuard(fakeClient{}, NonceGuardConfig{KeyPrefix: "melody:nonce:custom"})
+    guard := NewNonceGuard(newTestConnection(fakeClient{}), NonceGuardConfig{KeyPrefix: "melody:nonce:custom"})
 
     if "melody:nonce:custom" != guard.keyPrefix {
         t.Fatalf("expected the prefix to reach the guard, got %q", guard.keyPrefix)
@@ -151,9 +151,9 @@ func TestNewNonceGuard_HandsThePrefixThroughAndKeepsTheDefaultBudget(t *testing.
 }
 
 func TestNewNonceGuard_AnEmptyPrefixKeepsTheDefault(t *testing.T) {
-    guard := NewNonceGuard(fakeClient{}, NonceGuardConfig{KeyPrefix: ""})
+    guard := NewNonceGuard(newTestConnection(fakeClient{}), NonceGuardConfig{KeyPrefix: ""})
 
-    if defaultNonceGuardPrefix != guard.keyPrefix {
+    if "melody:nonce" != guard.keyPrefix {
         t.Fatalf("expected an empty prefix to read as the default, got %q", guard.keyPrefix)
     }
 }

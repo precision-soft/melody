@@ -71,15 +71,11 @@ func (instance *Module) outboxRelayFactory(resolver melodycontainercontract.Reso
     return outbox.NewRelay(store, transport, &outboxNoticeCodec{}, outbox.RelayConfig{
         BatchSize:  bound.Of(50),
         Locker:     locker,
-        LockName:   outboxRelayLockName,
         LockTtl:    bound.Of(outboxRelayLockTtl),
     }), nil
 }
 
 const (
-    /* outboxRelayLockName is the lease every replica's relay contends for, named under this application so two applications on one redis never share it */
-    outboxRelayLockName = "melody-example-v4:outbox:relay"
-
     /* outboxRelayLockTtl outlives one batch of fifty publishes; the relay refreshes the lease while it drains */
     outboxRelayLockTtl = 30 * time.Second
 )
@@ -94,7 +90,7 @@ func (instance *Module) buildOutboxTransport() (melodymessagebuscontract.Transpo
     registry := amqp.NewMessageRegistry()
     amqp.RegisterMessage[message.OutboxNotice](registry, outboxNoticeType)
 
-    return amqp.NewTransport("outbox_notice", registry, amqp.FromDialer(amqp.NewProvider(amqp.ProviderConfig{}).Dialer(dsn)), amqp.TransportConfig{}), nil
+    return amqp.NewTransport("outbox_notice", registry, amqp.FromDialer(amqp.NewProvider(instance.namespace(), amqp.ProviderConfig{}).Dialer(dsn)), amqp.TransportConfig{}), nil
 }
 
 type outboxNoticeCodec struct{}

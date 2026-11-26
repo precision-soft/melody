@@ -29,7 +29,7 @@ func TestClientMustFromRuntime_AnswersTheSiblingsInstanceThroughTheRuntimesScope
     container.MustRegister[*Connection](serviceContainer, ServiceConnection, func(resolver containercontract.Resolver) (*Connection, error) {
         seen = resolver.Runtime().Context().Value(twinContextKey{})
 
-        return NewConnection(first), nil
+        return NewConnection(first, "melody"), nil
     }, containercontract.RegisterOptions{})
 
     runtimeInstance := runtime.NewRequest(context.WithValue(t.Context(), twinContextKey{}, "the caller's"), serviceContainer.NewScope())
@@ -42,7 +42,7 @@ func TestClientMustFromRuntime_AnswersTheSiblingsInstanceThroughTheRuntimesScope
     }
 
     overridden := serviceContainer.NewScope()
-    overridden.MustOverrideProtectedInstance(ServiceConnection, NewConnection(second), containercontract.OverrideOptions{})
+    overridden.MustOverrideProtectedInstance(ServiceConnection, NewConnection(second, "melody"), containercontract.OverrideOptions{})
 
     if second != ClientMustFromRuntime(runtime.NewRun(t.Context(), overridden)) {
         t.Fatalf("expected the runtime form to resolve through the runtime's scope")

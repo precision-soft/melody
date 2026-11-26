@@ -13,6 +13,7 @@ import (
     "unicode/utf8"
 
     "github.com/precision-soft/melody/v4/bound"
+    melodyconfig "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
@@ -29,7 +30,7 @@ import (
 type RelayConfig struct {
     Locker lockcontract.Locker
 
-    /* LockName names the single-drainer lock: melody:outbox:relay when empty. */
+    /* LockName names the single-drainer lock, used verbatim: the application namespace followed by :outbox:relay when empty, resolved at each run from the runtime's configuration, melody:outbox:relay under the default namespace. */
     LockName string
 
     /* LockTtl is the lease the lock is held and refreshed under: 30s when left out, at least 1s, unlimited refused. */
@@ -134,7 +135,7 @@ func (instance *Relay) RunOnce(runtimeInstance containercontract.Runtime) (int, 
             instance.releaseClaims(runtimeInstance, due[stoppedIndex+1:])
         }
 
-        return instance.batchFailureOutcome(batchErr, refreshErr)
+        return instance.batchFailureOutcome(runtimeInstance, batchErr, refreshErr)
     }
 
     for index := 0; index < len(due); index++ {
@@ -187,7 +188,7 @@ func (instance *Relay) RunOnce(runtimeInstance containercontract.Runtime) (int, 
     if nil != refreshErr {
         return published, exception.NewError(
             "outbox relay lease refresh failed - the claimed batch was drained under its claim tokens, to its end or to a failed send",
-            exceptioncontract.Context{"lock": instance.config.LockName},
+            exceptioncontract.Context{"lock": instance.lockName(runtimeInstance)},
             refreshErr,
         )
     }
@@ -225,7 +226,7 @@ func (instance *Relay) releaseClaims(runtimeInstance containercontract.Runtime, 
 }
 
 /* batchFailureOutcome reports the repository failure that ended a batch; when the lease was lost earlier in the batch, the refresh failure travels in the context so neither is dropped, while the repository failure stays the cause — it is the one the command's loop classifies, and a cancellation that explains it has to stay reachable through errors.Is. */
-func (instance *Relay) batchFailureOutcome(deliverErr error, refreshErr error) error {
+func (instance *Relay) batchFailureOutcome(runtimeInstance containercontract.Runtime, deliverErr error, refreshErr error) error {
     if nil == refreshErr {
         return deliverErr
     }
@@ -233,7 +234,7 @@ func (instance *Relay) batchFailureOutcome(deliverErr error, refreshErr error) e
     return exception.NewError(
         "outbox relay batch failed after its lease refresh had already failed",
         exceptioncontract.Context{
-            "lock":         instance.config.LockName,
+            "lock":         instance.lockName(runtimeInstance),
             "refreshError": refreshErr.Error(),
         },
         deliverErr,
@@ -659,6 +660,22 @@ func resolutionWriteOutcome(writeErr error, deliveryError string) error {
     )
 }
 
+/* lockName answers the declared name verbatim, else the default under the runtime's namespace; a runtime with no configuration reads the default namespace */
+func (instance *Relay) lockName(runtimeInstance containercontract.Runtime) string {
+    if "" != instance.config.LockName {
+        return instance.config.LockName
+    }
+
+    namespace := melodyconfig.DefaultNamespace
+    if configuration, configurationErr := melodyconfig.ConfigFromRuntime(runtimeInstance); nil == configurationErr && nil != configuration {
+        if kernelConfiguration := configuration.Kernel(); nil != kernelConfiguration && "" != kernelConfiguration.Namespace() {
+            namespace = kernelConfiguration.Namespace()
+        }
+    }
+
+    return namespace + defaultLockNameSuffix
+}
+
 func (instance *Relay) acquireLease(runtimeInstance containercontract.Runtime) (func(), func(containercontract.Runtime) error, bool, error) {
     noopRelease := func() {}
     noopRefresh := func(containercontract.Runtime) error { return nil }
@@ -667,7 +684,7 @@ func (instance *Relay) acquireLease(runtimeInstance containercontract.Runtime) (
         return noopRelease, noopRefresh, true, nil
     }
 
-    lock, createErr := melodylock.CreateLock(instance.config.Locker, instance.config.LockName, bound.Of(instance.config.LockTtl))
+    lock, createErr := melodylock.CreateLock(instance.config.Locker, instance.lockName(runtimeInstance), bound.Of(instance.config.LockTtl))
     if nil != createErr {
         return noopRelease, noopRefresh, false, createErr
     }
@@ -714,7 +731,7 @@ func (instance *Relay) releaseLease(runtimeInstance containercontract.Runtime, l
             releaseErr,
             exception.LogContextConfig{
                 Extra: exceptioncontract.Context{
-                    "lock": instance.config.LockName,
+                    "lock": instance.lockName(runtimeInstance),
                 },
             },
         ),

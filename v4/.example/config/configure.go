@@ -87,7 +87,7 @@ func Configure(ctx context.Context, app *melodyapplication.Application, applicat
     }
 
     if true == moduleInstance.redisConfigured() {
-        app.RegisterModuleProvider(newRedisInfrastructure(moduleInstance.redisProvider, moduleInstance.redisParameters, moduleInstance.serverSentEventHub))
+        app.RegisterModuleProvider(newRedisInfrastructure(moduleInstance.namespace(), moduleInstance.redisProvider, moduleInstance.redisParameters, moduleInstance.serverSentEventHub))
     }
 }
 

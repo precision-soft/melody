@@ -67,7 +67,7 @@ func (instance *Module) buildMessageBusTransport() melodymessagebuscontract.Tran
     registry := amqp.NewMessageRegistry()
     amqp.RegisterMessage[message.WelcomeEmail](registry, messageBusWelcomeType)
 
-    return amqp.NewTransport(messageBusQueue, registry, amqp.FromDialer(amqp.NewProvider(amqp.ProviderConfig{}).Dialer(dsn)), amqp.TransportConfig{
+    return amqp.NewTransport(messageBusQueue, registry, amqp.FromDialer(amqp.NewProvider(instance.namespace(), amqp.ProviderConfig{}).Dialer(dsn)), amqp.TransportConfig{
         Prefetch: melodybound.Of(10),
     })
 }

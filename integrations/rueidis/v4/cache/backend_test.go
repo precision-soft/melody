@@ -13,6 +13,7 @@ import (
     "testing"
     "time"
 
+    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
     "github.com/precision-soft/melody/v4/bound"
     melodycache "github.com/precision-soft/melody/v4/cache"
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
@@ -89,7 +90,7 @@ func (instance *closeTrackingClient) Close() {
 func TestBackendCloseDoesNotCloseCallerOwnedClient(t *testing.T) {
     client := &closeTrackingClient{}
 
-    backend, backendErr := NewBackend(client, BackendConfig{})
+    backend, backendErr := NewBackend(newTestConnection(client), BackendConfig{})
     if nil != backendErr {
         t.Fatalf("NewBackend returned an error: %v", backendErr)
     }
@@ -376,7 +377,7 @@ func TestClear_WalksEveryPageOfTheScan(t *testing.T) {
     _, client := liveBackend(t)
 
     prefix := "melody:test:paged:" + t.Name() + ":"
-    backend, backendErr := NewBackend(client, BackendConfig{Prefix: prefix, ScanCount: bound.Of(1), DeleteBatch: bound.Of(1)})
+    backend, backendErr := NewBackend(newTestConnection(client), BackendConfig{Prefix: prefix, ScanCount: bound.Of(1), DeleteBatch: bound.Of(1)})
     if nil != backendErr {
         t.Fatalf("NewBackend: %v", backendErr)
     }
@@ -568,19 +569,33 @@ func TestDeleteKeysInBatches_AnEmptyKeyListIsNotAFailure(t *testing.T) {
     }
 }
 
-func TestNewBackend_RefusesANilClient(t *testing.T) {
-    if _, err := NewBackend(nil, BackendConfig{}); nil == err {
-        t.Fatal("a nil client must be refused")
+func TestNewBackend_RefusesANilConnection(t *testing.T) {
+    if _, err := NewBackend(nil, BackendConfig{}); nil == err || "connection" != exception.LogContext(err, exception.LogContextConfig{})["argument"] {
+        t.Fatalf("expected a nil connection refused naming the argument, got %v", err)
+    }
+}
+
+func TestNewBackend_TheDefaultPrefixFollowsTheNamespaceAndAnExplicitOneIsVerbatim(t *testing.T) {
+    connection := melodyrueidis.NewConnection(&closeTrackingClient{}, "shop")
+
+    derived, derivedErr := NewBackend(connection, BackendConfig{})
+    if nil != derivedErr || "shop:cache:" != derived.prefix {
+        t.Fatalf("expected the namespace's prefix shop:cache:, got %v %v", derived, derivedErr)
+    }
+
+    explicit, explicitErr := NewBackend(connection, BackendConfig{Prefix: "legacy:cache:"})
+    if nil != explicitErr || "legacy:cache:" != explicit.prefix {
+        t.Fatalf("expected the explicit prefix verbatim, got %v %v", explicit, explicitErr)
     }
 }
 
 func TestNewBackend_AnAbsentConfigTakesTheDefaults(t *testing.T) {
-    backend, backendErr := NewBackend(&closeTrackingClient{}, BackendConfig{})
+    backend, backendErr := NewBackend(newTestConnection(&closeTrackingClient{}), BackendConfig{})
     if nil != backendErr {
         t.Fatalf("NewBackend returned an error: %v", backendErr)
     }
 
-    if defaultBackendPrefix != backend.prefix || 1000 != backend.scanCount || 500 != backend.deleteBatch || 1024 != backend.maxKeyLength || time.Second != backend.callTimeout {
+    if "melody:cache:" != backend.prefix || 1000 != backend.scanCount || 500 != backend.deleteBatch || 1024 != backend.maxKeyLength || time.Second != backend.callTimeout {
         t.Fatalf("expected the default prefix, 1000, 500, 1024 and 1s, got %q, %d, %d, %d, %v", backend.prefix, backend.scanCount, backend.deleteBatch, backend.maxKeyLength, backend.callTimeout)
     }
 }
@@ -602,7 +617,7 @@ func TestNewBackend_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T) {
 
     for name, testCase := range cases {
         t.Run(name, func(t *testing.T) {
-            _, backendErr := NewBackend(&closeTrackingClient{}, testCase.config)
+            _, backendErr := NewBackend(newTestConnection(&closeTrackingClient{}), testCase.config)
             if nil == backendErr {
                 t.Fatalf("expected a refusal naming %s, got none", testCase.field)
             }
@@ -760,7 +775,7 @@ func TestClose_RefusesLaterOperationsAndLeavesTheSharedClientOpen(t *testing.T) 
         t.Fatalf("expected the in-memory backend's refusal, got %v", setErr)
     }
 
-    sibling, siblingErr := NewBackend(client, BackendConfig{Prefix: "melody:test:" + t.Name() + ":sibling:"})
+    sibling, siblingErr := NewBackend(newTestConnection(client), BackendConfig{Prefix: "melody:test:" + t.Name() + ":sibling:"})
     if nil != siblingErr {
         t.Fatalf("sibling backend: %v", siblingErr)
     }
@@ -841,7 +856,7 @@ func TestIncrement_WrapsTheStoreRefusalWithTheKey(t *testing.T) {
 func TestCallTimeout_BoundsTheContractCalls(t *testing.T) {
     _, client := liveBackend(t)
 
-    bounded, boundedErr := NewBackend(client, BackendConfig{Prefix: "melody:test:" + t.Name() + ":"})
+    bounded, boundedErr := NewBackend(newTestConnection(client), BackendConfig{Prefix: "melody:test:" + t.Name() + ":"})
     if nil != boundedErr {
         t.Fatalf("backend: %v", boundedErr)
     }
@@ -1004,7 +1019,7 @@ func TestBackend_CounterRefusalsAreMatchedInsideTheServersOwnWrapping(t *testing
 func TestNewBackend_DefaultMaxKeyLength(t *testing.T) {
     client := &closeTrackingClient{}
 
-    backend, backendErr := NewBackend(client, BackendConfig{})
+    backend, backendErr := NewBackend(newTestConnection(client), BackendConfig{})
     if nil != backendErr {
         t.Fatalf("NewBackend returned an error: %v", backendErr)
     }
@@ -1017,7 +1032,7 @@ func TestNewBackend_DefaultMaxKeyLength(t *testing.T) {
 func TestNewBackend_MaxKeyLengthOverrideRejectsLongKey(t *testing.T) {
     client := &closeTrackingClient{}
 
-    backend, backendErr := NewBackend(client, BackendConfig{MaxKeyLength: bound.Of(8)})
+    backend, backendErr := NewBackend(newTestConnection(client), BackendConfig{MaxKeyLength: bound.Of(8)})
     if nil != backendErr {
         t.Fatalf("NewBackend returned an error: %v", backendErr)
     }
@@ -1124,7 +1139,7 @@ func newDelayedNamespaceBackend(t *testing.T, delay time.Duration, callTimeout t
 
     prefix := "melody:test:wide:" + t.Name() + ":"
 
-    filler, fillerErr := NewBackend(client, BackendConfig{Prefix: prefix})
+    filler, fillerErr := NewBackend(newTestConnection(client), BackendConfig{Prefix: prefix})
     if nil != fillerErr {
         t.Fatalf("NewBackend: %v", fillerErr)
     }
@@ -1147,7 +1162,7 @@ func newDelayedNamespaceBackend(t *testing.T, delay time.Duration, callTimeout t
         }
     })
 
-    backend, backendErr := NewBackend(&delayedClient{Client: client, delay: delay}, BackendConfig{
+    backend, backendErr := NewBackend(newTestConnection(&delayedClient{Client: client, delay: delay}), BackendConfig{
         Prefix:         prefix,
         ScanCount:      bound.Of(1),
         DeleteBatch:    bound.Of(1),
@@ -1278,7 +1293,7 @@ func backendContextOperations(backend *Backend) map[string]func(runtimeInstance 
 }
 
 func TestBackend_EveryDoorRefusesAnAbsentRuntimeFirst(t *testing.T) {
-    backend, backendErr := NewBackend(&closeTrackingClient{}, BackendConfig{})
+    backend, backendErr := NewBackend(newTestConnection(&closeTrackingClient{}), BackendConfig{})
     if nil != backendErr {
         t.Fatalf("NewBackend: %v", backendErr)
     }
@@ -1336,7 +1351,7 @@ func TestBackend_ADoneContextIsAnsweredAfterTheArgumentsAndTouchesNothing(t *tes
 func TestBackend_ARoundTripCutByTheCallTimeoutNamesTheField(t *testing.T) {
     _, client := liveBackend(t)
 
-    backend, backendErr := NewBackend(&delayedClient{Client: client, delay: time.Hour}, BackendConfig{
+    backend, backendErr := NewBackend(newTestConnection(&delayedClient{Client: client, delay: time.Hour}), BackendConfig{
         Prefix:         "melody:test:" + t.Name() + ":",
         CallTimeout:    bound.Of(50 * time.Millisecond),
     })
@@ -1395,7 +1410,7 @@ func TestClear_ADeleteRoundTripCutByTheCallTimeoutNamesTheField(t *testing.T) {
     for _, operation := range []string{"Clear", "ClearByPrefix"} {
         prefix := "melody:test:" + t.Name() + ":" + operation + ":"
 
-        filler, fillerErr := NewBackend(client, BackendConfig{Prefix: prefix})
+        filler, fillerErr := NewBackend(newTestConnection(client), BackendConfig{Prefix: prefix})
         if nil != fillerErr {
             t.Fatalf("NewBackend: %v", fillerErr)
         }
@@ -1404,7 +1419,7 @@ func TestClear_ADeleteRoundTripCutByTheCallTimeoutNamesTheField(t *testing.T) {
         }
         t.Cleanup(func() { _ = filler.Clear(testRuntime()) })
 
-        backend, backendErr := NewBackend(&deleteDelayedClient{Client: client}, BackendConfig{Prefix: prefix, CallTimeout: bound.Of(50 * time.Millisecond)})
+        backend, backendErr := NewBackend(newTestConnection(&deleteDelayedClient{Client: client}), BackendConfig{Prefix: prefix, CallTimeout: bound.Of(50 * time.Millisecond)})
         if nil != backendErr {
             t.Fatalf("NewBackend: %v", backendErr)
         }
@@ -1427,7 +1442,7 @@ func runWedgedOperations(t *testing.T, callTimeout time.Duration, callerContext 
 
     _, client := liveBackend(t)
 
-    backend, backendErr := NewBackend(&delayedClient{Client: client, delay: time.Hour}, BackendConfig{
+    backend, backendErr := NewBackend(newTestConnection(&delayedClient{Client: client, delay: time.Hour}), BackendConfig{
         Prefix:         "melody:test:" + t.Name() + ":",
         CallTimeout:    bound.Of(callTimeout),
     })
@@ -1584,7 +1599,7 @@ func TestErrCallTimeout_UnwrapsToTheDeadlineAndIsATimeout(t *testing.T) {
 }
 
 func TestBackend_AnEmptyBatchUnderADoneContextAnswersItsError(t *testing.T) {
-    backend, backendErr := NewBackend(&closeTrackingClient{}, BackendConfig{})
+    backend, backendErr := NewBackend(newTestConnection(&closeTrackingClient{}), BackendConfig{})
     if nil != backendErr {
         t.Fatalf("NewBackend: %v", backendErr)
     }
@@ -1637,7 +1652,7 @@ func TestBackend_ADoneContextSendsNoCommandToTheClient(t *testing.T) {
     _, client := liveBackend(t)
 
     countingClient := &commandCountingClient{Client: client, commands: &atomic.Int64{}}
-    backend, backendErr := NewBackend(countingClient, BackendConfig{Prefix: "melody:test:" + t.Name() + ":"})
+    backend, backendErr := NewBackend(newTestConnection(countingClient), BackendConfig{Prefix: "melody:test:" + t.Name() + ":"})
     if nil != backendErr {
         t.Fatalf("NewBackend: %v", backendErr)
     }
@@ -1657,7 +1672,7 @@ func TestBackend_ADoneContextSendsNoCommandToTheClient(t *testing.T) {
 }
 
 func TestBackend_UnderADoneContextTheTtlAndTheDeltaAreJudgedFirst(t *testing.T) {
-    backend, backendErr := NewBackend(&closeTrackingClient{}, BackendConfig{})
+    backend, backendErr := NewBackend(newTestConnection(&closeTrackingClient{}), BackendConfig{})
     if nil != backendErr {
         t.Fatalf("NewBackend: %v", backendErr)
     }
@@ -1832,7 +1847,7 @@ func TestBackend_ACounterRefusesAnAbsentTtlBeforeACancelledContext(t *testing.T)
 func TestFailedAttemptStore_TwoInstancesOverOneRedisShareOneCount(t *testing.T) {
     backend, client := liveBackend(t)
 
-    sibling, siblingErr := NewBackend(client, BackendConfig{Prefix: "melody:test:" + t.Name() + ":"})
+    sibling, siblingErr := NewBackend(newTestConnection(client), BackendConfig{Prefix: "melody:test:" + t.Name() + ":"})
     if nil != siblingErr {
         t.Fatalf("could not build the sibling backend: %v", siblingErr)
     }

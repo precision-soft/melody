@@ -33,6 +33,9 @@ type ConfigurationConfig struct {
 
     /* HttpPublicUrl is the application's public base, ApplicationConfig.HttpPublicUrl: HttpConfiguration.PublicUrl answers it when MELODY_HTTP_PUBLIC_URL is unset, judged as the key is and refused naming the field. */
     HttpPublicUrl string
+
+    /* Namespace is the application's namespace, ApplicationConfig.Namespace: KernelConfiguration.Namespace answers it when MELODY_NAMESPACE is unset and DefaultNamespace when both are empty, judged by ValidateNamespace and refused naming the field. */
+    Namespace string
 }
 
 func NewConfiguration(
@@ -51,6 +54,7 @@ func NewConfiguration(
         parameters:    make(ParameterMap),
         logger:        logger,
         httpPublicUrl: configurationConfig.HttpPublicUrl,
+        namespace:     configurationConfig.Namespace,
     }
 
     applyDefaultsErr := configuration.applyDefaults(projectDirectory)
@@ -115,6 +119,9 @@ type Configuration struct {
 
     /* the application's public base, read when the key is unset */
     httpPublicUrl string
+
+    /* the application's namespace, read when the key is unset */
+    namespace string
 
     resolved bool
 
@@ -649,11 +656,54 @@ func (instance *Configuration) buildKernelConfiguration() error {
 
     kernelConfigurationInstance.containerTeardownSequential = containerTeardownSequential
 
+    namespace, namespaceErr := instance.resolveNamespace()
+    if nil != namespaceErr {
+        return namespaceErr
+    }
+
+    kernelConfigurationInstance.namespace = namespace
+
     instance.kernel = kernelConfigurationInstance
 
     instance.logger.Info("configuration kernel initialized", nil)
 
     return nil
+}
+
+/* resolveNamespace answers the key when the deployment set it, the application's field otherwise and DefaultNamespace when both are empty; the field is judged even under a key, so a malformed one never waits for the key to go */
+func (instance *Configuration) resolveNamespace() (string, error) {
+    if "" != instance.namespace {
+        if refusal := namespaceRefusal(instance.namespace, "field", "ApplicationConfig.Namespace"); nil != refusal {
+            return "", refusal
+        }
+    }
+
+    namespace := instance.MustGet(KernelNamespace).MustString()
+    if "" == namespace {
+        if "" == instance.namespace {
+            return DefaultNamespace, nil
+        }
+
+        return instance.namespace, nil
+    }
+
+    if refusal := namespaceRefusal(namespace, "key", NamespaceKey); nil != refusal {
+        return "", refusal
+    }
+
+    return namespace, nil
+}
+
+func namespaceRefusal(namespace string, sourceName string, source string) error {
+    validateErr := ValidateNamespace(namespace)
+    if nil == validateErr {
+        return nil
+    }
+
+    refusal := exception.FromError(validateErr)
+    refusal.SetContextValue(sourceName, source)
+
+    return refusal
 }
 
 func (instance *Configuration) buildHttpConfiguration() error {

@@ -318,9 +318,6 @@ func (instance *Module) registerMetricsFirewall(builder *melodysecurityconfig.Bu
     )
 }
 
-/* internalNonceGuardPrefix names the nonces this application's internal firewall remembers, so two applications on one redis never refuse each other's envelopes as replays */
-const internalNonceGuardPrefix = "melody-example-v4:nonce"
-
 /* internalNonceGuard is the replay guard of the internal firewall: on redis every replica remembers the nonces every other one accepted, so an envelope accepted by one is refused by all; without redis the source keeps its in-process guard, which a single process is. The envelope horizon bounds how long a nonce is remembered. */
 func (instance *Module) internalNonceGuard() melodysecuritycontract.NonceGuard {
     if false == instance.redisConfigured() {
