@@ -1,19 +1,24 @@
 package rueidis
 
 import (
+    "context"
     "crypto/tls"
     "errors"
+    "net"
     nethttp "net/http"
     "net/http/httptest"
     "os"
     "strings"
+    "sync/atomic"
     "testing"
     "time"
+    "unicode/utf8"
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    redisclient "github.com/redis/rueidis"
 )
 
 func TestNewProvider_TheZeroConfigResolvesTheDefaults(t *testing.T) {
@@ -23,8 +28,8 @@ func TestNewProvider_TheZeroConfigResolvesTheDefaults(t *testing.T) {
         t.Fatalf("expected an absent retry to be the default retry of three attempts, got %d", provider.retry.maxAttempts)
     }
 
-    if 3*time.Second != provider.timeout.connectTimeout || 3*time.Second != provider.timeout.commandTimeout {
-        t.Fatalf("expected the default ping deadlines, got %+v", provider.timeout)
+    if 3*time.Second != provider.client.bootPingTimeout {
+        t.Fatalf("expected the default boot ping deadline, got %s", provider.client.bootPingTimeout)
     }
 
     if 5*time.Second != provider.client.dialTimeout || true == provider.client.bootPingDisabled || true == provider.client.clientSideCacheEnabled {
@@ -38,7 +43,7 @@ func TestNewProvider_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T) {
         config ProviderConfig
     }{
         {field: "ClientConfig.DialTimeout", config: ProviderConfig{Client: ClientConfig{DialTimeout: bound.UnlimitedDuration()}}},
-        {field: "TimeoutConfig.ConnectTimeout", config: ProviderConfig{Timeout: TimeoutConfig{ConnectTimeout: bound.UnlimitedDuration()}}},
+        {field: "ClientConfig.BootPingTimeout", config: ProviderConfig{Client: ClientConfig{BootPingTimeout: bound.UnlimitedDuration()}}},
         {field: "RetryConfig.MaxAttempts", config: ProviderConfig{Retry: RetryConfig{MaxAttempts: bound.Of(0)}}},
     } {
         expectPanicNamingField(t, testCase.field, func() {
@@ -83,11 +88,11 @@ func TestProvider_Open_EmptyAddressFails(t *testing.T) {
         t.Run(testCase.name, func(t *testing.T) {
             provider := NewProvider(ProviderConfig{})
 
-            client, openErr := provider.Open(ConnectionParameters{Address: testCase.address})
+            client, openErr := provider.Open(openRuntime(t), ConnectionParameters{Address: testCase.address})
 
             if nil == openErr {
                 if nil != client {
-                    client.Close()
+                    client.CloseWithContext(t.Context())
                 }
 
                 t.Fatalf("expected an error for an empty redis address, got nil")
@@ -106,16 +111,15 @@ func TestProvider_Open_EmptyAddressFails(t *testing.T) {
 
 func TestProvider_Open_UnreachableAddressFailsWithoutLeakingPassword(t *testing.T) {
     provider := NewProvider(ProviderConfig{
-        Client:  ClientConfig{DialTimeout: bound.Of(250 * time.Millisecond), ConnectionWriteTimeout: bound.Of(250 * time.Millisecond)},
-        Timeout: TimeoutConfig{ConnectTimeout: bound.Of(500 * time.Millisecond), CommandTimeout: bound.Of(500 * time.Millisecond)},
+        Client: ClientConfig{DialTimeout: bound.Of(250 * time.Millisecond), ConnectionWriteTimeout: bound.Of(250 * time.Millisecond), BootPingTimeout: bound.Of(500 * time.Millisecond)},
         Retry:   RetryConfig{MaxAttempts: bound.Of(1)},
     })
 
-    client, openErr := provider.Open(ConnectionParameters{Address: "127.0.0.1:1", User: "app-user", Password: "s3cret-value"})
+    client, openErr := provider.Open(openRuntime(t), ConnectionParameters{Address: "127.0.0.1:1", User: "app-user", Password: "s3cret-value"})
 
     if nil == openErr {
         if nil != client {
-            client.Close()
+            client.CloseWithContext(t.Context())
         }
 
         t.Fatalf("expected an error for an unreachable redis address, got nil")
@@ -130,52 +134,35 @@ func TestProvider_Open_UnreachableAddressFailsWithoutLeakingPassword(t *testing.
     }
 }
 
-func TestProvider_Close_NilClientReturnsNil(t *testing.T) {
+func TestProvider_Ping_ANilConnectionReturnsError(t *testing.T) {
     provider := NewProvider(ProviderConfig{})
 
-    closeErr := provider.Close(nil)
-    if nil != closeErr {
-        t.Fatalf("Close(nil) must be a no-op, got: %v", closeErr)
+    for _, connection := range []*Connection{nil, NewConnection(nil)} {
+        pingErr := provider.Ping(openRuntime(t), connection)
+        if nil == pingErr || false == strings.Contains(pingErr.Error(), "redis connection is nil") {
+            t.Fatalf("expected the nil-connection error, got: %v", pingErr)
+        }
     }
 }
 
-func TestProvider_Ping_NilClientReturnsError(t *testing.T) {
-    provider := NewProvider(ProviderConfig{})
-
-    pingErr := provider.Ping(nil)
-    if nil == pingErr {
-        t.Fatalf("Ping(nil) must return an error")
-    }
-
-    if false == strings.Contains(pingErr.Error(), "redis client is nil") {
-        t.Fatalf("expected the nil-client error, got: %v", pingErr)
-    }
-}
-
-func TestProvider_Open_AnAbsentConnectTimeoutPingsUnderTheDefaultBound(t *testing.T) {
+func TestProvider_Open_AnAbsentBootPingTimeoutPingsUnderTheDefaultBound(t *testing.T) {
     address := os.Getenv("REDIS_ADDRESS")
     if "" == address {
         t.Skip("REDIS_ADDRESS not set; skipping redis provider integration test")
     }
 
-    provider := NewProvider(ProviderConfig{Timeout: TimeoutConfig{CommandTimeout: bound.Of(3 * time.Second)}})
+    provider := NewProvider(ProviderConfig{})
 
-    if 3*time.Second != provider.timeout.connectTimeout {
-        t.Fatalf("an absent connect timeout must take the default bound, got %s", provider.timeout.connectTimeout)
-    }
-
-    client, openErr := provider.Open(ConnectionParameters{Address: address})
+    connection, openErr := provider.Open(openRuntime(t), ConnectionParameters{Address: address})
     if nil != openErr {
-        t.Fatalf("open with an absent connect timeout against healthy redis: %v", openErr)
+        t.Fatalf("open with an absent boot ping timeout against healthy redis: %v", openErr)
     }
 
-    pingErr := provider.Ping(client)
-    if nil != pingErr {
+    if pingErr := provider.Ping(openRuntime(t), connection); nil != pingErr {
         t.Fatalf("ping: %v", pingErr)
     }
 
-    closeErr := provider.Close(client)
-    if nil != closeErr {
+    if closeErr := connection.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 }
@@ -184,7 +171,7 @@ func TestProvider_Open_AnAbsentConnectTimeoutPingsUnderTheDefaultBound(t *testin
 func TestProviderOpen_TheRefusalNamesTheDeadlinesAndNotTheCredential(t *testing.T) {
     provider := NewProvider(ProviderConfig{})
 
-    _, openErr := provider.Open(ConnectionParameters{User: "melody", Password: "secret"})
+    _, openErr := provider.Open(openRuntime(t), ConnectionParameters{User: "melody", Password: "secret"})
     if nil == openErr {
         t.Fatal("expected an empty address to be refused")
     }
@@ -196,7 +183,7 @@ func TestProviderOpen_TheRefusalNamesTheDeadlinesAndNotTheCredential(t *testing.
 
     errorContext := melodyErr.Context()
 
-    if _, exists := errorContext["connectTimeout"]; false == exists {
+    if _, exists := errorContext["bootPingTimeout"]; false == exists {
         t.Fatalf("expected the deadline that governs the attempt, got %v", errorContext)
     }
 
@@ -218,16 +205,15 @@ func TestProviderOpen_TheRefusalNamesTheDeadlinesAndNotTheCredential(t *testing.
 func TestProvider_TheConnectionContextCarriesTheGoverningDeadlines(t *testing.T) {
     connectionContext := NewProvider(ProviderConfig{}).connectionContext(ConnectionParameters{Address: "127.0.0.1:6379"})
 
-    if "5s" != connectionContext["dialTimeout"] || "3s" != connectionContext["connectTimeout"] {
+    if "5s" != connectionContext["dialTimeout"] || "3s" != connectionContext["bootPingTimeout"] {
         t.Fatalf("expected 5s / 3s, got %v", connectionContext)
     }
 
     configured := NewProvider(ProviderConfig{
-        Client:  ClientConfig{DialTimeout: bound.Of(2 * time.Second)},
-        Timeout: TimeoutConfig{ConnectTimeout: bound.Of(7 * time.Second)},
+        Client: ClientConfig{DialTimeout: bound.Of(2 * time.Second), BootPingTimeout: bound.Of(7 * time.Second)},
     }).connectionContext(ConnectionParameters{Address: "127.0.0.1:6379"})
 
-    if "2s" != configured["dialTimeout"] || "7s" != configured["connectTimeout"] {
+    if "2s" != configured["dialTimeout"] || "7s" != configured["bootPingTimeout"] {
         t.Fatalf("expected 2s / 7s, got %v", configured)
     }
 
@@ -241,17 +227,16 @@ func TestProvider_OpenWithRetry_ReportsEachRetryAndTheExhaustionOnTheLoggerItIsH
     logger := &capturingLogger{}
 
     provider := NewProvider(ProviderConfig{
-        Client:  ClientConfig{DialTimeout: bound.Of(250 * time.Millisecond), ConnectionWriteTimeout: bound.Of(250 * time.Millisecond)},
-        Timeout: TimeoutConfig{ConnectTimeout: bound.Of(500 * time.Millisecond), CommandTimeout: bound.Of(500 * time.Millisecond)},
+        Client: ClientConfig{DialTimeout: bound.Of(250 * time.Millisecond), ConnectionWriteTimeout: bound.Of(250 * time.Millisecond), BootPingTimeout: bound.Of(500 * time.Millisecond)},
         Retry:   RetryConfig{MaxAttempts: bound.Of(2), Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond), Max: bound.Of(time.Millisecond), Factor: 1}},
         Logger:  logger,
     })
 
-    client, openErr := provider.Open(ConnectionParameters{Address: "127.0.0.1:1", User: "app-user", Password: "s3cret-value"})
+    client, openErr := provider.Open(openRuntime(t), ConnectionParameters{Address: "127.0.0.1:1", User: "app-user", Password: "s3cret-value"})
 
     if nil == openErr {
         if nil != client {
-            client.Close()
+            client.CloseWithContext(t.Context())
         }
 
         t.Fatalf("expected an error for an unreachable redis address, got nil")
@@ -303,9 +288,9 @@ func TestProvider_AnAbsentRetryDialsThreeTimesAndASingleAttemptOnce(t *testing.T
                 Logger: logger,
             })
 
-            client, openErr := provider.Open(ConnectionParameters{Address: "127.0.0.1:1"})
+            client, openErr := provider.Open(openRuntime(t), ConnectionParameters{Address: "127.0.0.1:1"})
             if nil == openErr {
-                client.Close()
+                client.CloseWithContext(t.Context())
                 t.Fatal("expected an unreachable address to be refused")
             }
 
@@ -325,14 +310,14 @@ func TestProvider_Open_TheZeroClientPingsOnStartAndBootPingDisabledSkipsIt(t *te
     address := pingSwallowingProxy(t)
 
     pinging := NewProvider(ProviderConfig{
-        Timeout: TimeoutConfig{ConnectTimeout: bound.Of(200 * time.Millisecond)},
+        Client:  ClientConfig{BootPingTimeout: bound.Of(200 * time.Millisecond)},
         Retry:   RetryConfig{MaxAttempts: bound.Of(1)},
         Logger:  &capturingLogger{},
     })
 
-    client, openErr := pinging.Open(ConnectionParameters{Address: address})
+    client, openErr := pinging.Open(openRuntime(t), ConnectionParameters{Address: address})
     if nil == openErr {
-        client.Close()
+        client.CloseWithContext(t.Context())
         t.Fatal("expected the zero client's boot ping to fail against a store that never answers it")
     }
 
@@ -341,44 +326,16 @@ func TestProvider_Open_TheZeroClientPingsOnStartAndBootPingDisabledSkipsIt(t *te
     }
 
     silent := NewProvider(ProviderConfig{
-        Client:  ClientConfig{BootPingDisabled: true},
-        Timeout: TimeoutConfig{ConnectTimeout: bound.Of(200 * time.Millisecond)},
+        Client:  ClientConfig{BootPingDisabled: true, BootPingTimeout: bound.Of(200 * time.Millisecond)},
         Retry:   RetryConfig{MaxAttempts: bound.Of(1)},
     })
 
-    client, openErr = silent.Open(ConnectionParameters{Address: address})
+    client, openErr = silent.Open(openRuntime(t), ConnectionParameters{Address: address})
     if nil != openErr {
         t.Fatalf("expected BootPingDisabled to open without pinging, got %v", openErr)
     }
 
-    client.Close()
-}
-
-func TestProvider_Ping_IsBoundedByTheCommandTimeout(t *testing.T) {
-    address := pingSwallowingProxy(t)
-
-    provider := NewProvider(ProviderConfig{
-        Client:  ClientConfig{BootPingDisabled: true},
-        Timeout: TimeoutConfig{ConnectTimeout: bound.Of(5 * time.Second), CommandTimeout: bound.Of(100 * time.Millisecond)},
-        Retry:   RetryConfig{MaxAttempts: bound.Of(1)},
-    })
-
-    client, openErr := provider.Open(ConnectionParameters{Address: address})
-    if nil != openErr {
-        t.Fatalf("open: %v", openErr)
-    }
-
-    defer client.Close()
-
-    started := time.Now()
-    pingErr := provider.Ping(client)
-    if nil == pingErr {
-        t.Fatal("expected a ping the store never answers to fail")
-    }
-
-    if elapsed := time.Since(started); 2*time.Second < elapsed {
-        t.Fatalf("expected the 100ms command timeout to end the ping, it took %s", elapsed)
-    }
+    client.CloseWithContext(t.Context())
 }
 
 func TestProvider_OpenReturnsOnACyclicChainFromATlsVerifier(t *testing.T) {
@@ -404,7 +361,7 @@ func TestProvider_OpenReturnsOnACyclicChainFromATlsVerifier(t *testing.T) {
     go func() {
         defer close(done)
 
-        if _, openErr := provider.Open(ConnectionParameters{Address: server.Listener.Addr().String()}); nil == openErr {
+        if _, openErr := provider.Open(openRuntime(t), ConnectionParameters{Address: server.Listener.Addr().String()}); nil == openErr {
             t.Error("expected the verifier's refusal")
         }
     }()
@@ -417,5 +374,241 @@ func TestProvider_OpenReturnsOnACyclicChainFromATlsVerifier(t *testing.T) {
 
     if true == provider.isTransientError(first) {
         t.Fatal("expected a chain with no transient text not to read as transient")
+    }
+}
+
+/* countingListener accepts every connection and counts it, so a pin can tell whether a door dialled at all */
+func countingListener(t *testing.T) (string, *atomic.Int64) {
+    t.Helper()
+
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("listen: %v", listenErr)
+    }
+
+    t.Cleanup(func() {
+        listener.Close()
+    })
+
+    accepted := &atomic.Int64{}
+
+    go func() {
+        for {
+            connection, acceptErr := listener.Accept()
+            if nil != acceptErr {
+                return
+            }
+
+            accepted.Add(1)
+            connection.Close()
+        }
+    }()
+
+    return listener.Addr().String(), accepted
+}
+
+type doneContextCause struct{}
+
+func (doneContextCause) Error() string {
+    return "the caller gave up"
+}
+
+func TestProviderOpen_ADoneContextRefusesBeforeTheClientIsBuilt(t *testing.T) {
+    address, accepted := countingListener(t)
+
+    openContext, cancel := context.WithCancelCause(t.Context())
+    cancel(doneContextCause{})
+
+    provider := NewProvider(ProviderConfig{Retry: RetryConfig{MaxAttempts: bound.Of(1)}, Logger: &capturingLogger{}})
+
+    connection, openErr := provider.Open(runtimeOver(openContext), ConnectionParameters{Address: address})
+    if nil != connection || nil == openErr {
+        t.Fatalf("expected a done context refused, got %v, %v", connection, openErr)
+    }
+
+    if false == strings.Contains(openErr.Error(), "the caller's context is done") || false == errors.Is(openErr, doneContextCause{}) {
+        t.Fatalf("expected the refusal to carry the context's cause, got %v", openErr)
+    }
+
+    time.Sleep(100 * time.Millisecond)
+
+    if 0 != accepted.Load() {
+        t.Fatalf("expected the address never dialled, it was dialled %d time(s)", accepted.Load())
+    }
+}
+
+func TestProviderOpen_TheRetryWaitEndsWithTheContext(t *testing.T) {
+    logger := &capturingLogger{}
+
+    provider := NewProvider(ProviderConfig{
+        Client: ClientConfig{DialTimeout: bound.Of(250 * time.Millisecond)},
+        Retry:  RetryConfig{MaxAttempts: bound.Of(10), Backoff: bound.Backoff{Initial: bound.Of(time.Second), Max: bound.Of(5 * time.Second)}},
+        Logger: logger,
+    })
+
+    openContext, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+    defer cancel()
+
+    started := time.Now()
+    connection, openErr := provider.Open(runtimeOver(openContext), ConnectionParameters{Address: "127.0.0.1:1"})
+    elapsed := time.Since(started)
+
+    if nil != connection || nil == openErr {
+        t.Fatalf("expected the open refused, got %v, %v", connection, openErr)
+    }
+
+    if 900*time.Millisecond < elapsed {
+        t.Fatalf("expected the wait to end with the context, it took %s", elapsed)
+    }
+
+    if false == strings.Contains(openErr.Error(), "redis connection retry ended by the caller's context") || false == errors.Is(openErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the wait's refusal with the context's cause, got %v", openErr)
+    }
+
+    errorContext := exceptionContextOf(openErr)
+    if 1 != errorContext["attempt"] || 10 != errorContext["maxAttempts"] {
+        t.Fatalf("expected attempt 1 of 10, got %v", errorContext)
+    }
+
+    if lastError, isString := errorContext["lastError"].(string); false == isString || "" == lastError {
+        t.Fatalf("expected the last dial error, got %v", errorContext)
+    }
+}
+
+func TestProviderOpen_TheLastErrorIsBounded(t *testing.T) {
+    long := strings.Repeat("é", 400)
+
+    bounded := boundLastError(long)
+    if 600 < len(bounded) || false == strings.Contains(bounded, "...(truncated ") || false == utf8.ValidString(bounded) {
+        t.Fatalf("expected a bounded, valid text, got %d bytes", len(bounded))
+    }
+
+    if "short" != boundLastError("short") {
+        t.Fatalf("expected a short text kept whole")
+    }
+}
+
+func TestProviderOpen_TheBootPingIsBoundedWithinTheCallersContext(t *testing.T) {
+    address := pingSwallowingProxy(t)
+
+    t.Run("the caller's earlier deadline ends it", func(t *testing.T) {
+        provider := NewProvider(ProviderConfig{
+            Client: ClientConfig{BootPingTimeout: bound.Of(5 * time.Second)},
+            Retry:  RetryConfig{MaxAttempts: bound.Of(1)},
+            Logger: &capturingLogger{},
+        })
+
+        openContext, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+        defer cancel()
+
+        openErr := awaitOutcome(t, boundProbeBudget, func() error {
+            _, err := provider.Open(runtimeOver(openContext), ConnectionParameters{Address: address})
+
+            return err
+        })
+        requireDeadlineExceeded(t, openErr)
+    })
+
+    t.Run("the boot ping timeout governs inside a longer context", func(t *testing.T) {
+        provider := NewProvider(ProviderConfig{
+            Client: ClientConfig{BootPingTimeout: bound.Of(200 * time.Millisecond)},
+            Retry:  RetryConfig{MaxAttempts: bound.Of(1)},
+            Logger: &capturingLogger{},
+        })
+
+        openErr := awaitOutcome(t, boundProbeBudget, func() error {
+            _, err := provider.Open(openRuntime(t), ConnectionParameters{Address: address})
+
+            return err
+        })
+        requireDeadlineExceeded(t, openErr)
+    })
+}
+
+func TestProviderOpen_AnswersTheOwnerThatClosesItsClientOnce(t *testing.T) {
+    address := os.Getenv("REDIS_ADDRESS")
+    if "" == address {
+        t.Skip("REDIS_ADDRESS not set; skipping redis provider integration test")
+    }
+
+    connection, openErr := NewProvider(ProviderConfig{}).Open(openRuntime(t), ConnectionParameters{Address: address})
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+
+    client := connection.Client()
+    if nil == client {
+        t.Fatal("expected the owner to hold the client it opened")
+    }
+
+    if doErr := client.Do(t.Context(), client.B().Ping().Build()).Error(); nil != doErr {
+        t.Fatalf("expected the opened client to answer, got %v", doErr)
+    }
+
+    for range 2 {
+        if closeErr := connection.CloseWithContext(t.Context()); nil != closeErr {
+            t.Fatalf("close: %v", closeErr)
+        }
+    }
+
+    if doErr := client.Do(t.Context(), client.B().Ping().Build()).Error(); false == errors.Is(doErr, redisclient.ErrClosing) {
+        t.Fatalf("expected the owner's close to close the client it opened, got %v", doErr)
+    }
+}
+
+/* contextRecordingClient answers every command through the real client and records the context each command is handed */
+type contextRecordingClient struct {
+    redisclient.Client
+    seen context.Context
+}
+
+func (instance *contextRecordingClient) Do(ctx context.Context, command redisclient.Completed) redisclient.RedisResult {
+    instance.seen = ctx
+
+    return instance.Client.Do(ctx, command)
+}
+
+func TestProviderPing_RunsUnderTheCallersContextAlone(t *testing.T) {
+    address := os.Getenv("REDIS_ADDRESS")
+    if "" == address {
+        t.Skip("REDIS_ADDRESS not set; skipping redis provider integration test")
+    }
+
+    provider := NewProvider(ProviderConfig{})
+
+    opened, openErr := provider.Open(openRuntime(t), ConnectionParameters{Address: address})
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+
+    defer opened.CloseWithContext(context.Background())
+
+    recording := &contextRecordingClient{Client: opened.Client()}
+    pingContext := context.WithValue(t.Context(), doneContextCause{}, "the caller's")
+
+    if pingErr := provider.Ping(runtimeOver(pingContext), NewConnection(recording)); nil != pingErr {
+        t.Fatalf("ping: %v", pingErr)
+    }
+
+    if pingContext != recording.seen {
+        t.Fatalf("expected the round trip to run under the caller's context as it is")
+    }
+
+    if _, hasDeadline := recording.seen.Deadline(); true == hasDeadline {
+        t.Fatalf("expected no private deadline on the ping")
+    }
+}
+
+func TestProviderOpen_ANilRuntimeIsRefusedNamingTheDoor(t *testing.T) {
+    provider := NewProvider(ProviderConfig{})
+
+    _, openErr := provider.Open(nil, ConnectionParameters{Address: "127.0.0.1:1"})
+    if nil == openErr || "rueidis.Provider.Open" != exceptionContextOf(openErr)["door"] {
+        t.Fatalf("expected the open door named, got %v", openErr)
+    }
+
+    pingErr := provider.Ping(nil, NewConnection(&stubClient{}))
+    if nil == pingErr || "rueidis.Provider.Ping" != exceptionContextOf(pingErr)["door"] {
+        t.Fatalf("expected the ping door named, got %v", pingErr)
     }
 }

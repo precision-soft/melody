@@ -33,50 +33,33 @@ func (instance *recordingRegistrar) has(serviceName string) bool {
     return false
 }
 
-func TestRegisterClientServiceUsesClientName(t *testing.T) {
+func TestRegisterServices_UseTheConnectionLockerAndTokenStoreNames(t *testing.T) {
     registrar := &recordingRegistrar{}
 
-    RegisterClientService(registrar, nil)
+    registerConnectionService(registrar, connectionOver(fakeClient{}), containercontract.RegisterOptions{})
+    registerLockerService(registrar, LockerConfig{})
+    registerTokenStoreService(registrar, TokenStoreConfig{})
 
-    if false == registrar.has(ServiceClient) {
-        t.Fatalf("expected %q to be registered, got %v", ServiceClient, registrar.names)
+    for _, name := range []string{ServiceConnection, melodylock.ServiceLocker, ServiceTokenStore} {
+        if false == registrar.has(name) {
+            t.Fatalf("expected %q to be registered, got %v", name, registrar.names)
+        }
     }
 }
 
-func TestRegisterLockerServiceUsesCoreLockerName(t *testing.T) {
-    registrar := &recordingRegistrar{}
+func TestRegisterLockerAndTokenStoreService_ANoConnectionIsRefusedAtTheResolve(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    registrar := &containerRegistrar{target: serviceContainer}
 
-    RegisterLockerService(registrar, fakeClient{}, LockerConfig{})
+    registerLockerService(registrar, LockerConfig{})
+    registerTokenStoreService(registrar, TokenStoreConfig{})
 
-    if false == registrar.has(melodylock.ServiceLocker) {
-        t.Fatalf("expected %q to be registered, got %v", melodylock.ServiceLocker, registrar.names)
+    if _, lockerErr := container.FromResolver[any](t.Context(), serviceContainer, melodylock.ServiceLocker); nil == lockerErr {
+        t.Fatal("expected a locker with no connection service refused")
     }
-}
 
-func TestRegisterLockerAndTokenStoreService_RefuseANilClientAtRegistration(t *testing.T) {
-    for door, register := range map[string]func(){
-        "RegisterLockerService":     func() { RegisterLockerService(&recordingRegistrar{}, nil, LockerConfig{}) },
-        "RegisterTokenStoreService": func() { RegisterTokenStoreService(&recordingRegistrar{}, nil, TokenStoreConfig{}) },
-    } {
-        func() {
-            defer func() {
-                if nil == recover() {
-                    t.Fatalf("expected %s to refuse a nil client at registration", door)
-                }
-            }()
-
-            register()
-        }()
-    }
-}
-
-func TestRegisterTokenStoreServiceUsesTokenStoreName(t *testing.T) {
-    registrar := &recordingRegistrar{}
-
-    RegisterTokenStoreService(registrar, fakeClient{}, TokenStoreConfig{})
-
-    if false == registrar.has(ServiceTokenStore) {
-        t.Fatalf("expected %q to be registered, got %v", ServiceTokenStore, registrar.names)
+    if _, storeErr := container.FromResolver[any](t.Context(), serviceContainer, ServiceTokenStore); nil == storeErr {
+        t.Fatal("expected a token store with no connection service refused")
     }
 }
 
@@ -106,14 +89,13 @@ func (instance *containerRegistrar) MustRegister(serviceName string, provider an
     instance.target.MustRegister(serviceName, provider, options)
 }
 
-/* the raw client's Close returns nothing, so registered alone it could never join the container's teardown and the connection lived exactly as long as the process; through the owning Connection and the dependency edge, whichever run resolves a client-backed service closes the connection after it */
+/* through the owning Connection and the dependency edge, whichever run resolves a client-backed service closes the connection after it */
 func TestRegisterConnectionService_TeardownClosesTheClientOnceTheClientWasResolved(t *testing.T) {
     client := &closeSpyClient{}
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     registrar := &containerRegistrar{target: serviceContainer}
 
-    RegisterConnectionService(registrar, NewConnection(client))
-    RegisterClientService(registrar, client)
+    registerConnectionService(registrar, connectionOver(client), containercontract.RegisterOptions{})
 
     resolvedClient := ClientMustFromResolver(t.Context(), serviceContainer)
     if nil == resolvedClient {
@@ -129,14 +111,13 @@ func TestRegisterConnectionService_TeardownClosesTheClientOnceTheClientWasResolv
     }
 }
 
-/* the guarantee's declared boundary: a run that resolves no client-backed service leaves the connection unresolved, and the container closes only what was resolved at least once */
+/* the guarantee's declared boundary: the container closes only what was resolved at least once */
 func TestRegisterConnectionService_TeardownLeavesAnUnresolvedConnectionOpen(t *testing.T) {
     client := &closeSpyClient{}
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     registrar := &containerRegistrar{target: serviceContainer}
 
-    RegisterConnectionService(registrar, NewConnection(client))
-    RegisterClientService(registrar, client)
+    registerConnectionService(registrar, connectionOver(client), containercontract.RegisterOptions{})
 
     if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("container close: %v", closeErr)
@@ -151,7 +132,8 @@ func TestRegisterLockerService_HandsTheConfigToTheLocker(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     registrar := &containerRegistrar{target: serviceContainer}
 
-    RegisterLockerService(registrar, fakeClient{}, LockerConfig{CallTimeout: bound.Of(750 * time.Millisecond)})
+    registerConnectionService(registrar, connectionOver(fakeClient{}), containercontract.RegisterOptions{})
+    registerLockerService(registrar, LockerConfig{CallTimeout: bound.Of(750 * time.Millisecond)})
 
     locker, ok := melodylock.LockerMustFromResolver(t.Context(), serviceContainer).(*Locker)
     if false == ok {
@@ -168,7 +150,8 @@ func TestRegisterLockerService_KeepsTheDefaultCallTimeout(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     registrar := &containerRegistrar{target: serviceContainer}
 
-    RegisterLockerService(registrar, fakeClient{}, LockerConfig{})
+    registerConnectionService(registrar, connectionOver(fakeClient{}), containercontract.RegisterOptions{})
+    registerLockerService(registrar, LockerConfig{})
 
     locker := melodylock.LockerMustFromResolver(t.Context(), serviceContainer).(*Locker)
     if defaultLockerCallTimeout != locker.callTimeout {
@@ -196,7 +179,7 @@ func TestRegisterTokenStoreService_TheContainerClockFillsOnlyAnAbsentConfigClock
             container.RegisterOptions{},
         )
 
-        RegisterTokenStoreService(&containerRegistrar{target: serviceContainer}, fakeClient{}, testCase.config)
+        NewModule(ModuleConfig{Connection: connectionOver(fakeClient{}), TokenStore: &testCase.config}).RegisterServices(&containerRegistrar{target: serviceContainer})
 
         store := TokenStoreMustFromResolver(t.Context(), serviceContainer).(*RedisTokenStore)
         if testCase.expected != store.clock {
@@ -210,10 +193,12 @@ func TestRegisterTokenStoreService_HandsTheConfigToTheStore(t *testing.T) {
 
     for name, register := range map[string]func(serviceContainer containercontract.Container){
         "door": func(serviceContainer containercontract.Container) {
-            RegisterTokenStoreService(&containerRegistrar{target: serviceContainer}, fakeClient{}, config)
+            registrar := &containerRegistrar{target: serviceContainer}
+            registerConnectionService(registrar, connectionOver(fakeClient{}), containercontract.RegisterOptions{})
+            registerTokenStoreService(registrar, config)
         },
         "module": func(serviceContainer containercontract.Container) {
-            NewModule(ModuleConfig{Client: fakeClient{}, AsTokenStore: true, TokenStore: config}).RegisterServices(&containerRegistrar{target: serviceContainer})
+            NewModule(ModuleConfig{Connection: connectionOver(fakeClient{}), TokenStore: &config}).RegisterServices(&containerRegistrar{target: serviceContainer})
         },
     } {
         serviceContainer := container.NewContainer(container.ContainerConfig{})

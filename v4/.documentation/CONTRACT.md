@@ -219,13 +219,6 @@ The module exports no interface.
 | [`MessageCodec`](../../integrations/outbox/v4/codec.go) | application | an application encodes its own messages |
 | [`Repository`](../../integrations/outbox/v4/repository.go) | application | the application stores its outbox; its doors are methods of the interface by verdict 11-18 |
 
-## Module `integrations/rueidis/v4`
-
-| Interface | Implemented by | Reason |
-|---|---|---|
-| [`ServiceRegistrar`](../../integrations/rueidis/v4/service_resolver.go) | framework | the boot's registrar satisfies it; only the application builder implements it |
-| [`cache.ServiceRegistrar`](../../integrations/rueidis/v4/cache/service_resolver.go) | framework | the boot's registrar satisfies it; only the application builder implements it |
-
 ## Module `integrations/websocket/v4`
 
 | Interface | Implemented by | Reason |

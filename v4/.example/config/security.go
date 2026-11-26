@@ -4,7 +4,6 @@ import (
     "regexp"
     "strings"
 
-    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
     "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/route"
@@ -324,9 +323,9 @@ const internalNonceGuardPrefix = "melody-example-v4:nonce"
 
 /* internalNonceGuard is the replay guard of the internal firewall: on redis every replica remembers the nonces every other one accepted, so an envelope accepted by one is refused by all; without redis the source keeps its in-process guard, which a single process is. The envelope horizon bounds how long a nonce is remembered. */
 func (instance *Module) internalNonceGuard() melodysecuritycontract.NonceGuard {
-    if nil == instance.redisClient {
+    if false == instance.redisConfigured() {
         return nil
     }
 
-    return melodyrueidis.NewNonceGuard(instance.redisClient, melodyrueidis.NonceGuardConfig{KeyPrefix: internalNonceGuardPrefix})
+    return &runtimeResolvedNonceGuard{serviceName: serviceInternalNonceGuard}
 }

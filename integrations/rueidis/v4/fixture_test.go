@@ -75,16 +75,34 @@ func newTokenStoreClient(t *testing.T) redisclient.Client {
     }
 
     provider := NewProvider(ProviderConfig{})
-    client, openErr := provider.Open(ConnectionParameters{Address: address})
+    connection, openErr := provider.Open(openRuntime(t), ConnectionParameters{Address: address})
     if nil != openErr {
         t.Fatalf("open: %v", openErr)
     }
 
     t.Cleanup(func() {
-        provider.Close(client)
+        connection.CloseWithContext(context.Background())
     })
 
-    return client
+    return connection.Client()
+}
+
+/* openRuntime is the runtime a provider door is handed in a test: the test's own context, no scope */
+func openRuntime(t *testing.T) containercontract.Runtime {
+    return &contextOnlyRuntime{ctx: t.Context()}
+}
+
+/* connectionOver is the module's connection factory over a client the test holds, answering one owner */
+func connectionOver(client redisclient.Client) func(resolver containercontract.Resolver) (*Connection, error) {
+    connection := NewConnection(client)
+
+    return func(resolver containercontract.Resolver) (*Connection, error) {
+        return connection, nil
+    }
+}
+
+func runtimeOver(ctx context.Context) containercontract.Runtime {
+    return &contextOnlyRuntime{ctx: ctx}
 }
 
 /* gatedConn is a net.Conn whose Read stops delivering once wedged: every byte the store sends after that is swallowed and the read blocks until the conn is closed or a deadline set on it lands, which is what a store that accepts connections but stops answering looks like from the client. Writes pass through untouched, so the command reaches the store and the client's own reader, pinger and reconnect run exactly as they do in production. The wedge is CONSTRUCTED rather than awaited, so a test holds the window open for as long as its assertions need. */

@@ -7,7 +7,6 @@ import (
 
     melodymysql "github.com/precision-soft/melody/integrations/bunorm/mysql/v4"
     melodypgsql "github.com/precision-soft/melody/integrations/bunorm/pgsql/v4"
-    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
     "github.com/precision-soft/melody/v4/.example/persistence"
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
     melodyclock "github.com/precision-soft/melody/v4/clock"
@@ -50,9 +49,8 @@ func (instance *Module) localStorageDirectory() string {
 }
 
 func (instance *Module) registerLockerService(registrar melodyapplicationcontract.ServiceRegistrar) {
-    if nil != instance.redisClient {
-        melodyrueidis.RegisterLockerService(registrar, instance.redisClient, melodyrueidis.LockerConfig{})
-
+    /* the rueidis module registers the redis locker over the connection */
+    if true == instance.redisConfigured() {
         return
     }
 

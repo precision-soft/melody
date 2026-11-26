@@ -4,11 +4,9 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-/* ProviderConfig declares how the provider opens a client; its zero value is the default, a pinged client with no client-side cache, the default ping deadlines and the default retry. */
+/* ProviderConfig declares how the provider opens a client; its zero value is the default, a pinged client with no client-side cache, the default boot ping deadline and the default retry. */
 type ProviderConfig struct {
     Client ClientConfig
-
-    Timeout TimeoutConfig
 
     Retry RetryConfig
 
@@ -17,9 +15,8 @@ type ProviderConfig struct {
 }
 
 type resolvedProvider struct {
-    client  resolvedClient
-    timeout resolvedTimeout
-    retry   resolvedRetry
+    client resolvedClient
+    retry  resolvedRetry
 }
 
 func resolveProviderConfig(config ProviderConfig) (resolvedProvider, error) {
@@ -28,19 +25,13 @@ func resolveProviderConfig(config ProviderConfig) (resolvedProvider, error) {
         return resolvedProvider{}, clientErr
     }
 
-    timeout, timeoutErr := resolveTimeout(config.Timeout)
-    if nil != timeoutErr {
-        return resolvedProvider{}, timeoutErr
-    }
-
     retry, retryErr := resolveRetry(config.Retry)
     if nil != retryErr {
         return resolvedProvider{}, retryErr
     }
 
     return resolvedProvider{
-        client:  client,
-        timeout: timeout,
-        retry:   retry,
+        client: client,
+        retry:  retry,
     }, nil
 }

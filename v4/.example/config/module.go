@@ -20,7 +20,6 @@ import (
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
     melodytranslationcontract "github.com/precision-soft/melody/v4/translation/contract"
-    rueidis "github.com/redis/rueidis"
 )
 
 type Module struct {
@@ -63,10 +62,9 @@ type Module struct {
     /* lifecycleDecorator counts every request at the seam around the kernel handler, the short-circuits the metrics middleware never sees included */
     lifecycleDecorator melodyapplicationcontract.HttpHandlerDecorator
 
-    redisClient rueidis.Client
-
-    /* redisConnection owns the eagerly opened client; registered through the rueidis module, it is what lets the container teardown close the connection the raw client cannot answer for */
-    redisConnection *melodyrueidis.Connection
+    /* redisProvider and redisParameters open redis at boot, through the rueidis module's connection factory; the provider is nil when no address is configured */
+    redisProvider   *melodyrueidis.Provider
+    redisParameters melodyrueidis.ConnectionParameters
 
     /* catalogWriteThrottle counts in redis when the environment gives the example one, shared by every replica, and in this process otherwise; it is nil only until the routes are registered */
     catalogWriteThrottle melodyhttpcontract.Middleware

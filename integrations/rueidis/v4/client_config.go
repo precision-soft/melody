@@ -24,6 +24,9 @@ type ClientConfig struct {
     /* ConnectionWriteTimeout is the per-connection write deadline and the cadence of the library's background pings: 5s by default, at least 1ms, unlimited refused, since the library has no unbounded form. */
     ConnectionWriteTimeout bound.Duration
 
+    /* BootPingTimeout bounds the ping that verifies the store answers before Open returns, within the caller's context: 3s by default, at least 1ms, unlimited refused, since an unbounded ping against a store that never answers would hold the open for as long as the caller's context allows. */
+    BootPingTimeout bound.Duration
+
     /* BootPingDisabled skips the ping that verifies the store answers before Open returns; a dead address still refuses at client creation. */
     BootPingDisabled bool
 
@@ -46,6 +49,12 @@ var clientConnectionWriteTimeoutRule = bound.Rule[time.Duration]{
     Minimum: bound.TimeoutMinimum,
 }
 
+var clientBootPingTimeoutRule = bound.Rule[time.Duration]{
+    Name:    "ClientConfig.BootPingTimeout",
+    Default: 3 * time.Second,
+    Minimum: bound.TimeoutMinimum,
+}
+
 var clientSideCacheBytesRule = bound.Rule[int]{
     Name:    "ClientConfig.ClientSideCacheBytes",
     Default: rueidis.DefaultCacheBytes,
@@ -58,6 +67,7 @@ type resolvedClient struct {
     tlsConfig              *tls.Config
     dialTimeout            time.Duration
     connectionWriteTimeout time.Duration
+    bootPingTimeout        time.Duration
     bootPingDisabled       bool
     clientSideCacheEnabled bool
     clientSideCacheBytes   int
@@ -72,6 +82,11 @@ func resolveClient(config ClientConfig) (resolvedClient, error) {
     connectionWriteTimeout, connectionWriteTimeoutErr := bound.Resolve(config.ConnectionWriteTimeout, clientConnectionWriteTimeoutRule)
     if nil != connectionWriteTimeoutErr {
         return resolvedClient{}, connectionWriteTimeoutErr
+    }
+
+    bootPingTimeout, bootPingTimeoutErr := bound.Resolve(config.BootPingTimeout, clientBootPingTimeoutRule)
+    if nil != bootPingTimeoutErr {
+        return resolvedClient{}, bootPingTimeoutErr
     }
 
     if false == config.ClientSideCacheEnabled && false == config.ClientSideCacheBytes.IsAbsent() {
@@ -96,6 +111,7 @@ func resolveClient(config ClientConfig) (resolvedClient, error) {
         tlsConfig:              config.TlsConfig,
         dialTimeout:            dialTimeout.Value,
         connectionWriteTimeout: connectionWriteTimeout.Value,
+        bootPingTimeout:        bootPingTimeout.Value,
         bootPingDisabled:       config.BootPingDisabled,
         clientSideCacheEnabled: config.ClientSideCacheEnabled,
         clientSideCacheBytes:   clientSideCacheBytes.Value,

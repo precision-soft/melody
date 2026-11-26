@@ -33,7 +33,7 @@ func TestCatalogWriteThrottle_AllowsThirtyWritesAMinute(t *testing.T) {
 }
 
 func TestRedisInfrastructure_ProvidesTheTokenStoreAndTheCacheModules(t *testing.T) {
-    modules := newRedisInfrastructure(nil, nil).Modules()
+    modules := newRedisInfrastructure(nil, melodyrueidis.ConnectionParameters{}, nil).Modules()
 
     if 2 != len(modules) {
         t.Fatalf("expected the token store and the cache modules, got %d modules", len(modules))

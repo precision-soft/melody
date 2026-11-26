@@ -188,7 +188,7 @@ type TokenStoreConfig struct {
     /* CallTimeout bounds one round trip of every door, capping the caller's context so a request without a deadline, as melody's http kernel leaves it, fails fast while a tighter deadline is kept; a round trip it cut answers an infrastructure failure naming this field. 1s by default, at least 1ms, unlimited refused, since unbounded a store that stops answering would hold a write for the client's write deadline and a read forever, the client retrying the SSCAN, SCAN and HMGET read-only commands for as long as the context allows. The bound is per round trip, so a walk over a large index gets one budget per batch. */
     CallTimeout bound.Duration
 
-    /* Clock is where the issue stamps are read; nil is the system clock, and the container's when the store is registered through RegisterTokenStoreService. */
+    /* Clock is where the issue stamps are read; nil is the system clock, and the container's when the store is registered through the module. */
     Clock clockcontract.Clock
 
     /* MaximumClockSkew is how far a token's issue instant may sit ahead of the clock before it is refused, and the slack every revocation boundary is widened by: 0 by default, which is no tolerance, at least 0, unlimited refused, since an unbounded tolerance admits any future issue instant. */

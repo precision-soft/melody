@@ -1,17 +1,11 @@
 package cache
 
 import (
-    "reflect"
-
-    "github.com/redis/rueidis"
-
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
-    "github.com/precision-soft/melody/v4/exception"
 )
 
+/* ModuleConfig declares the cache backend the module registers over the connection service the rueidis module registers. */
 type ModuleConfig struct {
-    Client rueidis.Client
-
     /* Backend is the configuration of the registered backend, as NewBackendService takes it. */
     Backend BackendConfig
 }
@@ -29,37 +23,14 @@ func (instance *Module) Name() string {
 }
 
 func (instance *Module) Description() string {
-    return "registers the cache backend service backed by a redis client"
+    return "registers the cache backend service over the redis connection service"
 }
 
 func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRegistrar) {
-    if true == clientIsNil(instance.config.Client) {
-        if false == reflect.ValueOf(instance.config.Backend).IsZero() {
-            exception.Panic(exception.NewError(
-                "the rueidis cache module is handed a backend configuration and has no client",
-                map[string]any{"field": "ModuleConfig.Backend", "requires": "ModuleConfig.Client"},
-                nil,
-            ))
-        }
-
-        return
-    }
-
-    RegisterBackendService(registrar, instance.config.Client, instance.config.Backend)
+    registerBackendService(registrar, instance.config.Backend)
 }
 
 var (
     _ applicationcontract.Module        = (*Module)(nil)
     _ applicationcontract.ServiceModule = (*Module)(nil)
 )
-
-/* clientIsNil reads a typed nil as nil, which a bare comparison on the interface takes for a live client. */
-func clientIsNil(client rueidis.Client) bool {
-    if nil == client {
-        return true
-    }
-
-    value := reflect.ValueOf(client)
-
-    return reflect.Pointer == value.Kind() && true == value.IsNil()
-}

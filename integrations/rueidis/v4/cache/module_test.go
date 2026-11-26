@@ -4,18 +4,12 @@ import (
     "testing"
     "time"
 
-    "github.com/redis/rueidis"
-
+    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
     "github.com/precision-soft/melody/v4/bound"
     melodycache "github.com/precision-soft/melody/v4/cache"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
-    "github.com/precision-soft/melody/v4/exception"
 )
-
-type fakeClient struct {
-    rueidis.Client
-}
 
 type spyServiceRegistrar struct {
     names []string
@@ -49,13 +43,7 @@ func TestModule_NameAndDescription(t *testing.T) {
 
 func TestModule_RegisterServices(t *testing.T) {
     registrar := &spyServiceRegistrar{}
-    NewModule(ModuleConfig{}).RegisterServices(registrar)
-    if 0 != len(registrar.names) {
-        t.Fatalf("expected no service without a client, got %v", registrar.names)
-    }
-
-    registrar = &spyServiceRegistrar{}
-    NewModule(ModuleConfig{Client: fakeClient{}, Backend: BackendConfig{Prefix: "cache"}}).RegisterServices(registrar)
+    NewModule(ModuleConfig{Backend: BackendConfig{Prefix: "cache"}}).RegisterServices(registrar)
     if 1 != len(registrar.names) || melodycache.ServiceCacheBackend != registrar.names[0] {
         t.Fatalf("expected the cache backend service, got %v", registrar.names)
     }
@@ -65,8 +53,8 @@ func TestModule_RegisterServicesForwardsTheBackendConfig(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     registrar := &containerRegistrar{target: serviceContainer}
 
+    registerConnectionOver(serviceContainer, &teardownSpyClient{})
     NewModule(ModuleConfig{
-        Client:  &teardownSpyClient{},
         Backend: BackendConfig{Prefix: "prefix", CallTimeout: bound.Of(750 * time.Millisecond)},
     }).RegisterServices(registrar)
 
@@ -77,43 +65,24 @@ func TestModule_RegisterServicesForwardsTheBackendConfig(t *testing.T) {
     }
 }
 
-func TestModule_ABackendConfigurationWithNoClientIsRefusedNamingIt(t *testing.T) {
-    defer func() {
-        recoveredErr, isError := recover().(error)
-        if false == isError {
-            t.Fatal("expected a backend configuration with no client to be refused at boot")
-        }
+func TestModule_TheBackendDeclaresTheConnectionItIsClosedBefore(t *testing.T) {
+    var options containercontract.RegisterOptions
+    registrar := &optionsRecordingRegistrar{options: &options}
 
-        context := exception.LogContext(recoveredErr, exception.LogContextConfig{})
-        if "ModuleConfig.Backend" != context["field"] || "ModuleConfig.Client" != context["requires"] {
-            t.Fatalf("expected the refusal to name ModuleConfig.Backend and its requirement, got %v", context)
-        }
-    }()
+    NewModule(ModuleConfig{}).RegisterServices(registrar)
 
-    NewModule(ModuleConfig{Backend: BackendConfig{Prefix: "cache"}}).RegisterServices(&spyServiceRegistrar{})
-}
-
-type typedNilModuleClient struct {
-    rueidis.Client
-}
-
-func TestModule_ATypedNilClientIsNoClient(t *testing.T) {
-    var client *typedNilModuleClient
-
-    registrar := &spyServiceRegistrar{}
-    NewModule(ModuleConfig{Client: client}).RegisterServices(registrar)
-    if 0 != len(registrar.names) {
-        t.Fatalf("expected no service over a typed nil client, got %v", registrar.names)
+    if 1 != len(options.TeardownDependencyNames) || melodyrueidis.ServiceConnection != options.TeardownDependencyNames[0] {
+        t.Fatalf("expected the backend to declare the connection, got %v", options.TeardownDependencyNames)
     }
+}
 
-    defer func() {
-        recoveredErr, isError := recover().(error)
-        if false == isError || "ModuleConfig.Backend" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
-            t.Fatalf("expected a backend configuration over a typed nil client to be refused naming ModuleConfig.Backend, got %v", recoveredErr)
-        }
-    }()
+type optionsRecordingRegistrar struct {
+    spyServiceRegistrar
+    options *containercontract.RegisterOptions
+}
 
-    NewModule(ModuleConfig{Client: client, Backend: BackendConfig{Prefix: "cache"}}).RegisterServices(&spyServiceRegistrar{})
+func (instance *optionsRecordingRegistrar) RegisterService(serviceName string, provider any, options containercontract.RegisterOptions) {
+    *instance.options = options
 }
 
 func (instance *spyServiceRegistrar) ReservePhaseService(serviceName string, kind containercontract.Kind) error {

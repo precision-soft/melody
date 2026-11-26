@@ -2,7 +2,7 @@
 
 Redis-backed building blocks for Melody v4, built on [`rueidis`](https://github.com/redis/rueidis):
 
-- a [`Provider`](./provider.go) that opens a `rueidis.Client` from connection parameters;
+- a [`Provider`](./provider.go) that opens a client from connection parameters under the caller's runtime and answers its owner, a [`Connection`](./connection.go);
 - a distributed [`Locker`](./lock.go) implementing the core `lock/contract.Locker`;
 - a [`RedisTokenStore`](./token_store.go) implementing the security `RevocableTokenStore`;
 - a [`NonceGuard`](./nonce_guard.go) implementing the security `NonceGuard` replay guard;
@@ -14,33 +14,33 @@ Import path: `github.com/precision-soft/melody/integrations/rueidis/v4`
 
 ## Provider
 
-[`NewProvider(ProviderConfig)`](./provider.go) builds a [`Provider`](./provider.go) from one [`ProviderConfig`](./provider_config.go) of `Client`, `Timeout`, `Retry` and `Logger`, whose zero value is the default; a limit outside its rule panics at `NewProvider`, naming the field, before any client is built. `Open` takes a [`ConnectionParameters`](./connection_parameters.go) literal (`Address`, `User`, `Password`) and returns a `rueidis.Client`; a comma-separated address list is used as multiple init addresses.
+[`NewProvider(ProviderConfig)`](./provider.go) builds a [`Provider`](./provider.go) from one [`ProviderConfig`](./provider_config.go) of `Client`, `Retry` and `Logger`, whose zero value is the default; a limit outside its rule panics at `NewProvider`, naming the field, before any client is built. `Open(runtimeInstance, parameters)` takes the caller's runtime and a [`ConnectionParameters`](./connection_parameters.go) literal (`Address`, `User`, `Password`) and answers the [`*Connection`](./connection.go) that owns the client it opened; a comma-separated address list is used as multiple init addresses. The runtime's context bounds the open: a context already done is refused before any client is built, the retry wait ends with it, answering the context's cause with the last dial error under `lastError` (cut at 512 bytes), and the boot ping runs under the earlier of the context's deadline and `ClientConfig.BootPingTimeout`. A nil runtime is refused naming the door. `Ping(runtimeInstance, connection)` runs one round trip under the runtime's context and no deadline of its own.
 
 ```go
 provider := rueidis.NewProvider(rueidis.ProviderConfig{})
 
-client, err := provider.Open(rueidis.ConnectionParameters{Address: address, User: user, Password: password})
+connection, err := provider.Open(resolver.Runtime(), rueidis.ConnectionParameters{Address: address, User: user, Password: password})
 if err != nil {
     // connection error
 }
+
+client := connection.Client()
 ```
 
 Configuration, every field left out being the documented default:
 
-- [`ClientConfig`](./client_config.go) — client name, DB selection, TLS, the dial and write deadlines, `BootPingDisabled` and the client-side cache (`ClientSideCacheEnabled`, `ClientSideCacheBytes`). The zero value pings on start and keeps the client-side cache off, so a partial literal is the safe default plus the change; a cache budget set while the cache is not enabled is refused, naming both fields.
-- [`TimeoutConfig`](./timeout_config.go) — **boot only**. `ConnectTimeout` and `CommandTimeout` bound the provider's own ping round trips; neither is passed into `rueidis.ClientOption`, so ordinary commands are not bounded by them. The network deadline a running application answers to is `ClientConfig.ConnectionWriteTimeout`, which the client also applies as the deadline of a command whose context carries none — and which does not end a READ: the client retries a read-only command on a fresh connection for as long as the context allows, so the budget that ends one is the per-call timeout of the service issuing it (`RateLimiterConfig.CallTimeout`, `TokenStoreConfig.CallTimeout`, `LockerConfig.CallTimeout`, `NonceGuardConfig.CallTimeout`, `ServerSentEventBackplaneConfig.CallTimeout`, `cache.BackendConfig.CallTimeout`).
+- [`ClientConfig`](./client_config.go) — client name, DB selection, TLS, the dial and write deadlines, the boot ping (`BootPingTimeout`, `BootPingDisabled`) and the client-side cache (`ClientSideCacheEnabled`, `ClientSideCacheBytes`). The zero value pings on start and keeps the client-side cache off, so a partial literal is the safe default plus the change; a cache budget set while the cache is not enabled is refused, naming both fields. `BootPingTimeout` bounds the boot ping alone and is not passed into `rueidis.ClientOption`, so ordinary commands are not bounded by it. The network deadline a running application answers to is `ClientConfig.ConnectionWriteTimeout`, which the client also applies as the deadline of a command whose context carries none — and which does not end a READ: the client retries a read-only command on a fresh connection for as long as the context allows, so the budget that ends one is the per-call timeout of the service issuing it (`RateLimiterConfig.CallTimeout`, `TokenStoreConfig.CallTimeout`, `LockerConfig.CallTimeout`, `NonceGuardConfig.CallTimeout`, `ServerSentEventBackplaneConfig.CallTimeout`, `cache.BackendConfig.CallTimeout`).
 - [`RetryConfig`](./retry_config.go) — the initial-connection retry (see below).
 
 The dialer and the write deadline are always installed from the resolved values, so the library's own defaults — five seconds for the dial, ten for a write — never govern a melody client.
 
 The provider is handed the connection **values**, not the configuration keys they came from, so it knows no configuration key and names no credential of its own — this package carries no credential-marking door. Arming the framework's redaction is the application's call, through the parameter registrar's `RegisterSecretParameter` for a parameter the application declares, or a `.env` key declared `Secret` in `ApplicationConfig.EnvironmentKeys`, which marks the parameter it feeds; `MarkParameterSecret` takes a parameter name, never a key. The mark propagates to every parameter whose template reads the secret, so a dsn assembled from the credential is redacted with it and `debug:parameters` masks the password in a process that never dials.
 
-Every refusal the provider writes carries the deadlines that governed the attempt — the connect timeout and the dial timeout. The password is never part of that record.
+Every refusal the provider writes carries the deadlines that governed the attempt — the boot ping timeout and the dial timeout. The password is never part of that record.
 
 ### Owning the client
 
-`rueidis.Client.Close` returns nothing, so the raw client cannot join the container's ordered teardown — which closes a value through `CloseWithContext(context.Context) error` or through a closer its registration declared in `RegisterOptions.Closer`, and nothing else; the raw client carries neither. [`NewConnection`](./connection.go) wraps it in that shape, and [`RegisterConnectionService`](./service_resolver.go) (or [`ModuleConfig.Connection`](./module.go)) registers it as the service that owns the client. Every client-backed provider in this package — the client itself, the locker, the token store, the cache backend — resolves the registered connection as its dependency, so whichever run resolves one of them orders the connection's close after it; a run that resolves none leaves the connection the composition root's to close, since the container closes only what was resolved at
-least once. Every value in this package that could close a client it merely borrows — the cache backend, the rate limiter — deliberately declines to.
+`rueidis.Client.Close` returns nothing, so the raw client cannot join the container's ordered teardown — which closes a value through `CloseWithContext(context.Context) error` or through a closer its registration declared in `RegisterOptions.Closer`, and nothing else; the raw client carries neither. `Open` answers the [`Connection`](./connection.go) that owns the client, whose `CloseWithContext` is the one close: once, the deadline answered as an error. [`NewConnection`](./connection.go) wraps a client built elsewhere in the same shape. Commands through `connection.Client()` are safe while the owner keeps the lifecycle; closing the raw client oneself loses the ordered teardown, the idempotent close and the deadline answer. [`ModuleConfig.Connection`](./module.go) registers the owner's factory as the connection service. Every client-backed service of this package — the locker, the token store, the cache backend — resolves the connection as its dependency, so the teardown closes the connection after them; a run that resolves no connection leaves nothing to close. Every value in this package that could close a client it merely borrows — the cache backend, the rate limiter — deliberately declines to.
 
 ### Connection retry
 
@@ -65,13 +65,12 @@ Every attempt is reported in the journal `ProviderConfig.Logger` names: a warnin
 
 | Config          | Field                    | Default   | Rule                                             |
 |-----------------|--------------------------|-----------|--------------------------------------------------|
-| `TimeoutConfig` | `ConnectTimeout`         | `3s`      | at least `1ms`, unlimited refused                |
-| `TimeoutConfig` | `CommandTimeout`         | `3s`      | at least `1ms`, unlimited refused                |
 | `ClientConfig`  | `ClientName`             | empty     |                                                  |
 | `ClientConfig`  | `SelectDatabase`         | `0`       |                                                  |
 | `ClientConfig`  | `TlsConfig`              | `nil`     |                                                  |
 | `ClientConfig`  | `DialTimeout`            | `5s`      | at least `1ms`, unlimited refused                |
 | `ClientConfig`  | `ConnectionWriteTimeout` | `5s`      | at least `1ms`, unlimited refused                |
+| `ClientConfig`  | `BootPingTimeout`        | `3s`      | at least `1ms`, unlimited refused                |
 | `ClientConfig`  | `BootPingDisabled`       | `false`   |                                                  |
 | `ClientConfig`  | `ClientSideCacheEnabled` | `false`   |                                                  |
 | `ClientConfig`  | `ClientSideCacheBytes`   | `128 MiB` | at least `1`, unlimited refused, needs the cache |
@@ -108,7 +107,7 @@ The instants on both sides of that comparison come from application clocks. `Tok
 - `Prefix` — the key prefix, default `melody:token`.
 - `CallTimeout` — bounds one round trip of every door: 1s when left out, at least 1ms, unlimited refused. Unbounded, a store that accepts connections but stops answering would hold `Put`, `Delete`, `Lookup` and `RevokeBefore` — each one Lua script, which the client does not retry — for the client's write deadline and hold `DeleteByUser`, `PurgeExpired` and `RevocationEpoch` for good, since the client retries their read-only `SSCAN`, `SCAN` and `HMGET` commands for as long as a context without deadline allows — and melody's http kernel attaches none to a request. Every door keeps a request deadline that is tighter than the timeout, and a round trip the timeout cut answers an infrastructure failure naming this field. The bound is per round trip, so a walk over a large user's index gets one budget per batch.
 - `ScanCount` — the batch size of the `SSCAN`/`SCAN` walks: 256 when left out, at least 1, unlimited refused.
-- `Clock` — the clock stamping a token's issue instant; nil is the system clock, and `RegisterTokenStoreService` fills it from the container when the config names none.
+- `Clock` — the clock stamping a token's issue instant; nil is the system clock, and the module fills it from the container when the config names none.
 - `MaximumClockSkew` — the window the paragraph above describes: 0 when left out, which is no tolerance, at least 0, unlimited refused.
 - `RevocationEpochRetention` — how long a revocation boundary outlives its instant: 7 days when left out, at least 1s, and `bound.UnlimitedDuration()` keeps it for ever, as the in-memory store does, at the cost of one hash kept per user that ever revoked.
 
@@ -207,20 +206,27 @@ func main() {
 
 ## Plug-and-play registration
 
-Each capability has a one-call registration helper that binds it to a canonical service name, so a provider resolves it through the matching `*MustFromResolver` helper, and a handler holding a runtime reads the raw client with `ClientMustFromRuntime(runtimeInstance)`:
+The modules are the registration door. [`rueidis.NewModule`](./module.go) registers the connection service its `Connection` factory builds and, each behind a pointer to its configuration, the locker and the revocable token store over it; [`rueidiscache.NewModule`](./cache/module.go) registers the cache backend over the same connection service. A provider resolves each through the matching `*MustFromResolver` helper, and a handler holding a runtime reads the client of the connection with `ClientMustFromRuntime(runtimeInstance)`:
 
 ```go
-rueidis.RegisterClientService(registrar, client)                                                   /* rueidis.ServiceClient, "service.rueidis.client" */
-rueidis.RegisterLockerService(registrar, client, rueidis.LockerConfig{})                           /* core lock.ServiceLocker */
-rueidis.RegisterTokenStoreService(registrar, client, rueidis.TokenStoreConfig{})                   /* rueidis.ServiceTokenStore, "service.rueidis.token_store" */
-rueidiscache.RegisterBackendService(registrar, client, rueidiscache.BackendConfig{Prefix: "app:"}) /* core cache.ServiceCacheBackend */
+app.RegisterModule(rueidis.NewModule(rueidis.ModuleConfig{
+    Connection: func(resolver containercontract.Resolver) (*rueidis.Connection, error) {
+        return provider.Open(resolver.Runtime(), parameters)
+    },
+    ConnectionBuiltAtBoot: true,
+    ConnectionBootFailure: container.BootFailureFailsBoot,
+    Locker:                &rueidis.LockerConfig{},
+    TokenStore:            &rueidis.TokenStoreConfig{Prefix: "app:token"},
+}))
+app.RegisterModule(rueidiscache.NewModule(rueidiscache.ModuleConfig{Backend: rueidiscache.BackendConfig{Prefix: "app:"}}))
 ```
 
-`RegisterClientService`, `RegisterLockerService` and `RegisterTokenStoreService` live in [`service_resolver.go`](./service_resolver.go); the locker and token store doors take their config and resolve it at the call, so a value outside its rule, or a nil client, fails the boot rather than the first resolve; [`RegisterBackendService`](./cache/service_resolver.go) lives in [`cache/service_resolver.go`](./cache/service_resolver.go) and resolves its `BackendConfig` at the call the same way, and the [`cache.ModuleConfig.Backend`](./cache/module.go) field hands the config through the module, as [`ModuleConfig.Locker`](./module.go) and [`ModuleConfig.TokenStore`](./module.go) hand theirs.
+| Field                   | Registers                                                   | Left out                                                  |
+|-------------------------|-------------------------------------------------------------|-----------------------------------------------------------|
+| `Connection`            | `rueidis.ServiceConnection`, `"service.rueidis.connection"` | nothing                                                   |
+| `ConnectionBuiltAtBoot` | the connection built inside `Boot`, under the boot runtime  | built at its first resolution                             |
+| `ConnectionBootFailure` | the registrar's boot failure mode of that build             | `BootFailureWarns`                                        |
+| `Locker`                | core `lock.ServiceLocker`                                   | no locker; `&LockerConfig{}` is the default locker        |
+| `TokenStore`            | `rueidis.ServiceTokenStore`, `"service.rueidis.token_store"` | no store; `&TokenStoreConfig{}` is the default store      |
 
-Or bundle them as self-registering application modules — `RegisterModule` registers the client service and, opt-in, the locker and revocable token store (and the cache backend), instead of calling each helper by hand. A role with no client, or a role's configuration with the role off, is refused at boot naming the field, and so is a cache module handed a `Backend` configuration with no client:
-
-```go
-app.RegisterModule(rueidis.NewModule(rueidis.ModuleConfig{Client: client, AsLocker: true, AsTokenStore: true}))
-app.RegisterModule(rueidiscache.NewModule(rueidiscache.ModuleConfig{Client: client, Backend: rueidiscache.BackendConfig{Prefix: "app:"}}))
-```
+The module copies the configurations it is handed at `NewModule`, so a later edit of the caller's value is not observed, and resolves each at `RegisterServices`, so a value outside its rule fails the boot rather than the first resolve. A role with no `Connection`, `ConnectionBuiltAtBoot` with no `Connection`, and a `ConnectionBootFailure` with no connection built at boot are refused at boot naming the field. The cache backend declares the connection as the service it is closed before, so an application that registers the cache module and no connection is refused at boot.

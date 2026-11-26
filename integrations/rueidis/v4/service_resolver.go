@@ -8,6 +8,7 @@ import (
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     melodylock "github.com/precision-soft/melody/v4/lock"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
@@ -16,74 +17,59 @@ import (
 )
 
 const (
-    ServiceClient     = "service.rueidis.client"
     ServiceConnection = "service.rueidis.connection"
     ServiceTokenStore = "service.rueidis.token_store"
 )
 
-type ServiceRegistrar interface {
+type serviceRegistrar interface {
     RegisterService(serviceName string, provider any, options containercontract.RegisterOptions)
 }
 
-/* RegisterConnectionService registers the Connection that owns the client, so the container's ordered teardown, which closes what answers CloseWithContext and was resolved at least once, closes the client. Every client-backed provider in this package resolves the connection when it is registered, so a run that resolves a locker, a token store or the client closes the connection after them; a run that resolves none leaves it unclosed, as the messagebus transports do. */
-func RegisterConnectionService(registrar ServiceRegistrar, connection *Connection) {
-    registrar.RegisterService(
-        ServiceConnection,
-        func(resolver containercontract.Resolver) (*Connection, error) {
-            return connection, nil
-        },
-        container.RegisterOptions{},
-    )
+/* registerConnectionService registers the factory of the Connection that owns the client, so the container's ordered teardown, which closes what answers CloseWithContext and was resolved at least once, closes the client. Every client-backed provider in this package resolves the connection, so the teardown closes the connection after them. */
+func registerConnectionService(
+    registrar serviceRegistrar,
+    connection func(resolver containercontract.Resolver) (*Connection, error),
+    options containercontract.RegisterOptions,
+) {
+    registrar.RegisterService(ServiceConnection, connection, options)
 }
 
-/* resolveConnectionEdge records the consumer-to-connection dependency edge when a connection service is registered: resolving it through the resolver building the consumer orders the teardown, consumers first and the connection after. Without a registered connection the edge is skipped. */
-func resolveConnectionEdge(resolver containercontract.Resolver) {
-    if true == resolver.Has(ServiceConnection) {
-        container.MustFromResolver[*Connection](resolver.Runtime().Context(), resolver, ServiceConnection)
-    }
+func resolveConnection(resolver containercontract.Resolver) (*Connection, error) {
+    return container.FromResolver[*Connection](resolver.Runtime().Context(), resolver, ServiceConnection)
 }
 
-func RegisterClientService(registrar ServiceRegistrar, client rueidis.Client) {
-    registrar.RegisterService(
-        ServiceClient,
-        func(resolver containercontract.Resolver) (rueidis.Client, error) {
-            resolveConnectionEdge(resolver)
-
-            return client, nil
-        },
-        container.RegisterOptions{},
-    )
-}
-
+/* ClientMustFromRuntime answers the client of the connection service resolved through the runtime's scope; the connection keeps its lifecycle. */
 func ClientMustFromRuntime(runtimeInstance containercontract.Runtime) rueidis.Client {
-    return runtime.MustFromRuntime[rueidis.Client](runtimeInstance, ServiceClient)
+    return runtime.MustFromRuntime[*Connection](runtimeInstance, ServiceConnection).Client()
 }
 
 func ClientMustFromResolver(ctx context.Context, resolver containercontract.Resolver) rueidis.Client {
-    return container.MustFromResolver[rueidis.Client](ctx, resolver, ServiceClient)
+    return container.MustFromResolver[*Connection](ctx, resolver, ServiceConnection).Client()
 }
 
-/* RegisterLockerService builds the locker at the call, so a configuration outside its rule fails the boot rather than the first resolve. */
-func RegisterLockerService(registrar ServiceRegistrar, client rueidis.Client, config LockerConfig) {
-    locker := NewLocker(client, config)
+/* registerLockerService resolves the configuration at the call, so a configuration outside its rule fails the boot rather than the first resolve; the locker is built over the resolved connection. */
+func registerLockerService(registrar serviceRegistrar, config LockerConfig) {
+    callTimeout, callTimeoutErr := bound.Resolve(config.CallTimeout, lockerCallTimeoutRule)
+    if nil != callTimeoutErr {
+        exception.Panic(exception.FromError(callTimeoutErr))
+    }
 
     registrar.RegisterService(
         melodylock.ServiceLocker,
         func(resolver containercontract.Resolver) (lockcontract.Locker, error) {
-            resolveConnectionEdge(resolver)
+            connection, connectionErr := resolveConnection(resolver)
+            if nil != connectionErr {
+                return nil, connectionErr
+            }
 
-            return locker, nil
+            return &Locker{client: connection.Client(), callTimeout: callTimeout.Value}, nil
         },
         container.RegisterOptions{},
     )
 }
 
-/* RegisterTokenStoreService resolves the configuration at the call, so a limit outside its rule fails the boot rather than the first resolve; the container's clock reaches a store whose config names none. */
-func RegisterTokenStoreService(registrar ServiceRegistrar, client rueidis.Client, config TokenStoreConfig) {
-    if nil == client {
-        exception.Panic(exception.NewError("redis token store client is nil", nil, nil))
-    }
-
+/* registerTokenStoreService resolves the configuration at the call, so a limit outside its rule fails the boot rather than the first resolve; the container's clock reaches a store whose config names none. */
+func registerTokenStoreService(registrar serviceRegistrar, config TokenStoreConfig) {
     resolved, resolveErr := resolveTokenStoreConfig(config)
     if nil != resolveErr {
         exception.Panic(exception.FromError(resolveErr))
@@ -92,7 +78,10 @@ func RegisterTokenStoreService(registrar ServiceRegistrar, client rueidis.Client
     registrar.RegisterService(
         ServiceTokenStore,
         func(resolver containercontract.Resolver) (securitycontract.RevocableTokenStore, error) {
-            resolveConnectionEdge(resolver)
+            connection, connectionErr := resolveConnection(resolver)
+            if nil != connectionErr {
+                return nil, connectionErr
+            }
 
             storeConfig := resolved
             if nil == storeConfig.clock {
@@ -101,7 +90,7 @@ func RegisterTokenStoreService(registrar ServiceRegistrar, client rueidis.Client
                 }
             }
 
-            return newTokenStoreFromResolved(client, storeConfig), nil
+            return newTokenStoreFromResolved(connection.Client(), storeConfig), nil
         },
         container.RegisterOptions{},
     )

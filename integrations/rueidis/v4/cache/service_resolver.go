@@ -7,19 +7,14 @@ import (
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
-    "github.com/redis/rueidis"
 )
 
-type ServiceRegistrar interface {
+type serviceRegistrar interface {
     RegisterService(serviceName string, provider any, options containercontract.RegisterOptions)
 }
 
-/* RegisterBackendService resolves the configuration at the call, so a nil client or a limit outside its rule fails the boot rather than the first resolve. Each round trip is bounded by BackendConfig.CallTimeout, 1s when left out, on top of the runtime's context. */
-func RegisterBackendService(registrar ServiceRegistrar, client rueidis.Client, config BackendConfig) {
-    if nil == client {
-        exception.Panic(exception.NewError("redis client is nil", nil, nil))
-    }
-
+/* registerBackendService resolves the configuration at the call, so a limit outside its rule fails the boot rather than the first resolve; the backend is built over the client of the resolved connection, and the declared edge refuses at boot an application that registers no connection. Each round trip is bounded by BackendConfig.CallTimeout, 1s when left out, on top of the runtime's context. */
+func registerBackendService(registrar serviceRegistrar, config BackendConfig) {
     resolved, resolveErr := resolveBackendConfig(config)
     if nil != resolveErr {
         exception.Panic(exception.FromError(resolveErr))
@@ -28,15 +23,16 @@ func RegisterBackendService(registrar ServiceRegistrar, client rueidis.Client, c
     registrar.RegisterService(
         melodycache.ServiceCacheBackend,
         func(resolver containercontract.Resolver) (cachecontract.Backend, error) {
-            /* the backend borrows the client and does not close it; resolving the owning Connection, when one is registered, records the dependency edge that closes the client after this backend at teardown */
-            if true == resolver.Has(melodyrueidis.ServiceConnection) {
-                container.MustFromResolver[*melodyrueidis.Connection](resolver.Runtime().Context(), resolver, melodyrueidis.ServiceConnection)
+            /* the backend borrows the client and does not close it; resolving the owning connection records the edge that closes the client after this backend at teardown */
+            connection, connectionErr := container.FromResolver[*melodyrueidis.Connection](resolver.Runtime().Context(), resolver, melodyrueidis.ServiceConnection)
+            if nil != connectionErr {
+                return nil, connectionErr
             }
 
             return &BackendService{
-                backend: newBackendFromResolved(client, resolved),
+                backend: newBackendFromResolved(connection.Client(), resolved),
             }, nil
         },
-        container.RegisterOptions{},
+        container.RegisterOptions{TeardownDependencyNames: []string{melodyrueidis.ServiceConnection}},
     )
 }

@@ -86,3 +86,31 @@ func TestResolveClient_RefusesACacheBudgetWhileTheCacheIsNotEnabled(t *testing.T
         t.Fatalf("expected the refusal to name the enabling field, got %v", exceptionContextOf(resolveErr))
     }
 }
+
+func TestClientConfig_BootPingTimeoutRule(t *testing.T) {
+    resolved, resolveErr := resolveClient(ClientConfig{})
+    if nil != resolveErr {
+        t.Fatalf("expected the zero client config to resolve, got %v", resolveErr)
+    }
+
+    if 3*time.Second != resolved.bootPingTimeout {
+        t.Fatalf("expected the default boot ping timeout of 3s, got %v", resolved.bootPingTimeout)
+    }
+
+    configured, configuredErr := resolveClient(ClientConfig{BootPingTimeout: bound.Of(time.Millisecond)})
+    if nil != configuredErr || time.Millisecond != configured.bootPingTimeout {
+        t.Fatalf("expected 1ms kept, got %v, %v", configured.bootPingTimeout, configuredErr)
+    }
+
+    for _, config := range []ClientConfig{
+        {BootPingTimeout: bound.Of(time.Microsecond)},
+        {BootPingTimeout: bound.UnlimitedDuration()},
+    } {
+        _, refusedErr := resolveClient(config)
+        expectErrorNamingField(t, refusedErr, "ClientConfig.BootPingTimeout")
+    }
+
+    expectPanicNamingField(t, "ClientConfig.BootPingTimeout", func() {
+        NewProvider(ProviderConfig{Client: ClientConfig{BootPingTimeout: bound.UnlimitedDuration()}})
+    })
+}

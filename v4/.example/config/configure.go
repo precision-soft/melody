@@ -86,8 +86,8 @@ func Configure(ctx context.Context, app *melodyapplication.Application, applicat
         app.RegisterModule(melodyawss3.NewModule(moduleInstance.storageModuleConfig()))
     }
 
-    if nil != moduleInstance.redisClient {
-        app.RegisterModuleProvider(newRedisInfrastructure(moduleInstance.redisClient, moduleInstance.redisConnection))
+    if true == moduleInstance.redisConfigured() {
+        app.RegisterModuleProvider(newRedisInfrastructure(moduleInstance.redisProvider, moduleInstance.redisParameters, moduleInstance.serverSentEventHub))
     }
 }
 

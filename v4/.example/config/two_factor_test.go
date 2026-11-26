@@ -12,10 +12,12 @@ import (
     "testing"
     "time"
 
+    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
     "github.com/precision-soft/melody/v4/.example/twofactor"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     "github.com/redis/rueidis"
     bun "github.com/uptrace/bun"
@@ -111,9 +113,21 @@ func TestBuildSecondFactorBudgetLimiter_AFailedReleaseIsReturnedMarked(t *testin
     }
     client.Close()
 
-    limiter := (&Module{redisClient: client}).buildSecondFactorBudgetLimiter(melodyclock.NewSystemClock())
+    moduleInstance := &Module{redisProvider: melodyrueidis.NewProvider(melodyrueidis.ProviderConfig{})}
 
-    if resetErr := limiter.Reset(configTestRuntime(), "account:user-2"); false == melodyexception.AnswersUnavailable(resetErr) {
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    containerInstance.MustRegister(
+        melodyrueidis.ServiceConnection,
+        func(resolver melodycontainercontract.Resolver) (*melodyrueidis.Connection, error) {
+            return melodyrueidis.NewConnection(client), nil
+        },
+        melodycontainer.RegisterOptions{},
+    )
+    moduleInstance.registerRedisServices(containerRegistrar{Container: containerInstance})
+
+    limiter := moduleInstance.buildSecondFactorBudgetLimiter(melodyclock.NewSystemClock())
+
+    if resetErr := limiter.Reset(melodyruntime.NewRun(t.Context(), containerInstance.NewScope()), "account:user-2"); false == melodyexception.AnswersUnavailable(resetErr) {
         t.Fatalf("expected the failed release returned marked, got %v", resetErr)
     }
 }

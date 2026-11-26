@@ -67,11 +67,13 @@ func TestRedisLock_MutualExclusionReleaseAndRefresh(t *testing.T) {
     }
 
     provider := NewProvider(ProviderConfig{})
-    client, openErr := provider.Open(ConnectionParameters{Address: address})
+    connection, openErr := provider.Open(openRuntime(t), ConnectionParameters{Address: address})
     if nil != openErr {
         t.Fatalf("open: %v", openErr)
     }
-    defer provider.Close(client)
+    defer connection.CloseWithContext(context.Background())
+
+    client := connection.Client()
 
     locker := NewLocker(client, LockerConfig{})
     runtimeInstance := newLockRuntime()
@@ -114,11 +116,13 @@ func TestRedisLock_RefreshFailsWhenLostToAnotherClient(t *testing.T) {
     }
 
     provider := NewProvider(ProviderConfig{})
-    client, openErr := provider.Open(ConnectionParameters{Address: address})
+    connection, openErr := provider.Open(openRuntime(t), ConnectionParameters{Address: address})
     if nil != openErr {
         t.Fatalf("open: %v", openErr)
     }
-    defer provider.Close(client)
+    defer connection.CloseWithContext(context.Background())
+
+    client := connection.Client()
 
     locker := NewLocker(client, LockerConfig{})
     runtimeInstance := newLockRuntime()
@@ -147,11 +151,13 @@ func TestRedisLock_ReacquireIsReentrantForSameLock(t *testing.T) {
     }
 
     provider := NewProvider(ProviderConfig{})
-    client, openErr := provider.Open(ConnectionParameters{Address: address})
+    connection, openErr := provider.Open(openRuntime(t), ConnectionParameters{Address: address})
     if nil != openErr {
         t.Fatalf("open: %v", openErr)
     }
-    defer provider.Close(client)
+    defer connection.CloseWithContext(context.Background())
+
+    client := connection.Client()
 
     locker := NewLocker(client, LockerConfig{})
     runtimeInstance := newLockRuntime()

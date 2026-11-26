@@ -4,7 +4,6 @@ import (
     "reflect"
 
     outboxintegration "github.com/precision-soft/melody/integrations/outbox/v4"
-    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
     "github.com/precision-soft/melody/v4/.example/handler"
     "github.com/precision-soft/melody/v4/.example/handler/accesstoken"
     handlercategory "github.com/precision-soft/melody/v4/.example/handler/category"
@@ -64,7 +63,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.Handle("/platform/check", handler.PlatformCheckHandler(), melodyhttp.RouteOptions{Name: "example.platform.check", Methods: []string{"GET"}})
 
     /* the write budget is built before the first door it guards */
-    if nil != instance.redisClient {
+    if true == instance.redisConfigured() {
         instance.buildCatalogWriteThrottle()
     } else {
         instance.buildInProcessCatalogWriteThrottle(kernelInstance.Clock())
@@ -200,9 +199,7 @@ var _ melodyapplicationcontract.HttpModule = (*Module)(nil)
 
 /* buildCatalogWriteThrottle prepares the shared budget the nomenclature's write endpoints sit behind. The counter lives in redis, so several replicas enforce one limit rather than each allowing its own, and the client key is resolved trusted-proxy-aware: behind the compose load balancer the X-Forwarded-For client is used, a direct hit falls back to the peer address, and a spoofed header from an untrusted peer is ignored. With redis unreachable the limiter fails closed, so a write is refused rather than let through uncounted. */
 func (instance *Module) buildCatalogWriteThrottle() {
-    limiter := melodyrueidis.NewRateLimiter(instance.redisClient, catalogWriteLimiterName, catalogWriteAllowance, catalogWriteWindow, melodyrueidis.RateLimiterConfig{
-        KeyPrefix: redisRateLimitKeyPrefix,
-    })
+    limiter := &runtimeResolvedRateLimiter{serviceName: serviceCatalogWriteLimiter}
 
     instance.loginDoorLimiter.bind(limiter)
 

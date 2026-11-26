@@ -28,7 +28,7 @@ func (instance *recordingRegistrar) RegisterService(serviceName string, provider
 func TestRegisterBackendServiceUsesCoreBackendName(t *testing.T) {
     registrar := &recordingRegistrar{}
 
-    RegisterBackendService(registrar, &teardownSpyClient{}, BackendConfig{Prefix: "example"})
+    registerBackendService(registrar, BackendConfig{Prefix: "example"})
 
     if 0 == len(registrar.names) || melodycache.ServiceCacheBackend != registrar.names[0] {
         t.Fatalf("expected %q to be registered, got %v", melodycache.ServiceCacheBackend, registrar.names)
@@ -65,8 +65,8 @@ func TestRegisterBackendService_ResolutionOrdersTheConnectionIntoTheTeardown(t *
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     registrar := &containerRegistrar{target: serviceContainer}
 
-    melodyrueidis.RegisterConnectionService(registrar, melodyrueidis.NewConnection(client))
-    RegisterBackendService(registrar, client, BackendConfig{Prefix: "prefix"})
+    registerConnectionOver(serviceContainer, client)
+    registerBackendService(registrar, BackendConfig{Prefix: "prefix"})
 
     backend := container.MustFromResolver[cachecontract.Backend](t.Context(), serviceContainer, melodycache.ServiceCacheBackend)
     if nil == backend {
@@ -89,7 +89,8 @@ func TestRegisterBackendService_HandsTheConfigToTheBackend(t *testing.T) {
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     registrar := &containerRegistrar{target: serviceContainer}
-    RegisterBackendService(registrar, client, BackendConfig{
+    registerConnectionOver(serviceContainer, client)
+    registerBackendService(registrar, BackendConfig{
         Prefix:         "melody:test:" + t.Name() + ":",
         ScanCount:      melodybound.Of(11),
         DeleteBatch:    melodybound.Of(13),
@@ -123,7 +124,8 @@ func TestRegisterBackendService_AnAbsentCallTimeoutRefusesAWedgedReadWithinOneSe
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     registrar := &containerRegistrar{target: serviceContainer}
-    RegisterBackendService(registrar, client, BackendConfig{Prefix: "melody:test:" + t.Name() + ":"})
+    registerConnectionOver(serviceContainer, client)
+    registerBackendService(registrar, BackendConfig{Prefix: "melody:test:" + t.Name() + ":"})
 
     service := container.MustFromResolver[*BackendService](t.Context(), serviceContainer, melodycache.ServiceCacheBackend)
 
@@ -150,7 +152,8 @@ func TestRegisterBackendService_AnAbsentCallTimeoutRefusesAWedgedReadWithinOneSe
 func TestRegisterBackendService_AnAbsentConfigBoundsEachRoundTripAtOneSecond(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     registrar := &containerRegistrar{target: serviceContainer}
-    RegisterBackendService(registrar, &teardownSpyClient{}, BackendConfig{})
+    registerConnectionOver(serviceContainer, &teardownSpyClient{})
+    registerBackendService(registrar, BackendConfig{})
 
     service := container.MustFromResolver[*BackendService](t.Context(), serviceContainer, melodycache.ServiceCacheBackend)
 
@@ -161,13 +164,11 @@ func TestRegisterBackendService_AnAbsentConfigBoundsEachRoundTripAtOneSecond(t *
 
 func TestRegisterBackendService_RefusesAtTheCall(t *testing.T) {
     cases := map[string]struct {
-        client rueidis.Client
         config BackendConfig
         field  string
     }{
-        "nil client":        {client: nil, config: BackendConfig{}, field: ""},
-        "unlimited timeout": {client: &teardownSpyClient{}, config: BackendConfig{CallTimeout: melodybound.UnlimitedDuration()}, field: "BackendConfig.CallTimeout"},
-        "zero scan count":   {client: &teardownSpyClient{}, config: BackendConfig{ScanCount: melodybound.Of(0)}, field: "BackendConfig.ScanCount"},
+        "unlimited timeout": {config: BackendConfig{CallTimeout: melodybound.UnlimitedDuration()}, field: "BackendConfig.CallTimeout"},
+        "zero scan count":   {config: BackendConfig{ScanCount: melodybound.Of(0)}, field: "BackendConfig.ScanCount"},
     }
 
     for name, testCase := range cases {
@@ -181,18 +182,38 @@ func TestRegisterBackendService_RefusesAtTheCall(t *testing.T) {
                         t.Fatal("expected the registration to panic with an error")
                     }
 
-                    if "" != testCase.field && testCase.field != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+                    if testCase.field != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
                         t.Fatalf("expected the refusal to name %s, got %v", testCase.field, recoveredErr)
                     }
                 }()
 
-                RegisterBackendService(registrar, testCase.client, testCase.config)
+                registerBackendService(registrar, testCase.config)
             }()
 
             if 0 != len(registrar.names) {
                 t.Fatalf("expected nothing registered, got %v", registrar.names)
             }
         })
+    }
+}
+
+/* registerConnectionOver registers the connection service the rueidis module would, over a client the test holds */
+func registerConnectionOver(serviceContainer containercontract.Container, client rueidis.Client) {
+    serviceContainer.MustRegister(
+        melodyrueidis.ServiceConnection,
+        func(resolver containercontract.Resolver) (*melodyrueidis.Connection, error) {
+            return melodyrueidis.NewConnection(client), nil
+        },
+        containercontract.RegisterOptions{},
+    )
+}
+
+func TestRegisterBackendService_AnApplicationWithNoConnectionIsRefusedAtTheResolve(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    registerBackendService(&containerRegistrar{target: serviceContainer}, BackendConfig{})
+
+    if _, resolveErr := container.FromResolver[cachecontract.Backend](t.Context(), serviceContainer, melodycache.ServiceCacheBackend); nil == resolveErr {
+        t.Fatal("expected a backend with no connection service refused")
     }
 }
 

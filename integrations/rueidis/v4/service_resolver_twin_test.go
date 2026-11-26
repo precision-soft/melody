@@ -26,10 +26,10 @@ func TestClientMustFromRuntime_AnswersTheSiblingsInstanceThroughTheRuntimesScope
     seen := any(nil)
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    container.MustRegister[rueidis.Client](serviceContainer, ServiceClient, func(resolver containercontract.Resolver) (rueidis.Client, error) {
+    container.MustRegister[*Connection](serviceContainer, ServiceConnection, func(resolver containercontract.Resolver) (*Connection, error) {
         seen = resolver.Runtime().Context().Value(twinContextKey{})
 
-        return first, nil
+        return NewConnection(first), nil
     }, containercontract.RegisterOptions{})
 
     runtimeInstance := runtime.NewRequest(context.WithValue(t.Context(), twinContextKey{}, "the caller's"), serviceContainer.NewScope())
@@ -42,7 +42,7 @@ func TestClientMustFromRuntime_AnswersTheSiblingsInstanceThroughTheRuntimesScope
     }
 
     overridden := serviceContainer.NewScope()
-    overridden.MustOverrideProtectedInstance(ServiceClient, second, containercontract.OverrideOptions{})
+    overridden.MustOverrideProtectedInstance(ServiceConnection, NewConnection(second), containercontract.OverrideOptions{})
 
     if second != ClientMustFromRuntime(runtime.NewRun(t.Context(), overridden)) {
         t.Fatalf("expected the runtime form to resolve through the runtime's scope")
@@ -57,7 +57,7 @@ func TestClientMustFromRuntime_PanicsOnANilRuntimeAndAnUnregisteredService(t *te
     }{
         {"nil runtime", nil, "runtime may not be nil"},
         {"unregistered", runtime.NewRequest(t.Context(), container.NewContainer(container.ContainerConfig{}).NewScope()), "service is not registered"},
-        {"unregistered names the service", runtime.NewRequest(t.Context(), container.NewContainer(container.ContainerConfig{}).NewScope()), ServiceClient},
+        {"unregistered names the service", runtime.NewRequest(t.Context(), container.NewContainer(container.ContainerConfig{}).NewScope()), ServiceConnection},
     } {
         func() {
             defer func() {

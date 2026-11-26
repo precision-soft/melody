@@ -29,7 +29,6 @@ import (
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodymessagebus "github.com/precision-soft/melody/v4/messagebus"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    rueidis "github.com/redis/rueidis"
     bun "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
 )
@@ -439,11 +438,6 @@ func TestRegisterSeeders_CollectsTheSeedersInTheOrderTheirReferencesNeed(t *test
     }
 }
 
-/* stubRedisClient stands for a wired redis client; the hub's registration reads only whether one is there */
-type stubRedisClient struct {
-    rueidis.Client
-}
-
 type closeableConnectionStub struct{}
 
 func (instance *closeableConnectionStub) CloseWithContext(closeContext context.Context) error {
@@ -466,7 +460,7 @@ func hubTeardownDependencies(t *testing.T, redisWired bool) []string {
     moduleInstance.buildServerSentEvent()
 
     if true == redisWired {
-        moduleInstance.redisClient = stubRedisClient{}
+        moduleInstance.redisProvider = melodyrueidis.NewProvider(melodyrueidis.ProviderConfig{})
         containerInstance.MustRegister(
             melodyrueidis.ServiceConnection,
             func(resolver melodycontainercontract.Resolver) (*closeableConnectionStub, error) {

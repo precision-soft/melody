@@ -3,7 +3,6 @@ package config
 import (
     "time"
 
-    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
     "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/.example/persistence"
     "github.com/precision-soft/melody/v4/.example/security"
@@ -61,11 +60,11 @@ func (instance *Module) registerTwoFactorStoreService(registrar melodyapplicatio
 
 /* buildSecondFactorReplayGuard is the one memory of accepted codes both the sign-in and the verification door burn a code in, so a code spent at either door is refused at the other: in redis when the example has one, shared by every replica, and in this process otherwise. */
 func (instance *Module) buildSecondFactorReplayGuard(clockInstance melodyclockcontract.Clock) melodysecuritycontract.NonceGuard {
-    if nil == instance.redisClient {
+    if false == instance.redisConfigured() {
         return melodysecurity.NewMemoryNonceGuard(melodysecurity.MemoryNonceGuardConfig{Clock: clockInstance})
     }
 
-    return melodyrueidis.NewNonceGuard(instance.redisClient, melodyrueidis.NonceGuardConfig{KeyPrefix: secondFactorReplayGuardPrefix})
+    return &runtimeResolvedNonceGuard{serviceName: serviceSecondFactorReplayGuard}
 }
 
 /* buildLoginAuthentication is the chain the sign-in door authenticates through. Without a database there is no enrollment to read, so the password stands alone; with one, an enrolled account also presents a TOTP code or a recovery code, through the framework's second-factor authenticator, and the code is only read while the account's budget lasts. */
@@ -100,10 +99,8 @@ func (instance *Module) buildLoginAuthentication(
 
 /* buildSecondFactorBudgetLimiter counts the presented codes in redis when the example has one, so every replica spends one budget, and in this process otherwise; with redis unreachable the limiter fails closed, so a code is refused rather than read uncounted. A store failure is returned to the budget, which journals it on the request's logger. The in-process budget is keyed per account and spent only once the password was accepted, so its 10,000 entries are accounts that presented a code; a full table gives the slot of the account seen longest ago to the next one, and handing one account its budget back early takes the passwords of 10,000 others. */
 func (instance *Module) buildSecondFactorBudgetLimiter(clockInstance melodyclockcontract.Clock) melodyhttpcontract.RateLimiter {
-    if nil != instance.redisClient {
-        return melodyrueidis.NewRateLimiter(instance.redisClient, secondFactorBudgetLimiterName, secondFactorBudgetAllowance, secondFactorBudgetWindow, melodyrueidis.RateLimiterConfig{
-            KeyPrefix: redisRateLimitKeyPrefix,
-        })
+    if true == instance.redisConfigured() {
+        return &runtimeResolvedRateLimiter{serviceName: serviceSecondFactorBudgetLimiter}
     }
 
     return melodyhttpmiddleware.NewSlidingWindowLimiter(secondFactorBudgetLimiterName, secondFactorBudgetAllowance, secondFactorBudgetWindow, melodyhttpmiddleware.LimiterConfig{

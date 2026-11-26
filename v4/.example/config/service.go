@@ -10,7 +10,6 @@ import (
     "github.com/precision-soft/melody/v4/.example/persistence"
     "github.com/precision-soft/melody/v4/.example/reporting"
     "github.com/precision-soft/melody/v4/.example/repository"
-    examplesecurity "github.com/precision-soft/melody/v4/.example/security"
     "github.com/precision-soft/melody/v4/.example/subscriber"
     examplevalidation "github.com/precision-soft/melody/v4/.example/validation"
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
@@ -66,20 +65,10 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
 
     instance.registerSessionStorage(registrar)
 
-    /* the token store's namespace on redis, which example:db:reset empties; without redis the store is the server process's own memory and has none */
-    if nil != instance.redisClient {
-        redisClient := instance.redisClient
+    /* the token store's namespace on redis, which example:db:reset empties, the limiters and the nonce guards; without redis the store is the server process's own memory and has none */
+    instance.registerRedisServices(registrar)
 
-        registrar.RegisterService(
-            examplesecurity.ServiceTokenNamespace,
-            func(resolver melodycontainercontract.Resolver) (*examplesecurity.TokenNamespace, error) {
-                return examplesecurity.NewTokenNamespace(redisClient, redisTokenStoreKeyPrefix), nil
-            },
-            melodycontainer.RegisterOptions{},
-        )
-    }
-
-    if nil == instance.redisClient {
+    if false == instance.redisConfigured() {
         opaqueTokenStore := instance.opaqueTokenStore
 
         registrar.RegisterService(
@@ -156,10 +145,10 @@ var _ melodyapplicationcontract.ServiceModule = (*Module)(nil)
 func (instance *Module) registerServerSentEventHubService(registrar melodyapplicationcontract.ServiceRegistrar) {
     serverSentEventHub := instance.serverSentEventHub
 
-    /* the redis backplane was installed on the hub before any container existed, a capture no resolution records: without the edge the teardown could close the connection before the hub drains the backplane's subscription. It is declared only when redis is wired, since the boot refuses an edge to a service never registered */
+    /* the connection factory installs the redis backplane on the hub, a capture no resolution of the hub records: without the edge the teardown could close the connection before the hub drains the backplane's subscription. It is declared only when redis is wired, since the boot refuses an edge to a service never registered */
     /* built at boot: only the nomenclature listener resolves it, on a write, so a process serving only readers would run the hub without a journal */
     registerOptions := melodycontainer.RegisterOptions{BuiltAtBoot: true, BootFailure: melodycontainer.BootFailureFailsBoot}
-    if nil != instance.redisClient {
+    if true == instance.redisConfigured() {
         registerOptions.TeardownDependencyNames = []string{melodyrueidis.ServiceConnection}
     }
 

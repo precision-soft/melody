@@ -23,6 +23,7 @@ type Connection struct {
     closeErr error
 }
 
+/* Client answers the owned client for commands, safe while the owner keeps the lifecycle; closing it oneself loses the ordered teardown, the idempotent close and the deadline answer. */
 func (instance *Connection) Client() rueidis.Client {
     return instance.client
 }
