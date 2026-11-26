@@ -129,10 +129,34 @@ Every door of `httpclientcontract.Client` takes the runtime it runs under first,
 | `TlsHandshakeTimeout`       | 10s     | 1ms                             | refused                                           |
 | `ExpectContinueTimeout`     | 1s      | 0, which sends the body at once | refused                                           |
 | `ResponseHeaderTimeout`     | 15s     | 1ms                             | refused                                           |
+| `TlsConfig`                 | nil, Go's own TLS configuration | —                     | —                                                 |
+| `Proxy`                     | nil, the environment | —                                | —                                                 |
+| `ProxyDisabled`             | false   | —                               | —                                                 |
 
 Every timeout but `IdleConnectionTimeout` refuses unlimited: the dial, handshake, response-header and 100-continue waits each guard against a peer that never answers, and `KeepAlive` has `KeepAliveDisabled`. `KeepAlive` set beside `KeepAliveDisabled` is refused.
 
 The two idle pools are decided each on its own: `MaxIdleConnections` bounds the idle connections across every host, `MaxIdleConnectionsPerHost` those kept for one host, and net/http applies both, so the smaller one wins. Raising the total alone leaves each host at 100; a client that talks to many hosts sets both. `IdleConnectionsDisabled` keeps no connection idle, so every request dials its own over HTTP/1 and HTTP/2 alike, an HTTP/1 request carrying `Connection: close`, and refuses `MaxIdleConnections`, `MaxIdleConnectionsPerHost` or `IdleConnectionTimeout` set beside it.
+
+- **`TransportConfig.TlsConfig`, `Proxy` and `ProxyDisabled` decide how the transport reaches a server.** `TlsConfig` is the TLS configuration of every connection the client dials — a private certificate authority, a client certificate, a minimum version — cloned by `NewHttpClient`, so a later change to the caller's value is not observed; nil is Go's own. HTTP/2 is still negotiated beside it. `InsecureSkipVerify` and a lowered `MinVersion` are admitted: they are the application's explicit Go, the one off door of certificate verification. `Proxy` picks the proxy of each request; nil reads `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`, which never proxy a loopback target. `ProxyDisabled` dials every request directly whatever the environment says, and `Proxy` set beside it is refused naming `TransportConfig.Proxy`. A redirect still strips `Proxy-Authorization`, and a proxy url is never written into an error, since it may carry a credential.
+
+```go
+pool := x509.NewCertPool()
+pool.AppendCertsFromPEM(authorityPem)
+
+certificate, _ := tls.X509KeyPair(clientCertificatePem, clientKeyPem)
+
+client, clientErr := httpclient.NewHttpClient(httpclient.HttpClientConfig{
+    BaseUrl: "https://ledger.internal/v1/",
+    Transport: httpclient.TransportConfig{
+        TlsConfig: &tls.Config{
+            RootCAs:      pool,
+            Certificates: []tls.Certificate{certificate},
+            MinVersion:   tls.VersionTLS12,
+        },
+        ProxyDisabled: true,
+    },
+})
+```
 
 - `NewDefaultHttpClient` is `NewHttpClient(HttpClientConfig{})`: no base url, a 30s timeout, no header, the default transport and redirects followed up to net/http's cap of ten requests. The base url and the timeout are fixed at construction; a caller that needs another builds another client.
 - **`HttpClientConfig.Timeout` bounds one whole exchange**: 30s by default, at least 1ms, and unlimited admitted for a client that must never cut an exchange. A request's `RequestOptions.Timeout` replaces it for that request, unlimited included. `MaxRedirects` bounds the requests an exchange makes while it follows redirects, the first included, ten by default as net/http counts its own cap, and is refused beside `RedirectsDisabled`.
@@ -174,7 +198,7 @@ The two idle pools are decided each on its own: `MaxIdleConnections` bounds the 
     - [`FromRuntime(runtimeInstance, serviceName) Bound`](../../httpclient/bound.go)
 - [`type HttpClientConfig`](../../httpclient/http_client_config.go) — `BaseUrl`, `Timeout bound.Duration`, `Headers`, `Transport TransportConfig`, `RedirectsDisabled`, `MaxRedirects bound.Count`, `RoundTripperDecorators []RoundTripperDecorator`; `RedirectsDisabled` hands a redirect back as the response it is, status and `Location` included, instead of following it, where a `POST` answered 301, 302 or 303 is otherwise re-sent by `net/http` as a `GET` without its body
 - [`type RoundTripperDecorator`](../../httpclient/http_client_config.go) — `func(next nethttp.RoundTripper) nethttp.RoundTripper`, the first of `HttpClientConfig.RoundTripperDecorators` outermost
-- [`type TransportConfig`](../../httpclient/transport_config.go) — `bound` fields, `KeepAliveDisabled` and `IdleConnectionsDisabled`
+- [`type TransportConfig`](../../httpclient/transport_config.go) — `bound` fields, `KeepAliveDisabled` and `IdleConnectionsDisabled`, `TlsConfig *tls.Config`, `Proxy func(request *nethttp.Request) (*url.URL, error)` and `ProxyDisabled`
 - [`type RequestOptions`](../../httpclient/request_option.go) and [`type BasicAuth`](../../httpclient/request_option.go) — the contract's structs
 - Responses:
     - [`type Response`](../../httpclient/response.go)

@@ -76,8 +76,14 @@ func NewHttpClient(config HttpClientConfig) (*HttpClient, error) {
         return nil, err
     }
 
+    transportRouting, err := resolveTransportRouting(config.Transport)
+    if nil != err {
+        return nil, err
+    }
+
     transport := &nethttp.Transport{
-        Proxy:                 nethttp.ProxyFromEnvironment,
+        Proxy:                 transportRouting.Proxy,
+        TLSClientConfig:       transportRouting.TlsConfig,
         DialContext:           (&net.Dialer{Timeout: transportConfig.DialTimeout, KeepAlive: transportConfig.KeepAlive}).DialContext,
         ForceAttemptHTTP2:     true,
         MaxIdleConns:          transportConfig.MaxIdleConnections,

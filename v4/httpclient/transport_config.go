@@ -1,7 +1,10 @@
 package httpclient
 
 import (
+    "crypto/tls"
     "math"
+    nethttp "net/http"
+    "net/url"
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
@@ -38,6 +41,15 @@ type TransportConfig struct {
 
     /* ResponseHeaderTimeout bounds the wait for the response headers once the request is written: 15s by default, at least 1ms. */
     ResponseHeaderTimeout bound.Duration
+
+    /* TlsConfig is the TLS configuration of every connection the client dials: a private certificate authority, a client certificate, a minimum version. nil is Go's default. It is cloned at construction; a later change is not observed. */
+    TlsConfig *tls.Config
+
+    /* Proxy picks the proxy of a request; nil reads the environment (HTTP_PROXY, HTTPS_PROXY, NO_PROXY). */
+    Proxy func(request *nethttp.Request) (*url.URL, error)
+
+    /* ProxyDisabled dials every request directly, whatever the environment says, and refuses a Proxy set beside it. */
+    ProxyDisabled bool
 }
 
 /* resolvedTransportConfig is the transport configuration with every field decided, in net/http's terms. */
@@ -51,6 +63,12 @@ type resolvedTransportConfig struct {
     ExpectContinueTimeout     time.Duration
     ResponseHeaderTimeout     time.Duration
     DisableKeepAlives         bool
+}
+
+/* resolvedTransportRouting is how the transport reaches a server: the cloned TLS configuration and the proxy choice. */
+type resolvedTransportRouting struct {
+    TlsConfig *tls.Config
+    Proxy     func(request *nethttp.Request) (*url.URL, error)
 }
 
 const defaultMaxIdleConnections = 100
@@ -215,6 +233,36 @@ func resolveTransportConfig(config TransportConfig) (resolvedTransportConfig, er
         return resolvedTransportConfig{}, err
     }
     resolved.ResponseHeaderTimeout = responseHeaderTimeout.Value
+
+    return resolved, nil
+}
+
+func resolveTransportRouting(config TransportConfig) (resolvedTransportRouting, error) {
+    var resolved resolvedTransportRouting
+
+    if nil != config.Proxy && true == config.ProxyDisabled {
+        return resolvedTransportRouting{}, exception.NewError(
+            "the http client is handed a proxy and has its proxy disabled",
+            exceptioncontract.Context{
+                "field":       "TransportConfig.Proxy",
+                "contradicts": "TransportConfig.ProxyDisabled",
+            },
+            nil,
+        )
+    }
+
+    resolved.Proxy = nethttp.ProxyFromEnvironment
+    if nil != config.Proxy {
+        resolved.Proxy = config.Proxy
+    }
+
+    if true == config.ProxyDisabled {
+        resolved.Proxy = nil
+    }
+
+    if nil != config.TlsConfig {
+        resolved.TlsConfig = config.TlsConfig.Clone()
+    }
 
     return resolved, nil
 }

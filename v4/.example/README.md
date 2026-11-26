@@ -427,6 +427,16 @@ client that carries no base at all. Both are registered by NAME and not by type:
 type, so a resolution by type could only answer with whichever landed first, and the boot refuses the second
 registration outright.
 
+A provider behind a private certificate authority keeps these clients: the authority goes into the client's
+transport in Go, and certificate verification stays on.
+
+```go
+pool := x509.NewCertPool()
+pool.AppendCertsFromPEM(authorityPem)
+
+config.Transport.TlsConfig = &tls.Config{RootCAs: pool}
+```
+
 The rate is quoted against a base — one unit of that base costs `rate` units of the currency — so a
 conversion between two currencies cancels it and the catalogue never has to know what the base was. The
 instant stored is the PROVIDER's rather than the moment the refresh ran, because a reader deciding whether a

@@ -1,11 +1,15 @@
 package httpclient
 
 import (
+    "crypto/tls"
     "math"
+    "net/http"
+    "net/url"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/exception"
 )
 
 func mustResolveTransportConfig(t *testing.T, config TransportConfig) resolvedTransportConfig {
@@ -221,3 +225,36 @@ func TestResolveTransportConfig_AnIdlePoolLimitSetBesideIdleConnectionsDisabledI
     _, err = resolveTransportConfig(TransportConfig{IdleConnectionsDisabled: true, IdleConnectionTimeout: bound.Of(time.Minute)})
     assertRefusedField(t, err, "TransportConfig.IdleConnectionTimeout", "an idle pool limit is set on a transport that keeps no idle connection")
 }
+
+func TestResolveTransportRouting_AProxyBesideProxyDisabledIsRefused(t *testing.T) {
+    _, err := resolveTransportRouting(TransportConfig{
+        ProxyDisabled: true,
+        Proxy: func(request *http.Request) (*url.URL, error) {
+            return nil, nil
+        },
+    })
+
+    assertRefusedField(t, err, "TransportConfig.Proxy", "the http client is handed a proxy and has its proxy disabled")
+
+    if "TransportConfig.ProxyDisabled" != exception.FromError(err).Context()["contradicts"] {
+        t.Fatalf("expected the refusal to name the contradicting field, got %+v", exception.FromError(err).Context())
+    }
+}
+
+func TestResolveTransportRouting_ANilTlsConfigStaysNil(t *testing.T) {
+    routing, err := resolveTransportRouting(TransportConfig{})
+    if nil != err {
+        t.Fatalf("unexpected refusal: %v", err)
+    }
+
+    if nil != routing.TlsConfig {
+        t.Fatalf("expected Go's default TLS configuration, got %+v", routing.TlsConfig)
+    }
+
+    var typedNil *tls.Config
+    routing, err = resolveTransportRouting(TransportConfig{TlsConfig: typedNil})
+    if nil != err || nil != routing.TlsConfig {
+        t.Fatalf("expected a nil pointer to be Go's default, got %+v, %v", routing.TlsConfig, err)
+    }
+}
+

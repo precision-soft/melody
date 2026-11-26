@@ -216,6 +216,14 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** `application.HttpHandler()` for the handler, served under your own server, with `application.BeginHttpShutdown(ctx)` before its `Shutdown(ctx)` and `application.CloseWithContext(closeCtx)` after it; `http.NewKernel(router, http.KernelConfig{…}).ServeHttp(container)` for a bare kernel in a unit test; a field typed `httpcontract.Kernel` becomes `*http.Kernel`. Drop `HttpKernel()` from a kernel fake.
 
+### Httpclient: the transport takes a TLS configuration and a proxy
+
+**What changed.** [`TransportConfig`](../httpclient/transport_config.go) gains `TlsConfig`, `Proxy` and `ProxyDisabled`; their zero value is the client it was. See [Footguns & caveats](package/HTTPCLIENT.md#footguns--caveats).
+
+**Symptom.** None. A comparison of two `TransportConfig` values with `==` no longer compiles: the struct holds a function.
+
+**Remedy.** A `net/http` client built by hand only for a private certificate authority, a client certificate or a proxy comes back to `httpclient.NewHttpClient` with `TransportConfig.TlsConfig`, `Proxy` or `ProxyDisabled`, and keeps the client's timeouts, caps and credential stripping.
+
 ### Cli: the root is built from a config
 
 **What changed.** [`cli.NewRoot(applicationName, applicationDescription, cli.RootConfig{Version, Writer, ErrorWriter})`](../cli/root.go) takes the version and the two streams at construction, stamped on every command at `Register`; `Root.SetVersion`, `SetWriter` and `SetErrorWriter` are removed. The zero config is an undeclared version and the process's standard streams.

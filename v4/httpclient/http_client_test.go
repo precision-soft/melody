@@ -3,6 +3,8 @@ package httpclient
 import (
     "bytes"
     "context"
+    "crypto/tls"
+    "crypto/x509"
     "encoding/base64"
     "errors"
     "fmt"
@@ -2917,3 +2919,128 @@ func TestHttpClientCloseWithContext_OfAClientWithoutItsOwnTransport_AnswersNil(t
         }
     }
 }
+
+func newTlsTestServer(t *testing.T, http2 bool) (*httptest.Server, *x509.CertPool) {
+    t.Helper()
+
+    server := httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        _, _ = io.WriteString(writer, request.Proto)
+    }))
+    server.EnableHTTP2 = http2
+    server.StartTLS()
+    t.Cleanup(server.Close)
+
+    pool := x509.NewCertPool()
+    pool.AddCert(server.Certificate())
+
+    return server, pool
+}
+
+func TestHttpClient_TlsConfigReachesTheHandshake(t *testing.T) {
+    server, pool := newTlsTestServer(t, false)
+
+    trusting := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL + "/", Transport: TransportConfig{TlsConfig: &tls.Config{RootCAs: pool}}})
+    if _, err := trusting.Get(testRuntime(), "", RequestOptions{}); nil != err {
+        t.Fatalf("expected the private authority to verify the server, got %v", err)
+    }
+
+    defaulted := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL + "/"})
+    var unknownAuthority x509.UnknownAuthorityError
+    if _, err := defaulted.Get(testRuntime(), "", RequestOptions{}); false == errors.As(err, &unknownAuthority) {
+        t.Fatalf("expected the default trust to refuse the private authority, got %v", err)
+    }
+}
+
+func TestHttpClient_TheTlsConfigIsClonedAtConstruction(t *testing.T) {
+    server, pool := newTlsTestServer(t, false)
+
+    tlsConfig := &tls.Config{RootCAs: pool}
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL + "/", Transport: TransportConfig{TlsConfig: tlsConfig}})
+
+    tlsConfig.RootCAs = x509.NewCertPool()
+
+    if client.transport.TLSClientConfig == tlsConfig {
+        t.Fatalf("expected the transport to hold a clone, not the caller's pointer")
+    }
+
+    if _, err := client.Get(testRuntime(), "", RequestOptions{}); nil != err {
+        t.Fatalf("expected a change after construction not to be observed, got %v", err)
+    }
+}
+
+/* the environment never proxies a loopback target, so the transport's proxy choice is read directly */
+func TestHttpClient_ProxyDisabledIgnoresTheEnvironment(t *testing.T) {
+    disabled := newTestHttpClient(t, HttpClientConfig{Transport: TransportConfig{ProxyDisabled: true}})
+    if nil != disabled.transport.Proxy {
+        t.Fatalf("expected no proxy function with the proxy disabled")
+    }
+
+    defaulted := newTestHttpClient(t, HttpClientConfig{})
+    if nil == defaulted.transport.Proxy {
+        t.Fatalf("expected the environment to be read when nothing is configured")
+    }
+}
+
+func TestHttpClient_AProxyFunctionIsAsked(t *testing.T) {
+    received := make(chan string, 1)
+    proxy := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        received <- request.URL.String()
+        writer.WriteHeader(http.StatusOK)
+    }))
+    t.Cleanup(proxy.Close)
+
+    proxyUrl, _ := url.Parse(proxy.URL)
+    asked := &atomic.Int64{}
+    client := newTestHttpClient(t, HttpClientConfig{Transport: TransportConfig{Proxy: func(request *http.Request) (*url.URL, error) {
+        asked.Add(1)
+
+        return proxyUrl, nil
+    }}})
+
+    if _, err := client.Get(testRuntime(), "http://service.example/path", RequestOptions{}); nil != err {
+        t.Fatalf("expected the request to go through the proxy, got %v", err)
+    }
+
+    if 1 != asked.Load() {
+        t.Fatalf("expected the proxy function asked once, got %d", asked.Load())
+    }
+
+    if target := <-received; "http://service.example/path" != target {
+        t.Fatalf("expected the proxy to receive the absolute target, got %q", target)
+    }
+}
+
+func TestHttpClient_TheProtocolIsUnchangedByATlsConfig(t *testing.T) {
+    server, pool := newTlsTestServer(t, true)
+
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL + "/", Transport: TransportConfig{TlsConfig: &tls.Config{RootCAs: pool}}})
+
+    response, err := client.Get(testRuntime(), "", RequestOptions{})
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "HTTP/2.0" != string(response.Body()) {
+        t.Fatalf("expected HTTP/2 negotiated beside a TLS configuration, got %q", response.Body())
+    }
+}
+
+func TestHttpClient_ADecoratorStillWrapsTheConfiguredTransport(t *testing.T) {
+    server, pool := newTlsTestServer(t, false)
+
+    recorder := &recordingRoundTripper{}
+    client := newTestHttpClient(t, HttpClientConfig{
+        BaseUrl:                server.URL + "/",
+        Transport:              TransportConfig{TlsConfig: &tls.Config{RootCAs: pool}},
+        RoundTripperDecorators: []RoundTripperDecorator{recordingDecorator(recorder)},
+    })
+
+    if _, err := client.Get(testRuntime(), "", RequestOptions{}); nil != err {
+        t.Fatalf("expected the decorated transport to carry the TLS configuration, got %v", err)
+    }
+
+    if 1 != len(recorder.requests) {
+        t.Fatalf("expected the decorator to see the request, got %d", len(recorder.requests))
+    }
+}
+
