@@ -7,10 +7,12 @@ import (
     "os"
     "strings"
     "sync"
+    "sync/atomic"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -30,7 +32,7 @@ func TestServerSentEventBackplane_PublishAfterCloseDoesNotRetry(t *testing.T) {
 
     done := make(chan error, 1)
     go func() {
-        done <- backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "after-close"})
+        done <- backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "after-close"})
     }()
 
     select {
@@ -151,7 +153,7 @@ func TestServerSentEventBackplane_ReplicatesBroadcastToAnotherInstance(t *testin
     defer tick.Stop()
 
     for {
-        hubA.Broadcast("orders", melodyhttp.ServerSentEvent{Data: "from-a"})
+        hubA.Broadcast(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "from-a"})
 
         select {
         case event := <-subscriber.Events():
@@ -188,7 +190,7 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
     subscriber := hub.Subscribe("orders")
     defer hub.Unsubscribe(subscriber)
 
-    if delivered := hub.Broadcast("orders", melodyhttp.ServerSentEvent{Data: "once"}); 1 != delivered {
+    if delivered := hub.Broadcast(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "once"}); 1 != delivered {
         t.Fatalf("expected exactly one local delivery, got %d", delivered)
     }
 
@@ -401,14 +403,14 @@ func TestServerSentEventBackplane_PublishReturnsWithinTheCallTimeoutOnAWedgedWri
     })
     awaitBackplaneSubscribed(t, backplane)
 
-    if publishErr := backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
+    if publishErr := backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
         t.Fatalf("healthy publish: %v", publishErr)
     }
 
     gated.Wedge()
 
     outcome := make(chan error, 1)
-    go func() { outcome <- backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "wedged"}) }()
+    go func() { outcome <- backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "wedged"}) }()
 
     publishErr := awaitOutcome(t, "publish on a wedged write", outcome, 2*time.Second)
     if nil == publishErr {
@@ -436,7 +438,7 @@ func TestServerSentEventBackplane_ATimedOutPublishOnAnOwnedConnectionRedialsOnTh
     defer backplane.CloseWithContext(context.Background())
     awaitBackplaneSubscribed(t, backplane)
 
-    if publishErr := backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
+    if publishErr := backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
         t.Fatalf("healthy publish: %v", publishErr)
     }
 
@@ -447,13 +449,13 @@ func TestServerSentEventBackplane_ATimedOutPublishOnAnOwnedConnectionRedialsOnTh
     dialer.Latest().Wedge()
 
     outcome := make(chan error, 1)
-    go func() { outcome <- backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "wedged"}) }()
+    go func() { outcome <- backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "wedged"}) }()
 
     if publishErr := awaitOutcome(t, "publish on a wedged write", outcome, 2*time.Second); nil == publishErr {
         t.Fatalf("expected the wedged publish to fail")
     }
 
-    go func() { outcome <- backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "after-the-wedge"}) }()
+    go func() { outcome <- backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "after-the-wedge"}) }()
 
     if publishErr := awaitOutcome(t, "publish after the wedge", outcome, 5*time.Second); nil != publishErr {
         t.Fatalf("expected the publish after the wedge to succeed on a fresh connection, got: %v", publishErr)
@@ -525,21 +527,21 @@ func TestServerSentEventBackplane_ASecondPublishOnAWedgedCallerOwnedConnectionIs
     })
     awaitBackplaneSubscribed(t, backplane)
 
-    if publishErr := backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
+    if publishErr := backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
         t.Fatalf("healthy publish: %v", publishErr)
     }
 
     gated.Wedge()
 
     outcome := make(chan error, 1)
-    go func() { outcome <- backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "wedged"}) }()
+    go func() { outcome <- backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "wedged"}) }()
 
     firstErr := awaitOutcome(t, "publish on a wedged write", outcome, 2*time.Second)
     if false == errorChainContains(firstErr, "did not return within the call timeout on a caller-owned connection") {
         t.Fatalf("expected the first publish to report the call timeout on a caller-owned connection, got: %v", firstErr)
     }
 
-    go func() { outcome <- backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "while-wedged"}) }()
+    go func() { outcome <- backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "while-wedged"}) }()
 
     secondErr := awaitOutcome(t, "publish while wedged", outcome, 2*time.Second)
     if false == errorChainContains(secondErr, "an earlier write is still blocked on this connection") {
@@ -563,14 +565,14 @@ func TestServerSentEventBackplane_CloseReturnsWhileAPublishWriteIsWedged(t *test
     })
     awaitBackplaneSubscribed(t, backplane)
 
-    if publishErr := backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
+    if publishErr := backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
         t.Fatalf("healthy publish: %v", publishErr)
     }
 
     dialer.Latest().Wedge()
 
     publishOutcome := make(chan error, 1)
-    go func() { publishOutcome <- backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "wedged"}) }()
+    go func() { publishOutcome <- backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "wedged"}) }()
 
     closeOutcome := make(chan error, 1)
     go func() { closeOutcome <- backplane.CloseWithContext(t.Context()) }()
@@ -590,13 +592,13 @@ func TestServerSentEventBackplane_HubShutdownReturnsWhileABroadcastIsWedged(t *t
     })
     awaitBackplaneSubscribed(t, backplane)
 
-    hub.Broadcast("orders", melodyhttp.ServerSentEvent{Data: "healthy"})
+    hub.Broadcast(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "healthy"})
 
     gated.Wedge()
 
     broadcastOutcome := make(chan error, 1)
     go func() {
-        hub.Broadcast("orders", melodyhttp.ServerSentEvent{Data: "wedged"})
+        hub.Broadcast(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "wedged"})
         broadcastOutcome <- nil
     }()
 
@@ -629,7 +631,7 @@ func TestServerSentEventBackplane_CloseReturnsWhenTheSocketWedgedWhileIdle(t *te
     })
     awaitBackplaneSubscribed(t, backplane)
 
-    if publishErr := backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
+    if publishErr := backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
         t.Fatalf("healthy publish: %v", publishErr)
     }
 
@@ -652,14 +654,14 @@ func TestServerSentEventBackplane_CloseNamesTheBlockedWriteOnAWedgedCallerOwnedC
     })
     awaitBackplaneSubscribed(t, backplane)
 
-    if publishErr := backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
+    if publishErr := backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
         t.Fatalf("healthy publish: %v", publishErr)
     }
 
     gated.Wedge()
 
     publishOutcome := make(chan error, 1)
-    go func() { publishOutcome <- backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "wedged"}) }()
+    go func() { publishOutcome <- backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "wedged"}) }()
 
     if publishErr := awaitOutcome(t, "publish on a wedged write", publishOutcome, 2*time.Second); nil == publishErr {
         t.Fatalf("expected the wedged publish to fail")
@@ -766,7 +768,7 @@ func TestServerSentEventBackplane_CloseClosesTheChannelsWhenNoWriteIsInFlight(t 
     })
     awaitBackplaneSubscribed(t, backplane)
 
-    if publishErr := backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
+    if publishErr := backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
         t.Fatalf("healthy publish: %v", publishErr)
     }
 
@@ -810,7 +812,7 @@ func TestServerSentEventBackplane_ABroadcastQueuedBehindAnotherIsNotReportedAsAW
     })
     awaitBackplaneSubscribed(t, backplane)
 
-    if publishErr := backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
+    if publishErr := backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
         t.Fatalf("healthy publish: %v", publishErr)
     }
 
@@ -821,7 +823,7 @@ func TestServerSentEventBackplane_ABroadcastQueuedBehindAnotherIsNotReportedAsAW
     releaseBackplanePublish := holdPublishMutex(t, &backplane.publishMutex)
 
     publishOutcome := make(chan error, 1)
-    go func() { publishOutcome <- backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "queued"}) }()
+    go func() { publishOutcome <- backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "queued"}) }()
 
     publishErr := awaitOutcome(t, "broadcast queued behind the publish mutex", publishOutcome, 3*time.Second)
 
@@ -858,7 +860,7 @@ func TestServerSentEventBackplane_ABroadcastAbandonedWhileQueuedIsNeverWritten(t
     })
     awaitBackplaneSubscribed(t, backplane)
 
-    if publishErr := backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
+    if publishErr := backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
         t.Fatalf("healthy publish: %v", publishErr)
     }
 
@@ -867,7 +869,7 @@ func TestServerSentEventBackplane_ABroadcastAbandonedWhileQueuedIsNeverWritten(t
     releaseBackplanePublish := holdPublishMutex(t, &backplane.publishMutex)
 
     publishOutcome := make(chan error, 1)
-    go func() { publishOutcome <- backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "abandoned"}) }()
+    go func() { publishOutcome <- backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "abandoned"}) }()
 
     if publishErr := awaitOutcome(t, "broadcast abandoned while queued", publishOutcome, 3*time.Second); nil == publishErr {
         t.Fatalf("expected the queued broadcast to be refused")
@@ -878,7 +880,7 @@ func TestServerSentEventBackplane_ABroadcastAbandonedWhileQueuedIsNeverWritten(t
 
     awaitNoPublishGoroutine(t, "(*ServerSentEventBackplane).publishOnce.func", 3*time.Second)
 
-    if publishErr := backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "fence"}); nil != publishErr {
+    if publishErr := backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "fence"}); nil != publishErr {
         t.Fatalf("fence publish: %v", publishErr)
     }
 
@@ -945,7 +947,7 @@ func TestServerSentEventBackplane_ResolveExpiredWriteAnswersAWriteThatAlreadyRet
     })
     awaitBackplaneSubscribed(t, backplane)
 
-    if publishErr := backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
+    if publishErr := backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
         t.Fatalf("healthy publish: %v", publishErr)
     }
 
@@ -1026,7 +1028,7 @@ func TestServerSentEventBackplane_CloseGivesAnOwnedConnectionItsHandshakeWhenNot
     })
     awaitBackplaneSubscribed(t, backplane)
 
-    if publishErr := backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
+    if publishErr := backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
         t.Fatalf("healthy publish: %v", publishErr)
     }
 
@@ -1120,14 +1122,14 @@ func TestServerSentEventBackplane_CloseWithContextStillReportsACutWedgedWrite(t 
     }
 
     /* a healthy publish FIRST, so the publish channel is open before the socket is wedged: opening it is itself an RPC over the same socket, and wedging ahead of it blocks that RPC instead of the publish this test is about — which left the publish half free and the close with nothing to cut */
-    if publishErr := backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
+    if publishErr := backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
         t.Fatalf("the healthy publish failed, so nothing below measures a wedged one: %v", publishErr)
     }
 
     gated.Wedge()
 
     publishing := make(chan error, 1)
-    go func() { publishing <- backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "wedged"}) }()
+    go func() { publishing <- backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "wedged"}) }()
 
     /* the gate is the backplane's OWN count of writes on the socket, not the socket's count of blocked ones: the connection carries heartbeats of its own, so a blocked write is not necessarily THIS publish, and waiting on the wrong one let the close run with the publish half free and nothing to cut. What the close reads is what this waits for. */
     deadline := time.Now().Add(2 * time.Second)
@@ -1239,7 +1241,7 @@ func TestNewServerSentEventBackplane_ARefusedLimitLeavesTheHubWithoutABackplane(
                 NewServerSentEventBackplane(hub, refusingSource(), config)
             })
 
-            hub.Broadcast("orders", melodyhttp.ServerSentEvent{Data: "probe"})
+            hub.Broadcast(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "probe"})
             if 0 != hub.BackplaneFailures() {
                 t.Fatalf("expected a refused config to leave the hub without a backplane, but a broadcast reached one")
             }
@@ -1251,7 +1253,7 @@ func TestNewServerSentEventBackplane_ARefusedLimitLeavesTheHubWithoutABackplane(
     backplane := NewServerSentEventBackplane(hub, FromDialer(refusingDialer), ServerSentEventBackplaneConfig{})
     defer backplane.CloseWithContext(context.Background())
 
-    hub.Broadcast("orders", melodyhttp.ServerSentEvent{Data: "probe"})
+    hub.Broadcast(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "probe"})
     if 0 == hub.BackplaneFailures() {
         t.Fatalf("expected the control's broadcast to reach the installed backplane and fail over the refusing dialer")
     }
@@ -1580,7 +1582,7 @@ func TestServerSentEventBackplane_PublishReturnsOnACyclicChainFromTheDialer(t *t
     }
 
     assertReturnsOnACyclicChain(t, func() {
-        if publishErr := instance.Publish("topic", melodyhttp.ServerSentEvent{}); nil == publishErr {
+        if publishErr := instance.Publish(newReconnectRuntime(context.Background()), "topic", melodyhttp.ServerSentEvent{}); nil == publishErr {
             t.Error("expected the dialer's refusal")
         }
     })
@@ -1745,5 +1747,179 @@ func TestServerSentEventBackplane_AClosedBackplaneCancelsADialInFlight(t *testin
 
     if elapsed := time.Since(closeStarted); 2*time.Second <= elapsed {
         t.Fatalf("expected the close to return at once, it took %s", elapsed)
+    }
+}
+
+func TestServerSentEventBackplane_PublishIsCappedByCallTimeoutWithinTheCallersContext(t *testing.T) {
+    queuedBehindAHeldPublish := func(t *testing.T, callTimeout time.Duration, runtimeInstance containercontract.Runtime) (error, time.Duration, *ServerSentEventBackplane, *amqp091.Channel) {
+        dsn := amqpDsnOrSkip(t)
+        connection, _ := dialGated(t, dsn)
+
+        hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+        backplane := NewServerSentEventBackplane(hub, borrowedSource(connection), ServerSentEventBackplaneConfig{
+            Exchange:    "melody.sse.test.wedge",
+            CallTimeout: bound.Of(callTimeout),
+        })
+        awaitBackplaneSubscribed(t, backplane)
+
+        if publishErr := backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
+            t.Fatalf("healthy publish: %v", publishErr)
+        }
+
+        backplane.mutex.Lock()
+        publishChannelBefore := backplane.publishChannel
+        backplane.mutex.Unlock()
+
+        releaseBackplanePublish := holdPublishMutex(t, &backplane.publishMutex)
+        defer releaseBackplanePublish()
+
+        started := time.Now()
+        publishOutcome := make(chan error, 1)
+        go func() { publishOutcome <- backplane.Publish(runtimeInstance, "orders", melodyhttp.ServerSentEvent{Data: "queued"}) }()
+
+        publishErr := awaitOutcome(t, "broadcast queued behind the publish mutex", publishOutcome, 3*time.Second)
+
+        return publishErr, time.Since(started), backplane, publishChannelBefore
+    }
+
+    t.Run("the call timeout caps a caller's context without a deadline", func(t *testing.T) {
+        publishErr, waited, _, _ := queuedBehindAHeldPublish(t, 200*time.Millisecond, newReconnectRuntime(context.Background()))
+
+        if false == errors.Is(publishErr, errServerSentEventBackplanePublishTimedOut) || 150*time.Millisecond > waited {
+            t.Fatalf("expected the call timeout to end the turn, got %v after %v", publishErr, waited)
+        }
+    })
+
+    t.Run("the caller's earlier deadline wins over the call timeout", func(t *testing.T) {
+        callerContext, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+        defer cancel()
+
+        publishErr, waited, backplane, publishChannelBefore := queuedBehindAHeldPublish(t, time.Hour, newReconnectRuntime(callerContext))
+
+        if false == errors.Is(publishErr, errServerSentEventBackplanePublishCallerDone) || false == errors.Is(publishErr, context.DeadlineExceeded) {
+            t.Fatalf("expected the caller's deadline to end the turn, got %v", publishErr)
+        }
+
+        if 2*time.Second < waited {
+            t.Fatalf("expected the turn to end at the caller's deadline, waited %v", waited)
+        }
+
+        backplane.mutex.Lock()
+        wedged := backplane.wedged
+        publishChannelAfter := backplane.publishChannel
+        backplane.mutex.Unlock()
+
+        if true == wedged || publishChannelBefore != publishChannelAfter {
+            t.Fatalf("a turn the caller gave up on touched no socket: expected the channel kept and nothing wedged, wedged %v", wedged)
+        }
+    })
+}
+
+func TestServerSentEventBackplane_PublishRefusesADoneContextBeforeMarshalling(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    dials := 0
+    instance := &ServerSentEventBackplane{
+        ctx:    ctx,
+        cancel: cancel,
+        dialer: func(dialContext context.Context) (*Connection, error) {
+            dials++
+
+            return nil, errors.New("no broker")
+        },
+    }
+
+    cause := errors.New("the request went away")
+    callerContext, cancelCaller := context.WithCancelCause(context.Background())
+    cancelCaller(cause)
+
+    publishErr := instance.Publish(newReconnectRuntime(callerContext), "orders", melodyhttp.ServerSentEvent{Data: "x"})
+    if nil == publishErr || "sse backplane publish refused: the caller's context is done" != publishErr.Error() || false == errors.Is(publishErr, cause) {
+        t.Fatalf("expected the done-context refusal carrying its cause, got %v", publishErr)
+    }
+
+    if 0 != dials {
+        t.Fatalf("expected no dial under a done context, got %d", dials)
+    }
+}
+
+func TestServerSentEventBackplane_PublishRefusesANilRuntimeNamingTheDoor(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    instance := &ServerSentEventBackplane{ctx: ctx, cancel: cancel}
+
+    publishErr := instance.Publish(nil, "orders", melodyhttp.ServerSentEvent{Data: "x"})
+    if nil == publishErr || "amqp.ServerSentEventBackplane.Publish" != exception.LogContext(publishErr, exception.LogContextConfig{})["door"] {
+        t.Fatalf("expected the nil runtime refused naming the door, got %v", publishErr)
+    }
+}
+
+func TestServerSentEventBackplane_AQueuedPublishEndsWhenTheBackplaneCloses(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, _ := dialGated(t, dsn)
+
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+    backplane := NewServerSentEventBackplane(hub, borrowedSource(connection), ServerSentEventBackplaneConfig{
+        Exchange:    "melody.sse.test.wedge",
+        CallTimeout: bound.Of(time.Hour),
+    })
+    awaitBackplaneSubscribed(t, backplane)
+
+    if publishErr := backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
+        t.Fatalf("healthy publish: %v", publishErr)
+    }
+
+    releaseBackplanePublish := holdPublishMutex(t, &backplane.publishMutex)
+    defer releaseBackplanePublish()
+
+    publishOutcome := make(chan error, 1)
+    go func() { publishOutcome <- backplane.Publish(newReconnectRuntime(context.Background()), "orders", melodyhttp.ServerSentEvent{Data: "queued"}) }()
+
+    backplane.cancel()
+
+    if publishErr := awaitOutcome(t, "broadcast queued while the backplane closes", publishOutcome, 3*time.Second); nil == publishErr {
+        t.Fatalf("expected the queued broadcast to be refused once the backplane closed")
+    }
+}
+
+/* a context that reads live at the first check and done at every later one, so a failure between the two is answered under a context that ended meanwhile */
+type endingAfterFirstCheckContext struct {
+    context.Context
+    checks atomic.Int64
+}
+
+func (instance *endingAfterFirstCheckContext) Err() error {
+    if 1 == instance.checks.Add(1) {
+        return nil
+    }
+
+    return context.Canceled
+}
+
+func TestServerSentEventBackplane_AFailedPublishIsNotRetriedOnceTheCallersContextEnded(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    var dials atomic.Int64
+    instance := &ServerSentEventBackplane{
+        ctx:       ctx,
+        cancel:    cancel,
+        reconnect: defaultReconnect,
+        dialer: func(dialContext context.Context) (*Connection, error) {
+            dials.Add(1)
+
+            return nil, errors.New("no broker")
+        },
+    }
+
+    publishErr := instance.Publish(newReconnectRuntime(&endingAfterFirstCheckContext{Context: context.Background()}), "orders", melodyhttp.ServerSentEvent{Data: "x"})
+    if nil == publishErr || "sse backplane publish refused: the caller's context is done" != publishErr.Error() {
+        t.Fatalf("expected the retry refused under the ended context, got %v", publishErr)
+    }
+
+    if 1 != dials.Load() {
+        t.Fatalf("expected one dial and no retry, got %d", dials.Load())
     }
 }

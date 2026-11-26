@@ -39,7 +39,7 @@ handler := melodywebsocket.NewStreamHandler(hub, melodywebsocket.StreamHandlerCo
 
 // register handler on a route, e.g. GET /ws
 // broadcast from anywhere (e.g. a message handler):
-hub.Broadcast("device-42", melodyhttp.ServerSentEvent{Event: "task.cancelled", Data: payloadJson})
+hub.Broadcast(runtimeInstance, "device-42", melodyhttp.ServerSentEvent{Event: "task.cancelled", Data: payloadJson})
 ```
 
 The handler upgrades the connection, subscribes to the resolved topic, writes each broadcast `ServerSentEvent`'s data to the socket, and reads inbound frames (dispatched to `OnMessage` as an `InboundMessage`, with the `StreamConnection` they arrived on). It returns `(nil, nil)` once the client disconnects, so the kernel writes nothing further.
@@ -62,7 +62,7 @@ app.RegisterModule(melodywebsocket.NewModule(melodywebsocket.ModuleConfig{
 
 ## Footguns & caveats
 
-- The hub is shared with Server-Sent Events: a single `hub.Broadcast(topic, event)` reaches both Server-Sent Events and WebSocket subscribers of that topic.
+- The hub is shared with Server-Sent Events: a single `hub.Broadcast(runtimeInstance, topic, event)` reaches both Server-Sent Events and WebSocket subscribers of that topic.
 - Only the event `Data` is written to the socket — the `Event`/`Id`/`Retry` fields of a `ServerSentEvent` are not. Encode structured payloads (for example JSON) into `Data` before broadcasting.
 - Outbound frames are **text** by default; set `StreamHandlerConfig.BinaryWrites = true` to write `websocket.MessageBinary` instead ([`writeMessageType`](./handler.go)). It is an all-or-nothing switch for the whole connection — pick binary when `Data` carries a non-UTF-8 payload (Protobuf, MessagePack, raw bytes), since a text frame's payload must be valid UTF-8. It does not affect `OnMessage`, whose `InboundMessage.Binary` reports whatever the client sent, nor `Send`, whose `OutboundMessage.Binary` chooses the frame type of each reply.
 - `OriginPatterns` is passed to `websocket.Accept`; set it for browser clients on other origins.

@@ -266,7 +266,7 @@ func TestRegisterCatalogSchemaService_PublishesTheSchemaWithoutADatabase(t *test
 /* refusingBackplane refuses every publish, the failure the hub files */
 type refusingBackplane struct{}
 
-func (instance refusingBackplane) Publish(topic string, event melodyhttp.ServerSentEvent) error {
+func (instance refusingBackplane) Publish(runtimeInstance melodycontainercontract.Runtime, topic string, event melodyhttp.ServerSentEvent) error {
     return errors.New("the backplane is down")
 }
 
@@ -301,7 +301,7 @@ func TestHub_IsBuiltInItsProviderWithTheApplicationsLogger(t *testing.T) {
     }
 
     hub.SetBackplane(refusingBackplane{})
-    hub.Broadcast("catalog", melodyhttp.ServerSentEvent{Event: "notification", Data: "changed"})
+    hub.Broadcast(configTestRuntime(), "catalog", melodyhttp.ServerSentEvent{Event: "notification", Data: "changed"})
     _ = hub.CloseWithContext(t.Context())
 
     if false == strings.Contains(journal.String(), "server sent event backplane publish failed") {

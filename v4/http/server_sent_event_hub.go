@@ -7,6 +7,7 @@ import (
     "sync/atomic"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
@@ -14,7 +15,8 @@ import (
 )
 
 type ServerSentEventBackplane interface {
-    Publish(topic string, event ServerSentEvent) error
+    /* Publish replicates one event to the other nodes under the caller's runtime: a done context is refused before the event is encoded, and the backplane's own call timeout caps the round trip within that context. */
+    Publish(runtimeInstance containercontract.Runtime, topic string, event ServerSentEvent) error
 
     CloseWithContext(closeContext context.Context) error
 }
@@ -249,10 +251,15 @@ func sameBackplane(installed ServerSentEventBackplane, candidate ServerSentEvent
     return installed == candidate
 }
 
-func (instance *ServerSentEventHub) Broadcast(topic string, event ServerSentEvent) int {
+/* Broadcast delivers the event to this node's subscribers and replicates it through the backplane under the caller's runtime, answering the local delivery count; a nil runtime panics naming the door, and a done context still delivers locally, the backplane's refusal counted as one failure. */
+func (instance *ServerSentEventHub) Broadcast(runtimeInstance containercontract.Runtime, topic string, event ServerSentEvent) int {
+    if refusal := containercontract.RefuseNilRuntime(runtimeInstance, "http.ServerSentEventHub.Broadcast"); nil != refusal {
+        exception.Panic(exception.FromError(refusal))
+    }
+
     delivered := instance.DeliverLocal(topic, event)
 
-    instance.replicate(topic, event)
+    instance.replicate(runtimeInstance, topic, event)
 
     return delivered
 }
@@ -457,7 +464,7 @@ func recoverServerSentEventBackplaneClose(closeContext context.Context, backplan
 }
 
 /* replicate pushes the event to the other nodes. The publish runs outside the lock, a network round trip, so the in-flight counter is raised under the read lock that reads the closed flag and a close waits on it. The publish runs under a guard, since it is third-party code on the broadcaster's goroutine, and its failure is recorded. */
-func (instance *ServerSentEventHub) replicate(topic string, event ServerSentEvent) {
+func (instance *ServerSentEventHub) replicate(runtimeInstance containercontract.Runtime, topic string, event ServerSentEvent) {
     instance.mutex.RLock()
 
     if true == instance.closed {
@@ -483,7 +490,7 @@ func (instance *ServerSentEventHub) replicate(topic string, event ServerSentEven
     defer generation.publishesOutstanding.Add(-1)
     defer generation.publishesInFlight.Done()
 
-    publishErr := recoverServerSentEventBackplanePublish(generation.backplane, topic, event)
+    publishErr := recoverServerSentEventBackplanePublish(generation.backplane, runtimeInstance, topic, event)
     if nil == publishErr {
         return
     }
@@ -502,6 +509,7 @@ func (instance *ServerSentEventHub) replicate(topic string, event ServerSentEven
 
 func recoverServerSentEventBackplanePublish(
     backplane ServerSentEventBackplane,
+    runtimeInstance containercontract.Runtime,
     topic string,
     event ServerSentEvent,
 ) (publishErr error) {
@@ -514,7 +522,7 @@ func recoverServerSentEventBackplanePublish(
         publishErr = RecoverToError(recoveredValue)
     }()
 
-    return backplane.Publish(topic, event)
+    return backplane.Publish(runtimeInstance, topic, event)
 }
 
 func logServerSentEventHubError(

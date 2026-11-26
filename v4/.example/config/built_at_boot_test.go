@@ -41,7 +41,7 @@ func TestBuiltAtBoot_HandsTheHubItsJournalBeforeAnyWrite(t *testing.T) {
 
     hub := moduleInstance.builtServerSentEventHub.Load()
     hub.SetBackplane(refusingBackplane{})
-    hub.Broadcast("catalog", melodyhttp.ServerSentEvent{Event: "notification", Data: "changed"})
+    hub.Broadcast(configTestRuntime(), "catalog", melodyhttp.ServerSentEvent{Event: "notification", Data: "changed"})
     _ = hub.CloseWithContext(t.Context())
 
     if false == strings.Contains(journal.String(), "server sent event backplane publish failed") {

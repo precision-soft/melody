@@ -9,6 +9,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -107,15 +108,27 @@ func NewServerSentEventBackplane(connection *Connection, hub *melodyhttp.ServerS
     return backplane
 }
 
-func (instance *ServerSentEventBackplane) Publish(topic string, event melodyhttp.ServerSentEvent) error {
+/* Publish refuses a nil runtime and a done caller's context before the event is encoded; the round trip runs under the caller's context capped by the call timeout, and a CloseWithContext ends it too. */
+func (instance *ServerSentEventBackplane) Publish(runtimeInstance containercontract.Runtime, topic string, event melodyhttp.ServerSentEvent) error {
+    if refusal := containercontract.RefuseNilRuntime(runtimeInstance, "rueidis.ServerSentEventBackplane.Publish"); nil != refusal {
+        return refusal
+    }
+
+    callerContext := runtimeInstance.Context()
+    if nil != callerContext.Err() {
+        return exception.NewError("sse backplane publish refused: the caller's context is done", map[string]any{"topic": topic}, context.Cause(callerContext))
+    }
+
     payload, marshalErr := json.Marshal(serverSentEventWireEvent{Origin: instance.origin, Topic: topic, Event: event})
     if nil != marshalErr {
         return exception.NewError("redis sse backplane could not encode the event", map[string]any{"topic": topic}, marshalErr)
     }
 
-    /* the publish is bounded by the call timeout on a context derived from the backplane's own, so a CloseWithContext cancels an in-flight publish too */
-    callContext, cancel := context.WithTimeout(instance.ctx, instance.callTimeout)
+    callContext, cancel := context.WithTimeout(callerContext, instance.callTimeout)
     defer cancel()
+
+    stopCancelOnClose := context.AfterFunc(instance.ctx, cancel)
+    defer stopCancelOnClose()
 
     result := instance.client.Do(
         callContext,

@@ -11,6 +11,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
@@ -39,6 +40,9 @@ var errServerSentEventBackplaneConnectionGone = errors.New("amqp sse backplane c
 
 /* sentinel matched with exception.ChainIs when a publish did not return inside the call timeout, its write or its wait for a turn. Publish retries neither and keeps the channel on both: a retry after a timed-out write would first close the channel that write still holds, and after a timed-out turn it would queue behind the same broadcasts. The message says which of the two it was; plain and wrapped fresh at the return site, for the reason above. */
 var errServerSentEventBackplanePublishTimedOut = errors.New("amqp sse backplane publish did not return within the call timeout")
+
+/* sentinel matched with exception.ChainIs when the caller's context ended while the publish waited for its turn: the socket was never touched, so the channel is kept and nothing is retried */
+var errServerSentEventBackplanePublishCallerDone = errors.New("amqp sse backplane publish was abandoned by the caller's context")
 
 type serverSentEventWireEvent struct {
     Origin string                     `json:"origin"`
@@ -149,13 +153,22 @@ func newServerSentEventBackplane(hub *melodyhttp.ServerSentEventHub, source Conn
 }
 
 /* Publish is best-effort by design, unlike the transport's confirmed publish: the channel runs without confirms, so an event the broker discards after accepting the frame is lost with no error, and the hub's backplane-failure counter counts local refusals only, as over redis pub/sub. A server-sent event is ephemeral fan-out state, corrected by the next event or a client refresh. The turn and the write are each bounded by the call timeout, and a timed-out write is not retried, since the retry would begin by closing the channel that write still holds. */
-func (instance *ServerSentEventBackplane) Publish(topic string, event melodyhttp.ServerSentEvent) error {
+func (instance *ServerSentEventBackplane) Publish(runtimeInstance containercontract.Runtime, topic string, event melodyhttp.ServerSentEvent) error {
+    if refusal := containercontract.RefuseNilRuntime(runtimeInstance, "amqp.ServerSentEventBackplane.Publish"); nil != refusal {
+        return refusal
+    }
+
+    callerContext := runtimeInstance.Context()
+    if nil != callerContext.Err() {
+        return refuseServerSentEventPublishForDoneContext(callerContext, topic)
+    }
+
     payload, marshalErr := json.Marshal(serverSentEventWireEvent{Origin: instance.origin, Topic: topic, Event: event})
     if nil != marshalErr {
         return exception.NewError("amqp sse backplane could not encode the event", map[string]any{"topic": topic}, marshalErr)
     }
 
-    usedChannel, publishErr := instance.publishOnce(payload)
+    usedChannel, publishErr := instance.publishOnce(callerContext, payload)
     if nil != publishErr {
         if true == instance.refusalKeepsTheChannel(publishErr) {
             return exception.NewError("amqp sse backplane publish failed", map[string]any{"topic": topic}, publishErr)
@@ -163,7 +176,11 @@ func (instance *ServerSentEventBackplane) Publish(topic string, event melodyhttp
 
         instance.resetPublishChannel(usedChannel)
 
-        retryChannel, retryErr := instance.publishOnce(payload)
+        if nil != callerContext.Err() {
+            return refuseServerSentEventPublishForDoneContext(callerContext, topic)
+        }
+
+        retryChannel, retryErr := instance.publishOnce(callerContext, payload)
         if nil != retryErr {
             if false == instance.refusalKeepsTheChannel(retryErr) {
                 instance.resetPublishChannel(retryChannel)
@@ -176,13 +193,17 @@ func (instance *ServerSentEventBackplane) Publish(topic string, event melodyhttp
     return nil
 }
 
+func refuseServerSentEventPublishForDoneContext(callerContext context.Context, topic string) error {
+    return exception.NewError("sse backplane publish refused: the caller's context is done", map[string]any{"topic": topic}, context.Cause(callerContext))
+}
+
 /* refusalKeepsTheChannel reports whether a publish failure leaves the cached channel in place: a closing backplane has nothing to reopen, a timed-out write still holds the channel, so closing it would join that write over the same socket, and a timed-out turn waited behind writes that hold it too. Both attempts read this one door. */
 func (instance *ServerSentEventBackplane) refusalKeepsTheChannel(publishErr error) bool {
     if true == instance.isClosing() {
         return true
     }
 
-    return exception.ChainIs(publishErr, errServerSentEventBackplanePublishTimedOut)
+    return exception.ChainIs(publishErr, errServerSentEventBackplanePublishTimedOut) || exception.ChainIs(publishErr, errServerSentEventBackplanePublishCallerDone)
 }
 
 /* CloseWithContext is bounded on every stretch, because no amqp client RPC observes a context and all share the send locks a blocked write holds: it joins the publish half under the call timeout, cuts an owned connection with a deadline, at once over a write genuinely in flight and one close timeout ahead otherwise, closes the channels under the join timeout, except where the close could only block — an owned connection whose close did not return within its bound, a caller-owned connection with a wedged write — and joins the listen goroutine under the same bound. No amqp call runs under instance.mutex, so isClosing and the publish path stay answerable while teardown waits. A failed join is read together with the writes in flight, as publishJoin.wedgedWrite does, since a queued broadcast holds the publish half as firmly as a wedged write. A dial that lands after the close began is closed on a goroutine of its own, which outlives this call by at most one close timeout counted from the landing; a dial still in flight when the close cancelled is waited for on that goroutine for as long as the dialer takes, so only the dialer's own timeout bounds that wait. The hub's clear waits for the broadcasts holding this backplane under that deadline. The publish join and the owned connection's close are the publishHalf's; every stretch takes the smaller of what is left of the deadline and its own ceiling, the transport's for the same operation: this backplane's call timeout for the publish join, and the close timeout for the owned connection's close and the channel closes. */
@@ -267,7 +288,7 @@ func (instance *ServerSentEventBackplane) CloseWithContext(closeContext context.
 }
 
 /* publishOnce is one broadcast through the embedded publish half, whose doc says why the write runs on its own goroutine and why the turn and the write are bounded apart: a busy fan-out queues broadcasts as its ordinary state, and a queued broadcast must not be answered as a blocked write. */
-func (instance *ServerSentEventBackplane) publishOnce(payload []byte) (*amqp091.Channel, error) {
+func (instance *ServerSentEventBackplane) publishOnce(callerContext context.Context, payload []byte) (*amqp091.Channel, error) {
     channel, channelConnection, channelErr := instance.ensurePublishChannel()
     if nil != channelErr {
         return nil, channelErr
@@ -288,7 +309,22 @@ func (instance *ServerSentEventBackplane) publishOnce(payload []byte) (*amqp091.
         outcome <- publishErr
     })
 
-    if true == attempt.awaitTurn(instance.ctx) {
+    /* the turn ends at the earlier of the call timeout, the caller's context and the backplane's close; the write once begun is waited for under the call timeout alone, since abandoning it on the caller's word would cut the connection it holds */
+    turnContext, cancelTurn := context.WithCancel(callerContext)
+    defer cancelTurn()
+
+    stopCancelOnClose := context.AfterFunc(instance.ctx, cancelTurn)
+    defer stopCancelOnClose()
+
+    if true == attempt.awaitTurn(turnContext) {
+        if nil != callerContext.Err() && nil == instance.ctx.Err() {
+            return channel, exception.NewError(
+                "amqp sse backplane publish refused: the caller's context ended before its turn",
+                map[string]any{"exchange": instance.exchange},
+                errors.Join(errServerSentEventBackplanePublishCallerDone, context.Cause(callerContext)),
+            )
+        }
+
         /* the socket was never touched by this broadcast, so nothing here may mark the backplane wedged or name a blocked write: what ran out was this broadcast's wait for its turn behind the ones ahead of it */
         return channel, exception.NewError(
             "amqp sse backplane publish did not reach the socket within the call timeout while earlier broadcasts still held it",

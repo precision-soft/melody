@@ -81,7 +81,7 @@ Every module below has one section, headed by its directory, and one row per exp
 | [`event/contract.SubscribedEvent`](../event/contract/event_subscriber.go) | framework | the dispatcher builds the subscription it hands back |
 | [`exception/contract.AlreadyLogged`](../exception/contract/already_logged.go) | framework | a marker the framework's logging sets on an error it already wrote |
 | [`exception/contract.ContextProvider`](../exception/contract/context.go) | application | an application error implements it to add context to the log line |
-| [`http.ServerSentEventBackplane`](../http/server_sent_event_hub.go) | application | a cross-process backplane is written by the application or an integration (amqp ships one) |
+| [`http.ServerSentEventBackplane`](../http/server_sent_event_hub.go) | application | a cross-process backplane is written by the application or an integration (amqp and rueidis ship one); its `Publish` takes the caller's runtime and publishes under its context |
 | [`http/contract.RateLimiter`](../http/contract/middleware.go) | application | a shared-store limiter is written by the application or an integration |
 | [`http/contract.Request`](../http/contract/request.go) | framework | the kernel builds every request a handler receives; a test builds one through http.NewRequest |
 | [`http/contract.RequestContext`](../http/contract/request_context.go) | framework | the kernel builds the request context |

@@ -75,6 +75,10 @@ func (instance *recordingResponseWriter) CommittedStatusCode() int {
    that skipped the registration would drive the handler down its unavailable branch and every assertion
    below it would be about that branch instead of about the stream. streamRequestWithoutHub is the sister
    that drives it deliberately. */
+func broadcastRuntime() melodycontainercontract.Runtime {
+    return melodyruntime.NewRun(context.Background(), melodycontainer.NewContainer(melodycontainer.ContainerConfig{}).NewScope())
+}
+
 func streamRequest(t *testing.T, target string, cancelled bool) (*melodyhttp.Request, melodycontainercontract.Runtime) {
     t.Helper()
 
@@ -347,13 +351,13 @@ func TestStreamHandler_DeliversAnEventPublishedPastTheServersWriteTimeout(t *tes
     /* the subscription exists once the hub counts it, which is the only thing that makes the broadcast below
        a delivery rather than a publish to nobody */
     deadline := time.Now().Add(2 * time.Second)
-    for 0 == hub.Broadcast("visitor", melodyhttp.ServerSentEvent{Data: "warm-up"}) && time.Now().Before(deadline) {
+    for 0 == hub.Broadcast(broadcastRuntime(), "visitor", melodyhttp.ServerSentEvent{Data: "warm-up"}) && time.Now().Before(deadline) {
         time.Sleep(10 * time.Millisecond)
     }
 
     time.Sleep(1500 * time.Millisecond)
 
-    if 1 != hub.Broadcast("visitor", melodyhttp.ServerSentEvent{Event: "catalog", Data: `{"action":"created"}`}) {
+    if 1 != hub.Broadcast(broadcastRuntime(), "visitor", melodyhttp.ServerSentEvent{Event: "catalog", Data: `{"action":"created"}`}) {
         t.Fatal("the stream was no longer subscribed when the event was published")
     }
 
@@ -450,7 +454,7 @@ func TestStreamHandler_JournalsARealServerCutAndNotAClientThatLeft(t *testing.T)
     }
 
     deadline := time.Now().Add(2 * time.Second)
-    for 0 == hub.Broadcast("visitor", melodyhttp.ServerSentEvent{Data: "warm-up"}) && time.Now().Before(deadline) {
+    for 0 == hub.Broadcast(broadcastRuntime(), "visitor", melodyhttp.ServerSentEvent{Data: "warm-up"}) && time.Now().Before(deadline) {
         time.Sleep(10 * time.Millisecond)
     }
 
@@ -458,7 +462,7 @@ func TestStreamHandler_JournalsARealServerCutAndNotAClientThatLeft(t *testing.T)
     frame := strings.Repeat("x", 256*1024)
     cutBy := time.Now().Add(10 * time.Second)
     for time.Now().Before(cutBy) && 0 == len(logger.recorded()) {
-        hub.Broadcast("visitor", melodyhttp.ServerSentEvent{Data: frame})
+        hub.Broadcast(broadcastRuntime(), "visitor", melodyhttp.ServerSentEvent{Data: frame})
         time.Sleep(20 * time.Millisecond)
     }
 
@@ -472,12 +476,12 @@ func TestStreamHandler_JournalsARealServerCutAndNotAClientThatLeft(t *testing.T)
     if nil != leavingErr {
         t.Fatalf("opening the second stream failed: %v", leavingErr)
     }
-    for 0 == hub.Broadcast("leaver", melodyhttp.ServerSentEvent{Data: "warm-up"}) && time.Now().Before(time.Now().Add(2*time.Second)) {
+    for 0 == hub.Broadcast(broadcastRuntime(), "leaver", melodyhttp.ServerSentEvent{Data: "warm-up"}) && time.Now().Before(time.Now().Add(2*time.Second)) {
         time.Sleep(10 * time.Millisecond)
     }
     _ = leaving.Body.Close()
     time.Sleep(200 * time.Millisecond)
-    hub.Broadcast("leaver", melodyhttp.ServerSentEvent{Data: frame})
+    hub.Broadcast(broadcastRuntime(), "leaver", melodyhttp.ServerSentEvent{Data: frame})
     time.Sleep(200 * time.Millisecond)
 
     if 1 != len(logger.recorded()) {
@@ -513,7 +517,7 @@ func TestStreamHandler_KeepsAnIdleStreamAliveAtHalfTheServersWriteBudget(t *test
     defer response.Body.Close()
 
     deadline := time.Now().Add(2 * time.Second)
-    for 0 == hub.Broadcast("idle", melodyhttp.ServerSentEvent{Data: "warm-up"}) && time.Now().Before(deadline) {
+    for 0 == hub.Broadcast(broadcastRuntime(), "idle", melodyhttp.ServerSentEvent{Data: "warm-up"}) && time.Now().Before(deadline) {
         time.Sleep(10 * time.Millisecond)
     }
 

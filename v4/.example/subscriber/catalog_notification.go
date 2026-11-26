@@ -64,7 +64,7 @@ func notifyCatalogChange(
         return encodeErr
     }
 
-    hub.Broadcast(catalogNotificationTopic, melodyhttp.ServerSentEvent{
+    hub.Broadcast(runtimeInstance, catalogNotificationTopic, melodyhttp.ServerSentEvent{
         Event: catalogNotificationEvent,
         Data:  string(payload),
     })

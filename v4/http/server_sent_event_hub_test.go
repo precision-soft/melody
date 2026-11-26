@@ -11,6 +11,8 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -22,7 +24,7 @@ func TestServerSentEventHub_BroadcastDeliversToTopicSubscribers(t *testing.T) {
     subscriber := hub.Subscribe("demo")
     other := hub.Subscribe("other")
 
-    delivered := hub.Broadcast("demo", ServerSentEvent{Event: "ping", Data: "hello"})
+    delivered := hub.Broadcast(newTestRuntime(), "demo", ServerSentEvent{Event: "ping", Data: "hello"})
     if 1 != delivered {
         t.Fatalf("expected 1 delivery, got %d", delivered)
     }
@@ -48,11 +50,11 @@ func TestServerSentEventHub_BroadcastCountsDroppedEventsOnFullBuffer(t *testing.
 
     hub.Subscribe("demo")
 
-    if delivered := hub.Broadcast("demo", ServerSentEvent{Data: "first"}); 1 != delivered {
+    if delivered := hub.Broadcast(newTestRuntime(), "demo", ServerSentEvent{Data: "first"}); 1 != delivered {
         t.Fatalf("expected the first event to be delivered, got %d", delivered)
     }
 
-    if delivered := hub.Broadcast("demo", ServerSentEvent{Data: "second"}); 0 != delivered {
+    if delivered := hub.Broadcast(newTestRuntime(), "demo", ServerSentEvent{Data: "second"}); 0 != delivered {
         t.Fatalf("expected the second event to be dropped, got %d delivered", delivered)
     }
 
@@ -80,7 +82,7 @@ func TestServerSentEventHub_CloseClosesSubscribersAndStopsDelivery(t *testing.T)
         }
     }
 
-    if delivered := hub.Broadcast("demo", ServerSentEvent{Data: "x"}); 0 != delivered {
+    if delivered := hub.Broadcast(newTestRuntime(), "demo", ServerSentEvent{Data: "x"}); 0 != delivered {
         t.Fatalf("expected no deliveries after shutdown, got %d", delivered)
     }
 
@@ -109,7 +111,7 @@ func TestServerSentEventHub_UnsubscribeStopsDelivery(t *testing.T) {
     subscriber := hub.Subscribe("demo")
     hub.Unsubscribe(subscriber)
 
-    delivered := hub.Broadcast("demo", ServerSentEvent{Data: "x"})
+    delivered := hub.Broadcast(newTestRuntime(), "demo", ServerSentEvent{Data: "x"})
     if 0 != delivered {
         t.Fatalf("expected 0 deliveries after unsubscribe, got %d", delivered)
     }
@@ -122,15 +124,22 @@ func TestServerSentEventHub_UnsubscribeStopsDelivery(t *testing.T) {
 type recordingBackplane struct {
     mutex      sync.Mutex
     published  []ServerSentEvent
+    runtimes   []containercontract.Runtime
     publishErr error
 }
 
-func (instance *recordingBackplane) Publish(topic string, event ServerSentEvent) error {
+func (instance *recordingBackplane) Publish(runtimeInstance containercontract.Runtime, topic string, event ServerSentEvent) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
+    instance.runtimes = append(instance.runtimes, runtimeInstance)
+
     if nil != instance.publishErr {
         return instance.publishErr
+    }
+
+    if doneErr := runtimeInstance.Context().Err(); nil != doneErr {
+        return doneErr
     }
 
     instance.published = append(instance.published, event)
@@ -157,7 +166,7 @@ func TestServerSentEventHub_BroadcastReplicatesAndDeliversLocally(t *testing.T) 
     subscriber := hub.Subscribe("orders")
     defer hub.Unsubscribe(subscriber)
 
-    if delivered := hub.Broadcast("orders", ServerSentEvent{Data: "hello"}); 1 != delivered {
+    if delivered := hub.Broadcast(newTestRuntime(), "orders", ServerSentEvent{Data: "hello"}); 1 != delivered {
         t.Fatalf("expected one local delivery, got %d", delivered)
     }
 
@@ -206,7 +215,7 @@ func TestServerSentEventHub_BroadcastAfterCloseDoesNotReplicate(t *testing.T) {
 
     _ = hub.CloseWithContext(t.Context())
 
-    if delivered := hub.Broadcast("orders", ServerSentEvent{Data: "hello"}); 0 != delivered {
+    if delivered := hub.Broadcast(newTestRuntime(), "orders", ServerSentEvent{Data: "hello"}); 0 != delivered {
         t.Fatalf("expected no local delivery after shutdown, got %d", delivered)
     }
 
@@ -219,10 +228,91 @@ func TestServerSentEventHub_BackplaneFailureIsCounted(t *testing.T) {
     hub := NewServerSentEventHub(ServerSentEventHubConfig{})
     hub.SetBackplane(&recordingBackplane{publishErr: exception.NewError("backplane down", nil, nil)})
 
-    hub.Broadcast("orders", ServerSentEvent{Data: "hello"})
+    hub.Broadcast(newTestRuntime(), "orders", ServerSentEvent{Data: "hello"})
 
     if 1 != hub.BackplaneFailures() {
         t.Fatalf("expected one backplane failure, got %d", hub.BackplaneFailures())
+    }
+}
+
+func TestServerSentEventHub_BroadcastHandsItsRuntimeToTheBackplane(t *testing.T) {
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{})
+    backplane := &recordingBackplane{}
+    hub.SetBackplane(backplane)
+
+    runtimeInstance := newTestRuntime()
+    hub.Broadcast(runtimeInstance, "orders", ServerSentEvent{Data: "hello"})
+
+    backplane.mutex.Lock()
+    defer backplane.mutex.Unlock()
+
+    if 1 != len(backplane.runtimes) || runtimeInstance != backplane.runtimes[0] {
+        t.Fatalf("expected the backplane to be handed the broadcast's runtime, got %v", backplane.runtimes)
+    }
+}
+
+func TestServerSentEventHub_ABroadcastUnderADoneContextDeliversLocallyAndCountsOneFailure(t *testing.T) {
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.Of(1)})
+    backplane := &recordingBackplane{}
+    hub.SetBackplane(backplane)
+
+    subscriber := hub.Subscribe("orders")
+    defer hub.Unsubscribe(subscriber)
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if delivered := hub.Broadcast(runtime.WithContext(newTestRuntime(), cancelledContext), "orders", ServerSentEvent{Data: "hello"}); 1 != delivered {
+        t.Fatalf("expected the local delivery to stand under a done context, got %d", delivered)
+    }
+
+    if 0 != backplane.count() {
+        t.Fatalf("expected nothing replicated under a done context, got %d", backplane.count())
+    }
+
+    if 1 != hub.BackplaneFailures() {
+        t.Fatalf("expected one backplane failure, got %d", hub.BackplaneFailures())
+    }
+
+    select {
+    case event := <-subscriber.Events():
+        if "hello" != event.Data {
+            t.Fatalf("unexpected event delivered locally: %q", event.Data)
+        }
+    default:
+        t.Fatalf("expected the event to reach the local subscriber")
+    }
+}
+
+func TestServerSentEventHub_ANilRuntimePanicsNamingTheDoor(t *testing.T) {
+    hub := NewServerSentEventHub(ServerSentEventHubConfig{SubscriberBuffer: bound.Of(1)})
+    backplane := &recordingBackplane{}
+    hub.SetBackplane(backplane)
+
+    subscriber := hub.Subscribe("orders")
+    defer hub.Unsubscribe(subscriber)
+
+    recoveredValue := func() (recoveredValue any) {
+        defer func() {
+            recoveredValue = recover()
+        }()
+
+        hub.Broadcast(nil, "orders", ServerSentEvent{Data: "hello"})
+
+        return nil
+    }()
+
+    if nil == recoveredValue {
+        t.Fatalf("expected a nil runtime to panic")
+    }
+
+    panicErr := exception.PanicCause(recoveredValue)
+    if "http.ServerSentEventHub.Broadcast" != exception.LogContext(panicErr, exception.LogContextConfig{})["door"] {
+        t.Fatalf("expected the refusal to name the door, got %v", panicErr)
+    }
+
+    if 0 != backplane.count() || 0 != len(subscriber.Events()) {
+        t.Fatalf("expected a refused broadcast to deliver and replicate nothing")
     }
 }
 
@@ -433,8 +523,8 @@ func TestServerSentEventHub_FilesItsFailuresIntoTheConfiguredLogger(t *testing.T
     hub.SetBackplane(&recordingBackplane{publishErr: exception.NewError("redis is down", nil, nil)})
 
     hub.Subscribe("topic")
-    hub.Broadcast("topic", ServerSentEvent{Data: "first"})
-    hub.Broadcast("topic", ServerSentEvent{Data: "second"})
+    hub.Broadcast(newTestRuntime(), "topic", ServerSentEvent{Data: "first"})
+    hub.Broadcast(newTestRuntime(), "topic", ServerSentEvent{Data: "second"})
 
     if 2 != logger.errorCount() {
         t.Fatalf("expected both failed publishes in the configured logger, got %d", logger.errorCount())
@@ -495,7 +585,7 @@ type sliceBackplane struct {
     names []string
 }
 
-func (instance sliceBackplane) Publish(topic string, event ServerSentEvent) error { return nil }
+func (instance sliceBackplane) Publish(runtimeInstance containercontract.Runtime, topic string, event ServerSentEvent) error { return nil }
 
 func (instance sliceBackplane) CloseWithContext(closeContext context.Context) error { return nil }
 
@@ -534,7 +624,7 @@ func TestServerSentEventHub_RecordsABackplanePublishFailureAtError(t *testing.T)
     hub := NewServerSentEventHub(ServerSentEventHubConfig{Logger: logger})
     hub.SetBackplane(&recordingBackplane{publishErr: exception.NewError("redis is down", nil, nil)})
 
-    hub.Broadcast("topic", ServerSentEvent{Data: "payload"})
+    hub.Broadcast(newTestRuntime(), "topic", ServerSentEvent{Data: "payload"})
 
     if 1 != logger.errorCount() {
         t.Fatalf("expected the publish failure to be recorded at error, got %d records", logger.errorCount())
@@ -547,7 +637,7 @@ func TestServerSentEventHub_RecordsABackplanePublishFailureAtError(t *testing.T)
 
 type panickingBackplane struct{}
 
-func (instance *panickingBackplane) Publish(topic string, event ServerSentEvent) error {
+func (instance *panickingBackplane) Publish(runtimeInstance containercontract.Runtime, topic string, event ServerSentEvent) error {
     panic("backplane exploded")
 }
 
@@ -561,7 +651,7 @@ func TestServerSentEventHub_ContainsAPanickingBackplane(t *testing.T) {
     hub.SetBackplane(&panickingBackplane{})
 
     /* replicate runs on whatever goroutine broadcast — a message-bus consumer's, commonly, where a panic ends the process */
-    hub.Broadcast("topic", ServerSentEvent{Data: "payload"})
+    hub.Broadcast(newTestRuntime(), "topic", ServerSentEvent{Data: "payload"})
 
     if 1 != logger.errorCount() {
         t.Fatalf("expected the contained panic to be recorded, got %d records", logger.errorCount())
@@ -674,7 +764,7 @@ func newGatedBackplane() *gatedBackplane {
     }
 }
 
-func (instance *gatedBackplane) Publish(topic string, event ServerSentEvent) error {
+func (instance *gatedBackplane) Publish(runtimeInstance containercontract.Runtime, topic string, event ServerSentEvent) error {
     close(instance.entered)
     <-instance.release
 
@@ -698,7 +788,7 @@ func TestServerSentEventHub_CloseWaitsForAnInFlightPublishBeforeClosingTheBackpl
     backplane := newGatedBackplane()
     hub.SetBackplane(backplane)
 
-    go hub.Broadcast("topic", ServerSentEvent{Data: "payload"})
+    go hub.Broadcast(newTestRuntime(), "topic", ServerSentEvent{Data: "payload"})
 
     <-backplane.entered
 
@@ -732,7 +822,7 @@ func TestServerSentEventHub_ASpentCloseDeadlineHandsTheBackplaneToADetachedClose
     backplane := newGatedBackplane()
     hub.SetBackplane(backplane)
 
-    go hub.Broadcast("topic", ServerSentEvent{Data: "payload"})
+    go hub.Broadcast(newTestRuntime(), "topic", ServerSentEvent{Data: "payload"})
 
     <-backplane.entered
 
@@ -771,7 +861,7 @@ func TestServerSentEventHub_ClearingTheBackplaneWaitsForAnInFlightPublish(t *tes
     backplane := newGatedBackplane()
     hub.SetBackplane(backplane)
 
-    go hub.Broadcast("topic", ServerSentEvent{Data: "payload"})
+    go hub.Broadcast(newTestRuntime(), "topic", ServerSentEvent{Data: "payload"})
 
     <-backplane.entered
 
@@ -850,7 +940,7 @@ func TestServerSentEventHub_CloseWithContext_LeavesTheBackplaneOpenWhenTheDeadli
     hub.SetBackplane(backplane)
 
     /* the publish in flight is created by a BROADCAST, the door a replicate actually travels, rather than by raising the hub's bookkeeping by hand. The hub records a publish in flight in more than one place — a group to wait on and a count to read — and a fixture that writes one of them stops creating the state it names the moment the other is consulted. */
-    go hub.Broadcast("topic", ServerSentEvent{Data: "payload"})
+    go hub.Broadcast(newTestRuntime(), "topic", ServerSentEvent{Data: "payload"})
 
     select {
     case <-backplane.publishing:
@@ -897,7 +987,7 @@ type countingServerSentEventBackplane struct {
     publishing  chan struct{}
 }
 
-func (instance *countingServerSentEventBackplane) Publish(topic string, event ServerSentEvent) error {
+func (instance *countingServerSentEventBackplane) Publish(runtimeInstance containercontract.Runtime, topic string, event ServerSentEvent) error {
     if nil == instance.publishGate {
         return nil
     }
@@ -966,7 +1056,7 @@ func TestServerSentEventHub_ClearBackplaneEndsWithTheDeadlineWhileAPublishIsInsi
     hub.SetBackplane(backplane)
     defer close(backplane.release)
 
-    go hub.Broadcast("topic", ServerSentEvent{Data: "payload"})
+    go hub.Broadcast(newTestRuntime(), "topic", ServerSentEvent{Data: "payload"})
 
     <-backplane.entered
 
@@ -1002,7 +1092,7 @@ type generationProbeBackplane struct {
     release chan struct{}
 }
 
-func (instance *generationProbeBackplane) Publish(topic string, event ServerSentEvent) error {
+func (instance *generationProbeBackplane) Publish(runtimeInstance containercontract.Runtime, topic string, event ServerSentEvent) error {
     if nil != instance.release {
         <-instance.release
     }
@@ -1036,7 +1126,7 @@ func TestServerSentEventHub_AClearWaitsOnTheBackplaneItRemovedAloneUnderNewPubli
             go func() {
                 defer finished.Done()
                 started.Done()
-                hub.Broadcast("topic", ServerSentEvent{Data: "x"})
+                hub.Broadcast(newTestRuntime(), "topic", ServerSentEvent{Data: "x"})
             }()
         }
         started.Wait()
@@ -1071,7 +1161,7 @@ func TestServerSentEventHub_AClearWaitsOnTheBackplaneItRemovedAloneUnderNewPubli
                 defer storm.Done()
                 for round := 0; round < 64; round++ {
                     hub.SetBackplane(next)
-                    hub.Broadcast("topic", ServerSentEvent{Data: "y"})
+                    hub.Broadcast(newTestRuntime(), "topic", ServerSentEvent{Data: "y"})
                 }
             }()
         }

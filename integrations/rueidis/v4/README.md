@@ -175,7 +175,7 @@ defer func() {
 }()
 ```
 
-`NewServerSentEventBackplane` resolves its configuration first and then calls `hub.SetBackplane` itself, so a refused configuration leaves the hub without a backplane and, after construction, `hub.Broadcast(...)` replicates automatically. The connection is caller-owned; `CloseWithContext` detaches the backplane and stops the subscription goroutine cleanly, but does not close the client. Delivery is best-effort like Server-Sent Events itself; `hub.BackplaneFailures()` counts broadcasts that could not be published.
+`NewServerSentEventBackplane` resolves its configuration first and then calls `hub.SetBackplane` itself, so a refused configuration leaves the hub without a backplane and, after construction, `hub.Broadcast(runtimeInstance, topic, event)` replicates automatically. `Publish` runs under the context of the runtime the broadcast was handed: a done context is refused before the event is encoded, with `sse backplane publish refused: the caller's context is done` and the context's cause, a nil runtime refused naming `door` `rueidis.ServerSentEventBackplane.Publish`, and the round trip is capped by `CallTimeout` within that context and ended by the backplane's close. The connection is caller-owned; `CloseWithContext` detaches the backplane and stops the subscription goroutine cleanly, but does not close the client. Delivery is best-effort like Server-Sent Events itself; `hub.BackplaneFailures()` counts broadcasts that could not be published.
 
 [`ServerSentEventBackplaneConfig`](./server_sent_event_backplane.go), every field left out being the default, and a value outside its rule panicking at `NewServerSentEventBackplane`, naming the field:
 

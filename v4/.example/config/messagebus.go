@@ -30,7 +30,7 @@ func (instance *Module) buildMessageBus() {
             return hubErr
         }
 
-        hub.Broadcast(notification.Topic, melodyhttp.ServerSentEvent{
+        hub.Broadcast(runtimeInstance, notification.Topic, melodyhttp.ServerSentEvent{
             Event: "notification",
             Data:  notification.Text,
         })

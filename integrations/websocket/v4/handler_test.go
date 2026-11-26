@@ -65,7 +65,7 @@ func TestStreamHandler_BroadcastReachesClient(t *testing.T) {
         time.Sleep(time.Millisecond)
     }
 
-    delivered := hub.Broadcast("demo", melodyhttp.ServerSentEvent{Event: "notification", Data: "hello-ws"})
+    delivered := hub.Broadcast(broadcastTestRuntime(), "demo", melodyhttp.ServerSentEvent{Event: "notification", Data: "hello-ws"})
     if 1 != delivered {
         t.Fatalf("expected the broadcast to reach 1 subscriber, got %d", delivered)
     }
@@ -120,7 +120,7 @@ func TestStreamHandler_IdleTimeoutKeepsHealthyClientConnected(t *testing.T) {
     /* the client's blocking Read below answers the server pings in the meantime */
     go func() {
         time.Sleep(350 * time.Millisecond)
-        hub.Broadcast("demo", melodyhttp.ServerSentEvent{Event: "notification", Data: "still-here"})
+        hub.Broadcast(broadcastTestRuntime(), "demo", melodyhttp.ServerSentEvent{Event: "notification", Data: "still-here"})
     }()
 
     messageType, payload, readErr := connection.Read(ctx)
@@ -305,7 +305,7 @@ func TestStreamHandler_TheWriteTimeoutBoundsAWriteTheClientNeverDrains(t *testin
     }
 
     /* far more than the loopback buffers hold, and the client never reads, so the write parks until its timeout */
-    if 1 != hub.Broadcast("demo", melodyhttp.ServerSentEvent{Event: "notification", Data: strings.Repeat("p", 16<<20)}) {
+    if 1 != hub.Broadcast(broadcastTestRuntime(), "demo", melodyhttp.ServerSentEvent{Event: "notification", Data: strings.Repeat("p", 16<<20)}) {
         t.Fatalf("expected the broadcast to reach the subscriber")
     }
 
@@ -400,7 +400,7 @@ func TestStreamHandler_SlowClientDrainingOneFrameIsNotDisconnected(t *testing.T)
         drained <- nil
     }()
 
-    if 1 != hub.Broadcast("demo", melodyhttp.ServerSentEvent{Event: "notification", Data: payload}) {
+    if 1 != hub.Broadcast(broadcastTestRuntime(), "demo", melodyhttp.ServerSentEvent{Event: "notification", Data: payload}) {
         t.Fatalf("expected the broadcast to reach the subscriber")
     }
 
@@ -463,7 +463,7 @@ func TestStreamHandler_UnansweredPingsDisconnectAPeerThatKeepsAcceptingWrites(t 
             case <-stopBroadcast:
                 return
             case <-time.After(30 * time.Millisecond):
-                hub.Broadcast("demo", melodyhttp.ServerSentEvent{Event: "notification", Data: payload})
+                hub.Broadcast(broadcastTestRuntime(), "demo", melodyhttp.ServerSentEvent{Event: "notification", Data: payload})
             }
         }
     }()
@@ -545,7 +545,7 @@ func TestStreamHandler_SlowOnMessageDoesNotDisconnectHealthyClient(t *testing.T)
 
     go func() {
         time.Sleep(500 * time.Millisecond)
-        hub.Broadcast("demo", melodyhttp.ServerSentEvent{Event: "notification", Data: "still-here"})
+        hub.Broadcast(broadcastTestRuntime(), "demo", melodyhttp.ServerSentEvent{Event: "notification", Data: "still-here"})
     }()
 
     _, payload, readErr := connection.Read(ctx)
@@ -1246,7 +1246,7 @@ func TestStreamHandler_BinaryWritesDeliverTheBroadcastAsABinaryFrame(t *testing.
         time.Sleep(time.Millisecond)
     }
 
-    delivered := hub.Broadcast("demo", melodyhttp.ServerSentEvent{Event: "notification", Data: "hello-ws"})
+    delivered := hub.Broadcast(broadcastTestRuntime(), "demo", melodyhttp.ServerSentEvent{Event: "notification", Data: "hello-ws"})
     if 1 != delivered {
         t.Fatalf("expected the broadcast to reach 1 subscriber, got %d", delivered)
     }
@@ -1595,7 +1595,7 @@ func TestStreamHandler_ANilErrorKeepsTheConnection(t *testing.T) {
         }
     }
 
-    if 1 != hub.Broadcast("demo", melodyhttp.ServerSentEvent{Data: "after-the-callbacks"}) {
+    if 1 != hub.Broadcast(broadcastTestRuntime(), "demo", melodyhttp.ServerSentEvent{Data: "after-the-callbacks"}) {
         t.Fatal("expected the connection still subscribed after two callbacks answered nil")
     }
 
@@ -1702,7 +1702,7 @@ func TestStreamConnection_ConcurrentSendsEachArriveWhole(t *testing.T) {
             sendErrors <- streamConnection.Send(senderRuntime, OutboundMessage{Payload: []byte(fmt.Sprintf("frame-%d", index))})
         }(index)
     }
-    hub.Broadcast("demo", melodyhttp.ServerSentEvent{Data: "broadcast"})
+    hub.Broadcast(broadcastTestRuntime(), "demo", melodyhttp.ServerSentEvent{Data: "broadcast"})
 
     expected := map[string]bool{"broadcast": true}
     for index := 0; index < senderCount; index++ {
@@ -1996,7 +1996,7 @@ func TestStreamHandler_AFailureDuringABroadcastFrameStillClosesWithStatus1011(t 
 
             stream := <-kept
             largePayload := strings.Repeat("a", 32<<20)
-            hub.Broadcast("demo", melodyhttp.ServerSentEvent{Data: largePayload})
+            hub.Broadcast(broadcastTestRuntime(), "demo", melodyhttp.ServerSentEvent{Data: largePayload})
 
             deadline := time.Now().Add(5 * time.Second)
             for false == stream.isClosed() {

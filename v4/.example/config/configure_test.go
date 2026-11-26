@@ -9,6 +9,7 @@ import (
 
     melodyotlp "github.com/precision-soft/melody/integrations/opentelemetry/v4/otlp"
     "github.com/precision-soft/melody/v4/.example/migration"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -19,7 +20,7 @@ type countingBackplane struct {
     closes int
 }
 
-func (instance *countingBackplane) Publish(topic string, event melodyhttp.ServerSentEvent) error {
+func (instance *countingBackplane) Publish(runtimeInstance melodycontainercontract.Runtime, topic string, event melodyhttp.ServerSentEvent) error {
     return nil
 }
 
@@ -81,7 +82,7 @@ type blockingBackplane struct {
     closed   chan struct{}
 }
 
-func (instance *blockingBackplane) Publish(topic string, event melodyhttp.ServerSentEvent) error {
+func (instance *blockingBackplane) Publish(runtimeInstance melodycontainercontract.Runtime, topic string, event melodyhttp.ServerSentEvent) error {
     close(instance.entered)
     <-instance.released
 
@@ -112,7 +113,7 @@ func TestRegisterHubShutdown_ReturnsWithinTheShutdownsBudgetWhileAPublishIsInsid
     backplane := &blockingBackplane{entered: make(chan struct{}), released: make(chan struct{}), closed: make(chan struct{})}
     hub.SetBackplane(backplane)
 
-    go hub.Broadcast("catalog", melodyhttp.ServerSentEvent{Data: "changed"})
+    go hub.Broadcast(configTestRuntime(), "catalog", melodyhttp.ServerSentEvent{Data: "changed"})
     <-backplane.entered
 
     registrar := &recordingShutdownRegistrar{}

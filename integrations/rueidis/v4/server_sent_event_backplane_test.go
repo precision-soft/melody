@@ -10,6 +10,7 @@ import (
     redisclient "github.com/redis/rueidis"
 
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
 )
 
@@ -34,7 +35,7 @@ func TestServerSentEventBackplane_ReplicatesBroadcastToAnotherInstance(t *testin
     defer tick.Stop()
 
     for {
-        hubA.Broadcast("orders", melodyhttp.ServerSentEvent{Data: "from-a"})
+        hubA.Broadcast(newTokenStoreRuntime(), "orders", melodyhttp.ServerSentEvent{Data: "from-a"})
 
         select {
         case event := <-subscriber.Events():
@@ -60,7 +61,7 @@ func TestServerSentEventBackplane_DoesNotEchoToOriginInstanceTwice(t *testing.T)
     subscriber := hub.Subscribe("orders")
     defer hub.Unsubscribe(subscriber)
 
-    if delivered := hub.Broadcast("orders", melodyhttp.ServerSentEvent{Data: "once"}); 1 != delivered {
+    if delivered := hub.Broadcast(newTokenStoreRuntime(), "orders", melodyhttp.ServerSentEvent{Data: "once"}); 1 != delivered {
         t.Fatalf("expected exactly one local delivery, got %d", delivered)
     }
 
@@ -154,7 +155,7 @@ func TestNewServerSentEventBackplane_ARefusedConfigLeavesTheHubWithoutABackplane
 
     deadline := time.After(5 * time.Second)
     for received := false; false == received; {
-        probeHub.Broadcast("orders", melodyhttp.ServerSentEvent{Data: "probe"})
+        probeHub.Broadcast(newTokenStoreRuntime(), "orders", melodyhttp.ServerSentEvent{Data: "probe"})
         select {
         case <-subscriber.Events():
             received = true
@@ -164,7 +165,7 @@ func TestNewServerSentEventBackplane_ARefusedConfigLeavesTheHubWithoutABackplane
         }
     }
 
-    refusedHub.Broadcast("orders", melodyhttp.ServerSentEvent{Data: "refused"})
+    refusedHub.Broadcast(newTokenStoreRuntime(), "orders", melodyhttp.ServerSentEvent{Data: "refused"})
 
     /* read the whole window: a probe still in flight must not stand in for the silence */
     window := time.After(500 * time.Millisecond)
@@ -216,9 +217,163 @@ func TestServerSentEventBackplane_PublishAppliesCallTimeout(t *testing.T) {
         callTimeout: time.Nanosecond,
     }
 
-    publishErr := backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "x"})
+    publishErr := backplane.Publish(newTokenStoreRuntime(), "orders", melodyhttp.ServerSentEvent{Data: "x"})
     if nil == publishErr {
         t.Fatalf("expected the 1ns call timeout to bound Publish and surface a deadline error")
+    }
+}
+
+/* deadlineRecordingClient records the deadline of every Do and, when blockUntilDone is set, holds the call until its context ends */
+type deadlineRecordingClient struct {
+    redisclient.Client
+    mutex          sync.Mutex
+    calls          int
+    deadlines      []time.Time
+    hasDeadline    []bool
+    blockUntilDone bool
+}
+
+func (instance *deadlineRecordingClient) Do(ctx context.Context, command redisclient.Completed) redisclient.RedisResult {
+    deadline, hasDeadline := ctx.Deadline()
+
+    instance.mutex.Lock()
+    instance.calls++
+    instance.deadlines = append(instance.deadlines, deadline)
+    instance.hasDeadline = append(instance.hasDeadline, hasDeadline)
+    instance.mutex.Unlock()
+
+    if true == instance.blockUntilDone {
+        <-ctx.Done()
+    }
+
+    return instance.Client.Do(ctx, command)
+}
+
+func newDeadlineRecordingBackplane(client *deadlineRecordingClient, callTimeout time.Duration) *ServerSentEventBackplane {
+    lifetime, cancel := context.WithCancel(context.Background())
+
+    return &ServerSentEventBackplane{
+        client:      client,
+        channel:     "melody:sse:test:caller-context",
+        origin:      "test-origin",
+        ctx:         lifetime,
+        cancel:      cancel,
+        callTimeout: callTimeout,
+    }
+}
+
+func TestServerSentEventBackplane_PublishIsCappedByCallTimeoutWithinTheCallersContext(t *testing.T) {
+    t.Run("the call timeout caps a caller's context without a deadline", func(t *testing.T) {
+        client := &deadlineRecordingClient{Client: newTokenStoreClient(t)}
+        backplane := newDeadlineRecordingBackplane(client, 750*time.Millisecond)
+        defer backplane.cancel()
+
+        before := time.Now()
+        if publishErr := backplane.Publish(newTokenStoreRuntime(), "orders", melodyhttp.ServerSentEvent{Data: "x"}); nil != publishErr {
+            t.Fatalf("expected the publish to land, got %v", publishErr)
+        }
+
+        if 1 != client.calls || false == client.hasDeadline[0] {
+            t.Fatalf("expected one call under a deadline, got %d calls, deadlines %v", client.calls, client.hasDeadline)
+        }
+
+        if budget := client.deadlines[0].Sub(before); 700*time.Millisecond > budget || 800*time.Millisecond < budget {
+            t.Fatalf("expected the call timeout of 750ms as the deadline, got %v", budget)
+        }
+    })
+
+    t.Run("the caller's earlier deadline wins over the call timeout", func(t *testing.T) {
+        client := &deadlineRecordingClient{Client: newTokenStoreClient(t)}
+        backplane := newDeadlineRecordingBackplane(client, time.Hour)
+        defer backplane.cancel()
+
+        callerContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+        defer cancel()
+
+        callerDeadline, _ := callerContext.Deadline()
+        if publishErr := backplane.Publish(&contextOnlyRuntime{ctx: callerContext}, "orders", melodyhttp.ServerSentEvent{Data: "x"}); nil != publishErr {
+            t.Fatalf("expected the publish to land, got %v", publishErr)
+        }
+
+        if 1 != client.calls || false == client.hasDeadline[0] || false == client.deadlines[0].Equal(callerDeadline) {
+            t.Fatalf("expected the caller's deadline %v, got %v (calls %d)", callerDeadline, client.deadlines, client.calls)
+        }
+    })
+}
+
+func TestServerSentEventBackplane_PublishRefusesADoneContextBeforeMarshalling(t *testing.T) {
+    client := &deadlineRecordingClient{}
+    backplane := newDeadlineRecordingBackplane(client, time.Second)
+    defer backplane.cancel()
+
+    cause := errors.New("the request went away")
+    callerContext, cancel := context.WithCancelCause(context.Background())
+    cancel(cause)
+
+    publishErr := backplane.Publish(&contextOnlyRuntime{ctx: callerContext}, "orders", melodyhttp.ServerSentEvent{Data: "x"})
+    if nil == publishErr || "sse backplane publish refused: the caller's context is done" != publishErr.Error() {
+        t.Fatalf("expected the done-context refusal, got %v", publishErr)
+    }
+
+    if false == errors.Is(publishErr, cause) {
+        t.Fatalf("expected the refusal to carry the context's cause, got %v", publishErr)
+    }
+
+    if 0 != client.calls {
+        t.Fatalf("expected no round trip under a done context, got %d", client.calls)
+    }
+}
+
+func TestServerSentEventBackplane_PublishRefusesANilRuntimeNamingTheDoor(t *testing.T) {
+    client := &deadlineRecordingClient{}
+    backplane := newDeadlineRecordingBackplane(client, time.Second)
+    defer backplane.cancel()
+
+    publishErr := backplane.Publish(nil, "orders", melodyhttp.ServerSentEvent{Data: "x"})
+    if nil == publishErr || "rueidis.ServerSentEventBackplane.Publish" != exception.LogContext(publishErr, exception.LogContextConfig{})["door"] {
+        t.Fatalf("expected the nil runtime refused naming the door, got %v", publishErr)
+    }
+
+    if 0 != client.calls {
+        t.Fatalf("expected no round trip for a nil runtime, got %d", client.calls)
+    }
+}
+
+func TestServerSentEventBackplane_PublishEndsWhenTheBackplaneCloses(t *testing.T) {
+    client := &deadlineRecordingClient{Client: newTokenStoreClient(t), blockUntilDone: true}
+    backplane := newDeadlineRecordingBackplane(client, time.Hour)
+
+    published := make(chan error, 1)
+    go func() {
+        published <- backplane.Publish(newTokenStoreRuntime(), "orders", melodyhttp.ServerSentEvent{Data: "x"})
+    }()
+
+    deadline := time.After(5 * time.Second)
+    for {
+        client.mutex.Lock()
+        calls := client.calls
+        client.mutex.Unlock()
+
+        if 1 == calls {
+            break
+        }
+
+        select {
+        case <-deadline:
+            t.Fatal("the publish never reached the client")
+        case <-time.After(5 * time.Millisecond):
+        }
+    }
+
+    backplane.cancel()
+
+    select {
+    case publishErr := <-published:
+        if nil == publishErr {
+            t.Fatalf("expected a publish ended by the close to answer an error")
+        }
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the backplane's close to end an in-flight publish")
     }
 }
 
