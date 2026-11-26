@@ -2,6 +2,7 @@ package config
 
 import (
     "context"
+    "sync/atomic"
 
     minio "github.com/minio/minio-go/v7"
     melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v4"
@@ -45,7 +46,8 @@ type Module struct {
 
     translator melodytranslationcontract.Translator
 
-    serverSentEventHub *melodyhttp.ServerSentEventHub
+    /* builtServerSentEventHub is the hub its provider built, for the http shutdown hook, which is handed no runtime to resolve it through; nil until the provider ran */
+    builtServerSentEventHub atomic.Pointer[melodyhttp.ServerSentEventHub]
     /* eventStreamSlots is the process's one count of the streams held open on the hub, over the event stream door and the websocket route alike */
     eventStreamSlots *handlerevent.StreamSlots
 
@@ -103,7 +105,6 @@ func NewExampleModule(ctx context.Context, configuration melodyconfigcontract.Co
         eventStreamSlots: handlerevent.NewStreamSlots(handlerevent.StreamCapPerUser, handlerevent.StreamCapPerProcess),
     }
     moduleInstance.buildTrustedProxyResolver()
-    moduleInstance.buildServerSentEvent()
     moduleInstance.buildObservability()
     moduleInstance.buildEncrypt()
     moduleInstance.buildRedis()

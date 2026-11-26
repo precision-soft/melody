@@ -12,9 +12,7 @@ import (
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
-    melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodylogging "github.com/precision-soft/melody/v4/logging"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -73,43 +71,26 @@ func redisConnectionFromResolver(resolver melodycontainercontract.Resolver) (*me
 
 /* redisInfrastructure is the one switch for a process that has redis: the connection, the token store and the cache backend live on the same client, so they are registered together or not at all, rather than as registrations that must stay paired by hand. */
 type redisInfrastructure struct {
-    namespace          string
-    provider           *melodyrueidis.Provider
-    parameters         melodyrueidis.ConnectionParameters
-    serverSentEventHub *melodyhttp.ServerSentEventHub
+    namespace  string
+    provider   *melodyrueidis.Provider
+    parameters melodyrueidis.ConnectionParameters
 }
 
 func newRedisInfrastructure(
     namespace string,
     provider *melodyrueidis.Provider,
     parameters melodyrueidis.ConnectionParameters,
-    serverSentEventHub *melodyhttp.ServerSentEventHub,
 ) *redisInfrastructure {
     return &redisInfrastructure{
-        namespace:          namespace,
-        provider:           provider,
-        parameters:         parameters,
-        serverSentEventHub: serverSentEventHub,
+        namespace:  namespace,
+        provider:   provider,
+        parameters: parameters,
     }
 }
 
-/* openConnection opens redis under the boot runtime and installs the backplane on the hub, the one holder: the hub's Shutdown drains the publishes in flight and closes the backplane's listen goroutine and subscription, and the hub's registration is closed before this connection. */
+/* openConnection opens redis under the boot runtime; the hub's provider installs the backplane over it. */
 func (instance *redisInfrastructure) openConnection(resolver melodycontainercontract.Resolver) (*melodyrueidis.Connection, error) {
-    logger, loggerErr := melodylogging.LoggerFromResolver(resolver.Runtime().Context(), resolver)
-    if nil != loggerErr {
-        return nil, loggerErr
-    }
-
-    connection, openErr := instance.provider.Open(resolver.Runtime(), instance.parameters)
-    if nil != openErr {
-        return nil, openErr
-    }
-
-    melodyrueidis.NewServerSentEventBackplane(connection, instance.serverSentEventHub, melodyrueidis.ServerSentEventBackplaneConfig{
-        Logger: logger,
-    })
-
-    return connection, nil
+    return instance.provider.Open(resolver.Runtime(), instance.parameters)
 }
 
 func (instance *redisInfrastructure) Modules() []melodyapplicationcontract.Module {

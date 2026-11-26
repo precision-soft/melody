@@ -41,7 +41,7 @@ func TestCatalogWriteThrottle_AllowsThirtyWritesAMinute(t *testing.T) {
 }
 
 func TestRedisInfrastructure_ProvidesTheTokenStoreAndTheCacheModules(t *testing.T) {
-    modules := newRedisInfrastructure("melody-example-v4", nil, melodyrueidis.ConnectionParameters{}, nil).Modules()
+    modules := newRedisInfrastructure("melody-example-v4", nil, melodyrueidis.ConnectionParameters{}).Modules()
 
     if 2 != len(modules) {
         t.Fatalf("expected the token store and the cache modules, got %d modules", len(modules))
@@ -104,7 +104,7 @@ func TestRedis_TwoNamespacesOverOneClientWriteDisjointKeys(t *testing.T) {
             t.Fatalf("%s: expected the counter under %q, got %d %v", namespace, counterKey, exists, existsErr)
         }
 
-        modules := newRedisInfrastructure(namespace, moduleInstance.redisProvider, melodyrueidis.ConnectionParameters{}, nil).Modules()
+        modules := newRedisInfrastructure(namespace, moduleInstance.redisProvider, melodyrueidis.ConnectionParameters{}).Modules()
         if 2 != len(modules) || false == strings.HasPrefix(cacheKeyPrefix(namespace), namespace+":cache:") || namespace+":token" != redisTokenStoreKeyPrefix(namespace) {
             t.Fatalf("%s: expected the cache and token prefixes inside the namespace", namespace)
         }

@@ -604,7 +604,7 @@ func TestServerSentEventBackplane_HubShutdownReturnsWhileABroadcastIsWedged(t *t
 
     shutdownOutcome := make(chan error, 1)
     go func() {
-        hub.Shutdown()
+        _ = hub.CloseWithContext(context.Background())
         shutdownOutcome <- nil
     }()
 

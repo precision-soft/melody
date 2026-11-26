@@ -2,7 +2,6 @@ package config
 
 import (
     "context"
-    "time"
 
     melodyawss3 "github.com/precision-soft/melody/integrations/aws/s3/v4"
     bunormmigrate "github.com/precision-soft/melody/integrations/bunorm/migrate/v4"
@@ -11,12 +10,10 @@ import (
     melodyopentelemetry "github.com/precision-soft/melody/integrations/opentelemetry/v4"
     melodyotlp "github.com/precision-soft/melody/integrations/opentelemetry/v4/otlp"
     melodyoutbox "github.com/precision-soft/melody/integrations/outbox/v4"
-    melodywebsocket "github.com/precision-soft/melody/integrations/websocket/v4"
     "github.com/precision-soft/melody/v4/.example/migration"
     "github.com/precision-soft/melody/v4/.example/twofactor"
     melodyapplication "github.com/precision-soft/melody/v4/application"
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
-    "github.com/precision-soft/melody/v4/bound"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
@@ -80,14 +77,12 @@ func Configure(ctx context.Context, app *melodyapplication.Application, applicat
     moduleInstance.registerHubShutdown(app)
     moduleInstance.registerTrustedProxyShutdown(app)
 
-    app.RegisterModule(melodywebsocket.NewModule(moduleInstance.websocketModuleConfig()))
-
     if nil != moduleInstance.storageClient {
         app.RegisterModule(melodyawss3.NewModule(moduleInstance.storageModuleConfig()))
     }
 
     if true == moduleInstance.redisConfigured() {
-        app.RegisterModuleProvider(newRedisInfrastructure(moduleInstance.namespace(), moduleInstance.redisProvider, moduleInstance.redisParameters, moduleInstance.serverSentEventHub))
+        app.RegisterModuleProvider(newRedisInfrastructure(moduleInstance.namespace(), moduleInstance.redisProvider, moduleInstance.redisParameters))
     }
 }
 
@@ -116,10 +111,15 @@ type httpShutdownRegistrar interface {
 /* hubShutdownWarningLogger journals a hub close that outlived the http shutdown's budget, the hook carrying no runtime of its own; a variable so a test can capture it. */
 var hubShutdownWarningLogger = melodylogging.EmergencyLogger
 
-/* registerHubShutdown closes the hub when the http server begins to shut down: http.Server.Shutdown neither cancels an in-flight request's context nor tracks a hijacked connection, so a connected SSE or websocket client would otherwise hold the whole shutdown timeout. It is also the backplane's only close, through the hub's CloseWithContext, bounded by the shutdown's context: the hub drains and closes the backplane it holds, and hands it to a closer of its own when a publish outlives the budget, which the hook journals. The container's teardown closes the hub again through the same idempotent door, the only close a process without an http server reaches. */
+/* registerHubShutdown closes the hub its provider built when the http server begins to shut down: http.Server.Shutdown neither cancels an in-flight request's context nor tracks a hijacked connection, so a connected SSE or websocket client would otherwise hold the whole shutdown timeout. It is also the backplane's first close, through the hub's CloseWithContext, bounded by the shutdown's context: the hub drains and closes the backplane it holds, and hands it to a closer of its own when a publish outlives the budget, which the hook journals. The container's teardown closes the hub again through the same idempotent door, the only close a process without an http server reaches. */
 func (instance *Module) registerHubShutdown(registrar httpShutdownRegistrar) {
     registrar.OnHttpShutdown(func(shutdownContext context.Context) {
-        closeErr := instance.serverSentEventHub.CloseWithContext(shutdownContext)
+        serverSentEventHub := instance.builtServerSentEventHub.Load()
+        if nil == serverSentEventHub {
+            return
+        }
+
+        closeErr := serverSentEventHub.CloseWithContext(shutdownContext)
         if nil != closeErr {
             hubShutdownWarningLogger().Warning(
                 "the server sent event hub did not close within the http shutdown budget",
@@ -147,24 +147,4 @@ func (instance *Module) registerTrustedProxyShutdown(registrar httpShutdownRegis
         case <-shutdownContext.Done():
         }
     })
-}
-
-/* websocketRouteName names the /ws route, which StreamSlotMiddleware counts in the event stream's slots */
-const websocketRouteName = "example.websocket"
-
-/* websocketModuleConfig serves the hub over /ws beside the event stream. */
-func (instance *Module) websocketModuleConfig() melodywebsocket.ModuleConfig {
-    return melodywebsocket.ModuleConfig{
-        Streams: []melodywebsocket.StreamConfig{
-            {
-                Hub:       instance.serverSentEventHub,
-                Path:      "/ws",
-                RouteName: websocketRouteName,
-                /* IdleTimeout is written out although thirty seconds is its default: the keepalive ping is the only thing that reaps a tab that went away without a fin. OriginPatterns stays unset on purpose: the upgrade authenticates through the session cookie, which a browser sends cross-site too, so the library's same-origin default is what stops a foreign page riding a visitor's session; a client that sends no Origin header is not origin-checked. */
-                Handler: melodywebsocket.StreamHandlerConfig{
-                    IdleTimeout: bound.Of(30 * time.Second),
-                },
-            },
-        },
-    }
 }

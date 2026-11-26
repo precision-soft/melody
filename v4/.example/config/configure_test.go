@@ -9,7 +9,6 @@ import (
 
     melodyotlp "github.com/precision-soft/melody/integrations/opentelemetry/v4/otlp"
     "github.com/precision-soft/melody/v4/.example/migration"
-    "github.com/precision-soft/melody/v4/bound"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -26,7 +25,7 @@ func (instance *countingBackplane) Publish(topic string, event melodyhttp.Server
 
 func (instance *countingBackplane) CloseWithContext(closeContext context.Context) error {
     instance.closes++
-    instance.hub.SetBackplane(nil)
+    _ = instance.hub.ClearBackplane(closeContext)
 
     return nil
 }
@@ -41,10 +40,11 @@ func (instance *recordingShutdownRegistrar) OnHttpShutdown(hook func(shutdownCon
 
 func TestRegisterHubShutdown_RegistersTheHubsShutdownAloneAndItClosesTheBackplaneOnce(t *testing.T) {
     moduleInstance := &Module{}
-    moduleInstance.buildServerSentEvent()
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+    moduleInstance.builtServerSentEventHub.Store(hub)
 
-    backplane := &countingBackplane{hub: moduleInstance.serverSentEventHub}
-    moduleInstance.serverSentEventHub.SetBackplane(backplane)
+    backplane := &countingBackplane{hub: hub}
+    hub.SetBackplane(backplane)
 
     registrar := &recordingShutdownRegistrar{}
     moduleInstance.registerHubShutdown(registrar)
@@ -57,7 +57,7 @@ func TestRegisterHubShutdown_RegistersTheHubsShutdownAloneAndItClosesTheBackplan
         hook(context.Background())
     }
 
-    if false == moduleInstance.serverSentEventHub.IsClosed() {
+    if false == hub.IsClosed() {
         t.Fatal("expected the hook to shut the hub down")
     }
 
@@ -65,7 +65,7 @@ func TestRegisterHubShutdown_RegistersTheHubsShutdownAloneAndItClosesTheBackplan
         t.Fatalf("expected the backplane closed exactly once by the hub that owns it, got %d", backplane.closes)
     }
 
-    if closeErr := moduleInstance.serverSentEventHub.CloseWithContext(t.Context()); nil != closeErr {
+    if closeErr := hub.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("expected the teardown's second close of the hub to be a no-op, got %v", closeErr)
     }
 
@@ -106,12 +106,13 @@ func TestRegisterHubShutdown_ReturnsWithinTheShutdownsBudgetWhileAPublishIsInsid
     })
 
     moduleInstance := &Module{}
-    moduleInstance.buildServerSentEvent()
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+    moduleInstance.builtServerSentEventHub.Store(hub)
 
     backplane := &blockingBackplane{entered: make(chan struct{}), released: make(chan struct{}), closed: make(chan struct{})}
-    moduleInstance.serverSentEventHub.SetBackplane(backplane)
+    hub.SetBackplane(backplane)
 
-    go moduleInstance.serverSentEventHub.Broadcast("catalog", melodyhttp.ServerSentEvent{Data: "changed"})
+    go hub.Broadcast("catalog", melodyhttp.ServerSentEvent{Data: "changed"})
     <-backplane.entered
 
     registrar := &recordingShutdownRegistrar{}
@@ -133,7 +134,7 @@ func TestRegisterHubShutdown_ReturnsWithinTheShutdownsBudgetWhileAPublishIsInsid
         t.Fatal("expected the hook to return within the shutdown's budget while a publish is inside the backplane")
     }
 
-    if false == moduleInstance.serverSentEventHub.IsClosed() {
+    if false == hub.IsClosed() {
         t.Fatal("expected the hook to close the hub")
     }
 
@@ -179,27 +180,17 @@ func TestMigrateModuleConfig_PinsTheBaseFamilyToTheCatalogueAndTheArchiveToItsCo
     }
 }
 
-func TestWebsocketModuleConfig_ServesTheModulesHubWithAThirtySecondKeepalive(t *testing.T) {
+/* the hook closes the hub the provider built: before the provider ran there is none, and the hook returns without one */
+func TestRegisterHubShutdown_ClosesNothingBeforeTheProviderBuiltTheHub(t *testing.T) {
     moduleInstance := &Module{}
-    moduleInstance.buildServerSentEvent()
 
-    moduleConfig := moduleInstance.websocketModuleConfig()
-    if 1 != len(moduleConfig.Streams) {
-        t.Fatalf("expected one stream, got %d", len(moduleConfig.Streams))
-    }
+    registrar := &recordingShutdownRegistrar{}
+    moduleInstance.registerHubShutdown(registrar)
 
-    config := moduleConfig.Streams[0]
+    registrar.hookList[0](context.Background())
 
-    if moduleInstance.serverSentEventHub != config.Hub || nil == config.Hub {
-        t.Fatal("expected the feed to serve the module's hub")
-    }
-
-    if "/ws" != config.Path || "example.websocket" != config.RouteName {
-        t.Fatalf("expected the feed at /ws named example.websocket, got %q named %q", config.Path, config.RouteName)
-    }
-
-    if bound.Of(30*time.Second) != config.Handler.IdleTimeout {
-        t.Fatalf("expected a thirty-second keepalive, got %s", config.Handler.IdleTimeout)
+    if nil != moduleInstance.builtServerSentEventHub.Load() {
+        t.Fatal("expected the hook to build no hub of its own")
     }
 }
 

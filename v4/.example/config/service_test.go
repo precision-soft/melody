@@ -274,9 +274,9 @@ func (instance refusingBackplane) CloseWithContext(closeContext context.Context)
     return nil
 }
 
-/* the hub files its own failures, and its provider is where it is handed the application's journal; without the swap a redis outage would silence cross-node delivery into a counter nobody reads. A publish the backplane refuses after the hub is resolved reaches the logger the container publishes. */
-func TestRegisterServerSentEventHubService_HandsTheHubTheContainersJournal(t *testing.T) {
-    /* read after Shutdown, which waits for the publishes in flight: the record is written before it returns */
+/* the hub files its own failures, and its provider builds it with the application's journal; without it a redis outage would silence cross-node delivery into a counter nobody reads. A publish the backplane refuses after the hub is resolved reaches the logger the container publishes. */
+func TestHub_IsBuiltInItsProviderWithTheApplicationsLogger(t *testing.T) {
+    /* read after the close, which waits for the publishes in flight: the record is written before it returns */
     journal := &bytes.Buffer{}
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -289,17 +289,20 @@ func TestRegisterServerSentEventHubService_HandsTheHubTheContainersJournal(t *te
     )
 
     moduleInstance := &Module{}
-    moduleInstance.buildServerSentEvent()
     moduleInstance.registerServerSentEventHubService(containerRegistrar{Container: containerInstance})
 
+    if nil != moduleInstance.builtServerSentEventHub.Load() {
+        t.Fatal("expected no hub before its provider ran")
+    }
+
     hub, hubErr := melodycontainer.FromResolver[*melodyhttp.ServerSentEventHub](t.Context(), containerInstance, subscriber.ServiceCatalogNotificationHub)
-    if nil != hubErr || moduleInstance.serverSentEventHub != hub {
-        t.Fatalf("expected the module's hub published, got %v, %v", hub, hubErr)
+    if nil != hubErr || nil == hub || moduleInstance.builtServerSentEventHub.Load() != hub {
+        t.Fatalf("expected the provider's hub published and handed to the shutdown hook, got %v, %v", hub, hubErr)
     }
 
     hub.SetBackplane(refusingBackplane{})
     hub.Broadcast("catalog", melodyhttp.ServerSentEvent{Event: "notification", Data: "changed"})
-    hub.Shutdown()
+    _ = hub.CloseWithContext(t.Context())
 
     if false == strings.Contains(journal.String(), "server sent event backplane publish failed") {
         t.Fatalf("expected the refused publish in the container's journal, got %q", journal.String())
@@ -438,12 +441,6 @@ func TestRegisterSeeders_CollectsTheSeedersInTheOrderTheirReferencesNeed(t *test
     }
 }
 
-type closeableConnectionStub struct{}
-
-func (instance *closeableConnectionStub) CloseWithContext(closeContext context.Context) error {
-    return nil
-}
-
 func hubTeardownDependencies(t *testing.T, redisWired bool) []string {
     t.Helper()
 
@@ -456,19 +453,20 @@ func hubTeardownDependencies(t *testing.T, redisWired bool) []string {
         melodycontainer.RegisterOptions{},
     )
 
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
+
     moduleInstance := &Module{}
-    moduleInstance.buildServerSentEvent()
 
     if true == redisWired {
+        client := redisTestClient(t)
         moduleInstance.redisProvider = melodyrueidis.NewProvider("melody-example-v4", melodyrueidis.ProviderConfig{})
         containerInstance.MustRegister(
             melodyrueidis.ServiceConnection,
-            func(resolver melodycontainercontract.Resolver) (*closeableConnectionStub, error) {
-                return &closeableConnectionStub{}, nil
+            func(resolver melodycontainercontract.Resolver) (*melodyrueidis.Connection, error) {
+                return melodyrueidis.NewConnection(client, "melody-example-v4"), nil
             },
             melodycontainer.RegisterOptions{},
         )
-        _ = melodycontainer.MustFromResolver[*closeableConnectionStub](t.Context(), containerInstance, melodyrueidis.ServiceConnection)
     }
 
     moduleInstance.registerServerSentEventHubService(containerRegistrar{Container: containerInstance})

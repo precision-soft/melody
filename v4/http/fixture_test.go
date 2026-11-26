@@ -504,6 +504,40 @@ func assertPanicsNamingField(t *testing.T, callback func(), expectedMessage stri
     callback()
 }
 
+func requireRefusalNamingDoor(t *testing.T, refusalErr error, expectedMessage string, door string) {
+    t.Helper()
+
+    var refusal *exception.Error
+    if false == errors.As(refusalErr, &refusal) {
+        t.Fatalf("expected the refusal %q, got %v", expectedMessage, refusalErr)
+    }
+
+    if expectedMessage != refusal.Message() {
+        t.Fatalf("expected the message %q, got %q", expectedMessage, refusal.Message())
+    }
+
+    if door != refusal.Context()["door"] {
+        t.Fatalf("expected the refusal to name the door %q, got %v", door, refusal.Context()["door"])
+    }
+}
+
+func assertPanicsNamingDoor(t *testing.T, callback func(), expectedMessage string, door string) {
+    t.Helper()
+
+    defer func() {
+        t.Helper()
+
+        recoveredErr, isError := recover().(error)
+        if false == isError {
+            t.Fatalf("expected a panic with the refusal %q", expectedMessage)
+        }
+
+        requireRefusalNamingDoor(t, recoveredErr, expectedMessage, door)
+    }()
+
+    callback()
+}
+
 type cyclicChainError struct {
     next error
 }

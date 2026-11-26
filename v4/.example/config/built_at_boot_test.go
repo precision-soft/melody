@@ -31,7 +31,6 @@ func TestBuiltAtBoot_HandsTheHubItsJournalBeforeAnyWrite(t *testing.T) {
     )
 
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
-    moduleInstance.buildServerSentEvent()
     moduleInstance.buildInternalAuth()
     moduleInstance.registerServerSentEventHubService(containerRegistrar{Container: containerInstance})
     moduleInstance.registerInternalAuthSignerService(containerRegistrar{Container: containerInstance})
@@ -40,10 +39,10 @@ func TestBuiltAtBoot_HandsTheHubItsJournalBeforeAnyWrite(t *testing.T) {
         t.Fatalf("unexpected boot resolution error: %v", resolveErr)
     }
 
-    hub := moduleInstance.serverSentEventHub
+    hub := moduleInstance.builtServerSentEventHub.Load()
     hub.SetBackplane(refusingBackplane{})
     hub.Broadcast("catalog", melodyhttp.ServerSentEvent{Event: "notification", Data: "changed"})
-    hub.Shutdown()
+    _ = hub.CloseWithContext(t.Context())
 
     if false == strings.Contains(journal.String(), "server sent event backplane publish failed") {
         t.Fatalf("expected the refused publish in the container's journal, got %q", journal.String())
@@ -62,7 +61,6 @@ func bootContainerWithInternalAuthSigner(t *testing.T, moduleInstance *Module) m
         melodycontainer.RegisterOptions{},
     )
 
-    moduleInstance.buildServerSentEvent()
     moduleInstance.registerServerSentEventHubService(containerRegistrar{Container: containerInstance})
     moduleInstance.registerInternalAuthSignerService(containerRegistrar{Container: containerInstance})
 

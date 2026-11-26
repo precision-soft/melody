@@ -7,6 +7,7 @@ import (
     "errors"
     nethttp "net/http"
     "net/http/httptest"
+    "os"
     "strings"
     "testing"
     "time"
@@ -20,6 +21,7 @@ import (
     bun "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
     melodylockcontract "github.com/precision-soft/melody/v4/lock/contract"
+    "github.com/redis/rueidis"
 )
 
 /* the compose balancer as the shipped .env names it, already resolved: the tests below hand the list in resolved form because what they assert is what the resolver does with a peer and a chain, not what the name resolves to. */
@@ -148,4 +150,21 @@ func mustCreateLock(lock melodylockcontract.Lock, createErr error) melodylockcon
     }
 
     return lock
+}
+
+func redisTestClient(t *testing.T) rueidis.Client {
+    t.Helper()
+
+    address := os.Getenv("REDIS_ADDRESS")
+    if "" == address {
+        t.Skip("REDIS_ADDRESS not set; skipping the redis backplane test")
+    }
+
+    client, clientErr := rueidis.NewClient(rueidis.ClientOption{InitAddress: []string{address}})
+    if nil != clientErr {
+        t.Fatalf("could not connect to redis: %v", clientErr)
+    }
+    t.Cleanup(client.Close)
+
+    return client
 }

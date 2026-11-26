@@ -71,7 +71,9 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.Handle("/messagebus/dispatch", instance.throttledWrite(handler.WelcomeEmailDispatchHandler("" != instance.parameterValue(parameterAmqpDsn))), melodyhttp.RouteOptions{Name: "example.messagebus.dispatch", Methods: []string{"POST"}})
 
-    /* the example.metrics and example.websocket routes are contributed by the opentelemetry and websocket modules (see configure.go). */
+    /* the example.metrics route is contributed by the opentelemetry module (see configure.go). */
+
+    router.Handle("/ws", websocketStreamHandler(websocketStreamHandlerConfig()), melodyhttp.RouteOptions{Name: websocketRouteName, Methods: []string{"GET"}})
 
     router.Handle("/encrypt/roundtrip", handler.EncryptRoundTripHandler(instance.cipher), melodyhttp.RouteOptions{Name: "example.encrypt.roundtrip", Methods: []string{"GET"}})
 

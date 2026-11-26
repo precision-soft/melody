@@ -558,7 +558,7 @@ func TestStreamHandler_RefusesWithoutCommittingWhenTheHubHasShutDown(t *testing.
     if nil != hubErr {
         t.Fatalf("resolve the hub: %v", hubErr)
     }
-    hub.Shutdown()
+    _ = hub.CloseWithContext(t.Context())
 
     writer := &recordingResponseWriter{}
 

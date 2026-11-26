@@ -18,7 +18,6 @@ import (
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
-    melodyhttp "github.com/precision-soft/melody/v4/http"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodymailer "github.com/precision-soft/melody/v4/mailer"
     melodymailercontract "github.com/precision-soft/melody/v4/mailer/contract"
@@ -141,31 +140,13 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
 
 var _ melodyapplicationcontract.ServiceModule = (*Module)(nil)
 
-/* registerServerSentEventHubService registers the hub so the event listeners, which are handed a runtime rather than this module, reach it through the container. */
+/* registerServerSentEventHubService registers the hub so the event listeners and the stream handlers, which are handed a runtime rather than this module, reach it through the container. */
 func (instance *Module) registerServerSentEventHubService(registrar melodyapplicationcontract.ServiceRegistrar) {
-    serverSentEventHub := instance.serverSentEventHub
-
-    /* the connection factory installs the redis backplane on the hub, a capture no resolution of the hub records: without the edge the teardown could close the connection before the hub drains the backplane's subscription. It is declared only when redis is wired, since the boot refuses an edge to a service never registered */
-    /* built at boot: only the nomenclature listener resolves it, on a write, so a process serving only readers would run the hub without a journal */
-    registerOptions := melodycontainer.RegisterOptions{BuiltAtBoot: true, BootFailure: melodycontainer.BootFailureFailsBoot}
-    if true == instance.redisConfigured() {
-        registerOptions.TeardownDependencyNames = []string{melodyrueidis.ServiceConnection}
-    }
-
+    /* built at boot: the stream handlers and the nomenclature listener resolve it on a request, and the http shutdown hook closes the hub the boot built */
     registrar.RegisterService(
         subscriber.ServiceCatalogNotificationHub,
-        func(resolver melodycontainercontract.Resolver) (*melodyhttp.ServerSentEventHub, error) {
-            /* the hub files its own failures — a backplane whose publish fails, a subscriber whose buffer overflows — and without a journal those are counted into an atomic nobody reads: a redis outage would silence cross-node delivery with no record anywhere */
-            logger, loggerErr := melodylogging.LoggerFromResolver(resolver.Runtime().Context(), resolver)
-            if nil != loggerErr {
-                return nil, loggerErr
-            }
-
-            serverSentEventHub.SetLogger(logger)
-
-            return serverSentEventHub, nil
-        },
-        registerOptions,
+        instance.newServerSentEventHub,
+        melodycontainer.RegisterOptions{BuiltAtBoot: true, BootFailure: melodycontainer.BootFailureFailsBoot},
     )
 }
 

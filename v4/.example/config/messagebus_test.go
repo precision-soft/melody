@@ -57,11 +57,14 @@ func TestBuildMessageBusTransport_FallsBackToTheInProcessTransportWithoutADsn(t 
 /* the notification handler resolves the hub through the runtime at each message: the hub the container publishes is the one that broadcasts, not the one the composition root held when the bus was built, and a capture would leave the hub's provider, its logger swap and its teardown edge unrun. The module's own hub and the registered one are two hubs here, so a capture broadcasts where nobody listens. */
 func TestBuildMessageBus_TheNotificationHandlerResolvesTheHubAtEachMessage(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
-    moduleInstance.buildServerSentEvent()
     moduleInstance.buildMessageBus()
 
+    builtHub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+    t.Cleanup(func() { _ = builtHub.CloseWithContext(context.Background()) })
+    moduleInstance.builtServerSentEventHub.Store(builtHub)
+
     registeredHub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    t.Cleanup(registeredHub.Shutdown)
+    t.Cleanup(func() { _ = registeredHub.CloseWithContext(context.Background()) })
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     containerInstance.MustRegister(
@@ -73,7 +76,7 @@ func TestBuildMessageBus_TheNotificationHandlerResolvesTheHubAtEachMessage(t *te
     )
 
     listener := registeredHub.Subscribe("catalog")
-    capturedListener := moduleInstance.serverSentEventHub.Subscribe("catalog")
+    capturedListener := builtHub.Subscribe("catalog")
 
     runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
     if _, dispatchErr := moduleInstance.messageBusDispatch.Dispatch(runtimeInstance, message.Notification{Topic: "catalog", Text: "changed"}, nil); nil != dispatchErr {
@@ -100,7 +103,6 @@ func TestBuildMessageBus_TheNotificationHandlerResolvesTheHubAtEachMessage(t *te
    both are the same contract, and a second registration by type is refused by the container */
 func TestRegisterMessageBusServices_TheDispatchBusOwnsTheTypeAndTheConsumeBusIsByName(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
-    moduleInstance.buildServerSentEvent()
     moduleInstance.buildMessageBus()
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})

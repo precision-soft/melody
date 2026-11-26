@@ -260,7 +260,7 @@ func (instance *smallSendBufferListener) Accept() (net.Conn, error) {
 
 func TestStreamHandler_TheWriteTimeoutBoundsAWriteTheClientNeverDrains(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    defer hub.Shutdown()
+    defer hub.CloseWithContext(context.Background())
 
     handler := NewStreamHandler(hub, StreamHandlerConfig{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
@@ -682,7 +682,7 @@ func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
 
     <-callbackEntered
 
-    hub.Shutdown()
+    _ = hub.CloseWithContext(context.Background())
 
     outcome := <-resolveOutcome
     if "alive" != outcome {
@@ -759,7 +759,7 @@ func wedgedCallbackReleaseAfterTeardown(t *testing.T, closeHandshakeGrace bound.
 
     <-callbackEntered
 
-    hub.Shutdown()
+    _ = hub.CloseWithContext(context.Background())
 
     start := time.Now()
     select {
@@ -1127,7 +1127,7 @@ func TestDispatchOnMessage_SurvivesAPanicWhoseUnwrapPanics(t *testing.T) {
 
 func TestStreamHandler_AnUnlimitedReadLimitDisablesTheDefaultCap(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    defer hub.Shutdown()
+    defer hub.CloseWithContext(context.Background())
 
     received := make(chan int, 1)
 
@@ -1181,7 +1181,7 @@ func TestStreamHandler_AnUnlimitedReadLimitDisablesTheDefaultCap(t *testing.T) {
 
 func TestStreamHandler_RefusesAShutDownHubBeforeTheUpgrade(t *testing.T) {
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    hub.Shutdown()
+    _ = hub.CloseWithContext(context.Background())
 
     handler := NewStreamHandler(hub, StreamHandlerConfig{
         IdleTimeout:   bound.Of(time.Second),
@@ -1382,7 +1382,7 @@ func TestStreamHandler_ADrainingHubAnswers503AndAnEmptyTopic400(t *testing.T) {
         "draining hub": {
             hub: func() *melodyhttp.ServerSentEventHub {
                 hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-                hub.Shutdown()
+                _ = hub.CloseWithContext(context.Background())
 
                 return hub
             },
@@ -1470,7 +1470,7 @@ func TestStreamHandler_AHubClosedBetweenTheCheckAndTheSubscribeLeavesARecord(t *
 
     wsUrl := serveStreamHandlerWithLogger(t, hub, StreamHandlerConfig{
         TopicResolver: func(request httpcontract.Request) string {
-            hub.Shutdown()
+            _ = hub.CloseWithContext(context.Background())
 
             return "demo"
         },

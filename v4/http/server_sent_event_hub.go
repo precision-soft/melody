@@ -5,7 +5,6 @@ import (
     "reflect"
     "sync"
     "sync/atomic"
-    "time"
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
@@ -25,20 +24,14 @@ type ServerSentEventHubConfig struct {
     /* SubscriberBuffer is the capacity of every subscriber's channel, the events a slow reader can lag behind before the hub drops for it: 16 by default, at least 1, unlimited refused. */
     SubscriberBuffer bound.Count
 
-    /* BackplaneClearTimeout bounds the wait of SetBackplane(nil) for the publishes still holding the backplane it clears: 30s by default, at least 1ms, unlimited refused; ClearBackplane is the clear under a deadline of the caller's. */
-    BackplaneClearTimeout bound.Duration
+    /* Logger is the journal the hub files its own failures into: a failed backplane publish, a subscriber's first dropped event; nil records none, a typed nil is refused. */
+    Logger loggingcontract.Logger
 }
 
 var serverSentEventSubscriberBufferRule = bound.Rule[int]{
     Name:    "ServerSentEventHubConfig.SubscriberBuffer",
     Default: defaultServerSentEventBufferSize,
     Minimum: 1,
-}
-
-var serverSentEventBackplaneClearTimeoutRule = bound.Rule[time.Duration]{
-    Name:    "ServerSentEventHubConfig.BackplaneClearTimeout",
-    Default: defaultServerSentEventBackplaneClearTimeout,
-    Minimum: bound.TimeoutMinimum,
 }
 
 /* NewServerSentEventHub resolves the configuration and builds the hub; a refused field panics naming it. */
@@ -48,30 +41,34 @@ func NewServerSentEventHub(config ServerSentEventHubConfig) *ServerSentEventHub 
         exception.Panic(exception.FromError(subscriberBufferErr))
     }
 
-    backplaneClearTimeout, backplaneClearTimeoutErr := bound.Resolve(config.BackplaneClearTimeout, serverSentEventBackplaneClearTimeoutRule)
-    if nil != backplaneClearTimeoutErr {
-        exception.Panic(exception.FromError(backplaneClearTimeoutErr))
+    if nil != config.Logger && true == internal.IsNilInterface(config.Logger) {
+        exception.Panic(
+            exception.NewError(
+                "server sent event hub logger is a typed nil",
+                exceptioncontract.Context{"field": "ServerSentEventHubConfig.Logger"},
+                nil,
+            ),
+        )
     }
 
     return &ServerSentEventHub{
-        subscribersByTopic:    make(map[string]map[*ServerSentEventSubscriber]struct{}),
-        subscriberBuffer:      subscriberBuffer.Value,
-        backplaneClearTimeout: backplaneClearTimeout.Value,
+        subscribersByTopic: make(map[string]map[*ServerSentEventSubscriber]struct{}),
+        subscriberBuffer:   subscriberBuffer.Value,
+        logger:             config.Logger,
     }
 }
 
-/* ServerSentEventHub holds the subscribers of every topic, the backplane and the logger for the life of the process. The subscriber maps, the closed flag, the backplane and the logger are read and written under mutex; the backplane generation counts the publishes past the closed check so Shutdown and a clear wait for them, and the drop and failure counters are atomics read without the lock. */
+/* ServerSentEventHub holds the subscribers of every topic, the backplane and the logger for the life of the process. The subscriber maps, the closed flag and the backplane are read and written under mutex, the logger is fixed at construction; the backplane generation counts the publishes past the closed check so a close and a clear wait for them, and the drop and failure counters are atomics read without the lock. */
 type ServerSentEventHub struct {
     mutex              sync.RWMutex
     subscribersByTopic map[string]map[*ServerSentEventSubscriber]struct{}
     closed             bool
-    /* the installed backplane with the publishes holding it; nil when none is installed. Swapped whole under the write lock, so a clear or a shutdown waits on the generation it removed alone. */
+    /* the installed backplane with the publishes holding it; nil when none is installed. Swapped whole under the write lock, so a clear or a close waits on the generation it removed alone. */
     generation *serverSentEventBackplaneGeneration
     logger     loggingcontract.Logger
 
-    /* the resolved configuration; zero on the zero-value hub, read as the defaults */
-    subscriberBuffer      int
-    backplaneClearTimeout time.Duration
+    /* the resolved configuration; zero on the zero-value hub, read as the default */
+    subscriberBuffer int
 
     dropped           atomic.Uint64
     backplaneFailures atomic.Uint64
@@ -104,15 +101,7 @@ func (instance *ServerSentEventSubscriber) Topic() string {
     return instance.topic
 }
 
-/* SetLogger installs the journal the hub files its own failures into: a failed backplane publish and a subscriber's first dropped event. */
-func (instance *ServerSentEventHub) SetLogger(logger loggingcontract.Logger) {
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    instance.logger = logger
-}
-
-/* Subscribe registers a subscriber for a topic with the hub's buffer. On a hub that has been shut down the subscriber is handed back with its channel already closed and is not registered; IsClosed tells that apart from an ordinary end of stream. */
+/* Subscribe registers a subscriber for a topic with the hub's buffer. On a hub that has been closed the subscriber is handed back with its channel already closed and is not registered; IsClosed tells that apart from an ordinary end of stream. */
 func (instance *ServerSentEventHub) Subscribe(topic string) *ServerSentEventSubscriber {
     bufferSize := instance.subscriberBuffer
     if 0 == bufferSize {
@@ -149,11 +138,8 @@ func (instance *ServerSentEventHub) Subscribe(topic string) *ServerSentEventSubs
     return subscriber
 }
 
-/* the two defaults are the rules' and the zero-value hub's alike, which reads its unresolved zero fields as them */
+/* the default is the rule's and the zero-value hub's alike, which reads its unresolved zero field as it */
 const defaultServerSentEventBufferSize = 16
-
-/* defaultServerSentEventBackplaneClearTimeout bounds the wait of a SetBackplane(nil) for the publishes holding the backplane it clears */
-const defaultServerSentEventBackplaneClearTimeout = 30 * time.Second
 
 func (instance *ServerSentEventHub) Unsubscribe(subscriber *ServerSentEventSubscriber) {
     if nil == subscriber {
@@ -180,28 +166,16 @@ func (instance *ServerSentEventHub) Unsubscribe(subscriber *ServerSentEventSubsc
     }
 }
 
-/* SetBackplane installs the cross-node fan-out, or clears it when handed nil or a typed nil. Installing a different backplane over a live one, or any backplane into a hub that has shut down, is refused — re-installing the very one already installed changes nothing —: clear first, close what was taken out, then install. Clearing is always allowed, since a shipped backplane's CloseWithContext clears itself from the hub through ClearBackplane under its own deadline, and it waits for the publishes holding the backplane, so the caller closes it with nothing inside; the wait of a SetBackplane(nil) is bounded by the hub's BackplaneClearTimeout, thirty seconds by default, past which a warning names the publishes still inside and the clear returns, the backplane's own Publish being what holds them. ClearBackplane is the clear under a deadline of the caller's. Clearing from inside the backplane's own Publish waits on itself until that bound. */
+/* SetBackplane installs the cross-node fan-out. A nil or typed-nil backplane is refused naming ClearBackplane, the clear under the caller's deadline. Installing a different backplane over a live one, or any backplane into a hub that has closed, is refused — re-installing the very one already installed changes nothing —: clear first, close what was taken out, then install. */
 func (instance *ServerSentEventHub) SetBackplane(backplane ServerSentEventBackplane) {
     if true == internal.IsNilInterface(backplane) {
-        clearContext, cancel := context.WithTimeout(context.Background(), instance.clearTimeout())
-        defer cancel()
-
-        if removed, clearErr := instance.clearBackplane(clearContext); nil != clearErr {
-            instance.mutex.RLock()
-            logger := instance.logger
-            instance.mutex.RUnlock()
-
-            logServerSentEventHubWarning(
-                logger,
-                "server sent event hub cleared its backplane while publishes were still inside it; the clear stopped waiting for them at its timeout",
-                loggingcontract.Context{
-                    "reason":          "backplane clear",
-                    "publishesInside": removed.publishesOutstanding.Load(),
-                },
-            )
-        }
-
-        return
+        exception.Panic(
+            exception.NewError(
+                "the server-sent event hub is handed a nil backplane",
+                exceptioncontract.Context{"door": "ServerSentEventHub.ClearBackplane"},
+                nil,
+            ),
+        )
     }
 
     instance.mutex.Lock()
@@ -231,8 +205,12 @@ func (instance *ServerSentEventHub) SetBackplane(backplane ServerSentEventBackpl
     instance.generation = &serverSentEventBackplaneGeneration{backplane: backplane}
 }
 
-/* ClearBackplane clears the backplane and waits, under the caller's deadline, for the publishes that read it before the clear, so the caller closes it with nothing inside. A wait the deadline ended answers an error carrying the context's: publishes are still inside the backplane, which takes no context, and closing it under them is the caller's decision. */
+/* ClearBackplane clears the backplane and waits, under the caller's deadline, for the publishes that read it before the clear, so the caller closes it with nothing inside; a shipped backplane's CloseWithContext clears itself through it. A wait the deadline ended answers an error carrying the context's: publishes are still inside the backplane, which takes no context, and closing it under them is the caller's decision. Clearing from inside the backplane's own Publish waits on itself until the deadline. */
 func (instance *ServerSentEventHub) ClearBackplane(clearContext context.Context) error {
+    if nil == clearContext {
+        return exception.NewError("the clear context is nil", exceptioncontract.Context{"door": "ServerSentEventHub.ClearBackplane"}, nil)
+    }
+
     _, clearErr := instance.clearBackplane(clearContext)
 
     return clearErr
@@ -260,15 +238,6 @@ func (instance *ServerSentEventHub) clearBackplane(clearContext context.Context)
         },
         clearContext.Err(),
     )
-}
-
-/* clearTimeout is the bound of a SetBackplane(nil), the default on the zero-value hub. */
-func (instance *ServerSentEventHub) clearTimeout() time.Duration {
-    if 0 == instance.backplaneClearTimeout {
-        return defaultServerSentEventBackplaneClearTimeout
-    }
-
-    return instance.backplaneClearTimeout
 }
 
 /* sameBackplane compares identity only of values that carry one, since == panics on an incomparable dynamic type; a value with no identity is never the same, so re-installing it is refused. */
@@ -347,7 +316,7 @@ func (instance *ServerSentEventHub) SubscriberCount(topic string) int {
     return len(instance.subscribersByTopic[topic])
 }
 
-/* IsClosed reports whether the hub was shut down, which a subscriber's closed channel alone cannot tell from an ordinary end of stream. */
+/* IsClosed reports whether the hub was closed, which a subscriber's closed channel alone cannot tell from an ordinary end of stream. */
 func (instance *ServerSentEventHub) IsClosed() bool {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
@@ -355,13 +324,12 @@ func (instance *ServerSentEventHub) IsClosed() bool {
     return instance.closed
 }
 
-/* Shutdown closes every subscriber channel and the backplane the hub owns. */
-func (instance *ServerSentEventHub) Shutdown() {
-    _ = instance.shutdownWithin(context.Background())
-}
-
-/* CloseWithContext is Shutdown under a deadline, the door the container's teardown closes the hub through. The deadline bounds the wait for the publishes past the closed check, not the publishes, which take no context: when it expires with a publish still inside, the backplane is handed to a closer of its own that closes it when they end, and the error is returned. With nothing in flight, the backplane is closed here and nil answered, even past the deadline. */
+/* CloseWithContext closes every subscriber channel and the backplane the hub owns, the door the container's teardown closes the hub through. The deadline bounds the wait for the publishes past the closed check, not the publishes, which take no context: when it expires with a publish still inside, the backplane is handed to a closer of its own that closes it when they end, and the error is returned. With nothing in flight, the backplane is closed here and nil answered, even past the deadline. */
 func (instance *ServerSentEventHub) CloseWithContext(closeContext context.Context) error {
+    if nil == closeContext {
+        return exception.NewError("the close context is nil", exceptioncontract.Context{"door": "ServerSentEventHub.CloseWithContext"}, nil)
+    }
+
     return instance.shutdownWithin(closeContext)
 }
 
@@ -488,7 +456,7 @@ func recoverServerSentEventBackplaneClose(closeContext context.Context, backplan
     return backplane.CloseWithContext(closeContext)
 }
 
-/* replicate pushes the event to the other nodes. The publish runs outside the lock, a network round trip, so the in-flight counter is raised under the read lock that reads the closed flag and Shutdown waits on it. The publish runs under a guard, since it is third-party code on the broadcaster's goroutine, and its failure is recorded. */
+/* replicate pushes the event to the other nodes. The publish runs outside the lock, a network round trip, so the in-flight counter is raised under the read lock that reads the closed flag and a close waits on it. The publish runs under a guard, since it is third-party code on the broadcaster's goroutine, and its failure is recorded. */
 func (instance *ServerSentEventHub) replicate(topic string, event ServerSentEvent) {
     instance.mutex.RLock()
 
