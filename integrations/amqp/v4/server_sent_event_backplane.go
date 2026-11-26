@@ -85,7 +85,7 @@ type ServerSentEventBackplaneConfig struct {
     Reconnect ReconnectConfig
     /* CallTimeout bounds each of the two stretches one Publish spends time in: the wait for its turn and the write. The amqp client discards the publish context, so a broker that stops reading would otherwise hold the write, every later broadcast and the hub's shutdown; a write that outlives the timeout fails and an owned connection is cut, redialed on the next publish when the cut freed the write and refusing publishes until the write returns when it did not, while a broadcast that ran out waiting for its turn marks nothing and is never written. It sizes one attempt over an open channel; opening or reopening the channel, or the one retry after a failure that was not a timeout, pays channel RPCs the client bounds only by the socket. 1s when left out, at least 1ms, unlimited refused. */
     CallTimeout bound.Duration
-    /* CloseTimeout bounds each stretch of CloseWithContext that cannot observe its signal and every wait on a call the client may park behind a wedged write: the provider's when built through one, 30s otherwise, at least 1ms, unlimited refused. */
+    /* CloseTimeout bounds each stretch of CloseWithContext that cannot observe its signal, the close of an owned connection and of a dial that lands after the close began included, and every wait on a call the client may park behind a wedged write: the provider's when built through one, 30s otherwise, at least 1ms, unlimited refused. */
     CloseTimeout bound.Duration
 }
 
@@ -190,7 +190,7 @@ func (instance *ServerSentEventBackplane) refusalKeepsTheChannel(publishErr erro
     return exception.ChainIs(publishErr, errServerSentEventBackplanePublishTimedOut)
 }
 
-/* CloseWithContext is bounded on every stretch, because no amqp client RPC observes a context and all share the send locks a blocked write holds: it joins the publish half under the call timeout, cuts an owned connection with a deadline, at once over a write genuinely in flight and one call timeout ahead otherwise, closes the channels under the join timeout, except where the close could only block — an owned connection whose close did not return within its bound, a caller-owned connection with a wedged write — and joins the listen goroutine under the same bound. No amqp call runs under instance.mutex, so isClosing and the publish path stay answerable while teardown waits. A failed join is read together with the writes in flight, as publishJoin.wedgedWrite does, since a queued broadcast holds the publish half as firmly as a wedged write. A dial that lands after the close began is closed on a goroutine of its own, which outlives this call by at most one call timeout counted from the landing; a dial still in flight when the close cancelled is waited for on that goroutine for as long as the dialer takes, so only the dialer's own timeout bounds that wait. The hub's clear waits for the broadcasts holding this backplane under that deadline. The publish join and the owned connection's close are the publishHalf's; every stretch takes the smaller of what is left of the deadline and its own ceiling, the transport's for the same operation: this backplane's publish budget for the join and the owned close, and the join timeout for the channel closes of a caller-owned connection. */
+/* CloseWithContext is bounded on every stretch, because no amqp client RPC observes a context and all share the send locks a blocked write holds: it joins the publish half under the call timeout, cuts an owned connection with a deadline, at once over a write genuinely in flight and one close timeout ahead otherwise, closes the channels under the join timeout, except where the close could only block — an owned connection whose close did not return within its bound, a caller-owned connection with a wedged write — and joins the listen goroutine under the same bound. No amqp call runs under instance.mutex, so isClosing and the publish path stay answerable while teardown waits. A failed join is read together with the writes in flight, as publishJoin.wedgedWrite does, since a queued broadcast holds the publish half as firmly as a wedged write. A dial that lands after the close began is closed on a goroutine of its own, which outlives this call by at most one close timeout counted from the landing; a dial still in flight when the close cancelled is waited for on that goroutine for as long as the dialer takes, so only the dialer's own timeout bounds that wait. The hub's clear waits for the broadcasts holding this backplane under that deadline. The publish join and the owned connection's close are the publishHalf's; every stretch takes the smaller of what is left of the deadline and its own ceiling, the transport's for the same operation: this backplane's call timeout for the publish join, and the close timeout for the owned connection's close and the channel closes. */
 func (instance *ServerSentEventBackplane) CloseWithContext(closeContext context.Context) error {
     var closeErrs []error
 
@@ -221,7 +221,7 @@ func (instance *ServerSentEventBackplane) CloseWithContext(closeContext context.
     connectionCloseReturned := true
 
     if true == ownsConnection && nil != connection {
-        connectionCloseErr, reported, returned := instance.closeOwnedConnectionWithin(closeContext, instance.callTimeout, join, connection)
+        connectionCloseErr, reported, returned := instance.closeOwnedConnectionWithin(closeContext, instance.joinBound, join, connection)
         if true == reported {
             closeErrs = append(closeErrs, connectionCloseErr)
         }
@@ -570,8 +570,8 @@ func (instance *ServerSentEventBackplane) dialWithContext() (*amqp091.Connection
     case result := <-outcome:
         return result.connection, result.err
     case <-instance.ctx.Done():
-        /* a dial that lands after the cancellation is closed by the drain goroutine under one call timeout from its landing, so its close cannot outlive that budget on a broker that does not answer */
-        drainAbandonedDial(outcome, instance.callTimeout)
+        /* a dial that lands after the cancellation is closed by the drain goroutine under one close timeout from its landing, so its close cannot outlive that budget on a broker that does not answer */
+        drainAbandonedDial(outcome, instance.joinBound)
 
         return nil, exception.NewError("amqp sse backplane dial canceled", nil, instance.ctx.Err())
     }
@@ -630,8 +630,8 @@ func (instance *ServerSentEventBackplane) liveConnection() (*amqp091.Connection,
     if true == instance.closing {
         instance.mutex.Unlock()
 
-        /* a dial that landed after CloseWithContext began belongs to nobody: it is closed on a goroutine of its own under one call timeout, since run here the close would hold the caller that asked for a connection */
-        closeAbandonedConnection(connection, time.Now().Add(instance.callTimeout))
+        /* a dial that landed after CloseWithContext began belongs to nobody: it is closed on a goroutine of its own under one close timeout, since run here the close would hold the caller that asked for a connection */
+        closeAbandonedConnection(connection, time.Now().Add(instance.joinBound))
 
         return nil, exception.NewError("amqp sse backplane is closing", nil, nil)
     }

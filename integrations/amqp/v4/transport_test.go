@@ -2287,6 +2287,7 @@ func TestEnsureConsumeChannel_AnswersTheCachedChannelWithItsOwnGeneration(t *tes
 const (
     wedgeCallTimeout       = 200 * time.Millisecond
     wedgeWarmupCallTimeout = 5 * time.Second
+    wedgeCloseTimeout      = time.Second
 )
 
 func newWedgeTestTransport(t *testing.T, connection *amqp091.Connection, dialer func() (*amqp091.Connection, error)) (*Transport, containercontract.Runtime) {
@@ -2299,6 +2300,7 @@ func newWedgeTestTransport(t *testing.T, connection *amqp091.Connection, dialer 
         Connection:     connection,
         Dialer:         dialer,
         CallTimeout:    bound.Of(wedgeWarmupCallTimeout),
+        CloseTimeout:   bound.Of(wedgeCloseTimeout),
     })
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
@@ -2449,13 +2451,56 @@ func TestClose_WaitsForTheInFlightPublishBeforeClosingTheChannel(t *testing.T) {
     awaitOutcome(t, "close after the publish released the mutex", closed, 2*time.Second)
 }
 
-func TestClose_GivesUpOnThePublishHalfAfterTheCallTimeout(t *testing.T) {
+func TestTransport_AnOwnedConnectionClosesUnderCloseTimeout(t *testing.T) {
+    cases := []struct {
+        callTimeout  time.Duration
+        closeTimeout time.Duration
+    }{
+        {callTimeout: time.Millisecond, closeTimeout: 600 * time.Millisecond},
+        {callTimeout: time.Hour, closeTimeout: 300 * time.Millisecond},
+    }
+
+    for _, testCase := range cases {
+        fake := dialFakeBroker(t)
+
+        transport := NewTransport("melody.amqp.v4.test.close.stretch", NewMessageRegistry(), TransportConfig{
+            Dialer:       func() (*amqp091.Connection, error) { return fake.connection, nil },
+            CallTimeout:  bound.Of(testCase.callTimeout),
+            CloseTimeout: bound.Of(testCase.closeTimeout),
+        })
+
+        if _, connectErr := transport.connect(); nil != connectErr {
+            t.Fatalf("the fake broker connection was not taken: %v", connectErr)
+        }
+
+        if false == transport.ownsConnection {
+            t.Fatalf("this test needs a transport that OWNS its connection")
+        }
+
+        started := time.Now()
+        closeOutcome := make(chan error, 1)
+        go func() { closeOutcome <- transport.CloseWithContext(t.Context()) }()
+
+        awaitArmedDeadline(t, fake.gated)
+
+        stretch := fake.gated.Deadline().Sub(started)
+        if stretch < testCase.closeTimeout-50*time.Millisecond || stretch > testCase.closeTimeout+500*time.Millisecond {
+            t.Fatalf("call timeout %s, close timeout %s: the owned connection's close armed a stretch of %s", testCase.callTimeout, testCase.closeTimeout, stretch)
+        }
+
+        if closeErr := awaitOutcome(t, "close of an owned connection the broker never answers", closeOutcome, testCase.closeTimeout+3*time.Second); nil == closeErr {
+            t.Fatalf("a close the broker never answered was reported clean")
+        }
+    }
+}
+
+func TestTransport_ThePublishJoinStillFollowsCallTimeout(t *testing.T) {
     instance := &Transport{
         queue:          "orders",
         closeSignal:    make(chan struct{}),
         reconnect:      defaultReconnect,
         callTimeout:    100 * time.Millisecond,
-        publishHalf:    publishHalf{joinBound: closeJoinTimeout},
+        publishHalf:    publishHalf{joinBound: time.Hour},
     }
 
     releaseInstancePublish := holdPublishMutex(t, &instance.publishMutex)
@@ -3420,13 +3465,14 @@ func TestTransport_CloseWithContextReturnsWithinTheDeadlineWhenAnEarlierCutHasNo
     }
 }
 
-func TestConnect_ADialThatLandsAfterCloseBeganIsClosedOffTheMutex(t *testing.T) {
+func TestConnect_ADialThatLandsAfterCloseBeganIsClosedOffTheMutexUnderCloseTimeout(t *testing.T) {
     fake := dialFakeBroker(t)
 
     var transport *Transport
     transport = &Transport{
         queue:          "orders",
-        callTimeout:    time.Second,
+        callTimeout:    time.Hour,
+        publishHalf:    publishHalf{joinBound: time.Second},
         closeSignal:    make(chan struct{}),
         dialer: func() (*amqp091.Connection, error) {
             transport.mutex.Lock()
@@ -3466,13 +3512,14 @@ func TestConnect_ADialThatLandsAfterCloseBeganIsClosedOffTheMutex(t *testing.T) 
     }
 }
 
-func TestDialInterruptibly_ADialThatLandsAfterTheCloseSignalIsClosedWithinOneCallTimeout(t *testing.T) {
+func TestTransport_AnAbandonedDialIsDrainedUnderCloseTimeout(t *testing.T) {
     fake := dialFakeBroker(t)
 
     release := make(chan struct{})
     transport := &Transport{
         queue:          "orders",
-        callTimeout:    200 * time.Millisecond,
+        callTimeout:    time.Hour,
+        publishHalf:    publishHalf{joinBound: 200 * time.Millisecond},
         closeSignal:    make(chan struct{}),
         dialer: func() (*amqp091.Connection, error) {
             <-release

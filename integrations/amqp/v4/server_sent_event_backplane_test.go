@@ -562,9 +562,10 @@ func TestServerSentEventBackplane_CloseReturnsWhileAPublishWriteIsWedged(t *test
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Dialer:      dialer.Dial,
-        Exchange:    "melody.sse.test.wedge",
-        CallTimeout: bound.Of(200 * time.Millisecond),
+        Dialer:       dialer.Dial,
+        Exchange:     "melody.sse.test.wedge",
+        CallTimeout:  bound.Of(200 * time.Millisecond),
+        CloseTimeout: bound.Of(time.Second),
     })
     awaitBackplaneSubscribed(t, backplane)
 
@@ -629,9 +630,10 @@ func TestServerSentEventBackplane_CloseReturnsWhenTheSocketWedgedWhileIdle(t *te
 
     hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
     backplane := NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{
-        Dialer:      dialer.Dial,
-        Exchange:    "melody.sse.test.wedge",
-        CallTimeout: bound.Of(200 * time.Millisecond),
+        Dialer:       dialer.Dial,
+        Exchange:     "melody.sse.test.wedge",
+        CallTimeout:  bound.Of(200 * time.Millisecond),
+        CloseTimeout: bound.Of(time.Second),
     })
     awaitBackplaneSubscribed(t, backplane)
 
@@ -987,6 +989,47 @@ func TestServerSentEventBackplane_ResolveExpiredWriteAnswersAWriteThatAlreadyRet
 }
 
 /* an owned connection whose publish half is merely BUSY still gets its close handshake: the deadline is moved a call timeout ahead unless a write is genuinely in flight, so a clean shutdown behind a queue of broadcasts is not cut off mid-handshake. */
+func TestServerSentEventBackplane_AnOwnedConnectionClosesUnderCloseTimeout(t *testing.T) {
+    cases := []struct {
+        callTimeout  time.Duration
+        closeTimeout time.Duration
+    }{
+        {callTimeout: time.Millisecond, closeTimeout: 600 * time.Millisecond},
+        {callTimeout: time.Hour, closeTimeout: 300 * time.Millisecond},
+    }
+
+    for _, testCase := range cases {
+        fake := dialFakeBroker(t)
+
+        backplaneContext, backplaneCancel := context.WithCancel(context.Background())
+        backplane := &ServerSentEventBackplane{
+            connection:     fake.connection,
+            ownsConnection: true,
+            hub:            melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}),
+            exchange:       "melody.sse.test.close.stretch",
+            ctx:            backplaneContext,
+            cancel:         backplaneCancel,
+            callTimeout:    testCase.callTimeout,
+            publishHalf:    publishHalf{joinBound: testCase.closeTimeout},
+        }
+
+        started := time.Now()
+        closeOutcome := make(chan error, 1)
+        go func() { closeOutcome <- backplane.CloseWithContext(t.Context()) }()
+
+        awaitArmedDeadline(t, fake.gated)
+
+        stretch := fake.gated.Deadline().Sub(started)
+        if stretch < testCase.closeTimeout-50*time.Millisecond || stretch > testCase.closeTimeout+500*time.Millisecond {
+            t.Fatalf("call timeout %s, close timeout %s: the owned connection's close armed a stretch of %s", testCase.callTimeout, testCase.closeTimeout, stretch)
+        }
+
+        if closeErr := awaitOutcome(t, "close of an owned connection the broker never answers", closeOutcome, testCase.closeTimeout+3*time.Second); nil == closeErr {
+            t.Fatalf("a close the broker never answered was reported clean")
+        }
+    }
+}
+
 func TestServerSentEventBackplane_CloseGivesAnOwnedConnectionItsHandshakeWhenNothingIsInFlight(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     dialer := newGatedDialer(t, dsn)
@@ -1414,13 +1457,13 @@ func TestServerSentEventBackplane_CloseNamesTheWriteLeftBlockedOnAConnectionAnEa
 }
 
 /* the backplane's twin of the transport's late-dial guard: a dial that lands after Close began is closed on a goroutine of its own under one call timeout, so the caller that asked for a connection returns before that budget runs out and the late socket is still closed */
-func TestServerSentEventBackplane_ADialThatLandsAfterCloseBeganIsClosedOffTheCallersPath(t *testing.T) {
+func TestServerSentEventBackplane_ADialThatLandsAfterCloseBeganIsClosedOffTheCallersPathUnderCloseTimeout(t *testing.T) {
     fake := dialFakeBroker(t)
 
     var backplane *ServerSentEventBackplane
     backplane = &ServerSentEventBackplane{
         ctx:         context.Background(),
-        callTimeout: time.Second,
+        callTimeout: time.Hour,
         dialer: func() (*amqp091.Connection, error) {
             backplane.mutex.Lock()
             backplane.closing = true
@@ -1430,7 +1473,7 @@ func TestServerSentEventBackplane_ADialThatLandsAfterCloseBeganIsClosedOffTheCal
 
             return fake.connection, nil
         },
-        publishHalf: publishHalf{joinBound: closeJoinTimeout},
+        publishHalf: publishHalf{joinBound: time.Second},
     }
 
     connectOutcome := make(chan error, 1)
@@ -1455,8 +1498,8 @@ func TestServerSentEventBackplane_ADialThatLandsAfterCloseBeganIsClosedOffTheCal
     }
 }
 
-/* a dial that lands after the backplane's context was cancelled is closed by the drain goroutine under one call timeout from its landing, where the client's plain close would join a write the broker never reads */
-func TestServerSentEventBackplane_ADialThatLandsAfterTheCancellationIsClosedWithinOneCallTimeout(t *testing.T) {
+/* a dial that lands after the backplane's context was cancelled is closed by the drain goroutine under one close timeout from its landing, where the client's plain close would join a write the broker never reads */
+func TestServerSentEventBackplane_ADialThatLandsAfterTheCancellationIsClosedWithinOneCloseTimeout(t *testing.T) {
     fake := dialFakeBroker(t)
 
     release := make(chan struct{})
@@ -1464,7 +1507,8 @@ func TestServerSentEventBackplane_ADialThatLandsAfterTheCancellationIsClosedWith
     backplane := &ServerSentEventBackplane{
         ctx:         backplaneContext,
         cancel:      cancel,
-        callTimeout: 200 * time.Millisecond,
+        callTimeout: time.Hour,
+        publishHalf: publishHalf{joinBound: 200 * time.Millisecond},
         dialer: func() (*amqp091.Connection, error) {
             <-release
 

@@ -165,9 +165,9 @@ type TransportConfig struct {
     PublishReturnBuffer bound.Count
     /* DelayBuckets are the ascending queue-level-ttl delay tiers, from 1ms to the 32-bit millisecond limit. */
     DelayBuckets []time.Duration
-    /* CallTimeout bounds each of a send's turn wait, write and confirmation. */
+    /* CallTimeout bounds each of a send's turn wait, write and confirmation, and the publish join of a close; a connection's close is CloseTimeout's. */
     CallTimeout bound.Duration
-    /* CloseTimeout bounds each close stretch that cannot observe its signal: 30s by default, at least 1ms. */
+    /* CloseTimeout bounds each close stretch that cannot observe its signal, the close of an owned connection and of a dial that lands after the close began included: 30s by default, at least 1ms. */
     CloseTimeout bound.Duration
 }
 
@@ -326,7 +326,7 @@ func (instance *Transport) Nack(
 
 const closeJoinTimeout = 30 * time.Second
 
-/* CloseWithContext bounds the consume join and the channel closes by CloseTimeout, the publish join and an owned connection's close by CallTimeout, all within the caller's deadline. */
+/* CloseWithContext bounds the consume join, the channel closes and an owned connection's close by CloseTimeout, the publish join by CallTimeout, all within the caller's deadline. */
 func (instance *Transport) CloseWithContext(closeContext context.Context) error {
     instance.mutex.Lock()
     instance.closing = true
@@ -361,7 +361,7 @@ func (instance *Transport) CloseWithContext(closeContext context.Context) error 
     connectionCloseReturned := true
 
     if true == ownsConnection && nil != connection {
-        connectionCloseErr, reported, returned := instance.closeOwnedConnectionWithin(closeContext, instance.callTimeout, join, connection)
+        connectionCloseErr, reported, returned := instance.closeOwnedConnectionWithin(closeContext, instance.joinBound, join, connection)
         if true == reported {
             closeErrs = append(closeErrs, connectionCloseErr)
         }
@@ -561,7 +561,7 @@ func (instance *Transport) connect() (*amqp091.Connection, error) {
 
     if true == instance.closing {
         /* a late dial is closed on its own goroutine: under instance.mutex the close would hold CloseWithContext */
-        closeAbandonedConnection(connection, time.Now().Add(instance.callTimeout))
+        closeAbandonedConnection(connection, time.Now().Add(instance.joinBound))
 
         return nil, exception.NewError("amqp transport is closing", nil, nil)
     }
@@ -595,7 +595,7 @@ func (instance *Transport) dialInterruptibly() (*amqp091.Connection, error) {
     case result := <-outcome:
         return result.connection, result.err
     case <-instance.closeSignal:
-        drainAbandonedDial(outcome, instance.callTimeout)
+        drainAbandonedDial(outcome, instance.joinBound)
 
         return nil, exception.NewError("amqp transport is closing", nil, nil)
     }
