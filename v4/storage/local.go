@@ -17,6 +17,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/internal/entitytag"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     storagecontract "github.com/precision-soft/melody/v4/storage/contract"
@@ -29,7 +30,20 @@ type LocalStorageConfig struct {
 
     /* SweepBatchSize is how many names of a key's directory the sweep reads at a time; 256 when left out, at least 1, unlimited refused since a batch is held in memory. */
     SweepBatchSize bound.Count
+
+    /* FileMode is the permission every object and its metadata object are created with: DefaultLocalStorageFileMode when left out; permission bits only, the owner's read and write required. */
+    FileMode os.FileMode
+
+    /* DirectoryMode is the permission the base directory and every missing directory of a key are created with: DefaultLocalStorageDirectoryMode when left out; permission bits only, the owner's read, write and search required. */
+    DirectoryMode os.FileMode
 }
+
+const (
+    /* DefaultLocalStorageFileMode is the permission of a stored object when LocalStorageConfig.FileMode is left out. */
+    DefaultLocalStorageFileMode os.FileMode = 0o640
+    /* DefaultLocalStorageDirectoryMode is the permission of a created storage directory when LocalStorageConfig.DirectoryMode is left out. */
+    DefaultLocalStorageDirectoryMode os.FileMode = 0o750
+)
 
 var localStorageTemporaryStaleAgeRule = bound.Rule[time.Duration]{
     Name:              "LocalStorageConfig.TemporaryStaleAge",
@@ -60,9 +74,19 @@ func NewLocalStorage(baseDirectory string, config LocalStorageConfig) *LocalStor
         exception.Panic(exception.FromError(sweepBatchSizeErr))
     }
 
+    fileMode, fileModeErr := internal.ResolveCreationMode(config.FileMode, DefaultLocalStorageFileMode, internal.JournalFileModeFloor, internal.FileModeRefusal, "LocalStorageConfig.FileMode")
+    if nil != fileModeErr {
+        exception.Panic(exception.FromError(fileModeErr))
+    }
+
+    directoryMode, directoryModeErr := internal.ResolveCreationMode(config.DirectoryMode, DefaultLocalStorageDirectoryMode, internal.JournalDirectoryModeFloor, internal.DirectoryModeRefusal, "LocalStorageConfig.DirectoryMode")
+    if nil != directoryModeErr {
+        exception.Panic(exception.FromError(directoryModeErr))
+    }
+
     cleanBaseDirectory := filepath.Clean(baseDirectory)
 
-    if mkdirErr := os.MkdirAll(cleanBaseDirectory, 0o750); nil != mkdirErr {
+    if mkdirErr := os.MkdirAll(cleanBaseDirectory, directoryMode); nil != mkdirErr {
         exception.Panic(
             exception.NewError(
                 "could not create the storage base directory",
@@ -89,6 +113,8 @@ func NewLocalStorage(baseDirectory string, config LocalStorageConfig) *LocalStor
         baseDirectory:     cleanBaseDirectory,
         temporaryStaleAge: temporaryStaleAge,
         sweepBatchSize:    sweepBatchSize.Value,
+        fileMode:          fileMode,
+        directoryMode:     directoryMode,
     }
 }
 
@@ -97,6 +123,8 @@ type LocalStorage struct {
     baseDirectory     string
     temporaryStaleAge bound.Resolved[time.Duration]
     sweepBatchSize    int
+    fileMode          os.FileMode
+    directoryMode     os.FileMode
 }
 
 func (instance *LocalStorage) Put(
@@ -125,7 +153,7 @@ func (instance *LocalStorage) Put(
     }
 
     /* the base directory is created again if it was removed after the construction; os.OpenRoot then confines every key operation to it, each path component checked against symlink escape */
-    if mkdirErr := os.MkdirAll(instance.baseDirectory, 0o750); nil != mkdirErr {
+    if mkdirErr := os.MkdirAll(instance.baseDirectory, instance.directoryMode); nil != mkdirErr {
         return exception.NewError("could not create the storage directory", map[string]any{"key": key}, mkdirErr)
     }
 
@@ -136,7 +164,7 @@ func (instance *LocalStorage) Put(
     defer root.Close()
 
     if directory := filepath.Dir(relativeKey); "." != directory {
-        if mkdirErr := root.MkdirAll(directory, 0o750); nil != mkdirErr {
+        if mkdirErr := root.MkdirAll(directory, instance.directoryMode); nil != mkdirErr {
             return exception.NewError("could not create the storage object's directory", map[string]any{"key": key, "directory": directory}, mkdirErr)
         }
     }
@@ -153,7 +181,7 @@ func (instance *LocalStorage) Put(
         return exception.NewError("storage key resolves to a directory", map[string]any{"key": key}, storagecontract.ErrKeyIsDirectory)
     }
 
-    temporaryKey, file, createErr := createStorageTemporaryFile(root, relativeKey)
+    temporaryKey, file, createErr := createStorageTemporaryFile(root, relativeKey, instance.fileMode)
     if nil != createErr {
         return exception.NewError("could not create the storage object", map[string]any{"key": key}, createErr)
     }
@@ -211,7 +239,7 @@ func (instance *LocalStorage) Put(
     /* the content type is stored after the object it describes, so a failed rename above leaves the previous object and its content type as they were; until it lands, the previous metadata describes another write and reads as none */
     if "" == options.ContentType {
         _ = root.Remove(storageMetadataKey(relativeKey))
-    } else if metadataErr := writeStorageMetadata(root, relativeKey, temporaryInfo, options.ContentType); nil != metadataErr {
+    } else if metadataErr := writeStorageMetadata(root, relativeKey, temporaryInfo, options.ContentType, instance.fileMode); nil != metadataErr {
         return exception.NewError("could not store the storage object's content type", map[string]any{"key": key}, metadataErr)
     }
 
@@ -298,7 +326,7 @@ func isStorageTemporaryRandomPart(randomPart string) bool {
 }
 
 /* createStorageTemporaryFile creates a uniquely named temporary object beside the target, so the rename stays within the pinned root; O_EXCL never clobbers another writer's temporary or the live key. */
-func createStorageTemporaryFile(root *os.Root, relativeKey string) (string, *os.File, error) {
+func createStorageTemporaryFile(root *os.Root, relativeKey string, fileMode os.FileMode) (string, *os.File, error) {
     directory := filepath.Dir(relativeKey)
     prefix := storageTemporaryPrefix(relativeKey)
 
@@ -310,7 +338,7 @@ func createStorageTemporaryFile(root *os.Root, relativeKey string) (string, *os.
 
         temporaryKey := filepath.Join(directory, prefix+hex.EncodeToString(suffix)+storageTemporaryObjectSuffix)
 
-        file, openErr := root.OpenFile(temporaryKey, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o640)
+        file, openErr := root.OpenFile(temporaryKey, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode)
         if nil == openErr {
             return temporaryKey, file, nil
         }
@@ -472,13 +500,13 @@ func storageMetadataKey(relativeKey string) string {
 }
 
 /* writeStorageMetadata stores the content type bound to the size and the modification time of the object written, through a temporary of its own renamed over the metadata name */
-func writeStorageMetadata(root *os.Root, relativeKey string, temporaryInfo os.FileInfo, contentType string) error {
+func writeStorageMetadata(root *os.Root, relativeKey string, temporaryInfo os.FileInfo, contentType string, fileMode os.FileMode) error {
     encoded, encodeErr := json.Marshal(storageMetadata{ContentType: contentType, Size: temporaryInfo.Size(), ModifiedAtUnixNano: temporaryInfo.ModTime().UnixNano()})
     if nil != encodeErr {
         return encodeErr
     }
 
-    metadataTemporaryKey, file, createErr := createStorageTemporaryFile(root, relativeKey)
+    metadataTemporaryKey, file, createErr := createStorageTemporaryFile(root, relativeKey, fileMode)
     if nil != createErr {
         return createErr
     }

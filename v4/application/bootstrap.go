@@ -21,19 +21,17 @@ func resolveRuntimePath(projectDirectory string, path string) string {
     return filepath.Join(projectDirectory, path)
 }
 
-const cacheDirectoryMode os.FileMode = 0o755
-
 func ensureRuntimeDirectories(
     projectDirectory string,
     logsDirectory string,
     cacheDirectory string,
     logDirectoryMode os.FileMode,
+    cacheDirectoryMode os.FileMode,
 ) error {
     logsPath := resolveRuntimePath(projectDirectory, logsDirectory)
 
     cachePath := resolveRuntimePath(projectDirectory, cacheDirectory)
 
-    /* the cache directory has no key of its own yet, and the journal's must not govern it */
     runtimeDirectories := []struct {
         path string
         mode os.FileMode

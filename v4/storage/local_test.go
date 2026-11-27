@@ -1614,3 +1614,77 @@ func TestLocalStorage_EveryDoorRefusesANilRuntimeFirst(t *testing.T) {
         t.Fatalf("expected nothing written under the base, got %v %v", entries, readErr)
     }
 }
+
+func requireStoragePermission(t *testing.T, path string, expected os.FileMode) {
+    t.Helper()
+
+    info, statErr := os.Stat(path)
+    if nil != statErr {
+        t.Fatalf("stat %s: %v", path, statErr)
+    }
+
+    if expected != info.Mode().Perm() {
+        t.Fatalf("expected %s at %#o, got %#o", path, uint32(expected), uint32(info.Mode().Perm()))
+    }
+}
+
+func storedUnderModes(t *testing.T, config LocalStorageConfig, fileMode os.FileMode, directoryMode os.FileMode) {
+    t.Helper()
+
+    base := filepath.Join(t.TempDir(), "base")
+    local := NewLocalStorage(base, config)
+    requireStoragePermission(t, base, directoryMode)
+
+    if removeErr := os.Remove(base); nil != removeErr {
+        t.Fatalf("remove: %v", removeErr)
+    }
+
+    if putErr := local.Put(testRuntime(), "labels/awb-123.txt", strings.NewReader("body"), 4, storagecontract.PutOptions{ContentType: "text/plain"}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    requireStoragePermission(t, base, directoryMode)
+    requireStoragePermission(t, filepath.Join(base, "labels"), directoryMode)
+    requireStoragePermission(t, filepath.Join(base, "labels", "awb-123.txt"), fileMode)
+    requireStoragePermission(t, filepath.Join(base, storageMetadataKey("labels/awb-123.txt")), fileMode)
+}
+
+func TestNewLocalStorage_CreatesTheDirectoriesAt0750AndTheObjectsAt0640ByDefault(t *testing.T) {
+    if 0o640 != DefaultLocalStorageFileMode || 0o750 != DefaultLocalStorageDirectoryMode {
+        t.Fatalf("expected the defaults 0640 and 0750, got %#o and %#o", uint32(DefaultLocalStorageFileMode), uint32(DefaultLocalStorageDirectoryMode))
+    }
+
+    storedUnderModes(t, LocalStorageConfig{}, 0o640, 0o750)
+}
+
+func TestNewLocalStorage_CreatesTheDirectoriesAndTheObjectsAtTheConfiguredModes(t *testing.T) {
+    storedUnderModes(t, LocalStorageConfig{FileMode: 0o644, DirectoryMode: 0o755}, 0o644, 0o755)
+    storedUnderModes(t, LocalStorageConfig{FileMode: 0o600, DirectoryMode: 0o700}, 0o600, 0o700)
+}
+
+func TestNewLocalStorage_RefusesAModeOutsideItsRuleNamingTheField(t *testing.T) {
+    cases := []struct {
+        config LocalStorageConfig
+        field  string
+        value  string
+    }{
+        {config: LocalStorageConfig{FileMode: 0o440}, field: "LocalStorageConfig.FileMode", value: "0440"},
+        {config: LocalStorageConfig{FileMode: 0o2640}, field: "LocalStorageConfig.FileMode", value: "02640"},
+        {config: LocalStorageConfig{DirectoryMode: 0o650}, field: "LocalStorageConfig.DirectoryMode", value: "0650"},
+        {config: LocalStorageConfig{DirectoryMode: 0o1750}, field: "LocalStorageConfig.DirectoryMode", value: "01750"},
+    }
+
+    for _, testCase := range cases {
+        base := filepath.Join(t.TempDir(), "base")
+        context := recoveredPanicContext(func() {
+            NewLocalStorage(base, testCase.config)
+        })
+        if testCase.field != context["field"] || testCase.value != context["value"] {
+            t.Fatalf("expected the refusal to name %s and %s, got %v", testCase.field, testCase.value, context)
+        }
+
+        if _, statErr := os.Stat(base); false == os.IsNotExist(statErr) {
+            t.Fatalf("expected nothing created under a refused mode, got %v", statErr)
+        }
+    }
+}

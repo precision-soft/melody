@@ -7,9 +7,11 @@ import (
     "os"
     "path/filepath"
     "strings"
+    "syscall"
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/exception"
     "github.com/uptrace/bun"
 )
 
@@ -29,7 +31,7 @@ func TestWithDatabase_BindsHandleForRecorder(t *testing.T) {
 
 func TestFileStorage_AppendsJsonLines(t *testing.T) {
     path := filepath.Join(t.TempDir(), "audit.log")
-    storage := NewFileStorage(path)
+    storage := NewFileStorage(path, FileStorageConfig{})
 
     first := Entry{Entity: "parityAccount", EntityId: "1", Operation: OperationInsert}
     second := Entry{Entity: "parityAccount", EntityId: "2", Operation: OperationDelete}
@@ -102,7 +104,7 @@ func TestFileStorage_WritesEveryKeyInCamelCase(t *testing.T) {
         CreatedAt:     time.Date(2026, 11, 13, 9, 0, 0, 0, time.UTC),
     }
 
-    if saveErr := NewFileStorage(path).Save(context.Background(), "melody_audit", []Entry{entry}); nil != saveErr {
+    if saveErr := NewFileStorage(path, FileStorageConfig{}).Save(context.Background(), "melody_audit", []Entry{entry}); nil != saveErr {
         t.Fatalf("save: %v", saveErr)
     }
 
@@ -132,7 +134,7 @@ func TestFileStorage_WritesChangesThatAreNotAJsonArrayAsAString(t *testing.T) {
 
         entry := Entry{Entity: "product", Operation: OperationUpdate, Changes: changes}
 
-        if saveErr := NewFileStorage(path).Save(context.Background(), "melody_audit", []Entry{entry}); nil != saveErr {
+        if saveErr := NewFileStorage(path, FileStorageConfig{}).Save(context.Background(), "melody_audit", []Entry{entry}); nil != saveErr {
             t.Fatalf("expected an entry whose changes are %q to be written, got: %v", changes, saveErr)
         }
 
@@ -195,7 +197,7 @@ func TestWithDatabase_RefusesANilHandle(t *testing.T) {
 
 func TestFileStorage_RefusesAContextAlreadyDone(t *testing.T) {
     path := filepath.Join(t.TempDir(), "audit.jsonl")
-    storage := NewFileStorage(path)
+    storage := NewFileStorage(path, FileStorageConfig{})
 
     ctx, cancel := context.WithCancel(context.Background())
     cancel()
@@ -236,7 +238,7 @@ func TestStorage_ANilOrEmptySliceIsANoOp(t *testing.T) {
 
     for name, storage := range map[string]Storage{
         "bun":   NewBunStorage(newTestDatabase()),
-        "file":  NewFileStorage(path),
+        "file":  NewFileStorage(path, FileStorageConfig{}),
         "async": asyncStorage,
     } {
         for _, entries := range [][]Entry{nil, {}} {
@@ -256,5 +258,48 @@ func TestStorage_ANilOrEmptySliceIsANoOp(t *testing.T) {
 
     if _, statErr := os.Stat(path); false == errors.Is(statErr, os.ErrNotExist) {
         t.Fatalf("expected no file written, got %v", statErr)
+    }
+}
+
+func TestFileStorage_CreatesTheFileAt0640ByDefaultAndAtTheConfiguredMode(t *testing.T) {
+    previousUmask := syscall.Umask(0)
+    defer syscall.Umask(previousUmask)
+
+    if os.FileMode(0o640) != DefaultFileStorageFileMode {
+        t.Fatalf("expected the default 0640, got %#o", uint32(DefaultFileStorageFileMode))
+    }
+
+    for configured, expected := range map[os.FileMode]os.FileMode{0: 0o640, 0o600: 0o600, 0o664: 0o664} {
+        path := filepath.Join(t.TempDir(), "audit.log")
+        if saveErr := NewFileStorage(path, FileStorageConfig{FileMode: configured}).Save(context.Background(), "melody_audit", []Entry{{Entity: "account", EntityId: "1", Operation: OperationInsert}}); nil != saveErr {
+            t.Fatalf("save: %v", saveErr)
+        }
+
+        information, statErr := os.Stat(path)
+        if nil != statErr {
+            t.Fatalf("stat: %v", statErr)
+        }
+
+        if expected != information.Mode().Perm() {
+            t.Fatalf("%#o: expected the audit file at %#o, got %#o", uint32(configured), uint32(expected), uint32(information.Mode().Perm()))
+        }
+    }
+}
+
+func TestNewFileStorage_RefusesAFileModeOutsideItsRuleNamingTheField(t *testing.T) {
+    for configured, value := range map[os.FileMode]string{0o400: "0400", 0o200: "0200", 0o1640: "01640"} {
+        refusal := func() (refusal *exception.Error) {
+            defer func() {
+                refusal, _ = recover().(*exception.Error)
+            }()
+
+            NewFileStorage(filepath.Join(t.TempDir(), "audit.log"), FileStorageConfig{FileMode: configured})
+
+            return nil
+        }()
+
+        if nil == refusal || "FileStorageConfig.FileMode" != refusal.Context()["field"] || value != refusal.Context()["value"] {
+            t.Fatalf("%s: expected the refusal naming the field and the value, got %v", value, refusal)
+        }
     }
 }

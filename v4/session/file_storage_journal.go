@@ -79,13 +79,13 @@ func sessionJournalPath(path string) string {
 }
 
 /* a new journal's directory entry is synced, so its first record does not land in a file a crash can drop */
-func openSessionJournal(path string, snapshotDigest string, sessionById map[string]fileSessionEntry) (*os.File, sessionJournalReplay, error) {
+func openSessionJournal(path string, snapshotDigest string, sessionById map[string]fileSessionEntry, fileMode os.FileMode) (*os.File, sessionJournalReplay, error) {
     journalPath := sessionJournalPath(path)
 
     _, statErr := os.Stat(journalPath)
     created := true == os.IsNotExist(statErr)
 
-    journal, openErr := os.OpenFile(journalPath, os.O_RDWR|os.O_CREATE, 0600)
+    journal, openErr := os.OpenFile(journalPath, os.O_RDWR|os.O_CREATE, fileMode)
     if nil != openErr {
         return nil, sessionJournalReplay{}, exception.NewError(
             "failed to open session storage journal",
@@ -309,7 +309,7 @@ func (instance *FileStorage) compactLocked() error {
         return encodeErr
     }
 
-    if snapshotErr := writeSessionBytesAtomically(instance.path, encoded); nil != snapshotErr {
+    if snapshotErr := writeSessionBytesAtomically(instance.path, encoded, instance.modes); nil != snapshotErr {
         instance.journalNeedsCompaction = true
 
         return snapshotErr

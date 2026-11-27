@@ -478,6 +478,7 @@ func (instance *Application) ensureRuntimeDirectories() {
         logsDirectory,
         cacheDirectory,
         configuration.Kernel().LogDirectoryMode(),
+        configuration.Kernel().CacheDirectoryMode(),
     )
     if nil != ensureRuntimeDirectoriesErr {
         exception.Panic(

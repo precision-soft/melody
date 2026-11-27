@@ -44,7 +44,7 @@ func RefuseNonJsonOutputTarget(outputPath string, artifactName string) *exceptio
     )
 }
 
-/* WriteFileAtomically writes through a temp file and a rename, so a write that dies partway leaves the previous artifact intact. The parent directories are created. */
+/* WriteFileAtomically writes through a temp file and a rename, so a write that dies partway leaves the previous artifact intact. The parent directories are created. Its modes are fixed, not configured: a generated artifact is source the repository commits, so its directories take 0755 and a new file 0644, the repository's own modes, and an existing file keeps its own. */
 func WriteFileAtomically(outputPath string, payload []byte, artifactName string) *exception.Error {
     directoryPath := filepath.Dir(outputPath)
 

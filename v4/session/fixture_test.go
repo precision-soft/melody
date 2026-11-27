@@ -3,6 +3,7 @@ package session
 import (
     "context"
     "errors"
+    "os"
     "sync"
     "testing"
     "time"
@@ -390,4 +391,21 @@ func sessionRuntime() containercontract.Runtime {
 
 func sessionRuntimeUnder(ctx context.Context) containercontract.Runtime {
     return runtime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
+}
+
+func defaultSessionFileModes() sessionFileModes {
+    return sessionFileModes{file: DefaultFileStorageFileMode, directory: DefaultFileStorageDirectoryMode}
+}
+
+func requirePermission(t *testing.T, path string, expected os.FileMode) {
+    t.Helper()
+
+    info, statErr := os.Stat(path)
+    if nil != statErr {
+        t.Fatalf("unexpected stat error on %s: %s", path, statErr.Error())
+    }
+
+    if expected != info.Mode().Perm() {
+        t.Fatalf("expected %s at %#o, got %#o", path, uint32(expected), uint32(info.Mode().Perm()))
+    }
 }

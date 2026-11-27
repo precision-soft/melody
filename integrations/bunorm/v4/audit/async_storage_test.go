@@ -735,7 +735,7 @@ func TestAsyncStorage_CloseAbandonsAFileStorageParkedOnAFifo(t *testing.T) {
         t.Fatalf("mkfifo: %v", mkfifoErr)
     }
 
-    storage := NewAsyncStorage(NewFileStorage(fifo), AsyncStorageConfig{BufferSize: bound.Of(2)})
+    storage := NewAsyncStorage(NewFileStorage(fifo, FileStorageConfig{}), AsyncStorageConfig{BufferSize: bound.Of(2)})
 
     if saveErr := storage.Save(context.Background(), "melody_audit", []Entry{Entry{Entity: "wedged"}}); nil != saveErr {
         t.Fatalf("save: %v", saveErr)

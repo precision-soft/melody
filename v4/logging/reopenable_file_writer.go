@@ -34,12 +34,12 @@ type ReopenableFileWriterConfig struct {
 
 /* NewReopenableFileWriter creates the missing directories of the path, opens the file for appending and answers a writer that can reopen it under the same path, which rename-based rotation needs. Every write, the reopen and the close serialize on one lock, so a record is never torn across the swap nor written to a closed descriptor. */
 func NewReopenableFileWriter(path string, config ReopenableFileWriterConfig) (*ReopenableFileWriter, error) {
-    fileMode, fileModeErr := resolveJournalMode(config.FileMode, DefaultLogFileMode, internal.JournalFileModeFloor, internal.JournalFileModeRefusal, "ReopenableFileWriterConfig.FileMode")
+    fileMode, fileModeErr := internal.ResolveCreationMode(config.FileMode, DefaultLogFileMode, internal.JournalFileModeFloor, internal.JournalFileModeRefusal, "ReopenableFileWriterConfig.FileMode")
     if nil != fileModeErr {
         return nil, fileModeErr
     }
 
-    directoryMode, directoryModeErr := resolveJournalMode(config.DirectoryMode, DefaultLogDirectoryMode, internal.JournalDirectoryModeFloor, internal.JournalDirectoryModeRefusal, "ReopenableFileWriterConfig.DirectoryMode")
+    directoryMode, directoryModeErr := internal.ResolveCreationMode(config.DirectoryMode, DefaultLogDirectoryMode, internal.JournalDirectoryModeFloor, internal.JournalDirectoryModeRefusal, "ReopenableFileWriterConfig.DirectoryMode")
     if nil != directoryModeErr {
         return nil, directoryModeErr
     }
@@ -55,25 +55,6 @@ func NewReopenableFileWriter(path string, config ReopenableFileWriterConfig) (*R
         directoryMode: directoryMode,
         file:          file,
     }, nil
-}
-
-func resolveJournalMode(mode os.FileMode, defaultMode os.FileMode, floor os.FileMode, refusal string, field string) (os.FileMode, error) {
-    if 0 == mode {
-        return defaultMode, nil
-    }
-
-    if false == internal.IsJournalMode(mode, floor) {
-        return 0, exception.NewError(
-            refusal,
-            exceptioncontract.Context{
-                "field": field,
-                "value": fmt.Sprintf("%#o", uint32(mode)),
-            },
-            nil,
-        )
-    }
-
-    return mode, nil
 }
 
 type ReopenableFileWriter struct {

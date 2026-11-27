@@ -25,6 +25,7 @@ func frameworkEnvironmentKeys() []configcontract.EnvironmentKey {
         frameworkEnvironmentKey(LogLevelKey, KernelLogLevel, string(loggingcontract.LevelDebug)),
         frameworkEnvironmentKey(LogFileModeKey, KernelLogFileMode, fmt.Sprintf("%#o", uint32(logging.DefaultLogFileMode))),
         frameworkEnvironmentKey(LogDirectoryModeKey, KernelLogDirectoryMode, fmt.Sprintf("%#o", uint32(logging.DefaultLogDirectoryMode))),
+        frameworkEnvironmentKey(CacheDirectoryModeKey, KernelCacheDirectoryMode, fmt.Sprintf("%#o", uint32(DefaultCacheDirectoryMode))),
         frameworkEnvironmentKey(DefaultLocaleKey, KernelDefaultLocale, "en"),
         frameworkEnvironmentKey(PublicDirectoryKey, KernelPublicDirectory, "public"),
         frameworkEnvironmentKey(StaticIndexFileKey, KernelStaticIndexFile, "index.html"),

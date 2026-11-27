@@ -89,6 +89,7 @@ Keys and parameters are two tables. A key is not a parameter: `Get("MELODY_HTTP_
 | `MELODY_LOG_LEVEL`                        | `kernel.log_level`                        | `"debug"`                                          |
 | `MELODY_LOG_FILE_MODE`                    | `kernel.log_file_mode`                    | `"0640"` (see [Journal modes](#journal-modes))     |
 | `MELODY_LOG_DIRECTORY_MODE`               | `kernel.log_directory_mode`               | `"0750"` (see [Journal modes](#journal-modes))     |
+| `MELODY_CACHE_DIRECTORY_MODE`             | `kernel.cache_directory_mode`             | `"0750"` (see [Journal modes](#journal-modes))     |
 | `MELODY_DEFAULT_LOCALE`                   | `kernel.default_locale`                   | `"en"`                                             |
 | `MELODY_PUBLIC_DIRECTORY`                 | `kernel.public_directory`                 | `"public"` (set explicitly, it must exist)         |
 | `MELODY_STATIC_INDEX_FILE`                | `kernel.static.index_file`                | `"index.html"`                                     |
@@ -321,14 +322,15 @@ The two store families are handed the namespace once, positionally, on `rueidis.
 
 ### Journal modes
 
-The permissions the container's journal file and every directory created for it are created with: the logs directory the boot creates and each missing directory of `MELODY_LOG_PATH`, the cache directory keeping `0755`. Read through [`KernelConfiguration.LogFileMode()`](../../config/contract/kernel.go) and [`LogDirectoryMode()`](../../config/contract/kernel.go) and handed to [`logging.ReopenableFileWriterConfig`](../../logging/reopenable_file_writer.go); the key is the one source, no `ApplicationConfig` field carries them.
+The permissions the container's journal file and every directory created for it are created with: the logs directory the boot creates and each missing directory of `MELODY_LOG_PATH`; the cache directory the boot creates takes its own key, `MELODY_CACHE_DIRECTORY_MODE`, so the journal's never governs it. Read through [`KernelConfiguration.LogFileMode()`](../../config/contract/kernel.go), [`LogDirectoryMode()`](../../config/contract/kernel.go) and [`CacheDirectoryMode()`](../../config/contract/kernel.go), the first two handed to [`logging.ReopenableFileWriterConfig`](../../logging/reopenable_file_writer.go); the key is the one source, no `ApplicationConfig` field carries them.
 
-| Environment key             | Parameter name              | Default  |
-|-----------------------------|-----------------------------|----------|
-| `MELODY_LOG_FILE_MODE`      | `kernel.log_file_mode`      | `"0640"` |
-| `MELODY_LOG_DIRECTORY_MODE` | `kernel.log_directory_mode` | `"0750"` |
+| Environment key               | Parameter name                | Default  |
+|-------------------------------|-------------------------------|----------|
+| `MELODY_LOG_FILE_MODE`        | `kernel.log_file_mode`        | `"0640"` |
+| `MELODY_LOG_DIRECTORY_MODE`   | `kernel.log_directory_mode`   | `"0750"` |
+| `MELODY_CACHE_DIRECTORY_MODE` | `kernel.cache_directory_mode` | `"0750"` |
 
-A value is octal, `0640`, `640` or `0o640`. A mode is a creation mode only: the process umask still narrows it, and a file or directory that already exists keeps its own, so logrotate's `create <mode>` decides what a rotated journal gets. The boot refuses an empty value (the key has a default, so an empty line is a typo), a value that is not octal, one holding a bit outside `0777`, a file mode without the owner's read and write and a directory mode without the owner's read, write and search, with `the journal file mode must be an octal permission that lets the owner read and write` or `the journal directory mode must be an octal permission that lets the owner read, write and search`, naming `environmentKey` and `value`. A log shipper outside the process's user and group reads nothing under the defaults: put it in the group, or widen the modes, `0644` and `0755` being the third major's.
+A value is octal, `0640`, `640` or `0o640`. A mode is a creation mode only: the process umask still narrows it, and a file or directory that already exists keeps its own, so logrotate's `create <mode>` decides what a rotated journal gets. The boot refuses an empty value (the key has a default, so an empty line is a typo), a value that is not octal, one holding a bit outside `0777`, a file mode without the owner's read and write and a directory mode without the owner's read, write and search, with `the journal file mode must be an octal permission that lets the owner read and write`, `the journal directory mode must be an octal permission that lets the owner read, write and search` or, for the cache key, `the directory mode must be an octal permission that lets the owner read, write and search`, naming `environmentKey` and `value`. A log shipper outside the process's user and group reads nothing under the defaults: put it in the group, or widen the modes, `0644` and `0755` being the third major's.
 
 ### Session storage outage
 
@@ -526,11 +528,11 @@ func example() configcontract.Configuration {
 
 ### Environment variable keys (`config`)
 
-- [`EnvironmentNameKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpSessionMaxSessionsKey`, `HttpShutdownTimeoutKey`, `HttpUnavailableRetryAfterKey`, `HttpSessionEmptyOnOutageKey`, `HttpSessionCookieSecureKey`, `TeardownTimeoutKey`, `ScopeTeardownTimeoutKey`, `ContainerCreationWaitersKey`, `ContainerTeardownSequentialKey`, `NamespaceKey`, `CliNameKey`, `CliDescriptionKey`, `CliBootWarningsIgnoredKey`, `CliBootWarningsDisabledKey`, `LogPathKey`, `LogLevelKey`, `LogFileModeKey`, `LogDirectoryModeKey`, `DefaultLocaleKey`, `PublicDirectoryKey`, `StaticIndexFileKey`, `StaticCacheDisabledKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
+- [`EnvironmentNameKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpSessionMaxSessionsKey`, `HttpShutdownTimeoutKey`, `HttpUnavailableRetryAfterKey`, `HttpSessionEmptyOnOutageKey`, `HttpSessionCookieSecureKey`, `TeardownTimeoutKey`, `ScopeTeardownTimeoutKey`, `ContainerCreationWaitersKey`, `ContainerTeardownSequentialKey`, `NamespaceKey`, `CliNameKey`, `CliDescriptionKey`, `CliBootWarningsIgnoredKey`, `CliBootWarningsDisabledKey`, `LogPathKey`, `LogLevelKey`, `LogFileModeKey`, `LogDirectoryModeKey`, `CacheDirectoryModeKey`, `DefaultLocaleKey`, `PublicDirectoryKey`, `StaticIndexFileKey`, `StaticCacheDisabledKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
 
 ### Kernel parameter names (`config`)
 
-- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnvironment`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpSessionMaxSessions`, `KernelHttpShutdownTimeout`, `KernelHttpUnavailableRetryAfter`, `KernelHttpSessionEmptyOnOutage`, `KernelHttpSessionCookieSecure`, `KernelTeardownTimeout`, `KernelScopeTeardownTimeout`, `KernelContainerCreationWaiters`, `KernelContainerTeardownSequential`, `KernelNamespace`, `KernelCliName`, `KernelCliDescription`, `KernelCliBootWarningsIgnored`, `KernelCliBootWarningsDisabled`, `KernelLogPath`, `KernelLogLevel`, `KernelLogFileMode`, `KernelLogDirectoryMode`, `KernelDefaultLocale`, `KernelPublicDirectory`, `KernelStaticIndexFile`, `KernelStaticCacheDisabled`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDirectory`, `KernelLogsDirectory`, `KernelCacheDirectory`](../../config/environment.go)
+- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnvironment`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpSessionMaxSessions`, `KernelHttpShutdownTimeout`, `KernelHttpUnavailableRetryAfter`, `KernelHttpSessionEmptyOnOutage`, `KernelHttpSessionCookieSecure`, `KernelTeardownTimeout`, `KernelScopeTeardownTimeout`, `KernelContainerCreationWaiters`, `KernelContainerTeardownSequential`, `KernelNamespace`, `KernelCliName`, `KernelCliDescription`, `KernelCliBootWarningsIgnored`, `KernelCliBootWarningsDisabled`, `KernelLogPath`, `KernelLogLevel`, `KernelLogFileMode`, `KernelLogDirectoryMode`, `KernelCacheDirectoryMode`, `KernelDefaultLocale`, `KernelPublicDirectory`, `KernelStaticIndexFile`, `KernelStaticCacheDisabled`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDirectory`, `KernelLogsDirectory`, `KernelCacheDirectory`](../../config/environment.go)
 
 ### Environment / mode / role constants (`config`)
 

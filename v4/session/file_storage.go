@@ -43,6 +43,38 @@ type FileStorageConfig struct {
 
     /* Clock is where every expiry instant is read; nil is the system clock, and the file persists the wall reading. */
     Clock clockcontract.Clock
+
+    /* FileMode is the permission of the session file over a path, set on every snapshot it writes, and of the journal it creates: DefaultFileStorageFileMode when left out; permission bits only, the owner's read and write required; unused over an open handle. */
+    FileMode os.FileMode
+
+    /* DirectoryMode is the permission every missing directory of the path is created with: DefaultFileStorageDirectoryMode when left out; permission bits only, the owner's read, write and search required; an existing directory keeps its own, and it is unused over an open handle. */
+    DirectoryMode os.FileMode
+}
+
+const (
+    /* DefaultFileStorageFileMode is the permission of the session file and its journal when FileStorageConfig.FileMode is left out: the file holds every session's data, so only its owner reads it. */
+    DefaultFileStorageFileMode os.FileMode = 0o600
+    /* DefaultFileStorageDirectoryMode is the permission a missing session directory is created with when FileStorageConfig.DirectoryMode is left out. */
+    DefaultFileStorageDirectoryMode os.FileMode = 0o700
+)
+
+type sessionFileModes struct {
+    file      os.FileMode
+    directory os.FileMode
+}
+
+func resolveSessionFileModes(config FileStorageConfig) (sessionFileModes, error) {
+    fileMode, fileModeErr := internal.ResolveCreationMode(config.FileMode, DefaultFileStorageFileMode, internal.JournalFileModeFloor, internal.FileModeRefusal, "FileStorageConfig.FileMode")
+    if nil != fileModeErr {
+        return sessionFileModes{}, fileModeErr
+    }
+
+    directoryMode, directoryModeErr := internal.ResolveCreationMode(config.DirectoryMode, DefaultFileStorageDirectoryMode, internal.JournalDirectoryModeFloor, internal.DirectoryModeRefusal, "FileStorageConfig.DirectoryMode")
+    if nil != directoryModeErr {
+        return sessionFileModes{}, directoryModeErr
+    }
+
+    return sessionFileModes{file: fileMode, directory: directoryMode}, nil
 }
 
 var fileStorageMaxSessionsRule = bound.Rule[int]{
@@ -91,13 +123,18 @@ func newFileStorage(path string, file *os.File, config FileStorageConfig) (*File
         return nil, clockErr
     }
 
+    modes, modesErr := resolveSessionFileModes(config)
+    if nil != modesErr {
+        return nil, modesErr
+    }
+
     var storage *FileStorage
     var storageErr error
 
     if nil != file {
         storage, storageErr = newFileStorageFromFile(file, clockInstance)
     } else {
-        storage, storageErr = newFileStorageFromPath(path, clockInstance, false == config.JournalDisabled, journalMaxBytes, logger)
+        storage, storageErr = newFileStorageFromPath(path, clockInstance, false == config.JournalDisabled, journalMaxBytes, logger, modes)
     }
 
     if nil != storageErr {
@@ -111,7 +148,7 @@ func newFileStorage(path string, file *os.File, config FileStorageConfig) (*File
     return storage, nil
 }
 
-func newFileStorageFromPath(path string, clockInstance clockcontract.Clock, journalEnabled bool, journalMaxBytes bound.Resolved[int], logger loggingcontract.Logger) (*FileStorage, error) {
+func newFileStorageFromPath(path string, clockInstance clockcontract.Clock, journalEnabled bool, journalMaxBytes bound.Resolved[int], logger loggingcontract.Logger, modes sessionFileModes) (*FileStorage, error) {
     trimmedPath := filepath.Clean(path)
     if "." == trimmedPath {
         return nil, exception.NewError(
@@ -124,7 +161,7 @@ func newFileStorageFromPath(path string, clockInstance clockcontract.Clock, jour
     }
 
     directoryPath := filepath.Dir(trimmedPath)
-    err := os.MkdirAll(directoryPath, 0755)
+    err := os.MkdirAll(directoryPath, modes.directory)
     if nil != err {
         return nil, exception.NewError(
             "failed to create session storage directory",
@@ -148,6 +185,7 @@ func newFileStorageFromPath(path string, clockInstance clockcontract.Clock, jour
         sessionById:     decoded,
         clock:           clockInstance,
         journalMaxBytes: journalMaxBytes,
+        modes:           modes,
     }
 
     journalErr := storage.openJournal(journalEnabled, logger)
@@ -173,7 +211,7 @@ func (instance *FileStorage) openJournal(journalEnabled bool, logger loggingcont
         return digestErr
     }
 
-    journal, replay, openErr := openSessionJournal(instance.path, snapshotDigest, instance.sessionById)
+    journal, replay, openErr := openSessionJournal(instance.path, snapshotDigest, instance.sessionById, instance.modes.file)
     if nil != openErr {
         return openErr
     }
@@ -250,6 +288,7 @@ type FileStorage struct {
     journalMaxBytes        bound.Resolved[int]
     journalNeedsCompaction bool
     journalSeam            func(point journalPoint)
+    modes                  sessionFileModes
 
     sessionById map[string]fileSessionEntry
 }
@@ -579,7 +618,7 @@ func (instance *FileStorage) flushLocked() error {
     snapshot := instance.sessionById
 
     if true == instance.ownsFile && "" != instance.path {
-        return writeSessionFileAtomically(instance.path, snapshot)
+        return writeSessionFileAtomically(instance.path, snapshot, instance.modes)
     }
 
     if nil == instance.file {
@@ -652,18 +691,18 @@ func encodeSessionSnapshot(snapshot map[string]fileSessionEntry) ([]byte, error)
     return buffer.Bytes(), nil
 }
 
-func writeSessionFileAtomically(path string, snapshot map[string]fileSessionEntry) error {
+func writeSessionFileAtomically(path string, snapshot map[string]fileSessionEntry, modes sessionFileModes) error {
     encoded, encodeErr := encodeSessionSnapshot(snapshot)
     if nil != encodeErr {
         return encodeErr
     }
 
-    return writeSessionBytesAtomically(path, encoded)
+    return writeSessionBytesAtomically(path, encoded, modes)
 }
 
-func writeSessionBytesAtomically(path string, encoded []byte) error {
+func writeSessionBytesAtomically(path string, encoded []byte, modes sessionFileModes) error {
     directoryPath := filepath.Dir(path)
-    err := os.MkdirAll(directoryPath, 0755)
+    err := os.MkdirAll(directoryPath, modes.directory)
     if nil != err {
         return exception.NewError(
             "failed to create session storage directory",
@@ -686,6 +725,15 @@ func writeSessionBytesAtomically(path string, encoded []byte) error {
     }
 
     tempPath := tempFile.Name()
+
+    /* CreateTemp creates at 0600, and the rename carries the temp file's mode onto the session file */
+    err = tempFile.Chmod(modes.file)
+    if nil != err {
+        _ = tempFile.Close()
+        _ = os.Remove(tempPath)
+
+        return exception.NewError("failed to set the mode of the session storage temp file", exceptioncontract.Context{"path": path}, err)
+    }
 
     _, err = tempFile.Write(encoded)
     if nil != err {

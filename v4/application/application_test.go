@@ -1650,3 +1650,29 @@ func TestApplicationEnsureRuntimeDirectories_TheLogsDirectoryTakesTheKernelMode(
         t.Fatalf("expected the logs directory at 0710, got %o", information.Mode().Perm())
     }
 }
+
+func TestApplicationEnsureRuntimeDirectories_TheCacheDirectoryTakesTheKernelMode(t *testing.T) {
+    previousUmask := syscall.Umask(0)
+    defer syscall.Umask(previousUmask)
+
+    for value, expected := range map[string]os.FileMode{"": 0o750, "0770": 0o770} {
+        environment := map[string]string{config.EnvironmentNameKey: "dev"}
+        if "" != value {
+            environment[config.CacheDirectoryModeKey] = value
+        }
+
+        applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, environment)
+        applicationInstance.ensureRuntimeDirectories()
+
+        cacheDirectory := resolveRuntimePath(applicationInstance.configuration.Kernel().ProjectDirectory(), applicationInstance.configuration.Kernel().CacheDirectory())
+
+        information, statErr := os.Stat(cacheDirectory)
+        if nil != statErr {
+            t.Fatalf("unexpected stat error: %v", statErr)
+        }
+
+        if expected != information.Mode().Perm() {
+            t.Fatalf("%q: expected the cache directory at %o, got %o", value, expected, information.Mode().Perm())
+        }
+    }
+}

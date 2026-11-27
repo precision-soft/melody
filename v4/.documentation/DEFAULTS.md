@@ -32,7 +32,6 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
-| `v4/application.cacheDirectoryMode` | mode | a cache directory readable by every local user | 0755 | none | — | — |
 | `v4/application.Application.bootCli` | protection | debug commands outside development | development only | none | — | — |
 
 ## `v4/cache`
@@ -86,6 +85,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | `v4/config.HttpConfiguration.SessionTtl` | limit | state held, or a decision kept, forever | DefaultSessionTtl min bound.TtlMinimum unlimited admitted | `value:v4/config/contract.HttpConfiguration.SessionTtl`, `env:MELODY_HTTP_SESSION_TTL` | — | [CONFIG.md](package/CONFIG.md) |
 | `v4/config.HttpConfiguration.StaticCacheMaxAge` | limit | a response cached for good | DefaultStaticCacheMaxAge min 0 | `value:v4/config/contract.HttpConfiguration.StaticCacheMaxAge`, `env:MELODY_STATIC_CACHE_MAX_AGE` | class T: a cache lifetime; unlimited pins a response in every cache for good | [CONFIG.md](package/CONFIG.md) |
 | `v4/config.HttpSessionCookieSecureAlways` | protection | a session cookie sent in clear | from the scheme | `use:v4/http/contract.SessionCookiePolicy.Secure`, `env:MELODY_HTTP_SESSION_COOKIE_SECURE` | the key only hardens it: always is the one value it admits, and the Go field lowers the policy | [HTTP.md](package/HTTP.md) |
+| `v4/config.DefaultCacheDirectoryMode` | mode | a cache directory readable by every local user | 0750 | `env:MELODY_CACHE_DIRECTORY_MODE` | — | [CONFIG.md](package/CONFIG.md) |
 | `v4/config.kernelConfiguration.validateEnvironment` | refusal | an environment name outside the closed list | refused | none | — | — |
 
 ## `v4/container`
@@ -341,9 +341,8 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | `v4/session.ManagerConfig.StorageTimeout` | limit | a call or a wait that never returns | DefaultStorageTimeout min bound.TimeoutMinimum unlimited admitted | `value:v4/session.ManagerConfig.StorageTimeout` | — | [SESSION.md](package/SESSION.md) |
 | `v4/session.ManagerConfig.TombstoneRetention` | limit | state held, or a decision kept, forever | 5 * time.Minute min bound.TtlMinimum | `value:v4/session.ManagerConfig.TombstoneRetention` | class T: a lifetime; unlimited keeps the state forever | [SESSION.md](package/SESSION.md) |
 | `v4/session.ManagerConfig.Ttl` | limit | state held, or a decision kept, forever | 24 * time.Hour min bound.TtlMinimum unlimited admitted | `value:v4/session.ManagerConfig.Ttl` | — | [SESSION.md](package/SESSION.md) |
-| `v4/session.newFileStorageFromPath#1` | mode | a session directory readable by every local user | 0755 | none | — | — |
-| `v4/session.openSessionJournal#1` | mode | a session journal readable beyond its owner | 0600 | none | — | — |
-| `v4/session.writeSessionBytesAtomically#1` | mode | a session directory readable by every local user | 0755 | none | — | — |
+| `v4/session.DefaultFileStorageDirectoryMode` | mode | a session directory readable by every local user | 0700 | `value:v4/session.FileStorageConfig.DirectoryMode` | — | [SESSION.md](package/SESSION.md) |
+| `v4/session.DefaultFileStorageFileMode` | mode | a session file or journal readable beyond its owner | 0600 | `value:v4/session.FileStorageConfig.FileMode` | — | [SESSION.md](package/SESSION.md) |
 | `v4/session.FileStorageConfig.JournalDisabled` | protection | the door: writes the whole snapshot on every Save and Delete over a path | on | `off:v4/session.FileStorageConfig.JournalDisabled` | — | [SESSION.md](package/SESSION.md) |
 
 ## `v4/session/contract`
@@ -359,10 +358,8 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | `v4/storage.LocalStorageConfig.SweepBatchSize` | limit | unbounded memory or work | storageSweepBatchSize min 1 | `value:v4/storage.LocalStorageConfig.SweepBatchSize` | class T: a batch; unlimited is one call over the whole set | [STORAGE.md](package/STORAGE.md) |
 | `v4/storage.LocalStorageConfig.TemporaryStaleAge` | limit | unbounded memory or work | storageTemporaryStaleAge min bound.TtlMinimum unlimited admitted | `value:v4/storage.LocalStorageConfig.TemporaryStaleAge` | — | [STORAGE.md](package/STORAGE.md) |
 | `v4/storage.LocalStorage.Get#1` | mode | — | 0 (read only) | none | opened read only: the mode argument creates nothing | [STORAGE.md](package/STORAGE.md) |
-| `v4/storage.LocalStorage.Put#1` | mode | a storage directory readable beyond its owner | 0750 | none | — | [STORAGE.md](package/STORAGE.md) |
-| `v4/storage.LocalStorage.Put#2` | mode | a storage directory readable beyond its owner | 0750 | none | — | [STORAGE.md](package/STORAGE.md) |
-| `v4/storage.NewLocalStorage#1` | mode | a storage directory readable beyond its owner | 0750 | none | — | [STORAGE.md](package/STORAGE.md) |
-| `v4/storage.createStorageTemporaryFile#1` | mode | a stored object readable by every local user | 0640 | none | — | — |
+| `v4/storage.DefaultLocalStorageDirectoryMode` | mode | a storage directory readable beyond its owner | 0750 | `value:v4/storage.LocalStorageConfig.DirectoryMode` | — | [STORAGE.md](package/STORAGE.md) |
+| `v4/storage.DefaultLocalStorageFileMode` | mode | a stored object readable by every local user | 0640 | `value:v4/storage.LocalStorageConfig.FileMode` | — | [STORAGE.md](package/STORAGE.md) |
 | `v4/storage.readStorageContentType#1` | mode | — | 0 (read only) | none | opened read only: the mode argument creates nothing | — |
 
 ## `v4/storage/contract`
@@ -463,7 +460,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
 | `integrations/bunorm/v4/audit.AsyncStorageConfig.BufferSize` | limit | unbounded memory or work | 1024 min 1 | `value:integrations/bunorm/v4/audit.AsyncStorageConfig.BufferSize` | class T: a size; unlimited is memory or work that only grows | [integrations/bunorm/v4/audit/README.md](../../integrations/bunorm/v4/audit/README.md) |
-| `integrations/bunorm/v4/audit.FileStorage.Save#1` | mode | an audit trail readable by every local user | 0640 | none | — | [integrations/bunorm/v4/audit/README.md](../../integrations/bunorm/v4/audit/README.md) |
+| `integrations/bunorm/v4/audit.DefaultFileStorageFileMode` | mode | an audit trail readable by every local user | 0640 | `value:integrations/bunorm/v4/audit.FileStorageConfig.FileMode` | — | [integrations/bunorm/v4/audit/README.md](../../integrations/bunorm/v4/audit/README.md) |
 | `integrations/bunorm/v4/audit.RegistryConfig` | redaction | an encrypted column's plaintext in the audit trail | masked | `off:integrations/bunorm/v4/audit.RegistryConfig.EncryptedColumnsUnmasked` | class R: per registry rather than per entity, so the door is not set once and forgotten on the entity that holds the card numbers; a field tagged redact stays masked | [integrations/bunorm/v4/audit/README.md](../../integrations/bunorm/v4/audit/README.md) |
 
 ## `integrations/bunorm/v4/encrypt`

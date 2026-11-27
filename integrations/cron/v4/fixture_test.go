@@ -325,6 +325,10 @@ func (instance *stubKernelConfiguration) LogDirectoryMode() os.FileMode {
     return 0o750
 }
 
+func (instance *stubKernelConfiguration) CacheDirectoryMode() os.FileMode {
+    return 0o750
+}
+
 func (instance *stubKernelConfiguration) TeardownTimeout() bound.Duration {
     return bound.Duration{}
 }

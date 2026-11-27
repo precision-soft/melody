@@ -14,6 +14,9 @@ import (
 /* DefaultTeardownTimeout is how long a process shutting down cleanly may spend releasing what it holds, when neither MELODY_TEARDOWN_TIMEOUT nor the application's ApplicationConfig names one, before the teardown is abandoned and the process exits non-zero. It is the budget of the whole ordered teardown, not one per service, since a supervisor budgets for the process. A stalled dependency can cost far more, and the default matches what the commonest supervisor grants before SIGKILL; a deployment granted longer raises it, so the teardown runs to its end and names the service that failed. Unlimited asks for no deadline; a budget below 1ms fails the boot. A budget hands the teardown a deadline at half of it and keeps the other half for the teardown to report in before it is abandoned. */
 const DefaultTeardownTimeout = 10 * time.Second
 
+/* DefaultCacheDirectoryMode is the permission the cache directory is created with when MELODY_CACHE_DIRECTORY_MODE is unset. */
+const DefaultCacheDirectoryMode os.FileMode = 0o750
+
 func newKernelConfiguration(
     defaultMode string,
     processRole string,
@@ -70,6 +73,7 @@ type kernelConfiguration struct {
     namespace                   string
     logFileMode                 os.FileMode
     logDirectoryMode            os.FileMode
+    cacheDirectoryMode          os.FileMode
 }
 
 func (instance *kernelConfiguration) DefaultMode() string {
@@ -112,6 +116,11 @@ func (instance *kernelConfiguration) LogDirectoryMode() os.FileMode {
 
 func (instance *kernelConfiguration) CacheDirectory() string {
     return instance.cacheDirectory
+}
+
+/* CacheDirectoryMode is MELODY_CACHE_DIRECTORY_MODE, DefaultCacheDirectoryMode when the key is unset. */
+func (instance *kernelConfiguration) CacheDirectoryMode() os.FileMode {
+    return instance.cacheDirectoryMode
 }
 
 func (instance *kernelConfiguration) validate() error {

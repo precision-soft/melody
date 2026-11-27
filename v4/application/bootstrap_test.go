@@ -13,7 +13,7 @@ func TestEnsureRuntimeDirectories_CreatesDirectories(t *testing.T) {
     relativeLogsDirectory := filepath.Join("var", "log")
     relativeCacheDirectory := filepath.Join("var", "cache")
 
-    err := ensureRuntimeDirectories(projectDirectory, relativeLogsDirectory, relativeCacheDirectory, 0o750)
+    err := ensureRuntimeDirectories(projectDirectory, relativeLogsDirectory, relativeCacheDirectory, 0o750, 0o750)
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -41,7 +41,7 @@ func TestEnsureRuntimeDirectories_CreatesDirectories(t *testing.T) {
 func TestEnsureRuntimeDirectories_IgnoresEmpty(t *testing.T) {
     projectDirectory := t.TempDir()
 
-    err := ensureRuntimeDirectories(projectDirectory, "", "", 0o750)
+    err := ensureRuntimeDirectories(projectDirectory, "", "", 0o750, 0o750)
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -61,7 +61,7 @@ func TestEnsureRuntimeDirectories_ReturnsErrorWhenPathIsFile(t *testing.T) {
         t.Fatalf("failed to create file: %v", err)
     }
 
-    err = ensureRuntimeDirectories(projectDirectory, filepath.Join("var", "log"), "", 0o750)
+    err = ensureRuntimeDirectories(projectDirectory, filepath.Join("var", "log"), "", 0o750, 0o750)
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -81,18 +81,18 @@ func TestResolveRuntimePath_AnchorsOnlyARelativePath(t *testing.T) {
     }
 }
 
-func TestEnsureRuntimeDirectories_TheLogsDirectoryTakesTheLogModeAndTheCacheDirectoryKeeps0755(t *testing.T) {
+func TestEnsureRuntimeDirectories_TheLogsDirectoryTakesTheLogModeAndTheCacheDirectoryItsOwn(t *testing.T) {
     previousUmask := syscall.Umask(0)
     defer syscall.Umask(previousUmask)
 
     projectDirectory := t.TempDir()
 
-    err := ensureRuntimeDirectories(projectDirectory, filepath.Join("var", "log"), filepath.Join("cache"), 0o710)
+    err := ensureRuntimeDirectories(projectDirectory, filepath.Join("var", "log"), filepath.Join("cache"), 0o710, 0o770)
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 
-    for path, expected := range map[string]os.FileMode{filepath.Join(projectDirectory, "var", "log"): 0o710, filepath.Join(projectDirectory, "var"): 0o710, filepath.Join(projectDirectory, "cache"): 0o755} {
+    for path, expected := range map[string]os.FileMode{filepath.Join(projectDirectory, "var", "log"): 0o710, filepath.Join(projectDirectory, "var"): 0o710, filepath.Join(projectDirectory, "cache"): 0o770} {
         information, statErr := os.Stat(path)
         if nil != statErr {
             t.Fatalf("unexpected stat error on %s: %v", path, statErr)

@@ -673,8 +673,14 @@ func (instance *Configuration) buildKernelConfiguration() error {
         return logDirectoryModeErr
     }
 
+    cacheDirectoryMode, cacheDirectoryModeErr := checkedParameterJournalMode(instance.MustGet(KernelCacheDirectoryMode), CacheDirectoryModeKey, internal.JournalDirectoryModeFloor, internal.DirectoryModeRefusal)
+    if nil != cacheDirectoryModeErr {
+        return cacheDirectoryModeErr
+    }
+
     kernelConfigurationInstance.logFileMode = logFileMode
     kernelConfigurationInstance.logDirectoryMode = logDirectoryMode
+    kernelConfigurationInstance.cacheDirectoryMode = cacheDirectoryMode
 
     instance.kernel = kernelConfigurationInstance
 

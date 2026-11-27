@@ -683,7 +683,7 @@ func TestWriteSessionFileAtomically_RemovesTheTempFileWhenTheReplaceFails(t *tes
 
     writeErr := writeSessionFileAtomically(path, map[string]fileSessionEntry{
         "abc": {Data: map[string]any{"k": "v"}, ExpiresAt: 0},
-    })
+    }, defaultSessionFileModes())
     if nil == writeErr {
         t.Fatalf("expected the replace to fail when the destination cannot be replaced")
     }
@@ -714,7 +714,7 @@ func TestWriteSessionFileAtomically_RefusesWhenTheDirectoryCannotBeCreated(t *te
         t.Fatalf("unexpected error seeding the blocking file: %s", writeErr.Error())
     }
 
-    writeErr := writeSessionFileAtomically(filepath.Join(blockingFilePath, "nested", "session.json"), map[string]fileSessionEntry{})
+    writeErr := writeSessionFileAtomically(filepath.Join(blockingFilePath, "nested", "session.json"), map[string]fileSessionEntry{}, defaultSessionFileModes())
     if nil == writeErr {
         t.Fatalf("expected a directory under a regular file to be refused")
     }
@@ -2064,4 +2064,111 @@ func TestFileStorage_AContextThatEndsDuringTheWriteDoesNotTearIt(t *testing.T) {
     if nil != loadErr || false == exists || "whole" != data["k"] {
         t.Fatalf("expected the replay to read the record whole, got %v, %v and %v", data, exists, loadErr)
     }
+}
+
+func savedAndClosedSessionStorage(t *testing.T, path string, config FileStorageConfig, fileMode os.FileMode, directoryMode os.FileMode) {
+    t.Helper()
+
+    storage, storageErr := NewFileStorage(path, config)
+    if nil != storageErr {
+        t.Fatalf("unexpected construction error: %s", storageErr.Error())
+    }
+
+    if saveErr := storage.Save(sessionRuntimeUnder(context.Background()), "abc", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
+        t.Fatalf("unexpected save error: %s", saveErr.Error())
+    }
+
+    requirePermission(t, filepath.Dir(path), directoryMode)
+
+    if false == config.JournalDisabled {
+        requirePermission(t, sessionJournalPath(path), fileMode)
+    }
+
+    if closeErr := storage.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %s", closeErr.Error())
+    }
+
+    requirePermission(t, path, fileMode)
+}
+
+func TestNewFileStorage_CreatesTheDirectoryAt0700AndTheFilesAt0600ByDefault(t *testing.T) {
+    if 0o700 != DefaultFileStorageDirectoryMode || 0o600 != DefaultFileStorageFileMode {
+        t.Fatalf("expected the defaults 0700 and 0600, got %#o and %#o", uint32(DefaultFileStorageDirectoryMode), uint32(DefaultFileStorageFileMode))
+    }
+
+    savedAndClosedSessionStorage(t, filepath.Join(t.TempDir(), "nested", "sessions.json"), FileStorageConfig{}, 0o600, 0o700)
+    savedAndClosedSessionStorage(t, filepath.Join(t.TempDir(), "nested", "sessions.json"), FileStorageConfig{JournalDisabled: true}, 0o600, 0o700)
+}
+
+func TestNewFileStorage_CreatesTheDirectoryAndTheFilesAtTheConfiguredModes(t *testing.T) {
+    savedAndClosedSessionStorage(t, filepath.Join(t.TempDir(), "nested", "sessions.json"), FileStorageConfig{FileMode: 0o640, DirectoryMode: 0o750}, 0o640, 0o750)
+    savedAndClosedSessionStorage(t, filepath.Join(t.TempDir(), "nested", "sessions.json"), FileStorageConfig{FileMode: 0o640, DirectoryMode: 0o750, JournalDisabled: true}, 0o640, 0o750)
+}
+
+func TestNewFileStorage_LeavesTheModeOfAnExistingDirectory(t *testing.T) {
+    directory := filepath.Join(t.TempDir(), "existing")
+    if mkdirErr := os.Mkdir(directory, 0o755); nil != mkdirErr {
+        t.Fatalf("unexpected mkdir error: %s", mkdirErr.Error())
+    }
+    if chmodErr := os.Chmod(directory, 0o755); nil != chmodErr {
+        t.Fatalf("unexpected chmod error: %s", chmodErr.Error())
+    }
+
+    storage, storageErr := NewFileStorage(filepath.Join(directory, "sessions.json"), FileStorageConfig{})
+    if nil != storageErr {
+        t.Fatalf("unexpected construction error: %s", storageErr.Error())
+    }
+    _ = storage.CloseWithContext(context.Background())
+
+    requirePermission(t, directory, 0o755)
+}
+
+func TestNewFileStorage_RefusesAModeOutsideItsRuleNamingTheField(t *testing.T) {
+    cases := []struct {
+        config FileStorageConfig
+        field  string
+        value  string
+    }{
+        {config: FileStorageConfig{FileMode: 0o400}, field: "FileStorageConfig.FileMode", value: "0400"},
+        {config: FileStorageConfig{FileMode: 0o4600}, field: "FileStorageConfig.FileMode", value: "04600"},
+        {config: FileStorageConfig{DirectoryMode: 0o600}, field: "FileStorageConfig.DirectoryMode", value: "0600"},
+        {config: FileStorageConfig{DirectoryMode: 0o1700}, field: "FileStorageConfig.DirectoryMode", value: "01700"},
+    }
+
+    for _, testCase := range cases {
+        _, pathErr := NewFileStorage(filepath.Join(t.TempDir(), "sessions.json"), testCase.config)
+        _, handleErr := NewFileStorageOverFile(os.Stdout, testCase.config)
+
+        for _, storageErr := range []error{pathErr, handleErr} {
+            if nil == storageErr {
+                t.Fatalf("expected %s %s refused", testCase.field, testCase.value)
+            }
+
+            context := exception.LogContext(storageErr, exception.LogContextConfig{})
+            if testCase.field != context["field"] || testCase.value != context["value"] {
+                t.Fatalf("expected the refusal to name %s and %s, got %v", testCase.field, testCase.value, context)
+            }
+        }
+    }
+}
+
+func TestFileStorage_SaveRecreatesARemovedDirectoryAtTheConfiguredMode(t *testing.T) {
+    directory := filepath.Join(t.TempDir(), "nested")
+    path := filepath.Join(directory, "sessions.json")
+
+    storage, storageErr := NewFileStorage(path, FileStorageConfig{JournalDisabled: true, DirectoryMode: 0o750})
+    if nil != storageErr {
+        t.Fatalf("unexpected construction error: %s", storageErr.Error())
+    }
+    defer func() { _ = storage.CloseWithContext(context.Background()) }()
+
+    if removeErr := os.RemoveAll(directory); nil != removeErr {
+        t.Fatalf("unexpected remove error: %s", removeErr.Error())
+    }
+
+    if saveErr := storage.Save(sessionRuntimeUnder(context.Background()), "abc", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
+        t.Fatalf("unexpected save error: %s", saveErr.Error())
+    }
+
+    requirePermission(t, directory, 0o750)
 }

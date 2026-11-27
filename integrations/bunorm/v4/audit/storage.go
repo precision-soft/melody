@@ -4,6 +4,7 @@ import (
     "bytes"
     "context"
     "encoding/json"
+    "fmt"
     "os"
     "sync"
     "time"
@@ -102,17 +103,41 @@ func (instance *BunStorage) Save(ctx context.Context, table string, entries []En
     return nil
 }
 
-func NewFileStorage(path string) *FileStorage {
+/* DefaultFileStorageFileMode is the permission the audit file is created with when FileStorageConfig.FileMode is left out. */
+const DefaultFileStorageFileMode os.FileMode = 0o640
+
+/* FileStorageConfig is what a FileStorage is built from beside its path. */
+type FileStorageConfig struct {
+    /* FileMode is the permission the audit file is created with: DefaultFileStorageFileMode when left out; permission bits only, the owner's read and write required. A creation mode: the umask narrows it and an existing file keeps its own. */
+    FileMode os.FileMode
+}
+
+/* NewFileStorage appends to the file at path, refusing an empty path and a FileMode outside its rule naming the field and the value in octal. */
+func NewFileStorage(path string, config FileStorageConfig) *FileStorage {
     if "" == path {
         exception.Panic(exception.NewError("audit file storage path is empty", nil, nil))
     }
 
-    return &FileStorage{path: path}
+    fileMode := config.FileMode
+    if 0 == fileMode {
+        fileMode = DefaultFileStorageFileMode
+    }
+
+    if 0 != fileMode&^os.ModePerm || 0o600 != fileMode&0o600 {
+        exception.Panic(exception.NewError(
+            "the audit file mode must be an octal permission that lets the owner read and write",
+            map[string]any{"field": "FileStorageConfig.FileMode", "value": fmt.Sprintf("%#o", uint32(fileMode))},
+            nil,
+        ))
+    }
+
+    return &FileStorage{path: path, fileMode: fileMode}
 }
 
 type FileStorage struct {
-    mutex sync.Mutex
-    path  string
+    mutex    sync.Mutex
+    path     string
+    fileMode os.FileMode
 }
 
 type fileRecord struct {
@@ -169,7 +194,7 @@ func (instance *FileStorage) Save(ctx context.Context, table string, entries []E
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    file, openErr := os.OpenFile(instance.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
+    file, openErr := os.OpenFile(instance.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, instance.fileMode)
     if nil != openErr {
         return exception.NewError("could not open the audit file", map[string]any{"path": instance.path}, openErr)
     }

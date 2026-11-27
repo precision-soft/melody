@@ -246,6 +246,35 @@ func TestKernelConfiguration_TheModeKeysDefaultTo0640And0750(t *testing.T) {
     }
 }
 
+func TestKernelConfiguration_TheCacheDirectoryModeKey(t *testing.T) {
+    if os.FileMode(0o750) != DefaultCacheDirectoryMode || os.FileMode(0o750) != mustConfigurationFromValues(t, map[string]string{}).Kernel().CacheDirectoryMode() {
+        t.Fatalf("expected the cache directory at 0750 by default, got %o", DefaultCacheDirectoryMode)
+    }
+
+    for text, expected := range map[string]os.FileMode{"0755": 0o755, "700": 0o700, " 0o770 ": 0o770} {
+        if actual := mustConfigurationFromValues(t, map[string]string{CacheDirectoryModeKey: text}).Kernel().CacheDirectoryMode(); expected != actual {
+            t.Fatalf("%q: expected %o, got %o", text, expected, actual)
+        }
+    }
+
+    for _, refused := range []string{"0x1ed", "02750", "0600", "0650", ""} {
+        _, err := newConfigurationFromValues(map[string]string{CacheDirectoryModeKey: refused})
+        assertLimitRefusal(t, err, CacheDirectoryModeKey, "")
+
+        found := false
+        for current := err; nil != current; current = errors.Unwrap(current) {
+            refusal, isRefusal := current.(*exception.Error)
+            if true == isRefusal && internal.DirectoryModeRefusal == refusal.Message() && refused == refusal.Context()["value"] {
+                found = true
+            }
+        }
+
+        if false == found {
+            t.Fatalf("%q: expected the directory mode refusal carrying the value, got %v", refused, err)
+        }
+    }
+}
+
 func TestKernelConfiguration_TheModeKeysAreReadAsOctal(t *testing.T) {
     for _, testCase := range []struct {
         fileText      string

@@ -30,6 +30,9 @@ type KernelConfiguration interface {
     /* LogDirectoryMode is MELODY_LOG_DIRECTORY_MODE, the permission the logs directory and every missing directory of MELODY_LOG_PATH are created with: 0750 by default. */
     LogDirectoryMode() os.FileMode
 
+    /* CacheDirectoryMode is MELODY_CACHE_DIRECTORY_MODE, the permission the cache directory the boot creates is created with: 0750 by default. */
+    CacheDirectoryMode() os.FileMode
+
     /* TeardownTimeout is MELODY_TEARDOWN_TIMEOUT as the deployment set it, absent when the key says nothing: the application decides it against its own config, the key winning. */
     TeardownTimeout() bound.Duration
 
