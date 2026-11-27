@@ -466,6 +466,7 @@ could not answer, at either door or through a sign-in door's `Handler` or token 
 
 ### Fixed
 
+- example: the example requires `go.opentelemetry.io/otel` 1.47.0 and its sdk, trace, metric and log modules, past the attribute length limit bypass of advisory GO-2026-6974 that the 1.45.0 sdk carried.
 - application: a panic inside a handler decorator during `HttpHandler` left the next call answering a nil handler with a nil error, and the application claimed, so `Run` was refused as if a handler were out; only a finished build is kept, so the next call builds again, and nothing handed out leaves the application unclaimed.
 - http: `RouteDefinition.Attributes()` handed out the route's own slices and the `_protection` value's `SecurityHeadersDisabled`, and a match its protection's list, so a reader's edit reached the live route; both are copied at every egress.
 - http: a body cap of `math.MaxInt` overflowed the form read's allowance and read every urlencoded form as empty; the form read and `BindJson` share one saturating allowance.
