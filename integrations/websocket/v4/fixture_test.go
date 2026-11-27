@@ -24,5 +24,11 @@ func newStreamHandlerPastTheDoor(hub *melodyhttp.ServerSentEventHub, config Stre
 
     resolved.idleTimeout = idleTimeout
 
-    return newStreamHandler(hub, resolved)
+    return newStreamHandler(fixedHub(hub), resolved)
+}
+
+func fixedHub(hub *melodyhttp.ServerSentEventHub) func(containercontract.Runtime) (*melodyhttp.ServerSentEventHub, error) {
+    return func(containercontract.Runtime) (*melodyhttp.ServerSentEventHub, error) {
+        return hub, nil
+    }
 }

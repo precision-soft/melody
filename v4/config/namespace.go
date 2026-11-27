@@ -1,14 +1,31 @@
 package config
 
 import (
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    "github.com/precision-soft/melody/v4/internal"
 )
 
 /* DefaultNamespace is the application namespace when neither MELODY_NAMESPACE nor ApplicationConfig.Namespace names one, so every store name keeps its spelling of the third major. */
 const DefaultNamespace = "melody"
 
 const namespaceMaximumLength = 32
+
+/* NamespaceFromRuntime answers the application namespace of the runtime's configuration, DefaultNamespace when the runtime resolves no configuration, a typed nil included, or its kernel configuration names none, so a component deriving a default name from the namespace never derives it from an empty one. */
+func NamespaceFromRuntime(runtimeInstance containercontract.Runtime) string {
+    configuration, configurationErr := ConfigFromRuntime(runtimeInstance)
+    if nil != configurationErr || true == internal.IsNilInterface(configuration) {
+        return DefaultNamespace
+    }
+
+    kernelConfiguration := configuration.Kernel()
+    if true == internal.IsNilInterface(kernelConfiguration) || "" == kernelConfiguration.Namespace() {
+        return DefaultNamespace
+    }
+
+    return kernelConfiguration.Namespace()
+}
 
 /* ValidateNamespace is the one rule of an application namespace: 1 to 32 characters of a-z, 0-9, _ and -, beginning and ending with a letter or a digit, so no store separator or glob character can enter a name derived from it. The refusal carries the value; the caller adds the key, field or argument it was read from. */
 func ValidateNamespace(namespace string) error {

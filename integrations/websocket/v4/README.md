@@ -46,13 +46,15 @@ The handler upgrades the connection, subscribes to the resolved topic, writes ea
 
 ### Register as a module
 
-Bundle the stream routes as a self-registering application module — one `RegisterModule` call registers every declared stream, each on its own hub. An application registers the module once, since a module's name is its identity, so two endpoints are two entries in `ModuleConfig.Streams`, not two modules. Refused at boot, naming the field and the stream's index: a module with no stream, a stream with a nil hub or an empty path, and, on a module declaring more than one stream, an empty `RouteName`, since the default `melody.websocket` names a single route; a handler limit outside its rule is refused by `NewStreamHandler`, naming the `StreamHandlerConfig` field. An unregistered route has no later consumer to fail loudly, so the missing wiring would otherwise surface only as client 404s under a healthy-looking boot. Every stream is judged and its handler built before the first route registers, so a refused module leaves no route behind.
+Bundle the stream routes as a self-registering application module — one `RegisterModule` call registers every declared stream, each on its own hub. `StreamConfig.Hub` is the hub's provider, called on every connection with the connection's runtime, so a hub its container provider builds at boot — after the routes registered — is reached through the runtime; its error is the request's, and a provider answering a nil hub refuses the request before the upgrade. The handler configuration is resolved once, at the route registration. An application registers the module once, since a module's name is its identity, so two endpoints are two entries in `ModuleConfig.Streams`, not two modules. Refused at boot, naming the field and the stream's index: a module with no stream, a stream with a nil hub provider or an empty path, and, on a module declaring more than one stream, an empty `RouteName`, since the default `melody.websocket` names a single route; a handler limit outside its rule is refused naming the `StreamHandlerConfig` field. An unregistered route has no later consumer to fail loudly, so the missing wiring would otherwise surface only as client 404s under a healthy-looking boot. Every stream is judged and its handler built before the first route registers, so a refused module leaves no route behind.
 
 ```go
 app.RegisterModule(melodywebsocket.NewModule(melodywebsocket.ModuleConfig{
     Streams: []melodywebsocket.StreamConfig{
         {
-            Hub:     hub,
+            Hub: func(runtimeInstance containercontract.Runtime) (*melodyhttp.ServerSentEventHub, error) {
+                return runtime.FromRuntime[*melodyhttp.ServerSentEventHub](runtimeInstance, serviceServerSentEventHub)
+            },
             Path:    "/ws",
             Handler: melodywebsocket.StreamHandlerConfig{IdleTimeout: bound.Of(15 * time.Second), OriginPatterns: []string{"*"}},
         },

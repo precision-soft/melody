@@ -5,6 +5,10 @@ import (
     "strings"
     "testing"
 
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
 )
 
@@ -80,5 +84,70 @@ func TestValidateNamespace_TheRule(t *testing.T) {
         if nil == validateErr || value != exception.FromError(validateErr).Context()["value"] {
             t.Fatalf("expected %q refused naming the value, got %v", value, validateErr)
         }
+    }
+}
+
+type kernelAnsweringConfiguration struct {
+    configcontract.Configuration
+    kernel configcontract.KernelConfiguration
+}
+
+func (instance kernelAnsweringConfiguration) Kernel() configcontract.KernelConfiguration {
+    return instance.kernel
+}
+
+type namespaceAnsweringKernel struct {
+    configcontract.KernelConfiguration
+    namespace string
+}
+
+func (instance *namespaceAnsweringKernel) Namespace() string {
+    return instance.namespace
+}
+
+func runtimeOverConfiguration(t *testing.T, configuration configcontract.Configuration) containercontract.Runtime {
+    t.Helper()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    t.Cleanup(func() { _ = serviceContainer.CloseWithContext(context.Background()) })
+
+    if nil != configuration {
+        serviceContainer.MustRegister(
+            ServiceConfig,
+            func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+                return configuration, nil
+            },
+            container.RegisterOptions{},
+        )
+    }
+
+    return runtime.NewRun(context.Background(), serviceContainer.NewScope())
+}
+
+func TestNamespaceFromRuntime_AnswersTheConfigurationsNamespaceElseTheDefault(t *testing.T) {
+    namespaced, namespacedErr := newNamespacedConfiguration(t, map[string]string{}, "shop")
+    if nil != namespacedErr {
+        t.Fatalf("unexpected configuration error: %v", namespacedErr)
+    }
+
+    var typedNilKernel *namespaceAnsweringKernel
+
+    for _, testCase := range []struct {
+        name          string
+        configuration configcontract.Configuration
+        expected      string
+    }{
+        {name: "the configuration's namespace", configuration: namespaced, expected: "shop"},
+        {name: "no configuration", configuration: nil, expected: DefaultNamespace},
+        {name: "a kernel configuration that is a typed nil", configuration: kernelAnsweringConfiguration{kernel: typedNilKernel}, expected: DefaultNamespace},
+        {name: "a kernel configuration that is nil", configuration: kernelAnsweringConfiguration{}, expected: DefaultNamespace},
+        {name: "a kernel configuration naming none", configuration: kernelAnsweringConfiguration{kernel: &namespaceAnsweringKernel{}}, expected: DefaultNamespace},
+        {name: "a kernel configuration naming one", configuration: kernelAnsweringConfiguration{kernel: &namespaceAnsweringKernel{namespace: "billing"}}, expected: "billing"},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            if namespace := NamespaceFromRuntime(runtimeOverConfiguration(t, testCase.configuration)); testCase.expected != namespace {
+                t.Fatalf("expected the namespace %q, got %q", testCase.expected, namespace)
+            }
+        })
     }
 }

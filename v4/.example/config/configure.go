@@ -10,6 +10,7 @@ import (
     melodyopentelemetry "github.com/precision-soft/melody/integrations/opentelemetry/v4"
     melodyotlp "github.com/precision-soft/melody/integrations/opentelemetry/v4/otlp"
     melodyoutbox "github.com/precision-soft/melody/integrations/outbox/v4"
+    melodywebsocket "github.com/precision-soft/melody/integrations/websocket/v4"
     "github.com/precision-soft/melody/v4/.example/migration"
     "github.com/precision-soft/melody/v4/.example/twofactor"
     melodyapplication "github.com/precision-soft/melody/v4/application"
@@ -58,12 +59,8 @@ func Configure(ctx context.Context, app *melodyapplication.Application, applicat
         SealBindings:    twofactor.SealBindings(),
     }))
 
-    /* the outbox store and relay are service providers that resolve the shared *bun.DB at first use, so registering the module touches neither the outbox schema nor the transport. */
     if true == moduleInstance.catalogueWired {
-        app.RegisterModule(melodyoutbox.NewModule(melodyoutbox.ModuleConfig{
-            Store: moduleInstance.outboxStoreFactory,
-            Relay: moduleInstance.outboxRelayFactory,
-        }))
+        app.RegisterModule(melodyoutbox.NewModule(moduleInstance.outboxModuleConfig()))
     }
 
     app.RegisterModule(bunormmigrate.NewModule(migrateModuleConfig()))
@@ -76,6 +73,8 @@ func Configure(ctx context.Context, app *melodyapplication.Application, applicat
 
     moduleInstance.registerHubShutdown(app)
     moduleInstance.registerTrustedProxyShutdown(app)
+
+    app.RegisterModule(melodywebsocket.NewModule(websocketModuleConfig()))
 
     if nil != moduleInstance.storageClient {
         app.RegisterModule(melodyawss3.NewModule(moduleInstance.storageModuleConfig()))

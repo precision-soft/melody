@@ -104,20 +104,13 @@ type ExclusiveCommand struct {
     exclusiveConfig ExclusiveConfig
 }
 
-/* resolvedLockName answers the declared name verbatim, else the default under the runtime's namespace; a runtime with no configuration reads DefaultNamespace */
+/* resolvedLockName answers the declared name verbatim, else the default under the runtime's namespace */
 func (instance *ExclusiveCommand) resolvedLockName(runtimeInstance containercontract.Runtime) string {
     if "" != instance.lockName {
         return instance.lockName
     }
 
-    namespace := melodyconfig.DefaultNamespace
-    if configuration, configurationErr := melodyconfig.ConfigFromRuntime(runtimeInstance); nil == configurationErr && false == internal.IsNilInterface(configuration) {
-        if kernelConfiguration := configuration.Kernel(); false == internal.IsNilInterface(kernelConfiguration) && "" != kernelConfiguration.Namespace() {
-            namespace = kernelConfiguration.Namespace()
-        }
-    }
-
-    return namespace + exclusiveCommandLockNameInfix + instance.command.Name()
+    return melodyconfig.NamespaceFromRuntime(runtimeInstance) + exclusiveCommandLockNameInfix + instance.command.Name()
 }
 
 func (instance *ExclusiveCommand) Name() string {

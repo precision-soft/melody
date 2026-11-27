@@ -2,10 +2,7 @@ package config
 
 import (
     "context"
-    "errors"
     "fmt"
-    nethttp "net/http"
-    "net/http/httptest"
     "strings"
     "testing"
     "time"
@@ -16,7 +13,6 @@ import (
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
-    melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -78,16 +74,21 @@ func TestHub_WithoutRedisTheProviderInstallsNoBackplane(t *testing.T) {
     hub.SetBackplane(refusingBackplane{})
 }
 
-func TestWebsocketStreamHandlerConfig_KeepsAThirtySecondKeepalive(t *testing.T) {
-    if bound.Of(30*time.Second) != websocketStreamHandlerConfig().IdleTimeout {
-        t.Fatalf("expected a thirty-second keepalive, got %s", websocketStreamHandlerConfig().IdleTimeout)
+func TestWebsocketModuleConfig_ServesSlashWsUnderItsCountedRouteWithAThirtySecondKeepalive(t *testing.T) {
+    streams := websocketModuleConfig().Streams
+    if 1 != len(streams) || "/ws" != streams[0].Path || websocketRouteName != streams[0].RouteName {
+        t.Fatalf("expected one /ws stream named %s, got %+v", websocketRouteName, streams)
+    }
+
+    if bound.Of(30*time.Second) != streams[0].Handler.IdleTimeout {
+        t.Fatalf("expected a thirty-second keepalive, got %s", streams[0].Handler.IdleTimeout)
     }
 }
 
-/* the /ws handler serves the hub the container publishes, resolved at each request: a closed one is refused by the integration's handler with 503 before any upgrade */
-func TestWebsocketStreamHandler_ServesTheHubTheContainerPublishes(t *testing.T) {
+/* the module's hub provider answers the hub the container publishes, resolved through the connection's runtime */
+func TestWebsocketModuleConfig_TheHubIsTheOneTheContainerPublishes(t *testing.T) {
     registeredHub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
-    _ = registeredHub.CloseWithContext(t.Context())
+    t.Cleanup(func() { _ = registeredHub.CloseWithContext(context.Background()) })
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     containerInstance.MustRegister(
@@ -98,24 +99,18 @@ func TestWebsocketStreamHandler_ServesTheHubTheContainerPublishes(t *testing.T) 
         melodycontainer.RegisterOptions{},
     )
 
-    runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
-    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/ws", nil), nil, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("websocket-test", time.Now())})
-
-    _, handlerErr := websocketStreamHandler(websocketStreamHandlerConfig())(runtimeInstance, httptest.NewRecorder(), request)
-
-    var httpException *melodyexception.HttpException
-    if false == errors.As(handlerErr, &httpException) || nethttp.StatusServiceUnavailable != httpException.StatusCode() {
-        t.Fatalf("expected the closed hub refused with 503, got %v", handlerErr)
+    hub, hubErr := websocketModuleConfig().Streams[0].Hub(melodyruntime.NewRun(context.Background(), containerInstance.NewScope()))
+    if nil != hubErr || registeredHub != hub {
+        t.Fatalf("expected the registered hub, got %p %v", hub, hubErr)
     }
 }
 
-/* without the hub service the request answers the resolution's refusal, never a nil hub dereferenced */
-func TestWebsocketStreamHandler_AnswersTheRefusalWhenTheHubIsNotRegistered(t *testing.T) {
+/* without the hub service the provider answers the resolution's refusal, never a nil hub */
+func TestWebsocketModuleConfig_AnswersTheRefusalWhenTheHubIsNotRegistered(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
-    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/ws", nil), nil, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("websocket-test", time.Now())})
 
-    if _, handlerErr := websocketStreamHandler(websocketStreamHandlerConfig())(runtimeInstance, httptest.NewRecorder(), request); nil == handlerErr {
-        t.Fatal("expected the missing hub service refused")
+    hub, hubErr := websocketModuleConfig().Streams[0].Hub(melodyruntime.NewRun(context.Background(), containerInstance.NewScope()))
+    if nil == hubErr || nil != hub {
+        t.Fatalf("expected the missing hub service refused, got %p %v", hub, hubErr)
     }
 }

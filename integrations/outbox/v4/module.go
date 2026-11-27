@@ -14,6 +14,12 @@ import (
 type ModuleConfig struct {
     Store func(resolver containercontract.Resolver) (*Store, error)
 
+    /* StoreBuiltAtBoot builds the store inside Boot, under the boot runtime, so a factory that ensures the schema does it before the first request, its failure following StoreBootFailure. */
+    StoreBuiltAtBoot bool
+
+    /* StoreBootFailure is the boot failure mode of a store built at boot, the registrar's own: BootFailureWarns when left out. */
+    StoreBootFailure containercontract.BootFailureMode
+
     Relay func(resolver containercontract.Resolver) (*Relay, error)
 
     /* RelayCommand configures the melody:outbox:relay command the module registers beside a Relay. */
@@ -45,12 +51,43 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
         ))
     }
 
+    refuseABootModeWithoutAStoreBuiltAtBoot(instance.config)
+
     if nil != instance.config.Store {
-        registrar.RegisterService(ServiceStore, instance.config.Store, containercontract.RegisterOptions{})
+        registrar.RegisterService(ServiceStore, instance.config.Store, containercontract.RegisterOptions{
+            BuiltAtBoot: instance.config.StoreBuiltAtBoot,
+            BootFailure: instance.config.StoreBootFailure,
+        })
     }
 
     if nil != instance.config.Relay {
         registrar.RegisterService(ServiceRelay, instance.config.Relay, containercontract.RegisterOptions{})
+    }
+}
+
+/* a boot mode handed to a module with no store factory, or a failure mode for a store not built at boot, would be ignored silently */
+func refuseABootModeWithoutAStoreBuiltAtBoot(config ModuleConfig) {
+    hasStore := nil != config.Store
+
+    if true == config.StoreBuiltAtBoot && false == hasStore {
+        exception.Panic(exception.NewError(
+            "the outbox module is handed a boot mode and has no store built at boot",
+            map[string]any{"field": "ModuleConfig.StoreBuiltAtBoot", "requires": "ModuleConfig.Store"},
+            nil,
+        ))
+    }
+
+    if containercontract.BootFailureWarns != config.StoreBootFailure && (false == hasStore || false == config.StoreBuiltAtBoot) {
+        requires := "ModuleConfig.StoreBuiltAtBoot"
+        if false == hasStore {
+            requires = "ModuleConfig.Store"
+        }
+
+        exception.Panic(exception.NewError(
+            "the outbox module is handed a boot mode and has no store built at boot",
+            map[string]any{"field": "ModuleConfig.StoreBootFailure", "requires": requires},
+            nil,
+        ))
     }
 }
 

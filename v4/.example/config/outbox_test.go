@@ -5,9 +5,11 @@ import (
     "database/sql"
     "database/sql/driver"
     "errors"
+    "slices"
     "sync/atomic"
     "testing"
 
+    outbox "github.com/precision-soft/melody/integrations/outbox/v4"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
@@ -67,5 +69,40 @@ func TestOutboxStoreFactory_EnsuresTheSchemaUnderTheResolvingRuntime(t *testing.
 
     if dialled := connector.connects.Load() - dialledAtConstruction; 0 != dialled {
         t.Fatalf("expected no ddl sent once the resolving runtime ended, dialled %d times", dialled)
+    }
+}
+
+/* the module's store is built at boot with the warning mode, and its provider ensures the schema under the boot runtime */
+func TestOutboxModuleConfig_TheStoreIsBuiltAtBootAndEnsuresTheSchemaThere(t *testing.T) {
+    connector := &countingConnector{}
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
+    containerInstance.MustRegister(serviceDatabase, func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {
+        return bun.NewDB(sql.OpenDB(connector), mysqldialect.New()), nil
+    }, melodycontainer.RegisterOptions{Closer: registryOwnedDatabaseCloser})
+
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    outbox.NewModule(moduleInstance.outboxModuleConfig()).RegisterServices(containerRegistrar{Container: containerInstance})
+
+    names, modes := builtAtBootNames(containerInstance)
+    if false == slices.Contains(names, outbox.ServiceStore) || melodycontainer.BootFailureWarns != modes[outbox.ServiceStore] {
+        t.Fatalf("expected the outbox store built at boot with the warning mode, got %v %v", names, modes)
+    }
+
+    if true == slices.Contains(names, outbox.ServiceRelay) {
+        t.Fatalf("expected the relay built at its first use, got %v", names)
+    }
+
+    bootRuntime, finish := melodyruntime.NewBoot(t.Context(), containerInstance)
+    defer func() {
+        _ = finish()
+    }()
+
+    if _, buildErr := bootRuntime.Scope().Get(bootRuntime.Context(), outbox.ServiceStore); nil == buildErr {
+        t.Fatal("expected the schema's failure answered at the boot build")
+    }
+
+    if 0 == connector.connects.Load() {
+        t.Fatal("expected the schema ensured at the boot build")
     }
 }

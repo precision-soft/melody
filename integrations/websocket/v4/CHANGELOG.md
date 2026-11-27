@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Breaking** — `module.go`: `StreamConfig.Hub` is the hub's provider, `func(runtimeInstance) (*http.ServerSentEventHub, error)`, called on every connection with the connection's runtime, so a hub a container provider builds at boot is served by the module; a nil provider is refused at boot naming `ModuleConfig.Streams[<index>].Hub`, the provider's error is the request's and a nil hub it answers refuses the request before the upgrade; the handler configuration is resolved once at the route registration.
 - **Breaking** with the framework: the fourth major's runtime is read from `v4/container/contract` and built through `v4/container/runtime`, a runtime resolving through its scope only; `runtime.New` and `Runtime.Container()` are gone. See the framework's `UPGRADE.md`.
 - websocket: **Breaking**: `Options.SubscribeBuffer` is removed; the stream handler subscribes with the hub's `ServerSentEventHubConfig.SubscriberBuffer`, handing `ServerSentEventHub.Subscribe` the zero `SubscribeOptions`.
 - `handler.go`: the stream handler subscribes through the fourth major's `Subscribe(topic, SubscribeOptions{})`; a refused subscription is recorded at error and ends the connection before any read or ping starts.

@@ -248,25 +248,10 @@ func (instance *RunnerCommand) resolveTickDedupRun(runtimeInstance containercont
 
     dedupRun.keyPrefix = instance.tickDedup.keyPrefix
     if "" == dedupRun.keyPrefix {
-        dedupRun.keyPrefix = namespaceOf(runtimeInstance) + tickDedupKeyPrefixInfix
+        dedupRun.keyPrefix = melodyconfig.NamespaceFromRuntime(runtimeInstance) + tickDedupKeyPrefixInfix
     }
 
     return dedupRun
-}
-
-/* namespaceOf reads the application namespace from the run's configuration, the default one when the run has none. */
-func namespaceOf(runtimeInstance containercontract.Runtime) string {
-    configuration, configurationErr := melodyconfig.ConfigFromRuntime(runtimeInstance)
-    if nil != configurationErr || true == isNilInterface(configuration) {
-        return melodyconfig.DefaultNamespace
-    }
-
-    kernelConfiguration := configuration.Kernel()
-    if true == isNilInterface(kernelConfiguration) || "" == kernelConfiguration.Namespace() {
-        return melodyconfig.DefaultNamespace
-    }
-
-    return kernelConfiguration.Namespace()
 }
 
 /* currentTickDedupRun answers the run Run resolved, else resolves one for a caller driving the dispatch directly. */

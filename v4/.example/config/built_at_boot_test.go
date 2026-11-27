@@ -205,7 +205,7 @@ func TestBuiltAtBoot_EveryRegistrationOfTheCompositionRootStatesItsMode(t *testi
         }
     }
 
-    if 5 != stated {
-        t.Fatalf("expected the hub, the signer, the database registry, the catalogue schema and the redis connection, got %d registrations", stated)
+    if 6 != stated {
+        t.Fatalf("expected the hub, the signer, the database registry, the catalogue schema, the redis connection and the outbox store, got %d registrations", stated)
     }
 }

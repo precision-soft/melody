@@ -73,7 +73,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     /* the example.metrics route is contributed by the opentelemetry module (see configure.go). */
 
-    router.Handle("/ws", websocketStreamHandler(websocketStreamHandlerConfig()), melodyhttp.RouteOptions{Name: websocketRouteName, Methods: []string{"GET"}})
+    /* the /ws route is contributed by the websocket module (see configure.go). */
 
     router.Handle("/encrypt/roundtrip", handler.EncryptRoundTripHandler(instance.cipher), melodyhttp.RouteOptions{Name: "example.encrypt.roundtrip", Methods: []string{"GET"}})
 

@@ -4,6 +4,7 @@ import (
     "fmt"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
@@ -19,8 +20,9 @@ type ModuleConfig struct {
 
 /* StreamConfig is one stream route. RouteName defaults to melody.websocket when the module declares a single stream and is required when it declares more, since one default cannot name two routes. */
 type StreamConfig struct {
-    Hub *melodyhttp.ServerSentEventHub
-    /* Handler is handed to NewStreamHandler untouched, so a limit outside its rule fails the route registration at boot. */
+    /* Hub answers the hub of each connection through the connection's runtime, so a hub its container provider builds at boot is reached after the routes register; its error is the request's, a hub it answers nil is refused. */
+    Hub func(runtimeInstance containercontract.Runtime) (*melodyhttp.ServerSentEventHub, error)
+    /* Handler is resolved once, at the route registration, so a limit outside its rule fails the boot. */
     Handler   StreamHandlerConfig
     RouteName string
     Path      string
@@ -42,7 +44,7 @@ func (instance *Module) Description() string {
     return "registers the websocket stream routes, each bridged onto a server-sent-event hub"
 }
 
-/* every stream is judged and its handler built before the first route registers, so a refused module leaves no route behind; a missing stream list, hub, path or route name is refused at boot rather than skipped, since an unregistered route has no later consumer to fail loudly, and a handler limit outside its rule is refused by NewStreamHandler naming the field */
+/* every stream is judged and its handler built before the first route registers, so a refused module leaves no route behind; a missing stream list, hub provider, path or route name is refused at boot rather than skipped, since an unregistered route has no later consumer to fail loudly, and a handler limit outside its rule is refused by NewStreamHandler naming the field */
 func (instance *Module) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
     streams := instance.config.Streams
     if 0 == len(streams) {
@@ -57,7 +59,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel)
     for index, stream := range streams {
         if nil == stream.Hub {
             exception.Panic(exception.NewError(
-                "websocket module hub is nil; the stream route cannot be registered without one",
+                "websocket module hub provider is nil; the stream route cannot be registered without one",
                 map[string]any{"field": fmt.Sprintf("ModuleConfig.Streams[%d].Hub", index)},
                 nil,
             ))
@@ -79,7 +81,12 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel)
             ))
         }
 
-        handlers = append(handlers, NewStreamHandler(stream.Hub, stream.Handler))
+        resolved, resolveErr := resolveStreamHandlerConfig(stream.Handler)
+        if nil != resolveErr {
+            exception.Panic(exception.FromError(resolveErr))
+        }
+
+        handlers = append(handlers, newStreamHandler(stream.Hub, resolved))
     }
 
     for index, stream := range streams {

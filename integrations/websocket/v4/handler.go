@@ -153,13 +153,27 @@ func NewStreamHandler(hub *melodyhttp.ServerSentEventHub, config StreamHandlerCo
         exception.Panic(exception.FromError(resolveErr))
     }
 
-    return newStreamHandler(hub, resolved)
+    return newStreamHandler(
+        func(containercontract.Runtime) (*melodyhttp.ServerSentEventHub, error) {
+            return hub, nil
+        },
+        resolved,
+    )
 }
 
-func newStreamHandler(hub *melodyhttp.ServerSentEventHub, resolved resolvedStreamHandlerConfig) httpcontract.Handler {
+func newStreamHandler(hubProvider func(runtimeInstance containercontract.Runtime) (*melodyhttp.ServerSentEventHub, error), resolved resolvedStreamHandlerConfig) httpcontract.Handler {
     config := resolved.config
 
     return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        hub, hubErr := hubProvider(runtimeInstance)
+        if nil != hubErr {
+            return nil, hubErr
+        }
+
+        if nil == hub {
+            return nil, exception.NewError("websocket stream hub provider answered no hub and no error", nil, nil)
+        }
+
         /* a hub that has shut down serves no stream: Subscribe on it hands back a closed channel, which the event loop would read as an ordinary end of stream after a 101, indistinguishable from a peer that went away. The request is refused before the upgrade with 503, as an empty resolved topic is with 400, so a client connecting during the shutdown drain is told to come back rather than handed a server error. */
         if true == hub.IsClosed() {
             return nil, exception.NewHttpException(

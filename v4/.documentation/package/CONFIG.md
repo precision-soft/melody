@@ -296,7 +296,7 @@ The value is a boolean in any spelling the parameter conversion accepts — `tru
 
 ### Application namespace
 
-The one namespace of the application, the stem of every name a store family derives by default: two deployments of one build on one Redis or one broker differ by it. Read through [`KernelConfiguration.Namespace()`](../../config/contract/kernel.go), which answers the key when a deployment sets it, else [`ApplicationConfig.Namespace`](../../application/application_new.go), else [`DefaultNamespace`](../../config/namespace.go), `melody`, under which every name keeps its third-major spelling.
+The one namespace of the application, the stem of every name a store family derives by default: two deployments of one build on one Redis or one broker differ by it. Read through [`KernelConfiguration.Namespace()`](../../config/contract/kernel.go), which answers the key when a deployment sets it, else [`ApplicationConfig.Namespace`](../../application/application_new.go), else [`DefaultNamespace`](../../config/namespace.go), `melody`, under which every name keeps its third-major spelling. A component that holds only a runtime reads it through [`NamespaceFromRuntime(runtimeInstance)`](../../config/namespace.go), which answers `DefaultNamespace` when the runtime resolves no configuration or its kernel configuration names none: the exclusive command, the outbox relay and the cron runner derive their default names through it.
 
 | Environment key    | Parameter name     | Default                                 |
 |--------------------|--------------------|-----------------------------------------|

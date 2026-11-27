@@ -693,14 +693,7 @@ func (instance *Relay) lockName(runtimeInstance containercontract.Runtime) strin
         suffix += ":" + instance.config.TransportName
     }
 
-    namespace := melodyconfig.DefaultNamespace
-    if configuration, configurationErr := melodyconfig.ConfigFromRuntime(runtimeInstance); nil == configurationErr && nil != configuration {
-        if kernelConfiguration := configuration.Kernel(); nil != kernelConfiguration && "" != kernelConfiguration.Namespace() {
-            namespace = kernelConfiguration.Namespace()
-        }
-    }
-
-    return namespace + suffix
+    return melodyconfig.NamespaceFromRuntime(runtimeInstance) + suffix
 }
 
 func (instance *Relay) acquireLease(runtimeInstance containercontract.Runtime) (func(), func(containercontract.Runtime) error, bool, error) {

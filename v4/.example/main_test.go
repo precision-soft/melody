@@ -164,6 +164,11 @@ func TestApplicationHttpHandler_ServesTheHealthRouteUnderAnotherServer(t *testin
         t.Fatalf("unexpected http handler error: %v", handlerErr)
     }
 
+    /* the websocket module serves /ws, the hub reached per connection through its provider */
+    if websocketRoute, found := applicationInstance.Boot().HttpRouter().RouteDefinition("example.websocket"); false == found || "/ws" != websocketRoute.Pattern() {
+        t.Fatalf("expected the websocket module to register /ws, got %v %v", websocketRoute, found)
+    }
+
     server := httptest.NewServer(handler)
 
     response, requestErr := nethttp.Get(server.URL + "/health")

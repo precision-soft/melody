@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- `module.go`: `ModuleConfig.StoreBuiltAtBoot` builds `service.outbox.store` inside `Boot`, under the boot runtime, so a factory ensuring the schema does it before the first request, and `ModuleConfig.StoreBootFailure` is its boot failure mode, `BootFailureWarns` when left out; a boot mode with no `Store`, and a failure mode on a store not built at boot, are refused at registration naming the field and what it requires.
 - `StoreMustFromRuntime(runtimeInstance)`, the store read through the runtime's scope under its context, for code that holds a runtime; a nil runtime is refused. `StoreMustFromResolver` stays the door of a provider.
 - **Breaking** — `service_resolver.go`: `StoreMustFromContainer` and `RelayMustFromContainer` are removed, their `…FromResolver` forms taking the container as they take a scope.
 - This major includes every change of the third major up to v3.2.0; that history is in the third major's changelog, and the third-major fixes released after it are listed below as carried.
@@ -21,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- `relay.go`: the default lock name reads the namespace through the framework's `config.NamespaceFromRuntime`, so a configuration resolved as a typed nil reads `melody` as an absent one does.
 - **Breaking** — `store.go`: `NewStore(database, codec, config)` takes a `StoreConfig`: `TableName`, `DefaultTableName` when left out, a plain identifier refused naming `StoreConfig.TableName`, bound in every query; `Headers`, a `messagebus.HeaderLimitsConfig` bounding one enqueue. A nil database or codec is refused naming the argument.
 - **Breaking** — `store.go`, `repository.go`: `Enqueue(ctx, executor, message, options)` takes `EnqueueOptions{Headers, Transport}`, the headers judged by `messagebus.ValidateHeaders` and stored as a JSON object in the new `headers` column, the destination in the new `transport` column, both NULL when left out; `Repository.ClaimDueMessages` takes `ClaimOptions{Transport}` and claims the rows of that name alone, an empty name the rows that name none; `Pending` carries `Headers` and `Transport`; a malformed transport name is refused naming its field.
 - **Breaking** — `store.go`: `EnsureSchema(runtimeInstance)` takes the runtime in place of a context, a nil runtime refused naming `outbox.Store.EnsureSchema`, and adds `headers` and `transport` to an older table as it adds `sent_at`.

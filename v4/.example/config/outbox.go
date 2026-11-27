@@ -20,9 +20,18 @@ import (
 
 const outboxNoticeType = "outbox_notice"
 
-/* the transactional outbox: a message enqueued in the same transaction as a business write is drained to the transport by the relay with a stable id, so a consumer can deduplicate the at-least-once delivery. The store and the relay are built from the container at first use. */
+/* the transactional outbox: a message enqueued in the same transaction as a business write is drained to the transport by the relay with a stable id, so a consumer can deduplicate the at-least-once delivery. */
 
-/* outboxStoreFactory is the service.outbox.store provider: it resolves the shared *bun.DB from the container and ensures the outbox schema at the first resolution, under the runtime of whoever resolves it, as the catalogue schema is prepared. The relay publishes each row to a dedicated amqp queue; without AMQP_DSN it is refused by name and the rows wait. */
+/* outboxModuleConfig builds the store at boot with the warning mode, as the catalogue schema is, so the schema is ensured under the boot runtime and a database that does not answer leaves a boot warning, the first resolution trying again; the relay is built at its first use. */
+func (instance *Module) outboxModuleConfig() outbox.ModuleConfig {
+    return outbox.ModuleConfig{
+        Store:            instance.outboxStoreFactory,
+        StoreBuiltAtBoot: true, StoreBootFailure: melodycontainer.BootFailureWarns,
+        Relay:            instance.outboxRelayFactory,
+    }
+}
+
+/* outboxStoreFactory is the service.outbox.store provider: it resolves the shared *bun.DB from the container and ensures the outbox schema under the runtime it is built in. The relay publishes each row to a dedicated amqp queue; without AMQP_DSN it is refused by name and the rows wait. */
 func (instance *Module) outboxStoreFactory(resolver melodycontainercontract.Resolver) (*outbox.Store, error) {
     database, resolveErr := melodycontainer.FromResolver[*bun.DB](resolver.Runtime().Context(), resolver, serviceDatabase)
     if nil != resolveErr {
