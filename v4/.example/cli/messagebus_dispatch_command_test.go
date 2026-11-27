@@ -71,7 +71,7 @@ func (instance *acceptingBus) Dispatch(runtimeInstance melodycontainercontract.R
     return envelope, instance.handleErr
 }
 
-/* recordingTransport is the in-process transport with its acks, nacks and receives counted; closedStreamErr, when closed is set, makes Receive answer a stream that is already closed */
+/* recordingTransport is the in-process transport with its acks, nacks and receives counted and the context of the last Receive kept; closedStreamErr, when closed is set, makes Receive answer a stream that is already closed */
 type recordingTransport struct {
     *melodymessagebus.InMemoryTransport
 
@@ -83,6 +83,8 @@ type recordingTransport struct {
     acks     int
     nacks    []melodymessagebuscontract.NackConfig
     receives int
+
+    receiveContext context.Context
 }
 
 func newRecordingTransport(t *testing.T) *recordingTransport {
@@ -97,6 +99,7 @@ func newRecordingTransport(t *testing.T) *recordingTransport {
 func (instance *recordingTransport) Receive(runtimeInstance melodycontainercontract.Runtime) (melodymessagebuscontract.Subscription, error) {
     instance.mutex.Lock()
     instance.receives++
+    instance.receiveContext = runtimeInstance.Context()
     instance.mutex.Unlock()
 
     if true == instance.closed {
@@ -248,6 +251,29 @@ func TestMessageBusDispatchCommandReportsOnTheCommandWriter(t *testing.T) {
 
     if durations := clockInstance.timerDurations(); 1 != len(durations) || 30*time.Second != durations[0] {
         t.Fatalf("expected one timer of the declared 30s default, got %v", durations)
+    }
+}
+
+/* the subscription ends with the run, so a longer-lived process running the command keeps no consumer on the queue */
+func TestMessageBusDispatchCommand_EndsItsSubscriptionWhenTheRunReturns(t *testing.T) {
+    fixture := newCommandFixture(t)
+    transport := newRecordingTransport(t)
+
+    command := NewMessageBusDispatchCommand(&sendingBus{transport: transport}, &acceptingBus{}, transport, newManualClock())
+    if runErr := command.Run(fixture.runtime, dispatchCommandContext(command, nil, &bytes.Buffer{})); nil != runErr {
+        t.Fatalf("expected the messages to be dispatched and consumed, got %v", runErr)
+    }
+
+    transport.mutex.Lock()
+    receiveContext := transport.receiveContext
+    transport.mutex.Unlock()
+
+    if nil == receiveContext || nil == receiveContext.Err() {
+        t.Fatal("expected the context Receive was handed done once the run returned")
+    }
+
+    if nil != fixture.runtime.Context().Err() {
+        t.Fatal("expected the run's own context left alone, the subscription's alone ended")
     }
 }
 

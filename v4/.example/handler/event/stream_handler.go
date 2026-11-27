@@ -104,7 +104,12 @@ func StreamHandler(slots *StreamSlots, revision StreamRevisionConfig) melodyhttp
                     return nil, nil
                 }
             case <-revisionTicks:
-                if reason := checkStreamAuthority(runtimeInstance, authority, topic); "" != reason {
+                reason := checkStreamAuthority(runtimeInstance, requestContext, authority, topic)
+                if streamClientLeft == reason {
+                    return nil, nil
+                }
+
+                if "" != reason {
                     _ = serverSentEventWriter.Comment("closed: " + reason)
 
                     return nil, nil

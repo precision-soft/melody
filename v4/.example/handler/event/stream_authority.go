@@ -146,10 +146,18 @@ func currentRevisionOf(user *entity.User) string {
     return examplesecurity.AccountRevision(user.Id, examplesecurity.SessionCredentialVersion(user.Password), user.Roles)
 }
 
+/* streamClientLeft ends a stream whose re-read failed because its connection had already ended: nothing is journaled and nothing is written to a client that is gone */
+const streamClientLeft = "client-left"
+
 /* checkStreamAuthority asks the authority once and journals the end it answers; it answers the reason the stream ends with, empty while it holds */
-func checkStreamAuthority(runtimeInstance melodycontainercontract.Runtime, authority *StreamAuthority, topic string) string {
+func checkStreamAuthority(runtimeInstance melodycontainercontract.Runtime, connectionContext context.Context, authority *StreamAuthority, topic string) string {
     reason, holdErr := authority.StillHolds(runtimeInstance)
     logger := examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger())
+
+    /* a read cut by the connection's end answers the context's error, which is no outage of the directory */
+    if nil != holdErr && nil != connectionContext.Err() {
+        return streamClientLeft
+    }
 
     if nil != holdErr {
         logger.Warning(
@@ -189,6 +197,16 @@ func StreamRevisionMiddleware(routeName string, revision StreamRevisionConfig) m
             watcherDone := make(chan struct{})
             go func() {
                 defer close(watcherDone)
+                /* the re-read runs application functions on a goroutine of its own, where a panic would end the process: it ends this connection alone, as a failed re-read does */
+                defer func() {
+                    if recovered := recover(); nil != recovered {
+                        examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Error(
+                            "event stream watcher panicked",
+                            melodyloggingcontract.Context{"userId": authority.UserId(), "topic": TopicOf(request), "panic": recovered},
+                        )
+                        cancel()
+                    }
+                }()
 
                 watchStreamAuthority(runtimeInstance, watchContext, cancel, authority, revision.Interval, TopicOf(request))
             }()
@@ -218,7 +236,7 @@ func watchStreamAuthority(
         case <-watchContext.Done():
             return
         case <-ticker.C:
-            if "" != checkStreamAuthority(runtimeInstance, authority, topic) {
+            if "" != checkStreamAuthority(runtimeInstance, watchContext, authority, topic) {
                 cancel()
 
                 return

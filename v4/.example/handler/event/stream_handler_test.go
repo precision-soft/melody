@@ -308,11 +308,26 @@ func TestStreamHandler_RefusesWithoutCommittingWhenTheHubIsNotRegistered(t *test
     }
 }
 
-/* warningRecordingLogger keeps the warnings a door wrote through the runtime's logger */
+/* warningRecordingLogger keeps the warnings and the errors a door wrote through the runtime's logger */
 type warningRecordingLogger struct {
     melodyloggingcontract.Logger
-    mutex    sync.Mutex
-    warnings []string
+    mutex         sync.Mutex
+    warnings      []string
+    errorMessages []string
+}
+
+func (instance *warningRecordingLogger) Error(message string, context melodyloggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.errorMessages = append(instance.errorMessages, message)
+}
+
+func (instance *warningRecordingLogger) recordedErrors() []string {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]string{}, instance.errorMessages...)
 }
 
 func (instance *warningRecordingLogger) Warning(message string, context melodyloggingcontract.Context) {

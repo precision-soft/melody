@@ -283,6 +283,71 @@ func TestRegisterHttpRoutes_PutsTheBackendSpendingDoorsBehindTheWriteBudget(t *t
     }
 }
 
+/* every write door of the catalogue and the user directory stands behind the write budget: a door registered without it would read past the spent budget */
+func TestRegisterHttpRoutes_PutsEveryCatalogueWriteDoorBehindTheWriteBudget(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.trustedProxyResolver = newTrustedProxyResolver("", time.Now)
+    moduleInstance.eventStreamSlots = handlerevent.NewStreamSlots(1, 1)
+
+    router := melodyhttp.NewRouter()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
+    moduleInstance.RegisterHttpRoutes(&routeKernel{router: router, container: containerInstance})
+
+    runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
+    noContent := func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        return melodyhttp.EmptyResponse(nethttp.StatusNoContent), nil
+    }
+
+    requestFrom := func(method string, path string) melodyhttpcontract.Request {
+        httpRequest := httptest.NewRequest(method, path, nil)
+        httpRequest.RemoteAddr = "203.0.113.9:41234"
+
+        return melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("budget-test", time.Now())})
+    }
+
+    for attempt := 0; attempt < catalogWriteAllowance; attempt++ {
+        if _, spendErr := moduleInstance.throttledWrite(noContent)(runtimeInstance, httptest.NewRecorder(), requestFrom(nethttp.MethodPost, route.ProductsApiCreatePattern)); nil != spendErr {
+            t.Fatalf("attempt %d: expected the budget spent without a refusal, got %v", attempt, spendErr)
+        }
+    }
+
+    writeDoors := 0
+    for _, definition := range router.RouteDefinitions() {
+        pattern := definition.Pattern()
+        if false == strings.HasPrefix(pattern, route.CategoriesApiGroupPrefix+"/") &&
+            false == strings.HasPrefix(pattern, route.CurrenciesApiGroupPrefix+"/") &&
+            false == strings.HasPrefix(pattern, route.ProductsPrefix+"/api/") &&
+            false == strings.HasPrefix(pattern, route.UsersPrefix+"/api/") {
+            continue
+        }
+
+        for _, method := range definition.Methods() {
+            if nethttp.MethodPost != method && nethttp.MethodPut != method && nethttp.MethodDelete != method {
+                continue
+            }
+
+            writeDoors = writeDoors + 1
+            path := strings.ReplaceAll(pattern, ":id", "budget-1")
+            matched, found := router.Match(method, path, "", "http")
+            if false == found {
+                t.Fatalf("expected %s %s to match %s", method, path, definition.Name())
+            }
+
+            _, handlerErr := matched.Handler(runtimeInstance, httptest.NewRecorder(), requestFrom(method, path))
+
+            var httpException *melodyexception.HttpException
+            if false == errors.As(handlerErr, &httpException) || nethttp.StatusTooManyRequests != httpException.StatusCode() {
+                t.Fatalf("%s %s: expected the spent budget refused 429, got %v", method, definition.Name(), handlerErr)
+            }
+        }
+    }
+
+    if 12 != writeDoors {
+        t.Fatalf("expected the twelve write doors of categories, currencies, products and users, found %d", writeDoors)
+    }
+}
+
 func TestBuildOutboxTransport_RefusesWithoutAmqpDsnNamingTheKey(t *testing.T) {
     _, transportErr := moduleWithEnvironment(t, map[string]string{}).buildOutboxTransport()
     if false == errors.Is(transportErr, message.ErrTransportNotConfigured) {

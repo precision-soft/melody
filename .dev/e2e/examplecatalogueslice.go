@@ -38,6 +38,7 @@ const (
 
     exampleDispatchSuccessLine = "consumed own messages: 3 of 3"
     exampleDispatchedLine      = "dispatched welcome email for user:"
+    exampleDispatchForeignLine = "consumed a message of another producer"
 )
 
 /* runExampleCatalogueSliceAssertions drives the catalogue slice of the fourth major's example over the wire and its console: the category write doors, the views per window, the topic gate, the stream's account revision and the dispatch command counting its own messages */
@@ -443,7 +444,12 @@ func assertExampleDispatchCountsItsOwn(label string, major exampleMajor, workspa
         fail("%s: messagebus:dispatch --timeout 5s printed no %q after three dispatched lines:\n%s", label, exampleDispatchSuccessLine, exampleTail(consumed, 20))
     }
 
-    pass("%s: messagebus:dispatch --no-consume printed three dispatched lines and no consumed one; the next run printed %q", label, exampleDispatchSuccessLine)
+    /* at least: an earlier failed run may have left more on the queue; a command counting every envelope would take the three left over as its own */
+    if 3 > strings.Count(consumed, exampleDispatchForeignLine) {
+        fail("%s: messagebus:dispatch --timeout 5s printed fewer than three %q lines for the messages the --no-consume run left:\n%s", label, exampleDispatchForeignLine, exampleTail(consumed, 20))
+    }
+
+    pass("%s: messagebus:dispatch --no-consume printed three dispatched lines and no consumed one; the next run took the three it left as another producer's and printed %q", label, exampleDispatchSuccessLine)
 }
 
 /* removeExampleRecordsOf removes the journal entries and the audit trail a probe write left in the major's own tables */

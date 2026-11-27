@@ -109,9 +109,7 @@ func TestStreamHandler_ClosesWhenTheAccountChanges(t *testing.T) {
             done := runStreamHandler(stream, account.revision(revisionTestInterval), writer)
 
             /* the stream holds while the account does */
-            for 2 > account.readCount() {
-                time.Sleep(5 * time.Millisecond)
-            }
+            awaitReads(t, account, 2, 2*time.Second)
             select {
             case <-done:
                 t.Fatal("expected the stream open while the account holds")
@@ -143,6 +141,44 @@ func TestStreamHandler_ClosesWhenTheAccountCannotBeReRead(t *testing.T) {
 
     if false == strings.Contains(string(writer.body), ": closed: "+StreamAuthorityAccountUnreadable) {
         t.Fatalf("expected the stream to end with the unreadable reason, wrote %q", writer.body)
+    }
+}
+
+/* the client leaves while the re-read is inside the directory, which answers the context's error as a database driver does: no outage is journaled and nothing is written to the connection that is gone */
+func TestStreamHandler_AClientLeavingMidReReadIsNotJournaledAsUnreadable(t *testing.T) {
+    account := newStreamAccount([]string{entity.RoleUser})
+    stream := signedInStreamRequest(t, "/events/stream/?topic=visitor", account, true)
+    writer := &recordingResponseWriter{}
+
+    readStarted := make(chan struct{}, 1)
+    revision := account.revision(revisionTestInterval)
+    revision.LookupUser = func(runtimeInstance melodycontainercontract.Runtime, userId string) (*entity.User, bool, error) {
+        select {
+        case readStarted <- struct{}{}:
+        default:
+        }
+        requestContext := stream.request.HttpRequest().Context()
+        <-requestContext.Done()
+
+        return nil, false, requestContext.Err()
+    }
+
+    done := runStreamHandler(stream, revision, writer)
+    select {
+    case <-readStarted:
+    case <-time.After(2 * time.Second):
+        t.Fatal("expected a re-read within 2s")
+    }
+
+    stream.cancel()
+    awaitClosed(t, done, 2*time.Second, "the stream closed with its client")
+
+    if 0 != len(stream.logger.recorded()) {
+        t.Fatalf("expected no warning for a client that left, got %v", stream.logger.recorded())
+    }
+
+    if true == strings.Contains(string(writer.body), "closed:") {
+        t.Fatalf("expected no closing comment to a client that left, wrote %q", writer.body)
     }
 }
 
@@ -186,13 +222,7 @@ func TestStreamHandler_KeepsTheStreamWhileTheRevisionHolds(t *testing.T) {
 
     done := runStreamHandler(stream, account.revision(revisionTestInterval), writer)
 
-    deadline := time.Now().Add(2 * time.Second)
-    for 3 > account.readCount() && time.Now().Before(deadline) {
-        time.Sleep(5 * time.Millisecond)
-    }
-    if 3 > account.readCount() {
-        t.Fatalf("expected three re-reads, got %d", account.readCount())
-    }
+    awaitReads(t, account, 3, 2*time.Second)
 
     select {
     case <-done:
@@ -283,9 +313,7 @@ func TestStreamRevisionMiddleware_CancelsTheConnectionContextWhenTheRevisionMove
     handed := &atomic.Pointer[melodyhttpcontract.Request]{}
     done, _ := runRevisionMiddleware(stream, account.revision(revisionTestInterval), waitingHandler(handed))
 
-    for 2 > account.readCount() {
-        time.Sleep(5 * time.Millisecond)
-    }
+    awaitReads(t, account, 2, 2*time.Second)
     select {
     case <-done:
         t.Fatal("expected the connection open while the account holds")
@@ -382,10 +410,7 @@ func TestStreamRevisionMiddleware_TheDecoratedRequestKeepsEveryOtherDoorOfTheReq
     handed := &atomic.Pointer[melodyhttpcontract.Request]{}
     done, _ := runRevisionMiddleware(stream, account.revision(time.Hour), waitingHandler(handed))
 
-    for nil == handed.Load() {
-        time.Sleep(5 * time.Millisecond)
-    }
-    decorated := *handed.Load()
+    decorated := awaitHanded(t, handed, 2*time.Second)
 
     marker, _ := decorated.Attributes().Get("example.marker")
     if revisionTestRoute != decorated.RouteName() || "visitor" != TopicOf(decorated) || "kept" != marker || stream.runtimeInstance != decorated.RuntimeInstance() {
@@ -438,9 +463,7 @@ func TestStreamRevisionMiddleware_ClosesARealWebsocketConnectionWhenTheRevisionM
         t.Fatalf("expected the upgrade answered 101, got %q", statusLine)
     }
 
-    for 2 > account.readCount() {
-        time.Sleep(5 * time.Millisecond)
-    }
+    awaitReads(t, account, 2, 2*time.Second)
     account.change(func(account *streamAccount) { account.user.Roles = []string{entity.RoleAdmin} })
 
     awaitClosed(t, handlerDone, 3*time.Second, "the websocket handler returned once the roles changed")
@@ -461,5 +484,59 @@ func TestOpenStreamAuthority_RefusesASessionWithoutAPasswordVersion(t *testing.T
         if nil != authority || nil == refusal || nethttp.StatusUnauthorized != refusal.StatusCode() {
             t.Errorf("expected a 401 for a password version %s, got %v, %v", name, authority, refusal)
         }
+    }
+}
+
+/* the off door holds on /ws as on the event stream: with no interval and nothing to re-read with, a signed-in connection and one without a session reach the handler with their own request */
+func TestStreamRevisionMiddleware_DisabledPassesTheConnectionUntouched(t *testing.T) {
+    for name, withSession := range map[string]bool{"signed in": true, "without a session": false} {
+        t.Run(name, func(t *testing.T) {
+            account := newStreamAccount([]string{entity.RoleUser})
+            stream := signedInStreamRequest(t, "/ws?topic=visitor", account, withSession)
+            stream.request.Attributes().Set(melodyhttp.RouteAttributeName, revisionTestRoute)
+
+            disabled := account.revision(0)
+            disabled.Disabled = true
+
+            var handed melodyhttpcontract.Request
+            next := func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+                handed = request
+
+                return nil, nil
+            }
+
+            response, _ := StreamRevisionMiddleware(revisionTestRoute, disabled)(next)(stream.runtimeInstance, httptest.NewRecorder(), stream.request)
+            if nil != response || stream.request != handed {
+                t.Fatalf("expected the connection handed its own request, got %v and %v", response, handed)
+            }
+
+            if 0 != account.readCount() {
+                t.Fatalf("expected no re-read while the re-read is off, read %d times", account.readCount())
+            }
+        })
+    }
+}
+
+/* the watcher runs on a goroutine of its own: a re-read that panics is journaled and ends that connection, not the process */
+func TestStreamRevisionMiddleware_APanickingReReadEndsTheConnectionAlone(t *testing.T) {
+    account := newStreamAccount([]string{entity.RoleUser})
+    stream := signedInStreamRequest(t, "/ws?topic=visitor", account, true)
+    stream.request.Attributes().Set(melodyhttp.RouteAttributeName, revisionTestRoute)
+
+    revision := account.revision(revisionTestInterval)
+    revision.LookupUser = func(runtimeInstance melodycontainercontract.Runtime, userId string) (*entity.User, bool, error) {
+        panic("the directory panicked")
+    }
+
+    handed := &atomic.Pointer[melodyhttpcontract.Request]{}
+    done, _ := runRevisionMiddleware(stream, revision, waitingHandler(handed))
+    awaitClosed(t, done, 2*time.Second, "the connection's context cancelled once the re-read panicked")
+
+    if false == slices.Contains(stream.logger.recordedErrors(), "event stream watcher panicked") {
+        t.Fatalf("expected the panic journaled as an error, got %v", stream.logger.recordedErrors())
+    }
+
+    if nil != stream.request.HttpRequest().Context().Err() {
+        t.Fatal("expected the request's own context left alone, the connection's alone cancelled")
     }
 }

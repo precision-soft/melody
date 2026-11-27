@@ -7,6 +7,7 @@ import (
     "net/http/httptest"
     "slices"
     "sync"
+    "sync/atomic"
     "testing"
     "time"
 
@@ -18,6 +19,7 @@ import (
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
+    melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     melodysession "github.com/precision-soft/melody/v4/session"
@@ -176,4 +178,34 @@ func awaitClosed(t *testing.T, done <-chan struct{}, within time.Duration, what 
     case <-time.After(within):
         t.Fatalf("expected %s within %s", what, within)
     }
+}
+
+/* awaitReads waits for the open stream's re-reads to reach the count, so a re-read that never comes fails the pin instead of hanging the package */
+func awaitReads(t *testing.T, account *streamAccount, count int, within time.Duration) {
+    t.Helper()
+
+    deadline := time.Now().Add(within)
+    for count > account.readCount() {
+        if false == time.Now().Before(deadline) {
+            t.Fatalf("expected %d re-reads within %s, got %d", count, within, account.readCount())
+        }
+
+        time.Sleep(5 * time.Millisecond)
+    }
+}
+
+/* awaitHanded waits for the request the middleware handed its handler */
+func awaitHanded(t *testing.T, handed *atomic.Pointer[melodyhttpcontract.Request], within time.Duration) melodyhttpcontract.Request {
+    t.Helper()
+
+    deadline := time.Now().Add(within)
+    for nil == handed.Load() {
+        if false == time.Now().Before(deadline) {
+            t.Fatalf("expected the handler handed a request within %s", within)
+        }
+
+        time.Sleep(5 * time.Millisecond)
+    }
+
+    return *handed.Load()
 }
