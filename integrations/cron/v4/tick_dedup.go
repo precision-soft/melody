@@ -484,7 +484,7 @@ func (instance *RunnerCommand) releaseWonTick(runtimeInstance containercontract.
     }
 }
 
-/* gateTick resolves an entry's claim and answers what replaces its run: a skip row, a failed or cancelled row, or nothing when the entry runs. A locker failure under TickDedupFailureRun runs the entry with a warning. A panic in the gate, the application's logger included, is the entry's failed row, as it is around a run. */
+/* gateTick resolves an entry's claim and answers what replaces its run: a skip row, a failed or cancelled row, or nothing when the entry runs. A locker failure under TickDedupFailureRun runs the entry with a warning, a logger panicking on that warning included. Any other panic in the gate, the application's logger included, is the entry's failed row, as it is around a run. */
 func (instance *RunnerCommand) gateTick(
     runtimeInstance containercontract.Runtime,
     dedupRun *tickDedupRun,
@@ -544,12 +544,7 @@ func (instance *RunnerCommand) gateTick(
     unavailable := newTickDedupUnavailableError(entry, claim, cause)
 
     if TickDedupFailureRun == entry.tickDedup.failureMode {
-        if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
-            logger.Warning(
-                "cron runner could not reach the tick dedup locker and runs the tick without its marker",
-                exception.LogContext(unavailable, exception.LogContextConfig{}),
-            )
-        }
+        warnTickRunsWithoutItsMarker(runtimeInstance, unavailable)
 
         return nil, nil, nil, false, false
     }
@@ -559,4 +554,18 @@ func (instance *RunnerCommand) gateTick(
     counted = instance.reportRunOutcome(runtimeInstance, entry, runId, unavailable, false)
 
     return nil, &failedRow, unavailable, counted, true
+}
+
+/* warnTickRunsWithoutItsMarker swallows a logger's panic: the mode promises the run, and the warning is all that failed. */
+func warnTickRunsWithoutItsMarker(runtimeInstance containercontract.Runtime, unavailable error) {
+    defer func() {
+        _ = recover()
+    }()
+
+    if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
+        logger.Warning(
+            "cron runner could not reach the tick dedup locker and runs the tick without its marker",
+            exception.LogContext(unavailable, exception.LogContextConfig{}),
+        )
+    }
 }

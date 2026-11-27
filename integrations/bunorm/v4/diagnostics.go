@@ -46,7 +46,7 @@ func RouteDiagnostics(logger loggingcontract.Logger) {
     routeDiagnosticsTo(logger)
 }
 
-/* routeDiagnosticsTo is RouteDiagnostics answering the destination it left live, so a registry can hand exactly that one back at its Close. A logger whose dynamic type carries no identity is routed afresh on every call; nil and a typed nil route nothing and answer nil. */
+/* routeDiagnosticsTo is RouteDiagnostics answering the destination it left live, so a registry can hand exactly that one back at its CloseWithContext. A logger whose dynamic type carries no identity is routed afresh on every call; nil and a typed nil route nothing and answer nil. */
 func routeDiagnosticsTo(logger loggingcontract.Logger) *diagnosticsTarget {
     if true == isNilInterface(logger) {
         return nil
@@ -55,7 +55,7 @@ func routeDiagnosticsTo(logger loggingcontract.Logger) *diagnosticsTarget {
     bunDiagnosticsRouting.Lock()
     defer bunDiagnosticsRouting.Unlock()
 
-    /* a registry's logger retired at its Close routes nothing: a provider open still in flight must not take the channel back onto it */
+    /* a registry's logger retired at its CloseWithContext routes nothing: a provider open still in flight must not take the channel back onto it */
     if owned, isOwned := logger.(*registryLogger); true == isOwned && true == owned.retired.Load() {
         return nil
     }

@@ -45,7 +45,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
-- runner: a panic while a tick is gated by its dedup, the application's logger recording a skipped tick or the run-mode warning included, is the entry's failed row, `cron: the runner panicked gating a scheduled tick`, where it ended the process.
+- runner: a panic while a tick is gated by its dedup, the application's logger recording a skipped tick included, is the entry's failed row, `cron: the runner panicked gating a scheduled tick`, where it ended the process; under `TickDedupFailureRun` a logger panicking on the run-mode warning is swallowed and the tick still runs.
 - runner: a sibling failure's cause chain renders each pointer link once, breadth-first, as the framework's chain does, where a chain reaching itself repeated its links up to the bound of eight.
 - runner: a scheduled command's error whose `Unwrap` chain reaches itself no longer holds the dispatch worker that classifies it, nor the command that renders it.
 

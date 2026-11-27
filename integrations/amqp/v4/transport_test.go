@@ -4584,7 +4584,7 @@ func TestTransport_AReceivedHeaderTheWriteRuleRefusesIsSkippedSoTheRequeueCounts
         "x-melody-header-":          "empty name",
         "x-melody-header-tabbed":    "a\tb",
         "x-melody-header-request-id": "request-7",
-    }, map[string]string{"request-id": "request-7"})
+    }, map[string]string{"request-id": "request-7"}, nil)
 }
 
 func TestTransport_AReceivedEnvelopeOverTheHeaderLimitsRequeuesCounted(t *testing.T) {
@@ -4596,7 +4596,139 @@ func TestTransport_AReceivedEnvelopeOverTheHeaderLimitsRequeuesCounted(t *testin
         expected[name] = "value"
     }
 
-    expectARawDeliveryRequeuesCounted(t, "melody.amqp.v4.headers.overlimit", headers, expected)
+    expectARawDeliveryRequeuesCounted(t, "melody.amqp.v4.headers.overlimit", headers, expected, nil)
+}
+
+func TestTransport_AHeaderTheHandlerAddsThatFailsTheRuleIsDroppedSoTheRequeueCounts(t *testing.T) {
+    logger := expectARawDeliveryRequeuesCounted(t, "melody.amqp.v4.headers.handleradded", amqp091.Table{
+        "x-melody-header-request-id": "request-7",
+    }, map[string]string{"request-id": "request-7"}, map[string]string{"bad name": "spaced", "tabbed": "a\tb"})
+
+    logger.mutex.Lock()
+    defer logger.mutex.Unlock()
+
+    named := []string{}
+    for _, record := range logger.records {
+        if loggingcontract.LevelWarning == record.level && "amqp requeue header fails the header rule, dropped" == record.message {
+            named = append(named, fmt.Sprint(record.context["header"]))
+        }
+    }
+
+    if "x-melody-header-bad name,x-melody-header-tabbed" != strings.Join(named, ",") {
+        t.Fatalf("expected the requeue to warn naming each dropped header, got %v", named)
+    }
+}
+
+func TestTransport_ARequeueIsBoundedByTheLargerOfTheLimitsAndWhatItArrivedWith(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.headers.requeuebound")
+
+    instance := &Transport{queue: "orders", registry: registry, serializer: melodyserializer.NewJsonSerializer()}
+
+    body, serializeErr := instance.serializer.Serialize(testMessage{Id: 1})
+    if nil != serializeErr {
+        t.Fatalf("serialize: %v", serializeErr)
+    }
+
+    decodeWith := func(headerCount int, valueLength int) messagebuscontract.Envelope {
+        headers := amqp091.Table{headerMessageType: "amqp.test.headers.requeuebound"}
+        for index := 0; index < headerCount; index++ {
+            headers[ApplicationHeaderPrefix+"h"+strconv.Itoa(index)] = strings.Repeat("v", valueLength)
+        }
+
+        decoded, decodeErr := instance.decode(amqp091.Delivery{Headers: headers, Body: body}, 1)
+        if nil != decodeErr {
+            t.Fatalf("decode: %v", decodeErr)
+        }
+
+        return decoded
+    }
+
+    addHeaders := func(envelopeInstance messagebuscontract.Envelope, count int, valueLength int) messagebuscontract.Envelope {
+        added := map[string]string{}
+        for index := 0; index < count; index++ {
+            added["added"+strconv.Itoa(index)] = strings.Repeat("a", valueLength)
+        }
+
+        return envelopeInstance.WithStamps([]messagebuscontract.Stamp{melodymessagebus.HeadersStamp{Headers: added}})
+    }
+
+    overCount := melodymessagebus.DefaultHeaderMaxCount + 8
+    overBytes := melodymessagebus.DefaultHeaderMaxBytes + 1024
+
+    cases := []struct {
+        name     string
+        envelope messagebuscontract.Envelope
+        refused  bool
+    }{
+        {name: "arrived over the count", envelope: decodeWith(overCount, 1), refused: false},
+        {name: "grown past what it arrived with", envelope: addHeaders(decodeWith(overCount, 1), 1, 1), refused: true},
+        {name: "grown up to the transport's count", envelope: addHeaders(decodeWith(2, 1), melodymessagebus.DefaultHeaderMaxCount-2, 1), refused: false},
+        {name: "grown past the transport's count", envelope: addHeaders(decodeWith(2, 1), melodymessagebus.DefaultHeaderMaxCount-1, 1), refused: true},
+        {name: "arrived over the bytes", envelope: decodeWith(1, overBytes), refused: false},
+        {name: "grown past the bytes it arrived with", envelope: addHeaders(decodeWith(1, overBytes), 1, 16), refused: true},
+        {name: "grown past the transport's bytes", envelope: addHeaders(decodeWith(1, 1), 1, melodymessagebus.DefaultHeaderMaxBytes), refused: true},
+    }
+
+    for _, testCase := range cases {
+        _, buildErr := instance.buildPublishing(testCase.envelope, "", true)
+        if true == testCase.refused && false == errors.Is(buildErr, melodymessagebus.ErrHeadersRefused) {
+            t.Fatalf("%s: expected the requeue refused for its headers, got %v", testCase.name, buildErr)
+        }
+
+        if false == testCase.refused && nil != buildErr {
+            t.Fatalf("%s: expected the requeue built, got %v", testCase.name, buildErr)
+        }
+    }
+}
+
+func TestTransport_AHeaderTheHandlerAddsThatFailsTheRuleIsDroppedWithAWarningNamingIt(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.headers.handlerdropped")
+
+    instance := &Transport{queue: "orders", registry: registry, serializer: melodyserializer.NewJsonSerializer()}
+
+    body, serializeErr := instance.serializer.Serialize(testMessage{Id: 1})
+    if nil != serializeErr {
+        t.Fatalf("serialize: %v", serializeErr)
+    }
+
+    decoded, decodeErr := instance.decode(amqp091.Delivery{
+        Headers: amqp091.Table{headerMessageType: "amqp.test.headers.handlerdropped", "x-melody-header-request-id": "request-7"},
+        Body:    body,
+    }, 1)
+    if nil != decodeErr {
+        t.Fatalf("decode: %v", decodeErr)
+    }
+
+    retried := decoded.WithStamps([]messagebuscontract.Stamp{melodymessagebus.HeadersStamp{Headers: map[string]string{"bad name": "secret"}}})
+
+    publishing, buildErr := instance.buildPublishing(retried, "", true)
+    if nil != buildErr {
+        t.Fatalf("expected the requeue built without the refused header, got %v", buildErr)
+    }
+
+    if _, present := publishing.Headers["x-melody-header-bad name"]; true == present {
+        t.Fatalf("expected the refused header dropped, got %v", publishing.Headers)
+    }
+
+    if "request-7" != publishing.Headers["x-melody-header-request-id"] {
+        t.Fatalf("expected the received header kept, got %v", publishing.Headers)
+    }
+
+    runtimeInstance, logger := newRecordingLoggerRuntime(t.Context())
+    instance.warnDroppedRequeueHeaders(runtimeInstance, retried)
+
+    logger.mutex.Lock()
+    defer logger.mutex.Unlock()
+
+    if 1 != len(logger.records) || loggingcontract.LevelWarning != logger.records[0].level || "x-melody-header-bad name" != logger.records[0].context["header"] {
+        t.Fatalf("expected one warning naming the dropped header, got %v", logger.records)
+    }
+
+    if true == strings.Contains(fmt.Sprint(logger.records[0].context), "secret") {
+        t.Fatalf("expected the warning to carry no value, got %v", logger.records[0].context)
+    }
 }
 
 func TestTransport_AHeaderFailingTheWriteRuleIsSkippedWithAWarningNamingIt(t *testing.T) {

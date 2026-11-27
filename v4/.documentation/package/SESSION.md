@@ -178,7 +178,7 @@ The returned session is a **new object marked modified**, and the one passed in 
 - [`type FileStorage`](../../session/file_storage.go) — the storage the [durability](#file-storage-durability) section is about, recommended for development only
 - **session.ManagerConfig** ([`session/manager.go`](../../session/manager.go)) — `Ttl`, `TombstoneRetention`, `StorageTimeout`, `Clock` and `OwnsStorage`, the zero value the default
 - **session.InMemoryStorageConfig** ([`session/in_memory_storage.go`](../../session/in_memory_storage.go)) — `CleanupInterval`, 1m by default, at least 1ms, unlimited refused, `MaxSessions`, 100,000 by default, at least 1, unlimited admitted, and `Clock`
-- **session.FileStorageConfig** ([`session/file_storage.go`](../../session/file_storage.go)) — `JournalDisabled`, the door back to the whole snapshot per write, `JournalMaxBytes`, 8 MiB by default, at least 64 KiB, unlimited refused, `Logger`, nil journaling nothing and a typed nil refused, `MaxSessions`, 100,000 by default, at least 1, unlimited admitted, and `Clock`
+- **session.FileStorageConfig** ([`session/file_storage.go`](../../session/file_storage.go)) — `JournalDisabled`, the door back to the whole snapshot per write, `JournalMaxBytes`, 8 MiB by default, at least 64 KiB, unlimited refused, `Logger`, the emergency logger when left out and a typed nil refused, `MaxSessions`, 100,000 by default, at least 1, unlimited admitted, and `Clock`
 
 ### Constants
 

@@ -10,7 +10,7 @@ import (
     "github.com/precision-soft/melody/v4/httpclient"
 )
 
-/* The two outbound clients are container services, because each owns a transport with an idle connection pool and the container closes each at teardown through its Close. There are two because they point at two services, and they are the client's two shapes: a based client refuses a target off its origin, a baseless one refuses a relative target. */
+/* The two outbound clients are container services, because each owns a transport with an idle connection pool and the container closes each at teardown through its CloseWithContext. There are two because they point at two services, and they are the client's two shapes: a based client refuses a target off its origin, a baseless one refuses a relative target. */
 
 /* outboundRequestTimeout bounds one exchange with an outbound provider, narrower than the client's thirty-second default; both callers run on a schedule, so it fails fast and leaves the decision to the caller's retry. */
 const outboundRequestTimeout = 3 * time.Second

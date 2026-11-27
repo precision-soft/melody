@@ -796,8 +796,8 @@ func captureStandardError(t *testing.T, action func()) string {
     return string(written)
 }
 
-/* expectARawDeliveryRequeuesCounted publishes past the transport's write rule, as another producer may, then requeues with an advanced count: without a dead-letter queue a requeue that cannot be written loops at the count it arrived with. */
-func expectARawDeliveryRequeuesCounted(t *testing.T, queueName string, rawHeaders amqp091.Table, expected map[string]string) {
+/* expectARawDeliveryRequeuesCounted publishes past the transport's write rule, as another producer may, then requeues with an advanced count and the headers the handler added: without a dead-letter queue a requeue that cannot be written loops at the count it arrived with. */
+func expectARawDeliveryRequeuesCounted(t *testing.T, queueName string, rawHeaders amqp091.Table, expected map[string]string, added map[string]string) *recordingLogger {
     t.Helper()
 
     connection := openHeadersTestConnection(t)
@@ -810,7 +810,7 @@ func expectARawDeliveryRequeuesCounted(t *testing.T, queueName string, rawHeader
     transport := NewTransport(queueName, registry, borrowedSource(connection), TransportConfig{Prefetch: bound.Of(1), DeadLetterDisabled: true})
     defer transport.CloseWithContext(context.Background())
 
-    runtimeInstance := newReconnectRuntime(t.Context())
+    runtimeInstance, logger := newRecordingLoggerRuntime(t.Context())
 
     subscriptionInstance, receiveErr := transport.Receive(runtimeInstance)
     if nil != receiveErr {
@@ -844,7 +844,7 @@ func expectARawDeliveryRequeuesCounted(t *testing.T, queueName string, rawHeader
         t.Fatalf("expected the received headers %v, got %v", expected, received)
     }
 
-    retried := first.WithStamps([]messagebuscontract.Stamp{melodymessagebus.RedeliveryStamp{Count: 1}})
+    retried := first.WithStamps([]messagebuscontract.Stamp{melodymessagebus.RedeliveryStamp{Count: 1}, melodymessagebus.HeadersStamp{Headers: added}})
     if nackErr := transport.Nack(runtimeInstance, retried, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
         t.Fatalf("nack requeue: %v", nackErr)
     }
@@ -861,4 +861,6 @@ func expectARawDeliveryRequeuesCounted(t *testing.T, queueName string, rawHeader
     if ackErr := transport.Ack(runtimeInstance, second); nil != ackErr {
         t.Fatalf("ack: %v", ackErr)
     }
+
+    return logger
 }

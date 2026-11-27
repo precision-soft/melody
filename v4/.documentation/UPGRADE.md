@@ -494,7 +494,7 @@ The consume command's retry grows exponentially: 1s, 2s, 4s… capped at 1h, whe
 
 ### Outbox: the module takes factories; one relay command constructor
 
-**What changed.** [`outbox.ModuleConfig`](../../integrations/outbox/v4/module.go) is `{Store, Relay, RelayCommand}`, where `Store` and `Relay` are the providers of `service.outbox.store` and `service.outbox.relay`, `func(resolver containercontract.Resolver) (*outbox.Store, error)` and `(*outbox.Relay, error)`, run at first resolution; the prebuilt `Store *Store` and `Relay *Relay`, `StoreFactory`, `RelayFactory` and the two "set exactly one" refusals are removed, and a nil `Relay` registers no relay and no command. [`NewRelayCommand(config)`](../../integrations/outbox/v4/relay_command.go) is the one constructor of `melody:outbox:relay`: it resolves `service.outbox.relay` from the run's scope at the first batch and keeps it for the run. `NewRelayCommandFromResolver`, `RegisterStoreService`, `RegisterRelayService` and the `outbox.ServiceRegistrar` interface are removed.
+**What changed.** [`outbox.ModuleConfig`](../../integrations/outbox/v4/module.go) is `{Store, StoreBuiltAtBoot, StoreBootFailure, Relay, RelayCommand}`, where `Store` and `Relay` are the providers of `service.outbox.store` and `service.outbox.relay`, `func(resolver containercontract.Resolver) (*outbox.Store, error)` and `(*outbox.Relay, error)`, run at first resolution; the prebuilt `Store *Store` and `Relay *Relay`, `StoreFactory`, `RelayFactory` and the two "set exactly one" refusals are removed, and a nil `Relay` registers no relay and no command. [`NewRelayCommand(config)`](../../integrations/outbox/v4/relay_command.go) is the one constructor of `melody:outbox:relay`: it resolves `service.outbox.relay` from the run's scope at the first batch and keeps it for the run. `NewRelayCommandFromResolver`, `RegisterStoreService`, `RegisterRelayService` and the `outbox.ServiceRegistrar` interface are removed.
 
 **Symptom.** `unknown field StoreFactory in struct literal of type outbox.ModuleConfig` (and `RelayFactory`); `cannot use store (variable of type *outbox.Store) as func(resolver contract.Resolver) (*outbox.Store, error) value`; `too many arguments in call to outbox.NewRelayCommand`; `undefined: outbox.NewRelayCommandFromResolver`, `outbox.RegisterStoreService`, `outbox.RegisterRelayService`, `outbox.ServiceRegistrar`.
 
@@ -4196,7 +4196,7 @@ positive value into the per-host pool unless that was set too, and the fourth le
 websocket.NewModule(websocket.ModuleConfig{
     Streams: []websocket.StreamConfig{
         {
-            Hub:  hub,
+            Hub:  hubProvider,
             Path: "/ws",
             Handler: websocket.StreamHandlerConfig{
                 TopicResolver: topicResolver,

@@ -276,19 +276,19 @@ func TestTickDedup_ALoggerPanickingAtASkippedTickIsTheEntrysFailedRow(t *testing
     }
 }
 
-func TestTickDedup_ALoggerPanickingAtTheRunModeWarningIsTheEntrysFailedRow(t *testing.T) {
+func TestTickDedup_ALoggerPanickingAtTheRunModeWarningStillRunsTheTick(t *testing.T) {
     job := &countingCommand{commandName: "job:every-minute"}
     locker := &failingTickLocker{mode: failingTickLockerAnswersAnError, err: errors.New("the store is down")}
 
     runner := newTickDedupRunner(job, EntryConfig{}, RunnerConfig{TickDedup: TickDedupConfig{Locker: locker, FailureMode: TickDedupFailureRun}})
 
-    report, runErr := dispatchMinute(t, runner, newLoggedRunnerRuntime(context.Background(), &panickingLogger{}), tickDedupMinute)
-    if nil == runErr || 0 != job.runCount.Load() {
-        t.Fatalf("expected the minute to fail without the run, ran %d, error %v", job.runCount.Load(), runErr)
+    report, _ := dispatchMinute(t, runner, newLoggedRunnerRuntime(context.Background(), &panickingLogger{}), tickDedupMinute)
+    if 1 != job.runCount.Load() {
+        t.Fatalf("expected the tick to run once though the warning's logger panicked, ran %d", job.runCount.Load())
     }
 
-    if 1 != len(report.Ran) || false == report.Ran[0].Failed {
-        t.Fatalf("expected the entry's failed row, got %+v", report)
+    if 1 != len(report.Ran) || true == report.Ran[0].Failed {
+        t.Fatalf("expected the entry's run row, not a failed one, got %+v", report)
     }
 }
 

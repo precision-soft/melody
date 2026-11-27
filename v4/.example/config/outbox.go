@@ -46,7 +46,7 @@ func (instance *Module) outboxStoreFactory(resolver melodycontainercontract.Reso
     return store, nil
 }
 
-/* serviceOutboxTransport is the container name of the outbox's own amqp transport, registered as a service so its Close joins the ordered teardown; a connection opened inside a factory is invisible to it. */
+/* serviceOutboxTransport is the container name of the outbox's own amqp transport, registered as a service so its CloseWithContext joins the ordered teardown; a connection opened inside a factory is invisible to it. */
 const serviceOutboxTransport = "service.outbox.transport"
 
 func (instance *Module) registerOutboxTransportService(registrar melodyapplicationcontract.ServiceRegistrar) {

@@ -12,7 +12,7 @@ const DefaultNamespace = "melody"
 
 const namespaceMaximumLength = 32
 
-/* NamespaceFromRuntime answers the application namespace of the runtime's configuration, DefaultNamespace when the runtime resolves no configuration, a typed nil included, or its kernel configuration names none, so a component deriving a default name from the namespace never derives it from an empty one. */
+/* NamespaceFromRuntime answers the application namespace of the runtime's configuration, DefaultNamespace on any resolution failure, none registered, a closed scope or a wiring error alike, on a typed-nil configuration a foreign scope answers, or when its kernel configuration names none, so a component deriving a default name from the namespace never derives it from an empty one. */
 func NamespaceFromRuntime(runtimeInstance containercontract.Runtime) string {
     configuration, configurationErr := ConfigFromRuntime(runtimeInstance)
     if nil != configurationErr || true == internal.IsNilInterface(configuration) {

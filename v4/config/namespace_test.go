@@ -124,6 +124,39 @@ func runtimeOverConfiguration(t *testing.T, configuration configcontract.Configu
     return runtime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
+/* typedNilConfigurationScope stands for a foreign scope, the only resolver that can answer a typed-nil configuration: the framework's container refuses a nil value. */
+type typedNilConfigurationScope struct {
+    containercontract.Scope
+}
+
+func (instance typedNilConfigurationScope) Get(ctx context.Context, serviceName string) (any, error) {
+    if ServiceConfig == serviceName {
+        var configuration *Configuration
+
+        return configuration, nil
+    }
+
+    return instance.Scope.Get(ctx, serviceName)
+}
+
+type foreignScopeRuntime struct {
+    containercontract.Runtime
+    scope containercontract.Scope
+}
+
+func (instance foreignScopeRuntime) Scope() containercontract.Scope {
+    return instance.scope
+}
+
+func TestNamespaceFromRuntime_AConfigurationResolvedAsATypedNilIsTheDefault(t *testing.T) {
+    realRuntime := runtimeOverConfiguration(t, nil)
+    foreignRuntime := foreignScopeRuntime{Runtime: realRuntime, scope: typedNilConfigurationScope{Scope: realRuntime.Scope()}}
+
+    if namespace := NamespaceFromRuntime(foreignRuntime); DefaultNamespace != namespace {
+        t.Fatalf("expected the default namespace for a typed-nil configuration, got %q", namespace)
+    }
+}
+
 func TestNamespaceFromRuntime_AnswersTheConfigurationsNamespaceElseTheDefault(t *testing.T) {
     namespaced, namespacedErr := newNamespacedConfiguration(t, map[string]string{}, "shop")
     if nil != namespacedErr {

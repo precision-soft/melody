@@ -12,7 +12,7 @@ type dialOutcome struct {
     err        error
 }
 
-/* closeAbandonedConnection closes, on a goroutine of its own and under the deadline, a connection that belongs to nobody — one a dial answered after Close began — since the close is an RPC to a broker that may not answer, and run on the caller it would hold the Close or the reconnect that found it. The goroutine outlives the caller by at most the deadline. */
+/* closeAbandonedConnection closes, on a goroutine of its own and under the deadline, a connection that belongs to nobody — one a dial answered after CloseWithContext began — since the close is an RPC to a broker that may not answer, and run on the caller it would hold the CloseWithContext or the reconnect that found it. The goroutine outlives the caller by at most the deadline. */
 func closeAbandonedConnection(connection *amqp091.Connection, deadline time.Time) {
     go func() {
         _ = connection.CloseDeadline(deadline)
