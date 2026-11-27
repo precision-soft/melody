@@ -4,11 +4,23 @@ import (
     "context"
     "database/sql"
     "database/sql/driver"
+    "encoding/json"
     "errors"
     "sync"
+    "testing"
+    "time"
 
+    examplecache "github.com/precision-soft/melody/v4/.example/cache"
+    "github.com/precision-soft/melody/v4/.example/persistence"
+    "github.com/precision-soft/melody/v4/.example/repository"
+    "github.com/precision-soft/melody/v4/.example/service"
     "github.com/precision-soft/melody/v4/.example/twofactor"
+    melodybound "github.com/precision-soft/melody/v4/bound"
+    melodycache "github.com/precision-soft/melody/v4/cache"
+    melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
+    melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect"
     "github.com/uptrace/bun/dialect/feature"
@@ -165,4 +177,106 @@ func exampleTestRuntime() melodycontainercontract.Runtime {
 
 func exampleTestRuntimeUnder(ctx context.Context) melodycontainercontract.Runtime {
     return melodyruntime.NewRun(ctx, melodycontainer.NewContainer(melodycontainer.ContainerConfig{}).NewScope())
+}
+
+/* notificationFixture is a runtime holding the cache, the notification hub with one page subscribed to each topic of the application, and the journal, so a listener runs to its end */
+type notificationFixture struct {
+    cache             *deleteCountingCache
+    catalogPage       *melodyhttp.ServerSentEventSubscriber
+    userDirectoryPage *melodyhttp.ServerSentEventSubscriber
+    journalRepository repository.CatalogJournalRepository
+    runtimeInstance   melodycontainercontract.Runtime
+}
+
+func notificationUnderTest(t *testing.T) notificationFixture {
+    t.Helper()
+
+    clockInstance := melodyclock.NewSystemClock()
+    manager := melodycache.NewManager(melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(128), CleanupInterval: melodybound.Of(time.Minute), Clock: clockInstance}), examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
+    cacheInstance := &deleteCountingCache{Cache: manager, deletes: map[string]int{}}
+
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+    catalogPage, catalogSubscribeErr := hub.Subscribe(CatalogNotificationTopic, melodyhttp.SubscribeOptions{})
+    if nil != catalogSubscribeErr {
+        t.Fatalf("subscribe the catalogue topic: %v", catalogSubscribeErr)
+    }
+
+    userDirectoryPage, userDirectorySubscribeErr := hub.Subscribe(UserDirectoryNotificationTopic, melodyhttp.SubscribeOptions{})
+    if nil != userDirectorySubscribeErr {
+        t.Fatalf("subscribe the user directory topic: %v", userDirectorySubscribeErr)
+    }
+
+    journalRepository, journalErr := repository.NewCatalogJournalRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
+    if nil != journalErr {
+        t.Fatalf("build the journal: %v", journalErr)
+    }
+
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
+    melodycontainer.MustRegister(
+        containerInstance,
+        melodycache.ServiceCache,
+        func(resolver melodycontainercontract.Resolver) (melodycachecontract.Cache, error) {
+            return cacheInstance, nil
+        },
+        melodycontainer.RegisterOptions{},
+    )
+    melodycontainer.MustRegister(
+        containerInstance,
+        ServiceCatalogNotificationHub,
+        func(resolver melodycontainercontract.Resolver) (*melodyhttp.ServerSentEventHub, error) {
+            return hub, nil
+        },
+        melodycontainer.RegisterOptions{},
+    )
+    melodycontainer.MustRegister(
+        containerInstance,
+        service.ServiceCatalogJournalService,
+        func(resolver melodycontainercontract.Resolver) (*service.CatalogJournalService, error) {
+            return service.NewCatalogJournalService(journalRepository, clockInstance), nil
+        },
+        melodycontainer.RegisterOptions{},
+    )
+
+    return notificationFixture{
+        cache:             cacheInstance,
+        catalogPage:       catalogPage,
+        userDirectoryPage: userDirectoryPage,
+        journalRepository: journalRepository,
+        runtimeInstance:   melodyruntime.NewRun(context.Background(), containerInstance.NewScope()),
+    }
+}
+
+/* assertNoNotification fails when the page was told anything; a broadcast is delivered before Broadcast returns, so nothing pending means nothing sent */
+func assertNoNotification(t *testing.T, page *melodyhttp.ServerSentEventSubscriber, description string) {
+    t.Helper()
+
+    select {
+    case delivered := <-page.Events():
+        t.Fatalf("%s: expected no notification, got %+v", description, delivered)
+    default:
+    }
+}
+
+/* receivedNotification answers the one notification the page was told, failing when it was told none */
+func receivedNotification(t *testing.T, page *melodyhttp.ServerSentEventSubscriber, description string) catalogNotification {
+    t.Helper()
+
+    select {
+    case delivered := <-page.Events():
+        notification := catalogNotification{}
+        if decodeErr := json.Unmarshal([]byte(delivered.Data), &notification); nil != decodeErr {
+            t.Fatalf("%s: decode the notification %q: %v", description, delivered.Data, decodeErr)
+        }
+
+        if catalogNotificationEvent != delivered.Event {
+            t.Fatalf("%s: expected the %q event, got %+v", description, catalogNotificationEvent, delivered)
+        }
+
+        return notification
+    default:
+        t.Fatalf("%s: expected a notification", description)
+    }
+
+    return catalogNotification{}
 }

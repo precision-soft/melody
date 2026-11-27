@@ -57,6 +57,7 @@ func (instance *CurrencyEventSubscriber) onCurrencyCreated() melodyeventcontract
 
         return recordCatalogChange(
             runtimeInstance,
+            CatalogNotificationTopic,
             repository.CatalogJournalActionCreated,
             service.CatalogJournalSubjectCurrency,
             payloadInstance.Currency().Id,
@@ -89,6 +90,7 @@ func (instance *CurrencyEventSubscriber) onCurrencyUpdated() melodyeventcontract
 
         return recordCatalogChange(
             runtimeInstance,
+            CatalogNotificationTopic,
             repository.CatalogJournalActionUpdated,
             service.CatalogJournalSubjectCurrency,
             payloadInstance.Currency().Id,
@@ -121,6 +123,7 @@ func (instance *CurrencyEventSubscriber) onCurrencyDeleted() melodyeventcontract
 
         return recordCatalogChange(
             runtimeInstance,
+            CatalogNotificationTopic,
             repository.CatalogJournalActionDeleted,
             service.CatalogJournalSubjectCurrency,
             payloadInstance.CurrencyId(),

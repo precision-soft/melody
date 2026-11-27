@@ -22,7 +22,7 @@ import (
 /* StreamHandler resolves the hub per request rather than taking it at registration, so the provider that installs the hub's logger runs and the container knows it has a hub to close. The slots are the process's one count of open streams, taken at registration. */
 func StreamHandler(slots *StreamSlots) melodyhttpcontract.Handler {
     return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        topic := queryStringOr(request, "topic", CatalogTopic)
+        topic := TopicOf(request)
 
         /* the client names the topic, so opening a stream is not permission to read the topic asked for. The gate stands ahead of the writer because NewServerSentEventWriter commits the response (headers, 200, flush), and the kernel discards what a handler returns after that. */
         if false == topicIsReadableBy(runtimeInstance, topic) {

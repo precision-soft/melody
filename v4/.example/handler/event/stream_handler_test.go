@@ -189,6 +189,36 @@ func TestStreamHandler_OpensTheCatalogueTopicForAnEditor(t *testing.T) {
     }
 }
 
+/* the user directory topic is the administrator's: an editor holding the route's role and the catalogue's is refused while the response is still writable */
+func TestStreamHandler_RefusesTheUserDirectoryTopicToAnEditor(t *testing.T) {
+    request, runtimeInstance := streamRequestAs(t, "/events/stream/?topic=user-directory", []string{entity.RoleUser, entity.RoleEditor})
+    writer := &recordingResponseWriter{}
+
+    response, handlerErr := StreamHandler(NewStreamSlots(StreamCapPerUser, StreamCapPerProcess))(runtimeInstance, writer, request)
+    if nil != handlerErr || nil == response || nethttp.StatusForbidden != response.StatusCode() {
+        t.Fatalf("expected the editor refused the user directory topic with 403, got %v, %v", response, handlerErr)
+    }
+
+    if true == writer.HeadersWritten() || true == writer.flushed {
+        t.Fatalf("expected the refusal to leave the response uncommitted, got status %d", writer.CommittedStatusCode())
+    }
+}
+
+/* the sister: the administrator opens the user directory topic */
+func TestStreamHandler_OpensTheUserDirectoryTopicForAnAdministrator(t *testing.T) {
+    request, runtimeInstance := streamRequestAs(t, "/events/stream/?topic=user-directory", []string{entity.RoleUser, entity.RoleEditor, entity.RoleAdmin})
+    writer := &recordingResponseWriter{}
+
+    response, handlerErr := StreamHandler(NewStreamSlots(StreamCapPerUser, StreamCapPerProcess))(runtimeInstance, writer, request)
+    if nil != handlerErr || nil != response {
+        t.Fatalf("expected the administrator's stream to end on the cancelled request context, got %v, %v", response, handlerErr)
+    }
+
+    if false == writer.HeadersWritten() || nethttp.StatusOK != writer.CommittedStatusCode() {
+        t.Fatalf("expected the administrator's stream committed with 200, got %d", writer.CommittedStatusCode())
+    }
+}
+
 /* the refusal has to be decided while the response is still writable. NewServerSentEventWriter commits it (event-stream headers, 200, flush) and the kernel discards whatever a handler returns once the headers are committed, so a gate placed after it answers a successful empty stream that a browser reconnects to forever. The assertion is therefore on the writer being untouched, not on the 403 alone, which a gate placed after the writer also returns. */
 func TestStreamHandler_RefusesAPrivilegedTopicWithoutCommittingTheResponse(t *testing.T) {
     request, runtimeInstance := streamRequest(t, "/events/stream/", false)

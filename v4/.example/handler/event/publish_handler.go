@@ -13,7 +13,13 @@ import (
 
 func PublishHandler(bus melodymessagebuscontract.Bus) melodyhttpcontract.Handler {
     return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        topic := queryStringOr(request, "topic", CatalogTopic)
+        topic := TopicOf(request)
+
+        /* a topic's role is the role its content is written behind, so a caller who may not read it may not write onto it either */
+        if false == topicIsReadableBy(runtimeInstance, topic) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "not allowed to publish onto this topic"), nil
+        }
+
         text := queryStringOr(request, "text", "hello")
 
         _, dispatchErr := bus.Dispatch(runtimeInstance, message.Notification{Topic: topic, Text: text}, melodymessagebuscontract.DispatchOptions{})

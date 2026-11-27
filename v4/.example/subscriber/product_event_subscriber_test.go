@@ -73,3 +73,20 @@ func TestProductEventSubscriber_DropsTheEntriesUnderARequestContextAlreadyDone(t
         t.Fatalf("expected the view counter dropped although the request context was done")
     }
 }
+
+/* a product write is announced on the catalogue topic and never on the user directory topic */
+func TestProductEventSubscriber_BroadcastsOnTheCatalogueTopic(t *testing.T) {
+    fixture := notificationUnderTest(t)
+
+    listener := NewProductEventSubscriber().SubscribedEvents()[event.EventProductDeleted][0].Listener()
+    if listenErr := listener(fixture.runtimeInstance, melodyevent.NewEvent(event.EventProductDeleted, event.NewProductDeletedEvent("product-7"), melodyclock.NewSystemClock().Now())); nil != listenErr {
+        t.Fatalf("the listener failed: %v", listenErr)
+    }
+
+    notification := receivedNotification(t, fixture.catalogPage, "on the catalogue topic")
+    if service.CatalogJournalSubjectProduct != notification.Subject || "product-7" != notification.SubjectId {
+        t.Fatalf("unexpected notification %+v", notification)
+    }
+
+    assertNoNotification(t, fixture.userDirectoryPage, "on the user directory topic")
+}

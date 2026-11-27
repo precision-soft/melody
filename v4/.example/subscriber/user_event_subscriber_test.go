@@ -119,3 +119,29 @@ func TestUserEventSubscriber_DropsTheEntriesUnderACanceledEvent(t *testing.T) {
         }
     }
 }
+
+/* every account write is announced on the user directory topic, read behind the administrator's role, and never on the catalogue topic an editor reads */
+func TestUserEventSubscriber_BroadcastsOnTheUserDirectoryTopicAlone(t *testing.T) {
+    user := entity.NewUser("user-7", "grace", "hash", []string{entity.RoleUser})
+    eventList := map[string]any{
+        event.EventUserCreated: event.NewUserCreatedEvent(user),
+        event.EventUserUpdated: event.NewUserUpdatedEvent(user, "grace"),
+        event.EventUserDeleted: event.NewUserDeletedEvent("user-7", "grace"),
+    }
+
+    for eventName, payload := range eventList {
+        fixture := notificationUnderTest(t)
+
+        listener := NewUserEventSubscriber().SubscribedEvents()[eventName][0].Listener()
+        if listenErr := listener(fixture.runtimeInstance, melodyevent.NewEvent(eventName, payload, melodyclock.NewSystemClock().Now())); nil != listenErr {
+            t.Fatalf("%s: the listener failed: %v", eventName, listenErr)
+        }
+
+        notification := receivedNotification(t, fixture.userDirectoryPage, eventName+" on the user directory topic")
+        if service.CatalogJournalSubjectUser != notification.Subject || "user-7" != notification.SubjectId {
+            t.Fatalf("%s: unexpected notification %+v", eventName, notification)
+        }
+
+        assertNoNotification(t, fixture.catalogPage, eventName+" on the catalogue topic")
+    }
+}

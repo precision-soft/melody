@@ -5,6 +5,7 @@ import (
 
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
     melodywebsocket "github.com/precision-soft/melody/integrations/websocket/v4"
+    handlerevent "github.com/precision-soft/melody/v4/.example/handler/event"
     "github.com/precision-soft/melody/v4/.example/subscriber"
     "github.com/precision-soft/melody/v4/bound"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -42,10 +43,10 @@ func (instance *Module) newServerSentEventHub(resolver melodycontainercontract.R
     return serverSentEventHub, nil
 }
 
-/* websocketRouteName names the /ws route, which StreamSlotMiddleware counts in the event stream's slots */
+/* websocketRouteName names the /ws route, whose topic StreamTopicGateMiddleware gates and whose connections StreamSlotMiddleware counts in the event stream's slots */
 const websocketRouteName = "example.websocket"
 
-/* websocketModuleConfig serves the hub over /ws beside the event stream, the hub resolved through each connection's runtime since its provider builds it at boot, after the routes are registered. IdleTimeout is written out although thirty seconds is its default: the keepalive ping is the only thing that reaps a tab that went away without a fin. OriginPatterns stays unset on purpose: the upgrade authenticates through the session cookie, which a browser sends cross-site too, so the library's same-origin default is what stops a foreign page riding a visitor's session; a client that sends no Origin header is not origin-checked. */
+/* websocketModuleConfig serves the hub over /ws beside the event stream, on the topic the query names as the event stream reads it, the hub resolved through each connection's runtime since its provider builds it at boot, after the routes are registered. IdleTimeout is written out although thirty seconds is its default: the keepalive ping is the only thing that reaps a tab that went away without a fin. OriginPatterns stays unset on purpose: the upgrade authenticates through the session cookie, which a browser sends cross-site too, so the library's same-origin default is what stops a foreign page riding a visitor's session; a client that sends no Origin header is not origin-checked. */
 func websocketModuleConfig() melodywebsocket.ModuleConfig {
     return melodywebsocket.ModuleConfig{
         Streams: []melodywebsocket.StreamConfig{
@@ -54,7 +55,8 @@ func websocketModuleConfig() melodywebsocket.ModuleConfig {
                 Path:      "/ws",
                 RouteName: websocketRouteName,
                 Handler: melodywebsocket.StreamHandlerConfig{
-                    IdleTimeout: bound.Of(30 * time.Second),
+                    TopicResolver: handlerevent.TopicOf,
+                    IdleTimeout:   bound.Of(30 * time.Second),
                 },
             },
         },

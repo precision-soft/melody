@@ -77,6 +77,7 @@ func (instance *UserEventSubscriber) onUserCreated() melodyeventcontract.EventLi
 
         return recordCatalogChange(
             runtimeInstance,
+            UserDirectoryNotificationTopic,
             repository.CatalogJournalActionCreated,
             service.CatalogJournalSubjectUser,
             payloadInstance.User().Id,
@@ -126,6 +127,7 @@ func (instance *UserEventSubscriber) onUserUpdated() melodyeventcontract.EventLi
 
         return recordCatalogChange(
             runtimeInstance,
+            UserDirectoryNotificationTopic,
             repository.CatalogJournalActionUpdated,
             service.CatalogJournalSubjectUser,
             payloadInstance.User().Id,
@@ -177,6 +179,7 @@ func (instance *UserEventSubscriber) onUserDeleted() melodyeventcontract.EventLi
 
         return recordCatalogChange(
             runtimeInstance,
+            UserDirectoryNotificationTopic,
             repository.CatalogJournalActionDeleted,
             service.CatalogJournalSubjectUser,
             payloadInstance.UserId(),

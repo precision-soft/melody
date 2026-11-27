@@ -57,6 +57,7 @@ func (instance *CategoryEventSubscriber) onCategoryCreated() melodyeventcontract
 
         return recordCatalogChange(
             runtimeInstance,
+            CatalogNotificationTopic,
             repository.CatalogJournalActionCreated,
             service.CatalogJournalSubjectCategory,
             payloadInstance.Category().Id,
@@ -89,6 +90,7 @@ func (instance *CategoryEventSubscriber) onCategoryUpdated() melodyeventcontract
 
         return recordCatalogChange(
             runtimeInstance,
+            CatalogNotificationTopic,
             repository.CatalogJournalActionUpdated,
             service.CatalogJournalSubjectCategory,
             payloadInstance.Category().Id,
@@ -121,6 +123,7 @@ func (instance *CategoryEventSubscriber) onCategoryDeleted() melodyeventcontract
 
         return recordCatalogChange(
             runtimeInstance,
+            CatalogNotificationTopic,
             repository.CatalogJournalActionDeleted,
             service.CatalogJournalSubjectCategory,
             payloadInstance.CategoryId(),

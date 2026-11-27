@@ -10,6 +10,8 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/.example/entity"
+    handlerevent "github.com/precision-soft/melody/v4/.example/handler/event"
     "github.com/precision-soft/melody/v4/.example/reporting"
     "github.com/precision-soft/melody/v4/.example/repository"
     melodyclock "github.com/precision-soft/melody/v4/clock"
@@ -18,6 +20,8 @@ import (
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    melodysecurity "github.com/precision-soft/melody/v4/security"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
@@ -343,5 +347,56 @@ func TestCatalogJournalFlushMiddleware_ReturnsTheHandlersErrorOverAFlushFailure(
     )
     if false == errors.Is(err, errJournalUnavailable) {
         t.Fatalf("expected the flush failure answered as the request's when the handler succeeded, got %v", err)
+    }
+}
+
+/* capturingMiddlewareRegistrar keeps the middlewares a module registers, in the order the kernel installs them */
+type capturingMiddlewareRegistrar struct {
+    middlewares []melodyhttpcontract.Middleware
+}
+
+func (instance *capturingMiddlewareRegistrar) Use(registration melodyapplicationcontract.MiddlewareRegistration) {
+    instance.middlewares = append(instance.middlewares, registration.Middlewares...)
+}
+
+/* the websocket route's topic is gated ahead of its slot count: an editor whose account holds every slot and asks for the user directory topic is told the topic is not his, 403, not that he holds too many streams, which a slot taken first would answer */
+func TestRegisterHttpMiddlewares_TheTopicGateTakesNoSlotWhenItRefuses(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.eventStreamSlots = handlerevent.NewStreamSlots(1, 1)
+    if _, taken := moduleInstance.eventStreamSlots.Acquire("editor-1"); false == taken {
+        t.Fatal("expected the account's one slot taken")
+    }
+
+    registrar := &capturingMiddlewareRegistrar{}
+    moduleInstance.RegisterHttpMiddlewares(&routeKernel{}, registrar)
+
+    handlerRan := false
+    var handler melodyhttpcontract.Handler = func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        handlerRan = true
+
+        return nil, nil
+    }
+    for index := len(registrar.middlewares) - 1; 0 <= index; index-- {
+        handler = registrar.middlewares[index](handler)
+    }
+
+    runtimeInstance := newTrailRuntime(t, &recordingJournalRepository{}, "topic-gate")
+    firewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            melodysecurity.NewPathPrefixMatcher("/"),
+        MatcherDescription: "prefix /",
+    })
+    melodysecurity.SecurityContextSetOnRuntime(runtimeInstance, melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken("editor-1", []string{entity.RoleUser, entity.RoleEditor}, nil)))
+
+    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/ws?topic=user-directory", nil), runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("topic-gate", time.Unix(0, 0))})
+    request.Attributes().Set(melodyhttp.RouteAttributeName, websocketRouteName)
+
+    response, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != handlerErr || nil == response || nethttp.StatusForbidden != response.StatusCode() {
+        t.Fatalf("expected the topic refused with 403 ahead of the slot count, got %v, %v", response, handlerErr)
+    }
+
+    if true == handlerRan {
+        t.Fatal("expected the websocket handler never reached for a refused topic")
     }
 }

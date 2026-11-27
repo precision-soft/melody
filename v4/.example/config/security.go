@@ -86,7 +86,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
             Attributes: []string{entity.RoleEditor},
         }),
 
-        /* publishing injects a frame into every stream open across the cluster, so it takes the write role; streaming carries the catalog writes, so it takes an authenticated reader, and the handler gates the topic on top */
+        /* publishing injects a frame into every stream open across the cluster, so it takes the write role; streaming carries the catalog writes, so it takes an authenticated reader; both handlers gate the topic on top */
         melodyaccesscontrol.NewSegmentPrefixRule(route.EventsPublishPattern, melodyaccesscontrol.RuleConfig{
             Attributes: []string{entity.RoleEditor},
         }),
@@ -94,7 +94,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
             Attributes: []string{entity.RoleUser},
         }),
 
-        /* the websocket door bridges onto the catalog topic the SSE stream gates behind RoleEditor and has no per-topic gate of its own, so the route carries the topic's whole requirement */
+        /* the websocket door carries the catalogue topic's role, the least any topic of the application takes; a topic that takes more, the user directory's, is gated per connection by StreamTopicGateMiddleware */
         melodyaccesscontrol.NewRegexRule("^/ws", melodyaccesscontrol.RuleConfig{
             Attributes: []string{entity.RoleEditor},
         }),

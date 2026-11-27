@@ -171,7 +171,7 @@
 
         const connectCatalogNotifications = () => {
             const scheme = 'https:' === location.protocol ? 'wss' : 'ws';
-            const socket = new WebSocket(scheme + '://' + location.host + '/ws');
+            const socket = new WebSocket(scheme + '://' + location.host + '/ws?topic=user-directory');
 
             socket.onopen = () => {
                 bell.prop('disabled', false).attr('title', 'watching for changes');

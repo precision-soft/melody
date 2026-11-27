@@ -63,6 +63,7 @@ func (instance *ProductEventSubscriber) onProductCreated() melodyeventcontract.E
 
         return recordCatalogChange(
             runtimeInstance,
+            CatalogNotificationTopic,
             repository.CatalogJournalActionCreated,
             service.CatalogJournalSubjectProduct,
             payloadInstance.Product().Id,
@@ -112,6 +113,7 @@ func (instance *ProductEventSubscriber) onProductUpdated() melodyeventcontract.E
 
         return recordCatalogChange(
             runtimeInstance,
+            CatalogNotificationTopic,
             repository.CatalogJournalActionUpdated,
             service.CatalogJournalSubjectProduct,
             payloadInstance.Product().Id,
@@ -156,6 +158,7 @@ func (instance *ProductEventSubscriber) onProductDeleted() melodyeventcontract.E
 
         return recordCatalogChange(
             runtimeInstance,
+            CatalogNotificationTopic,
             repository.CatalogJournalActionDeleted,
             service.CatalogJournalSubjectProduct,
             payloadInstance.ProductId(),

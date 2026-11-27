@@ -572,6 +572,8 @@ answered it as a response reached the terminate listener alone, one info line an
 development the reason a door answered `500` existed nowhere. A client's own refusal, below `500`, is not
 journaled; its cause travels in the body's debug-gated context under the development environment alone.
 
+The hub carries two topics, each read behind the role its content is written behind: `default`, the catalogue's products, categories and currencies, behind `ROLE_EDITOR`, and `user-directory`, the accounts, behind `ROLE_ADMIN`. A stream names its topic in the query, `GET /events/stream/?topic=user-directory` or `GET /ws?topic=user-directory` (the users page opens the latter), the catalogue's when it names none; a caller without the topic's role is refused `403` before anything is committed, on `/ws` by a middleware in front of the integration's handler and ahead of the slot count, so a refused topic takes no slot. `POST /events/publish/?topic=` takes the same gate: an editor publishes onto the catalogue's topic and any topic the application does not carry, never onto the administrators'.
+
 One account holds at most four streams open at once and the process 256, counted across the event stream and the `/ws` websocket route: past either, the next one is refused with `429` before anything is committed — the websocket route through a middleware in front of the integration's handler, which accepts the upgrade itself — and a stream that closes frees its place.
 
 The event stream (`GET /events/stream/`) re-arms the server's write deadline before every frame and sends a

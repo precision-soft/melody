@@ -12,8 +12,11 @@ import (
 const (
     ServiceCatalogNotificationHub = "service.example.catalog_notification_hub"
 
-    /* the topic every browser watching the nomenclature joins: the websocket handler sets no topic resolver, so a broadcast here reaches every open page */
-    catalogNotificationTopic = "default"
+    /* CatalogNotificationTopic carries the nomenclature's changes, written behind the editor's role */
+    CatalogNotificationTopic = "default"
+
+    /* UserDirectoryNotificationTopic carries the account directory's changes, written behind the administrator's role */
+    UserDirectoryNotificationTopic = "user-directory"
 
     /* the event name the page listens for, not "message", so the page tells it apart from the message bus notifications on the same socket */
     catalogNotificationEvent = "catalog"
@@ -43,9 +46,10 @@ func CatalogNotificationHubFromRuntime(runtimeInstance melodycontainercontract.R
     return hub, nil
 }
 
-/* notifyCatalogChange tells every open page that the nomenclature changed, from the event listeners beside the cache invalidation and the journal entry. A broadcast cannot fail, so the only error is an unreachable hub, a wiring mistake, which is reported so the pages do not go silent unexplained. */
+/* notifyCatalogChange tells every page open on the topic that what it lists changed, from the event listeners beside the cache invalidation and the journal entry. A broadcast cannot fail, so the only error is an unreachable hub, a wiring mistake, which is reported so the pages do not go silent unexplained. */
 func notifyCatalogChange(
     runtimeInstance melodycontainercontract.Runtime,
+    topic string,
     action string,
     subject string,
     subjectId string,
@@ -64,7 +68,7 @@ func notifyCatalogChange(
         return encodeErr
     }
 
-    hub.Broadcast(runtimeInstance, catalogNotificationTopic, melodyhttp.ServerSentEvent{
+    hub.Broadcast(runtimeInstance, topic, melodyhttp.ServerSentEvent{
         Event: catalogNotificationEvent,
         Data:  string(payload),
     })

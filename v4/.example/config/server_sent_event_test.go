@@ -3,11 +3,14 @@ package config
 import (
     "context"
     "fmt"
+    nethttp "net/http"
+    "net/http/httptest"
     "strings"
     "testing"
     "time"
 
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
+    handlerevent "github.com/precision-soft/melody/v4/.example/handler/event"
     "github.com/precision-soft/melody/v4/.example/subscriber"
     "github.com/precision-soft/melody/v4/bound"
     melodycontainer "github.com/precision-soft/melody/v4/container"
@@ -112,5 +115,24 @@ func TestWebsocketModuleConfig_AnswersTheRefusalWhenTheHubIsNotRegistered(t *tes
     hub, hubErr := websocketModuleConfig().Streams[0].Hub(melodyruntime.NewRun(context.Background(), containerInstance.NewScope()))
     if nil == hubErr || nil != hub {
         t.Fatalf("expected the missing hub service refused, got %p %v", hub, hubErr)
+    }
+}
+
+/* the /ws connection subscribes to the topic its query names, as the event stream reads it, the catalogue's when it names none */
+func TestWebsocketModuleConfig_ResolvesTheTopicFromTheQuery(t *testing.T) {
+    resolver := websocketModuleConfig().Streams[0].Handler.TopicResolver
+    if nil == resolver {
+        t.Fatal("expected the /ws stream to resolve its topic")
+    }
+
+    runtimeInstance := melodyruntime.NewRun(context.Background(), melodycontainer.NewContainer(melodycontainer.ContainerConfig{}).NewScope())
+    for target, expected := range map[string]string{
+        "/ws?topic=user-directory": handlerevent.UserDirectoryTopic,
+        "/ws":                      handlerevent.CatalogTopic,
+    } {
+        request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, target, nil), runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("topic-test", time.Now())})
+        if topic := resolver(request); expected != topic {
+            t.Fatalf("%s: expected the topic %q, got %q", target, expected, topic)
+        }
     }
 }
