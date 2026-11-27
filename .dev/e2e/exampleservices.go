@@ -102,7 +102,7 @@ type exampleContainerDescription struct {
     TypeName string `json:"typeName"`
 }
 
-/* exampleProcessServiceInventoryOf answers the inventory one major's example is held to: the rows name their module path, and the fourth major adds the cipher of its integration module, the internal-auth signer, whose judged key id is kept under its lock, the catalogue schema it builds at boot, and the prometheus registry the metrics module tears down */
+/* exampleProcessServiceInventoryOf answers the inventory one major's example is held to: the rows name their module path, and the fourth major adds the cipher of its integration module, the internal-auth signer, whose judged key id is kept under its lock, the catalogue schema it builds at boot, the prometheus registry the metrics module tears down and its four redis limiters and nonce guards */
 func exampleProcessServiceInventoryOf(major exampleMajor) map[string]processServiceClassification {
     inventory := make(map[string]processServiceClassification, len(exampleProcessServiceInventory)+1)
     for serviceName, classification := range exampleProcessServiceInventory {
@@ -114,6 +114,13 @@ func exampleProcessServiceInventoryOf(major exampleMajor) map[string]processServ
         inventory["service.example.internal_auth_signer"] = processServiceClassification{typeName: "*security.HmacEnvelopeSigner", category: processServiceStore}
         inventory["service.example.catalog_schema"] = processServiceClassification{typeName: "*persistence.CatalogSchema", category: processServiceStateless}
         inventory["service.opentelemetry.prometheus_metrics"] = processServiceClassification{typeName: "*opentelemetry.PrometheusMetrics", category: processServiceStore}
+        inventory["service.example.redis.catalog_write_limiter"] = processServiceClassification{typeName: "*rueidis.RateLimiter", category: processServiceStore}
+        inventory["service.example.redis.second_factor_budget_limiter"] = processServiceClassification{typeName: "*rueidis.RateLimiter", category: processServiceStore}
+        inventory["service.example.redis.second_factor_replay_guard"] = processServiceClassification{typeName: "*rueidis.NonceGuard", category: processServiceStore}
+        inventory["service.example.redis.internal_nonce_guard"] = processServiceClassification{typeName: "*rueidis.NonceGuard", category: processServiceStore}
+
+        /* the fourth major's collaborators take the connection, which holds the client, so no client is registered */
+        delete(inventory, "service.rueidis.client")
     }
 
     return inventory

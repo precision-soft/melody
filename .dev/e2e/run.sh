@@ -72,6 +72,15 @@
 # refused 400 with one errors entry per field, and a throttled write carrying X-Forwarded-For budgeted against
 # the forwarded address — read back out of the redis rate-limit key. It then restarts the process and proves
 # the pre-restart session cookie still admits, which only the file-backed session storage can make true.
+#
+# The v4 section also drives its catalogue slice (.dev/e2e/examplecatalogueslice.go), after the concurrent creation:
+# the editor creates, renames and deletes a category of its own, the cached listing showing each write, a category a
+# product sits in refused 409 and a write by ROLE_USER 403; two reads of a product raise views and dailyViews by one
+# and product:list prints both without raising them; the editor's stream of and publish onto the user-directory topic
+# answer 403 while the admin's stream opens and the users page subscribes to it; an account of its own sees its
+# stream end within two re-read intervals (the workspace boots with APP_EVENT_STREAM_REVISION_INTERVAL=1s) after its
+# session signs out and after example:grant:role changes its roles; messagebus:dispatch --no-consume prints only the
+# dispatched lines and the next run, on the example's own transport, prints "consumed own messages: 3 of 3".
 
 set -euo pipefail
 IFS=$'\n\t'

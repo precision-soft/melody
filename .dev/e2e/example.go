@@ -60,13 +60,15 @@ type exampleMajor struct {
     csrfProbe bool
     /* routeBodyCapProbe names the major whose object upload carries its own body cap above the application's */
     routeBodyCapProbe bool
+    /* catalogueSliceProbes names the major whose example carries the category write doors, the views per window, the topic roles, the stream's account revision and the dispatch command counting its own messages */
+    catalogueSliceProbes bool
 }
 
 var exampleMajorCatalog = []exampleMajor{
     {number: 1, label: "v1", relativeDirectory: ".example", port: 18081, httpAddressKey: "MELODY_HTTP_ADDRESS", integrationDemos: true, showcaseProbes: exampleShowcaseProbesAll, sessionRestartProbe: true, loginThrottleProbe: true, journalOnPostgres: true},
     {number: 2, label: "v2", relativeDirectory: "v2/.example", port: 18082, httpAddressKey: "MELODY_HTTP_ADDRESS", integrationDemos: true, showcaseProbes: exampleShowcaseProbesAll, sessionRestartProbe: true, loginThrottleProbe: true},
     {number: 3, label: "v3", relativeDirectory: "v3/.example", port: 18083, httpAddressKey: "MELODY_HTTP_ADDRESS", integrationDemos: false, showcaseProbes: exampleShowcaseProbes{cors: true, gzip: true, validation: true, staticCache: true}, sessionRestartProbe: true, loginThrottleProbe: true, processServiceInventory: true, shutdownStreamProbe: true, requestSurfaceProbes: true},
-    {number: 4, label: "v4", relativeDirectory: "v4/.example", port: 18094, httpAddressKey: "APP_HTTP_ADDRESS", integrationDemos: false, showcaseProbes: exampleShowcaseProbes{cors: true, gzip: true, validation: true, staticCache: true}, sessionRestartProbe: true, loginThrottleProbe: true, processServiceInventory: true, shutdownStreamProbe: true, requestSurfaceProbes: true, firewallDoors: true, csrfProbe: true, routeBodyCapProbe: true},
+    {number: 4, label: "v4", relativeDirectory: "v4/.example", port: 18094, httpAddressKey: "APP_HTTP_ADDRESS", integrationDemos: false, showcaseProbes: exampleShowcaseProbes{cors: true, gzip: true, validation: true, staticCache: true}, sessionRestartProbe: true, loginThrottleProbe: true, processServiceInventory: true, shutdownStreamProbe: true, requestSurfaceProbes: true, firewallDoors: true, csrfProbe: true, routeBodyCapProbe: true, catalogueSliceProbes: true},
 }
 
 /* exampleMysqlDsn answers the dsn of one major's own database. The four examples share the development mysql but not a database in it — each holds its schema in melody_example_v<major> — so a harness section that reads what an application wrote has to ask the database that application writes to. MYSQL_DSN carries v3's, the one the supervised sections use, and this swaps the database segment of it for the major being driven.
@@ -224,6 +226,10 @@ func runExampleApplicationCheck(major exampleMajor, redisAddress string, mysqlDs
 
     runExampleHttpAssertions(major, application, redisAddress, mysqlDsn, postgresDsn)
     assertExampleCreatesConcurrentlyWithDistinctIdentifiers(major, redisAddress, mysqlDsn)
+
+    if true == major.catalogueSliceProbes {
+        runExampleCatalogueSliceAssertions(major, workspace, redisAddress, mysqlDsn)
+    }
     runExampleCliAssertions(major, workspace)
 
     if true == major.processServiceInventory {
@@ -336,6 +342,9 @@ func prepareExampleWorkspace(major exampleMajor, workspace string) {
     }
 
     override := fmt.Sprintf("%s=:%d\n", major.httpAddressKey, major.port)
+    if true == major.catalogueSliceProbes {
+        override = override + fmt.Sprintf("%s=%s\n", exampleStreamRevisionKey, exampleStreamRevisionInterval)
+    }
     if writeErr := os.WriteFile(filepath.Join(workspace, ".env.local"), []byte(override), 0o644); nil != writeErr {
         fail("[%s] example application: write the workspace .env.local: %v", major.label, writeErr)
     }

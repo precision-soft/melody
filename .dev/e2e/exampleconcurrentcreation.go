@@ -150,7 +150,7 @@ func createExampleUser(client *exampleClient, username string) (int, string) {
     return response.statusCode, created.Payload.Id
 }
 
-/* removeExampleUsers deletes each probe account through the application, and from the third major on the audit trail its writes left, so a run leaves the trail as it found it */
+/* removeExampleUsers deletes each probe account through the application, and from the third major on the journal entries and the audit trail its writes left in the major's own tables, so a run leaves them as it found them */
 func removeExampleUsers(label string, client *exampleClient, mysqlDsn string, major exampleMajor, idList []string) {
     var database *bun.DB
     if 3 <= major.number {
@@ -169,7 +169,7 @@ func removeExampleUsers(label string, client *exampleClient, mysqlDsn string, ma
         }
 
         if nil != database {
-            removeExampleV3AuditTrail(label, database, "user", id)
+            removeExampleRecordsIn(label, database, major, "user", id)
         }
     }
 }
