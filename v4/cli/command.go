@@ -221,16 +221,25 @@ func runCommandAction(
         commandErr = aggregatedErr
         /* the error line is written whatever quiet says and whatever the format: quiet governs decoration, StandardFlags defaults it to true, and for a failing command this line is its one answer on the terminal, so it goes to the error stream, never into the document on the output stream; the error itself still returns to the exit path */
         errorBanner := commandBanner{writer: commandErrorWriter(commandContext), noColor: resolvedOption.NoColor}
-        causeChain, _ := exception.LogContext(aggregatedErr, exception.LogContextConfig{CauseChainDepth: 2 * cliErrorLineCauseChainDepth})["causeChain"].([]string)
-        errorBanner.printStatusLine(AnsiBackgroundRed, internal.AppendCauseChain(internal.EscapeControlCharacters(fmt.Sprintf("[error] %s", aggregatedErr.Error())), causeChain, cliErrorLineCauseChainDepth))
+        causeChainDepth := errorLineCauseChainDepth(commandContext)
+        causeChain, _ := exception.LogContext(aggregatedErr, exception.LogContextConfig{CauseChainDepth: 2 * causeChainDepth})["causeChain"].([]string)
+        errorBanner.printStatusLine(AnsiBackgroundRed, internal.AppendCauseChain(internal.EscapeControlCharacters(fmt.Sprintf("[error] %s", aggregatedErr.Error())), causeChain, causeChainDepth))
         return aggregatedErr
     }
 
     return nil
 }
 
-/* cliErrorLineCauseChainDepth is how many causes a failed command's [error] line carries: the logger's own default, since the command runs before any logger is at hand */
-const cliErrorLineCauseChainDepth = 8
+/* errorLineCauseChainDepth answers the causes a failed command's [error] line carries: what NewRoot resolved, the rule's default on a tree NewRoot did not build */
+func errorLineCauseChainDepth(commandContext *clicontract.CommandContext) int {
+    if nil != commandContext {
+        if depth, isDepth := commandContext.Root().Metadata[MetadataErrorCauseChainDepth].(int); true == isDepth {
+            return depth
+        }
+    }
+
+    return rootErrorCauseChainDepthRule.Default
+}
 
 /* commandBanner prints the frame a registered command runs inside, on the stream its output goes to; under --no-color it carries no escape codes. */
 type commandBanner struct {

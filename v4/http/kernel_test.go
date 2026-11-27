@@ -4110,7 +4110,7 @@ func serveNegotiatedKernelProbe(t *testing.T, method string, target string, acce
             return serializer.NewSerializerManager(map[string]serializercontract.Serializer{
                 "application/json": serializer.NewJsonSerializer(),
                 "text/plain":       serializer.NewPlainTextSerializer(serializer.PlainTextSerializerConfig{}),
-            })
+            }, serializer.SerializerManagerConfig{})
         },
         container.RegisterOptions{},
     )
@@ -5452,7 +5452,7 @@ func TestKernel_ARendererBrokenByItsSerializerStillAnswersThroughTheResponsePath
         serviceContainer,
         serializer.ServiceSerializerManager,
         func(resolver containercontract.Resolver) (*serializer.SerializerManager, error) {
-            return serializer.NewSerializerManager(map[string]serializercontract.Serializer{"application/json": &panickingContentTypeSerializer{}})
+            return serializer.NewSerializerManager(map[string]serializercontract.Serializer{"application/json": &panickingContentTypeSerializer{}}, serializer.SerializerManagerConfig{})
         },
         containercontract.RegisterOptions{},
     )

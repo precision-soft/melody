@@ -7,6 +7,7 @@ import (
     "sync"
     "testing"
 
+    "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
 )
@@ -258,5 +259,40 @@ func TestTeardownPlan_ABridgeBetweenTwoRingsIsNotFlaggedAsACycle(t *testing.T) {
 
     if true == flagged["service:bridge"] {
         t.Fatalf("expected the bridge between the two rings not to be flagged, got %v", flagged)
+    }
+}
+
+func TestContainer_TeardownWalkBudgetEndedNamesTheServiceTheBudgetCut(t *testing.T) {
+    held := &closeOrderServiceB{}
+
+    for _, testCase := range []struct {
+        name   string
+        config ContainerConfig
+        wanted []string
+    }{
+        {"the default budget", ContainerConfig{}, nil},
+        {"a budget of two items", ContainerConfig{TeardownWalk: TeardownWalkConfig{Nodes: bound.Of(2)}}, []string{containerNameNodeKey("service.holder")}},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            serviceContainer := NewContainer(testCase.config)
+
+            if registerErr := serviceContainer.Register(
+                "service.holder",
+                func(_ containercontract.Resolver) (*chainFirstRoot, error) {
+                    return &chainFirstRoot{chain: chainOfLinks(3, &chainLink{held: held})}, nil
+                },
+                containercontract.RegisterOptions{},
+            ); nil != registerErr {
+                t.Fatalf("unexpected register error: %v", registerErr)
+            }
+
+            if _, getErr := serviceContainer.Get(t.Context(), "service.holder"); nil != getErr {
+                t.Fatalf("unexpected get error: %v", getErr)
+            }
+
+            if reported := serviceContainer.(teardownWalkBudgetReporter).TeardownWalkBudgetEnded(); false == reflect.DeepEqual(testCase.wanted, reported) {
+                t.Fatalf("expected %v, got %v", testCase.wanted, reported)
+            }
+        })
     }
 }

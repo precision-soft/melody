@@ -1651,3 +1651,68 @@ func TestContainer_CloseWithContextRefusesANilContextAndLeavesTheTeardownToALate
         t.Fatalf("expected the later close to close the service once, got %d", service.closes.Load())
     }
 }
+
+/* recoveredRefusalField answers the field a NewContainer refusal names, failing the test when the panic is not the wanted refusal */
+func recoveredRefusalField(t *testing.T, recovered any, wantedMessage string) any {
+    t.Helper()
+
+    recoveredErr, isError := recovered.(error)
+    if false == isError || wantedMessage != recoveredErr.Error() {
+        t.Fatalf("expected the refusal %q, got %v", wantedMessage, recovered)
+    }
+
+    return exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"]
+}
+
+func TestNewContainer_ResolvesTheTeardownWalkAndTheCloseFailureStackBytes(t *testing.T) {
+    defaulted := NewContainer(ContainerConfig{}).(*container)
+    if (teardownWalkLimits{depth: 12, elements: 256, nodes: 65_536}) != defaulted.teardownWalk {
+        t.Fatalf("expected a left-out walk to resolve to 12 / 256 / 65536, got %+v", defaulted.teardownWalk)
+    }
+
+    if false != defaulted.closeFailureStackBytes.Unlimited || 2048 != defaulted.closeFailureStackBytes.Value {
+        t.Fatalf("expected a left-out stack cut to resolve to 2048 bytes, got %+v", defaulted.closeFailureStackBytes)
+    }
+
+    given := NewContainer(ContainerConfig{
+        TeardownWalk:           TeardownWalkConfig{Depth: bound.Of(30), Elements: bound.Of(1), Nodes: bound.Of(1)},
+        CloseFailureStackBytes: bound.Of(4),
+    }).(*container)
+    if (teardownWalkLimits{depth: 30, elements: 1, nodes: 1}) != given.teardownWalk || 4 != given.closeFailureStackBytes.Value {
+        t.Fatalf("expected the given walk and stack cut to be kept, got %+v and %+v", given.teardownWalk, given.closeFailureStackBytes)
+    }
+
+    unlimited := NewContainer(ContainerConfig{CloseFailureStackBytes: bound.UnlimitedCount()}).(*container)
+    if false == unlimited.closeFailureStackBytes.Unlimited {
+        t.Fatalf("expected an unlimited stack cut to be admitted, got %+v", unlimited.closeFailureStackBytes)
+    }
+}
+
+func TestNewContainer_RefusesATeardownWalkOutsideItsRuleNamingTheField(t *testing.T) {
+    cases := []struct {
+        name    string
+        config  ContainerConfig
+        message string
+        field   string
+    }{
+        {"depth below its minimum", ContainerConfig{TeardownWalk: TeardownWalkConfig{Depth: bound.Of(0)}}, "the limit is below its minimum", "ContainerConfig.TeardownWalk.Depth"},
+        {"elements below its minimum", ContainerConfig{TeardownWalk: TeardownWalkConfig{Elements: bound.Of(0)}}, "the limit is below its minimum", "ContainerConfig.TeardownWalk.Elements"},
+        {"nodes below its minimum", ContainerConfig{TeardownWalk: TeardownWalkConfig{Nodes: bound.Of(0)}}, "the limit is below its minimum", "ContainerConfig.TeardownWalk.Nodes"},
+        {"an unlimited depth", ContainerConfig{TeardownWalk: TeardownWalkConfig{Depth: bound.UnlimitedCount()}}, "the limit does not admit unlimited", "ContainerConfig.TeardownWalk.Depth"},
+        {"unlimited elements", ContainerConfig{TeardownWalk: TeardownWalkConfig{Elements: bound.UnlimitedCount()}}, "the limit does not admit unlimited", "ContainerConfig.TeardownWalk.Elements"},
+        {"unlimited nodes", ContainerConfig{TeardownWalk: TeardownWalkConfig{Nodes: bound.UnlimitedCount()}}, "the limit does not admit unlimited", "ContainerConfig.TeardownWalk.Nodes"},
+        {"a stack cut below a rune", ContainerConfig{CloseFailureStackBytes: bound.Of(3)}, "the limit is below its minimum", "ContainerConfig.CloseFailureStackBytes"},
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            defer func() {
+                if field := recoveredRefusalField(t, recover(), testCase.message); testCase.field != field {
+                    t.Fatalf("expected the refusal to name %s, got %v", testCase.field, field)
+                }
+            }()
+
+            NewContainer(testCase.config)
+        })
+    }
+}

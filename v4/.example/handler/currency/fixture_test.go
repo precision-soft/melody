@@ -106,6 +106,7 @@ func newCurrencyDoorFixture(t *testing.T) *currencyDoorFixture {
                 map[string]melodyserializercontract.Serializer{
                     melodyserializer.MimeApplicationJson: melodyserializer.NewJsonSerializer(),
                 },
+                melodyserializer.SerializerManagerConfig{},
             )
         },
         melodycontainer.RegisterOptions{},

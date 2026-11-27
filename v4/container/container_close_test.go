@@ -14,6 +14,7 @@ import (
     "time"
     "unicode/utf8"
 
+    "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -1634,7 +1635,7 @@ func TestContainer_Close_TheFramesOfAPanickingCloseAreBounded(t *testing.T) {
         t.Fatalf("expected a stack this deep to be cut and to say so, got %d bytes", len(panicStack))
     }
 
-    if closeFailureStackLimit+128 < len(panicStack) {
+    if CloseFailureStackBytesRule().Default+128 < len(panicStack) {
         t.Fatalf("expected the cut to bound the frames near the limit, got %d bytes", len(panicStack))
     }
 }
@@ -4276,7 +4277,7 @@ func TestRecordCloseFailureDetails_ATypedNilErrorWritesIntoNoNilMap(t *testing.T
     failureDetails := map[string]exceptioncontract.Context{}
     var refusal *exception.Error
 
-    recordCloseFailureDetails(failureDetails, "service:typednil", refusal, "typed nil")
+    recordCloseFailureDetails(failureDetails, "service:typednil", refusal, "typed nil", defaultCloseFailureStackBytes())
 
     if 0 != len(failureDetails) {
         t.Fatalf("expected a typed nil, which carries no context, to book no details, got %v", failureDetails)
@@ -4289,11 +4290,11 @@ byte alone splits whatever rune straddles it; the probe puts a three-byte rune
 across the boundary deliberately. */
 func TestBoundedCloseFailureDetail_CutsOnARuneBoundary(t *testing.T) {
     /* one filler byte short of the limit, then a three-byte rune straddling it */
-    detail := strings.Repeat("a", closeFailureStackLimit-1) + strings.Repeat("\u4e16", 64)
+    detail := strings.Repeat("a", CloseFailureStackBytesRule().Default-1) + strings.Repeat("\u4e16", 64)
 
-    bounded, isText := boundedCloseFailureDetail(detail).(string)
+    bounded, isText := boundedCloseFailureDetail(detail, defaultCloseFailureStackBytes()).(string)
     if false == isText {
-        t.Fatalf("the detail came back as %T, wanted the cut text", boundedCloseFailureDetail(detail))
+        t.Fatalf("the detail came back as %T, wanted the cut text", boundedCloseFailureDetail(detail, defaultCloseFailureStackBytes()))
     }
 
     kept := strings.Split(bounded, "\n\t\u2026 cut,")[0]
@@ -4302,8 +4303,8 @@ func TestBoundedCloseFailureDetail_CutsOnARuneBoundary(t *testing.T) {
         t.Fatalf("the cut left invalid utf8: %q", kept[len(kept)-8:])
     }
 
-    if closeFailureStackLimit < len(kept) {
-        t.Fatalf("the cut kept %d bytes, over the limit of %d", len(kept), closeFailureStackLimit)
+    if CloseFailureStackBytesRule().Default < len(kept) {
+        t.Fatalf("the cut kept %d bytes, over the limit of %d", len(kept), CloseFailureStackBytesRule().Default)
     }
 }
 
@@ -4313,27 +4314,27 @@ service's own and is not the cut's to repair: asked of the whole prefix instead,
 the back-off walked down to that byte and kept nothing of a value that led with
 one. */
 func TestBoundedCloseFailureDetail_KeepsTheLimitPastAnInvalidByte(t *testing.T) {
-    for _, invalidAt := range []int{0, 100, closeFailureStackLimit - 8} {
-        detail := strings.Repeat("a", invalidAt) + "\xff" + strings.Repeat("a", 2*closeFailureStackLimit)
+    for _, invalidAt := range []int{0, 100, CloseFailureStackBytesRule().Default - 8} {
+        detail := strings.Repeat("a", invalidAt) + "\xff" + strings.Repeat("a", 2*CloseFailureStackBytesRule().Default)
 
-        bounded, isText := boundedCloseFailureDetail(detail).(string)
+        bounded, isText := boundedCloseFailureDetail(detail, defaultCloseFailureStackBytes()).(string)
         if false == isText {
-            t.Fatalf("the detail came back as %T, wanted the cut text", boundedCloseFailureDetail(detail))
+            t.Fatalf("the detail came back as %T, wanted the cut text", boundedCloseFailureDetail(detail, defaultCloseFailureStackBytes()))
         }
 
         kept := strings.Split(bounded, "\n\t\u2026 cut,")[0]
 
-        if closeFailureStackLimit != len(kept) {
-            t.Fatalf("an invalid byte at %d cut the detail to %d bytes, wanted the limit of %d", invalidAt, len(kept), closeFailureStackLimit)
+        if CloseFailureStackBytesRule().Default != len(kept) {
+            t.Fatalf("an invalid byte at %d cut the detail to %d bytes, wanted the limit of %d", invalidAt, len(kept), CloseFailureStackBytesRule().Default)
         }
     }
 
     /* a run of stray continuation bytes across the limit starts no rune anywhere in it: the walk stops at its
        bound of three bytes rather than following the run down */
-    detail := strings.Repeat("a", closeFailureStackLimit-8) + strings.Repeat("\x80", 20) + strings.Repeat("a", closeFailureStackLimit)
-    bounded, _ := boundedCloseFailureDetail(detail).(string)
-    if kept := strings.Split(bounded, "\n\t\u2026 cut,")[0]; closeFailureStackLimit-(utf8.UTFMax-1) != len(kept) {
-        t.Fatalf("a run of continuation bytes across the limit cut the detail to %d bytes, wanted the three-byte bound at %d", len(kept), closeFailureStackLimit-(utf8.UTFMax-1))
+    detail := strings.Repeat("a", CloseFailureStackBytesRule().Default-8) + strings.Repeat("\x80", 20) + strings.Repeat("a", CloseFailureStackBytesRule().Default)
+    bounded, _ := boundedCloseFailureDetail(detail, defaultCloseFailureStackBytes()).(string)
+    if kept := strings.Split(bounded, "\n\t\u2026 cut,")[0]; CloseFailureStackBytesRule().Default-(utf8.UTFMax-1) != len(kept) {
+        t.Fatalf("a run of continuation bytes across the limit cut the detail to %d bytes, wanted the three-byte bound at %d", len(kept), CloseFailureStackBytesRule().Default-(utf8.UTFMax-1))
     }
 }
 
@@ -5802,5 +5803,77 @@ func TestClose_AnEvictedInstanceASecondNameHoldsClosesBeforeWhatItDependsOn(t *t
                 t.Fatalf("expected the evicted instance closed once through the closer before what it depends on, got %v", closed)
             }
         })
+    }
+}
+
+func TestBoundedCloseFailureDetail_FollowsTheConfiguredCut(t *testing.T) {
+    detail := strings.Repeat("a", 5000)
+
+    raised, isText := boundedCloseFailureDetail(detail, bound.Resolved[int]{Value: 4096}).(string)
+    if false == isText || false == strings.HasPrefix(raised, strings.Repeat("a", 4096)+"\n\t… cut, 4096 of 5000 bytes kept") {
+        t.Fatalf("expected a raised cut to keep 4096 bytes, got %q", raised[len(raised)-40:])
+    }
+
+    if whole := boundedCloseFailureDetail(detail, bound.Resolved[int]{Unlimited: true}); detail != whole {
+        t.Fatalf("expected an unlimited cut to keep the detail whole")
+    }
+}
+
+/* hugePanicScopedService is the panicking close under a type of its own, for a scoped registration beside the container one */
+type hugePanicScopedService struct {
+    hugePanicCloseService
+}
+
+/* recoveredValueOfAnyFailure answers the recovered value one failure detail carries, whichever node it is keyed under */
+func recoveredValueOfAnyFailure(t *testing.T, closeErr error) string {
+    t.Helper()
+
+    var typedError *exception.Error
+    if false == errors.As(closeErr, &typedError) {
+        t.Fatalf("expected a melody error, got %v", closeErr)
+    }
+
+    failureDetails, _ := typedError.Context()["failureDetails"].(map[string]exceptioncontract.Context)
+    for _, details := range failureDetails {
+        if recovered, isText := details["recoveredValue"].(string); true == isText {
+            return recovered
+        }
+    }
+
+    t.Fatalf("expected a recovered value in the failure details, got %v", failureDetails)
+
+    return ""
+}
+
+func TestContainer_Close_TheConfiguredStackBytesCutAContainerAndAScopeFailure(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{CloseFailureStackBytes: bound.Of(64)})
+
+    if registerErr := serviceContainer.Register("service.huge", func(resolver containercontract.Resolver) (*hugePanicCloseService, error) {
+        return &hugePanicCloseService{}, nil
+    }, RegisterOptions{}); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.RegisterScoped("scoped.huge", func(resolver containercontract.Resolver) (*hugePanicScopedService, error) {
+        return &hugePanicScopedService{}, nil
+    }, RegisterOptions{}); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+    if _, getErr := scopeInstance.Get(t.Context(), "scoped.huge"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if scoped := recoveredValueOfAnyFailure(t, scopeInstance.CloseWithContext(context.Background())); false == strings.HasPrefix(scoped, strings.Repeat("H", 64)+"\n\t… cut, 64 of") {
+        t.Fatalf("expected the scope's failure cut at the configured 64 bytes, got %q", scoped[:min(len(scoped), 120)])
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "service.huge"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if contained := recoveredValueOfAnyFailure(t, serviceContainer.CloseWithContext(context.Background())); false == strings.HasPrefix(contained, strings.Repeat("H", 64)+"\n\t… cut, 64 of") {
+        t.Fatalf("expected the container's failure cut at the configured 64 bytes, got %q", contained[:min(len(contained), 120)])
     }
 }

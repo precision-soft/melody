@@ -95,7 +95,7 @@ func TestContainer_Close_SequentialAHeldCollaboratorIsClosedBeforeTheServiceHold
 func TestHeldPointerIdentities_DoesNotEnterAMap(t *testing.T) {
     held := &closeOrderServiceB{}
 
-    throughField := heldPointerIdentities(&capturingHolder{held: held}, nil, nil)
+    throughField := walkHeldPointers(&capturingHolder{held: held}, nil, nil)
     if 0 == len(throughField) {
         t.Fatalf("expected the walk to reach a collaborator held in a field")
     }
@@ -109,7 +109,7 @@ func TestHeldPointerIdentities_DoesNotEnterAMap(t *testing.T) {
         t.Fatalf("expected the field walk to find the collaborator")
     }
 
-    throughMap := heldPointerIdentities(map[string]*closeOrderServiceB{"held": held}, nil, nil)
+    throughMap := walkHeldPointers(map[string]*closeOrderServiceB{"held": held}, nil, nil)
     if 0 != len(throughMap) {
         t.Fatalf("expected a map to be neither entered nor counted, got %d identities", len(throughMap))
     }
@@ -296,21 +296,21 @@ func TestHeldPointerIdentities_AnAtomicPointerReachesAsDeepAsAPlainPointerField(
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(4, &chainLink{held: held})}, nil, nil), heldIdentity) {
+    if false == holdsIdentity(walkHeldPointers(&chainFirstRoot{chain: chainOfLinks(4, &chainLink{held: held})}, nil, nil), heldIdentity) {
         t.Fatalf("expected the plain pointer field at the depth limit to be found")
     }
 
-    if false == holdsIdentity(heldPointerIdentities(&atomicChainRoot{chain: atomicChainOfLinks(4, held)}, nil, nil), heldIdentity) {
+    if false == holdsIdentity(walkHeldPointers(&atomicChainRoot{chain: atomicChainOfLinks(4, held)}, nil, nil), heldIdentity) {
         t.Fatalf("expected the atomic pointer at the depth limit to be found as the plain pointer field is")
     }
 
-    if true == holdsIdentity(heldPointerIdentities(&atomicChainRoot{chain: atomicChainOfLinks(5, held)}, nil, nil), heldIdentity) {
+    if true == holdsIdentity(walkHeldPointers(&atomicChainRoot{chain: atomicChainOfLinks(5, held)}, nil, nil), heldIdentity) {
         t.Fatalf("expected the atomic pointer past the depth limit not to be found")
     }
 }
 
 func TestHeldPointerIdentities_ANilAtomicPointerHoldsNothing(t *testing.T) {
-    found := heldPointerIdentities(&atomicPointerHolder{}, nil, nil)
+    found := walkHeldPointers(&atomicPointerHolder{}, nil, nil)
 
     if 1 != len(found) {
         t.Fatalf("expected only the holder itself, got %d identities", len(found))
@@ -335,11 +335,11 @@ func TestHeldPointerIdentities_AnAtomicPointerInAValueNotAddressableIsNotEntered
         return false
     }
 
-    if false == holdsCollaborator(heldPointerIdentities(holder, nil, nil)) {
+    if false == holdsCollaborator(walkHeldPointers(holder, nil, nil)) {
         t.Fatalf("expected the collaborator found behind a holder reached through a pointer")
     }
 
-    if true == holdsCollaborator(heldPointerIdentities(reflect.ValueOf(holder).Elem().Interface(), nil, nil)) {
+    if true == holdsCollaborator(walkHeldPointers(reflect.ValueOf(holder).Elem().Interface(), nil, nil)) {
         t.Fatalf("expected a holder handed by value not to be entered")
     }
 }
@@ -450,7 +450,7 @@ func TestHeldPointerIdentities_DoesNotReadAnInterfaceFieldOfForeignMemory(t *tes
     hubIdentity, _ := pointerKeyOf(hub)
 
     for iteration := 0; iteration < 200; iteration = iteration + 1 {
-        identities := heldPointerIdentities(&hubHolder{hub: hub}, nil, nil)
+        identities := walkHeldPointers(&hubHolder{hub: hub}, nil, nil)
 
         if false == holdsIdentity(identities, hubIdentity) {
             t.Fatalf("expected the hub itself to be found through the holder's own pointer field")
@@ -481,7 +481,7 @@ func TestHeldPointerIdentities_DoesNotReadInsideAContextItHolds(t *testing.T) {
             _ = ctx.Done()
         }()
 
-        identities := heldPointerIdentities(&hubHolder{ctx: ctx}, nil, nil)
+        identities := walkHeldPointers(&hubHolder{ctx: ctx}, nil, nil)
 
         firstUse.Wait()
         cancel()
@@ -509,7 +509,7 @@ func TestHeldPointerIdentities_StillFindsAServiceBehindAnIntermediateStruct(t *t
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&outerHolder{middle: &intermediateStruct{service: held}}, nil, nil), heldIdentity) {
+    if false == holdsIdentity(walkHeldPointers(&outerHolder{middle: &intermediateStruct{service: held}}, nil, nil), heldIdentity) {
         t.Fatalf("expected the service behind an intermediate struct pointer to be found")
     }
 }
@@ -547,11 +547,11 @@ func TestHeldPointerIdentities_FindsAServiceAtTheDepthLimitWhicheverFieldComesFi
     for length := 3; length <= 7; length = length + 1 {
         tail := &chainLink{held: held}
 
-        if false == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(length, tail), direct: tail}, nil, nil), heldIdentity) {
+        if false == holdsIdentity(walkHeldPointers(&chainFirstRoot{chain: chainOfLinks(length, tail), direct: tail}, nil, nil), heldIdentity) {
             t.Fatalf("expected the service to be found with the long path listed first, chain of %d links", length)
         }
 
-        if false == holdsIdentity(heldPointerIdentities(&directFirstRoot{chain: chainOfLinks(length, tail), direct: tail}, nil, nil), heldIdentity) {
+        if false == holdsIdentity(walkHeldPointers(&directFirstRoot{chain: chainOfLinks(length, tail), direct: tail}, nil, nil), heldIdentity) {
             t.Fatalf("expected the service to be found with the short path listed first, chain of %d links", length)
         }
     }
@@ -561,11 +561,11 @@ func TestHeldPointerIdentities_StopsAtTheDepthLimit(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(4, &chainLink{held: held})}, nil, nil), heldIdentity) {
+    if false == holdsIdentity(walkHeldPointers(&chainFirstRoot{chain: chainOfLinks(4, &chainLink{held: held})}, nil, nil), heldIdentity) {
         t.Fatalf("expected a service at the depth limit to be found")
     }
 
-    if true == holdsIdentity(heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(5, &chainLink{held: held})}, nil, nil), heldIdentity) {
+    if true == holdsIdentity(walkHeldPointers(&chainFirstRoot{chain: chainOfLinks(5, &chainLink{held: held})}, nil, nil), heldIdentity) {
         t.Fatalf("expected a service past the depth limit not to be found")
     }
 }
@@ -604,11 +604,11 @@ func TestHeldPointerIdentities_DoesNotReadAPointerOnePastTheDepthLimit(t *testin
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&oddDepthRoot{chain: oddDepthChain(3, held)}, nil, nil), heldIdentity) {
+    if false == holdsIdentity(walkHeldPointers(&oddDepthRoot{chain: oddDepthChain(3, held)}, nil, nil), heldIdentity) {
         t.Fatalf("expected a service at depth eleven to be found")
     }
 
-    if true == holdsIdentity(heldPointerIdentities(&oddDepthRoot{chain: oddDepthChain(4, held)}, nil, nil), heldIdentity) {
+    if true == holdsIdentity(walkHeldPointers(&oddDepthRoot{chain: oddDepthChain(4, held)}, nil, nil), heldIdentity) {
         t.Fatalf("expected a service one past the depth limit not to be found")
     }
 }
@@ -640,20 +640,20 @@ func TestHeldPointerIdentities_StopsAtTheNodeBudget(t *testing.T) {
     last := &wideHolder{}
     last.cells[255][255].service = held
 
-    if true == holdsIdentity(heldPointerIdentities(last, nil, nil), heldIdentity) {
+    if true == holdsIdentity(walkHeldPointers(last, nil, nil), heldIdentity) {
         t.Fatalf("expected the walk to stop at its budget before the last cell of a table wider than it")
     }
 
     beside := &wideHolderWithPeer{peer: held}
 
-    if false == holdsIdentity(heldPointerIdentities(beside, nil, nil), heldIdentity) {
+    if false == holdsIdentity(walkHeldPointers(beside, nil, nil), heldIdentity) {
         t.Fatalf("expected a peer declared after a table wider than the budget to be found before the table is paid for")
     }
 
     bounded := &boundedHolder{}
     bounded.cells[63][255].service = held
 
-    if false == holdsIdentity(heldPointerIdentities(bounded, nil, nil), heldIdentity) {
+    if false == holdsIdentity(walkHeldPointers(bounded, nil, nil), heldIdentity) {
         t.Fatalf("expected the last cell of a table within the budget to be reached")
     }
 }
@@ -697,7 +697,7 @@ func TestHeldPointerIdentities_KeepsAHeldCollaboratorAlive(t *testing.T) {
     holder := &capturingHolder{held: &closeOrderServiceB{}}
     runtime.SetFinalizer(holder.held, func(*closeOrderServiceB) { finalized <- struct{}{} })
 
-    identities := heldPointerIdentities(holder, nil, nil)
+    identities := walkHeldPointers(holder, nil, nil)
     holder.held = nil
 
     for cycle := 0; cycle < 3; cycle = cycle + 1 {
@@ -871,7 +871,7 @@ func TestHeldPointerIdentities_DoesNotReadASliceEvenInItsOwnMemory(t *testing.T)
     foreign := &closeOrderServiceB{}
     foreignIdentity, _ := pointerKeyOf(foreign)
 
-    identities := heldPointerIdentities(&bagHolder{bag: &foreignBag{items: []*closeOrderServiceB{foreign}}, items: []*closeOrderServiceB{own}}, nil, nil)
+    identities := walkHeldPointers(&bagHolder{bag: &foreignBag{items: []*closeOrderServiceB{foreign}}, items: []*closeOrderServiceB{own}}, nil, nil)
 
     if true == holdsIdentity(identities, ownIdentity) {
         t.Fatalf("expected a service in the holder's own slice to stay unread, since the holder may have been handed that slice")
@@ -1085,7 +1085,7 @@ func TestContainer_Waves_WalksAPublishedServiceAsForeignMemory(t *testing.T) {
 
     /* the filing walked the hub once; the loop is that walk, called directly two hundred times under the writer, since through the container it would answer from the memo after the first */
     for iteration := 0; iteration < 200; iteration = iteration + 1 {
-        heldPointerIdentities(hub, nil, nil)
+        walkHeldPointers(hub, nil, nil)
     }
 
     close(stop)
@@ -1399,11 +1399,11 @@ func TestHeldPointerIdentities_DoesNotWalkAWholeSubtreeAgainFromAShallowerPath(t
     hub := &fatHub{}
 
     /* the held service sits four links below the holder, at depth ten: a hub of forty-nine thousand items walked once leaves it room in the budget, walked twice from the chain's second path it does not */
-    if false == holdsIdentity(heldPointerIdentities(&collaboratorFirstHolder{collaborator: newCollaboratorChain(held, 4), hub: hub, chain: newHubChain(hub, 2)}, nil, nil), heldIdentity) {
+    if false == holdsIdentity(walkHeldPointers(&collaboratorFirstHolder{collaborator: newCollaboratorChain(held, 4), hub: hub, chain: newHubChain(hub, 2)}, nil, nil), heldIdentity) {
         t.Fatalf("expected the collaborator declared first to be found")
     }
 
-    if false == holdsIdentity(heldPointerIdentities(&chainFirstHolder{chain: newHubChain(hub, 2), hub: hub, collaborator: newCollaboratorChain(held, 4)}, nil, nil), heldIdentity) {
+    if false == holdsIdentity(walkHeldPointers(&chainFirstHolder{chain: newHubChain(hub, 2), hub: hub, collaborator: newCollaboratorChain(held, 4)}, nil, nil), heldIdentity) {
         t.Fatalf("expected the collaborator declared after a chain of links to one large object to be found as well")
     }
 }
@@ -1427,26 +1427,26 @@ func TestHeldPointerIdentities_CountsAnArrayOfScalarsAsOneNode(t *testing.T) {
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&peerFirstCodec{peer: newCollaboratorChain(held, 1)}, nil, nil), heldIdentity) {
+    if false == holdsIdentity(walkHeldPointers(&peerFirstCodec{peer: newCollaboratorChain(held, 1)}, nil, nil), heldIdentity) {
         t.Fatalf("expected the peer declared before the table to be found")
     }
 
-    if false == holdsIdentity(heldPointerIdentities(&tableFirstCodec{peer: newCollaboratorChain(held, 1)}, nil, nil), heldIdentity) {
+    if false == holdsIdentity(walkHeldPointers(&tableFirstCodec{peer: newCollaboratorChain(held, 1)}, nil, nil), heldIdentity) {
         t.Fatalf("expected the peer declared after the table to be found as well")
     }
 }
 
 /* structOfScalarsAsWideAsTheBudget builds, through reflect, a struct of two hundred and fifty-six structs of two hundred and fifty-six integers: sixty-five thousand five hundred and thirty-six scalar fields, the walk's whole budget, which no array of the same content costs */
 func structOfScalarsAsWideAsTheBudget() reflect.Type {
-    integerFields := make([]reflect.StructField, 0, teardownWalkElementLimit)
-    for index := 0; index < teardownWalkElementLimit; index = index + 1 {
+    integerFields := make([]reflect.StructField, 0, TeardownWalkElementsRule().Default)
+    for index := 0; index < TeardownWalkElementsRule().Default; index = index + 1 {
         integerFields = append(integerFields, reflect.StructField{Name: reflectStructFieldName("Scalar", index), Type: reflect.TypeOf(0)})
     }
 
     inner := reflect.StructOf(integerFields)
 
-    innerFields := make([]reflect.StructField, 0, teardownWalkElementLimit)
-    for index := 0; index < teardownWalkElementLimit; index = index + 1 {
+    innerFields := make([]reflect.StructField, 0, TeardownWalkElementsRule().Default)
+    for index := 0; index < TeardownWalkElementsRule().Default; index = index + 1 {
         innerFields = append(innerFields, reflect.StructField{Name: reflectStructFieldName("Inner", index), Type: inner})
     }
 
@@ -1470,7 +1470,7 @@ func TestHeldPointerIdentities_CountsAStructOfScalarsAsOneNode(t *testing.T) {
     root := reflect.New(rootType)
     root.Elem().Field(1).Set(reflect.ValueOf(newCollaboratorChain(held, 1)))
 
-    if false == holdsIdentity(heldPointerIdentities(root.Interface(), nil, nil), heldIdentity) {
+    if false == holdsIdentity(walkHeldPointers(root.Interface(), nil, nil), heldIdentity) {
         t.Fatalf("expected the peer one link below the struct of scalars to be found: the struct is one node, not one per field")
     }
 }
@@ -1490,7 +1490,7 @@ func TestHeldPointerIdentities_ChargesTheBudgetWhenAnItemIsQueued(t *testing.T) 
     var before runtime.MemStats
     runtime.ReadMemStats(&before)
 
-    found := holdsIdentity(heldPointerIdentities(table, nil, nil), heldIdentity)
+    found := holdsIdentity(walkHeldPointers(table, nil, nil), heldIdentity)
 
     var after runtime.MemStats
     runtime.ReadMemStats(&after)
@@ -1558,13 +1558,13 @@ func TestHeldPointerIdentities_FindsAHeldServiceBehindARingFromTheShortPathWhich
 
     chain, tail := newCycleMemberShape(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&tailThenChainHolder{tail: tail, chain: chain}, nil, nil), heldIdentity) {
+    if false == holdsIdentity(walkHeldPointers(&tailThenChainHolder{tail: tail, chain: chain}, nil, nil), heldIdentity) {
         t.Fatalf("expected the collaborator found through the short path declared first")
     }
 
     chain, tail = newCycleMemberShape(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&chainThenTailHolder{chain: chain, tail: tail}, nil, nil), heldIdentity) {
+    if false == holdsIdentity(walkHeldPointers(&chainThenTailHolder{chain: chain, tail: tail}, nil, nil), heldIdentity) {
         t.Fatalf("expected the collaborator found through the short path declared after the chain that cut it")
     }
 }
@@ -1599,7 +1599,7 @@ func TestHeldPointerIdentities_AHubOnARingIsPaidForOnceAndTheCollaboratorAfterIt
     head := &cyclicHubLink{next: tail, hub: hub}
     hub.back = head
 
-    if false == holdsIdentity(heldPointerIdentities(&chainFirstCyclicHubHolder{chain: head, hub: hub, collaborator: held}, nil, nil), heldIdentity) {
+    if false == holdsIdentity(walkHeldPointers(&chainFirstCyclicHubHolder{chain: head, hub: hub, collaborator: held}, nil, nil), heldIdentity) {
         t.Fatalf("expected the collaborator declared after a cyclic hub walked whole once to be found")
     }
 }
@@ -1643,7 +1643,7 @@ func TestHeldPointerIdentities_FindsAHeldServiceBehindARingHeldThroughAForwardEd
 
     chain, holderOfMember := newCrossEdgeShape(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&crossEdgeHolder{chain: chain, short: holderOfMember}, nil, nil), heldIdentity) {
+    if false == holdsIdentity(walkHeldPointers(&crossEdgeHolder{chain: chain, short: holderOfMember}, nil, nil), heldIdentity) {
         t.Fatalf("expected the collaborator found through the short path into the holder of a cycle member")
     }
 }
@@ -1669,11 +1669,11 @@ func TestHeldPointerIdentities_CountsAnArrayOfWhatItDoesNotReadAsOneNode(t *test
     held := &closeOrderServiceB{}
     heldIdentity, _ := pointerKeyOf(held)
 
-    if false == holdsIdentity(heldPointerIdentities(&anyTableFirstCodec{peer: newCollaboratorChain(held, 1)}, nil, nil), heldIdentity) {
+    if false == holdsIdentity(walkHeldPointers(&anyTableFirstCodec{peer: newCollaboratorChain(held, 1)}, nil, nil), heldIdentity) {
         t.Fatalf("expected the peer declared after a table of interfaces to be found")
     }
 
-    if false == holdsIdentity(heldPointerIdentities(&sliceTableFirstCodec{peer: newCollaboratorChain(held, 1)}, nil, nil), heldIdentity) {
+    if false == holdsIdentity(walkHeldPointers(&sliceTableFirstCodec{peer: newCollaboratorChain(held, 1)}, nil, nil), heldIdentity) {
         t.Fatalf("expected the peer declared after a table of slices to be found")
     }
 }
@@ -1693,7 +1693,7 @@ func TestHeldPointerIdentities_ReadsAValuePointingAtItselfOnce(t *testing.T) {
     holder := &selfReferringHolder{collaborator: held}
     holder.self = holder
 
-    identities := heldPointerIdentities(holder, nil, nil)
+    identities := walkHeldPointers(holder, nil, nil)
 
     if false == holdsIdentity(identities, heldIdentity) {
         t.Fatalf("expected the collaborator of a self-referring holder to be found")
@@ -1986,11 +1986,11 @@ func TestHeldPointerIdentities_MatchesTheBoundedReachabilityOfARandomGraph(t *te
             }
         }
 
-        held := heldPointerIdentities(nodes[0], nil, nil)
+        held := walkHeldPointers(nodes[0], nil, nil)
         for index, node := range nodes {
             identity, _ := pointerKeyOf(node)
             /* each link is a pointer and a struct, two levels of the walk */
-            wanted := 0 <= distances[index] && 2*distances[index] <= teardownWalkDepthLimit
+            wanted := 0 <= distances[index] && 2*distances[index] <= TeardownWalkDepthRule().Default
             if wanted != holdsIdentity(held, identity) {
                 t.Fatalf("sample %d node %d at distance %d: expected held=%v over the edges %v", sample, index, distances[index], wanted, edges)
             }
@@ -2230,5 +2230,86 @@ func TestContainer_Waves_AHolderResolvedFirstNeverEntersAServiceRegisteredWithTe
     holderRecord, _ := heldRecordOf(serviceContainer, containerNameNodeKey("app.holder"))
     if false == holdsIdentity(holderRecord, storageIdentity) || true == holdsIdentity(holderRecord, innerIdentity) {
         t.Fatalf("expected the holder to hold the storage without the walk entering it, got %v", holderRecord)
+    }
+}
+
+func TestHeldPointerIdentities_ARaisedDepthReachesPastTheDefault(t *testing.T) {
+    held := &closeOrderServiceB{}
+    heldIdentity, _ := pointerKeyOf(held)
+
+    raised := defaultTeardownWalk()
+    raised.depth = 2 * raised.depth
+
+    found, budgetEnded := heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(5, &chainLink{held: held})}, nil, nil, raised)
+    if false == holdsIdentity(found, heldIdentity) || true == budgetEnded {
+        t.Fatalf("expected a raised depth to reach the service the default does not, found %v, budget ended %v", holdsIdentity(found, heldIdentity), budgetEnded)
+    }
+
+    lowered := defaultTeardownWalk()
+    lowered.depth = 1
+
+    if found, _ := heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(1, &chainLink{held: held})}, nil, nil, lowered); true == holdsIdentity(found, heldIdentity) {
+        t.Fatalf("expected a depth of 1 to stop before a service two links down")
+    }
+}
+
+func TestHeldPointerIdentities_TheElementBoundCutsTheFieldsEntered(t *testing.T) {
+    held := &closeOrderServiceB{}
+    heldIdentity, _ := pointerKeyOf(held)
+
+    limits := defaultTeardownWalk()
+    limits.elements = 1
+
+    if found, _ := heldPointerIdentities(&chainFirstRoot{direct: &chainLink{held: held}}, nil, nil, limits); true == holdsIdentity(found, heldIdentity) {
+        t.Fatalf("expected an element bound of 1 to leave the second field unentered")
+    }
+
+    limits.elements = 2
+
+    if found, _ := heldPointerIdentities(&chainFirstRoot{direct: &chainLink{held: held}}, nil, nil, limits); false == holdsIdentity(found, heldIdentity) {
+        t.Fatalf("expected an element bound of 2 to enter the second field")
+    }
+}
+
+func TestHeldPointerIdentities_ReportsTheNodeBudgetEndingTheWalk(t *testing.T) {
+    held := &closeOrderServiceB{}
+
+    if _, budgetEnded := heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(3, &chainLink{held: held})}, nil, nil, defaultTeardownWalk()); true == budgetEnded {
+        t.Fatalf("expected the default budget to walk a short chain whole")
+    }
+
+    limits := defaultTeardownWalk()
+    limits.nodes = 2
+
+    found, budgetEnded := heldPointerIdentities(&chainFirstRoot{chain: chainOfLinks(3, &chainLink{held: held})}, nil, nil, limits)
+    if false == budgetEnded {
+        t.Fatalf("expected a budget of 2 items to be reported as ending the walk")
+    }
+
+    heldIdentity, _ := pointerKeyOf(held)
+    if true == holdsIdentity(found, heldIdentity) {
+        t.Fatalf("expected the service past the budget not to be found")
+    }
+}
+
+type arrayHolder struct {
+    items [3]*closeOrderServiceB
+}
+
+func TestHeldPointerIdentities_TheElementBoundCutsTheArrayElementsEntered(t *testing.T) {
+    held := &closeOrderServiceB{}
+    heldIdentity, _ := pointerKeyOf(held)
+
+    limits := defaultTeardownWalk()
+    limits.elements = 2
+
+    if found, _ := heldPointerIdentities(&arrayHolder{items: [3]*closeOrderServiceB{nil, nil, held}}, nil, nil, limits); true == holdsIdentity(found, heldIdentity) {
+        t.Fatalf("expected an element bound of 2 to leave the third element unentered")
+    }
+
+    limits.elements = 3
+
+    if found, _ := heldPointerIdentities(&arrayHolder{items: [3]*closeOrderServiceB{nil, nil, held}}, nil, nil, limits); false == holdsIdentity(found, heldIdentity) {
+        t.Fatalf("expected an element bound of 3 to enter the third element")
     }
 }

@@ -105,7 +105,7 @@ The threshold covers the one case the lease clock cannot see: a gate configured 
 
 An `Acquire` that errors fails **closed**: `(false, err)`, because an unreachable store must not double-run the work. A shutdown is not an error: when the runtime context is already cancelled, an `Acquire` that fails with that cancellation returns `(false, nil)`, so a graceful stop does not read as a failed run. The release always runs on a context detached from the run's cancellation, with no deadline of the helper's, the locker bounding its own release (the mysql and pgsql lockers by `LockerConfig.ReleaseTimeout`, the redis one by its call timeout), so a `SIGTERM` between a cron tick and its release cannot leave the lock held until the `ttl` lapses; a release that fails anyway — a store hiccup exactly at release time — is logged with the lock name and the cause, because the lock then does stay held for up to a full `ttl` and the skips it causes would otherwise blame a run that is not happening.
 
-[`ExclusiveConfig`](../../lock/run_exclusive.go) is everything the run declares beyond its locker and its lock name, its zero value the default: `Ttl`, 30s, at least 2ms, since under it the renewal cadence is floored at 1ms and a lease of 1.5ms or less is demoted before its first renewal, unlimited the session-style lock. An unlimited `Ttl` selects session-lock behaviour: there is no lease to extend, so the renewal becomes a liveness probe every 15 seconds.
+[`ExclusiveConfig`](../../lock/run_exclusive.go) is everything the run declares beyond its locker and its lock name, its zero value the default: `Ttl`, 30s, at least 2ms, since under it the renewal cadence is floored at 1ms and a lease of 1.5ms or less is demoted before its first renewal, unlimited the session-style lock. An unlimited `Ttl` selects session-lock behaviour: there is no lease to extend, so the renewal becomes a liveness probe every `ProbeInterval`, 15s when left out, at least 1ms, unlimited refused, since a session never probed is lost unnoticed; `ProbeInterval` set beside a lease `Ttl`, which is renewed and never probed, is refused naming the field.
 
 ### Decorate a CLI command
 
@@ -121,7 +121,7 @@ command := lock.NewExclusiveCommand(
 )
 ```
 
-[`ExclusiveCommandConfig`](../../lock/exclusive_command.go) carries `LockName`, `Ttl` and `StopRenewalLimit` (set it to the cron runner's `ShutdownTimeout` when its commands may wind down longer than 30s), read as `ExclusiveConfig` reads them and resolved when the command is built, a refusal panicking naming the field. `LockName` left empty is the application namespace, `:command:` and the wrapped command's name, read at each run from the runtime's configuration, `melody:command:<name>` under the default namespace or with no configuration; a name set is used verbatim. Name one for when two differently-named commands must share one lock or one command needs distinct locks per deployment. `Name`, `Description` and `Flags` delegate to the wrapped command, so the decorator is transparent to the CLI.
+[`ExclusiveCommandConfig`](../../lock/exclusive_command.go) carries `LockName`, `Ttl`, `StopRenewalLimit` and `ProbeInterval` (set it to the cron runner's `ShutdownTimeout` when its commands may wind down longer than 30s), read as `ExclusiveConfig` reads them and resolved when the command is built, a refusal panicking naming the field. `LockName` left empty is the application namespace, `:command:` and the wrapped command's name, read at each run from the runtime's configuration, `melody:command:<name>` under the default namespace or with no configuration; a name set is used verbatim. Name one for when two differently-named commands must share one lock or one command needs distinct locks per deployment. `Name`, `Description` and `Flags` delegate to the wrapped command, so the decorator is transparent to the CLI.
 
 ### Elect a leader
 
@@ -243,7 +243,7 @@ defer pickingLock.Release(runtime.WithContext(runtimeInstance, context.WithoutCa
 ### Exclusive execution (`lock`)
 
 - [`RunExclusive(runtimeInstance containercontract.Runtime, locker lockcontract.Locker, name string, config ExclusiveConfig, callback func(containercontract.Runtime) error) (bool, error)`](../../lock/run_exclusive.go)
-- [`ExclusiveConfig`](../../lock/run_exclusive.go) — `Ttl`, `StopRenewalLimit`
+- [`ExclusiveConfig`](../../lock/run_exclusive.go) — `Ttl`, `StopRenewalLimit`, `ProbeInterval`
 - [`ExclusiveCommand`](../../lock/exclusive_command.go) — implements `cli/contract.Command`
     - [`NewExclusiveCommand(command clicontract.Command, locker lockcontract.Locker, config ExclusiveCommandConfig) *ExclusiveCommand`](../../lock/exclusive_command.go)
 - [`ExclusiveCommandConfig`](../../lock/exclusive_command.go) — `LockName`, `Ttl`

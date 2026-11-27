@@ -50,8 +50,17 @@ type InMemoryBackendConfig struct {
     /* CleanupInterval is the sweep cadence: 1m by default, at least 1ms, never unlimited. */
     CleanupInterval bound.Duration
 
+    /* MaxKeyLength bounds a key in bytes, as the rueidis backend's field of the same name does: 1024 by default, at least 1, unlimited refused. */
+    MaxKeyLength bound.Count
+
     /* Clock is where the backend reads the time; nil is the system clock. */
     Clock clockcontract.Clock
+}
+
+var inMemoryBackendMaxKeyLengthRule = bound.Rule[int]{
+    Name:    "InMemoryBackendConfig.MaxKeyLength",
+    Default: 1024,
+    Minimum: 1,
 }
 
 var inMemoryBackendMaxItemsRule = bound.Rule[int]{
@@ -79,6 +88,11 @@ func NewInMemoryBackend(config InMemoryBackendConfig) *InMemoryBackend {
         exception.Panic(exception.FromError(cleanupIntervalErr))
     }
 
+    maxKeyLength, maxKeyLengthErr := bound.Resolve(config.MaxKeyLength, inMemoryBackendMaxKeyLengthRule)
+    if nil != maxKeyLengthErr {
+        exception.Panic(exception.FromError(maxKeyLengthErr))
+    }
+
     clockInstance, clockErr := clock.ResolveOptionalClock(config.Clock, "in-memory cache backend", "InMemoryBackendConfig.Clock")
     if nil != clockErr {
         exception.Panic(exception.FromError(clockErr))
@@ -89,6 +103,7 @@ func NewInMemoryBackend(config InMemoryBackendConfig) *InMemoryBackend {
         entries:             make(map[string]*lruEntry),
         lruList:             list.New(),
         maxItems:            maxItems.Value,
+        maxKeyLength:        maxKeyLength.Value,
         cleanupTickInterval: cleanupInterval.Value,
         stopCleanup:         make(chan struct{}),
         cleanupDone:         make(chan struct{}),
@@ -105,6 +120,7 @@ type InMemoryBackend struct {
     entries             map[string]*lruEntry
     lruList             *list.List
     maxItems            int
+    maxKeyLength        int
     cleanupTickInterval time.Duration
     stopCleanup         chan struct{}
     cleanupDone         chan struct{}
@@ -122,9 +138,7 @@ func closedBackendError() error {
     )
 }
 
-const inMemoryBackendMaxKeyLength = 1024
-
-func validateKey(key string) error {
+func validateKey(key string, maxKeyLength int) error {
     if "" == key {
         return emptyKeyError()
     }
@@ -149,12 +163,12 @@ func validateKey(key string) error {
         )
     }
 
-    if inMemoryBackendMaxKeyLength < len(key) {
+    if maxKeyLength < len(key) {
         return exception.NewError(
             "cache key is too long",
             exceptioncontract.Context{
                 "key":          renderedCacheKey(key),
-                "maxKeyLength": inMemoryBackendMaxKeyLength,
+                "maxKeyLength": maxKeyLength,
                 "keyLength":    len(key),
             },
             nil,
@@ -172,9 +186,9 @@ func emptyKeyError() error {
     )
 }
 
-func refuseInvalidKeyList(keys []string) error {
+func (instance *InMemoryBackend) refuseInvalidKeyList(keys []string) error {
     for _, key := range keys {
-        if keyErr := validateKey(key); nil != keyErr {
+        if keyErr := validateKey(key, instance.maxKeyLength); nil != keyErr {
             return keyErr
         }
     }
@@ -195,7 +209,7 @@ func (instance *InMemoryBackend) Get(runtimeInstance containercontract.Runtime, 
         return nil, false, closedBackendError()
     }
 
-    if keyErr := validateKey(key); nil != keyErr {
+    if keyErr := validateKey(key, instance.maxKeyLength); nil != keyErr {
         instance.mutex.RUnlock()
         return nil, false, keyErr
     }
@@ -256,7 +270,7 @@ func (instance *InMemoryBackend) Has(runtimeInstance containercontract.Runtime, 
         return false, closedBackendError()
     }
 
-    if keyErr := validateKey(key); nil != keyErr {
+    if keyErr := validateKey(key, instance.maxKeyLength); nil != keyErr {
         instance.mutex.RUnlock()
         return false, keyErr
     }
@@ -300,7 +314,7 @@ func (instance *InMemoryBackend) Set(
         return closedBackendError()
     }
 
-    if keyErr := validateKey(key); nil != keyErr {
+    if keyErr := validateKey(key, instance.maxKeyLength); nil != keyErr {
         return keyErr
     }
 
@@ -335,7 +349,7 @@ func (instance *InMemoryBackend) Delete(runtimeInstance containercontract.Runtim
         return closedBackendError()
     }
 
-    if keyErr := validateKey(key); nil != keyErr {
+    if keyErr := validateKey(key, instance.maxKeyLength); nil != keyErr {
         return keyErr
     }
 
@@ -390,7 +404,7 @@ func (instance *InMemoryBackend) Many(runtimeInstance containercontract.Runtime,
         return nil, closedBackendError()
     }
 
-    if refuseErr := refuseInvalidKeyList(keys); nil != refuseErr {
+    if refuseErr := instance.refuseInvalidKeyList(keys); nil != refuseErr {
         instance.mutex.RUnlock()
         return nil, refuseErr
     }
@@ -479,7 +493,7 @@ func (instance *InMemoryBackend) SetMultiple(runtimeInstance containercontract.R
     sort.Strings(keys)
 
     for _, key := range keys {
-        if keyErr := validateKey(key); nil != keyErr {
+        if keyErr := validateKey(key, instance.maxKeyLength); nil != keyErr {
             return keyErr
         }
     }
@@ -512,7 +526,7 @@ func (instance *InMemoryBackend) DeleteMultiple(runtimeInstance containercontrac
         return closedBackendError()
     }
 
-    if refuseErr := refuseInvalidKeyList(keys); nil != refuseErr {
+    if refuseErr := instance.refuseInvalidKeyList(keys); nil != refuseErr {
         return refuseErr
     }
 
@@ -567,7 +581,7 @@ func (instance *InMemoryBackend) refuseClosedOrInvalidKey(key string) error {
         return closedBackendError()
     }
 
-    return validateKey(key)
+    return validateKey(key, instance.maxKeyLength)
 }
 
 /* CloseWithContext refuses later calls and waits for the cleanup loop up to the deadline. */
@@ -622,7 +636,7 @@ func (instance *InMemoryBackend) incrementValue(
         return 0, closedBackendError()
     }
 
-    if keyErr := validateKey(key); nil != keyErr {
+    if keyErr := validateKey(key, instance.maxKeyLength); nil != keyErr {
         return 0, keyErr
     }
 
@@ -979,6 +993,7 @@ func counterParseFailure(parseErr error) error {
 
 var _ cachecontract.Backend = (*InMemoryBackend)(nil)
 
+/* renderedCacheKey cuts a refused key to the 128 bytes a refusal quotes, on a rune boundary: the refusal names the key, not its payload, and the length stands beside it, so no deployment tunes the cut. */
 func renderedCacheKey(key string) string {
     const renderedCacheKeyLimit = 128
 

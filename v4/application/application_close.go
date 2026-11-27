@@ -91,6 +91,9 @@ func (instance *Application) performClose(closeContext context.Context) error {
     return errors.Join(windDownErr, teardownErr)
 }
 
+/* TeardownWalkBudgetEndedMessage is the warning the close writes when the node budget of ContainerConfig.TeardownWalk ended the walk of a service, so the waves may close it before a collaborator it holds. */
+const TeardownWalkBudgetEndedMessage = "the teardown walk budget ended before the walk of a service did; an edge past it was not gained"
+
 func (instance *Application) performTeardown(closeContext context.Context) error {
     emergencyLogger := logging.EmergencyLogger()
 
@@ -100,6 +103,19 @@ func (instance *Application) performTeardown(closeContext context.Context) error
     closedChecker, isChecker := serviceContainer.(interface{ IsClosed() bool })
     if true == isChecker {
         alreadyClosed = closedChecker.IsClosed()
+    }
+
+    /* the walk that infers the teardown edges is bounded, so a service whose walk the budget ended is named before the teardown that misses its edges */
+    if false == alreadyClosed {
+        budgetReporter, reportsBudget := serviceContainer.(interface{ TeardownWalkBudgetEnded() []string })
+        if true == reportsBudget {
+            if budgetEnded := budgetReporter.TeardownWalkBudgetEnded(); 0 < len(budgetEnded) {
+                emergencyLogger.Warning(
+                    TeardownWalkBudgetEndedMessage,
+                    exceptioncontract.Context{"services": budgetEnded, "field": "ContainerConfig.TeardownWalk.Nodes"},
+                )
+            }
+        }
     }
 
     serviceContainerCloseErr := serviceContainer.CloseWithContext(closeContext)

@@ -180,3 +180,39 @@ func runtimeWithNamespace(t *testing.T, namespace string) containercontract.Runt
 
     return runtime.NewRun(context.Background(), serviceContainer.NewScope())
 }
+
+/* refreshRecordingLocker wraps every lock it hands out so a test reads the ttls the refreshes were handed */
+type refreshRecordingLocker struct {
+    inner lockcontract.Locker
+    mutex sync.Mutex
+    ttls  []bound.Duration
+}
+
+func (instance *refreshRecordingLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+    lock, createErr := instance.inner.CreateLock(name, ttl)
+    if nil != createErr {
+        return nil, createErr
+    }
+
+    return &refreshRecordingLock{Lock: lock, locker: instance}, nil
+}
+
+func (instance *refreshRecordingLocker) refreshTtls() []bound.Duration {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]bound.Duration(nil), instance.ttls...)
+}
+
+type refreshRecordingLock struct {
+    lockcontract.Lock
+    locker *refreshRecordingLocker
+}
+
+func (instance *refreshRecordingLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+    instance.locker.mutex.Lock()
+    instance.locker.ttls = append(instance.locker.ttls, ttl)
+    instance.locker.mutex.Unlock()
+
+    return instance.Lock.Refresh(runtimeInstance, ttl)
+}

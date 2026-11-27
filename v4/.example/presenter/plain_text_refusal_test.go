@@ -30,6 +30,7 @@ func textNegotiatingRequest(t *testing.T) (melodycontainercontract.Runtime, melo
                     melodyserializer.MimeApplicationJson: melodyserializer.NewJsonSerializer(),
                     melodyserializer.MimeTextPlain:       melodyserializer.NewPlainTextSerializer(melodyserializer.PlainTextSerializerConfig{}),
                 },
+                melodyserializer.SerializerManagerConfig{},
             )
         },
         melodycontainer.RegisterOptions{},

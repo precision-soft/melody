@@ -45,6 +45,7 @@ func TestNormalizeResultToResponse_JoinsRepeatedAcceptLines(t *testing.T) {
                     serializer.MimeApplicationJson: serializer.NewJsonSerializer(),
                     serializer.MimeTextPlain:       serializer.NewPlainTextSerializer(serializer.PlainTextSerializerConfig{}),
                 },
+                serializer.SerializerManagerConfig{},
             )
         },
         container.RegisterOptions{},
@@ -111,6 +112,7 @@ func TestWrapResultHandler_ATextPlainClientReadsLines(t *testing.T) {
                     serializer.MimeApplicationJson: serializer.NewJsonSerializer(),
                     serializer.MimeTextPlain:       serializer.NewPlainTextSerializer(serializer.PlainTextSerializerConfig{}),
                 },
+                serializer.SerializerManagerConfig{},
             )
         },
         container.RegisterOptions{},
@@ -271,6 +273,7 @@ func TestNormalizeResultToResponse_AFailedResolutionIsRecordedBeforeTheFallback(
         func(resolver containercontract.Resolver) (*serializer.SerializerManager, error) {
             return serializer.NewSerializerManager(
                 map[string]serializercontract.Serializer{},
+                serializer.SerializerManagerConfig{},
             )
         },
         container.RegisterOptions{},

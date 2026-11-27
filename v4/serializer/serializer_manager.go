@@ -5,6 +5,7 @@ import (
     "sort"
     "strings"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
@@ -16,7 +17,25 @@ var ErrNotAcceptable = errors.New("no acceptable media type for the accept heade
 
 const notAcceptableMessage = "the accept header refuses every available media type"
 
-func NewSerializerManager(serializersByMime map[string]serializercontract.Serializer) (*SerializerManager, error) {
+/* SerializerManagerConfig is what a manager negotiates with beyond its serializers; the zero value is the default. */
+type SerializerManagerConfig struct {
+    /* MaxAcceptMembers bounds the members of an Accept header the negotiation reads: 64 when left out, at least 1, unlimited refused, since the header is the client's and every member is weighed against every serializer. A header holding more is refused whole with ErrNotAcceptable, a member past the bound possibly carrying a refusal. */
+    MaxAcceptMembers bound.Count
+}
+
+var serializerManagerMaxAcceptMembersRule = bound.Rule[int]{
+    Name:    "SerializerManagerConfig.MaxAcceptMembers",
+    Default: internal.MaximumSplitOutsideQuotesMembers,
+    Minimum: 1,
+}
+
+/* NewSerializerManager builds a manager over the serializers keyed by mime; a configuration field outside its rule is refused naming the field. */
+func NewSerializerManager(serializersByMime map[string]serializercontract.Serializer, config SerializerManagerConfig) (*SerializerManager, error) {
+    maxAcceptMembers, maxAcceptMembersErr := bound.Resolve(config.MaxAcceptMembers, serializerManagerMaxAcceptMembersRule)
+    if nil != maxAcceptMembersErr {
+        return nil, maxAcceptMembersErr
+    }
+
     if nil == serializersByMime {
         serializersByMime = map[string]serializercontract.Serializer{}
     }
@@ -69,11 +88,13 @@ func NewSerializerManager(serializersByMime map[string]serializercontract.Serial
 
     return &SerializerManager{
         serializersByMime: normalizedSerializersByMime,
+        maxAcceptMembers:  maxAcceptMembers.Value,
     }, nil
 }
 
 type SerializerManager struct {
     serializersByMime map[string]serializercontract.Serializer
+    maxAcceptMembers  int
 }
 
 func (instance *SerializerManager) Get(mime string) (serializercontract.Serializer, bool) {
@@ -134,7 +155,7 @@ func (instance *SerializerManager) ResolveByAcceptHeader(acceptHeader string) (s
     }
 
     /* a header with no member the negotiation can read matches no candidate below, as one naming nothing the manager serves does, and both are answered with the default representation */
-    acceptedMimes, cut := parseAcceptHeader(acceptHeader)
+    acceptedMimes, cut := parseAcceptHeader(acceptHeader, instance.maxAcceptMembers)
     if true == cut {
         return nil, exception.NewError(
             "the accept header holds more members than the negotiation reads and is refused whole",

@@ -561,8 +561,12 @@ func (instance *scope) closeWithin(closeContext context.Context) error {
     /* the dependency graph is guarded by the container mutex, so the snapshot takes the container lock first; an edge a racing creation misses degrades to creation order */
     dependencyGraph := map[string]map[string]struct{}(nil)
 
+    /* a scope its container already left behind cuts with the rule's default */
+    closeFailureStackBytes := bound.Resolved[int]{Value: CloseFailureStackBytesRule().Default}
+
     containerInstance := instance.container.Load()
     if nil != containerInstance {
+        closeFailureStackBytes = containerInstance.closeFailureStackBytes
         containerInstance.mutex.RLock()
         dependencyGraph = make(map[string]map[string]struct{}, len(instance.dependencyGraph))
         for dependentKey, dependencySet := range instance.dependencyGraph {
@@ -599,7 +603,7 @@ func (instance *scope) closeWithin(closeContext context.Context) error {
     /* the lock is released before anything is closed, with the scope already marked closed, so a Close reaching back reads a closed scope */
     instance.mutex.Unlock()
 
-    return closeCreatedScopeInstances(closeContext, createdInstances, createdTypeInstances, createdAliasNodeKeys, dependencyGraph, evictedCreatedInstances, creationOrderByNodeKey)
+    return closeCreatedScopeInstances(closeContext, createdInstances, createdTypeInstances, createdAliasNodeKeys, dependencyGraph, evictedCreatedInstances, creationOrderByNodeKey, closeFailureStackBytes)
 }
 
 /* closeCreatedScopeInstances closes each service the scope built once, through CloseWithContext, dependents before dependencies, creation order latest first as the tie-break. An instance filed under name and type is collapsed onto its name node first. A failing or panicking close is recorded and the loop carries on. The evicted instances close after the ordered walk. */
@@ -611,6 +615,7 @@ func closeCreatedScopeInstances(
     dependencyGraph map[string]map[string]struct{},
     evictedCreatedInstances []any,
     creationOrderByNodeKey map[string]int,
+    closeFailureStackBytes bound.Resolved[int],
 ) error {
     nodeKeys := make([]string, 0, len(createdInstances)+len(createdTypeInstances))
     valueOfNodeKey := make(map[string]any, len(createdInstances)+len(createdTypeInstances))
@@ -729,7 +734,7 @@ func closeCreatedScopeInstances(
         if nil != closeErr {
             failureLine := errorText(closeErr)
             failures[nodeKey] = failureLine
-            recordCloseFailureDetails(failureDetails, nodeKey, closeErr, failureLine)
+            recordCloseFailureDetails(failureDetails, nodeKey, closeErr, failureLine, closeFailureStackBytes)
         }
     }
 

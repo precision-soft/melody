@@ -9,6 +9,7 @@ import (
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/cli"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/config"
@@ -52,6 +53,13 @@ type ApplicationConfig struct {
     ContainerCreationWaiters bound.Count
     /* ContainerTeardownSequential closes the container's services one after the other instead of in waves, for services whose Close methods touch shared external state the container cannot see; the field is the default of kernel.container_teardown_sequential, which reads MELODY_CONTAINER_TEARDOWN_SEQUENTIAL unless overridden. */
     ContainerTeardownSequential bool
+    /* ContainerTeardownWalk bounds the walk that infers the container's teardown edges, handed to ContainerConfig.TeardownWalk: 12 deep, 256 fields or elements, 65,536 items when left out, unlimited refused, refused naming the ContainerConfig field. */
+    ContainerTeardownWalk container.TeardownWalkConfig
+    /* ContainerCloseFailureStackBytes bounds what one failed close contributes to the teardown error, handed to ContainerConfig.CloseFailureStackBytes: 2,048 when left out, at least 4, unlimited admitted. */
+    ContainerCloseFailureStackBytes bound.Count
+
+    /* CliErrorCauseChainDepth bounds the causes a failed command's [error] line carries, handed to cli.RootConfig.ErrorCauseChainDepth: 8 when left out, at least 0, unlimited refused, refused naming the RootConfig field. */
+    CliErrorCauseChainDepth bound.Count
 
     /* EnvironmentKeys are the .env keys the application owns, outside the MELODY_ namespace, each with the default, rule, secret mark, retired spellings and refusals of a module's key. They are declared when the application is built, before any parameter is read. A key in the MELODY_ namespace is refused. */
     EnvironmentKeys []configcontract.EnvironmentKey
@@ -149,6 +157,11 @@ func NewApplication(
         exception.Panic(exception.NewError("the scope teardown timeout is refused", nil, scopeTeardownTimeoutErr))
     }
 
+    /* the tree is built at the cli run, so its depth is refused here, with the application's other configuration errors */
+    if _, cliErrorCauseChainDepthErr := bound.Resolve(applicationConfig.CliErrorCauseChainDepth, cli.ErrorCauseChainDepthRule()); nil != cliErrorCauseChainDepthErr {
+        exception.Panic(exception.FromError(cliErrorCauseChainDepthErr))
+    }
+
     containerCreationWaiters, containerCreationWaitersErr := resolveContainerCreationWaiters(configuration, applicationConfig)
     if nil != containerCreationWaitersErr {
         exception.Panic(exception.NewError("the container creation waiters are refused", nil, containerCreationWaitersErr))
@@ -193,9 +206,11 @@ func NewApplication(
         kernelseam.NewToken(),
         configuration,
         container.NewContainer(container.ContainerConfig{
-            ScopeTeardownTimeout: scopeTeardownTimeout.Limit(),
-            CreationWaiters:      containerCreationWaiters.Limit(),
-            TeardownSequential:   resolveContainerTeardownSequential(configuration, applicationConfig),
+            ScopeTeardownTimeout:   scopeTeardownTimeout.Limit(),
+            CreationWaiters:        containerCreationWaiters.Limit(),
+            TeardownSequential:     resolveContainerTeardownSequential(configuration, applicationConfig),
+            TeardownWalk:           applicationConfig.ContainerTeardownWalk,
+            CloseFailureStackBytes: applicationConfig.ContainerCloseFailureStackBytes,
         }),
         httpRouter,
         eventDispatcher,

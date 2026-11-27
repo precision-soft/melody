@@ -14,6 +14,7 @@ import (
     "time"
     "unicode/utf8"
 
+    "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -877,7 +878,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
         if nil != closeErr {
             failureLine := errorText(closeErr)
             failures[candidate.nodeKey] = failureLine
-            recordCloseFailureDetails(failureDetails, candidate.nodeKey, closeErr, failureLine)
+            recordCloseFailureDetails(failureDetails, candidate.nodeKey, closeErr, failureLine, instance.closeFailureStackBytes)
         }
     }
 
@@ -1252,18 +1253,15 @@ func containedClose(closeFunction func() error) (closeErr error) {
     return closeErr
 }
 
-/* closeFailureStackLimit bounds the bytes one failed close contributes to the teardown error, a single record; the top frames name the close. */
-const closeFailureStackLimit = 2048
-
-/* boundedCloseFailureDetail cuts a text detail to the limit, naming the cut, and backs off to the start of the rune the limit lands in. A detail that is not text is answered unchanged. */
-func boundedCloseFailureDetail(value any) any {
+/* boundedCloseFailureDetail cuts a text detail to the limit, ContainerConfig.CloseFailureStackBytes, naming the cut, and backs off to the start of the rune the limit lands in; the top frames name the close. A detail that is not text, or an unlimited limit, answers the detail unchanged. */
+func boundedCloseFailureDetail(value any, limit bound.Resolved[int]) any {
     text, isText := value.(string)
-    if false == isText || closeFailureStackLimit >= len(text) {
+    if false == isText || true == limit.Unlimited || limit.Value >= len(text) {
         return value
     }
 
-    kept := closeFailureStackLimit
-    for closeFailureStackLimit-(utf8.UTFMax-1) < kept && false == utf8.RuneStart(text[kept]) {
+    kept := limit.Value
+    for limit.Value-(utf8.UTFMax-1) < kept && false == utf8.RuneStart(text[kept]) {
         kept--
     }
 
@@ -1276,6 +1274,7 @@ func recordCloseFailureDetails(
     nodeKey string,
     closeErr error,
     failureLine string,
+    stackLimit bound.Resolved[int],
 ) {
     details := containedCloseFailureDetails(closeErr)
 
@@ -1290,7 +1289,7 @@ func recordCloseFailureDetails(
             continue
         }
 
-        details[boundedKey] = boundedCloseFailureDetail(existing)
+        details[boundedKey] = boundedCloseFailureDetail(existing, stackLimit)
     }
 
     if 0 == len(details) {

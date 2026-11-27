@@ -66,5 +66,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Documentation
 
+- `README.md`: the cap of eight delay buckets is written with its reason — each tier is a queue the transport declares on the broker, so the list is topology a deployment migrates — beside the constant's GoDoc.
 - readme: carried from the third major (unreleased): the dead-lettering section states the headers a replay from the dead-letter queue deletes, the retry and failure-transport counters and the broker's `x-death`, and the one it keeps, `x-message-type`.
 - readme: the server-sent event backplane section names `ServerSentEventBackplaneConfig.CloseTimeout` with its default, the provider's when built through one and 30s otherwise, its minimum and the unlimited refusal, and the sample sets `CallTimeout`.

@@ -316,3 +316,9 @@ func awaitServing(t *testing.T, address string) {
 
     t.Fatalf("the test's own server never answered on %s: %s", address, answered)
 }
+
+/* teardownWalkHolder is a service value whose teardown walk queues two items per level */
+type teardownWalkHolder struct {
+    first  *teardownWalkHolder
+    second *teardownWalkHolder
+}

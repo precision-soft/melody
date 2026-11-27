@@ -80,6 +80,7 @@ func editorRuntime(t *testing.T) melodycontainercontract.Runtime {
                 map[string]melodyserializercontract.Serializer{
                     melodyserializer.MimeApplicationJson: melodyserializer.NewJsonSerializer(),
                 },
+                melodyserializer.SerializerManagerConfig{},
             )
         },
         melodycontainer.RegisterOptions{},

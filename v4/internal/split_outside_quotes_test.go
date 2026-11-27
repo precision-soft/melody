@@ -29,8 +29,8 @@ func TestSplitOutsideQuotes_CapsTheMemberCount(t *testing.T) {
 
     members, cut := SplitOutsideQuotes(hostileValue, ',')
 
-    if maximumSplitOutsideQuotesMembers < len(members) {
-        t.Fatalf("expected at most %d members, got %d", maximumSplitOutsideQuotesMembers, len(members))
+    if MaximumSplitOutsideQuotesMembers < len(members) {
+        t.Fatalf("expected at most %d members, got %d", MaximumSplitOutsideQuotesMembers, len(members))
     }
 
     if false == cut {
@@ -44,5 +44,17 @@ func TestSplitOutsideQuotes_ALegitimateListIsNotTruncated(t *testing.T) {
 
     if 4 != len(members) || true == cut {
         t.Fatalf("expected 4 members and no cut, got %d (cut %v): %v", len(members), cut, members)
+    }
+}
+
+func TestSplitOutsideQuotesWithin_CutsAtTheGivenBound(t *testing.T) {
+    members, cut := SplitOutsideQuotesWithin("a,b,c,d", ',', 2)
+    if false == cut || 2 != len(members) || "b,c,d" != members[1] {
+        t.Fatalf("expected a bound of 2 to keep the remainder as the second member and report the cut, got %q %v", members, cut)
+    }
+
+    members, cut = SplitOutsideQuotesWithin("a,b,c,d", ',', 4)
+    if true == cut || 4 != len(members) {
+        t.Fatalf("expected a bound of 4 to split four members whole, got %q %v", members, cut)
     }
 }

@@ -1,10 +1,15 @@
 package internal
 
-/* maximumSplitOutsideQuotesMembers bounds the work one header line can name. Past it the remainder stays the final member and the cut is reported, because the remainder can carry a refusal a reader must not miss. */
-const maximumSplitOutsideQuotesMembers = 64
+/* MaximumSplitOutsideQuotesMembers bounds the work one header line can name, the default of a reader that takes a bound of its own. Past it the remainder stays the final member and the cut is reported, because the remainder can carry a refusal a reader must not miss. */
+const MaximumSplitOutsideQuotesMembers = 64
 
-/* SplitOutsideQuotes splits value on separator outside double-quoted sections, where a backslash escapes the next character, so a quoted parameter value stays in its member. It is the one splitter for every negotiating reader. It cuts at most maximumSplitOutsideQuotesMembers members, and the second result reports the cut so a reader can refuse a list it only half read. */
+/* SplitOutsideQuotes splits value on separator outside double-quoted sections, where a backslash escapes the next character, so a quoted parameter value stays in its member. It is the one splitter for every negotiating reader. It cuts at most MaximumSplitOutsideQuotesMembers members, and the second result reports the cut so a reader can refuse a list it only half read. */
 func SplitOutsideQuotes(value string, separator byte) ([]string, bool) {
+    return SplitOutsideQuotesWithin(value, separator, MaximumSplitOutsideQuotesMembers)
+}
+
+/* SplitOutsideQuotesWithin is SplitOutsideQuotes cutting at most maximumMembers members, for a reader whose bound is configured; a bound below one reads as one. */
+func SplitOutsideQuotesWithin(value string, separator byte, maximumMembers int) ([]string, bool) {
     result := make([]string, 0, 4)
     insideQuotes := false
     escaped := false
@@ -32,7 +37,7 @@ func SplitOutsideQuotes(value string, separator byte) ([]string, bool) {
         }
 
         if separator == character && false == insideQuotes {
-            if maximumSplitOutsideQuotesMembers-1 <= len(result) {
+            if maximumMembers-1 <= len(result) {
                 return append(result, value[start:]), true
             }
 

@@ -512,3 +512,64 @@ func TestNewApplication_TheNamespaceFieldReachesTheKernelConfiguration(t *testin
         t.Fatalf("expected the field's namespace, got %q", namespace)
     }
 }
+
+/* NewApplication exits the process on a refusal, so each refused field runs in a child that names the case */
+func TestNewApplication_TheContainerWalkStackAndCliDepthFieldsAreRefusedNamingTheField(t *testing.T) {
+    cases := map[string]struct {
+        config ApplicationConfig
+        field  string
+    }{
+        "depth":  {ApplicationConfig{ContainerTeardownWalk: container.TeardownWalkConfig{Depth: bound.Of(0)}}, "ContainerConfig.TeardownWalk.Depth"},
+        "nodes":  {ApplicationConfig{ContainerTeardownWalk: container.TeardownWalkConfig{Nodes: bound.UnlimitedCount()}}, "ContainerConfig.TeardownWalk.Nodes"},
+        "stack":  {ApplicationConfig{ContainerCloseFailureStackBytes: bound.Of(3)}, "ContainerConfig.CloseFailureStackBytes"},
+        "causes": {ApplicationConfig{CliErrorCauseChainDepth: bound.UnlimitedCount()}, "RootConfig.ErrorCauseChainDepth"},
+    }
+
+    if name := os.Getenv(newApplicationRefusalProbeMarker); "" != name {
+        refused := cases[name].config
+        refused.EnvironmentFiles = testhelper.NewEmbeddedEnvironmentFs()
+        refused.PublicFiles = testhelper.NewEmbeddedStaticFs()
+
+        NewApplication(context.Background(), refused)
+
+        os.Exit(93)
+    }
+
+    for name, testCase := range cases {
+        child := exec.Command(os.Args[0], "-test.run=^TestNewApplication_TheContainerWalkStackAndCliDepthFieldsAreRefusedNamingTheField$")
+        child.Env = append(os.Environ(), newApplicationRefusalProbeMarker+"="+name)
+
+        output, runErr := child.CombinedOutput()
+
+        exitError, isExitError := runErr.(*exec.ExitError)
+        if false == isExitError || 1 != exitError.ExitCode() || false == strings.Contains(string(output), `"field":"`+testCase.field+`"`) {
+            t.Fatalf("%s: expected the application refused naming %s, got err %v with output: %s", name, testCase.field, runErr, string(output))
+        }
+    }
+}
+
+func TestNewApplication_TheContainerWalkFieldReachesTheContainer(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), ContainerTeardownWalk: container.TeardownWalkConfig{Nodes: bound.Of(2)}})
+    serviceContainer := applicationInstance.kernel.ServiceContainer()
+    defer func() {
+        _ = serviceContainer.CloseWithContext(context.Background())
+    }()
+
+    if registerErr := serviceContainer.Register(
+        "app.holder",
+        func(_ containercontract.Resolver) (*teardownWalkHolder, error) {
+            return &teardownWalkHolder{first: &teardownWalkHolder{}}, nil
+        },
+        containercontract.RegisterOptions{},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "app.holder"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if reported := serviceContainer.(interface{ TeardownWalkBudgetEnded() []string }).TeardownWalkBudgetEnded(); 1 != len(reported) {
+        t.Fatalf("expected the walk budget of the field to reach the container and end the holder's walk, got %v", reported)
+    }
+}

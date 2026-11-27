@@ -139,6 +139,7 @@ func newProductDoorFixtureOver(t *testing.T, wrap func(stores productDoorStores)
                 map[string]melodyserializercontract.Serializer{
                     melodyserializer.MimeApplicationJson: melodyserializer.NewJsonSerializer(),
                 },
+                melodyserializer.SerializerManagerConfig{},
             )
         },
         melodycontainer.RegisterOptions{},

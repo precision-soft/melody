@@ -11,6 +11,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
+/* maxInterpolationDepth bounds the nesting of plural and select blocks a message renders: a cycle guard, since every level is a recursion on the goroutine stack and no translated sentence nests a tenth as deep, so no deployment tunes it. */
 const maxInterpolationDepth = 32
 
 func formatMessage(pattern string, parameters map[string]any, locale string) string {

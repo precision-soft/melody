@@ -655,6 +655,7 @@ func TestBootContainer_TheSerializerManagerIsSubstitutedNotCollided(t *testing.T
             "application/json": serializer.NewJsonSerializer(),
             "application/xml":  serializer.NewJsonSerializer(),
         },
+        serializer.SerializerManagerConfig{},
     )
     if nil != managerErr {
         t.Fatalf("unexpected manager error: %v", managerErr)

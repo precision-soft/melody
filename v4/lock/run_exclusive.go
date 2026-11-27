@@ -17,8 +17,37 @@ import (
     "github.com/precision-soft/melody/v4/logging"
 )
 
-/* defaultSessionProbeInterval is the liveness-probe cadence for an unlimited ttl: a session-style locker (MySQL GET_LOCK, PostgreSQL advisory) holds until the session drops, so there is no lease to extend, only a connection to watch. */
+/* defaultSessionProbeInterval is the liveness-probe cadence for an unlimited ttl when ProbeInterval is left out: a session-style locker (MySQL GET_LOCK, PostgreSQL advisory) holds until the session drops, so there is no lease to extend, only a connection to watch. */
 const defaultSessionProbeInterval = 15 * time.Second
+
+func sessionProbeIntervalRule(name string) bound.Rule[time.Duration] {
+    return bound.Rule[time.Duration]{
+        Name:    name,
+        Default: defaultSessionProbeInterval,
+        Minimum: minimumRefreshInterval,
+    }
+}
+
+/* resolveSessionProbeInterval resolves the probe cadence of a session lock; one set beside a lease ttl, which is renewed at half its ttl and never probed, is refused naming the field rather than ignored. */
+func resolveSessionProbeInterval(field string, configured bound.Duration, ttl bound.Resolved[time.Duration]) (time.Duration, error) {
+    if false == ttl.Unlimited && false == configured.IsAbsent() {
+        return 0, exception.NewError(
+            "the probe interval applies to an unlimited ttl only",
+            exceptioncontract.Context{
+                "field": field,
+                "ttl":   ttl.Limit().String(),
+            },
+            nil,
+        )
+    }
+
+    probeInterval, probeIntervalErr := bound.Resolve(configured, sessionProbeIntervalRule(field))
+    if nil != probeIntervalErr {
+        return 0, probeIntervalErr
+    }
+
+    return probeInterval.Value, nil
+}
 
 /* minimumRefreshInterval floors the derived refresh cadence, since a ttl of a few nanoseconds would compute a zero, and time.NewTicker(0) panics on the refresh goroutine, where no recover reaches. */
 const minimumRefreshInterval = 1 * time.Millisecond
@@ -36,7 +65,12 @@ type ExclusiveConfig struct {
 
     /* StopRenewalLimit is how long after the stop the lease is still renewed while callback winds down: the stop cancels callback's context, not the renewal, so no peer acquires the lock while the work still runs. 30s by default, raised to the refresh interval when that is longer, the literal to align with the application's teardown timeout; when set, at least 1ms and not below the refresh interval; unlimited renews until callback returns. Past it the renewal ends, the lease lapses by itself and the run answers the error naming the limit. */
     StopRenewalLimit bound.Duration
+
+    /* ProbeInterval is the liveness-probe cadence of a session-style lock, read under an unlimited Ttl only: 15s by default, at least 1ms, unlimited refused, since a lock never probed loses its session unnoticed; set beside a lease Ttl it is refused naming the field. */
+    ProbeInterval bound.Duration
 }
+
+const exclusiveProbeIntervalField = "ExclusiveConfig.ProbeInterval"
 
 var exclusiveTtlRule = bound.Rule[time.Duration]{
     Name:              "ExclusiveConfig.Ttl",
@@ -48,7 +82,7 @@ var exclusiveTtlRule = bound.Rule[time.Duration]{
 const exclusiveStopRenewalLimitField = "ExclusiveConfig.StopRenewalLimit"
 
 
-/* RunExclusive acquires the named lock, runs callback while holding it, and always releases afterwards, so the ttl acts only as crash-safety, never as the run cadence. The configuration is resolved before the lock is created, and a refusal is answered as the error, naming the field. It returns (false, nil) without running callback when another holder owns the lock, so of N instances launched together one runs the command. While callback runs, the lock is refreshed at half the ttl on a background goroutine; the child runtime handed to callback is cancelled at the lease's demotion instant, a quarter of the ttl before the lease last written lapses, when no renewal has landed by then, so the callback is told to stop before another instance can acquire the lock; a failed refresh is retried once before that instant. An unlimited ttl selects the session-lock behavior: no lease to extend, only a liveness probe at defaultSessionProbeInterval. A stop cancels callback's runtime, not the renewal: the lease is still renewed while callback winds down, up to ExclusiveConfig.StopRenewalLimit, past which the run answers the error naming the limit; a session lock's probe runs until callback returns. */
+/* RunExclusive acquires the named lock, runs callback while holding it, and always releases afterwards, so the ttl acts only as crash-safety, never as the run cadence. The configuration is resolved before the lock is created, and a refusal is answered as the error, naming the field. It returns (false, nil) without running callback when another holder owns the lock, so of N instances launched together one runs the command. While callback runs, the lock is refreshed at half the ttl on a background goroutine; the child runtime handed to callback is cancelled at the lease's demotion instant, a quarter of the ttl before the lease last written lapses, when no renewal has landed by then, so the callback is told to stop before another instance can acquire the lock; a failed refresh is retried once before that instant. An unlimited ttl selects the session-lock behavior: no lease to extend, only a liveness probe every ExclusiveConfig.ProbeInterval. A stop cancels callback's runtime, not the renewal: the lease is still renewed while callback winds down, up to ExclusiveConfig.StopRenewalLimit, past which the run answers the error naming the limit; a session lock's probe runs until callback returns. */
 func RunExclusive(
     runtimeInstance containercontract.Runtime,
     locker lockcontract.Locker,
@@ -79,7 +113,12 @@ func RunExclusive(
         return false, ttlErr
     }
 
-    refreshInterval, _ := resolveRefreshSchedule(ttl)
+    probeInterval, probeIntervalErr := resolveSessionProbeInterval(exclusiveProbeIntervalField, config.ProbeInterval, ttl)
+    if nil != probeIntervalErr {
+        return false, probeIntervalErr
+    }
+
+    refreshInterval, _ := resolveRefreshSchedule(ttl, probeInterval)
     stopRenewalLimit, stopRenewalLimitErr := resolveStopRenewalLimit(exclusiveStopRenewalLimitField, config.StopRenewalLimit, refreshInterval)
     if nil != stopRenewalLimitErr {
         return false, stopRenewalLimitErr
@@ -155,7 +194,7 @@ func RunExclusive(
             }
         }()
 
-        refreshFailure = refreshWhileHeld(renewalRuntime, lock, ttl, acquireIssuedAt, refreshDone, cancel, newStopRenewalWatch(runtimeInstance.Context(), stopRenewalLimit, ttl.Unlimited), name)
+        refreshFailure = refreshWhileHeld(renewalRuntime, lock, ttl, probeInterval, acquireIssuedAt, refreshDone, cancel, newStopRenewalWatch(runtimeInstance.Context(), stopRenewalLimit, ttl.Unlimited), name)
         if nil != refreshFailure {
             /* the lease could not be extended, so callback is stopped rather than left working beside whoever may hold the lock now */
             cancel()
@@ -181,18 +220,19 @@ func RunExclusive(
     return true, runErr
 }
 
-/* refreshWhileHeld extends the lease at half the ttl until done closes or the runtime context ends, returning the failure that cost the lease; an unlimited ttl probes a session lock at defaultSessionProbeInterval. The lease clock demotes the caller, not a single call: once the lease last written reaches its demotion instant, half a cadence before it lapses, with no renewal landed, the caller is demoted — by a timer, whatever the store is doing, with every renewal bounded to that instant — so the callback is told to stop while nobody else can yet acquire the lock. A failed renewal is retried once, halfway to that instant, since the next tick would come too late to save the lease. */
+/* refreshWhileHeld extends the lease at half the ttl until done closes or the runtime context ends, returning the failure that cost the lease; an unlimited ttl probes a session lock every probeInterval. The lease clock demotes the caller, not a single call: once the lease last written reaches its demotion instant, half a cadence before it lapses, with no renewal landed, the caller is demoted — by a timer, whatever the store is doing, with every renewal bounded to that instant — so the callback is told to stop while nobody else can yet acquire the lock. A failed renewal is retried once, halfway to that instant, since the next tick would come too late to save the lease. */
 func refreshWhileHeld(
     runtimeInstance containercontract.Runtime,
     lock lockcontract.Lock,
     ttl bound.Resolved[time.Duration],
+    probeInterval time.Duration,
     acquireIssuedAt time.Time,
     done <-chan struct{},
     demote func(),
     stopWatch *stopRenewalWatch,
     name string,
 ) error {
-    refreshInterval, refreshTtl := resolveRefreshSchedule(ttl)
+    refreshInterval, refreshTtl := resolveRefreshSchedule(ttl, probeInterval)
     refreshTimeout := resolveRefreshTimeout(refreshInterval)
 
     ticker := time.NewTicker(refreshInterval)
@@ -490,9 +530,9 @@ func leaseIsBeyondRecovery(now time.Time, leaseExpiry time.Time, refreshInterval
 }
 
 /* resolveRefreshSchedule derives the refresh cadence and the ttl each refresh writes: half of a lease ttl, or the session probe interval renewed for a multiple of it under an unlimited one. The interval is floored, since time.NewTicker panics on a non-positive duration. */
-func resolveRefreshSchedule(ttl bound.Resolved[time.Duration]) (time.Duration, time.Duration) {
-    refreshInterval := defaultSessionProbeInterval
-    refreshTtl := sessionProbeTtlFactor * defaultSessionProbeInterval
+func resolveRefreshSchedule(ttl bound.Resolved[time.Duration], probeInterval time.Duration) (time.Duration, time.Duration) {
+    refreshInterval := probeInterval
+    refreshTtl := sessionProbeTtlFactor * probeInterval
 
     if false == ttl.Unlimited {
         refreshInterval = ttl.Value / 2

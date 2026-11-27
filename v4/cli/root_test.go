@@ -8,6 +8,7 @@ import (
     "go/parser"
     "go/token"
     "io"
+    "strconv"
     "strings"
     "testing"
     "time"
@@ -335,5 +336,67 @@ func TestRoot_VersionFlagHasNoShortAliasAndTheHelpNamesTheVersion(t *testing.T) 
 
     if false == strings.Contains(buffer.String(), "VERSION:\n   <unknown>") {
         t.Fatalf("expected the help to name the undeclared version, got %q", buffer.String())
+    }
+}
+
+/* causeChainError answers an error carrying the given number of causes below it */
+func causeChainError(causes int) error {
+    var chain error = errors.New("link " + strconv.Itoa(causes))
+    for index := causes - 1; 0 < index; index = index - 1 {
+        chain = exception.NewError("link "+strconv.Itoa(index), nil, chain)
+    }
+
+    return exception.NewError("the command failed", nil, chain)
+}
+
+func TestNewRoot_TheErrorLineCarriesTheConfiguredCauseChainDepth(t *testing.T) {
+    for _, testCase := range []struct {
+        name    string
+        depth   bound.Count
+        carried int
+    }{
+        {"the default of eight", bound.Count{}, 8},
+        {"a lowered depth", bound.Of(2), 2},
+        {"a raised depth", bound.Of(11), 11},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            errorBuffer := &bytes.Buffer{}
+
+            root := NewRoot("app", "desc", RootConfig{Writer: &bytes.Buffer{}, ErrorWriter: errorBuffer, ErrorCauseChainDepth: testCase.depth})
+            root.Register(
+                &testCommand{
+                    nameValue:        "hello",
+                    descriptionValue: "hello",
+                    flagsValue:       output.StandardFlags(),
+                    runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
+                        return causeChainError(12)
+                    },
+                },
+                newTestRuntime(t),
+            )
+
+            _ = root.Run(context.Background(), []string{"app", "hello"})
+
+            line := errorBuffer.String()
+            carried := "cause " + strconv.Itoa(testCase.carried) + ": link " + strconv.Itoa(testCase.carried)
+            if false == strings.Contains(line, carried) || true == strings.Contains(line, "link "+strconv.Itoa(testCase.carried+1)) {
+                t.Fatalf("expected the error line to carry %d causes, got %q", testCase.carried, line)
+            }
+        })
+    }
+}
+
+func TestNewRoot_RefusesAnErrorCauseChainDepthOutsideItsRuleNamingTheField(t *testing.T) {
+    for name, depth := range map[string]bound.Count{"below its minimum": bound.Of(-1), "unlimited": bound.UnlimitedCount()} {
+        t.Run(name, func(t *testing.T) {
+            defer func() {
+                recoveredErr, isError := recover().(error)
+                if false == isError || "RootConfig.ErrorCauseChainDepth" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+                    t.Fatalf("expected the refusal naming RootConfig.ErrorCauseChainDepth, got %v", recoveredErr)
+                }
+            }()
+
+            NewRoot("app", "desc", RootConfig{ErrorCauseChainDepth: depth})
+        })
     }
 }

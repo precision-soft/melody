@@ -13,7 +13,7 @@ import (
 var timeType = reflect.TypeOf(time.Time{})
 var jsonMarshalerInterfaceType = reflect.TypeOf((*json.Marshaler)(nil)).Elem()
 
-/* maximumSchemaDepth bounds the descent into a type. Generate runs inside the spec handler and a stack overflow is fatal and cannot be recovered, so reaching the bound degrades to an undescribed position instead. */
+/* maximumSchemaDepth bounds the descent into a type. Generate runs inside the spec handler and a stack overflow is fatal and cannot be recovered, so reaching the bound degrades to an undescribed position instead; a stack backstop, not a figure a deployment tunes: a type nested sixty-four levels deep is not one a client reads from a document. */
 const maximumSchemaDepth = 64
 
 /* schemaDepthLimitDescription marks a position where the bound stopped the generator; the schema there accepts any value, so the document stays well-formed and permissive. */

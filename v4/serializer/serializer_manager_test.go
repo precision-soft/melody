@@ -6,6 +6,8 @@ import (
     "strings"
     "testing"
 
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     serializercontract "github.com/precision-soft/melody/v4/serializer/contract"
 )
@@ -33,6 +35,7 @@ func TestNewSerializerManager_PanicsOnEmptyMimeKey(t *testing.T) {
         map[string]serializercontract.Serializer{
             "   ": &serializerTestSerializer{name: "x"},
         },
+        SerializerManagerConfig{},
     )
 
     if nil == err {
@@ -45,6 +48,7 @@ func TestSerializerManager_Get_NormalizesMime(t *testing.T) {
         map[string]serializercontract.Serializer{
             "application/json": &serializerTestSerializer{name: "json"},
         },
+        SerializerManagerConfig{},
     )
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
@@ -64,6 +68,7 @@ func TestSerializerManager_ResolveByAcceptHeader_DefaultsToApplicationJson(t *te
         map[string]serializercontract.Serializer{
             MimeApplicationJson: &serializerTestSerializer{name: "json"},
         },
+        SerializerManagerConfig{},
     )
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
@@ -120,6 +125,7 @@ func TestSerializerManager_ResolveByAcceptHeader_WildcardSubtype_SelectsLexicalF
             "text/plain": &testSerializerPlain{},
             "text/html":  &testSerializerHtml{},
         },
+        SerializerManagerConfig{},
     )
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
@@ -139,7 +145,7 @@ func TestResolveByAcceptHeader_MostSpecificRangeWins(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeApplicationJson: NewJsonSerializer(),
         MimeTextPlain:       NewPlainTextSerializer(PlainTextSerializerConfig{}),
-    })
+    }, SerializerManagerConfig{})
     if nil != managerErr {
         t.Fatalf("unexpected manager error: %v", managerErr)
     }
@@ -169,7 +175,7 @@ func TestResolveByAcceptHeader_MostSpecificRangeWins(t *testing.T) {
 func TestResolveByAcceptHeader_ExplicitRefusalIsNotAcceptable(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeApplicationJson: NewJsonSerializer(),
-    })
+    }, SerializerManagerConfig{})
     if nil != managerErr {
         t.Fatalf("unexpected manager error: %v", managerErr)
     }
@@ -193,6 +199,7 @@ func TestNewSerializerManager_RefusesATypedNilSerializer(t *testing.T) {
         map[string]serializercontract.Serializer{
             MimeApplicationJson: typedNil,
         },
+        SerializerManagerConfig{},
     )
 
     if nil == err {
@@ -210,6 +217,7 @@ func TestNewSerializerManager_RefusesCollidingMimeKeys(t *testing.T) {
             "application/json":                &serializerTestSerializer{name: "bare"},
             "Application/JSON; charset=utf-8": &serializerTestSerializer{name: "spelled"},
         },
+        SerializerManagerConfig{},
     )
 
     if nil == err {
@@ -225,7 +233,7 @@ func TestResolveByAcceptHeader_WithoutJsonFallsBackToTheFirstConfiguredSerialize
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         "text/plain": &testSerializerPlain{},
         "text/html":  &testSerializerHtml{},
-    })
+    }, SerializerManagerConfig{})
     if nil != managerErr {
         t.Fatalf("unexpected manager error: %v", managerErr)
     }
@@ -246,7 +254,7 @@ func TestResolveByAcceptHeader_MalformedQualityDropsTheMember(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeApplicationJson: NewJsonSerializer(),
         MimeTextPlain:       NewPlainTextSerializer(PlainTextSerializerConfig{}),
-    })
+    }, SerializerManagerConfig{})
     if nil != managerErr {
         t.Fatalf("unexpected manager error: %v", managerErr)
     }
@@ -266,7 +274,7 @@ func TestResolveByAcceptHeader_AHeaderWithNoReadableMemberServesTheDefault(t *te
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeApplicationJson: NewJsonSerializer(),
         MimeTextPlain:       NewPlainTextSerializer(PlainTextSerializerConfig{}),
-    })
+    }, SerializerManagerConfig{})
     if nil != managerErr {
         t.Fatalf("unexpected manager error: %v", managerErr)
     }
@@ -286,7 +294,7 @@ func TestResolveByAcceptHeader_AHeaderWithNoReadableMemberServesTheDefault(t *te
 func TestResolveByAcceptHeader_QuotedCommaKeepsTheRefusal(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeTextPlain: NewPlainTextSerializer(PlainTextSerializerConfig{}),
-    })
+    }, SerializerManagerConfig{})
     if nil != managerErr {
         t.Fatalf("unexpected manager error: %v", managerErr)
     }
@@ -300,7 +308,7 @@ func TestResolveByAcceptHeader_QuotedCommaKeepsTheRefusal(t *testing.T) {
 func TestResolveByAcceptHeader_UnmatchedHeaderStillFallsBackToJson(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeApplicationJson: NewJsonSerializer(),
-    })
+    }, SerializerManagerConfig{})
     if nil != managerErr {
         t.Fatalf("unexpected manager error: %v", managerErr)
     }
@@ -319,7 +327,7 @@ func TestResolveByAcceptHeader_ARefusedTypeLeavesTheUnrefusedOneServable(t *test
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeApplicationJson: NewJsonSerializer(),
         MimeTextPlain:       NewPlainTextSerializer(PlainTextSerializerConfig{}),
-    })
+    }, SerializerManagerConfig{})
     if nil != managerErr {
         t.Fatalf("unexpected manager error: %v", managerErr)
     }
@@ -344,7 +352,7 @@ func TestResolveByAcceptHeader_ARefusedTypeLeavesTheUnrefusedOneServable(t *test
 func TestSerializerManager_Get_RefusesAMimeThatNormalizesToNothing(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeApplicationJson: NewJsonSerializer(),
-    })
+    }, SerializerManagerConfig{})
     if nil != managerErr {
         t.Fatalf("unexpected manager error: %v", managerErr)
     }
@@ -362,7 +370,7 @@ func TestSerializerManager_Get_AnswersTheRegisteredSerializerAndMissesTheOthers(
 
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeApplicationJson: registered,
-    })
+    }, SerializerManagerConfig{})
     if nil != managerErr {
         t.Fatalf("unexpected manager error: %v", managerErr)
     }
@@ -379,7 +387,7 @@ func TestSerializerManager_Get_AnswersTheRegisteredSerializerAndMissesTheOthers(
 }
 
 func TestResolveByAcceptHeader_AnEmptyManagerRefusesBothWays(t *testing.T) {
-    manager, managerErr := NewSerializerManager(nil)
+    manager, managerErr := NewSerializerManager(nil, SerializerManagerConfig{})
     if nil != managerErr {
         t.Fatalf("unexpected manager error: %v", managerErr)
     }
@@ -416,7 +424,7 @@ func TestResolveByAcceptHeader_AnEmptyManagerRefusesBothWays(t *testing.T) {
 }
 
 func TestSerializerManager_DefaultSerializer_AnEmptyManagerHasNoDefault(t *testing.T) {
-    manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{})
+    manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{}, SerializerManagerConfig{})
     if nil != managerErr {
         t.Fatalf("unexpected manager error: %v", managerErr)
     }
@@ -428,7 +436,7 @@ func TestSerializerManager_DefaultSerializer_AnEmptyManagerHasNoDefault(t *testi
 }
 
 func TestNewSerializerManager_ANilMapBuildsAnEmptyManager(t *testing.T) {
-    manager, managerErr := NewSerializerManager(nil)
+    manager, managerErr := NewSerializerManager(nil, SerializerManagerConfig{})
     if nil != managerErr {
         t.Fatalf("unexpected manager error: %v", managerErr)
     }
@@ -466,7 +474,7 @@ func TestResolveByAcceptHeader_CatchAllHonoursTheJsonFirstDefault(t *testing.T) 
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         "application/json":     jsonSerializer,
         "application/hal+json": halSerializer,
-    })
+    }, SerializerManagerConfig{})
     if nil != managerErr {
         t.Fatalf("manager construction failed: %v", managerErr)
     }
@@ -495,7 +503,7 @@ func TestResolveByAcceptHeader_AJsonTieWithoutJsonStaysLexicallyFirst(t *testing
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         "application/hal+json": halSerializer,
         "application/xml":      xmlSerializer,
-    })
+    }, SerializerManagerConfig{})
     if nil != managerErr {
         t.Fatalf("manager construction failed: %v", managerErr)
     }
@@ -522,7 +530,7 @@ func TestResolveByAcceptHeader_AHeaderCutAtTheCapIsRefused(t *testing.T) {
     manager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeApplicationJson: NewJsonSerializer(),
         MimeTextPlain:       NewPlainTextSerializer(PlainTextSerializerConfig{}),
-    })
+    }, SerializerManagerConfig{})
     if nil != managerErr {
         t.Fatalf("unexpected manager error: %v", managerErr)
     }
@@ -535,5 +543,40 @@ func TestResolveByAcceptHeader_AHeaderCutAtTheCapIsRefused(t *testing.T) {
     within, resolveErr := manager.ResolveByAcceptHeader(acceptListWithTailPast("*/*;q=1", 62, "application/json;q=0"))
     if nil != resolveErr || false == strings.HasPrefix(within.ContentType(), MimeTextPlain) {
         t.Fatalf("expected the refusal within the cap to fall to the plain serializer, got %v / %v", within, resolveErr)
+    }
+}
+
+func TestResolveByAcceptHeader_TheMemberCapFollowsMaxAcceptMembers(t *testing.T) {
+    serializers := map[string]serializercontract.Serializer{
+        MimeApplicationJson: NewJsonSerializer(),
+        MimeTextPlain:       NewPlainTextSerializer(PlainTextSerializerConfig{}),
+    }
+
+    raised, raisedErr := NewSerializerManager(serializers, SerializerManagerConfig{MaxAcceptMembers: bound.Of(200)})
+    if nil != raisedErr {
+        t.Fatalf("unexpected manager error: %v", raisedErr)
+    }
+
+    within, resolveErr := raised.ResolveByAcceptHeader(acceptListWithTailPast("*/*;q=1", 150, "application/json;q=0"))
+    if nil != resolveErr || false == strings.HasPrefix(within.ContentType(), MimeTextPlain) {
+        t.Fatalf("expected a raised cap to read a 152-member header whole, got %v / %v", within, resolveErr)
+    }
+
+    lowered, loweredErr := NewSerializerManager(serializers, SerializerManagerConfig{MaxAcceptMembers: bound.Of(2)})
+    if nil != loweredErr {
+        t.Fatalf("unexpected manager error: %v", loweredErr)
+    }
+
+    if _, resolveErr := lowered.ResolveByAcceptHeader("text/plain, application/json, */*"); false == errors.Is(resolveErr, ErrNotAcceptable) {
+        t.Fatalf("expected a cap of 2 to refuse a three-member header, got %v", resolveErr)
+    }
+
+    for name, configured := range map[string]bound.Count{"below its minimum": bound.Of(0), "unlimited": bound.UnlimitedCount()} {
+        t.Run(name, func(t *testing.T) {
+            _, refusal := NewSerializerManager(serializers, SerializerManagerConfig{MaxAcceptMembers: configured})
+            if nil == refusal || "SerializerManagerConfig.MaxAcceptMembers" != exception.LogContext(refusal, exception.LogContextConfig{})["field"] {
+                t.Fatalf("expected the refusal naming SerializerManagerConfig.MaxAcceptMembers, got %v", refusal)
+            }
+        })
     }
 }

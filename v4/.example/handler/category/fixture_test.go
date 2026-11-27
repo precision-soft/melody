@@ -106,6 +106,7 @@ func newCategoryDoorFixture(t *testing.T) *categoryDoorFixture {
                 map[string]melodyserializercontract.Serializer{
                     melodyserializer.MimeApplicationJson: melodyserializer.NewJsonSerializer(),
                 },
+                melodyserializer.SerializerManagerConfig{},
             )
         },
         melodycontainer.RegisterOptions{},

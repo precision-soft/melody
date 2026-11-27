@@ -3,10 +3,12 @@ package container
 import (
     "context"
     "errors"
+    "reflect"
     "strings"
     "sync"
     "testing"
 
+    "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -435,4 +437,21 @@ func writeDependencyRingEdge(t *testing.T, serviceContainer containercontract.Co
     defer concrete.mutex.Unlock()
 
     concrete.registerDependencyLocked(containerNameNodeKey(dependentName), containerNameNodeKey(dependencyName))
+}
+
+/* defaultTeardownWalk is the walk bound a ContainerConfig left out resolves to */
+func defaultTeardownWalk() teardownWalkLimits {
+    return teardownWalkLimits{depth: TeardownWalkDepthRule().Default, elements: TeardownWalkElementsRule().Default, nodes: TeardownWalkNodesRule().Default}
+}
+
+/* walkHeldPointers walks under the default bound and drops the budget report */
+func walkHeldPointers(root any, opaqueIdentities map[pointerIdentity]any, opaqueTypes map[reflect.Type]struct{}) []heldPointer {
+    found, _ := heldPointerIdentities(root, opaqueIdentities, opaqueTypes, defaultTeardownWalk())
+
+    return found
+}
+
+/* defaultCloseFailureStackBytes is the cut a ContainerConfig left out resolves to */
+func defaultCloseFailureStackBytes() bound.Resolved[int] {
+    return bound.Resolved[int]{Value: CloseFailureStackBytesRule().Default}
 }

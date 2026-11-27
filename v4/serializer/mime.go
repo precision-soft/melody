@@ -30,9 +30,9 @@ type acceptedMime struct {
 }
 
 /* parseAcceptHeader drops a member whose q falls outside the RFC 7231 qvalue grammar rather than guessing a weight. */
-func parseAcceptHeader(acceptHeader string) ([]acceptedMime, bool) {
+func parseAcceptHeader(acceptHeader string, maximumMembers int) ([]acceptedMime, bool) {
     /* a header the member cap cut is reported, and the manager refuses it as not acceptable, since a member past the cap may carry a refusal */
-    parts, cut := internal.SplitOutsideQuotes(acceptHeader, ',')
+    parts, cut := internal.SplitOutsideQuotesWithin(acceptHeader, ',', maximumMembers)
     if true == cut {
         return nil, true
     }

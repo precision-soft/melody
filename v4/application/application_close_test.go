@@ -11,6 +11,7 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/config"
+    "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
@@ -445,3 +446,48 @@ func TestApplication_ACloseEndedByTheTeardownTimeoutNamesIt(t *testing.T) {
     }
 }
 
+
+/* a walk the node budget ended loses the teardown edges past it, so the close names the service before the teardown that may order it wrongly; a walk that ended by itself writes nothing */
+func TestApplicationClose_AServiceWhoseTeardownWalkTheBudgetEndedIsNamedInAWarning(t *testing.T) {
+    for _, testCase := range []struct {
+        name   string
+        nodes  bound.Count
+        warned bool
+    }{
+        {"the default budget", bound.Count{}, false},
+        {"a budget of two items", bound.Of(2), true},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            kernelInstance := newTestKernel()
+            kernelInstance.serviceContainer = container.NewContainer(container.ContainerConfig{TeardownWalk: container.TeardownWalkConfig{Nodes: testCase.nodes}})
+            applicationInstance := newScopedServiceApplication(kernelInstance)
+
+            serviceContainer := kernelInstance.ServiceContainer()
+
+            if registerErr := serviceContainer.Register(
+                "app.holder",
+                func(_ containercontract.Resolver) (*teardownWalkHolder, error) {
+                    return &teardownWalkHolder{first: &teardownWalkHolder{first: &teardownWalkHolder{}}}, nil
+                },
+                containercontract.RegisterOptions{},
+            ); nil != registerErr {
+                t.Fatalf("unexpected register error: %v", registerErr)
+            }
+
+            if _, getErr := serviceContainer.Get(t.Context(), "app.holder"); nil != getErr {
+                t.Fatalf("unexpected get error: %v", getErr)
+            }
+
+            written := captureEmergencyLogger(t, func() {
+                if closeErr := applicationInstance.close(context.Background()); nil != closeErr {
+                    t.Fatalf("unexpected close error: %v", closeErr)
+                }
+            })
+
+            warned := strings.Contains(written, TeardownWalkBudgetEndedMessage) && strings.Contains(written, "app.holder") && strings.Contains(written, "ContainerConfig.TeardownWalk.Nodes")
+            if testCase.warned != warned {
+                t.Fatalf("expected the warning written %v, got %q", testCase.warned, written)
+            }
+        })
+    }
+}

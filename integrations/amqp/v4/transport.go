@@ -1187,6 +1187,7 @@ const maxDelayExpirationMilliseconds = int64(math.MaxUint32)
 
 var defaultDelayBuckets = []time.Duration{5 * time.Second, 1 * time.Minute, 10 * time.Minute, 1 * time.Hour}
 
+/* maxDelayBuckets caps DelayBuckets: each tier is a queue the transport declares and binds on the broker, so a tier list is broker topology a deployment migrates; eight tiers spread at ten times apart already span a millisecond to the wire limit, and no retry policy needs a ninth. */
 const maxDelayBuckets = 8
 
 func resolveDelayBuckets(buckets []time.Duration) []time.Duration {

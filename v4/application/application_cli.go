@@ -177,6 +177,16 @@ func (instance *Application) servingProcessListeners() []debug.DeferredListener 
     )
 }
 
+/* cliRootConfig is what the tree the application dispatches from is built with: its version, the process's streams and the error line's cause chain depth. */
+func (instance *Application) cliRootConfig() cli.RootConfig {
+    return cli.RootConfig{
+        Version:              instance.applicationConfig.Version,
+        Writer:               os.Stdout,
+        ErrorWriter:          os.Stderr,
+        ErrorCauseChainDepth: instance.applicationConfig.CliErrorCauseChainDepth,
+    }
+}
+
 func (instance *Application) runCli() error {
     kernelInstance := instance.kernel
     configuration := instance.configuration
@@ -210,7 +220,7 @@ func (instance *Application) runCli() error {
 
     loggerWithProcess.Info("starting cli application", nil)
 
-    rootCli := cli.NewRoot(configuration.Cli().Name(), configuration.Cli().Description(), cli.RootConfig{Version: instance.applicationConfig.Version, Writer: os.Stdout, ErrorWriter: os.Stderr})
+    rootCli := cli.NewRoot(configuration.Cli().Name(), configuration.Cli().Description(), instance.cliRootConfig())
 
     availableCommands := make([]commandSuggestion, 0, len(instance.cliCommands))
 

@@ -319,7 +319,7 @@ func TestResolveRefreshSchedule(t *testing.T) {
         {"a tiny ttl is floored off zero", bound.Resolved[time.Duration]{Value: 1 * time.Nanosecond}, minimumRefreshInterval, 1 * time.Nanosecond},
     } {
         t.Run(testCase.name, func(t *testing.T) {
-            interval, refreshTtl := resolveRefreshSchedule(testCase.ttl)
+            interval, refreshTtl := resolveRefreshSchedule(testCase.ttl, defaultSessionProbeInterval)
 
             if testCase.wantedInterval != interval {
                 t.Fatalf("interval: wanted %s, got %s", testCase.wantedInterval, interval)
@@ -372,7 +372,7 @@ func TestRunExclusive_TheMinimumLeaseRenewsBeforeItsDemotionInstant(t *testing.T
         {minimumLeaseTtl, true},
         {minimumRefreshInterval, false},
     } {
-        interval, refreshTtl := resolveRefreshSchedule(bound.Resolved[time.Duration]{Value: testCase.ttl})
+        interval, refreshTtl := resolveRefreshSchedule(bound.Resolved[time.Duration]{Value: testCase.ttl}, defaultSessionProbeInterval)
 
         firstTick := acquiredAt.Add(interval)
         demotionAt := leaseDemotionAt(acquiredAt.Add(refreshTtl), interval)
@@ -1577,5 +1577,76 @@ func TestRunExclusive_ALockerAnsweringNoLockIsTheRunsErrorAndTheCallbackDoesNotR
 
     if true == ran || true == called || false == namesNoLock(runErr) {
         t.Fatalf("expected the no-lock refusal and no run, got %v %v %v", ran, called, runErr)
+    }
+}
+
+func TestResolveSessionProbeInterval_DefaultsMinimumUnlimitedAndALeaseTtl(t *testing.T) {
+    unlimitedTtl := bound.Resolved[time.Duration]{Unlimited: true}
+
+    if probeInterval, probeErr := resolveSessionProbeInterval(exclusiveProbeIntervalField, bound.Duration{}, unlimitedTtl); nil != probeErr || 15*time.Second != probeInterval {
+        t.Fatalf("expected a left-out probe interval to resolve to 15s, got %s %v", probeInterval, probeErr)
+    }
+
+    if probeInterval, probeErr := resolveSessionProbeInterval(exclusiveProbeIntervalField, bound.Of(time.Millisecond), unlimitedTtl); nil != probeErr || time.Millisecond != probeInterval {
+        t.Fatalf("expected the 1ms minimum to be admitted, got %s %v", probeInterval, probeErr)
+    }
+
+    if probeInterval, probeErr := resolveSessionProbeInterval(exclusiveProbeIntervalField, bound.Duration{}, bound.Resolved[time.Duration]{Value: 30 * time.Second}); nil != probeErr || 15*time.Second != probeInterval {
+        t.Fatalf("expected a left-out probe interval beside a lease ttl to resolve quietly, got %s %v", probeInterval, probeErr)
+    }
+
+    for _, testCase := range []struct {
+        name       string
+        configured bound.Duration
+        ttl        bound.Resolved[time.Duration]
+        message    string
+    }{
+        {"below the minimum", bound.Of(time.Microsecond), unlimitedTtl, "the limit is below its minimum"},
+        {"unlimited", bound.UnlimitedDuration(), unlimitedTtl, "the limit does not admit unlimited"},
+        {"beside a lease ttl", bound.Of(time.Second), bound.Resolved[time.Duration]{Value: 30 * time.Second}, "the probe interval applies to an unlimited ttl only"},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            _, probeErr := resolveSessionProbeInterval(exclusiveProbeIntervalField, testCase.configured, testCase.ttl)
+            if nil == probeErr || testCase.message != probeErr.Error() {
+                t.Fatalf("expected %q, got %v", testCase.message, probeErr)
+            }
+
+            if exclusiveProbeIntervalField != exception.LogContext(probeErr, exception.LogContextConfig{})["field"] {
+                t.Fatalf("expected the refusal to name %s, got %v", exclusiveProbeIntervalField, exception.LogContext(probeErr, exception.LogContextConfig{}))
+            }
+        })
+    }
+}
+
+func TestRunExclusive_ASessionLockIsProbedAtTheConfiguredInterval(t *testing.T) {
+    locker := &refreshRecordingLocker{inner: &sessionStyleLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})}}
+
+    ran, runErr := RunExclusive(testRuntime(), locker, "session-probe", ExclusiveConfig{Ttl: bound.UnlimitedDuration(), ProbeInterval: bound.Of(5 * time.Millisecond)}, func(containercontract.Runtime) error {
+        time.Sleep(60 * time.Millisecond)
+
+        return nil
+    })
+    if false == ran || nil != runErr {
+        t.Fatalf("expected the session-style run to run, got %v %v", ran, runErr)
+    }
+
+    refreshTtls := locker.refreshTtls()
+    if 2 > len(refreshTtls) {
+        t.Fatalf("expected a 5ms probe to refresh at least twice in 60ms, got %d", len(refreshTtls))
+    }
+
+    if wanted := bound.Of(sessionProbeTtlFactor * 5 * time.Millisecond); wanted != refreshTtls[0] {
+        t.Fatalf("expected each probe to write twice its interval, got %s", refreshTtls[0])
+    }
+}
+
+func TestRunExclusive_RefusesAProbeIntervalBesideALeaseTtlNamingTheField(t *testing.T) {
+    ran, runErr := RunExclusive(testRuntime(), NewInMemoryLocker(InMemoryLockerConfig{}), "probe-lease", ExclusiveConfig{ProbeInterval: bound.Of(time.Second)}, func(containercontract.Runtime) error {
+        t.Fatalf("expected the callback not to run")
+
+        return nil
+    })
+    if true == ran || nil == runErr || exclusiveProbeIntervalField != exception.LogContext(runErr, exception.LogContextConfig{})["field"] {
+        t.Fatalf("expected the refusal naming %s, got %v %v", exclusiveProbeIntervalField, ran, runErr)
     }
 }

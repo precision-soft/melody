@@ -1400,7 +1400,7 @@ func TestValidateKey_ARefusalNamesAnOversizedKeyByABoundedPrefix(t *testing.T) {
         "with a newline":    strings.Repeat("k", 1<<20) + "\n",
         "cut inside a rune": strings.Repeat("k", 127) + "é" + strings.Repeat("k", 2000),
     } {
-        refusal := validateKey(key)
+        refusal := validateKey(key, inMemoryBackendMaxKeyLengthRule.Default)
 
         var refusalException *exception.Error
         if false == errors.As(refusal, &refusalException) {
@@ -1413,7 +1413,7 @@ func TestValidateKey_ARefusalNamesAnOversizedKeyByABoundedPrefix(t *testing.T) {
         }
     }
 
-    if refusal := validateKey(strings.Repeat("k", 2000)); len(strings.Repeat("k", 2000)) != refusal.(*exception.Error).Context()["keyLength"] {
+    if refusal := validateKey(strings.Repeat("k", 2000), inMemoryBackendMaxKeyLengthRule.Default); len(strings.Repeat("k", 2000)) != refusal.(*exception.Error).Context()["keyLength"] {
         t.Fatalf("expected the whole length beside the cut key, got %v", refusal.(*exception.Error).Context())
     }
 }
@@ -1862,5 +1862,46 @@ func TestInMemoryBackend_ACounterRefusesAnAbsentTtlBeforeACancelledContext(t *te
 
     if _, ttlErr := backend.Increment(testRuntimeUnder(cancelled), "hits", 1, cachecontract.CounterOptions{}); nil == ttlErr || false == strings.Contains(ttlErr.Error(), "ttl is required") {
         t.Fatalf("expected the absent ttl refused before the cancelled context, got %v", ttlErr)
+    }
+}
+
+func TestInMemoryBackend_MaxKeyLengthDefaultsRaisesAndIsRefusedOutsideItsRule(t *testing.T) {
+    defaulted := NewInMemoryBackend(InMemoryBackendConfig{})
+    defer defaulted.CloseWithContext(context.Background())
+
+    if 1024 != defaulted.maxKeyLength {
+        t.Fatalf("expected a left-out key length to resolve to 1024, got %d", defaulted.maxKeyLength)
+    }
+
+    if setErr := defaulted.Set(testRuntime(), strings.Repeat("k", 1025), []byte("v"), bound.UnlimitedDuration()); nil == setErr || "cache key is too long" != setErr.Error() {
+        t.Fatalf("expected a key past 1024 bytes refused under the default, got %v", setErr)
+    }
+
+    raised := NewInMemoryBackend(InMemoryBackendConfig{MaxKeyLength: bound.Of(4096)})
+    defer raised.CloseWithContext(context.Background())
+
+    if setErr := raised.Set(testRuntime(), strings.Repeat("k", 4096), []byte("v"), bound.UnlimitedDuration()); nil != setErr {
+        t.Fatalf("expected a raised key length to admit a 4096-byte key, got %v", setErr)
+    }
+
+    if _, _, getErr := raised.Get(testRuntime(), strings.Repeat("k", 4097)); nil == getErr || 4096 != getErr.(*exception.Error).Context()["maxKeyLength"] {
+        t.Fatalf("expected a key past the raised length refused naming it, got %v", getErr)
+    }
+
+    if deleteErr := raised.DeleteMultiple(testRuntime(), []string{strings.Repeat("k", 4096)}); nil != deleteErr {
+        t.Fatalf("expected a raised key length to admit a 4096-byte key in a key list, got %v", deleteErr)
+    }
+
+    for name, configured := range map[string]bound.Count{"below its minimum": bound.Of(0), "unlimited": bound.UnlimitedCount()} {
+        t.Run(name, func(t *testing.T) {
+            defer func() {
+                recoveredErr, isError := recover().(error)
+                if false == isError || "InMemoryBackendConfig.MaxKeyLength" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+                    t.Fatalf("expected the refusal naming InMemoryBackendConfig.MaxKeyLength, got %v", recoveredErr)
+                }
+            }()
+
+            NewInMemoryBackend(InMemoryBackendConfig{MaxKeyLength: configured})
+        })
     }
 }

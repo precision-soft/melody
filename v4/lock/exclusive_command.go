@@ -27,6 +27,9 @@ type ExclusiveCommandConfig struct {
 
     /* StopRenewalLimit is how long after the stop the lease is still renewed while the command winds down, as ExclusiveConfig.StopRenewalLimit reads it: 30s by default, raised to the refresh interval when that is longer; when set, at least 1ms and not below the refresh interval; unlimited renews until the command returns. A cron runner granting its commands a longer grace sets it to that grace. */
     StopRenewalLimit bound.Duration
+
+    /* ProbeInterval is the liveness-probe cadence of a session-style lock, as ExclusiveConfig.ProbeInterval reads it: 15s by default, at least 1ms, unlimited refused, refused beside a lease Ttl. */
+    ProbeInterval bound.Duration
 }
 
 var exclusiveCommandTtlRule = bound.Rule[time.Duration]{
@@ -79,7 +82,12 @@ func NewExclusiveCommand(
         )
     }
 
-    refreshInterval, _ := resolveRefreshSchedule(ttl)
+    probeInterval, probeIntervalErr := resolveSessionProbeInterval("ExclusiveCommandConfig.ProbeInterval", config.ProbeInterval, ttl)
+    if nil != probeIntervalErr {
+        exception.Panic(exception.FromError(probeIntervalErr))
+    }
+
+    refreshInterval, _ := resolveRefreshSchedule(ttl, probeInterval)
     if _, stopRenewalLimitErr := resolveStopRenewalLimit("ExclusiveCommandConfig.StopRenewalLimit", config.StopRenewalLimit, refreshInterval); nil != stopRenewalLimitErr {
         exception.Panic(exception.FromError(stopRenewalLimitErr))
     }
@@ -91,6 +99,7 @@ func NewExclusiveCommand(
         exclusiveConfig: ExclusiveConfig{
             Ttl:              ttl.Limit(),
             StopRenewalLimit: config.StopRenewalLimit,
+            ProbeInterval:    config.ProbeInterval,
         },
     }
 }

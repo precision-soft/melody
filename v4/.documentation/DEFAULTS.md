@@ -39,8 +39,9 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
-| `v4/cache.renderedCacheKey` | constant | a cache key journaled whole | 128 | none | — | — |
+| `v4/cache.renderedCacheKey` | constant | a cache key journaled whole | 128 | none | class K: a diagnostic cut; the refusal names the key, not its payload, and carries the whole length beside it | [CACHE.md](package/CACHE.md) |
 | `v4/cache.InMemoryBackendConfig.CleanupInterval` | limit | a loop that spins or never runs | time.Minute min bound.TimeoutMinimum | `value:v4/cache.InMemoryBackendConfig.CleanupInterval` | class T: an interval; unlimited is a sweep that never runs, so the table only grows | [CACHE.md](package/CACHE.md) |
+| `v4/cache.InMemoryBackendConfig.MaxKeyLength` | limit | unbounded memory or work | 1024 min 1 | `value:v4/cache.InMemoryBackendConfig.MaxKeyLength` | class T: a size; unlimited is a key of any length kept in the table, as the rueidis backend refuses it | [CACHE.md](package/CACHE.md) |
 | `v4/cache.InMemoryBackendConfig.MaxItems` | limit | unbounded memory or work | 10_000 min 1 unlimited admitted | `value:v4/cache.InMemoryBackendConfig.MaxItems` | — | [CACHE.md](package/CACHE.md) |
 | `v4/cache.RememberConfig.WaitTimeout` | limit | a call or a wait that never returns | 30 * time.Second min 0 unlimited admitted | `value:v4/cache.RememberConfig.WaitTimeout` | — | [CACHE.md](package/CACHE.md) |
 | `v4/cache.RememberConfig.StampedeProtectionDisabled` | protection | the door: runs the callback on every miss in the caller's goroutine, under the caller's runtime, with no flight to join. | on | `off:v4/cache.RememberConfig.StampedeProtectionDisabled` | — | [CACHE.md](package/CACHE.md) |
@@ -55,7 +56,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
-| `v4/cli.cliErrorLineCauseChainDepth` | constant | an exit line without end | 8 | none | — | — |
+| `v4/cli.RootConfig.ErrorCauseChainDepth` | limit | an exit line without end | 8 min 0 | `value:v4/cli.RootConfig.ErrorCauseChainDepth`, `value:v4/application.ApplicationConfig.CliErrorCauseChainDepth` | class T: a count; unlimited is an error line an endless Unwrap of the application's own never ends | [CLI.md](package/CLI.md) |
 
 ## `v4/cli/output`
 
@@ -91,10 +92,10 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
-| `v4/container.closeFailureStackLimit` | constant | a close failure journaling a whole stack | 2048 bytes | none | — | — |
-| `v4/container.teardownWalkDepthLimit` | constant | a teardown walk without end | 12 | none | — | — |
-| `v4/container.teardownWalkElementLimit` | constant | a teardown walk without end | 256 | none | — | — |
-| `v4/container.teardownWalkNodeBudget` | constant | a teardown walk without end | 65536 | none | — | — |
+| `v4/container.ContainerConfig.CloseFailureStackBytes` | limit | a close failure journaling a whole stack | 2048 min utf8.UTFMax unlimited admitted | `value:v4/container.ContainerConfig.CloseFailureStackBytes`, `value:v4/application.ApplicationConfig.ContainerCloseFailureStackBytes` | — | [CONTAINER.md](package/CONTAINER.md) |
+| `v4/container.ContainerConfig.TeardownWalk.Depth` | limit | a teardown walk without end | 12 min 1 | `value:v4/container.TeardownWalkConfig.Depth`, `value:v4/application.ApplicationConfig.ContainerTeardownWalk` | class T: a stack backstop; the walk descends a service's value by reflection at its creation, so unlimited is a creation that costs what the deepest value costs | [CONTAINER.md](package/CONTAINER.md) |
+| `v4/container.ContainerConfig.TeardownWalk.Elements` | limit | a teardown walk without end | 256 min 1 | `value:v4/container.TeardownWalkConfig.Elements`, `value:v4/application.ApplicationConfig.ContainerTeardownWalk` | class T: a size; unlimited enters every element of the largest array a service holds | [CONTAINER.md](package/CONTAINER.md) |
+| `v4/container.ContainerConfig.TeardownWalk.Nodes` | limit | a teardown walk without end | 65_536 min 1 | `value:v4/container.TeardownWalkConfig.Nodes`, `value:v4/application.ApplicationConfig.ContainerTeardownWalk` | class T: a size; unlimited is a walk queue that grows with the value; a walk the budget ends is named in the warning the application writes at close (`v4/application.TeardownWalkBudgetEndedMessage`) | [CONTAINER.md](package/CONTAINER.md) |
 | `v4/container.ContainerConfig.CreationWaiters` | limit | a call or a wait that never returns | DefaultCreationWaiters min 1 unlimited admitted | `value:v4/container.ContainerConfig.CreationWaiters`, `value:v4/application.ApplicationConfig.ContainerCreationWaiters`, `env:MELODY_CONTAINER_CREATION_WAITERS` | — | [CONTAINER.md](package/CONTAINER.md) |
 | `v4/container.ContainerConfig.ScopeTeardownTimeout` | limit | a call or a wait that never returns | DefaultScopeTeardownTimeout min bound.TimeoutMinimum unlimited admitted | `value:v4/container.ContainerConfig.ScopeTeardownTimeout`, `value:v4/application.ApplicationConfig.ScopeTeardownTimeout`, `env:MELODY_SCOPE_TEARDOWN_TIMEOUT` | — | [CONTAINER.md](package/CONTAINER.md) |
 
@@ -109,7 +110,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
-| `v4/debug.errorCauseChainDepth` | constant | a debug error without end | 9 | none | — | — |
+| `v4/debug.errorCauseChainDepth` | constant | a debug error without end | 9 | none | class K: a cycle guard of a development command; the report names the first causes, an endless Unwrap of the application's own ends at the ninth | [DEBUG.md](package/DEBUG.md) |
 | `v4/debug.ParameterCommand.Flags` | redaction | a secret parameter printed by debug:parameters | masked | `off:v4/debug.ParameterCommandRevealFlagName` | class R: the flag reveals in the development environment only and is refused elsewhere naming the flag, so a deployed process never prints a credential | [DEBUG.md](package/DEBUG.md) |
 
 ## `v4/http`
@@ -203,7 +204,6 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
-| `v4/lock.defaultSessionProbeInterval` | constant | a session lock whose loss goes unnoticed | 15s | none | — | — |
 | `v4/lock.ExclusiveCommandConfig.Ttl` | limit | state held, or a decision kept, forever | exclusiveTtlRule.Default min exclusiveTtlRule.Minimum unlimited admitted | `value:v4/lock.ExclusiveCommandConfig.Ttl` | — | [LOCK.md](package/LOCK.md) |
 | `v4/lock.ExclusiveConfig.Ttl` | limit | state held, or a decision kept, forever | lockcontract.LockTtlRule().Default min minimumLeaseTtl unlimited admitted | `value:v4/lock.ExclusiveConfig.Ttl` | — | [LOCK.md](package/LOCK.md) |
 | `v4/lock.InMemoryLockerConfig.PurgeInterval` | limit | a loop that spins or never runs | DefaultInMemoryLockerPurgeInterval min 1 unlimited admitted | `value:v4/lock.InMemoryLockerConfig.PurgeInterval` | — | [LOCK.md](package/LOCK.md) |
@@ -212,6 +212,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | `v4/lock.LeaderGateConfig.RefreshInterval` | limit | a loop that spins or never runs | derivedRefreshInterval min minimumRefreshInterval | `value:v4/lock.LeaderGateConfig.RefreshInterval` | class T: an interval; unlimited never refreshes the lease, so the leadership lapses under a leader that still runs | [LOCK.md](package/LOCK.md) |
 | `v4/lock.LeaderGateConfig.RetryInterval` | limit | a loop that spins or never runs | derivedRetryInterval min bound.TimeoutMinimum | `value:v4/lock.LeaderGateConfig.RetryInterval` | class T: an interval; unlimited never campaigns again after a lost lease | [LOCK.md](package/LOCK.md) |
 | `v4/lock.LeaderGateConfig.Ttl` | limit | state held, or a decision kept, forever | lockcontract.LockTtlRule().Default min minimumLeaseTtl unlimited admitted | `value:v4/lock.LeaderGateConfig.Ttl` | — | [LOCK.md](package/LOCK.md) |
+| `v4/lock.sessionProbeIntervalRule#1` | limit | a session lock whose loss goes unnoticed | defaultSessionProbeInterval min minimumRefreshInterval | `value:v4/lock.sessionProbeIntervalRule`, `value:v4/lock.ExclusiveConfig.ProbeInterval`, `value:v4/lock.ExclusiveCommandConfig.ProbeInterval` | class T: an interval; unlimited never probes the session, so a lock lost with its connection goes unnoticed | [LOCK.md](package/LOCK.md) |
 | `v4/lock.stopRenewalLimitRule#1` | limit | unbounded memory or work | defaultStopRenewalLimit min bound.TimeoutMinimum unlimited admitted | `value:v4/lock.stopRenewalLimitRule`, `value:v4/lock.ExclusiveCommandConfig.StopRenewalLimit`, `value:v4/lock.ExclusiveConfig.StopRenewalLimit`, `value:v4/lock.LeaderGateConfig.StopRenewalLimit` | — | [LOCK.md](package/LOCK.md) |
 
 ## `v4/lock/contract`
@@ -259,7 +260,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
-| `v4/openapi.maximumSchemaDepth` | constant | a schema descent that overflows the stack | 64 | none | — | — |
+| `v4/openapi.maximumSchemaDepth` | constant | a schema descent that overflows the stack | 64 | none | class K: a stack backstop; the descent runs inside the spec handler, where a stack overflow is fatal, and the bound degrades a position to an undescribed one, never fails the document | [OPENAPI.md](package/OPENAPI.md) |
 
 ## `v4/security`
 
@@ -323,6 +324,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
+| `v4/serializer.SerializerManagerConfig.MaxAcceptMembers` | limit | unbounded memory or work | internal.MaximumSplitOutsideQuotesMembers min 1 | `value:v4/serializer.SerializerManagerConfig.MaxAcceptMembers` | class T: a size; the Accept header is the client's, every member weighed against every serializer, so unlimited is negotiation work a request names | [SERIALIZER.md](package/SERIALIZER.md) |
 | `v4/serializer.PlainTextSerializerConfig.MaxBytes` | limit | unbounded memory or work | plaintext.DefaultMaxBytes min 1 unlimited admitted | `value:v4/serializer.PlainTextSerializerConfig.MaxBytes` | — | [SERIALIZER.md](package/SERIALIZER.md) |
 | `v4/serializer.PlainTextSerializerConfig.MaxDepth` | limit | a descent without end: the stack, or a payload that nests forever | plaintext.DefaultMaxDepth min 1 max maxPlainTextDepth | `value:v4/serializer.PlainTextSerializerConfig.MaxDepth` | at most 1024: the walk recurses once per level on the goroutine stack and no reader follows a text body past a thousand levels; a value may hold itself, so unlimited never ends | [SERIALIZER.md](package/SERIALIZER.md) |
 | `v4/serializer.PlainTextSerializerConfig.MaxLines` | limit | unbounded memory or work | plaintext.DefaultMaxLines min 1 unlimited admitted | `value:v4/serializer.PlainTextSerializerConfig.MaxLines` | — | [SERIALIZER.md](package/SERIALIZER.md) |
@@ -373,7 +375,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
-| `v4/translation.maxInterpolationDepth` | constant | a message that interpolates itself forever | 32 | none | — | — |
+| `v4/translation.maxInterpolationDepth` | constant | a message that interpolates itself forever | 32 | none | class K: a cycle guard; every plural or select level is a recursion on the stack and no translated sentence nests a tenth as deep | [TRANSLATION.md](package/TRANSLATION.md) |
 
 ## `v4/validation`
 
@@ -389,7 +391,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
-| `integrations/amqp/v4.maxDelayBuckets` | constant | a delay exchange per distinct delay | 8 | none | — | — |
+| `integrations/amqp/v4.maxDelayBuckets` | constant | a delay exchange per distinct delay | 8 | none | class K: each tier is a queue the transport declares on the broker, so the tier list is topology a deployment migrates; eight tiers ten times apart span a millisecond to the wire limit | [README.md](../../integrations/amqp/v4/README.md) |
 | `integrations/amqp/v4.ConnectionConfig.CloseTimeout` | limit | a call or a wait that never returns | closeJoinTimeout min bound.TimeoutMinimum | `value:integrations/amqp/v4.ConnectionConfig.CloseTimeout` | class T: a timeout; unlimited is the wait that never returns | [integrations/amqp/v4/README.md](../../integrations/amqp/v4/README.md) |
 | `integrations/amqp/v4.ProviderConfig.CloseTimeout` | limit | a call or a wait that never returns | closeJoinTimeout min bound.TimeoutMinimum | `value:integrations/amqp/v4.ProviderConfig.CloseTimeout` | class T: a timeout; unlimited is the wait that never returns | [integrations/amqp/v4/README.md](../../integrations/amqp/v4/README.md) |
 | `integrations/amqp/v4.ProviderConfig.DialTimeout` | limit | a call or a wait that never returns | 30 * time.Second min bound.TimeoutMinimum | `value:integrations/amqp/v4.ProviderConfig.DialTimeout` | class T: a timeout; unlimited is the wait that never returns | [integrations/amqp/v4/README.md](../../integrations/amqp/v4/README.md) |

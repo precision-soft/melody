@@ -45,7 +45,7 @@ func newErrorRendererTestRuntime(
             serviceContainer,
             serializer.ServiceSerializerManager,
             func(resolver containercontract.Resolver) (*serializer.SerializerManager, error) {
-                return serializer.NewSerializerManager(serializersByMime)
+                return serializer.NewSerializerManager(serializersByMime, serializer.SerializerManagerConfig{})
             },
             container.RegisterOptions{},
         )

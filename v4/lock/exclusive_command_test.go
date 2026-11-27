@@ -301,3 +301,19 @@ func TestNewExclusiveCommand_ALockerAnsweringNoLockIsRefusedAtConstruction(t *te
         t.Fatalf("expected a panic carrying the no-lock refusal, got %#v", recovered)
     }
 }
+
+func TestNewExclusiveCommand_HandsTheProbeIntervalOnAndRefusesItBesideALeaseTtl(t *testing.T) {
+    command := NewExclusiveCommand(&recordingCommand{name: "probe:session"}, &sessionStyleLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})}, ExclusiveCommandConfig{Ttl: bound.UnlimitedDuration(), ProbeInterval: bound.Of(5 * time.Second)})
+    if bound.Of(5*time.Second) != command.exclusiveConfig.ProbeInterval {
+        t.Fatalf("expected the probe interval handed to the run, got %s", command.exclusiveConfig.ProbeInterval)
+    }
+
+    defer func() {
+        recoveredErr, isError := recover().(error)
+        if false == isError || "ExclusiveCommandConfig.ProbeInterval" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+            t.Fatalf("expected the refusal naming ExclusiveCommandConfig.ProbeInterval, got %v", recoveredErr)
+        }
+    }()
+
+    NewExclusiveCommand(&recordingCommand{name: "probe:lease"}, NewInMemoryLocker(InMemoryLockerConfig{}), ExclusiveCommandConfig{Ttl: bound.Of(time.Minute), ProbeInterval: bound.Of(time.Second)})
+}

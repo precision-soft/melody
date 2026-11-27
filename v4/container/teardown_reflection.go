@@ -9,12 +9,12 @@ import (
     "unsafe"
 )
 
-/* teardownWalkDepthLimit, teardownWalkElementLimit and teardownWalkNodeBudget bound the cost of the walk, never its correctness: an edge not reached is an edge not gained. The budget is charged when an item is queued, so the queue itself stays bounded. */
-const teardownWalkDepthLimit = 12
-
-const teardownWalkElementLimit = 256
-
-const teardownWalkNodeBudget = 65536
+/* teardownWalkLimits are the resolved ContainerConfig.TeardownWalk fields; they bound the cost of the walk, never its correctness: an edge not reached is an edge not gained. The node budget is charged when an item is queued, so the queue itself stays bounded. */
+type teardownWalkLimits struct {
+    depth    int
+    elements int
+    nodes    int
+}
 
 /* heldPointer is one pointer a service was seen to hold: its identity and a reflect.Value of its target, which keeps the target alive so the address cannot be reused by another allocation. */
 type heldPointer struct {
@@ -22,8 +22,8 @@ type heldPointer struct {
     keepAlive reflect.Value
 }
 
-/* heldPointerIdentities answers which pointer identities a freshly built service value holds, transitively, so the teardown can order a provider that captured its collaborator. It is walked where the value is filed, not at teardown. Every word is read as memory another goroutine may be writing, so only pointer words and the struct and array layouts around them are read: interfaces, strings, slices, maps, funcs, chans and unsafe pointers are never entered, an atomic.Pointer excepted, which is read through its own atomic load, and a collaborator reached only through one of them keeps the order it had. The walk is breadth-first, so every pointer is entered once, at its shallowest depth. */
-func heldPointerIdentities(root any, opaqueIdentities map[pointerIdentity]any, opaqueTypes map[reflect.Type]struct{}) []heldPointer {
+/* heldPointerIdentities answers which pointer identities a freshly built service value holds, transitively, so the teardown can order a provider that captured its collaborator. It is walked where the value is filed, not at teardown. Every word is read as memory another goroutine may be writing, so only pointer words and the struct and array layouts around them are read: interfaces, strings, slices, maps, funcs, chans and unsafe pointers are never entered, an atomic.Pointer excepted, which is read through its own atomic load, and a collaborator reached only through one of them keeps the order it had. The walk is breadth-first, so every pointer is entered once, at its shallowest depth; the second result reports that the node budget refused an item, so edges past it were not gained. */
+func heldPointerIdentities(root any, opaqueIdentities map[pointerIdentity]any, opaqueTypes map[reflect.Type]struct{}, limits teardownWalkLimits) ([]heldPointer, bool) {
     found := make([]heldPointer, 0)
     seen := make(map[pointerIdentity]struct{})
 
@@ -34,10 +34,13 @@ func heldPointerIdentities(root any, opaqueIdentities map[pointerIdentity]any, o
 
     queue := []walkItem{{value: reflect.ValueOf(root), depth: 0}}
     queued := 1
+    budgetEnded := false
 
     /* the budget is charged as an item is queued, so the queue never holds more than the budget */
     enqueue := func(value reflect.Value, depth int) {
-        if queued >= teardownWalkNodeBudget {
+        if queued >= limits.nodes {
+            budgetEnded = true
+
             return
         }
 
@@ -73,7 +76,7 @@ func heldPointerIdentities(root any, opaqueIdentities map[pointerIdentity]any, o
             return
         }
 
-        if depth < teardownWalkDepthLimit {
+        if depth < limits.depth {
             enqueue(target, depth+1)
         }
     }
@@ -88,7 +91,7 @@ func heldPointerIdentities(root any, opaqueIdentities map[pointerIdentity]any, o
         }
 
         /* the children of a node at the depth limit are neither computed nor queued */
-        childrenInReach := item.depth < teardownWalkDepthLimit
+        childrenInReach := item.depth < limits.depth
 
         switch value.Kind() {
         case reflect.Pointer:
@@ -108,8 +111,8 @@ func heldPointerIdentities(root any, opaqueIdentities map[pointerIdentity]any, o
             }
 
             fieldCount := value.NumField()
-            if fieldCount > teardownWalkElementLimit {
-                fieldCount = teardownWalkElementLimit
+            if fieldCount > limits.elements {
+                fieldCount = limits.elements
             }
 
             for fieldIndex := 0; fieldIndex < fieldCount; fieldIndex = fieldIndex + 1 {
@@ -133,8 +136,8 @@ func heldPointerIdentities(root any, opaqueIdentities map[pointerIdentity]any, o
             }
 
             elementCount := value.Len()
-            if elementCount > teardownWalkElementLimit {
-                elementCount = teardownWalkElementLimit
+            if elementCount > limits.elements {
+                elementCount = limits.elements
             }
 
             for elementIndex := 0; elementIndex < elementCount; elementIndex = elementIndex + 1 {
@@ -143,7 +146,7 @@ func heldPointerIdentities(root any, opaqueIdentities map[pointerIdentity]any, o
         }
     }
 
-    return found
+    return found, budgetEnded
 }
 
 /* atomicPointerTarget recognises a sync/atomic.Pointer by its layout — a zero-length array of its element pointer and the word v — and answers the pointer it holds, read with an atomic load so the walk races no writer; a nil pointer, or a value not addressable, answers an invalid value. Any other struct answers false. */
@@ -245,7 +248,14 @@ func (instance *container) recordHeldIdentitiesLocked(nodeKey string, value any)
         }
     }
 
-    walked := heldPointerIdentities(value, instance.opaqueIdentities, instance.opaqueTypes)
+    walked, budgetEnded := heldPointerIdentities(value, instance.opaqueIdentities, instance.opaqueTypes, instance.teardownWalk)
+    if true == budgetEnded {
+        if nil == instance.teardownWalkBudgetEndedNodeKeys {
+            instance.teardownWalkBudgetEndedNodeKeys = make(map[string]struct{})
+        }
+
+        instance.teardownWalkBudgetEndedNodeKeys[nodeKey] = struct{}{}
+    }
 
     instance.heldIdentitiesByNodeKey[nodeKey] = walked
 

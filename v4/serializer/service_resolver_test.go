@@ -68,7 +68,7 @@ func TestSoftResolvers_AnswerTheRegisteredServices(t *testing.T) {
 
     registeredManager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeApplicationJson: registeredSerializer,
-    })
+    }, SerializerManagerConfig{})
     if nil != managerErr {
         t.Fatalf("unexpected manager error: %v", managerErr)
     }
@@ -150,7 +150,7 @@ func TestMustResolvers_HandBackTheRegisteredServices(t *testing.T) {
 
     registeredManager, managerErr := NewSerializerManager(map[string]serializercontract.Serializer{
         MimeApplicationJson: registeredSerializer,
-    })
+    }, SerializerManagerConfig{})
     if nil != managerErr {
         t.Fatalf("unexpected manager error: %v", managerErr)
     }

@@ -269,6 +269,7 @@ func (instance *Application) bootContainer() {
                         "application/json": serializer.NewJsonSerializer(),
                         "text/plain":       serializer.NewPlainTextSerializer(serializer.PlainTextSerializerConfig{}),
                     },
+                    serializer.SerializerManagerConfig{},
                 )
             },
             container.RegisterOptions{},

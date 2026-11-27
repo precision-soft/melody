@@ -508,7 +508,7 @@ type containerServiceDetails struct {
     Teardown         *containerServiceTeardownItem `json:"teardown,omitempty"`
 }
 
-/* errorCauseChainDepth bounds the links the report walks, for the cause chain and its context alike. */
+/* errorCauseChainDepth bounds the links the report walks, for the cause chain and its context alike: a cycle guard for an Unwrap of the application's own that never ends, on a development command whose reader wants the first causes, so no deployment tunes it. */
 const errorCauseChainDepth = 9
 
 func resolveErrorContextJson(resolveErr error, option output.Option) string {

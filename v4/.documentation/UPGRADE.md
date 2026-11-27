@@ -33,6 +33,14 @@ The fourth major starts from the third: the sections the third major shipped, in
 
 The fourth major takes the forms the third major kept compatible: a section that names a sibling interface, a deprecated door or a released signature on the third major describes here the form the fourth major carries instead, and this major's changelog marks each **Breaking**.
 
+### Serializer: the manager takes a configuration
+
+**What changed.** [`NewSerializerManager`](../serializer/serializer_manager.go) takes a [`SerializerManagerConfig`](../serializer/serializer_manager.go) after the map of serializers; its `MaxAcceptMembers` bounds the members of an `Accept` header the negotiation reads, 64 when left out as before, at least 1, unlimited refused, a value outside the rule answered as the error naming `SerializerManagerConfig.MaxAcceptMembers`.
+
+**Symptom.** `not enough arguments in call to serializer.NewSerializerManager`.
+
+**Remedy.** Pass `serializer.SerializerManagerConfig{}` for today's negotiation, or `serializer.SerializerManagerConfig{MaxAcceptMembers: bound.Of(n)}` where a client legitimately sends a longer `Accept` list.
+
 ### Rueidis: the client is opened under the caller's runtime and answered as its owner, and the module registers the owner's factory
 
 **What changed.** [`Provider.Open`](../../integrations/rueidis/v4/provider.go) takes the caller's runtime first and answers the [`*Connection`](../../integrations/rueidis/v4/connection.go) that owns the client: the runtime's context refuses a done open before any client is built, ends the retry wait, which slept through a cancelled boot, and bounds the boot ping with `ClientConfig.BootPingTimeout`, 3s when left out, the earlier deadline winning. `Provider.Ping(runtimeInstance, connection)` runs under the runtime's context, with no deadline of its own. `Provider.Close`, which closed nothing an owner did not, `TimeoutConfig` and `ProviderConfig.Timeout` are removed. [`ModuleConfig`](../../integrations/rueidis/v4/module.go) registers a connection factory, `Connection`, built at boot under `ConnectionBuiltAtBoot` with the registrar's `ConnectionBootFailure`, and each role behind a pointer to its configuration, `Locker *LockerConfig` and `TokenStore *TokenStoreConfig`, nil registering none. The `Register…Service` functions of the module and of its cache package, `ServiceClient` and the cache module's `Client` are gone: the modules are the registration door, and every service they register resolves the connection service.

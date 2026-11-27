@@ -10,6 +10,7 @@ import (
     "sync"
     "sync/atomic"
     "time"
+    "unicode/utf8"
 
     "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -44,6 +45,53 @@ func CreationWaitersRule() bound.Rule[int] {
     }
 }
 
+/* TeardownWalkDepthRule resolves ContainerConfig.TeardownWalk.Depth: 12 when left out, at least 1, unlimited refused, since the walk descends a service's value by reflection and a bound is what keeps a deep value from costing the creation unbounded time. */
+func TeardownWalkDepthRule() bound.Rule[int] {
+    return bound.Rule[int]{
+        Name:    "ContainerConfig.TeardownWalk.Depth",
+        Default: 12,
+        Minimum: 1,
+    }
+}
+
+/* TeardownWalkElementsRule resolves ContainerConfig.TeardownWalk.Elements: 256 when left out, at least 1, unlimited refused for the reason of the depth. */
+func TeardownWalkElementsRule() bound.Rule[int] {
+    return bound.Rule[int]{
+        Name:    "ContainerConfig.TeardownWalk.Elements",
+        Default: 256,
+        Minimum: 1,
+    }
+}
+
+/* TeardownWalkNodesRule resolves ContainerConfig.TeardownWalk.Nodes: 65,536 when left out, at least 1, unlimited refused for the reason of the depth. */
+func TeardownWalkNodesRule() bound.Rule[int] {
+    return bound.Rule[int]{
+        Name:    "ContainerConfig.TeardownWalk.Nodes",
+        Default: 65_536,
+        Minimum: 1,
+    }
+}
+
+/* CloseFailureStackBytesRule resolves ContainerConfig.CloseFailureStackBytes: 2,048 when left out, at least utf8.UTFMax, so the cut can back off to a rune boundary, unlimited admitted for the whole text. */
+func CloseFailureStackBytesRule() bound.Rule[int] {
+    return bound.Rule[int]{
+        Name:              "ContainerConfig.CloseFailureStackBytes",
+        Default:           2048,
+        Minimum:           utf8.UTFMax,
+        UnlimitedAdmitted: true,
+    }
+}
+
+/* TeardownWalkConfig bounds the reflection walk that infers the teardown edges of a service from the pointers its value holds. A bound ends the walk, never its correctness: an edge not reached is an edge not gained, and TeardownDependencyNames or TeardownDependencyTypes declare one the walk cannot reach. */
+type TeardownWalkConfig struct {
+    /* Depth bounds how many pointers, fields and elements deep the walk descends: 12 when left out, at least 1, unlimited refused. */
+    Depth bound.Count
+    /* Elements bounds the fields of a struct and the elements of an array the walk enters: 256 when left out, at least 1, unlimited refused. */
+    Elements bound.Count
+    /* Nodes bounds the items one walk queues: 65,536 when left out, at least 1, unlimited refused. A walk the budget ends is named in the warning the application writes at close. */
+    Nodes bound.Count
+}
+
 /* ContainerConfig is what a container declares beyond its registrations; the zero value is the default. */
 type ContainerConfig struct {
     /* ScopeTeardownTimeout bounds what a scope's CloseWithContext hands its scoped services: 3s when left out, at least 1ms, unlimited admitted for no term. */
@@ -52,6 +100,10 @@ type ContainerConfig struct {
     CreationWaiters bound.Count
     /* TeardownSequential closes the services one after the other in the plan's order, where the default closes in one wave every service the teardown graph proves unrelated to the others in it: the opt-out for services whose Close methods touch shared external state the container cannot see, such as one file or one remote session. */
     TeardownSequential bool
+    /* TeardownWalk bounds the walk that infers the teardown edges under the waves. */
+    TeardownWalk TeardownWalkConfig
+    /* CloseFailureStackBytes bounds the bytes of the stack and of the recovered value one failed close contributes to the teardown error, cut on a rune boundary and the cut named: 2,048 when left out, at least 4, unlimited admitted. */
+    CloseFailureStackBytes bound.Count
 }
 
 /* NewContainer builds an empty container; a ContainerConfig field outside its rule panics naming the field. */
@@ -66,8 +118,30 @@ func NewContainer(config ContainerConfig) containercontract.Container {
         exception.Panic(exception.FromError(scopeTeardownTimeoutErr))
     }
 
+    teardownWalkDepth, teardownWalkDepthErr := bound.Resolve(config.TeardownWalk.Depth, TeardownWalkDepthRule())
+    if nil != teardownWalkDepthErr {
+        exception.Panic(exception.FromError(teardownWalkDepthErr))
+    }
+
+    teardownWalkElements, teardownWalkElementsErr := bound.Resolve(config.TeardownWalk.Elements, TeardownWalkElementsRule())
+    if nil != teardownWalkElementsErr {
+        exception.Panic(exception.FromError(teardownWalkElementsErr))
+    }
+
+    teardownWalkNodes, teardownWalkNodesErr := bound.Resolve(config.TeardownWalk.Nodes, TeardownWalkNodesRule())
+    if nil != teardownWalkNodesErr {
+        exception.Panic(exception.FromError(teardownWalkNodesErr))
+    }
+
+    closeFailureStackBytes, closeFailureStackBytesErr := bound.Resolve(config.CloseFailureStackBytes, CloseFailureStackBytesRule())
+    if nil != closeFailureStackBytesErr {
+        exception.Panic(exception.FromError(closeFailureStackBytesErr))
+    }
+
     return &container{
         creationWaiters:             creationWaiters,
+        teardownWalk:                teardownWalkLimits{depth: teardownWalkDepth.Value, elements: teardownWalkElements.Value, nodes: teardownWalkNodes.Value},
+        closeFailureStackBytes:      closeFailureStackBytes,
         scopeTeardownTimeout:        scopeTeardownTimeout,
         teardownInWaves:             false == config.TeardownSequential,
         closedChannel:               make(chan struct{}),
@@ -158,6 +232,10 @@ type container struct {
     opaqueIdentities          map[pointerIdentity]any
     /* opaqueTypes are the concrete pointer types registered with TeardownReflectionDisabled: a walk records a value of such a type and never enters it, filed or not, so a holder walked before the service it captured cannot read it */
     opaqueTypes map[reflect.Type]struct{}
+    /* teardownWalk bounds the walk recordHeldIdentitiesLocked runs; teardownWalkBudgetEndedNodeKeys are the nodes whose walk the node budget ended */
+    teardownWalk                    teardownWalkLimits
+    teardownWalkBudgetEndedNodeKeys map[string]struct{}
+    closeFailureStackBytes          bound.Resolved[int]
     /* teardownInWaves closes the unrelated services of one wave at once; on unless ContainerConfig.TeardownSequential */
     teardownInWaves bool
     /* teardownFinished is the second closing state: isClosed refuses new creations for the whole teardown, and teardownFinished refuses every resolution once the last Close returned, so a service's own Close can still resolve its dependencies */
@@ -1151,4 +1229,5 @@ var (
     _ teardownPlanner                   = (*container)(nil)
     _ containercontract.ContextCloser   = (*container)(nil)
     _ closedContainerChecker            = (*container)(nil)
+    _ teardownWalkBudgetReporter        = (*container)(nil)
 )

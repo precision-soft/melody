@@ -597,3 +597,12 @@ func TestNewApplication_HandsTheMessageBusRetryToTheConsumeCommandItRegisters(t 
         t.Fatalf("expected the application's retry policy, not the framework's default")
     }
 }
+
+func TestApplication_CliRootConfigCarriesTheCauseChainDepthField(t *testing.T) {
+    applicationInstance := &Application{applicationConfig: ApplicationConfig{Version: "1.2.3", CliErrorCauseChainDepth: bound.Of(3)}}
+
+    rootConfig := applicationInstance.cliRootConfig()
+    if bound.Of(3) != rootConfig.ErrorCauseChainDepth || "1.2.3" != rootConfig.Version || os.Stderr != rootConfig.ErrorWriter {
+        t.Fatalf("expected the tree built with the application's version, depth and streams, got %+v", rootConfig)
+    }
+}

@@ -96,6 +96,7 @@ func runtimeRefusingEveryMediaType(t *testing.T) (melodycontainercontract.Runtim
                 map[string]melodyserializercontract.Serializer{
                     melodyserializer.MimeApplicationJson: melodyserializer.NewJsonSerializer(),
                 },
+                melodyserializer.SerializerManagerConfig{},
             )
         },
         melodycontainer.RegisterOptions{},
@@ -127,6 +128,7 @@ func runtimeRefusingNothing(t *testing.T) (melodycontainercontract.Runtime, melo
                 map[string]melodyserializercontract.Serializer{
                     melodyserializer.MimeApplicationJson: melodyserializer.NewJsonSerializer(),
                 },
+                melodyserializer.SerializerManagerConfig{},
             )
         },
         melodycontainer.RegisterOptions{},
@@ -473,6 +475,7 @@ func runtimeWithJournal(t *testing.T) (melodycontainercontract.Runtime, melodyht
                 map[string]melodyserializercontract.Serializer{
                     melodyserializer.MimeApplicationJson: melodyserializer.NewJsonSerializer(),
                 },
+                melodyserializer.SerializerManagerConfig{},
             )
         },
         melodycontainer.RegisterOptions{},

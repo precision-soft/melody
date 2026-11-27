@@ -11,7 +11,7 @@ func TestNormalizeMime_StripsParametersAndLowercases(t *testing.T) {
 }
 
 func TestParseAcceptHeader_SortsByQualityDescending(t *testing.T) {
-    values, _ := parseAcceptHeader("text/plain;q=0.2, application/json;q=0.9")
+    values, _ := parseAcceptHeader("text/plain;q=0.2, application/json;q=0.9", serializerManagerMaxAcceptMembersRule.Default)
 
     if 2 != len(values) {
         t.Fatalf("unexpected length")
@@ -26,7 +26,7 @@ func TestParseAcceptHeader_SortsByQualityDescending(t *testing.T) {
 }
 
 func TestParseAcceptHeader_DropsAMemberWithAMalformedQuality(t *testing.T) {
-    values, _ := parseAcceptHeader("application/json;q=abc, text/plain;q=0.5")
+    values, _ := parseAcceptHeader("application/json;q=abc, text/plain;q=0.5", serializerManagerMaxAcceptMembersRule.Default)
 
     if 1 != len(values) {
         t.Fatalf("expected the malformed member to be dropped, got %d members", len(values))
@@ -52,7 +52,7 @@ func TestWildcardSubtypeMatching(t *testing.T) {
 }
 
 func TestParseAcceptHeader_SkipsTheMembersThatAreNotMediaRanges(t *testing.T) {
-    parsed, _ := parseAcceptHeader("application/json,,text/plain;;charset=utf-8;novalue,  ,;q=0.5")
+    parsed, _ := parseAcceptHeader("application/json,,text/plain;;charset=utf-8;novalue,  ,;q=0.5", serializerManagerMaxAcceptMembersRule.Default)
 
     if 2 != len(parsed) {
         t.Fatalf("expected only the two real ranges to survive, got %d: %#v", len(parsed), parsed)
@@ -73,7 +73,7 @@ func TestParseAcceptHeader_SkipsTheMembersThatAreNotMediaRanges(t *testing.T) {
 }
 
 func TestAcceptQualityFor_AnswersTheHighestQualityAmongRangesOfEqualSpecificity(t *testing.T) {
-    parsed, _ := parseAcceptHeader("text/html;q=0, text/html;q=0.5")
+    parsed, _ := parseAcceptHeader("text/html;q=0, text/html;q=0.5", serializerManagerMaxAcceptMembersRule.Default)
 
     quality, specificity, matched := acceptQualityFor(parsed, "text/html")
     if false == matched || 3 != specificity {

@@ -65,6 +65,25 @@ func (instance *container) TeardownDeadlineOverrun() exceptioncontract.Context {
     return cloneDeadlineRecord(instance.teardownDeadline)
 }
 
+/* TeardownWalkBudgetEnded answers, sorted, the nodes whose teardown walk the ContainerConfig.TeardownWalk.Nodes budget ended with items left to queue, so an edge past it was not gained; nil when none did. */
+func (instance *container) TeardownWalkBudgetEnded() []string {
+    instance.mutex.RLock()
+    defer instance.mutex.RUnlock()
+
+    if 0 == len(instance.teardownWalkBudgetEndedNodeKeys) {
+        return nil
+    }
+
+    nodeKeys := make([]string, 0, len(instance.teardownWalkBudgetEndedNodeKeys))
+    for nodeKey := range instance.teardownWalkBudgetEndedNodeKeys {
+        nodeKeys = append(nodeKeys, nodeKey)
+    }
+
+    sort.Strings(nodeKeys)
+
+    return nodeKeys
+}
+
 /* the doors reached through a type assertion on the concrete container, named once so the compiler holds the container to their shapes */
 type declaredTeardownVerifier interface {
     VerifyDeclaredTeardownDependencies() error
@@ -78,6 +97,10 @@ type teardownPlanner interface {
     TeardownPlan() []containercontract.TeardownPlanEntry
     TeardownRunsInWaves() bool
     TeardownDeadlineOverrun() exceptioncontract.Context
+}
+
+type teardownWalkBudgetReporter interface {
+    TeardownWalkBudgetEnded() []string
 }
 
 type closedContainerChecker interface {
