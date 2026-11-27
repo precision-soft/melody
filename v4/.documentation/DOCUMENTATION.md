@@ -74,6 +74,20 @@ Exclude:
 - Current API reference
 - Author guidelines / checklists
 
+### [`.documentation/DEFAULTS.md`](./DEFAULTS.md)
+
+Purpose: the inventory of every protective default, limit and door of the major, the core module and each `integrations/**/v4` module, checked against the code by `.dev/validate/defaults.sh`.
+
+Include:
+
+- The row's seven columns, its kinds, the door classes and the classes T, R and K
+- One section per package, headed by the package path, and one row per default: key, kind, what it protects against, the default, the door, the reason and the page that documents it
+
+Exclude:
+
+- The plain input validation of a package, which refuses a malformed argument naming its field
+- Current API reference
+
 ### [`.documentation/ROADMAP.md`](./ROADMAP.md)
 
 Purpose: repository roadmap (future plans only).

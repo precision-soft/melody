@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- documentation: `.documentation/DEFAULTS.md`, the inventory of every protective default, limit, boot-warning code, file mode and door of the major and of each `integrations/**/v4` module, one row each with what it protects against, its default, its door and its reason, checked against the code by the defaults band of the repository.
 - cache: **Breaking**: `cache/contract.Cache` declares `GetCounter(runtimeInstance, key) (int64, bool, error)`, the read of a key `Increment` or `Decrement` wrote, counting nothing, an absent or expired key answering false and no error, and `cache.Bound` forwards it as `GetCounter(key)`; `Manager.GetCounter` already answered it, so an implementation of the interface of the application's own, a decorator or a test double, adds the method.
 - config: `NamespaceFromRuntime(runtimeInstance)` answers the application namespace of the runtime's configuration, `DefaultNamespace` on any resolution failure, a typed-nil configuration a foreign scope answers included, or when its kernel configuration names none; the exclusive command's default lock name reads it, as the outbox relay and the cron runner do.
 - messagebus: `ValidateReceivedHeaders(headers, field)`, the name and value rule of `ValidateHeaders` without the count and the bytes, for the re-publish of a received envelope, and `IsWritableHeader(name, value)`, so a transport skips on receive what it could not write back.

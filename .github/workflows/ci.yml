@@ -283,6 +283,20 @@ jobs:
             -   name: exported surface of every published module against its last tag
                 run: .dev/validate/all.sh --apidiff
 
+    # the inventory of the fourth major's defaults against the code, mirroring run_defaults_checks in
+    # `.dev/validate/all.sh`, through the same entry point: every limit, boot-warning code, file mode and
+    # door field of a v4-line module has its row in `v4/.documentation/DEFAULTS.md`, every row names a
+    # declaration, and what the tree still owes is held in `.dev/validate/defaults.baseline`. It runs inside
+    # the dev image, where the type checker builds; kept off pull requests like the jobs above.
+    defaults:
+        if: github.event_name != 'pull_request'
+        runs-on: ubuntu-latest
+        timeout-minutes: 25
+        steps:
+            -   uses: actions/checkout@v4
+            -   name: defaults inventory of the fourth major against the code
+                run: .dev/validate/all.sh --defaults
+
     # the live e2e harness and the stack checks: the only lane that drives booted applications over the
     # wire. Every other job compiles the harness and runs its unit tests, so a middleware whose ordering
     # only matters once a real request traverses the chain, a route the router registers but never answers,

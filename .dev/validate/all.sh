@@ -28,7 +28,7 @@ set -- "${ARGUMENT_LIST[@]+"${ARGUMENT_LIST[@]}"}"
 if [[ "" = "${1-}" ]]; then
     :
 elif [[ "-h" = "${1-}" ]]; then
-    println "usage: all.sh [-h] [--all | --staged | --live | --e2e | --vulncheck | --compatibility | --apidiff] [--skip-live] [--fresh]"
+    println "usage: all.sh [-h] [--all | --staged | --live | --e2e | --vulncheck | --compatibility | --apidiff | --defaults] [--skip-live] [--fresh]"
     println ""
     println "  -h               show this help and exit"
     println "  --all            validate all modules, the live integration suites and the live e2e run (default)"
@@ -38,6 +38,7 @@ elif [[ "-h" = "${1-}" ]]; then
     println "  --vulncheck      run only the govulncheck lane against the vulncheck baseline"
     println "  --compatibility  run only the lane that builds every integration against the version its go.mod pins"
     println "  --apidiff        run only the lane that compares the exported surface of every published module with its last tag"
+    println "  --defaults       run only the lane that checks v4/.documentation/DEFAULTS.md against the defaults of every v4-line module"
     println "  --skip-live      leave the live suites and the e2e run out of --all, for a hand run with no backends"
     println "  --fresh          run every unit of --all, ignoring the unit cache, and record them again"
     println ""
@@ -58,6 +59,8 @@ elif [[ "--compatibility" = "${1-}" ]]; then
     MODE_STRING="compatibility"
 elif [[ "--apidiff" = "${1-}" ]]; then
     MODE_STRING="apidiff"
+elif [[ "--defaults" = "${1-}" ]]; then
+    MODE_STRING="defaults"
 elif [[ "--skip-live" = "${1-}" ]]; then
     MODE_STRING="all"
     SKIP_LIVE_BOOLEAN="true"
@@ -396,6 +399,36 @@ run_apidiff_checks() {
     fi
 
     run_published_lane_per_module "apidiff" "melody exported surface of every published module against its last tag (apidiff)"
+}
+
+# the inventory of the fourth major's defaults against the code of every v4-line module, read through go/types by
+# the tool beside the interface lister: every limit, boot-warning code, file mode and door field has its row in
+# v4/.documentation/DEFAULTS.md, every row names a declaration, and what the tree still owes is held, with its
+# reason, in .dev/validate/defaults.baseline. Needs the dev container for the toolchain; one unit, keyed on the
+# v4-line modules' digests, the document, the baseline, the lane and the type checker.
+run_defaults_checks() {
+    if [[ ! -x "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/defaults.sh" ]]; then
+        fail "the defaults check is missing or not executable: .dev/validate/defaults.sh. It is not optional — it is the only lane that asks whether every default of the fourth major has its door or its reason; restore it or chmod +x it"
+    fi
+
+    local LINE_MODULE_LIST=("v4")
+    local GO_MOD_PATH_STRING
+    while IFS= read -r GO_MOD_PATH_STRING; do
+        if [[ "" != "${GO_MOD_PATH_STRING}" ]]; then
+            LINE_MODULE_LIST+=("$(dirname "${GO_MOD_PATH_STRING}")")
+        fi
+    done < <(cd "${REPOSITORY_ROOT_DIRECTORY_STRING}" && find integrations -path '*/.example' -prune -o -path '*/v4/go.mod' -print | sort)
+
+    local UNIT_KEY_STRING=""
+    if [[ "true" = "${VALIDATION_CACHE_ENABLED_BOOLEAN}" ]]; then
+        UNIT_KEY_STRING="$(validation_cache_key "lane defaults" "unit v4 line" \
+            "$(validation_cache_object_list v4/.documentation/DEFAULTS.md .dev/validate/defaults.baseline .dev/validate/defaults.sh .dev/validate/typecheck)" \
+            "$(validation_cache_closure_digest_list "${LINE_MODULE_LIST[@]}")")"
+    fi
+
+    run_cached_unit "defaults" "v4 line" "${UNIT_KEY_STRING}" \
+        "melody defaults inventory of the fourth major against the code (DEFAULTS.md)" "${TAG_VALIDATE}" "defaults" -- \
+        "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/defaults.sh"
 }
 
 # the baseline rows of a lane as the run started, each prefixed with the module its first field names and a tab
@@ -1171,6 +1204,13 @@ main() {
         return 0
     fi
 
+    if [[ "defaults" = "${MODE_STRING}" ]]; then
+        run_defaults_checks
+
+        success "validation completed"
+        return 0
+    fi
+
     if [[ "all" = "${MODE_STRING}" ]]; then
         trap print_validation_unit_summary EXIT
 
@@ -1208,6 +1248,8 @@ main() {
         run_compatibility_checks
 
         run_apidiff_checks
+
+        run_defaults_checks
 
         run_race_go_suites
 
@@ -1310,6 +1352,15 @@ main() {
         run_apidiff_checks
     else
         info "skip compatibility and api surface checks (no staged go source, go.mod or go.sum outside the example applications and the dev harness)"
+    fi
+
+    # gated like the api surface check, on the paths its answer moves with: a v4-line go source outside the
+    # example applications, the inventory, its baseline, the lane and the type checker it builds
+    if grep -qE '^(v4|integrations/.+/v4)/.*\.go$' <<<"${PUBLISHED_STAGED_NAME_LIST_STRING}" ||
+        grep -qE '^(v4/\.documentation/DEFAULTS\.md|\.dev/validate/defaults\.(sh|baseline)|\.dev/validate/typecheck/.*)$' <<<"${STAGED_NAME_LIST_STRING}"; then
+        run_defaults_checks
+    else
+        info "skip defaults inventory check (no staged v4-line go source, DEFAULTS.md, defaults lane or type checker change)"
     fi
 
     section_end "staged validation" "success" "${TAG_VALIDATE}" "staged"
