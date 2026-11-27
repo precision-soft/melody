@@ -567,3 +567,59 @@ func TestDebugParameters_SecretOverrideIsRedacted(t *testing.T) {
         t.Fatalf("expected the overridden row secret, got %v", row)
     }
 }
+
+func TestParameterCommand_RevealPrintsASecretValueInDevelopment(t *testing.T) {
+    rendered, runErr := runDebugCommand(
+        &ParameterCommand{},
+        newParameterTestRuntime(t),
+        []string{"--format=json", "--" + ParameterCommandRevealFlagName},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    row := parameterItemsByName(t, rendered)["zz.window.secret"]
+    if nil == row || "P4ssPhrase" != row["value"] || true != row["isSecret"] {
+        t.Fatalf("expected the secret printed in clear and still marked secret, got %v", row)
+    }
+}
+
+func TestParameterCommand_RevealIsRefusedOutsideDevelopment(t *testing.T) {
+    rendered, runErr := runDebugCommand(
+        &ParameterCommand{},
+        newParameterTestRuntimeWith(t, map[string]string{config.EnvironmentNameKey: config.EnvironmentProduction}, config.ConfigurationConfig{}),
+        []string{"--format=json", "--" + ParameterCommandRevealFlagName},
+    )
+    if nil == runErr {
+        t.Fatalf("expected --reveal refused in production, got %q", rendered)
+    }
+
+    if true == strings.Contains(rendered, "P4ssPhrase") || true == strings.Contains(runErr.Error(), "P4ssPhrase") {
+        t.Fatalf("the refused reveal leaked the credential: %q, %v", rendered, runErr)
+    }
+
+    if false == strings.Contains(runErr.Error(), "--reveal") {
+        t.Fatalf("expected the refusal to name the flag, got %v", runErr)
+    }
+
+    errorContext := exceptionContextOf(t, runErr)
+    if ParameterCommandRevealFlagName != errorContext["flag"] || config.EnvironmentProduction != errorContext["environment"] {
+        t.Fatalf("expected the refusal context to name the flag and the environment, got %v", errorContext)
+    }
+}
+
+func TestParameterCommand_WithoutRevealASecretStaysMaskedInProduction(t *testing.T) {
+    rendered, runErr := runDebugCommand(
+        &ParameterCommand{},
+        newParameterTestRuntimeWith(t, map[string]string{config.EnvironmentNameKey: config.EnvironmentProduction}, config.ConfigurationConfig{}),
+        []string{"--format=json"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    row := parameterItemsByName(t, rendered)["zz.window.secret"]
+    if nil == row || redactedValuePlaceholder != row["value"] {
+        t.Fatalf("expected the secret masked, got %v", row)
+    }
+}

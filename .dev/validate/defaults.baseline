@@ -14,7 +14,6 @@ row ~ integrations/amqp/v4.maxDelayBuckets ~ class K: the reason row of the dela
 row ~ integrations/bunorm/migrate/v4.printAppliedGroup ~ W-9: db:migrate refuses while a ran-but-not-recorded marker stands, door --force (C8)
 row ~ integrations/bunorm/v4.SplitterConfig ~ M-13: SplitterConfig.PrimaryFallbackDisabled (C8)
 row ~ integrations/bunorm/v4/audit.FileStorage.Save#1 ~ H-5: a FileMode field per writer, the audit file storage with the other writers (C5)
-row ~ integrations/bunorm/v4/audit.RegistryConfig ~ class R: RegistryConfig.EncryptedColumnsUnmasked, per registry (C3, Q-G5-8)
 row ~ integrations/cron/v4.GenerateCommand.writeDestinations#1 ~ H-5: a DirectoryMode field per writer, the cron generator with the other writers (C5)
 row ~ integrations/cron/v4.RunnerCommand.Run ~ W-3: a cron User under the in-process runner refused, door RunnerConfig.EntryUserIgnored (C8)
 row ~ integrations/cron/v4.TickDedupConfig ~ Q-2 / G3R-3: the dedup over a locker without a lease is an open decision of the owner
@@ -30,7 +29,6 @@ row ~ v4/container.closeFailureStackLimit ~ class K: ContainerConfig.CloseFailur
 row ~ v4/container.teardownWalkDepthLimit ~ class K: ContainerConfig.TeardownWalk.Depth (C4)
 row ~ v4/container.teardownWalkElementLimit ~ class K: ContainerConfig.TeardownWalk.Elements (C4)
 row ~ v4/container.teardownWalkNodeBudget ~ class K: ContainerConfig.TeardownWalk.Nodes (C4)
-row ~ v4/debug.ParameterCommand.Flags ~ class R: debug:parameters --reveal, refused outside development (C3)
 row ~ v4/debug.errorCauseChainDepth ~ class K: the reason row of the debug cause chain, no field (C4)
 row ~ v4/http.RegisterKernelTerminateAccessLogListener ~ M-8: ApplicationConfig.AccessLog with Disabled and MaxFieldBytes, the HTTP.md access log section (C6)
 row ~ v4/http.sessionCookie ~ M-5: the reason of HttpOnly and of Cache-Control private (C9)
@@ -39,7 +37,6 @@ row ~ v4/internal.BootWarningNameEnvironmentUndeclaredKey ~ W-2: an undeclared M
 row ~ v4/internal.BootWarningNameSecretMarkUnmatched ~ W-1: an unmatched secret mark refuses the boot, door MarkParameterSecretOptional (C7)
 row ~ v4/internal.maxDiagnosticTextLength ~ class K: the diagnostic text length as a field, with the application doors (C4)
 row ~ v4/lock.defaultSessionProbeInterval ~ class K: ExclusiveConfig.ProbeInterval (C4)
-row ~ v4/logging ~ class R: the redaction and escaping exemption written once in LOGGING.md (C3)
 row ~ v4/openapi.maximumSchemaDepth ~ class K: the openapi descent depth as a field (C4)
 row ~ v4/security.JwtAlgorithmHs256 ~ M-12: the reason of HS256 only next to the check (C9)
 row ~ v4/security/accesscontrol.Control.MatchRuleIndex ~ W-8: a control without a fallback rule refused at compile, door = an explicit rule on / (C7)

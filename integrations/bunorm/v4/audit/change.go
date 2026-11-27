@@ -54,16 +54,16 @@ func (instance Change) MarshalJSON() ([]byte, error) {
 }
 
 func ChangeSet(before any, after any) []Change {
-    return changeSetWithIgnore(before, after, nil)
+    return changeSetWithIgnore(before, after, nil, false)
 }
 
-func changeSetWithIgnore(before any, after any, ignore map[string]struct{}) []Change {
+func changeSetWithIgnore(before any, after any, ignore map[string]struct{}, encryptedColumnsUnmasked bool) []Change {
     var changes []Change
 
     /* the visit record starts with the two root pointers, since Go permits `type Node struct { *Node }` and such an embed can lead back to the model itself */
     seen := map[embedVisitKey]struct{}{}
 
-    collectChanges(&changes, structValue(before, seen, false), structValue(after, seen, true), ignore, false, seen)
+    collectChanges(&changes, structValue(before, seen, false), structValue(after, seen, true), ignore, false, encryptedColumnsUnmasked, seen)
 
     /* an empty result is returned as an empty slice, never a nil one: a nil slice marshals to the JSON literal null in the changes column, where a consumer reading it as an array errors out and cannot tell it from a genuinely absent change-set. An idempotent update and any non-struct model both land here. */
     if 0 == len(changes) {
@@ -79,7 +79,7 @@ type embedVisitKey struct {
     after   bool
 }
 
-func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue reflect.Value, ignore map[string]struct{}, forceRedact bool, seen map[embedVisitKey]struct{}) {
+func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue reflect.Value, ignore map[string]struct{}, forceRedact bool, encryptedColumnsUnmasked bool, seen map[embedVisitKey]struct{}) {
     var structType reflect.Type
     if true == beforeValue.IsValid() {
         structType = beforeValue.Type()
@@ -120,7 +120,7 @@ func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue ref
             }
 
             embedRedact := forceRedact || "redact" == field.Tag.Get("audit")
-            collectChanges(changes, embeddedBefore, embeddedAfter, ignore, embedRedact, seen)
+            collectChanges(changes, embeddedBefore, embeddedAfter, ignore, embedRedact, encryptedColumnsUnmasked, seen)
             continue
         }
 
@@ -133,7 +133,8 @@ func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue ref
             continue
         }
 
-        redact := forceRedact || isRedactedField(field)
+        unmasked := true == encryptedColumnsUnmasked && false == forceRedact && "redact" != field.Tag.Get("audit") && true == isEncryptedColumnType(dereferencePointerType(field.Type))
+        redact := false == unmasked && (forceRedact || isRedactedField(field))
 
         var oldValue any
         var newValue any
@@ -144,7 +145,7 @@ func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue ref
             newValue = afterValue.Field(index).Interface()
         }
 
-        if false == redact {
+        if false == redact && false == unmasked {
             redact = valueContainsRedactTag(oldValue) || valueContainsRedactTag(newValue)
         }
 
@@ -152,6 +153,14 @@ func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue ref
             if true == valuesEqual(oldValue, newValue) {
                 continue
             }
+        }
+
+        if true == unmasked {
+            oldValue = encryptedColumnPlaintext(oldValue)
+            newValue = encryptedColumnPlaintext(newValue)
+        }
+
+        if true == oldUsable && true == newUsable {
             if true == redact {
                 *changes = append(*changes, Change{Field: name, Old: redactedValue, New: redactedValue, oldPresent: true, newPresent: true})
                 continue
@@ -176,6 +185,23 @@ func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue ref
 
         *changes = append(*changes, Change{Field: name, Old: oldValue, oldPresent: true})
     }
+}
+
+/* encryptedColumnPlaintext answers an encrypted column's plaintext as a plain string, since the column type's own MarshalJSON writes the placeholder; a nil pointer answers nil */
+func encryptedColumnPlaintext(value any) any {
+    resolved := reflect.ValueOf(value)
+    for reflect.Pointer == resolved.Kind() {
+        if true == resolved.IsNil() {
+            return nil
+        }
+        resolved = resolved.Elem()
+    }
+
+    if reflect.String != resolved.Kind() {
+        return value
+    }
+
+    return resolved.String()
 }
 
 func isAuditableEmbed(field reflect.StructField) bool {

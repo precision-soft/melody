@@ -115,6 +115,18 @@ func runWithScopedLogger(
 }
 ```
 
+## Redaction and escaping
+
+A credential the framework or an integration writes into a record, an error context, a diagnostic line or a printed configuration is redacted, and a control character in text of unknown origin is escaped, with no door that writes either raw. This is the one exemption from the rule that every protective default carries a door: a door that puts a credential in clear into the journal, or lets a forged line into it, turns the journal into the leak or the forgery the protection exists against, and a journal outlives the process and travels to places the application's own access control does not reach. The redactions it covers:
+
+- the access log's query values and `Referer`, and the http client's userinfo and query values in every message and error context it writes ([HTTPCLIENT](HTTPCLIENT.md));
+- the query values of a refused HMAC envelope, journaled by name only ([SECURITY](SECURITY.md));
+- the broker dsn of the amqp integration in its records and error causes, and the `fmt` rendering of a configuration that carries a secret: the collector headers of the opentelemetry integration, the keys of the s3 one;
+- the encrypted column types of the bunorm integration in every `fmt`, `slog` and json rendering;
+- the control characters of every text line the default logger, the recovery helpers and the commands' failure lines write, escaped to their visible form by one routine.
+
+Two reveals are legitimate and are doors of their own, outside the journal: `debug:parameters --reveal` prints a secret parameter's value in clear, in the development environment only ([DEBUG](DEBUG.md)), and `audit.RegistryConfig.EncryptedColumnsUnmasked` records an encrypted column's plaintext in the audit trail of a registry that asks for it (the bunorm audit README). A record the application writes itself is the application's to redact: an error context has no secret declaration the way a parameter has.
+
 ## Footguns & caveats
 
 - `LogOnRecover` **never terminates the process.** It recovers the panic in flight, logs it once — an error already marked as logged is not logged again — and, when `panicAgain` is set, panics again: with the recovered value when it already is an `*exception.Error` or an `*exception.ExitError`, or a foreign error that already carries the logged mark, and with the exception built around it otherwise, so the mark that prevents a second record travels with what goes back up. A recovered `exception.ExitError` is logged like any other error and re-raised as the wrapper it was, not as the error it carries, so the exit code it holds survives for whoever owns the process boundary; one carrying no error value is logged as the anomaly it is. A foreign error or a plain value is wrapped together with the stack of the panic still in flight, under the `panicStack` context key. This is the helper a `defer` in a library-like position wants: installed with `defer`, it sits above every defer registered

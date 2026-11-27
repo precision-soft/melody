@@ -3,12 +3,15 @@ package debug
 import (
     "bytes"
     "context"
+    "errors"
     "strings"
     "testing"
 
     melodycli "github.com/precision-soft/melody/v4/cli"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     middlewarepipeline "github.com/precision-soft/melody/v4/http/middleware/pipeline"
 )
@@ -163,4 +166,15 @@ func TestDebugCommands_CarryTheirNameAndDescription(t *testing.T) {
 
         seenNameList[commandEntry.command.Name()] = true
     }
+}
+
+func exceptionContextOf(t *testing.T, err error) exceptioncontract.Context {
+    t.Helper()
+
+    var exceptionErr *exception.Error
+    if false == errors.As(err, &exceptionErr) {
+        t.Fatalf("expected an exception error, got %T %v", err, err)
+    }
+
+    return exceptionErr.Context()
 }

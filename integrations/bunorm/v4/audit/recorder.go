@@ -119,7 +119,7 @@ func (instance *Recorder) record(
     before any,
     after any,
 ) error {
-    changes := changeSetWithIgnore(before, after, instance.registry.ignoredFieldsFor(entity))
+    changes := changeSetWithIgnore(before, after, instance.registry.ignoredFieldsFor(entity), instance.registry.encryptedColumnsUnmasked)
 
     payload, marshalErr := json.Marshal(changes)
     if nil != marshalErr {

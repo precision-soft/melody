@@ -12,6 +12,8 @@ The `changes` column the schema helper creates is `text`, which MySQL caps at 65
 - tag a field `audit:"redact"`, or
 - type it as any encrypted column type — `encrypt.EncryptedString`, `encrypt.EncryptedDeterministicString`, or the compartment-bound `encrypt.EncryptedStringFor[R]` / `EncryptedDeterministicStringFor[R]` forms — all recognised through the `encrypt.EncryptedColumn` marker interface (auto-redacted).
 
+The masking of the encrypted column types has one door, per registry: `RegistryConfig.EncryptedColumnsUnmasked` records a field typed as an encrypted column, behind a pointer or not, with its plaintext for every entity of the registry, for a trail that must show what a value was and is itself kept where the column's plaintext may be. The zero value masks, since the trail otherwise holds in clear what the column stores sealed. A field tagged `audit:"redact"`, and every field of an embed so tagged, stays masked under the door, and so does a field whose value holds an encrypted column inside it — a struct, a slice, a map or an `any` — which is masked whole: the column type renders only the placeholder through its own json, so the field is never half shown. The door is per registry rather than per entity, so the trail that holds the card numbers is not the one entity it was set on and forgotten; a registry per trail separates the entities that must stay masked.
+
 Additional fields can be dropped globally or per entity via the `Registry` (see below). Ignored fields are matched by **bun column name** (the first tag segment, or the Go field name where no tag names one) — the same name the change-set records.
 
 ## Recording

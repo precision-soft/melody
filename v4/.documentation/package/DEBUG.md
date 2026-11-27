@@ -18,7 +18,7 @@ The commands are intended for diagnostics and local debugging (container service
     - parameters (`debug:parameters`)
     - version metadata (`debug:version`)
 
-`debug:parameters` lists parameters only, never a key: the columns are the parameter, the `environmentKey` that feeds it, its `template`, the value, `default`, `overridden` and `secret`; an overridden row keeps the key it stopped reading. It reports a `secret` column: a parameter declared as holding a credential (see [CONFIG](CONFIG.md#secret-parameters)) renders its value as `********` — or `(empty)` when it carries none, including a nil value — with the length withheld, while an ordinary parameter prints in the clear.
+`debug:parameters` lists parameters only, never a key: the columns are the parameter, the `environmentKey` that feeds it, its `template`, the value, `default`, `overridden` and `secret`; an overridden row keeps the key it stopped reading. It reports a `secret` column: a parameter declared as holding a credential (see [CONFIG](CONFIG.md#secret-parameters)) renders its value as `********` — or `(empty)` when it carries none, including a nil value — with the length withheld, while an ordinary parameter prints in the clear. `--reveal` ([`ParameterCommandRevealFlagName`](../../debug/command_parameter.go)) prints a secret parameter's template and value in clear, the `secret` column still `true`; it is refused outside the development environment naming the flag and the environment, before any value is read, so a command registered by hand in a deployed process cannot be made to print a credential. The masking is otherwise doorless, as the journal's is ([LOGGING](LOGGING.md#redaction-and-escaping)).
 
 `debug:container` and `debug:middleware` describe by default and build only on request. The bare `debug:container` listing runs no provider: it reports names, lifetimes, built state and a type — the built instance's own for a service already built, the provider's declared return type for one not built yet and for a scoped one —, and the resolve sweep that builds services sits behind `--build`; naming a single service still resolves it. The bare `debug:middleware` listing describes the pipeline — the selection and ordering the build would run, with the inactive entries carrying their reasons — and only `--build` runs the real factories, under a recover so a panicking factory renders as a failure with its cause instead of killing the command. The inspection runs in a cli run, after `Boot` returned: a factory that calls a door under `kernelInstance.BootRuntime()` reports `ErrBootFinished` as its build error.
 
@@ -42,7 +42,7 @@ names that node, the table row prints it `service:a (also service:b)`, and a lis
 
 ## Flags and output
 
-Every debug command declares [`output.DebugFlags()`](../../cli/output/standard_flag.go) as its flag set — `debug:container` and `debug:middleware` appending their own `--build` beside it — and renders its result through [`output.Render`](../../cli/output/renderer.go), so all six share one interface. `DebugFlags()` is [`output.StandardFlags()`](../../cli/output/standard_flag.go) with `--quiet` defaulted to `false`, since a debug command's headers are the point. See [CLI](CLI.md#standard-output-flags) for the full table of flags and defaults.
+Every debug command declares [`output.DebugFlags()`](../../cli/output/standard_flag.go) as its flag set — `debug:container` and `debug:middleware` appending their own `--build` beside it, `debug:parameters` its `--reveal` — and renders its result through [`output.Render`](../../cli/output/renderer.go), so all six share one interface. `DebugFlags()` is [`output.StandardFlags()`](../../cli/output/standard_flag.go) with `--quiet` defaulted to `false`, since a debug command's headers are the point. See [CLI](CLI.md#standard-output-flags) for the full table of flags and defaults.
 
 Shared behaviours — the first, second and last applying to every command on this page, the middle two to the command each one names:
 
@@ -64,6 +64,7 @@ Shared behaviours — the first, second and last applying to every command on th
 - [`DeferredListenerProvider`](../../debug/command_event.go)
 - [`RouterCommand`](../../debug/command_router.go)
 - [`ParameterCommand`](../../debug/command_parameter.go)
+    - [`ParameterCommandRevealFlagName`](../../debug/command_parameter.go): `reveal`, the flag that prints a secret parameter in clear, refused outside the development environment
 - [`VersionCommand`](../../debug/command_version.go)
 - [`MiddlewareCommand`](../../debug/command_middleware.go)
 

@@ -484,3 +484,49 @@ func TestOptionalDependencies_NilIsTheDefaultAndATypedNilIsRefused(t *testing.T)
         })
     }
 }
+
+func TestRecorder_EncryptedColumnsUnmaskedRecordsThePlaintextAndTheTaggedFieldStaysMasked(t *testing.T) {
+    storage := &fakeStorage{}
+    recorder := NewRecorder(storage, RecorderConfig{Registry: NewRegistry(RegistryConfig{EncryptedColumnsUnmasked: true})})
+
+    before := account{Id: 1, ApiKey: "key-old", Password: "password-old", LookupEmail: "old@example.com"}
+    after := account{Id: 1, ApiKey: "key-new", Password: "password-new", LookupEmail: "new@example.com"}
+
+    if recordErr := recorder.RecordUpdate(context.Background(), "account", "1", before, after); nil != recordErr {
+        t.Fatalf("record: %v", recordErr)
+    }
+
+    changes := storage.saves[0].entries[0].Changes
+    for _, plaintext := range []string{"password-old", "password-new", "old@example.com", "new@example.com"} {
+        if false == strings.Contains(changes, plaintext) {
+            t.Fatalf("expected the unmasked registry to record %q, got %s", plaintext, changes)
+        }
+    }
+    for _, secret := range []string{"key-old", "key-new"} {
+        if true == strings.Contains(changes, secret) {
+            t.Fatalf("expected the audit:\"redact\" field masked under the unmasked registry, got %s", changes)
+        }
+    }
+}
+
+func TestRecorder_EncryptedColumnsStayMaskedByDefault(t *testing.T) {
+    storage := &fakeStorage{}
+    recorder := NewRecorder(storage, RecorderConfig{Registry: NewRegistry(RegistryConfig{})})
+
+    before := account{Id: 1, Password: "password-old", LookupEmail: "old@example.com"}
+    after := account{Id: 1, Password: "password-new", LookupEmail: "new@example.com"}
+
+    if recordErr := recorder.RecordUpdate(context.Background(), "account", "1", before, after); nil != recordErr {
+        t.Fatalf("record: %v", recordErr)
+    }
+
+    changes := storage.saves[0].entries[0].Changes
+    for _, plaintext := range []string{"password-old", "password-new", "old@example.com", "new@example.com"} {
+        if true == strings.Contains(changes, plaintext) {
+            t.Fatalf("expected the default registry to mask %q, got %s", plaintext, changes)
+        }
+    }
+    if 2 != strings.Count(changes, `"old":"\u003credacted\u003e"`) {
+        t.Fatalf("expected both encrypted columns masked, got %s", changes)
+    }
+}

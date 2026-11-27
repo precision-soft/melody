@@ -33,12 +33,17 @@ type Registry struct {
     defaultTable        string
     globalIgnoredFields []string
     optionsByEntity     map[string]EntityOptions
+
+    encryptedColumnsUnmasked bool
 }
 
 /* RegistryConfig declares the registry's defaults: DefaultTable, the audit table an entity writes to unless its options name one, DefaultTable when left out and refused when it is not a plain SQL identifier; GlobalIgnoredFields, the fields every entity leaves out of its changes. */
 type RegistryConfig struct {
     DefaultTable        string
     GlobalIgnoredFields []string
+
+    /* EncryptedColumnsUnmasked records a field typed as an encrypted column with its plaintext, for every entity of the registry; the zero value masks it to <redacted>, since the trail then holds in clear what the column stores sealed. A field tagged audit:"redact" stays masked either way. */
+    EncryptedColumnsUnmasked bool
 }
 
 func NewRegistry(config RegistryConfig) *Registry {
@@ -54,6 +59,8 @@ func NewRegistry(config RegistryConfig) *Registry {
         /* copied rather than aliased: a caller reusing that slice after boot would mutate what request goroutines read */
         globalIgnoredFields: append([]string{}, config.GlobalIgnoredFields...),
         optionsByEntity:     make(map[string]EntityOptions),
+
+        encryptedColumnsUnmasked: config.EncryptedColumnsUnmasked,
     }
 }
 

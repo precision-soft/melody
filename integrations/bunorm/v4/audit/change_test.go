@@ -860,7 +860,7 @@ func TestChange_MarshalsAPresentZeroValue(t *testing.T) {
         t.Fatalf("expected the present zero to render, got %s", updatePayload)
     }
 
-    deleteChanges := changeSetWithIgnore(flagRow{Id: 1, Active: true}, nil, nil)
+    deleteChanges := changeSetWithIgnore(flagRow{Id: 1, Active: true}, nil, nil, false)
 
     deletePayload, deleteErr := json.Marshal(deleteChanges)
     if nil != deleteErr {
@@ -1005,5 +1005,82 @@ func TestChangeSet_KeepsAColumnNamedLikeAnOptionAndReadsQuotedValuesWhole(t *tes
         if _, found := findChange(ChangeSet(row.before, row.after), row.field); row.kept != found {
             t.Fatalf("%s: expected %s kept %v", row.label, row.field, row.kept)
         }
+    }
+}
+
+func TestChangeSet_UnmaskedRecordsAPointerEncryptedColumnAndANilOne(t *testing.T) {
+    oldPassword := encrypt.EncryptedString("old-secret")
+    newLookup := encrypt.EncryptedDeterministicString("new@example.com")
+
+    before := nullableSecretAccount{Id: 1, Password: &oldPassword}
+    after := nullableSecretAccount{Id: 1, Lookup: &newLookup}
+
+    changes := changeSetWithIgnore(before, after, nil, true)
+
+    passwordChange, found := findChange(changes, "password")
+    if false == found || "old-secret" != passwordChange.Old || nil != passwordChange.New {
+        t.Fatalf("expected the pointer column's plaintext and a nil side, got %+v", passwordChange)
+    }
+
+    lookupChange, found := findChange(changes, "lookup")
+    if false == found || nil != lookupChange.Old || "new@example.com" != lookupChange.New {
+        t.Fatalf("expected a nil side and the pointer column's plaintext, got %+v", lookupChange)
+    }
+}
+
+func TestChangeSet_UnmaskedRecordsTheCompartmentBoundTypesAndKeepsANestedOneMasked(t *testing.T) {
+    type holder struct {
+        Email encrypt.EncryptedString `bun:"email"`
+    }
+    type document struct {
+        Id     int64                                               `bun:"id,pk"`
+        Iban   encrypt.EncryptedStringFor[changeTestCompartmentRef] `bun:"iban"`
+        Holder holder                                              `bun:"holder"`
+    }
+
+    before := document{Id: 1, Iban: "iban-old", Holder: holder{Email: "nested-old"}}
+    after := document{Id: 1, Iban: "iban-new", Holder: holder{Email: "nested-new"}}
+
+    changes := changeSetWithIgnore(before, after, nil, true)
+
+    ibanChange, found := findChange(changes, "iban")
+    if false == found || "iban-old" != ibanChange.Old || "iban-new" != ibanChange.New {
+        t.Fatalf("expected the compartment-bound column's plaintext, got %+v", ibanChange)
+    }
+
+    holderChange, found := findChange(changes, "holder")
+    if false == found || redactedValue != holderChange.Old || redactedValue != holderChange.New {
+        t.Fatalf("expected a field holding an encrypted value inside its own masked whole, got %+v", holderChange)
+    }
+}
+
+func TestChangeSet_UnmaskedKeepsAnEmbedTaggedRedactMasked(t *testing.T) {
+    type Credential struct {
+        Password encrypt.EncryptedString `bun:"password"`
+    }
+    type user struct {
+        Id         int64 `bun:"id,pk"`
+        Credential `audit:"redact"`
+    }
+
+    changes := changeSetWithIgnore(user{Id: 1, Credential: Credential{Password: "old-secret"}}, user{Id: 1, Credential: Credential{Password: "new-secret"}}, nil, true)
+
+    passwordChange, found := findChange(changes, "password")
+    if false == found || redactedValue != passwordChange.Old || redactedValue != passwordChange.New {
+        t.Fatalf("expected the redact-tagged embed to keep its encrypted column masked, got %+v", passwordChange)
+    }
+}
+
+func TestChangeSet_UnmaskedKeepsAnEncryptedColumnTaggedRedactMasked(t *testing.T) {
+    type card struct {
+        Id     int64                   `bun:"id,pk"`
+        Number encrypt.EncryptedString `bun:"number" audit:"redact"`
+    }
+
+    changes := changeSetWithIgnore(card{Id: 1, Number: "4111-old"}, card{Id: 1, Number: "4111-new"}, nil, true)
+
+    numberChange, found := findChange(changes, "number")
+    if false == found || redactedValue != numberChange.Old || redactedValue != numberChange.New {
+        t.Fatalf("expected the redact-tagged encrypted column masked under the unmasked registry, got %+v", numberChange)
     }
 }

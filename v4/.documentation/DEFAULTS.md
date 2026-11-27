@@ -19,7 +19,7 @@ An `env:` door sets an operational value. It never turns a protection off: on a 
 ## The classes
 
 - **class T** — a limit that is tunable and never unlimited: the large value is the door, because an unlimited value is the failure the limit exists for (a wait that never returns, a table that only grows).
-- **class R** — a redaction: the journal, the debug output and the audit trail never carry a secret in clear; the door, where there is one, is a flag of a development command or a field of the registry.
+- **class R** — a redaction: the journal, the debug output and the audit trail never carry a secret in clear; the door, where there is one, is a flag of a development command or a field of the registry, and the exemption of the journal is written once in [LOGGING.md](package/LOGGING.md#redaction-and-escaping).
 - **class K** — a constant that bounds a diagnostic or a cycle guard: a figure no deployment tunes, written here with its reason.
 
 ## What the band reads, and what it cannot
@@ -110,7 +110,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
 | `v4/debug.errorCauseChainDepth` | constant | a debug error without end | 9 | none | — | — |
-| `v4/debug.ParameterCommand.Flags` | redaction | a secret parameter printed by debug:parameters | masked | none | — | [DEBUG.md](package/DEBUG.md) |
+| `v4/debug.ParameterCommand.Flags` | redaction | a secret parameter printed by debug:parameters | masked | `off:v4/debug.ParameterCommandRevealFlagName` | class R: the flag reveals in the development environment only and is refused elsewhere naming the flag, so a deployed process never prints a credential | [DEBUG.md](package/DEBUG.md) |
 
 ## `v4/http`
 
@@ -230,7 +230,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | `v4/logging.causeChainDepthRule#1` | limit | a descent without end: the stack, or a payload that nests forever | causeChainDefaultDepth min 1 | `value:v4/logging.DefaultLoggerConfig.CauseChainDepth`, `value:v4/logging.JsonLoggerConfig.CauseChainDepth` | class T: a depth; a chain can be cyclic, so unlimited is a walk without end | [LOGGING.md](package/LOGGING.md) |
 | `v4/logging.DefaultLogDirectoryMode` | mode | a journal directory readable by every local user | 0750 | `value:v4/logging.ReopenableFileWriterConfig.DirectoryMode`, `env:MELODY_LOG_DIRECTORY_MODE` | — | [LOGGING.md](package/LOGGING.md) |
 | `v4/logging.DefaultLogFileMode` | mode | a journal readable by every local user | 0640 | `value:v4/logging.ReopenableFileWriterConfig.FileMode`, `env:MELODY_LOG_FILE_MODE` | — | [LOGGING.md](package/LOGGING.md) |
-| `v4/logging` | redaction | a secret or a control character written into the journal | redacted and escaped | none | — | — |
+| `v4/logging` | redaction | a secret or a control character written into the journal | redacted and escaped | none | class R: the one exemption from the door rule, a raw door would make the journal the leak or the forgery it is protected against | [LOGGING.md](package/LOGGING.md#redaction-and-escaping) |
 
 ## `v4/mailer`
 
@@ -462,7 +462,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 |---|---|---|---|---|---|---|
 | `integrations/bunorm/v4/audit.AsyncStorageConfig.BufferSize` | limit | unbounded memory or work | 1024 min 1 | `value:integrations/bunorm/v4/audit.AsyncStorageConfig.BufferSize` | class T: a size; unlimited is memory or work that only grows | [integrations/bunorm/v4/audit/README.md](../../integrations/bunorm/v4/audit/README.md) |
 | `integrations/bunorm/v4/audit.FileStorage.Save#1` | mode | an audit trail readable by every local user | 0640 | none | — | [integrations/bunorm/v4/audit/README.md](../../integrations/bunorm/v4/audit/README.md) |
-| `integrations/bunorm/v4/audit.RegistryConfig` | redaction | an encrypted column's plaintext in the audit trail | masked | none | — | [integrations/bunorm/v4/audit/README.md](../../integrations/bunorm/v4/audit/README.md) |
+| `integrations/bunorm/v4/audit.RegistryConfig` | redaction | an encrypted column's plaintext in the audit trail | masked | `off:integrations/bunorm/v4/audit.RegistryConfig.EncryptedColumnsUnmasked` | class R: per registry rather than per entity, so the door is not set once and forgotten on the entity that holds the card numbers; a field tagged redact stays masked | [integrations/bunorm/v4/audit/README.md](../../integrations/bunorm/v4/audit/README.md) |
 
 ## `integrations/bunorm/v4/encrypt`
 

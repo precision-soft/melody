@@ -8,6 +8,7 @@ import (
     "github.com/precision-soft/melody/v4/cli/output"
     "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
 )
 
@@ -15,6 +16,9 @@ const (
     redactedValuePlaceholder = "********"
     redactedEmptyPlaceholder = "(empty)"
 )
+
+/* ParameterCommandRevealFlagName is the flag that prints a secret parameter's value in clear, refused outside the development environment */
+const ParameterCommandRevealFlagName = "reveal"
 
 type ParameterCommand struct {
 }
@@ -28,7 +32,14 @@ func (instance *ParameterCommand) Description() string {
 }
 
 func (instance *ParameterCommand) Flags() []clicontract.Flag {
-    return output.DebugFlags()
+    return append(
+        output.DebugFlags(),
+        &clicontract.BoolFlag{
+            Name:  ParameterCommandRevealFlagName,
+            Usage: "print the value of a secret parameter in clear, in the development environment only",
+            Value: false,
+        },
+    )
 }
 
 func (instance *ParameterCommand) Run(
@@ -54,6 +65,19 @@ func (instance *ParameterCommand) Run(
     envelope := output.NewEnvelope(meta)
 
     applicationConfiguration := config.ConfigMustFromRuntime(runtimeInstance)
+
+    reveal := commandContext.Bool(ParameterCommandRevealFlagName)
+    if true == reveal && config.EnvironmentDevelopment != applicationConfiguration.Kernel().Environment() {
+        return exception.NewError(
+            "debug:parameters --reveal is refused outside the development environment",
+            map[string]any{
+                "flag":                ParameterCommandRevealFlagName,
+                "environment":         applicationConfiguration.Kernel().Environment(),
+                "requiredEnvironment": config.EnvironmentDevelopment,
+            },
+            nil,
+        )
+    }
 
     names := applicationConfiguration.Names()
     if 0 == len(names) {
@@ -85,14 +109,15 @@ func (instance *ParameterCommand) Run(
         }
 
         isSecret := parameter.IsSecret()
+        masked := true == isSecret && false == reveal
 
         items = append(
             items,
             parameterListItem{
                 Name:             name,
                 EnvironmentKey:   parameter.EnvironmentKey(),
-                Template:         redactedParameterValue(parameter.Template(), isSecret),
-                ValueString:      redactedParameterValue(parameter.Value(), isSecret),
+                Template:         redactedParameterValue(parameter.Template(), masked),
+                ValueString:      redactedParameterValue(parameter.Value(), masked),
                 IsDefault:        parameter.IsDefault(),
                 IsOverridden:     parameter.IsOverridden(),
                 IsSecret:         isSecret,
