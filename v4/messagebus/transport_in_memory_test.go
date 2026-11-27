@@ -457,6 +457,14 @@ func TestNewInMemoryTransport_RefusesAnUnlimitedBufferSizeAndATypedNilLogger(t *
     }, "in-memory transport logger is a typed nil")
 }
 
+func TestNewInMemoryTransport_AnAbsentLoggerIsTheEmergencyLogger(t *testing.T) {
+    emergency, _ := logging.ResolveOptionalLogger(nil, "in-memory transport", "InMemoryTransportConfig.Logger")
+
+    if emergency != NewInMemoryTransport(InMemoryTransportConfig{}).resolveLogger(newTestRuntime()) {
+        t.Fatalf("expected an absent logger to be the emergency logger where the runtime carries none")
+    }
+}
+
 func TestInMemoryTransport_TheConfiguredLoggerJournalsADropWhenTheRuntimeHasNone(t *testing.T) {
     logger := &messageRecordingLogger{}
     transport := NewInMemoryTransport(InMemoryTransportConfig{Logger: logger})

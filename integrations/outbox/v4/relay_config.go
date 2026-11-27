@@ -12,8 +12,10 @@ import (
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
 )
 
-/* defaultLockNameSuffix follows the application namespace in the relay's default lock name, <namespace>:outbox:relay */
+/* defaultLockNameSuffix follows the application namespace in the relay's default lock name, <namespace>:outbox:relay, then :<transport> for a named relay */
 const defaultLockNameSuffix = ":outbox:relay"
+
+const outboxMessageIdPrefix = "melody-outbox-"
 
 /* maximumBatchSize bounds one claim on both doors that take a batch size — the relay's BatchSize and the store's ClaimDueMessages limit; far above any sensible drain and far below what a mistyped configuration could ask a slice pre-allocation for. */
 const maximumBatchSize = 100000

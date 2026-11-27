@@ -9,7 +9,6 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
-    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -21,7 +20,7 @@ type InMemoryTransportConfig struct {
     /* BufferSize is the queue's capacity; 64 when left out, 0 an unbuffered queue where a send waits for a receiver, unlimited refused. */
     BufferSize bound.Count
 
-    /* Logger journals a requeue dropped at close when the runtime carries no logger; nil journals nothing, a typed nil is refused. */
+    /* Logger journals a requeue dropped at close when the runtime carries no logger; nil is the emergency logger, a typed nil is refused. */
     Logger loggingcontract.Logger
 
     /* Headers bounds the envelope headers one send carries, as a broker transport bounds them. */
@@ -41,16 +40,9 @@ func NewInMemoryTransport(config InMemoryTransportConfig) *InMemoryTransport {
         exception.Panic(exception.FromError(bufferSizeErr))
     }
 
-    if nil != config.Logger && true == internal.IsNilInterface(config.Logger) {
-        exception.Panic(
-            exception.NewError(
-                "in-memory transport logger is a typed nil",
-                exceptioncontract.Context{
-                    "field": "InMemoryTransportConfig.Logger",
-                },
-                nil,
-            ),
-        )
+    logger, loggerErr := logging.ResolveOptionalLogger(config.Logger, "in-memory transport", "InMemoryTransportConfig.Logger")
+    if nil != loggerErr {
+        exception.Panic(exception.FromError(loggerErr))
     }
 
     headerLimits, headerLimitsErr := ResolveHeaderLimits(config.Headers, "InMemoryTransportConfig.Headers")
@@ -61,7 +53,7 @@ func NewInMemoryTransport(config InMemoryTransportConfig) *InMemoryTransport {
     return &InMemoryTransport{
         queue:        make(chan messagebuscontract.Envelope, bufferSize.Value),
         done:         make(chan struct{}),
-        logger:       config.Logger,
+        logger:       logger,
         headerLimits: headerLimits,
     }
 }

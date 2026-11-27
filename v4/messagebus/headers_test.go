@@ -90,6 +90,48 @@ func TestValidateHeaders_TheZeroLimitsAreTheDefaults(t *testing.T) {
     }
 }
 
+func TestValidateReceivedHeaders_AppliesTheRuleWithoutTheCountAndTheBytes(t *testing.T) {
+    headers := map[string]string{"big": strings.Repeat("v", DefaultHeaderMaxBytes)}
+    for index := 0; index <= DefaultHeaderMaxCount; index++ {
+        headers[fmt.Sprintf("h%d", index)] = "value"
+    }
+
+    if validateErr := ValidateReceivedHeaders(headers, "TransportConfig.Headers"); nil != validateErr {
+        t.Fatalf("expected headers over the count and the bytes admitted, got %v", validateErr)
+    }
+
+    for _, refused := range []map[string]string{{"a b": "value"}, {"": "value"}, {"name": "a\tb"}, {"name": "\xff"}} {
+        validateErr := ValidateReceivedHeaders(refused, "TransportConfig.Headers")
+        if false == errors.Is(validateErr, ErrHeadersRefused) {
+            t.Fatalf("expected %q refused by the rule, got %v", refused, validateErr)
+        }
+
+        if "TransportConfig.Headers" != exception.LogContext(validateErr, exception.LogContextConfig{})["field"] {
+            t.Fatalf("expected the refusal to name the field, got %v", exception.LogContext(validateErr, exception.LogContextConfig{}))
+        }
+    }
+}
+
+func TestIsWritableHeader_AnswersTheNameAndValueRule(t *testing.T) {
+    for _, probe := range []struct {
+        name     string
+        value    string
+        writable bool
+    }{
+        {name: "request-id", value: "request-7", writable: true},
+        {name: strings.Repeat("a", 64), value: "", writable: true},
+        {name: "", value: "value"},
+        {name: "bad name", value: "value"},
+        {name: strings.Repeat("a", 65), value: "value"},
+        {name: "tabbed", value: "a\tb"},
+        {name: "invalid", value: "\xff"},
+    } {
+        if probe.writable != IsWritableHeader(probe.name, probe.value) {
+            t.Fatalf("expected IsWritableHeader(%q, %q) = %v", probe.name, probe.value, probe.writable)
+        }
+    }
+}
+
 func TestResolveHeaderLimits_RefusesUnlimitedAndValuesBelowTheMinimumNamingTheField(t *testing.T) {
     for _, probe := range []struct {
         config HeaderLimitsConfig

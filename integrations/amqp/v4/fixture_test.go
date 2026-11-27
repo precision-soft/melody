@@ -8,6 +8,7 @@ import (
     "io"
     "net"
     "os"
+    "reflect"
     "runtime"
     "strings"
     "sync"
@@ -15,9 +16,13 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     "github.com/precision-soft/melody/v4/logging"
+    melodymessagebus "github.com/precision-soft/melody/v4/messagebus"
+    messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
+    melodyserializer "github.com/precision-soft/melody/v4/serializer"
     amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
@@ -789,4 +794,71 @@ func captureStandardError(t *testing.T, action func()) string {
     }
 
     return string(written)
+}
+
+/* expectARawDeliveryRequeuesCounted publishes past the transport's write rule, as another producer may, then requeues with an advanced count: without a dead-letter queue a requeue that cannot be written loops at the count it arrived with. */
+func expectARawDeliveryRequeuesCounted(t *testing.T, queueName string, rawHeaders amqp091.Table, expected map[string]string) {
+    t.Helper()
+
+    connection := openHeadersTestConnection(t)
+
+    typeName := "amqp.test." + queueName
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, typeName)
+
+    deleteHeadersTestQueues(t, connection, queueName)
+    transport := NewTransport(queueName, registry, borrowedSource(connection), TransportConfig{Prefetch: bound.Of(1), DeadLetterDisabled: true})
+    defer transport.CloseWithContext(context.Background())
+
+    runtimeInstance := newReconnectRuntime(t.Context())
+
+    subscriptionInstance, receiveErr := transport.Receive(runtimeInstance)
+    if nil != receiveErr {
+        t.Fatalf("receive: %v", receiveErr)
+    }
+    queue := subscriptionInstance.Envelopes()
+
+    body, serializeErr := melodyserializer.NewJsonSerializer().Serialize(testMessage{Id: 1, Name: "raw"})
+    if nil != serializeErr {
+        t.Fatalf("serialize: %v", serializeErr)
+    }
+
+    headers := amqp091.Table{headerMessageType: typeName}
+    for key, value := range rawHeaders {
+        headers[key] = value
+    }
+
+    channel, channelErr := connection.Channel()
+    if nil != channelErr {
+        t.Fatalf("open publish channel: %v", channelErr)
+    }
+    defer channel.Close()
+
+    publishErr := channel.PublishWithContext(t.Context(), "", queueName, false, false, amqp091.Publishing{ContentType: "application/json", Headers: headers, Body: body})
+    if nil != publishErr {
+        t.Fatalf("raw publish: %v", publishErr)
+    }
+
+    first := receiveWithin(t, queue, 10*time.Second)
+    if received := melodymessagebus.Headers(first); false == reflect.DeepEqual(expected, received) {
+        t.Fatalf("expected the received headers %v, got %v", expected, received)
+    }
+
+    retried := first.WithStamps([]messagebuscontract.Stamp{melodymessagebus.RedeliveryStamp{Count: 1}})
+    if nackErr := transport.Nack(runtimeInstance, retried, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
+        t.Fatalf("nack requeue: %v", nackErr)
+    }
+
+    second := receiveWithin(t, queue, 10*time.Second)
+    if 1 != melodymessagebus.RedeliveryCount(second) {
+        t.Fatalf("expected the requeue to carry its redelivery count 1, got %d", melodymessagebus.RedeliveryCount(second))
+    }
+
+    if received := melodymessagebus.Headers(second); false == reflect.DeepEqual(expected, received) {
+        t.Fatalf("expected the requeue to keep the headers %v, got %v", expected, received)
+    }
+
+    if ackErr := transport.Ack(runtimeInstance, second); nil != ackErr {
+        t.Fatalf("ack: %v", ackErr)
+    }
 }

@@ -20,7 +20,7 @@ A runtime reaches no container: everything it resolves goes through its scope, a
 - Build a runtime:
     - [`NewRequest`](../../container/runtime/runtime.go): one http request;
     - [`NewRun`](../../container/runtime/runtime.go): one cli run, one delivery, one tick;
-    - [`NewChildRun`](../../container/runtime/runtime.go): a run over a new scope of the same container, for one delivery or one tick inside a run; the caller closes it through `child.Scope().Close()`;
+    - [`NewChildRun`](../../container/runtime/runtime.go): a run over a new scope of the same container, for one delivery or one tick inside a run; the caller closes it through `child.Scope().CloseWithContext(closeContext)`;
     - [`WithContext`](../../container/runtime/runtime.go): the same runtime, kind and scope, over a derived context.
 - Provide typed service resolution helpers, through the scope:
     - [`FromRuntime`](../../container/runtime/resolver.go)

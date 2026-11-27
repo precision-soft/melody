@@ -22,6 +22,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
+    "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
@@ -34,7 +35,7 @@ type FileStorageConfig struct {
     /* JournalMaxBytes is the journal size past which a write compacts it into the snapshot: 8 MiB when left out, at least 64 KiB, unlimited refused. */
     JournalMaxBytes bound.Count
 
-    /* Logger journals what the construction replayed or discarded and each failed threshold compaction; nil journals nothing, a typed nil is refused. */
+    /* Logger journals what the construction replayed or discarded and each failed threshold compaction; nil is the emergency logger, a typed nil is refused. */
     Logger loggingcontract.Logger
 
     /* MaxSessions bounds the sessions held at once: 100,000 when left out, at least 1, unlimited admitted; at the ceiling a new id is refused. */
@@ -80,14 +81,9 @@ func newFileStorage(path string, file *os.File, config FileStorageConfig) (*File
         return nil, journalMaxBytesErr
     }
 
-    if nil != config.Logger && true == internal.IsNilInterface(config.Logger) {
-        return nil, exception.NewError(
-            "session file storage logger is a typed nil",
-            exceptioncontract.Context{
-                "field": "FileStorageConfig.Logger",
-            },
-            nil,
-        )
+    logger, loggerErr := logging.ResolveOptionalLogger(config.Logger, "session file storage", "FileStorageConfig.Logger")
+    if nil != loggerErr {
+        return nil, loggerErr
     }
 
     clockInstance, clockErr := clock.ResolveOptionalClock(config.Clock, "session file storage", "FileStorageConfig.Clock")
@@ -101,7 +97,7 @@ func newFileStorage(path string, file *os.File, config FileStorageConfig) (*File
     if nil != file {
         storage, storageErr = newFileStorageFromFile(file, clockInstance)
     } else {
-        storage, storageErr = newFileStorageFromPath(path, clockInstance, false == config.JournalDisabled, journalMaxBytes, config.Logger)
+        storage, storageErr = newFileStorageFromPath(path, clockInstance, false == config.JournalDisabled, journalMaxBytes, logger)
     }
 
     if nil != storageErr {
@@ -109,7 +105,7 @@ func newFileStorage(path string, file *os.File, config FileStorageConfig) (*File
     }
 
     storage.maxSessions = maxSessions
-    storage.logger = config.Logger
+    storage.logger = logger
     storage.earliestExpiry = storage.earliestExpiryLocked()
 
     return storage, nil

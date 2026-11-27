@@ -34,7 +34,7 @@ type RelayConfig struct {
     /* TransportName is the destination this relay drains: the rows enqueued with EnqueueOptions.Transport equal to it; left out, the rows that name none. One relay per name, so a row is published by exactly one. */
     TransportName string
 
-    /* LockName names the single-drainer lock, used verbatim: the application namespace followed by :outbox:relay when empty, resolved at each run from the runtime's configuration, melody:outbox:relay under the default namespace. */
+    /* LockName names the single-drainer lock, used verbatim: the application namespace followed by :outbox:relay when empty, then :<TransportName> for a named relay, resolved at each run from the runtime's configuration, melody:outbox:relay under the default namespace. */
     LockName string
 
     /* LockTtl is the lease the lock is held and refreshed under: 30s when left out, at least 1s, unlimited refused. */
@@ -411,7 +411,7 @@ func (instance *Relay) deliver(runtimeInstance containercontract.Runtime, pendin
     }
 
     /* stamp the outbox row id as the message id so the transport can carry it (for example as the AMQP message id) and a consumer can deduplicate: the outbox is at-least-once (a transport success followed by a crash before MarkSent redelivers the row), so the same logical message must always publish under the same id. */
-    stamps := []messagebuscontract.Stamp{messagebus.MessageIdStamp{MessageId: outboxMessageId(pending.Id)}}
+    stamps := []messagebuscontract.Stamp{messagebus.MessageIdStamp{MessageId: outboxMessageId(pending.Table, pending.Id)}}
 
     if "" != pending.Headers {
         headers := map[string]string{}
@@ -681,10 +681,16 @@ func resolutionWriteOutcome(writeErr error, deliveryError string) error {
     )
 }
 
-/* lockName answers the declared name verbatim, else the default under the runtime's namespace; a runtime with no configuration reads the default namespace */
+/* lockName answers the declared name verbatim, else the default under the runtime's namespace, <namespace>:outbox:relay[:<transport>]; a runtime with no configuration reads the default namespace */
 func (instance *Relay) lockName(runtimeInstance containercontract.Runtime) string {
     if "" != instance.config.LockName {
         return instance.config.LockName
+    }
+
+    suffix := defaultLockNameSuffix
+    if "" != instance.config.TransportName {
+        /* each transport's relay drains rows of its own, so it must not wait on another's lock */
+        suffix += ":" + instance.config.TransportName
     }
 
     namespace := melodyconfig.DefaultNamespace
@@ -694,7 +700,7 @@ func (instance *Relay) lockName(runtimeInstance containercontract.Runtime) strin
         }
     }
 
-    return namespace + defaultLockNameSuffix
+    return namespace + suffix
 }
 
 func (instance *Relay) acquireLease(runtimeInstance containercontract.Runtime) (func(), func(containercontract.Runtime) error, bool, error) {
@@ -759,9 +765,13 @@ func (instance *Relay) releaseLease(runtimeInstance containercontract.Runtime, l
     )
 }
 
-/* outboxMessageId is the stable, deterministic message id derived from the outbox row id. The prefix namespaces it so it does not collide with ids other producers assign on the same transport. */
-func outboxMessageId(id int64) string {
-    return "melody-outbox-" + strconv.FormatInt(id, 10)
+/* outboxMessageId is the stable message id of a row: melody-outbox-<id> for the default table, melody-outbox-<table>-<id> for another, since two tables number their rows alike. */
+func outboxMessageId(table string, id int64) string {
+    if "" == table || DefaultTableName == table {
+        return outboxMessageIdPrefix + strconv.FormatInt(id, 10)
+    }
+
+    return outboxMessageIdPrefix + table + "-" + strconv.FormatInt(id, 10)
 }
 
 /* nextBackoff is the delay before the next attempt: the Backoff delay of the attempts already made. */

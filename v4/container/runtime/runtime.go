@@ -21,7 +21,7 @@ func NewRun(ctx context.Context, scope containercontract.Scope) containercontrac
     return newBoundRuntime(ctx, scope, containercontract.KindRun)
 }
 
-/* NewChildRun opens a new scope of the container behind the parent's scope and builds a run runtime over it: the runtime of one message delivery or one cron tick. The caller closes the child through child.Scope().Close(). A parent whose scope is closed, or whose scope is not the container's own, answers an error. */
+/* NewChildRun opens a new scope of the container behind the parent's scope and builds a run runtime over it: the runtime of one message delivery or one cron tick. The caller closes the child through child.Scope().CloseWithContext(closeContext). A parent whose scope is closed, or whose scope is not the container's own, answers an error. */
 func NewChildRun(parent containercontract.Runtime, ctx context.Context) (containercontract.Runtime, error) {
     if true == internal.IsNilInterface(parent) {
         exception.Panic(

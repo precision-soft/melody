@@ -48,7 +48,7 @@ type guardedCreation struct {
     store              instanceStore
     /* suspendsScope is true for a container-owned provider, which reads only what the container holds, and false for a scoped one, which reads both levels */
     suspendsScope bool
-    /* scopeDoneChannel is the owning scope's done channel for a scoped creation and nil for a container-owned one, which no scope's Close releases */
+    /* scopeDoneChannel is the owning scope's done channel for a scoped creation and nil for a container-owned one, which no scope's CloseWithContext releases */
     scopeDoneChannel chan struct{}
 }
 
@@ -109,7 +109,7 @@ func (instance *container) serviceWithCreationGuardLocked(
 
         instance.mutex.Unlock()
 
-        /* the channel is closed on every exit of the creating call, panics included; the caller's context, the container's Close and, for a scoped creation, the scope's Close release a waiter whose provider never returns */
+        /* the channel is closed on every exit of the creating call, panics included; the caller's context, the container's CloseWithContext and, for a scoped creation, the scope's CloseWithContext release a waiter whose provider never returns */
         var releaseErr error
         select {
         case <-currentState.waitChannel:

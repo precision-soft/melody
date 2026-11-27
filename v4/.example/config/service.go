@@ -34,7 +34,7 @@ import (
 )
 
 func (instance *Module) RegisterServices(registrar melodyapplicationcontract.ServiceRegistrar) {
-    /* the outbox transport is container-owned (see outbox.go): registered here so its Close() error joins the ordered teardown, gated like the outbox module itself on a configured database */
+    /* the outbox transport is container-owned (see outbox.go): registered here so its CloseWithContext joins the ordered teardown, gated like the outbox module itself on a configured database */
     if true == instance.catalogueWired {
         instance.registerOutboxTransportService(registrar)
     }

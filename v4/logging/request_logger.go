@@ -81,7 +81,7 @@ func (instance *requestLogger) Emergency(message string, context loggingcontract
     instance.base.Emergency(message, instance.mergeContextWithRequestId(context, instance.requestId))
 }
 
-/* Closed forwards the liveness question to the base logger, so the exit handler does not hand its final record to a decorator over a dead file logger; a base that cannot answer is reported open. Close is not forwarded: the wrapper does not own the shared writer. */
+/* Closed forwards the liveness question to the base logger, so the exit handler does not hand its final record to a decorator over a dead file logger; a base that cannot answer is reported open. CloseWithContext is not forwarded: the wrapper does not own the shared writer. */
 func (instance *requestLogger) Closed() bool {
     closedChecker, isChecker := instance.base.(interface{ Closed() bool })
     if false == isChecker {

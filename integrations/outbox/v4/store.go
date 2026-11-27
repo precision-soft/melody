@@ -299,6 +299,7 @@ func (instance *Store) ClaimDueMessages(runtimeInstance containercontract.Runtim
             ClaimToken:       claimToken,
             Headers:          row.Headers,
             Transport:        row.Transport,
+            Table:            instance.tableName,
         })
     }
 

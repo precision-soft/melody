@@ -986,7 +986,7 @@ func TestTransport_RequeuePersistsDeadLetterAttemptCount(t *testing.T) {
     envelope := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}, nil).
         WithStamps([]messagebuscontract.Stamp{melodymessagebus.DeadLetterAttemptStamp{Count: 2}})
 
-    publishing, buildErr := instance.buildPublishing(envelope, "")
+    publishing, buildErr := instance.buildPublishing(envelope, "", false)
     if nil != buildErr {
         t.Fatalf("build publishing: %v", buildErr)
     }
@@ -1012,7 +1012,7 @@ func TestTransport_BuildPublishingCarriesMessageId(t *testing.T) {
     envelope := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}, nil).
         WithStamps([]messagebuscontract.Stamp{melodymessagebus.MessageIdStamp{MessageId: "melody-outbox-42"}})
 
-    publishing, buildErr := instance.buildPublishing(envelope, "")
+    publishing, buildErr := instance.buildPublishing(envelope, "", false)
     if nil != buildErr {
         t.Fatalf("build publishing: %v", buildErr)
     }
@@ -1031,7 +1031,7 @@ func TestTransport_MessageIdSurvivesDecodeAndRepublish(t *testing.T) {
 
     sent := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}, nil).
         WithStamps([]messagebuscontract.Stamp{melodymessagebus.MessageIdStamp{MessageId: "melody-outbox-42"}})
-    published, buildErr := instance.buildPublishing(sent, "")
+    published, buildErr := instance.buildPublishing(sent, "", false)
     if nil != buildErr {
         t.Fatalf("build publishing: %v", buildErr)
     }
@@ -1051,7 +1051,7 @@ func TestTransport_MessageIdSurvivesDecodeAndRepublish(t *testing.T) {
         t.Fatalf("expected decode to surface the message id, got %q present=%v", roundTripped, present)
     }
 
-    republished, republishErr := instance.buildPublishing(decoded, "")
+    republished, republishErr := instance.buildPublishing(decoded, "", true)
     if nil != republishErr {
         t.Fatalf("rebuild publishing: %v", republishErr)
     }
@@ -1068,7 +1068,7 @@ func TestTransport_BuildPublishingWithoutMessageIdStampLeavesItEmpty(t *testing.
     serializer := melodyserializer.NewJsonSerializer()
     instance := &Transport{queue: "orders", registry: registry, serializer: serializer}
 
-    publishing, buildErr := instance.buildPublishing(melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}, nil), "")
+    publishing, buildErr := instance.buildPublishing(melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}, nil), "", false)
     if nil != buildErr {
         t.Fatalf("build publishing: %v", buildErr)
     }
@@ -2710,7 +2710,7 @@ func TestTransport_AWedgedRefusalIsNotReportedAsRetryable(t *testing.T) {
         t.Fatalf("expected the wedging send to fail")
     }
 
-    publishing, buildErr := transport.buildPublishing(melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "refused"}, nil), "")
+    publishing, buildErr := transport.buildPublishing(melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "refused"}, nil), "", false)
     if nil != buildErr {
         t.Fatalf("buildPublishing: %v", buildErr)
     }
@@ -2756,7 +2756,7 @@ func TestTransport_ATurnTimeoutIsWorthAFurtherAttemptWithoutFaultingTheChannel(t
     connection, _ := dialGated(t, dsn)
     transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
 
-    publishing, buildErr := transport.buildPublishing(melodymessagebus.NewEnvelope(testMessage{Id: 4, Name: "queued"}, nil), "")
+    publishing, buildErr := transport.buildPublishing(melodymessagebus.NewEnvelope(testMessage{Id: 4, Name: "queued"}, nil), "", false)
     if nil != buildErr {
         t.Fatalf("buildPublishing: %v", buildErr)
     }
@@ -3781,7 +3781,7 @@ func TestTransport_ARequeueRepublishKeepsTryingThroughANack(t *testing.T) {
     }
     defer func() { _, _ = declareChannel.QueueDelete(fullQueue, false, false, false) }()
 
-    publishing, buildErr := transport.buildPublishing(melodymessagebus.NewEnvelope(testMessage{Id: 5, Name: "overflow"}, nil), "")
+    publishing, buildErr := transport.buildPublishing(melodymessagebus.NewEnvelope(testMessage{Id: 5, Name: "overflow"}, nil), "", false)
     if nil != buildErr {
         t.Fatalf("buildPublishing: %v", buildErr)
     }
@@ -4377,7 +4377,7 @@ func TestTransport_HeadersCrossTheBroker(t *testing.T) {
         []messagebuscontract.Stamp{melodymessagebus.HeadersStamp{Headers: map[string]string{"request-id": "request-7", "tenant": "north"}}},
     )
 
-    publishing, buildErr := transport.buildPublishing(sent, "")
+    publishing, buildErr := transport.buildPublishing(sent, "", false)
     if nil != buildErr {
         t.Fatalf("build publishing: %v", buildErr)
     }
@@ -4569,6 +4569,83 @@ func TestTransport_APrefixedHeaderOfAnotherTypeIsSkippedWithAWarning(t *testing.
         }
 
         if true == strings.Contains(fmt.Sprint(record.context), strconv.FormatInt(secret, 10)) {
+            t.Fatalf("expected the warning to carry no value, got %v", record.context)
+        }
+    }
+
+    if 1 != warnings {
+        t.Fatalf("expected one warning, got %d", warnings)
+    }
+}
+
+func TestTransport_AReceivedHeaderTheWriteRuleRefusesIsSkippedSoTheRequeueCounts(t *testing.T) {
+    expectARawDeliveryRequeuesCounted(t, "melody.amqp.v4.headers.unwritable", amqp091.Table{
+        "x-melody-header-bad name":  "spaced",
+        "x-melody-header-":          "empty name",
+        "x-melody-header-tabbed":    "a\tb",
+        "x-melody-header-request-id": "request-7",
+    }, map[string]string{"request-id": "request-7"})
+}
+
+func TestTransport_AReceivedEnvelopeOverTheHeaderLimitsRequeuesCounted(t *testing.T) {
+    headers := amqp091.Table{}
+    expected := map[string]string{}
+    for index := 0; index <= melodymessagebus.DefaultHeaderMaxCount; index++ {
+        name := "h" + strconv.Itoa(index)
+        headers[ApplicationHeaderPrefix+name] = "value"
+        expected[name] = "value"
+    }
+
+    expectARawDeliveryRequeuesCounted(t, "melody.amqp.v4.headers.overlimit", headers, expected)
+}
+
+func TestTransport_AHeaderFailingTheWriteRuleIsSkippedWithAWarningNamingIt(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.headers.unwritable")
+
+    instance := &Transport{queue: "orders", registry: registry, serializer: melodyserializer.NewJsonSerializer(), closeSignal: make(chan struct{})}
+
+    body, serializeErr := instance.serializer.Serialize(testMessage{Id: 1})
+    if nil != serializeErr {
+        t.Fatalf("serialize: %v", serializeErr)
+    }
+
+    deliveries := make(chan amqp091.Delivery, 1)
+    deliveries <- amqp091.Delivery{
+        Headers: amqp091.Table{
+            headerMessageType:            "amqp.test.headers.unwritable",
+            "x-melody-header-request-id": "request-7",
+            "x-melody-header-tabbed":     "secret\tvalue",
+        },
+        Body: body,
+    }
+    close(deliveries)
+
+    runtimeInstance, logger := newRecordingLoggerRuntime(t.Context())
+    out := make(chan messagebuscontract.Envelope, 1)
+    instance.forwardDeliveries(runtimeInstance, nil, 1, deliveries, out)
+
+    received := <-out
+    headers := melodymessagebus.Headers(received)
+    if 1 != len(headers) || "request-7" != headers["request-id"] {
+        t.Fatalf("expected only the writable header, got %v", headers)
+    }
+
+    logger.mutex.Lock()
+    defer logger.mutex.Unlock()
+
+    warnings := 0
+    for _, record := range logger.records {
+        if loggingcontract.LevelWarning != record.level {
+            continue
+        }
+
+        warnings++
+        if "x-melody-header-tabbed" != record.context["header"] {
+            t.Fatalf("expected the warning to name the header, got %v", record.context)
+        }
+
+        if true == strings.Contains(fmt.Sprint(record.context), "secret") {
             t.Fatalf("expected the warning to carry no value, got %v", record.context)
         }
     }

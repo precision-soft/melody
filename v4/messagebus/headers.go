@@ -72,32 +72,9 @@ func ValidateHeaders(headers map[string]string, limits HeaderLimits) error {
         )
     }
 
-    names := make([]string, 0, len(headers))
-    for name := range headers {
-        names = append(names, name)
-    }
-    sort.Strings(names)
-
-    size := 0
-    for _, name := range names {
-        if false == validHeaderName(name) {
-            return exception.NewError(
-                "a message header name must be 1 to 64 characters of letters, digits, \".\", \"_\" and \"-\", beginning with a letter or a digit",
-                exceptioncontract.Context{"header": internal.BoundDiagnosticText(name), "field": limits.field},
-                ErrHeadersRefused,
-            )
-        }
-
-        value := headers[name]
-        if false == validHeaderValue(value) {
-            return exception.NewError(
-                "a message header value must be valid utf-8 with no control character",
-                exceptioncontract.Context{"header": name, "field": limits.field},
-                ErrHeadersRefused,
-            )
-        }
-
-        size += len(name) + len(value)
+    size, ruleErr := validateHeaderRule(headers, limits.field)
+    if nil != ruleErr {
+        return ruleErr
     }
 
     if limits.maxBytes < size {
@@ -109,6 +86,50 @@ func ValidateHeaders(headers map[string]string, limits HeaderLimits) error {
     }
 
     return nil
+}
+
+/* ValidateReceivedHeaders applies ValidateHeaders' name and value rule without its count and bytes, which the broker or the row already bounded: the re-publish of a received envelope is never refused for a size it arrived with. */
+func ValidateReceivedHeaders(headers map[string]string, field string) error {
+    _, ruleErr := validateHeaderRule(headers, field)
+
+    return ruleErr
+}
+
+/* IsWritableHeader answers whether one header meets ValidateHeaders' name and value rule, so a transport skips on receive what it could not write back. */
+func IsWritableHeader(name string, value string) bool {
+    return true == validHeaderName(name) && true == validHeaderValue(value)
+}
+
+func validateHeaderRule(headers map[string]string, field string) (int, error) {
+    names := make([]string, 0, len(headers))
+    for name := range headers {
+        names = append(names, name)
+    }
+    sort.Strings(names)
+
+    size := 0
+    for _, name := range names {
+        if false == validHeaderName(name) {
+            return 0, exception.NewError(
+                "a message header name must be 1 to 64 characters of letters, digits, \".\", \"_\" and \"-\", beginning with a letter or a digit",
+                exceptioncontract.Context{"header": internal.BoundDiagnosticText(name), "field": field},
+                ErrHeadersRefused,
+            )
+        }
+
+        value := headers[name]
+        if false == validHeaderValue(value) {
+            return 0, exception.NewError(
+                "a message header value must be valid utf-8 with no control character",
+                exceptioncontract.Context{"header": name, "field": field},
+                ErrHeadersRefused,
+            )
+        }
+
+        size += len(name) + len(value)
+    }
+
+    return size, nil
 }
 
 func validHeaderName(name string) bool {

@@ -799,6 +799,10 @@ func TestStore_TheTableNameIsTheConfigs(t *testing.T) {
     }
 
     for _, pending := range claimed {
+        if "orders_outbox" != pending.Table {
+            t.Fatalf("expected the claimed row to name its table, got %q", pending.Table)
+        }
+
         if _, recorded, recordErr := store.RecordDeliveryAttempt(runtimeInstance, pending.Id, pending.ClaimToken); nil != recordErr || false == recorded {
             t.Fatalf("record: %v (recorded %v)", recordErr, recorded)
         }

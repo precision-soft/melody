@@ -15,6 +15,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
@@ -430,6 +431,17 @@ func TestNewFileStorage_RefusesATypedNilLogger(t *testing.T) {
     _, storageErr := NewFileStorage(filepath.Join(t.TempDir(), "sessions.json"), FileStorageConfig{Logger: typedNil})
     if nil == storageErr || "session file storage logger is a typed nil" != storageErr.Error() {
         t.Fatalf("expected the typed nil refused, got %v", storageErr)
+    }
+}
+
+func TestNewFileStorage_AnAbsentLoggerIsTheEmergencyLogger(t *testing.T) {
+    emergency, _ := logging.ResolveOptionalLogger(nil, "session file storage", "FileStorageConfig.Logger")
+
+    storage := newJournalStorage(t, filepath.Join(t.TempDir(), "sessions.json"), FileStorageConfig{})
+    defer storage.CloseWithContext(context.Background())
+
+    if emergency != storage.logger {
+        t.Fatalf("expected an absent logger to journal on the emergency logger, got %v", storage.logger)
     }
 }
 

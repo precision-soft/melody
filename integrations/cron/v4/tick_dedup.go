@@ -5,6 +5,7 @@ import (
     "crypto/sha256"
     "encoding/hex"
     "fmt"
+    "runtime/debug"
     "strconv"
     "sync"
     "time"
@@ -498,13 +499,38 @@ func (instance *RunnerCommand) releaseWonTick(runtimeInstance containercontract.
     }
 }
 
-/* gateTick resolves an entry's claim and answers what replaces its run: a skip row, a failed or cancelled row, or nothing when the entry runs. A locker failure under TickDedupFailureRun runs the entry with a warning. */
+/* gateTick resolves an entry's claim and answers what replaces its run: a skip row, a failed or cancelled row, or nothing when the entry runs. A locker failure under TickDedupFailureRun runs the entry with a warning. A panic in the gate, the application's logger included, is the entry's failed row, as it is around a run. */
 func (instance *RunnerCommand) gateTick(
     runtimeInstance containercontract.Runtime,
     dedupRun *tickDedupRun,
     entry *scheduledRunEntry,
     claim *tickClaim,
 ) (skip *dueSkip, row *dueRun, failure error, counted bool, gated bool) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            return
+        }
+
+        runId := logging.GenerateProcessId()
+        failure = exception.NewError(
+            "cron: the runner panicked gating a scheduled tick",
+            exceptioncontract.Context{
+                "commandName":  entry.commandName,
+                "tickDedupKey": claim.key,
+                "cronRunId":    runId,
+                "panicValue":   fmt.Sprintf("%v", recovered),
+                "panicStack":   string(debug.Stack()),
+            },
+            exception.PanicCause(recovered),
+        )
+
+        failedRow := newDueRun(entry, runId, time.Now(), failure, false)
+        skip, row, counted, gated = nil, &failedRow, true, true
+
+        instance.reportContained(runtimeInstance, entry, runId, failure)
+    }()
+
     verdict, cause := instance.resolveClaim(runtimeInstance, dedupRun, claim)
 
     switch verdict {

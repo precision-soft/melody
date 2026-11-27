@@ -531,7 +531,7 @@ func wrapHttpShutdownHook(
     }
 }
 
-/* recoverHttpShutdownHook logs a panicking shutdown hook and returns. Unlike logging.LogOnRecover it strips an *exception.ExitError's code: the hook runs while the server drains, and ending the process there would cut in-flight requests, skip the remaining hooks and skip Application.Close(). */
+/* recoverHttpShutdownHook logs a panicking shutdown hook and returns. Unlike logging.LogOnRecover it strips an *exception.ExitError's code: the hook runs while the server drains, and ending the process there would cut in-flight requests, skip the remaining hooks and skip Application.CloseWithContext. */
 func recoverHttpShutdownHook(logger loggingcontract.Logger) {
     recoveredValue := recover()
     if nil == recoveredValue {

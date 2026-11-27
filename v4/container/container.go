@@ -18,7 +18,7 @@ import (
     "github.com/precision-soft/melody/v4/internal"
 )
 
-/* DefaultScopeTeardownTimeout is how long a scope's Close gives its scoped services when ContainerConfig.ScopeTeardownTimeout is left out. It stays under config.DefaultHttpShutdownTimeout, since a request scope still closing when a shutdown's wait ends is reported as left open. */
+/* DefaultScopeTeardownTimeout is how long a scope's CloseWithContext gives its scoped services when ContainerConfig.ScopeTeardownTimeout is left out. It stays under config.DefaultHttpShutdownTimeout, since a request scope still closing when a shutdown's wait ends is reported as left open. */
 const DefaultScopeTeardownTimeout = 3 * time.Second
 
 /* ScopeTeardownTimeoutRule resolves ContainerConfig.ScopeTeardownTimeout: 3s when left out, at least 1ms, unlimited admitted. */
@@ -46,7 +46,7 @@ func CreationWaitersRule() bound.Rule[int] {
 
 /* ContainerConfig is what a container declares beyond its registrations; the zero value is the default. */
 type ContainerConfig struct {
-    /* ScopeTeardownTimeout bounds what a scope's Close hands its scoped services: 3s when left out, at least 1ms, unlimited admitted for no term. */
+    /* ScopeTeardownTimeout bounds what a scope's CloseWithContext hands its scoped services: 3s when left out, at least 1ms, unlimited admitted for no term. */
     ScopeTeardownTimeout bound.Duration
     /* CreationWaiters bounds the resolutions that may wait on one in-flight creation: 1,024 when left out, at least 1, unlimited admitted. One more is refused with ErrCreationWaitersExceeded. */
     CreationWaiters bound.Count

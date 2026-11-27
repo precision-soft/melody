@@ -17,6 +17,7 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/lock"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -2124,15 +2125,19 @@ func TestRelay_AFailedReleaseIsLoggedAndTheBatchsOwnErrorIsAnswered(t *testing.T
 func TestRelay_TheDefaultLockNameCarriesTheNamespace(t *testing.T) {
     for label, testCase := range map[string]struct {
         lockName        string
+        transportName   string
         runtimeInstance containercontract.Runtime
         expected        string
     }{
         "the runtime's namespace":            {lockName: "", runtimeInstance: runtimeWithNamespace(t, "shop"), expected: "shop:outbox:relay"},
         "a runtime with no configuration":    {lockName: "", runtimeInstance: relayTestRuntime(), expected: "melody:outbox:relay"},
         "an explicit name under a namespace": {lockName: "legacy:relay", runtimeInstance: runtimeWithNamespace(t, "shop"), expected: "legacy:relay"},
+        "a named relay":                      {transportName: "orders", runtimeInstance: runtimeWithNamespace(t, "shop"), expected: "shop:outbox:relay:orders"},
+        "a named relay with no configuration": {transportName: "billing", runtimeInstance: relayTestRuntime(), expected: "melody:outbox:relay:billing"},
+        "an explicit name for a named relay": {lockName: "legacy:relay", transportName: "orders", runtimeInstance: relayTestRuntime(), expected: "legacy:relay"},
     } {
         locker := &fakeLocker{acquire: false}
-        relay := NewRelay(&fakeRepository{}, &fakeTransport{}, &stringCodec{}, RelayConfig{Locker: locker, LockName: testCase.lockName})
+        relay := NewRelay(&fakeRepository{}, &fakeTransport{}, &stringCodec{}, RelayConfig{Locker: locker, LockName: testCase.lockName, TransportName: testCase.transportName})
 
         if _, runErr := relay.RunOnce(testCase.runtimeInstance); nil != runErr {
             t.Fatalf("%s: unexpected run error: %v", label, runErr)
@@ -2211,6 +2216,83 @@ func TestRelay_ClaimsTheRowsOfItsTransportName(t *testing.T) {
         if 1 != len(repository.claimOptions) || transportName != repository.claimOptions[0].Transport {
             t.Fatalf("expected the claim narrowed to %q, got %+v", transportName, repository.claimOptions)
         }
+    }
+}
+
+func TestRelay_TwoNamedRelaysOverOneLockerDoNotExcludeEachOther(t *testing.T) {
+    locker := lock.NewInMemoryLocker(lock.InMemoryLockerConfig{})
+    runtimeInstance := relayTestRuntime()
+
+    ordersLock, createErr := locker.CreateLock("melody:outbox:relay:orders", bound.Of(time.Minute))
+    if nil != createErr {
+        t.Fatalf("create the orders lock: %v", createErr)
+    }
+
+    if acquired, acquireErr := ordersLock.Acquire(runtimeInstance); nil != acquireErr || false == acquired {
+        t.Fatalf("expected the orders relay's lock held, got %v %v", acquired, acquireErr)
+    }
+    defer ordersLock.Release(runtimeInstance)
+
+    ordersTransport := &fakeTransport{}
+    ordersRelay := NewRelay(&fakeRepository{due: []Pending{{Id: 1, TypeName: "string", Payload: []byte("order"), Transport: "orders"}}}, ordersTransport, &stringCodec{}, RelayConfig{Locker: locker, TransportName: "orders"})
+    if published, runErr := ordersRelay.RunOnce(runtimeInstance); nil != runErr || 0 != published || 0 != len(ordersTransport.envelopes) {
+        t.Fatalf("expected the orders relay to wait on its own held lock, got %d %v", published, runErr)
+    }
+
+    billingTransport := &fakeTransport{}
+    billingRelay := NewRelay(&fakeRepository{due: []Pending{{Id: 2, TypeName: "string", Payload: []byte("invoice"), Transport: "billing"}}}, billingTransport, &stringCodec{}, RelayConfig{Locker: locker, TransportName: "billing"})
+    published, runErr := billingRelay.RunOnce(runtimeInstance)
+    if nil != runErr {
+        t.Fatalf("billing run once: %v", runErr)
+    }
+
+    if 1 != published || 1 != len(billingTransport.envelopes) {
+        t.Fatalf("expected the billing relay to drain while the orders relay holds its lock, got %d published", published)
+    }
+}
+
+func TestRelay_TheMessageIdCarriesANonDefaultTable(t *testing.T) {
+    for label, testCase := range map[string]struct {
+        table    string
+        expected string
+    }{
+        "a row with no table":   {table: "", expected: "melody-outbox-1"},
+        "the default table":     {table: DefaultTableName, expected: "melody-outbox-1"},
+        "another table":         {table: "orders_outbox", expected: "melody-outbox-orders_outbox-1"},
+    } {
+        transport := &fakeTransport{}
+        repository := &fakeRepository{due: []Pending{{Id: 1, TypeName: "string", Payload: []byte("first"), Table: testCase.table}}}
+
+        if _, runErr := NewRelay(repository, transport, &stringCodec{}, RelayConfig{}).RunOnce(relayTestRuntime()); nil != runErr {
+            t.Fatalf("%s: run once: %v", label, runErr)
+        }
+
+        if messageId, present := messagebus.MessageId(transport.envelopes[0]); false == present || testCase.expected != messageId {
+            t.Fatalf("%s: expected the message id %q, got %q", label, testCase.expected, messageId)
+        }
+    }
+}
+
+func TestRelay_TwoTablesOverOneTransportPublishDistinctMessageIds(t *testing.T) {
+    transport := &fakeTransport{}
+    for _, row := range []Pending{
+        {Id: 1, TypeName: "string", Payload: []byte("orders:first"), Table: "orders_outbox"},
+        {Id: 1, TypeName: "string", Payload: []byte("billing:first"), Table: "billing_outbox"},
+    } {
+        repository := &fakeRepository{due: []Pending{row}}
+        if _, runErr := NewRelay(repository, transport, &stringCodec{}, RelayConfig{}).RunOnce(relayTestRuntime()); nil != runErr {
+            t.Fatalf("run once: %v", runErr)
+        }
+    }
+
+    if 2 != len(transport.envelopes) {
+        t.Fatalf("expected two deliveries, got %d", len(transport.envelopes))
+    }
+
+    first, _ := messagebus.MessageId(transport.envelopes[0])
+    second, _ := messagebus.MessageId(transport.envelopes[1])
+    if first == second {
+        t.Fatalf("expected the rows of two tables to publish distinct message ids, both %q", first)
     }
 }
 

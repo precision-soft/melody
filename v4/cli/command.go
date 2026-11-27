@@ -205,7 +205,7 @@ func runCommandAction(
         panic(recoveredValue)
     }()
 
-    /* normalized through the interface: a command returning a concrete typed nil pointer hands over a non-nil interface; the scope's Close result, from the substitutable runtime contract, gets the same reading */
+    /* normalized through the interface: a command returning a concrete typed nil pointer hands over a non-nil interface; the scope's CloseWithContext result, from the substitutable runtime contract, gets the same reading */
     runErr := normalizeCliError(command.Run(runtimeInstance, commandContext))
 
     closeErrorByName := map[string]error{}

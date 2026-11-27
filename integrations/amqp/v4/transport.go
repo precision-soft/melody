@@ -26,6 +26,8 @@ import (
 /* ApplicationHeaderPrefix opens the AMQP header of every envelope header: "x-melody-header-<name>". */
 const ApplicationHeaderPrefix = "x-melody-header-"
 
+const transportHeadersField = "TransportConfig.Headers"
+
 const (
     headerMessageType            = "x-message-type"
     headerRedeliveryCount        = "x-redelivery-count"
@@ -127,7 +129,7 @@ func newTransport(queue string, registry *MessageRegistry, source ConnectionSour
         exception.Panic(exception.FromError(closeTimeoutErr))
     }
 
-    headerLimits, headerLimitsErr := melodymessagebus.ResolveHeaderLimits(config.Headers, "TransportConfig.Headers")
+    headerLimits, headerLimitsErr := melodymessagebus.ResolveHeaderLimits(config.Headers, transportHeadersField)
     if nil != headerLimitsErr {
         exception.Panic(exception.FromError(headerLimitsErr))
     }
@@ -219,7 +221,7 @@ func (instance *Transport) Send(
     runtimeInstance containercontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
 ) error {
-    publishing, buildErr := instance.buildPublishing(envelopeInstance, "")
+    publishing, buildErr := instance.buildPublishing(envelopeInstance, "", false)
     if nil != buildErr {
         return buildErr
     }
@@ -655,6 +657,7 @@ func (instance *Transport) mainTarget() (string, string) {
 func (instance *Transport) buildPublishing(
     envelopeInstance messagebuscontract.Envelope,
     expiration string,
+    received bool,
 ) (amqp091.Publishing, error) {
     message := envelopeInstance.Message()
 
@@ -668,7 +671,14 @@ func (instance *Transport) buildPublishing(
     }
 
     applicationHeaders := melodymessagebus.Headers(envelopeInstance)
-    if headersErr := melodymessagebus.ValidateHeaders(applicationHeaders, instance.headerLimits); nil != headersErr {
+    var headersErr error
+    if true == received {
+        /* what this transport could receive it must be able to requeue, whatever limits its producer had */
+        headersErr = melodymessagebus.ValidateReceivedHeaders(applicationHeaders, transportHeadersField)
+    } else {
+        headersErr = melodymessagebus.ValidateHeaders(applicationHeaders, instance.headerLimits)
+    }
+    if nil != headersErr {
         return amqp091.Publishing{}, headersErr
     }
 
@@ -1268,7 +1278,7 @@ func (instance *Transport) republish(
         }
     }
 
-    publishing, buildErr := instance.buildPublishing(envelopeInstance, expiration)
+    publishing, buildErr := instance.buildPublishing(envelopeInstance, expiration, true)
     if nil != buildErr {
         /* a serialization failure is deterministic, so it is not retried */
         return instance.rejectUncountedRequeue(runtimeInstance, channel, stamp, "amqp requeue re-publish build failed", buildErr)
@@ -1537,7 +1547,7 @@ func (instance *Transport) decode(delivery amqp091.Delivery, generation uint64) 
     return melodymessagebus.NewEnvelope(message, stamps), nil
 }
 
-/* applicationHeadersFromDelivery reads every prefixed header carrying a string; what a producer legally sent is never bounded here. */
+/* applicationHeadersFromDelivery reads every prefixed string header the write rule admits, so a requeue never meets a header it cannot write; the count and the bytes are never bounded here. */
 func applicationHeadersFromDelivery(headers amqp091.Table) map[string]string {
     applicationHeaders := map[string]string{}
 
@@ -1547,7 +1557,7 @@ func applicationHeadersFromDelivery(headers amqp091.Table) map[string]string {
             continue
         }
 
-        if text, isText := value.(string); true == isText {
+        if text, isText := value.(string); true == isText && true == melodymessagebus.IsWritableHeader(name, text) {
             applicationHeaders[name] = text
         }
     }
@@ -1555,14 +1565,16 @@ func applicationHeadersFromDelivery(headers amqp091.Table) map[string]string {
     return applicationHeaders
 }
 
-/* warnSkippedApplicationHeaders names each prefixed header of another amqp type and its go type, never its value. */
+/* warnSkippedApplicationHeaders names each prefixed header it skipped, of another amqp type or failing the write rule, never its value. */
 func (instance *Transport) warnSkippedApplicationHeaders(runtimeInstance containercontract.Runtime, headers amqp091.Table) {
     for key, value := range headers {
-        if false == strings.HasPrefix(key, ApplicationHeaderPrefix) {
+        name, prefixed := strings.CutPrefix(key, ApplicationHeaderPrefix)
+        if false == prefixed {
             continue
         }
 
-        if _, isText := value.(string); true == isText {
+        text, isText := value.(string)
+        if true == isText && true == melodymessagebus.IsWritableHeader(name, text) {
             continue
         }
 
@@ -1571,9 +1583,18 @@ func (instance *Transport) warnSkippedApplicationHeaders(runtimeInstance contain
             return
         }
 
+        if false == isText {
+            logger.Warning(
+                "amqp delivery header is not a string, skipped",
+                map[string]any{"queue": instance.queue, "header": key, "headerType": fmt.Sprintf("%T", value)},
+            )
+
+            continue
+        }
+
         logger.Warning(
-            "amqp delivery header is not a string, skipped",
-            map[string]any{"queue": instance.queue, "header": key, "headerType": fmt.Sprintf("%T", value)},
+            "amqp delivery header fails the header rule, skipped",
+            map[string]any{"queue": instance.queue, "header": key},
         )
     }
 }
