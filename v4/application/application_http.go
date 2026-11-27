@@ -142,7 +142,7 @@ func (instance *Application) registerKernelHttpListeners() {
     }
 
     http.RegisterKernelResponseNormalizerListener(eventDispatcher)
-    http.RegisterKernelTerminateAccessLogListener(eventDispatcher)
+    http.RegisterKernelTerminateAccessLogListener(eventDispatcher, instance.applicationConfig.AccessLog)
 
     if nil != instance.httpMiddlewares && nil != instance.httpMiddlewares.securityHeaders {
         middleware.RegisterSecurityHeadersResponseListener(eventDispatcher, instance.httpMiddlewares.securityHeaders)

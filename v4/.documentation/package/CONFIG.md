@@ -83,8 +83,7 @@ Keys and parameters are two tables. A key is not a parameter: `Get("MELODY_HTTP_
 | `MELODY_NAMESPACE`                        | `kernel.namespace`                        | `""` (the application's, then `melody`)            |
 | `MELODY_CLI_NAME`                         | `kernel.cli_name`                         | `"melody"`                                         |
 | `MELODY_CLI_DESCRIPTION`                  | `kernel.cli_description`                  | `""`                                               |
-| `MELODY_CLI_BOOT_WARNINGS_IGNORED`        | `kernel.cli_boot_warnings_ignored`        | `""`                                               |
-| `MELODY_CLI_BOOT_WARNINGS_DISABLED`       | `kernel.cli_boot_warnings_disabled`       | `""` (`false`)                                     |
+| `MELODY_BOOT_WARNINGS_IGNORED`            | `kernel.boot_warnings_ignored`            | `""`                                               |
 | `MELODY_LOG_PATH`                         | `kernel.log_path`                         | `%kernel.logs_directory%/%kernel.environment%.log` |
 | `MELODY_LOG_LEVEL`                        | `kernel.log_level`                        | `"debug"`                                          |
 | `MELODY_LOG_FILE_MODE`                    | `kernel.log_file_mode`                    | `"0640"` (see [Journal modes](#journal-modes))     |
@@ -136,19 +135,20 @@ The `MELODY_` namespace belongs to the framework and the modules. Every loaded `
 - **Refusals of a module parameter's override.** A text that cannot be read at all, an unterminated `%env(` for one, refuses the module's declaration with `a declared environment key could not be resolved at its declaration` and `overridden: true`, leaving the tables as they were; a reference to a parameter or key not yet defined waits for the boot resolve, which refuses it with `failed to resolve parameter` and `overridden: true`. An override of a module's parameter in a process that does not register the module is not consumed, so it refuses the boot as below: such an override belongs to the process that registers the module.
 - **Refusals at boot.** After the modules declare, an override no framework or module key consumed refuses with `a parameter override names a parameter no framework or module key feeds`, the names under `parameterNames`. After the [retired keys](#retired-keys), a `.env` artifact that still sets the key of an overridden parameter refuses, unless the override reads that key: `the environment key <key> is set and reads nothing: the application overrides <parameter>; remove the line`, every such key in one refusal joined with `; ` in key order, the keys, parameters and owners under `key`, `parameter` and `owner` and never a value. Presence refuses, an empty line included.
 - **Secrets.** An overridden parameter is secret when its template reads a secret key or parameter, and when the key that feeds it is declared `Secret`: the mark says what the parameter carries, whatever its source. A mark on the key's value alone, a `${…}` reference to a secret key, does not reach an override that does not read it.
-- **Cli boot warnings.** An override of `kernel.cli_boot_warnings_ignored` or `kernel.cli_boot_warnings_disabled` is code the cli process reads; an http process writes every boot warning and ignores it. Only a `.env` line of either key refuses an http boot, as [Cli boot warnings](#cli-boot-warnings) says.
 
 ### Retired keys
 
 A key that was renamed refuses the boot naming its successor, whatever its value, an empty one included, and with the successor set beside it too:
 
-| Retired key                  | Successor                      | Owner           |
-|------------------------------|--------------------------------|-----------------|
-| `MELODY_PUBLIC_DIR`          | `MELODY_PUBLIC_DIRECTORY`      | the framework   |
-| `MELODY_STATIC_ENABLE_CACHE` | `MELODY_STATIC_CACHE_DISABLED` | the framework   |
-| `MELODY_CRON_LOGS_DIR`       | `MELODY_CRON_LOGS_DIRECTORY`   | the cron module |
+| Retired key                         | Successor                      | Owner           |
+|-------------------------------------|--------------------------------|-----------------|
+| `MELODY_PUBLIC_DIR`                 | `MELODY_PUBLIC_DIRECTORY`      | the framework   |
+| `MELODY_STATIC_ENABLE_CACHE`        | `MELODY_STATIC_CACHE_DISABLED` | the framework   |
+| `MELODY_CLI_BOOT_WARNINGS_IGNORED`  | `MELODY_BOOT_WARNINGS_IGNORED` | the framework   |
+| `MELODY_CLI_BOOT_WARNINGS_DISABLED` | `MELODY_BOOT_WARNINGS_IGNORED` | the framework   |
+| `MELODY_CRON_LOGS_DIR`              | `MELODY_CRON_LOGS_DIRECTORY`   | the cron module |
 
-`MELODY_CRON_LOGS_DIR` is a spelling of the unreleased fourth major, retired before its first release; `MELODY_PUBLIC_DIR` and `MELODY_STATIC_ENABLE_CACHE` are the third major's keys. The successor of `MELODY_STATIC_ENABLE_CACHE` reads its value the other way, so its refusal adds `, and the value inverts: MELODY_STATIC_ENABLE_CACHE=false is MELODY_STATIC_CACHE_DISABLED=true`, under `note` in the context.
+`MELODY_CRON_LOGS_DIR` and the two `MELODY_CLI_BOOT_WARNINGS_*` keys are spellings of the unreleased fourth major, retired before its first release; no key silences every boot warning, so the refusal of `MELODY_CLI_BOOT_WARNINGS_DISABLED` adds `, and no key silences every boot warning: list each code the process leaves out in MELODY_BOOT_WARNINGS_IGNORED`; `MELODY_PUBLIC_DIR` and `MELODY_STATIC_ENABLE_CACHE` are the third major's keys. The successor of `MELODY_STATIC_ENABLE_CACHE` reads its value the other way, so its refusal adds `, and the value inverts: MELODY_STATIC_ENABLE_CACHE=false is MELODY_STATIC_CACHE_DISABLED=true`, under `note` in the context.
 
 `Boot` judges the `.env` artifacts the process loads, embedded or on disk: `.env`, `.env.local` and the selected environment's two files, so a retired key in another environment's files refuses only the boot that selects it. It runs right after the modules declare their keys and before any other module hook, in every process shape, and names every retired key it finds in one refusal, `the environment key <key> is retired: rename it to <successor>`, joined with `; ` in key order; the refusal names keys, successors and owners, under `key`, `successor` and `owner`, and never a value, since a retired key may hold a credential. A process variable of a retired name is not configuration and is not read; the `application.environment.processVariableIgnored` boot warning names it with its `successor`, whatever its value. There is no door: the key's meaning is certain, nothing reads it, and booting on its silent default is the misconfiguration; the remedy is a one-line rename.
 
@@ -375,16 +375,15 @@ Which path prefixes the built-in file server declines before it looks at the dis
 
 The value is a comma-separated list whose entries are trimmed of surrounding whitespace, so `/admin, /api/internal` names two prefixes while a blank or whitespace-only value names none. An entry must begin with `/` and may not be empty; validation rejects both at boot (`static excluded path must begin with a slash`, `static excluded path may not be empty`) rather than let a stray comma — which prefix-matches every path — silently take static serving out of service. An entry holding a percent escape other than `%2F`, `/a%20b`, is refused too, naming the key and the index, in every mode: the file server compares an exclusion with the request path decoded, so such an entry would exclude only a path whose name holds the percent sign; write it decoded. See [HTTP](HTTP.md) for what a declined request goes on to do, and for why this is the lever an application pulls to serve part of the url space behind middleware of its own.
 
-### Cli boot warnings
+### Boot warnings ignored
 
-What a command writes of the [boot warnings](SECURITY.md#boot-warnings) the boot collected. Read through [`CliConfiguration`](../../config/contract/cli.go), `BootWarningsIgnored()` and `BootWarningsDisabled()`.
+What a process writes of the [boot warnings](SECURITY.md#boot-warnings) the boot collected. Read through [`KernelConfiguration`](../../config/contract/kernel.go), `BootWarningsIgnored()`.
 
-| Environment key                     | Parameter name                      | Default        |
-|-------------------------------------|-------------------------------------|----------------|
-| `MELODY_CLI_BOOT_WARNINGS_IGNORED`  | `kernel.cli_boot_warnings_ignored`  | `""`           |
-| `MELODY_CLI_BOOT_WARNINGS_DISABLED` | `kernel.cli_boot_warnings_disabled` | `""` (`false`) |
+| Environment key                | Parameter name                 | Default |
+|--------------------------------|--------------------------------|---------|
+| `MELODY_BOOT_WARNINGS_IGNORED` | `kernel.boot_warnings_ignored` | `""`    |
 
-A command writes every boot warning it collected once, before its own output, into its configured journal, stderr when `MELODY_LOG_PATH` is empty; a process that dies before then writes them before its exit record, under the same two keys. `MELODY_CLI_BOOT_WARNINGS_IGNORED` is a comma-separated list of codes a command leaves out; `MELODY_CLI_BOOT_WARNINGS_DISABLED=true` writes none. The configuration refuses, naming the key and the index, an empty or repeated code and a list beside `DISABLED=true`; the boot refuses, after every module declared its codes, a code neither the framework nor a registered module writes and a code only an http process writes, since each would silence nothing. The codes a command can write are those the [Boot warnings](SECURITY.md#boot-warnings) table marks for cli, `application.environment.undeclaredKey` among them, plus those a registered [`BootWarningModule`](APPLICATION.md) declares for cli. Both keys belong to the command's environment: an http process that sets either is refused at boot. A module's service built outside the module, which names its hazard at its first use, honours both keys too.
+An http process writes every boot warning it collected once, when its server starts, and a command once, before its own output, into the configured journal, stderr when `MELODY_LOG_PATH` is empty; a process that dies before then writes them before its exit record. `MELODY_BOOT_WARNINGS_IGNORED` is a comma-separated list of codes the process leaves out, read by the http and the cli process alike, so a `.env` both share silences a code in each; a code only one shape writes is admitted in the other, where it silences nothing it would have written. The configuration refuses, naming the key and the index, an empty or repeated code; the boot refuses, after every module declared its codes, a code neither the framework nor a registered module writes, naming the codes the list may name under `codes`, since it would silence nothing. No key silences every boot warning: the list names each one, so a code added later is written until someone reads it. A module's service built outside the module, which names its hazard at its first use, honours the key too.
 
 ### Typed accessors
 
@@ -528,11 +527,11 @@ func example() configcontract.Configuration {
 
 ### Environment variable keys (`config`)
 
-- [`EnvironmentNameKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpSessionMaxSessionsKey`, `HttpShutdownTimeoutKey`, `HttpUnavailableRetryAfterKey`, `HttpSessionEmptyOnOutageKey`, `HttpSessionCookieSecureKey`, `TeardownTimeoutKey`, `ScopeTeardownTimeoutKey`, `ContainerCreationWaitersKey`, `ContainerTeardownSequentialKey`, `NamespaceKey`, `CliNameKey`, `CliDescriptionKey`, `CliBootWarningsIgnoredKey`, `CliBootWarningsDisabledKey`, `LogPathKey`, `LogLevelKey`, `LogFileModeKey`, `LogDirectoryModeKey`, `CacheDirectoryModeKey`, `DefaultLocaleKey`, `PublicDirectoryKey`, `StaticIndexFileKey`, `StaticCacheDisabledKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
+- [`EnvironmentNameKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpSessionMaxSessionsKey`, `HttpShutdownTimeoutKey`, `HttpUnavailableRetryAfterKey`, `HttpSessionEmptyOnOutageKey`, `HttpSessionCookieSecureKey`, `TeardownTimeoutKey`, `ScopeTeardownTimeoutKey`, `ContainerCreationWaitersKey`, `ContainerTeardownSequentialKey`, `NamespaceKey`, `CliNameKey`, `CliDescriptionKey`, `BootWarningsIgnoredKey`, `LogPathKey`, `LogLevelKey`, `LogFileModeKey`, `LogDirectoryModeKey`, `CacheDirectoryModeKey`, `DefaultLocaleKey`, `PublicDirectoryKey`, `StaticIndexFileKey`, `StaticCacheDisabledKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
 
 ### Kernel parameter names (`config`)
 
-- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnvironment`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpSessionMaxSessions`, `KernelHttpShutdownTimeout`, `KernelHttpUnavailableRetryAfter`, `KernelHttpSessionEmptyOnOutage`, `KernelHttpSessionCookieSecure`, `KernelTeardownTimeout`, `KernelScopeTeardownTimeout`, `KernelContainerCreationWaiters`, `KernelContainerTeardownSequential`, `KernelNamespace`, `KernelCliName`, `KernelCliDescription`, `KernelCliBootWarningsIgnored`, `KernelCliBootWarningsDisabled`, `KernelLogPath`, `KernelLogLevel`, `KernelLogFileMode`, `KernelLogDirectoryMode`, `KernelCacheDirectoryMode`, `KernelDefaultLocale`, `KernelPublicDirectory`, `KernelStaticIndexFile`, `KernelStaticCacheDisabled`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDirectory`, `KernelLogsDirectory`, `KernelCacheDirectory`](../../config/environment.go)
+- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnvironment`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpSessionMaxSessions`, `KernelHttpShutdownTimeout`, `KernelHttpUnavailableRetryAfter`, `KernelHttpSessionEmptyOnOutage`, `KernelHttpSessionCookieSecure`, `KernelTeardownTimeout`, `KernelScopeTeardownTimeout`, `KernelContainerCreationWaiters`, `KernelContainerTeardownSequential`, `KernelNamespace`, `KernelCliName`, `KernelCliDescription`, `KernelBootWarningsIgnored`, `KernelLogPath`, `KernelLogLevel`, `KernelLogFileMode`, `KernelLogDirectoryMode`, `KernelCacheDirectoryMode`, `KernelDefaultLocale`, `KernelPublicDirectory`, `KernelStaticIndexFile`, `KernelStaticCacheDisabled`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDirectory`, `KernelLogsDirectory`, `KernelCacheDirectory`](../../config/environment.go)
 
 ### Environment / mode / role constants (`config`)
 

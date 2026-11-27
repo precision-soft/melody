@@ -250,7 +250,7 @@ func TestNewStorage_TwoStoragesOverOneEndpointNameItOnceAndAUseWithNoJournalLeav
     }
 }
 
-func TestNewStorage_TheFirstUseHonoursTheCliBootWarningKeysAndTheModulesRecord(t *testing.T) {
+func TestNewStorage_TheFirstUseHonoursTheIgnoreKeyAndTheModulesRecord(t *testing.T) {
     for _, testCase := range []struct {
         name           string
         values         map[string]string
@@ -258,9 +258,8 @@ func TestNewStorage_TheFirstUseHonoursTheCliBootWarningKeysAndTheModulesRecord(t
         expected       int
     }{
         {"no key", map[string]string{}, false, 1},
-        {"the code ignored", map[string]string{melodyconfig.CliBootWarningsIgnoredKey: PlaintextEndpointBootWarningName}, false, 0},
-        {"another code ignored", map[string]string{melodyconfig.CliBootWarningsIgnoredKey: "security.firewallDoorReachUnknown"}, false, 1},
-        {"the journal disabled", map[string]string{melodyconfig.CliBootWarningsDisabledKey: "true"}, false, 0},
+        {"the code ignored", map[string]string{melodyconfig.BootWarningsIgnoredKey: PlaintextEndpointBootWarningName}, false, 0},
+        {"another code ignored", map[string]string{melodyconfig.BootWarningsIgnoredKey: "security.firewallDoorReachUnknown"}, false, 1},
         {"already named by the module", map[string]string{}, true, 0},
     } {
         t.Run(testCase.name, func(t *testing.T) {

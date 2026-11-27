@@ -194,14 +194,6 @@ func (instance *stubCliConfiguration) Description() string {
     return "cron test application"
 }
 
-func (instance *stubCliConfiguration) BootWarningsIgnored() []string {
-    return nil
-}
-
-func (instance *stubCliConfiguration) BootWarningsDisabled() bool {
-    return false
-}
-
 type stubConfiguration struct {
     parameters map[string]configcontract.Parameter
     cli        configcontract.CliConfiguration
@@ -327,6 +319,10 @@ func (instance *stubKernelConfiguration) LogDirectoryMode() os.FileMode {
 
 func (instance *stubKernelConfiguration) CacheDirectoryMode() os.FileMode {
     return 0o750
+}
+
+func (instance *stubKernelConfiguration) BootWarningsIgnored() []string {
+    return nil
 }
 
 func (instance *stubKernelConfiguration) TeardownTimeout() bound.Duration {

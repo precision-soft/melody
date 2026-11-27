@@ -16,7 +16,7 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-/* PlaintextEndpointBootWarningName is the code of the warning a storage over a plaintext endpoint off this machine writes, the code a cli process lists in MELODY_CLI_BOOT_WARNINGS_IGNORED to leave it out */
+/* PlaintextEndpointBootWarningName is the code of the warning a storage over a plaintext endpoint off this machine writes, the code a process lists in MELODY_BOOT_WARNINGS_IGNORED to leave it out */
 const PlaintextEndpointBootWarningName = "aws.s3.plaintextEndpoint"
 
 const bootWarningContextKey = "bootWarning"
@@ -94,7 +94,7 @@ func (instance *plaintextEndpointWarning) write(runtimeInstance containercontrac
         return
     }
 
-    if true == silencedByCliBootWarningKeys(runtimeInstance) {
+    if true == silencedByBootWarningsIgnored(runtimeInstance) {
         return
     }
 
@@ -107,14 +107,12 @@ func (instance *plaintextEndpointWarning) write(runtimeInstance containercontrac
     logger.Warning(warning.Message, context)
 }
 
-/* a storage used outside an application finds no configuration and writes; an http process refuses both keys at boot, so they only ever narrow what a command writes */
-func silencedByCliBootWarningKeys(runtimeInstance containercontract.Runtime) bool {
+/* a storage used outside an application finds no configuration and writes */
+func silencedByBootWarningsIgnored(runtimeInstance containercontract.Runtime) bool {
     configuration, configurationErr := config.ConfigFromRuntime(runtimeInstance)
     if nil != configurationErr || nil == configuration {
         return false
     }
 
-    cliConfiguration := configuration.Cli()
-
-    return true == cliConfiguration.BootWarningsDisabled() || true == slices.Contains(cliConfiguration.BootWarningsIgnored(), PlaintextEndpointBootWarningName)
+    return true == slices.Contains(configuration.Kernel().BootWarningsIgnored(), PlaintextEndpointBootWarningName)
 }

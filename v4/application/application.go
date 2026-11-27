@@ -8,7 +8,6 @@ import (
     nethttp "net/http"
     "os"
     "slices"
-    "strings"
     "sync"
     "sync/atomic"
 
@@ -180,8 +179,7 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     instance.refuseHttpBootWithoutEnvironment()
     instance.refuseBootWithDefaultedEnvironment()
-    instance.refuseCliBootWarningKeysInHttp()
-    instance.refuseUnknownCliBootWarningCodes()
+    instance.refuseUnknownBootWarningCodes()
     instance.collectUndeclaredEnvironmentKeys()
     instance.collectIgnoredStaticCacheMaxAge()
     instance.refuseModuleEnvironmentKeys()
@@ -635,7 +633,7 @@ func (instance *Application) exitConfig() logging.ExitConfig {
     }
 }
 
-/* only a command reads the cli keys: an http process dying on its refusal of them still writes every boot warning */
+/* both process shapes read the one key, so a .env the http and the cli process share silences a code in each */
 func (instance *Application) writeBootWarnings(logger loggingcontract.Logger) {
     if true == instance.bootWarningsWritten {
         return
@@ -645,13 +643,8 @@ func (instance *Application) writeBootWarnings(logger loggingcontract.Logger) {
 
     ignored := make([]string, 0)
 
-    if nil != instance.runtimeFlags && config.ModeCli == instance.runtimeFlags.Mode() && nil != instance.configuration && false == internal.IsNilInterface(instance.configuration.Cli()) {
-        cliConfiguration := instance.configuration.Cli()
-        if true == cliConfiguration.BootWarningsDisabled() {
-            return
-        }
-
-        ignored = cliConfiguration.BootWarningsIgnored()
+    if nil != instance.configuration && false == internal.IsNilInterface(instance.configuration.Kernel()) {
+        ignored = instance.configuration.Kernel().BootWarningsIgnored()
     }
 
     for _, bootWarning := range instance.bootWarnings {
@@ -660,37 +653,6 @@ func (instance *Application) writeBootWarnings(logger loggingcontract.Logger) {
         }
 
         internal.WriteBootWarning(logger, bootWarning)
-    }
-}
-
-/* an http process writes every boot warning, so a cli key set there silences nothing */
-func (instance *Application) refuseCliBootWarningKeysInHttp() {
-    if config.ModeHttp != instance.runtimeFlags.Mode() {
-        return
-    }
-
-    /* the line is judged, never the parameter, so an override of the cli switches leaves an http process alone */
-    declarer, isDeclarer := instance.configuration.(configcontract.EnvironmentKeyDeclarer)
-    if false == isDeclarer {
-        return
-    }
-
-    for _, environmentKey := range []string{config.CliBootWarningsIgnoredKey, config.CliBootWarningsDisabledKey} {
-        /* a .env shared by both processes may carry the key blank */
-        line, isSet := declarer.EnvironmentValue(environmentKey)
-        if false == isSet || "" == strings.TrimSpace(line) {
-            continue
-        }
-
-        exception.Panic(
-            exception.NewError(
-                "a cli boot warning key is set in an http process, which writes every boot warning and reads the key nowhere; set it in the environment of the cli process only",
-                exceptioncontract.Context{
-                    "environmentKey": environmentKey,
-                },
-                nil,
-            ),
-        )
     }
 }
 

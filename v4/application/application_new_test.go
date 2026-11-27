@@ -514,15 +514,16 @@ func TestNewApplication_TheNamespaceFieldReachesTheKernelConfiguration(t *testin
 }
 
 /* NewApplication exits the process on a refusal, so each refused field runs in a child that names the case */
-func TestNewApplication_TheContainerWalkStackAndCliDepthFieldsAreRefusedNamingTheField(t *testing.T) {
+func TestNewApplication_TheContainerWalkStackCliDepthAndAccessLogFieldsAreRefusedNamingTheField(t *testing.T) {
     cases := map[string]struct {
         config ApplicationConfig
         field  string
     }{
-        "depth":  {ApplicationConfig{ContainerTeardownWalk: container.TeardownWalkConfig{Depth: bound.Of(0)}}, "ContainerConfig.TeardownWalk.Depth"},
-        "nodes":  {ApplicationConfig{ContainerTeardownWalk: container.TeardownWalkConfig{Nodes: bound.UnlimitedCount()}}, "ContainerConfig.TeardownWalk.Nodes"},
-        "stack":  {ApplicationConfig{ContainerCloseFailureStackBytes: bound.Of(3)}, "ContainerConfig.CloseFailureStackBytes"},
-        "causes": {ApplicationConfig{CliErrorCauseChainDepth: bound.UnlimitedCount()}, "RootConfig.ErrorCauseChainDepth"},
+        "depth":     {ApplicationConfig{ContainerTeardownWalk: container.TeardownWalkConfig{Depth: bound.Of(0)}}, "ContainerConfig.TeardownWalk.Depth"},
+        "nodes":     {ApplicationConfig{ContainerTeardownWalk: container.TeardownWalkConfig{Nodes: bound.UnlimitedCount()}}, "ContainerConfig.TeardownWalk.Nodes"},
+        "stack":     {ApplicationConfig{ContainerCloseFailureStackBytes: bound.Of(3)}, "ContainerConfig.CloseFailureStackBytes"},
+        "causes":    {ApplicationConfig{CliErrorCauseChainDepth: bound.UnlimitedCount()}, "RootConfig.ErrorCauseChainDepth"},
+        "accessLog": {ApplicationConfig{AccessLog: http.AccessLogConfig{Disabled: true, MaxFieldBytes: bound.Of(0)}}, "AccessLogConfig.MaxFieldBytes"},
     }
 
     if name := os.Getenv(newApplicationRefusalProbeMarker); "" != name {
@@ -536,7 +537,7 @@ func TestNewApplication_TheContainerWalkStackAndCliDepthFieldsAreRefusedNamingTh
     }
 
     for name, testCase := range cases {
-        child := exec.Command(os.Args[0], "-test.run=^TestNewApplication_TheContainerWalkStackAndCliDepthFieldsAreRefusedNamingTheField$")
+        child := exec.Command(os.Args[0], "-test.run=^TestNewApplication_TheContainerWalkStackCliDepthAndAccessLogFieldsAreRefusedNamingTheField$")
         child.Env = append(os.Environ(), newApplicationRefusalProbeMarker+"="+name)
 
         output, runErr := child.CombinedOutput()

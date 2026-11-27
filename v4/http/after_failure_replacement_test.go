@@ -261,7 +261,7 @@ func TestKernel_TheAccessLogStillRunsAfterAFailedTerminateListener(t *testing.T)
         dispatcher.AddListener(kernelcontract.EventKernelTerminate, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return errors.New("the terminate listener failed")
         }, eventcontract.ListenerConfig{Priority: 0})
-        RegisterKernelTerminateAccessLogListener(dispatcher)
+        RegisterKernelTerminateAccessLogListener(dispatcher, AccessLogConfig{})
 
         recorder := httptest.NewRecorder()
         NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/logged", nil))

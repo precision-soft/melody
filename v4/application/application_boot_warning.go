@@ -39,8 +39,6 @@ type moduleBootWarningRegistrar struct {
 }
 
 func (instance *moduleBootWarningRegistrar) DeclareBootWarning(name string, config applicationcontract.BootWarningConfig) {
-    writtenInCli := config.WrittenInCli
-
     if "" == name {
         exception.Panic(exception.NewError(
             "a module declared a boot warning with an empty name",
@@ -52,11 +50,11 @@ func (instance *moduleBootWarningRegistrar) DeclareBootWarning(name string, conf
     owner, declaredByModule := instance.application.bootWarningOwners[name]
 
     /* a module declaring one of its codes twice */
-    if true == declaredByModule && owner == instance.moduleName && writtenInCli == instance.registry.WrittenInCli(name) {
+    if true == declaredByModule && owner == instance.moduleName {
         return
     }
 
-    if false == instance.registry.Declare(name, writtenInCli) {
+    if false == instance.registry.Declare(name) {
         if false == declaredByModule {
             owner = "the framework"
         }
@@ -96,23 +94,21 @@ func (instance *moduleBootWarningRegistrar) AddBootWarning(warning applicationco
 }
 
 /* the codes are judged at boot, after the modules declared theirs; the syntax of the list was judged when the configuration was built */
-func (instance *Application) refuseUnknownCliBootWarningCodes() {
+func (instance *Application) refuseUnknownBootWarningCodes() {
     registry := instance.bootWarningRegistryOf()
 
-    for index, code := range instance.configuration.Cli().BootWarningsIgnored() {
-        context := exceptioncontract.Context{
-            "environmentKey": config.CliBootWarningsIgnoredKey,
-            "index":          index,
-            "code":           code,
-            "cliCodes":       registry.CliNames(),
-        }
-
+    for index, code := range instance.configuration.Kernel().BootWarningsIgnored() {
         if false == registry.Known(code) {
-            exception.Panic(exception.NewError("cli boot warning code names no boot warning the framework or a module writes", context, nil))
-        }
-
-        if false == registry.WrittenInCli(code) {
-            exception.Panic(exception.NewError("cli boot warning code names a boot warning only an http process writes, so a cli process never reads it", context, nil))
+            exception.Panic(exception.NewError(
+                "boot warning code names no boot warning the framework or a module writes",
+                exceptioncontract.Context{
+                    "environmentKey": config.BootWarningsIgnoredKey,
+                    "index":          index,
+                    "code":           code,
+                    "codes":          registry.Names(),
+                },
+                nil,
+            ))
         }
     }
 }

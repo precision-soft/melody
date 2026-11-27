@@ -31,16 +31,16 @@ func (instance *spyServiceRegistrar) MustRegister(serviceName string, provider a
 }
 
 type spyBootWarningRegistrar struct {
-    declared map[string]bool
+    declared map[string]struct{}
     warnings []applicationcontract.BootWarning
 }
 
 func (instance *spyBootWarningRegistrar) DeclareBootWarning(name string, config applicationcontract.BootWarningConfig) {
     if nil == instance.declared {
-        instance.declared = make(map[string]bool)
+        instance.declared = make(map[string]struct{})
     }
 
-    instance.declared[name] = config.WrittenInCli
+    instance.declared[name] = struct{}{}
 }
 
 func (instance *spyBootWarningRegistrar) AddBootWarning(warning applicationcontract.BootWarning) {
@@ -63,8 +63,8 @@ func TestModule_RegisterBootWarningsDeclaresTheCodeAndAddsTheWarningForAPlaintex
         registrar := &spyBootWarningRegistrar{}
         NewModule(ModuleConfig{Client: testCase.client, Bucket: "bucket"}).RegisterBootWarnings(registrar)
 
-        if writtenInCli, declared := registrar.declared[PlaintextEndpointBootWarningName]; false == declared || false == writtenInCli || 1 != len(registrar.declared) {
-            t.Fatalf("%s: expected the code declared as written in cli, got %v", testCase.name, registrar.declared)
+        if _, declared := registrar.declared[PlaintextEndpointBootWarningName]; false == declared || 1 != len(registrar.declared) {
+            t.Fatalf("%s: expected the code declared, got %v", testCase.name, registrar.declared)
         }
 
         if testCase.expected != len(registrar.warnings) {

@@ -67,6 +67,12 @@ type ApplicationConfig struct {
     /* Events is what the application declares on the framework's own events, by event name: kernel.request, kernel.controller, kernel.response, kernel.terminate, kernel.exception, the six security.* events and http.request.profile. The application declares all twelve through EventDispatcher.DeclareEvent when it is built, each with the framework's own tags followed by the TagsToRunAfterFailure given here and under the dispatcher's rules, so a later DeclareEvent on one of those names is refused as already declared. A name that is not a framework event refuses the application by name, and a tag the dispatcher refuses is answered naming this field; an application event is declared through EventDispatcher.DeclareEvent. */
     Events map[string]eventcontract.EventConfig
 
+    /* DebugCommandsEnabled registers the debug:* commands beyond debug:router, which dump the container, the parameters, the listeners and the middlewares, in every environment; false registers them under MELODY_ENV=dev only. debug:parameters --reveal stays refused outside dev. */
+    DebugCommandsEnabled bool
+
+    /* AccessLog is the request completed record the kernel.terminate listener writes for every request; the zero value writes it with every request-supplied field cut at 512 bytes, Disabled registers no listener. */
+    AccessLog http.AccessLogConfig
+
     /* SecurityHeaders is the security headers every response carries, through a middleware outside the static file server and a kernel.response listener; the zero value sends the defaults, Disabled none. */
     SecurityHeaders middleware.SecurityHeadersConfig
 
@@ -160,6 +166,11 @@ func NewApplication(
     /* the tree is built at the cli run, so its depth is refused here, with the application's other configuration errors */
     if _, cliErrorCauseChainDepthErr := bound.Resolve(applicationConfig.CliErrorCauseChainDepth, cli.ErrorCauseChainDepthRule()); nil != cliErrorCauseChainDepthErr {
         exception.Panic(exception.FromError(cliErrorCauseChainDepthErr))
+    }
+
+    /* the listener registers at the end of Boot, so its cut is refused here, with the application's other configuration errors */
+    if _, accessLogMaxFieldBytesErr := bound.Resolve(applicationConfig.AccessLog.MaxFieldBytes, http.AccessLogMaxFieldBytesRule()); nil != accessLogMaxFieldBytesErr {
+        exception.Panic(exception.FromError(accessLogMaxFieldBytesErr))
     }
 
     containerCreationWaiters, containerCreationWaitersErr := resolveContainerCreationWaiters(configuration, applicationConfig)

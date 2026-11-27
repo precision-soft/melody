@@ -33,6 +33,9 @@ type KernelConfiguration interface {
     /* CacheDirectoryMode is MELODY_CACHE_DIRECTORY_MODE, the permission the cache directory the boot creates is created with: 0750 by default. */
     CacheDirectoryMode() os.FileMode
 
+    /* BootWarningsIgnored is MELODY_BOOT_WARNINGS_IGNORED, the boot warning codes the process, http or cli, leaves out of its journal: none by default. */
+    BootWarningsIgnored() []string
+
     /* TeardownTimeout is MELODY_TEARDOWN_TIMEOUT as the deployment set it, absent when the key says nothing: the application decides it against its own config, the key winning. */
     TeardownTimeout() bound.Duration
 

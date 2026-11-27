@@ -27,6 +27,18 @@ func TestRetiredEnvironmentKeys_FrameworkKeySet_AnswersKeyAndSuccessor(t *testin
     }
 }
 
+func TestRetiredEnvironmentKeys_TheTwoCliBootWarningKeysNameTheOneKeyOfBothProcesses(t *testing.T) {
+    configuration := mustConfigurationFromValues(t, map[string]string{"MELODY_CLI_BOOT_WARNINGS_IGNORED": "", "MELODY_CLI_BOOT_WARNINGS_DISABLED": "true"})
+
+    expected := []configcontract.RetiredEnvironmentKey{
+        {Key: "MELODY_CLI_BOOT_WARNINGS_DISABLED", Successor: "MELODY_BOOT_WARNINGS_IGNORED", Owner: "the framework", Note: "no key silences every boot warning: list each code the process leaves out in MELODY_BOOT_WARNINGS_IGNORED"},
+        {Key: "MELODY_CLI_BOOT_WARNINGS_IGNORED", Successor: "MELODY_BOOT_WARNINGS_IGNORED", Owner: "the framework"},
+    }
+    if retiredKeys := configuration.RetiredEnvironmentKeys(); false == slices.Equal(expected, retiredKeys) {
+        t.Fatalf("expected %v, got %v", expected, retiredKeys)
+    }
+}
+
 func TestRetiredEnvironmentKeys_TheSessionPersistenceTimeoutKeyNamesTheStorageTimeoutKey(t *testing.T) {
     configuration := mustConfigurationFromValues(t, map[string]string{"MELODY_HTTP_SESSION_PERSISTENCE_TIMEOUT": "5s"})
 

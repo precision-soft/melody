@@ -506,7 +506,14 @@ func TestRunCli_EachApplicationCarriesItsOwnVersion(t *testing.T) {
 func bootCliCommandNames(t *testing.T, environmentName string) map[string]bool {
     t.Helper()
 
+    return bootCliCommandNamesUnder(t, environmentName, ApplicationConfig{})
+}
+
+func bootCliCommandNamesUnder(t *testing.T, environmentName string, applicationConfig ApplicationConfig) map[string]bool {
+    t.Helper()
+
     applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvironmentNameKey: environmentName})
+    applicationInstance.applicationConfig = applicationConfig
 
     applicationInstance.bootCli()
 
@@ -535,6 +542,18 @@ func TestBootCli_RegistersTheDebugFamilyOnlyInDevelopment(t *testing.T) {
 
     if false == productionNames["debug:router"] {
         t.Fatalf("expected debug:router registered in production too, got %v", productionNames)
+    }
+}
+
+func TestBootCli_DebugCommandsEnabledRegistersTheDebugFamilyInEveryEnvironment(t *testing.T) {
+    for _, environmentName := range []string{config.EnvironmentProduction, config.EnvironmentDevelopment} {
+        names := bootCliCommandNamesUnder(t, environmentName, ApplicationConfig{DebugCommandsEnabled: true})
+
+        for _, name := range []string{"debug:router", "debug:container", "debug:parameters", "debug:events", "debug:middleware", "debug:version"} {
+            if false == names[name] {
+                t.Fatalf("%s: expected %s registered under DebugCommandsEnabled, got %v", environmentName, name, names)
+            }
+        }
     }
 }
 

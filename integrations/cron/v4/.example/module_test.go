@@ -29,14 +29,6 @@ func (instance *moduleTestCliConfiguration) Description() string {
     return "billing"
 }
 
-func (instance *moduleTestCliConfiguration) BootWarningsIgnored() []string {
-    return nil
-}
-
-func (instance *moduleTestCliConfiguration) BootWarningsDisabled() bool {
-    return false
-}
-
 /* moduleTestConfiguration answers the cli name and no parameter, so the generator reads its flags */
 type moduleTestConfiguration struct{}
 

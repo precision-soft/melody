@@ -19,70 +19,48 @@ const (
     BootWarningNameCsrfDisabledOnLoginFirewall                = "security.csrfDisabledOnLoginFirewall"
 )
 
-type bootWarningRegistration struct {
-    name         string
-    writtenInCli bool
-}
-
 /* BootWarningRegistry holds the codes one application writes: the framework's own rows, then the ones its modules declare at boot, so two applications in one process never see each other's declarations */
 type BootWarningRegistry struct {
-    registrations []bootWarningRegistration
+    names []string
 }
 
 /* NewBootWarningRegistry answers a registry holding the framework's own codes */
 func NewBootWarningRegistry() *BootWarningRegistry {
     return &BootWarningRegistry{
-        registrations: []bootWarningRegistration{
-            {name: BootWarningNameFirewallDoorReachUnknown, writtenInCli: true},
-            {name: BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage, writtenInCli: false},
-            {name: BootWarningNameProcessEnvironmentVariableIgnored, writtenInCli: true},
-            {name: BootWarningNameSecretMarkUnmatched, writtenInCli: true},
-            {name: BootWarningNameEnvironmentUndeclaredKey, writtenInCli: true},
-            {name: BootWarningNameStaticCacheMaxAgeIgnored, writtenInCli: false},
-            {name: BootWarningNameRetryPolicyServiceIgnored, writtenInCli: true},
-            {name: BootWarningNameServiceBuiltAtBootFailed, writtenInCli: false},
-            {name: BootWarningNameCsrfDisabledOnLoginFirewall, writtenInCli: false},
+        names: []string{
+            BootWarningNameFirewallDoorReachUnknown,
+            BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage,
+            BootWarningNameProcessEnvironmentVariableIgnored,
+            BootWarningNameSecretMarkUnmatched,
+            BootWarningNameEnvironmentUndeclaredKey,
+            BootWarningNameStaticCacheMaxAgeIgnored,
+            BootWarningNameRetryPolicyServiceIgnored,
+            BootWarningNameServiceBuiltAtBootFailed,
+            BootWarningNameCsrfDisabledOnLoginFirewall,
         },
     }
 }
 
 /* Declare adds a code; false when the name is empty or already held, since a code has one owner */
-func (instance *BootWarningRegistry) Declare(name string, writtenInCli bool) bool {
+func (instance *BootWarningRegistry) Declare(name string) bool {
     if "" == name || true == instance.Known(name) {
         return false
     }
 
-    instance.registrations = append(instance.registrations, bootWarningRegistration{name: name, writtenInCli: writtenInCli})
+    instance.names = append(instance.names, name)
 
     return true
 }
 
-/* CliNames answers the name of every code a cli process can write, in registration order */
-func (instance *BootWarningRegistry) CliNames() []string {
-    names := make([]string, 0, len(instance.registrations))
-    for _, registration := range instance.registrations {
-        if true == registration.writtenInCli {
-            names = append(names, registration.name)
-        }
-    }
-
-    return names
+/* Names answers the name of every code, in registration order */
+func (instance *BootWarningRegistry) Names() []string {
+    return append([]string{}, instance.names...)
 }
 
 func (instance *BootWarningRegistry) Known(name string) bool {
-    for _, registration := range instance.registrations {
-        if name == registration.name {
+    for _, registeredName := range instance.names {
+        if name == registeredName {
             return true
-        }
-    }
-
-    return false
-}
-
-func (instance *BootWarningRegistry) WrittenInCli(name string) bool {
-    for _, registration := range instance.registrations {
-        if name == registration.name {
-            return registration.writtenInCli
         }
     }
 

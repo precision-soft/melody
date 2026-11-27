@@ -3,8 +3,10 @@ package http
 import (
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
+    "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
@@ -15,7 +17,45 @@ const (
     KernelTerminateAccessLogListenerPriority = -100
 )
 
-func RegisterKernelTerminateAccessLogListener(eventDispatcher eventcontract.EventDispatcher) {
+/* AccessLogConfig is the request completed record the access log listener writes; the zero value writes it under the framework's cut. */
+type AccessLogConfig struct {
+    /* Disabled registers no access log listener, for a deployment whose proxy or mesh writes the request line. */
+    Disabled bool
+    /* MaxFieldBytes cuts each request-supplied field of the record, the method, path, query, host, user agent and referer, after its redaction, naming the bytes it dropped: 512 when left out, at least 1, unlimited admitted for a journal that bounds its lines itself. */
+    MaxFieldBytes bound.Count
+}
+
+var accessLogMaxFieldBytesRule = bound.Rule[int]{
+    Name:              "AccessLogConfig.MaxFieldBytes",
+    Default:           internal.DiagnosticTextMaxLength,
+    Minimum:           1,
+    UnlimitedAdmitted: true,
+}
+
+/* AccessLogMaxFieldBytesRule resolves AccessLogConfig.MaxFieldBytes, for a caller that refuses the value before it registers the listener. */
+func AccessLogMaxFieldBytesRule() bound.Rule[int] {
+    return accessLogMaxFieldBytesRule
+}
+
+/* RegisterKernelTerminateAccessLogListener adds the access log listener under the config, none under Disabled; a MaxFieldBytes outside its rule panics naming the field. */
+func RegisterKernelTerminateAccessLogListener(eventDispatcher eventcontract.EventDispatcher, config AccessLogConfig) {
+    maxFieldBytes, maxFieldBytesErr := bound.Resolve(config.MaxFieldBytes, accessLogMaxFieldBytesRule)
+    if nil != maxFieldBytesErr {
+        exception.Panic(exception.FromError(maxFieldBytesErr))
+    }
+
+    if true == config.Disabled {
+        return
+    }
+
+    boundField := func(value string) string {
+        if true == maxFieldBytes.Unlimited {
+            return value
+        }
+
+        return internal.BoundDiagnosticTextWithin(value, maxFieldBytes.Value)
+    }
+
     eventDispatcher.AddListener(
         kernelcontract.EventKernelTerminate,
         func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
@@ -108,14 +148,14 @@ func RegisterKernelTerminateAccessLogListener(eventDispatcher eventcontract.Even
                 "request completed",
                 loggingcontract.Context{
                     "requestId":    requestId,
-                    "method":       internal.BoundDiagnosticText(method),
-                    "path":         internal.BoundDiagnosticText(path),
-                    "query":        internal.BoundDiagnosticText(queryString),
+                    "method":       boundField(method),
+                    "path":         boundField(path),
+                    "query":        boundField(queryString),
                     "scheme":       scheme,
-                    "host":         internal.BoundDiagnosticText(host),
+                    "host":         boundField(host),
                     "remoteAddr":   remoteAddr,
-                    "userAgent":    internal.BoundDiagnosticText(userAgent),
-                    "referer":      internal.BoundDiagnosticText(referer),
+                    "userAgent":    boundField(userAgent),
+                    "referer":      boundField(referer),
                     "routeName":    routeName,
                     "routePattern": routePattern,
                     "statusCode":   statusCode,

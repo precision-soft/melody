@@ -329,3 +329,53 @@ func TestKernelConfiguration_TheModeKeysRule(t *testing.T) {
         }
     }
 }
+
+func TestConfigurationBootWarningsIgnoredIsReadAndDefaultsToNothing(t *testing.T) {
+    defaulted := mustConfigurationFromValues(t, map[string]string{}).Kernel()
+    if nil == defaulted.BootWarningsIgnored() || 0 != len(defaulted.BootWarningsIgnored()) {
+        t.Fatalf("expected no ignored code, got %v", defaulted.BootWarningsIgnored())
+    }
+
+    ignored := mustConfigurationFromValues(t, map[string]string{BootWarningsIgnoredKey: " " + internal.BootWarningNameFirewallDoorReachUnknown + " "}).Kernel()
+    if 1 != len(ignored.BootWarningsIgnored()) || internal.BootWarningNameFirewallDoorReachUnknown != ignored.BootWarningsIgnored()[0] {
+        t.Fatalf("expected the trimmed code, got %v", ignored.BootWarningsIgnored())
+    }
+
+    ignored.BootWarningsIgnored()[0] = "changed"
+    if internal.BootWarningNameFirewallDoorReachUnknown != ignored.BootWarningsIgnored()[0] {
+        t.Fatalf("writing into the returned list reached the configuration")
+    }
+}
+
+func TestConfigurationBootWarningsIgnoredRefusesWhatSilencesNothing(t *testing.T) {
+    for _, testCase := range []struct {
+        expected string
+        values   map[string]string
+    }{
+        {"boot warning code may not be empty", map[string]string{BootWarningsIgnoredKey: internal.BootWarningNameFirewallDoorReachUnknown + ","}},
+        {"boot warning code is listed twice", map[string]string{BootWarningsIgnoredKey: internal.BootWarningNameFirewallDoorReachUnknown + "," + internal.BootWarningNameFirewallDoorReachUnknown}},
+    } {
+        expected := testCase.expected
+        values := testCase.values
+
+        _, err := newConfigurationFromValues(values)
+
+        found := false
+        for current := err; nil != current; current = errors.Unwrap(current) {
+            if refusal, isRefusal := current.(*exception.Error); true == isRefusal && expected == refusal.Message() && BootWarningsIgnoredKey == refusal.Context()["environmentKey"] {
+                found = true
+            }
+        }
+
+        if false == found {
+            t.Fatalf("expected %q for %v, got %v", expected, values, err)
+        }
+    }
+
+    /* whether a code names a warning anyone writes is judged at boot, once the modules declared theirs */
+    for _, code := range []string{"aws.s3.plaintextEndpoint", internal.BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage} {
+        if _, err := newConfigurationFromValues(map[string]string{BootWarningsIgnoredKey: code}); nil != err {
+            t.Fatalf("expected %q admitted when the configuration is built, got %v", code, err)
+        }
+    }
+}

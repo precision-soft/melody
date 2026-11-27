@@ -800,6 +800,46 @@ func TestRegisterKernelHttpListeners_LeavesTheBuiltInExceptionListenerToTheHttpK
     }
 }
 
+func accessLogListenerCount(t *testing.T, applicationInstance *Application) int {
+    t.Helper()
+
+    dispatcher, ok := applicationInstance.kernel.EventDispatcher().(*event.EventDispatcher)
+    if false == ok {
+        t.Fatalf("expected the framework dispatcher, got %T", applicationInstance.kernel.EventDispatcher())
+    }
+
+    count := 0
+    for _, registeredEvent := range dispatcher.RegisteredEvents() {
+        for _, listener := range registeredEvent.Listeners {
+            if kernelcontract.EventKernelTerminate == registeredEvent.EventName && true == slices.Contains(listener.Config.Tags, kernelcontract.ListenerTagKernelAccessLog) {
+                count++
+            }
+        }
+    }
+
+    return count
+}
+
+func TestRegisterKernelHttpListeners_RegistersTheAccessLogUnlessTheApplicationConfigDisablesIt(t *testing.T) {
+    for _, testCase := range []struct {
+        accessLog http.AccessLogConfig
+        expected  int
+    }{
+        {http.AccessLogConfig{}, 1},
+        {http.AccessLogConfig{MaxFieldBytes: bound.UnlimitedCount()}, 1},
+        {http.AccessLogConfig{Disabled: true}, 0},
+    } {
+        applicationInstance := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
+        applicationInstance.applicationConfig.AccessLog = testCase.accessLog
+
+        applicationInstance.registerKernelHttpListeners()
+
+        if count := accessLogListenerCount(t, applicationInstance); testCase.expected != count {
+            t.Fatalf("%+v: expected %d access log listeners, got %d", testCase.accessLog, testCase.expected, count)
+        }
+    }
+}
+
 func TestRunHttp_ServesTheListenerSetAConsoleInspectsPlusTheDeclaredBuiltIn(t *testing.T) {
     servingApplication := newCacheWarningTestApplication(t, config.ModeHttp, logging.NewNopLogger())
     servingApplication.registerKernelHttpListeners()
@@ -1749,8 +1789,8 @@ func TestRunHttpAndRunCli_WriteTheCollectedBootWarningsOnce(t *testing.T) {
         expectedOther int
     }{
         {"every code", map[string]string{}, 1, 1},
-        {"one code ignored", map[string]string{config.CliBootWarningsIgnoredKey: internal.BootWarningNameFirewallDoorReachUnknown}, 0, 1},
-        {"the journal disabled", map[string]string{config.CliBootWarningsDisabledKey: "true"}, 0, 0},
+        {"one code ignored", map[string]string{config.BootWarningsIgnoredKey: internal.BootWarningNameFirewallDoorReachUnknown}, 0, 1},
+        {"both codes ignored", map[string]string{config.BootWarningsIgnoredKey: internal.BootWarningNameFirewallDoorReachUnknown + "," + otherWarning.Name}, 0, 0},
     } {
         cliLogger := &warningRecordingLogger{}
         cliApplication := newCacheWarningTestApplicationOver(t, config.ModeCli, testCase.values, cliLogger)
@@ -1768,36 +1808,6 @@ func TestRunHttpAndRunCli_WriteTheCollectedBootWarningsOnce(t *testing.T) {
             t.Fatalf("%s: expected the other warning written %d times on a cli run, got %v", testCase.name, testCase.expectedOther, warnings)
         }
     }
-}
-
-func TestRefuseCliBootWarningKeysInHttp_RefusesEitherKeySetInAnHttpProcess(t *testing.T) {
-    for _, values := range []map[string]string{
-        {config.CliBootWarningsIgnoredKey: internal.BootWarningNameFirewallDoorReachUnknown},
-        {config.CliBootWarningsDisabledKey: "false"},
-    } {
-        applicationInstance := newCacheWarningTestApplicationOver(t, config.ModeHttp, values, &warningRecordingLogger{})
-
-        func() {
-            defer func() {
-                refusal, isRefusal := recover().(*exception.Error)
-                if false == isRefusal || false == strings.HasPrefix(refusal.Message(), "a cli boot warning key is set in an http process") {
-                    t.Fatalf("%v: expected the key refused in http, got %v", values, refusal)
-                }
-
-                for key := range values {
-                    if key != refusal.Context()["environmentKey"] {
-                        t.Fatalf("expected %s named, got %v", key, refusal.Context())
-                    }
-                }
-            }()
-
-            applicationInstance.refuseCliBootWarningKeysInHttp()
-        }()
-    }
-
-    newCacheWarningTestApplication(t, config.ModeHttp, &warningRecordingLogger{}).refuseCliBootWarningKeysInHttp()
-    newCacheWarningTestApplicationOver(t, config.ModeHttp, map[string]string{config.CliBootWarningsIgnoredKey: "  ", config.CliBootWarningsDisabledKey: ""}, &warningRecordingLogger{}).refuseCliBootWarningKeysInHttp()
-    newCacheWarningTestApplicationOver(t, config.ModeCli, map[string]string{config.CliBootWarningsDisabledKey: "true"}, &warningRecordingLogger{}).refuseCliBootWarningKeysInHttp()
 }
 
 func TestRunHttp_RefusesAServerLimitTheApplicationConfigSetsBelowItsMinimum(t *testing.T) {

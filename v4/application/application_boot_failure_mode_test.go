@@ -450,17 +450,9 @@ func TestBoot_AMiddlewareFactoryOverAWarnedServiceFailsTheBootAfterTheWarningIsW
     }
 }
 
-func TestBootWarningRegistry_TheBuiltAtBootCodeIsKnownAndNotACliCode(t *testing.T) {
-    registry := internal.NewBootWarningRegistry()
-
-    if false == registry.Known(internal.BootWarningNameServiceBuiltAtBootFailed) {
+func TestBootWarningRegistry_TheBuiltAtBootCodeIsKnown(t *testing.T) {
+    if false == internal.NewBootWarningRegistry().Known(internal.BootWarningNameServiceBuiltAtBootFailed) {
         t.Fatalf("expected the code known")
-    }
-
-    for _, name := range registry.CliNames() {
-        if internal.BootWarningNameServiceBuiltAtBootFailed == name {
-            t.Fatalf("expected the code not written by a cli process, which builds no warn-mode service at boot")
-        }
     }
 }
 

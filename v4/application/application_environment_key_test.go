@@ -381,11 +381,11 @@ func TestBoot_ACommandLeavesTheUndeclaredKeyWarningOutWhenItIsIgnored(t *testing
         expected int
     }{
         {"every code", map[string]string{"MELODY_TYPO": "x"}, 1},
-        {"the code ignored", map[string]string{"MELODY_TYPO": "x", config.CliBootWarningsIgnoredKey: internal.BootWarningNameEnvironmentUndeclaredKey}, 0},
+        {"the code ignored", map[string]string{"MELODY_TYPO": "x", config.BootWarningsIgnoredKey: internal.BootWarningNameEnvironmentUndeclaredKey}, 0},
     } {
         cliLogger := &warningRecordingLogger{}
         cliApplication := newCacheWarningTestApplicationOver(t, config.ModeCli, testCase.values, cliLogger)
-        cliApplication.refuseUnknownCliBootWarningCodes()
+        cliApplication.refuseUnknownBootWarningCodes()
         cliApplication.collectUndeclaredEnvironmentKeys()
 
         if runErr := cliApplication.runCli(); nil != runErr {
@@ -578,14 +578,25 @@ func TestBoot_RetiredKey_RefusedBeforeAnyModuleHook(t *testing.T) {
     }
 }
 
-func TestBoot_RetiredKey_RefusedInHttpModeBeforeTheCliKeyRefusal(t *testing.T) {
-    output, _, isChild := bootRetiredEnvironmentKeyChildInMode(t, config.ModeHttp, map[string]string{"MELODY_PUBLIC_DIR": "web", config.CliBootWarningsDisabledKey: "true"})
+func TestBoot_TheRetiredCliIgnoreKeyRefusesAnHttpBootNamingTheOneKey(t *testing.T) {
+    output, _, isChild := bootRetiredEnvironmentKeyChildInMode(t, config.ModeHttp, map[string]string{"MELODY_CLI_BOOT_WARNINGS_IGNORED": internal.BootWarningNameFirewallDoorReachUnknown})
     if true == isChild {
         return
     }
 
-    if false == strings.Contains(output, "after unrecovered error: the environment key MELODY_PUBLIC_DIR is retired") || true == strings.Contains(output, "a cli boot warning key is set in an http process") {
-        t.Fatalf("expected the retired refusal in http mode, ahead of the cli key refusal, got: %s", output[max(0, len(output)-1500):])
+    if false == strings.Contains(output, "after unrecovered error: the environment key MELODY_CLI_BOOT_WARNINGS_IGNORED is retired: rename it to MELODY_BOOT_WARNINGS_IGNORED") {
+        t.Fatalf("expected the retired refusal naming the one key, got: %s", output[max(0, len(output)-1500):])
+    }
+}
+
+func TestBoot_TheRetiredCliDisabledKeyRefusesACliBootNamingTheOneKeyAndItsNote(t *testing.T) {
+    output, _, isChild := bootRetiredEnvironmentKeyChildInMode(t, config.ModeCli, map[string]string{"MELODY_CLI_BOOT_WARNINGS_DISABLED": "true"})
+    if true == isChild {
+        return
+    }
+
+    if false == strings.Contains(output, "MELODY_CLI_BOOT_WARNINGS_DISABLED is retired: rename it to MELODY_BOOT_WARNINGS_IGNORED") || false == strings.Contains(output, "no key silences every boot warning") {
+        t.Fatalf("expected the retired refusal naming the one key and the note, got: %s", output[max(0, len(output)-1500):])
     }
 }
 
@@ -729,23 +740,4 @@ func TestBoot_ModuleParameterOverrideIsJudgedAfterTheModulesDeclare(t *testing.T
     if true == strings.Contains(output, "no framework or module key feeds") || false == strings.Contains(output, "MELODY_PUBLIC_DIR is retired") {
         t.Fatalf("expected the consumed override admitted and the boot to reach the next refusal, got: %s", output[max(0, len(output)-1500):])
     }
-}
-
-func TestRefuseCliBootWarningKeysInHttp_AnOverrideOfTheCliSwitchesIsNotRefused(t *testing.T) {
-    applicationInstance := newEnvironmentKeyBootApplicationWithOverridesIn(
-        t,
-        map[string]string{},
-        nil,
-        map[string]string{config.KernelCliBootWarningsDisabled: "true"},
-        t.TempDir(),
-    )
-    applicationInstance.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
-
-    defer func() {
-        if recovered := recover(); nil != recovered {
-            t.Fatalf("expected an override of the cli switches ignored by an http process, got %v", recovered)
-        }
-    }()
-
-    applicationInstance.refuseCliBootWarningKeysInHttp()
 }

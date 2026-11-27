@@ -594,16 +594,9 @@ func (instance *Configuration) resolvePlaceholders() error {
 }
 
 func (instance *Configuration) buildCliConfiguration() error {
-    bootWarningsDisabled, bootWarningsDisabledErr := checkedParameterSwitch(instance.MustGet(KernelCliBootWarningsDisabled), CliBootWarningsDisabledKey)
-    if nil != bootWarningsDisabledErr {
-        return bootWarningsDisabledErr
-    }
-
     cliConfigurationInstance, newCliConfigurationErr := newCliConfiguration(
         instance.MustGet(KernelCliName).MustString(),
         instance.MustGet(KernelCliDescription).MustString(),
-        splitConfigurationList(instance.MustGet(KernelCliBootWarningsIgnored).MustString()),
-        bootWarningsDisabled.Value,
     )
     if nil != newCliConfigurationErr {
         return exception.NewError("could not initialize the cli configuration", nil, newCliConfigurationErr)
@@ -681,6 +674,13 @@ func (instance *Configuration) buildKernelConfiguration() error {
     kernelConfigurationInstance.logFileMode = logFileMode
     kernelConfigurationInstance.logDirectoryMode = logDirectoryMode
     kernelConfigurationInstance.cacheDirectoryMode = cacheDirectoryMode
+
+    bootWarningsIgnored, bootWarningsIgnoredErr := checkedBootWarningsIgnored(splitConfigurationList(instance.MustGet(KernelBootWarningsIgnored).MustString()))
+    if nil != bootWarningsIgnoredErr {
+        return bootWarningsIgnoredErr
+    }
+
+    kernelConfigurationInstance.bootWarningsIgnored = bootWarningsIgnored
 
     instance.kernel = kernelConfigurationInstance
 

@@ -74,6 +74,7 @@ type kernelConfiguration struct {
     logFileMode                 os.FileMode
     logDirectoryMode            os.FileMode
     cacheDirectoryMode          os.FileMode
+    bootWarningsIgnored         []string
 }
 
 func (instance *kernelConfiguration) DefaultMode() string {
@@ -121,6 +122,35 @@ func (instance *kernelConfiguration) CacheDirectory() string {
 /* CacheDirectoryMode is MELODY_CACHE_DIRECTORY_MODE, DefaultCacheDirectoryMode when the key is unset. */
 func (instance *kernelConfiguration) CacheDirectoryMode() os.FileMode {
     return instance.cacheDirectoryMode
+}
+
+/* BootWarningsIgnored is MELODY_BOOT_WARNINGS_IGNORED, a copy, empty when the key is unset. */
+func (instance *kernelConfiguration) BootWarningsIgnored() []string {
+    return append([]string{}, instance.bootWarningsIgnored...)
+}
+
+/* checkedBootWarningsIgnored refuses an empty or repeated code, which would silence nothing while the operator believes it does; a code no application or module writes is refused at boot, once the modules declared theirs */
+func checkedBootWarningsIgnored(codes []string) ([]string, error) {
+    listed := make(map[string]struct{}, len(codes))
+    for index, code := range codes {
+        context := exceptioncontract.Context{
+            "environmentKey": BootWarningsIgnoredKey,
+            "index":          index,
+            "code":           code,
+        }
+
+        if "" == code {
+            return nil, exception.NewError("boot warning code may not be empty", context, nil)
+        }
+
+        if _, isListed := listed[code]; true == isListed {
+            return nil, exception.NewError("boot warning code is listed twice", context, nil)
+        }
+
+        listed[code] = struct{}{}
+    }
+
+    return append([]string{}, codes...), nil
 }
 
 func (instance *kernelConfiguration) validate() error {

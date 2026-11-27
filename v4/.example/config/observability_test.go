@@ -14,16 +14,16 @@ import (
 )
 
 type spyBootWarningRegistrar struct {
-    declared map[string]bool
+    declared map[string]struct{}
     warnings []melodyapplicationcontract.BootWarning
 }
 
 func (instance *spyBootWarningRegistrar) DeclareBootWarning(name string, config melodyapplicationcontract.BootWarningConfig) {
     if nil == instance.declared {
-        instance.declared = make(map[string]bool)
+        instance.declared = make(map[string]struct{})
     }
 
-    instance.declared[name] = config.WrittenInCli
+    instance.declared[name] = struct{}{}
 }
 
 func (instance *spyBootWarningRegistrar) AddBootWarning(warning melodyapplicationcontract.BootWarning) {
@@ -159,8 +159,8 @@ func TestRegisterBootWarnings_WarnsOfAPublicExpositionOutsideDevelopmentOnly(t *
         registrar := &spyBootWarningRegistrar{}
         testCase.module.RegisterBootWarnings(registrar)
 
-        if writtenInCli, declared := registrar.declared[MetricsPublicBootWarningName]; false == declared || false == writtenInCli || 1 != len(registrar.declared) {
-            t.Fatalf("%s: expected the one code declared written in cli, got %v", testCase.name, registrar.declared)
+        if _, declared := registrar.declared[MetricsPublicBootWarningName]; false == declared || 1 != len(registrar.declared) {
+            t.Fatalf("%s: expected the one code declared, got %v", testCase.name, registrar.declared)
         }
 
         if testCase.expected != len(registrar.warnings) {

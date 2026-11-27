@@ -20,8 +20,7 @@ import (
 )
 
 type bootWarningDeclaration struct {
-    name         string
-    writtenInCli bool
+    name string
 }
 
 type bootWarningTestModule struct {
@@ -40,7 +39,7 @@ func (instance *bootWarningTestModule) Description() string {
 
 func (instance *bootWarningTestModule) RegisterBootWarnings(registrar applicationcontract.BootWarningRegistrar) {
     for _, declaration := range instance.declarations {
-        registrar.DeclareBootWarning(declaration.name, applicationcontract.BootWarningConfig{WrittenInCli: declaration.writtenInCli})
+        registrar.DeclareBootWarning(declaration.name, applicationcontract.BootWarningConfig{})
     }
 
     for _, warning := range instance.warnings {
@@ -55,7 +54,7 @@ const moduleHazardMessage = "the module's configuration admits a hazard"
 func newModuleHazardModule(name string) *bootWarningTestModule {
     return &bootWarningTestModule{
         name:         name,
-        declarations: []bootWarningDeclaration{{name: "test.module.hazard", writtenInCli: true}},
+        declarations: []bootWarningDeclaration{{name: "test.module.hazard"}},
         warnings: []applicationcontract.BootWarning{{
             Name:    "test.module.hazard",
             Message: moduleHazardMessage,
@@ -79,42 +78,46 @@ func refusalOf(t *testing.T, call func()) *exception.Error {
     return refusal
 }
 
-func TestBootModuleBootWarnings_AModuleCodeIsWrittenWithTheBootWarningsAndHonoursTheCliKeys(t *testing.T) {
-    httpLogger := &warningRecordingLogger{}
-    httpApplication := newCacheWarningTestApplication(t, config.ModeHttp, httpLogger)
-    httpApplication.modules = []applicationcontract.Module{newModuleHazardModule("storage")}
-    httpApplication.bootModuleBootWarnings()
-    httpApplication.refuseUnknownCliBootWarningCodes()
-
-    cancelledContext, cancel := context.WithCancel(context.Background())
-    cancel()
-
-    if runErr := httpApplication.runHttp(cancelledContext); nil != runErr {
-        t.Fatalf("unexpected run http error: %v", runErr)
+func TestBootModuleBootWarnings_AModuleCodeIsWrittenWithTheBootWarningsAndHonoursTheIgnoreKeyInBothProcesses(t *testing.T) {
+    cases := []struct {
+        name     string
+        values   map[string]string
+        expected int
+    }{
+        {"every code", map[string]string{}, 1},
+        {"the module code ignored", map[string]string{config.BootWarningsIgnoredKey: "test.module.hazard"}, 0},
+        {"another code ignored", map[string]string{config.BootWarningsIgnoredKey: internal.BootWarningNameFirewallDoorReachUnknown}, 1},
     }
 
-    if warnings := httpLogger.warningsContaining(moduleHazardMessage); 1 != len(warnings) {
-        t.Fatalf("expected the module's warning written once on the http path, got %v", warnings)
+    for _, testCase := range cases {
+        httpLogger := &warningRecordingLogger{}
+        httpApplication := newCacheWarningTestApplicationOver(t, config.ModeHttp, testCase.values, httpLogger)
+        httpApplication.modules = []applicationcontract.Module{newModuleHazardModule("storage")}
+        httpApplication.bootModuleBootWarnings()
+        httpApplication.refuseUnknownBootWarningCodes()
+
+        cancelledContext, cancel := context.WithCancel(context.Background())
+        cancel()
+
+        if runErr := httpApplication.runHttp(cancelledContext); nil != runErr {
+            t.Fatalf("%s: unexpected run http error: %v", testCase.name, runErr)
+        }
+
+        if warnings := httpLogger.warningsContaining(moduleHazardMessage); testCase.expected != len(warnings) {
+            t.Fatalf("%s: expected the module's warning written %d times on the http path, got %v", testCase.name, testCase.expected, warnings)
+        }
     }
 
     originalArguments := os.Args
     os.Args = []string{"melody"}
     defer func() { os.Args = originalArguments }()
 
-    for _, testCase := range []struct {
-        name     string
-        values   map[string]string
-        expected int
-    }{
-        {"every code", map[string]string{}, 1},
-        {"the module code ignored", map[string]string{config.CliBootWarningsIgnoredKey: "test.module.hazard"}, 0},
-        {"the journal disabled", map[string]string{config.CliBootWarningsDisabledKey: "true"}, 0},
-    } {
+    for _, testCase := range cases {
         cliLogger := &warningRecordingLogger{}
         cliApplication := newCacheWarningTestApplicationOver(t, config.ModeCli, testCase.values, cliLogger)
         cliApplication.modules = []applicationcontract.Module{newModuleHazardModule("storage")}
         cliApplication.bootModuleBootWarnings()
-        cliApplication.refuseUnknownCliBootWarningCodes()
+        cliApplication.refuseUnknownBootWarningCodes()
 
         if runErr := cliApplication.runCli(); nil != runErr {
             t.Fatalf("%s: unexpected run cli error: %v", testCase.name, runErr)
@@ -122,24 +125,6 @@ func TestBootModuleBootWarnings_AModuleCodeIsWrittenWithTheBootWarningsAndHonour
 
         if warnings := cliLogger.warningsContaining(moduleHazardMessage); testCase.expected != len(warnings) {
             t.Fatalf("%s: expected the module's warning written %d times on a cli run, got %v", testCase.name, testCase.expected, warnings)
-        }
-    }
-
-    for _, writtenInCli := range []bool{true, false} {
-        hazardModule := newModuleHazardModule("storage")
-        hazardModule.declarations = []bootWarningDeclaration{{name: "test.module.hazard", writtenInCli: writtenInCli}}
-
-        cliApplication := newCacheWarningTestApplicationOver(t, config.ModeCli, map[string]string{config.CliBootWarningsIgnoredKey: "test.module.hazard"}, &warningRecordingLogger{})
-        cliApplication.modules = []applicationcontract.Module{hazardModule}
-        cliApplication.bootModuleBootWarnings()
-
-        if writtenInCli != cliApplication.bootWarningRegistryOf().WrittenInCli("test.module.hazard") {
-            t.Fatalf("expected the declared code to carry BootWarningConfig.WrittenInCli %v", writtenInCli)
-        }
-
-        refusal := refusalOf(t, cliApplication.refuseUnknownCliBootWarningCodes)
-        if writtenInCli != (nil == refusal) {
-            t.Fatalf("expected a code declared with WrittenInCli %v admitted in the cli ignore list %v, got %v", writtenInCli, writtenInCli, refusal)
         }
     }
 }
@@ -151,16 +136,11 @@ func TestBootModuleBootWarnings_RefusesANameAnotherOwnerHoldsNamingBoth(t *testi
         expectedOwner string
     }{
         {"another module", "test.module.hazard", "storage"},
-        {"the same module, written in cli no more", "test.module.hazard", "storage"},
         {"the framework", internal.BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage, "the framework"},
     } {
         applicationInstance := newCacheWarningTestApplication(t, config.ModeCli, &warningRecordingLogger{})
-        secondModule := &bootWarningTestModule{name: "mailer", declarations: []bootWarningDeclaration{{name: testCase.declaredName, writtenInCli: true}}}
+        secondModule := &bootWarningTestModule{name: "mailer", declarations: []bootWarningDeclaration{{name: testCase.declaredName}}}
         expectedModule := "mailer"
-        if "the same module, written in cli no more" == testCase.name {
-            secondModule = &bootWarningTestModule{name: "storage", declarations: []bootWarningDeclaration{{name: testCase.declaredName, writtenInCli: false}}}
-            expectedModule = "storage"
-        }
 
         applicationInstance.modules = []applicationcontract.Module{newModuleHazardModule("storage"), secondModule}
 
@@ -183,8 +163,8 @@ func TestBootModuleBootWarnings_AdmitsTheSameModuleRegisteredTwice(t *testing.T)
         t.Fatalf("expected a second instance of one module admitted, got %v", refusal)
     }
 
-    if cliNames := applicationInstance.bootWarningRegistryOf().CliNames(); 6 != len(cliNames) || "test.module.hazard" != cliNames[5] {
-        t.Fatalf("expected the code declared once, got %v", cliNames)
+    if names := applicationInstance.bootWarningRegistryOf().Names(); 10 != len(names) || "test.module.hazard" != names[9] {
+        t.Fatalf("expected the code declared once, got %v", names)
     }
 }
 
@@ -196,7 +176,7 @@ func TestBootModuleBootWarnings_RefusesAnEmptyNameAWarningUnderANameTheModuleDid
     }{
         {
             "an empty name",
-            []applicationcontract.Module{&bootWarningTestModule{name: "mailer", declarations: []bootWarningDeclaration{{name: "", writtenInCli: true}}}},
+            []applicationcontract.Module{&bootWarningTestModule{name: "mailer", declarations: []bootWarningDeclaration{{name: ""}}}},
             "a module declared a boot warning with an empty name",
         },
         {
@@ -212,7 +192,7 @@ func TestBootModuleBootWarnings_RefusesAnEmptyNameAWarningUnderANameTheModuleDid
         {
             "another module's name",
             []applicationcontract.Module{
-                &bootWarningTestModule{name: "storage", declarations: []bootWarningDeclaration{{name: "test.module.hazard", writtenInCli: true}}},
+                &bootWarningTestModule{name: "storage", declarations: []bootWarningDeclaration{{name: "test.module.hazard"}}},
                 &bootWarningTestModule{name: "mailer", warnings: []applicationcontract.BootWarning{{Name: "test.module.hazard", Message: "x"}}},
             },
             "a module added a boot warning under a name it did not declare",
@@ -226,7 +206,7 @@ func TestBootModuleBootWarnings_RefusesAnEmptyNameAWarningUnderANameTheModuleDid
             "an empty message",
             []applicationcontract.Module{&bootWarningTestModule{
                 name:         "mailer",
-                declarations: []bootWarningDeclaration{{name: "test.module.hazard", writtenInCli: true}},
+                declarations: []bootWarningDeclaration{{name: "test.module.hazard"}},
                 warnings:     []applicationcontract.BootWarning{{Name: "test.module.hazard"}},
             }},
             "a module added a boot warning with an empty message",
@@ -251,53 +231,51 @@ func TestBootModuleBootWarnings_RefusesAnEmptyNameAWarningUnderANameTheModuleDid
     }
 }
 
-func TestRefuseUnknownCliBootWarningCodes_JudgesEachCodeAgainstTheFrameworkAndTheModules(t *testing.T) {
-    for _, testCase := range []struct {
-        name     string
-        code     string
-        modules  []applicationcontract.Module
-        expected string
-    }{
-        {"an unknown code", "security.firewallShadowed", nil, "cli boot warning code names no boot warning the framework or a module writes"},
-        {"a module code with no module", "test.module.hazard", nil, "cli boot warning code names no boot warning the framework or a module writes"},
-        {"an http-only framework code", internal.BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage, nil, "cli boot warning code names a boot warning only an http process writes, so a cli process never reads it"},
-        {"the retired defaulted environment code", "application.environment.defaulted", nil, "cli boot warning code names no boot warning the framework or a module writes"},
-        {
-            "an http-only module code",
-            "test.module.httpHazard",
-            []applicationcontract.Module{&bootWarningTestModule{name: "storage", declarations: []bootWarningDeclaration{{name: "test.module.httpHazard", writtenInCli: false}}}},
-            "cli boot warning code names a boot warning only an http process writes, so a cli process never reads it",
-        },
-        {"a cli framework code", internal.BootWarningNameFirewallDoorReachUnknown, nil, ""},
-        {"the ignored process variable code", internal.BootWarningNameProcessEnvironmentVariableIgnored, nil, ""},
-        {"the unmatched secret mark code", internal.BootWarningNameSecretMarkUnmatched, nil, ""},
-        {"the undeclared environment key code", internal.BootWarningNameEnvironmentUndeclaredKey, nil, ""},
-        {"a cli module code", "test.module.hazard", []applicationcontract.Module{newModuleHazardModule("storage")}, ""},
-    } {
-        applicationInstance := newCacheWarningTestApplicationOver(t, config.ModeCli, map[string]string{config.CliBootWarningsIgnoredKey: "  " + testCase.code}, &warningRecordingLogger{})
-        applicationInstance.modules = testCase.modules
-        applicationInstance.bootModuleBootWarnings()
+func TestRefuseUnknownBootWarningCodes_JudgesEachCodeAgainstTheFrameworkAndTheModulesInBothProcesses(t *testing.T) {
+    unknownMessage := "boot warning code names no boot warning the framework or a module writes"
 
-        refusal := refusalOf(t, applicationInstance.refuseUnknownCliBootWarningCodes)
-        if "" == testCase.expected {
-            if nil != refusal {
-                t.Fatalf("%s: expected the code admitted, got %v", testCase.name, refusal)
+    for _, mode := range []string{config.ModeCli, config.ModeHttp} {
+        for _, testCase := range []struct {
+            name     string
+            code     string
+            modules  []applicationcontract.Module
+            expected string
+        }{
+            {"an unknown code", "security.firewallShadowed", nil, unknownMessage},
+            {"a module code with no module", "test.module.hazard", nil, unknownMessage},
+            {"the retired defaulted environment code", "application.environment.defaulted", nil, unknownMessage},
+            {"a framework code only an http process writes", internal.BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage, nil, ""},
+            {"a framework code both processes write", internal.BootWarningNameFirewallDoorReachUnknown, nil, ""},
+            {"the ignored process variable code", internal.BootWarningNameProcessEnvironmentVariableIgnored, nil, ""},
+            {"the unmatched secret mark code", internal.BootWarningNameSecretMarkUnmatched, nil, ""},
+            {"the undeclared environment key code", internal.BootWarningNameEnvironmentUndeclaredKey, nil, ""},
+            {"a module code", "test.module.hazard", []applicationcontract.Module{newModuleHazardModule("storage")}, ""},
+        } {
+            applicationInstance := newCacheWarningTestApplicationOver(t, mode, map[string]string{config.BootWarningsIgnoredKey: "  " + testCase.code}, &warningRecordingLogger{})
+            applicationInstance.modules = testCase.modules
+            applicationInstance.bootModuleBootWarnings()
+
+            refusal := refusalOf(t, applicationInstance.refuseUnknownBootWarningCodes)
+            if "" == testCase.expected {
+                if nil != refusal {
+                    t.Fatalf("%s %s: expected the code admitted, got %v", mode, testCase.name, refusal)
+                }
+
+                continue
             }
 
-            continue
-        }
+            if nil == refusal || testCase.expected != refusal.Message() {
+                t.Fatalf("%s %s: expected %q, got %v", mode, testCase.name, testCase.expected, refusal)
+            }
 
-        if nil == refusal || testCase.expected != refusal.Message() {
-            t.Fatalf("%s: expected %q, got %v", testCase.name, testCase.expected, refusal)
-        }
+            codes, isList := refusal.Context()["codes"].([]string)
+            if false == isList || false == slices.Equal(internal.NewBootWarningRegistry().Names(), codes) {
+                t.Fatalf("%s %s: expected the codes the list may name, got %v", mode, testCase.name, refusal.Context()["codes"])
+            }
 
-        cliCodes, isList := refusal.Context()["cliCodes"].([]string)
-        if false == isList || false == slices.Equal(internal.NewBootWarningRegistry().CliNames(), cliCodes) {
-            t.Fatalf("%s: expected the codes a command can list named, got %v", testCase.name, refusal.Context()["cliCodes"])
-        }
-
-        if config.CliBootWarningsIgnoredKey != refusal.Context()["environmentKey"] || 0 != refusal.Context()["index"] || testCase.code != refusal.Context()["code"] {
-            t.Fatalf("%s: expected the key, the index and the code named, got %v", testCase.name, refusal.Context())
+            if config.BootWarningsIgnoredKey != refusal.Context()["environmentKey"] || 0 != refusal.Context()["index"] || testCase.code != refusal.Context()["code"] {
+                t.Fatalf("%s %s: expected the key, the index and the code named, got %v", mode, testCase.name, refusal.Context())
+            }
         }
     }
 }
@@ -308,9 +286,9 @@ const bootCliCodeProbeMarker = "MELODY_TEST_BOOT_CLI_CODE_PROBE"
 func TestBoot_JudgesTheCliCodesAfterTheModulesDeclaredTheirs(t *testing.T) {
     if probe := os.Getenv(bootCliCodeProbeMarker); "" != probe {
         values := map[string]string{
-            config.EnvironmentNameKey:        config.EnvironmentDevelopment,
-            config.HttpAddressKey:            freeLoopbackAddress(t),
-            config.CliBootWarningsIgnoredKey: map[string]string{"moduleCode": "test.module.hazard", "unknownCode": "test.nobody.writes"}[probe],
+            config.EnvironmentNameKey:     config.EnvironmentDevelopment,
+            config.HttpAddressKey:         freeLoopbackAddress(t),
+            config.BootWarningsIgnoredKey: map[string]string{"moduleCode": "test.module.hazard", "unknownCode": "test.nobody.writes"}[probe],
         }
 
         environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: values})
@@ -344,7 +322,7 @@ func TestBoot_JudgesTheCliCodesAfterTheModulesDeclaredTheirs(t *testing.T) {
         output   string
     }{
         "moduleCode":  {93, ""},
-        "unknownCode": {1, "cli boot warning code names no boot warning the framework or a module writes"},
+        "unknownCode": {1, "boot warning code names no boot warning the framework or a module writes"},
     } {
         child := exec.Command(os.Args[0], "-test.run=^TestBoot_JudgesTheCliCodesAfterTheModulesDeclaredTheirs$")
         child.Env = append(os.Environ(), bootCliCodeProbeMarker+"="+probe)
@@ -368,7 +346,7 @@ const (
 )
 
 /* both are collected rather than written at boot, so a command filters them like every other boot warning */
-func TestRunCli_WritesTheIgnoredProcessVariableAndTheUnmatchedSecretMarkUnderTheCliKeys(t *testing.T) {
+func TestRunCli_WritesTheIgnoredProcessVariableAndTheUnmatchedSecretMarkUnderTheIgnoreKey(t *testing.T) {
     originalArguments := os.Args
     os.Args = []string{"melody"}
     defer func() { os.Args = originalArguments }()
@@ -380,13 +358,13 @@ func TestRunCli_WritesTheIgnoredProcessVariableAndTheUnmatchedSecretMarkUnderThe
         expectedSecretMark int
     }{
         {"every code", map[string]string{}, 1, 1},
-        {"the variable code ignored", map[string]string{config.CliBootWarningsIgnoredKey: internal.BootWarningNameProcessEnvironmentVariableIgnored}, 0, 1},
-        {"the secret mark code ignored", map[string]string{config.CliBootWarningsIgnoredKey: internal.BootWarningNameSecretMarkUnmatched}, 1, 0},
-        {"the journal disabled", map[string]string{config.CliBootWarningsDisabledKey: "true"}, 0, 0},
+        {"the variable code ignored", map[string]string{config.BootWarningsIgnoredKey: internal.BootWarningNameProcessEnvironmentVariableIgnored}, 0, 1},
+        {"the secret mark code ignored", map[string]string{config.BootWarningsIgnoredKey: internal.BootWarningNameSecretMarkUnmatched}, 1, 0},
+        {"both codes ignored", map[string]string{config.BootWarningsIgnoredKey: internal.BootWarningNameProcessEnvironmentVariableIgnored + "," + internal.BootWarningNameSecretMarkUnmatched}, 0, 0},
     } {
         cliLogger := &warningRecordingLogger{}
         cliApplication := newCacheWarningTestApplicationOver(t, config.ModeCli, testCase.values, cliLogger)
-        cliApplication.refuseUnknownCliBootWarningCodes()
+        cliApplication.refuseUnknownBootWarningCodes()
 
         cliApplication.bootWarnings = append(cliApplication.bootWarnings, ignoredProcessEnvironmentBootWarnings(cliApplication.configuration, []string{"MELODY_PROCESS_ROLE=worker"})...)
         cliApplication.MarkParameterSecret("app.misspelled")
@@ -433,10 +411,10 @@ const bootWarningsBeforeExitProbeMarker = "MELODY_TEST_BOOT_WARNINGS_BEFORE_EXIT
 /* a boot refused after the collection exits before any run, so the exit handler writes the boot warnings beside the exit record; the hazard they name may be what killed it */
 func TestBoot_ARefusedBootWritesTheCollectedBootWarningsBeforeItsExitRecord(t *testing.T) {
     if probe := os.Getenv(bootWarningsBeforeExitProbeMarker); "" != probe {
-        projectDirectory, disabled, _ := strings.Cut(probe, "|")
+        projectDirectory, ignored, _ := strings.Cut(probe, "|")
         values := map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment, config.HttpAddressKey: freeLoopbackAddress(t)}
-        if "disabled" == disabled {
-            values[config.CliBootWarningsDisabledKey] = "true"
+        if "ignored" == ignored {
+            values[config.BootWarningsIgnoredKey] = internal.BootWarningNameProcessEnvironmentVariableIgnored + "," + internal.BootWarningNameSecretMarkUnmatched
         }
 
         environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: values})
@@ -468,15 +446,15 @@ func TestBoot_ARefusedBootWritesTheCollectedBootWarningsBeforeItsExitRecord(t *t
 
     for _, testCase := range []struct {
         name     string
-        disabled string
+        ignored  string
         expected bool
     }{
         {"every code", "", true},
-        {"the journal disabled", "disabled", false},
+        {"both codes ignored", "ignored", false},
     } {
         childProjectDirectory := t.TempDir()
         child := exec.Command(os.Args[0], "-test.run=^TestBoot_ARefusedBootWritesTheCollectedBootWarningsBeforeItsExitRecord$")
-        child.Env = append(os.Environ(), bootWarningsBeforeExitProbeMarker+"="+childProjectDirectory+"|"+testCase.disabled, config.HttpAddressKey+"=127.0.0.1:1")
+        child.Env = append(os.Environ(), bootWarningsBeforeExitProbeMarker+"="+childProjectDirectory+"|"+testCase.ignored, config.HttpAddressKey+"=127.0.0.1:1")
 
         output, runErr := child.CombinedOutput()
 
@@ -508,18 +486,20 @@ func TestBoot_ARefusedBootWritesTheCollectedBootWarningsBeforeItsExitRecord(t *t
     }
 }
 
-func TestWriteBootWarnings_WritesOnceAndAnHttpProcessReadsNoCliKey(t *testing.T) {
+func TestWriteBootWarnings_WritesOnceAndAnHttpProcessHonoursTheIgnoreKey(t *testing.T) {
     bootWarning := internal.BootWarning{Name: internal.BootWarningNameFirewallDoorReachUnknown, Message: "a firewall door's reach is not known at boot"}
 
-    httpLogger := &warningRecordingLogger{}
-    httpApplication := newCacheWarningTestApplicationOver(t, config.ModeHttp, map[string]string{config.CliBootWarningsDisabledKey: "true"}, httpLogger)
-    httpApplication.bootWarnings = []internal.BootWarning{bootWarning}
+    for values, expected := range map[string]int{"": 1, internal.BootWarningNameFirewallDoorReachUnknown: 0} {
+        httpLogger := &warningRecordingLogger{}
+        httpApplication := newCacheWarningTestApplicationOver(t, config.ModeHttp, map[string]string{config.BootWarningsIgnoredKey: values}, httpLogger)
+        httpApplication.bootWarnings = []internal.BootWarning{bootWarning}
 
-    httpApplication.writeBootWarnings(httpLogger)
-    httpApplication.writeBootWarningsBeforeExit(httpLogger)
+        httpApplication.writeBootWarnings(httpLogger)
+        httpApplication.writeBootWarningsBeforeExit(httpLogger)
 
-    if warnings := httpLogger.warningsContaining(bootWarning.Message); 1 != len(warnings) {
-        t.Fatalf("expected an http process dying on the cli keys to write the boot warning once, got %v", warnings)
+        if warnings := httpLogger.warningsContaining(bootWarning.Message); expected != len(warnings) {
+            t.Fatalf("ignored %q: expected the boot warning written %d times, got %v", values, expected, warnings)
+        }
     }
 }
 

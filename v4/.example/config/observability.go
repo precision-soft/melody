@@ -56,9 +56,9 @@ func (instance *Module) buildMetricsAuth() {
     instance.metricsToken = token
 }
 
-/* the code is declared in every environment and process, so a command's MELODY_CLI_BOOT_WARNINGS_IGNORED may name it; a cli process shares the deployment's .env and writes it too */
+/* the code is declared in every environment and process, so MELODY_BOOT_WARNINGS_IGNORED may name it; a cli process shares the deployment's .env and writes it too */
 func (instance *Module) RegisterBootWarnings(registrar melodyapplicationcontract.BootWarningRegistrar) {
-    registrar.DeclareBootWarning(MetricsPublicBootWarningName, melodyapplicationcontract.BootWarningConfig{WrittenInCli: true})
+    registrar.DeclareBootWarning(MetricsPublicBootWarningName, melodyapplicationcontract.BootWarningConfig{})
 
     if "" != instance.metricsToken || true == instance.isDevelopment() {
         return

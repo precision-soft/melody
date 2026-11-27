@@ -32,7 +32,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
-| `v4/application.Application.bootCli` | protection | debug commands outside development | development only | none | — | — |
+| `v4/application.Application.bootCli` | protection | debug commands outside development | development only | `off:v4/application.ApplicationConfig.DebugCommandsEnabled` | — | [DEBUG.md](package/DEBUG.md) |
 
 ## `v4/cache`
 
@@ -122,7 +122,8 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | `v4/http.ServerSentEventHubConfig.SubscriberBuffer` | limit | unbounded memory or work | defaultServerSentEventBufferSize min 1 | `value:v4/http.ServerSentEventHubConfig.SubscriberBuffer` | class T: a size; unlimited is memory or work that only grows | [HTTP.md](package/HTTP.md) |
 | `v4/http.ServerSentEventWriterConfig.WriteBudget` | limit | a call or a wait that never returns | 30 * time.Second min bound.TimeoutMinimum unlimited admitted | `value:v4/http.ServerSentEventWriterConfig.WriteBudget` | — | [HTTP.md](package/HTTP.md) |
 | `v4/http.SubscribeOptions.Buffer` | limit | unbounded memory or work | bufferSize min 1 | `value:v4/http.SubscribeOptions.Buffer` | class T: a size; unlimited is memory or work that only grows | [HTTP.md](package/HTTP.md) |
-| `v4/http.RegisterKernelTerminateAccessLogListener` | protection | a request leaving no access line | on, always | none | — | — |
+| `v4/http.RegisterKernelTerminateAccessLogListener` | protection | a request leaving no access line | on | `off:v4/http.AccessLogConfig.Disabled`, `off:v4/application.ApplicationConfig.AccessLog` | — | [HTTP.md](package/HTTP.md) |
+| `v4/http.AccessLogConfig.MaxFieldBytes` | limit | an access line of any length | internal.DiagnosticTextMaxLength min 1 unlimited admitted | `value:v4/http.AccessLogConfig.MaxFieldBytes`, `value:v4/application.ApplicationConfig.AccessLog` | — | [HTTP.md](package/HTTP.md) |
 | `v4/http.sessionCookie` | protection | a session cookie readable by a script | HttpOnly, always | none | — | — |
 
 ## `v4/http/contract`
@@ -193,7 +194,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
-| `v4/internal.maxDiagnosticTextLength` | constant | a diagnostic journaled whole | 512 | none | — | — |
+| `v4/internal.DiagnosticTextMaxLength` | constant | a diagnostic journaled whole | 512 | `value:v4/http.AccessLogConfig.MaxFieldBytes` | class K: a diagnostic cut; a kernel, security or exception record carries the request-supplied field it names, cut at 512 bytes with the dropped bytes counted, and the access log, the one record written per request, takes its own cut through AccessLogConfig.MaxFieldBytes | [HTTP.md](package/HTTP.md) |
 | `v4/internal.JournalDirectoryModeFloor` | mode | a journal directory its owner cannot traverse | 0700 | none | the floor a configured journal directory mode may not go below: below it the owner cannot list or create the journal, so the mode is refused, not doored | — |
 | `v4/internal.JournalFileModeFloor` | mode | a journal file its owner cannot write | 0600 | none | the floor a configured journal file mode may not go below: below it the owner cannot write the journal and every line is lost, so the mode is refused, not doored | — |
 | `v4/internal.WriteFileAtomically#1` | mode | generated source in a directory the repository does not own | 0755 | none | generated Go source is committed: its directories and a new file take the repository's modes, an existing file keeps its own | — |
@@ -555,13 +556,13 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
-| `application.environment.processVariableIgnored` | warning | a process variable the operator believes is read | written | `env:MELODY_CLI_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
-| `application.environment.undeclaredKey` | warning | a MELODY_ key nothing reads, a typo the operator believes is set | written | `env:MELODY_CLI_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
-| `application.secretMark.unmatched` | warning | a secret mark that protects no parameter | written | `env:MELODY_CLI_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
-| `application.service.builtAtBootFailed` | warning | a service that failed its boot build going unnoticed | written in http | none | — | — |
-| `aws.s3.plaintextEndpoint` | warning | object traffic in clear to a non-loopback endpoint | written | `env:MELODY_CLI_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
-| `http.session.unboundedTtlOnBoundedDefaultStorage` | warning | sessions without end on a storage that evicts | written in http | none | — | — |
-| `http.static.cacheMaxAgeIgnored` | warning | a cache max age the operator believes is applied | written in http | none | — | — |
-| `messagebus.retryPolicyServiceIgnored` | warning | a retry policy service the operator believes is used | written | `env:MELODY_CLI_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
-| `security.csrfDisabledOnLoginFirewall` | warning | a login firewall without its forgery check | written in http | none | — | — |
-| `security.firewallDoorReachUnknown` | warning | a firewall door whose reach the compiler cannot prove | written | `env:MELODY_CLI_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
+| `application.environment.processVariableIgnored` | warning | a process variable the operator believes is read | written | `env:MELODY_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
+| `application.environment.undeclaredKey` | warning | a MELODY_ key nothing reads, a typo the operator believes is set | written | `env:MELODY_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
+| `application.secretMark.unmatched` | warning | a secret mark that protects no parameter | written | `env:MELODY_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
+| `application.service.builtAtBootFailed` | warning | a service that failed its boot build going unnoticed | written in http | `env:MELODY_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
+| `aws.s3.plaintextEndpoint` | warning | object traffic in clear to a non-loopback endpoint | written | `env:MELODY_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
+| `http.session.unboundedTtlOnBoundedDefaultStorage` | warning | sessions without end on a storage that evicts | written in http | `env:MELODY_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
+| `http.static.cacheMaxAgeIgnored` | warning | a cache max age the operator believes is applied | written in http | `env:MELODY_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
+| `messagebus.retryPolicyServiceIgnored` | warning | a retry policy service the operator believes is used | written | `env:MELODY_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
+| `security.csrfDisabledOnLoginFirewall` | warning | a login firewall without its forgery check | written in http | `env:MELODY_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
+| `security.firewallDoorReachUnknown` | warning | a firewall door whose reach the compiler cannot prove | written | `env:MELODY_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |

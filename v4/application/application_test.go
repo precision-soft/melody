@@ -1042,11 +1042,11 @@ const bootHttpRefusalProbeMarker = "MELODY_TEST_BOOT_HTTP_REFUSAL_PROBE"
 func bootHttpRefusalChildValues() map[string]map[string]string {
     return map[string]map[string]string{
         "sessionPair":  {config.HttpSessionTtlKey: "unlimited", config.HttpSessionMaxSessionsKey: "unlimited"},
-        "cliKeyInHttp": {config.CliBootWarningsDisabledKey: "true"},
+        "retiredCliKey": {"MELODY_CLI_BOOT_WARNINGS_DISABLED": "true"},
     }
 }
 
-func TestBoot_RefusesAnHttpBootOverAnUnboundedSessionPairOrACliBootWarningKey(t *testing.T) {
+func TestBoot_RefusesAnHttpBootOverAnUnboundedSessionPairOrARetiredCliBootWarningKey(t *testing.T) {
     if probe := os.Getenv(bootHttpRefusalProbeMarker); "" != probe {
         values := map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment, config.HttpAddressKey: freeLoopbackAddress(t)}
         for key, value := range bootHttpRefusalChildValues()[probe] {
@@ -1080,9 +1080,9 @@ func TestBoot_RefusesAnHttpBootOverAnUnboundedSessionPairOrACliBootWarningKey(t 
 
     for probe, expected := range map[string]string{
         "sessionPair":  "an unbounded session ttl and an unbounded session count",
-        "cliKeyInHttp": "a cli boot warning key is set in an http process",
+        "retiredCliKey": "the environment key MELODY_CLI_BOOT_WARNINGS_DISABLED is retired: rename it to MELODY_BOOT_WARNINGS_IGNORED",
     } {
-        child := exec.Command(os.Args[0], "-test.run=^TestBoot_RefusesAnHttpBootOverAnUnboundedSessionPairOrACliBootWarningKey$")
+        child := exec.Command(os.Args[0], "-test.run=^TestBoot_RefusesAnHttpBootOverAnUnboundedSessionPairOrARetiredCliBootWarningKey$")
         child.Env = append(os.Environ(), bootHttpRefusalProbeMarker+"="+probe)
 
         output, runErr := child.CombinedOutput()

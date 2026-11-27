@@ -11,13 +11,10 @@ type BootWarning struct {
     Context loggingcontract.Context
 }
 
-/* BootWarningConfig is how a declared boot warning code is written; every zero value is the default. */
-type BootWarningConfig struct {
-    /* WrittenInCli declares the code one a cli process writes, so MELODY_CLI_BOOT_WARNINGS_IGNORED may list it; false refuses the code in that list as one only an http process writes. */
-    WrittenInCli bool
-}
+/* BootWarningConfig is how a declared boot warning code is written; it holds no field yet, and every zero value is the default. */
+type BootWarningConfig struct{}
 
-/* BootWarningRegistrar is handed to a module before the configuration resolves. A declared code is one a cli process may list in MELODY_CLI_BOOT_WARNINGS_IGNORED when its config's WrittenInCli is true; a warning added under it is written with the framework's boot warnings and honours the cli keys. */
+/* BootWarningRegistrar is handed to a module before the configuration resolves. A declared code is one MELODY_BOOT_WARNINGS_IGNORED may list, in the http and the cli process alike; a warning added under it is written with the framework's boot warnings and honours that key. */
 type BootWarningRegistrar interface {
     DeclareBootWarning(name string, config BootWarningConfig)
 

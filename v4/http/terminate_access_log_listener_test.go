@@ -9,11 +9,13 @@ import (
     "sync"
     "testing"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/event"
+    "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
@@ -82,7 +84,7 @@ func TestRegisterKernelTerminateAccessLogListener_RecordsTheRequestItCompleted(t
     runtimeInstance := newAccessLogRuntime(recordingLogger)
 
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
-    RegisterKernelTerminateAccessLogListener(dispatcher)
+    RegisterKernelTerminateAccessLogListener(dispatcher, AccessLogConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/articles?draft=1&token=super-secret", nil)
     httpRequest.Host = "api.example.com"
@@ -151,7 +153,7 @@ func TestRegisterKernelTerminateAccessLogListener_PrefersTheSchemeTheKernelResol
     runtimeInstance := newAccessLogRuntime(recordingLogger)
 
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
-    RegisterKernelTerminateAccessLogListener(dispatcher)
+    RegisterKernelTerminateAccessLogListener(dispatcher, AccessLogConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/articles", nil)
     httpRequest.Header.Set("X-Forwarded-Proto", "https")
@@ -184,7 +186,7 @@ func TestRegisterKernelTerminateAccessLogListener_FallsBackToTheUntrustedSchemeD
     runtimeInstance := newAccessLogRuntime(recordingLogger)
 
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
-    RegisterKernelTerminateAccessLogListener(dispatcher)
+    RegisterKernelTerminateAccessLogListener(dispatcher, AccessLogConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/articles", nil)
     httpRequest.Header.Set("X-Forwarded-Proto", "https")
@@ -214,7 +216,7 @@ func TestRegisterKernelTerminateAccessLogListener_DetectsTlsFromTheConnection(t 
     runtimeInstance := newAccessLogRuntime(recordingLogger)
 
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
-    RegisterKernelTerminateAccessLogListener(dispatcher)
+    RegisterKernelTerminateAccessLogListener(dispatcher, AccessLogConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/articles", nil)
     httpRequest.TLS = &tls.ConnectionState{}
@@ -244,7 +246,7 @@ func TestRegisterKernelTerminateAccessLogListener_IgnoresAForeignPayload(t *test
     runtimeInstance := newAccessLogRuntime(recordingLogger)
 
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
-    RegisterKernelTerminateAccessLogListener(dispatcher)
+    RegisterKernelTerminateAccessLogListener(dispatcher, AccessLogConfig{})
 
     if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelTerminate, "not a terminate event"); nil != dispatchErr {
         t.Fatalf("expected a foreign payload to be ignored, got: %v", dispatchErr)
@@ -260,7 +262,7 @@ func TestRegisterKernelTerminateAccessLogListener_RecordsAZeroStatusWithoutAResp
     runtimeInstance := newAccessLogRuntime(recordingLogger)
 
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
-    RegisterKernelTerminateAccessLogListener(dispatcher)
+    RegisterKernelTerminateAccessLogListener(dispatcher, AccessLogConfig{})
 
     terminateEvent := NewKernelTerminateEvent(
         runtimeInstance,
@@ -287,7 +289,7 @@ func TestRegisterKernelTerminateAccessLogListener_RedactsEveryQueryValue(t *test
     runtimeInstance := newAccessLogRuntime(recordingLogger)
 
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
-    RegisterKernelTerminateAccessLogListener(dispatcher)
+    RegisterKernelTerminateAccessLogListener(dispatcher, AccessLogConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/reset?apiKey=live-credential&next=/home", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(httpRequest)
@@ -329,7 +331,7 @@ func TestRegisterKernelTerminateAccessLogListener_RedactsTheQueryOfTheReferer(t 
     runtimeInstance := newAccessLogRuntime(recordingLogger)
 
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
-    RegisterKernelTerminateAccessLogListener(dispatcher)
+    RegisterKernelTerminateAccessLogListener(dispatcher, AccessLogConfig{})
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/articles", nil)
     httpRequest.Header.Set("Referer", "https://example.com/reset?token=super-secret#state=other-secret")
@@ -360,7 +362,7 @@ func TestRegisterKernelTerminateAccessLogListener_BoundsEveryRequestSuppliedFiel
     runtimeInstance := newAccessLogRuntime(recordingLogger)
 
     dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
-    RegisterKernelTerminateAccessLogListener(dispatcher)
+    RegisterKernelTerminateAccessLogListener(dispatcher, AccessLogConfig{})
 
     longText := strings.Repeat("a", 4096)
 
@@ -391,5 +393,104 @@ func TestRegisterKernelTerminateAccessLogListener_BoundsEveryRequestSuppliedFiel
         if 600 < len(value) || false == strings.Contains(value, "...(truncated ") {
             t.Fatalf("expected %s bounded, got %d bytes", key, len(value))
         }
+    }
+}
+
+func dispatchLongAccessLogRequest(t *testing.T, config AccessLogConfig) (loggingcontract.Context, bool) {
+    t.Helper()
+
+    recordingLogger := &accessLogRecordingLogger{}
+    runtimeInstance := newAccessLogRuntime(recordingLogger)
+
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+    RegisterKernelTerminateAccessLogListener(dispatcher, config)
+
+    longText := strings.Repeat("a", 4096)
+
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/"+longText+"?"+longText+"=1", nil)
+    httpRequest.Header.Set("User-Agent", longText)
+    httpRequest.Header.Set("Referer", "https://example.com/"+longText)
+    httpRequest.Host = longText
+    httpRequest.Method = strings.Repeat("M", 4096)
+
+    terminateEvent := NewKernelTerminateEvent(
+        runtimeInstance,
+        testhelper.NewHttpTestRequestFromHttpRequest(httpRequest),
+        NewResponse(nethttp.StatusOK, []byte("ok")),
+    )
+
+    if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelTerminate, terminateEvent); nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    return recordingLogger.accessLogContext()
+}
+
+func TestRegisterKernelTerminateAccessLogListener_CutsEveryRequestSuppliedFieldAtMaxFieldBytes(t *testing.T) {
+    for _, testCase := range []struct {
+        maxFieldBytes bound.Count
+        expected      int
+    }{
+        {bound.Count{}, 512},
+        {bound.Of(1024), 1024},
+        {bound.Of(1), 1},
+    } {
+        loggedContext, logged := dispatchLongAccessLogRequest(t, AccessLogConfig{MaxFieldBytes: testCase.maxFieldBytes})
+        if false == logged {
+            t.Fatalf("%v: expected the access log record to be written", testCase.maxFieldBytes)
+        }
+
+        for _, key := range []string{"method", "path", "query", "host", "userAgent", "referer"} {
+            value, _ := loggedContext[key].(string)
+            kept, _, isCut := strings.Cut(value, "...(truncated ")
+            if false == isCut || testCase.expected != len(kept) {
+                t.Fatalf("%v: expected %s cut at %d bytes, got %d kept of %q", testCase.maxFieldBytes, key, testCase.expected, len(kept), value[:min(len(value), 64)])
+            }
+        }
+    }
+}
+
+func TestRegisterKernelTerminateAccessLogListener_AnUnlimitedMaxFieldBytesKeepsEveryFieldWhole(t *testing.T) {
+    loggedContext, logged := dispatchLongAccessLogRequest(t, AccessLogConfig{MaxFieldBytes: bound.UnlimitedCount()})
+    if false == logged {
+        t.Fatalf("expected the access log record to be written")
+    }
+
+    for _, key := range []string{"method", "path", "host", "userAgent"} {
+        value, _ := loggedContext[key].(string)
+        if 4096 > len(value) || true == strings.Contains(value, "...(truncated ") {
+            t.Fatalf("expected %s kept whole, got %d bytes", key, len(value))
+        }
+    }
+}
+
+func TestRegisterKernelTerminateAccessLogListener_DisabledRegistersNoListener(t *testing.T) {
+    if _, logged := dispatchLongAccessLogRequest(t, AccessLogConfig{Disabled: true}); true == logged {
+        t.Fatalf("expected no access log record under Disabled")
+    }
+
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+    RegisterKernelTerminateAccessLogListener(dispatcher, AccessLogConfig{Disabled: true})
+    if registeredEvents := dispatcher.RegisteredEvents(); 0 != len(registeredEvents) {
+        t.Fatalf("expected no listener under Disabled, got %v", registeredEvents)
+    }
+}
+
+func TestRegisterKernelTerminateAccessLogListener_RefusesAMaxFieldBytesBelowOneNamingTheFieldDisabledOrNot(t *testing.T) {
+    for _, disabled := range []bool{false, true} {
+        func() {
+            defer func() {
+                refusal, isRefusal := recover().(*exception.Error)
+                if false == isRefusal || "AccessLogConfig.MaxFieldBytes" != refusal.Context()["field"] {
+                    t.Fatalf("disabled %v: expected the field named, got %v", disabled, refusal)
+                }
+            }()
+
+            RegisterKernelTerminateAccessLogListener(event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()}), AccessLogConfig{Disabled: disabled, MaxFieldBytes: bound.Of(0)})
+        }()
+    }
+
+    if rule := AccessLogMaxFieldBytesRule(); 512 != rule.Default || 1 != rule.Minimum || false == rule.UnlimitedAdmitted || "AccessLogConfig.MaxFieldBytes" != rule.Name {
+        t.Fatalf("unexpected rule %+v", rule)
     }
 }
