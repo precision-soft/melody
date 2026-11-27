@@ -41,8 +41,11 @@ type LoginConfig struct {
     /* CsrfDisabled turns the door's forgery check off, the stated other origin refused without a session cookie included; a trusted origin in FirewallConfig.Csrf.TrustedOrigins is the narrower door. */
     CsrfDisabled bool
 
-    /* Limiter meters the door's own requests before they authenticate; nil meters none. */
+    /* Limiter meters the door's own requests before they authenticate, credential guessing bounded per key; a door without one is refused unless LimiterDisabled. */
     Limiter httpcontract.RateLimiter
+
+    /* LimiterDisabled declares the door unmetered on purpose, a limiter in front of the application metering it; refused beside a Limiter or a LimiterConfig. */
+    LimiterDisabled bool
 
     /* LimiterConfig declares the key and the answer of Limiter, and is refused without it. */
     LimiterConfig httpmiddleware.RateLimitConfig
@@ -82,6 +85,8 @@ type firewallDoorDeclaration struct {
     authenticatorNil  bool
     limiterAbsent     bool
     limiterConfigured bool
+    limiterRequired   bool
+    limiterDisabled   bool
 }
 
 func loginDoorDeclaration(config LoginConfig) firewallDoorDeclaration {
@@ -90,7 +95,7 @@ func loginDoorDeclaration(config LoginConfig) firewallDoorDeclaration {
     return firewallDoorDeclaration{
         label: "Login",
         /* a typed-nil handler counts as declared, so the check names it instead of the door vanishing */
-        declared:          "" != config.Path || nil != config.Handler || "" != config.Name || 0 != len(config.Attributes) || nil != config.Authenticator || 0 != len(config.Methods) || "" != config.TargetPath || true == config.CsrfDisabled || nil != config.Limiter || true == limiterConfigured,
+        declared:          "" != config.Path || nil != config.Handler || "" != config.Name || 0 != len(config.Attributes) || nil != config.Authenticator || 0 != len(config.Methods) || "" != config.TargetPath || true == config.CsrfDisabled || nil != config.Limiter || true == limiterConfigured || true == config.LimiterDisabled,
         path:              config.Path,
         attributes:        config.Attributes,
         handlerAbsent:     true == internal.IsNilInterface(config.Handler),
@@ -99,6 +104,8 @@ func loginDoorDeclaration(config LoginConfig) firewallDoorDeclaration {
         authenticatorNil:  nil != config.Authenticator && true == internal.IsNilInterface(config.Authenticator),
         limiterAbsent:     true == internal.IsNilInterface(config.Limiter),
         limiterConfigured: limiterConfigured || (nil != config.Limiter && true == internal.IsNilInterface(config.Limiter)),
+        limiterRequired:   true,
+        limiterDisabled:   config.LimiterDisabled,
     }
 }
 
@@ -155,8 +162,16 @@ func validateFirewallDoor(firewallName string, door firewallDoorDeclaration) err
         return firewallDoorRefusal("a security firewall door authenticator is a typed nil", firewallName, field+"Authenticator", door.path)
     }
 
+    if true == door.limiterDisabled && (false == door.limiterAbsent || true == door.limiterConfigured) {
+        return firewallDoorRefusal("a security firewall door declared unmetered may not declare a limiter", firewallName, field+"LimiterDisabled", door.path)
+    }
+
     if true == door.limiterConfigured && true == door.limiterAbsent {
         return firewallDoorRefusal("a security firewall door limiter configuration needs a limiter", firewallName, field+"Limiter", door.path)
+    }
+
+    if true == door.limiterRequired && true == door.limiterAbsent && false == door.limiterDisabled {
+        return firewallDoorRefusal("a security firewall login door declares a limiter, so credential guessing is bounded; declare FirewallConfig.Login.LimiterDisabled when a limiter in front of the application meters it", firewallName, field+"Limiter", door.path)
     }
 
     for key := range door.attributes {

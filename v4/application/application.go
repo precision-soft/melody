@@ -37,6 +37,8 @@ import (
 
 type RouteRegistrar func(kernelInstance kernelcontract.Kernel)
 
+const secretMarkUnmatchedMessage = "a secret marking matched no parameter, so the credential it meant stays in clear; the name may be misspelled or name an environment key, which is declared Secret rather than marked; a parameter this environment may not define is marked with MarkParameterSecretOptional"
+
 const (
     servingClaimNone int32 = iota
     servingClaimRun
@@ -89,6 +91,7 @@ type Application struct {
     moduleConfigurations      map[string]any
     bootCollisions            []bootCollision
     unappliedSecretMarks      []string
+    optionalSecretMarks       []string
     /* set when the framework supplied the session storage; with an unbounded session ttl it grows from the request path */
     defaultInMemorySessionStorage bool
     /* runs the one close that performs the teardown and holds every sibling until it has finished: the container's own closedness cannot answer "was it me", since two concurrent closes both probe it open. The zero value works, which an Application built by literal needs. */
@@ -180,7 +183,7 @@ func (instance *Application) Boot() kernelcontract.Kernel {
     instance.refuseHttpBootWithoutEnvironment()
     instance.refuseBootWithDefaultedEnvironment()
     instance.refuseUnknownBootWarningCodes()
-    instance.collectUndeclaredEnvironmentKeys()
+    instance.refuseUndeclaredEnvironmentKeys()
     instance.collectIgnoredStaticCacheMaxAge()
     instance.refuseModuleEnvironmentKeys()
 
@@ -213,7 +216,7 @@ func (instance *Application) Boot() kernelcontract.Kernel {
     /* after the collisions are reported and every registration is in: an optional feature built for its teardown, not for a caller */
     instance.buildMessageBusTransportsCloser()
 
-    instance.collectUnappliedSecretMarks()
+    instance.refuseUnappliedSecretMarks()
 
     instance.collectIgnoredRetryPolicyService()
 
@@ -260,8 +263,17 @@ func (instance *Application) RegisterSecretParameter(
     instance.registerParameter(name, value, true)
 }
 
-/* MarkParameterSecret marks a parameter, by its name, as holding a credential; an environment key is no parameter and is marked by declaring it Secret. A name that matches nothing does not fail the boot, since a module may register the parameter later; it is retried before the configuration resolves and at the end of the boot, and what still matches nothing is the boot warning `application.secretMark.unmatched`. */
+/* MarkParameterSecret marks a parameter, by its name, as holding a credential; an environment key is no parameter and is marked by declaring it Secret. A name that matches nothing does not fail at the call, since a module may register the parameter later; it is retried before the configuration resolves and at the end of the boot, and what still matches nothing refuses the boot naming it, since a misspelled mark leaves the credential in clear. A parameter this environment may not define is marked with MarkParameterSecretOptional. */
 func (instance *Application) MarkParameterSecret(name string) {
+    instance.markParameterSecret(name, false)
+}
+
+/* MarkParameterSecretOptional marks a parameter as MarkParameterSecret does, and a name that still matches nothing at the end of the boot is dropped without a word: the door for a parameter that exists in some environments only. */
+func (instance *Application) MarkParameterSecretOptional(name string) {
+    instance.markParameterSecret(name, true)
+}
+
+func (instance *Application) markParameterSecret(name string, optional bool) {
     if true == instance.registrationClosed() {
         exception.Panic(
             exception.NewError(
@@ -274,41 +286,54 @@ func (instance *Application) MarkParameterSecret(name string) {
         )
     }
 
-    if false == instance.configuration.MarkSecret(name) {
-        instance.unappliedSecretMarks = append(instance.unappliedSecretMarks, name)
+    if true == instance.configuration.MarkSecret(name) {
+        return
     }
+
+    if true == optional {
+        instance.optionalSecretMarks = append(instance.optionalSecretMarks, name)
+
+        return
+    }
+
+    instance.unappliedSecretMarks = append(instance.unappliedSecretMarks, name)
 }
 
 /* applyUnappliedSecretMarks retries the markings that matched nothing when declared. It runs after every module registered its parameters and before the configuration resolves, so a retried marking propagates into the templates that read the secret; what still matches nothing stays queued. */
 func (instance *Application) applyUnappliedSecretMarks() {
-    remaining := make([]string, 0, len(instance.unappliedSecretMarks))
+    instance.unappliedSecretMarks = instance.retrySecretMarks(instance.unappliedSecretMarks)
+    instance.optionalSecretMarks = instance.retrySecretMarks(instance.optionalSecretMarks)
+}
 
-    for _, name := range instance.unappliedSecretMarks {
+func (instance *Application) retrySecretMarks(names []string) []string {
+    remaining := make([]string, 0, len(names))
+
+    for _, name := range names {
         if false == instance.configuration.MarkSecret(name) {
             remaining = append(remaining, name)
         }
     }
 
-    instance.unappliedSecretMarks = remaining
+    return remaining
 }
 
-/* collectUnappliedSecretMarks runs when every phase that can register a parameter has finished: a marking that still matches nothing is a misspelled name or a key undefined in this environment. */
-func (instance *Application) collectUnappliedSecretMarks() {
-    for _, name := range instance.unappliedSecretMarks {
-        if true == instance.configuration.MarkSecret(name) {
-            continue
-        }
-
-        instance.bootWarnings = append(instance.bootWarnings, internal.BootWarning{
-            Name:    internal.BootWarningNameSecretMarkUnmatched,
-            Message: "a secret marking matched no parameter; the name may be misspelled, or name an environment key, which is declared Secret rather than marked",
-            Context: loggingcontract.Context{
-                "parameterName": name,
-            },
-        })
-    }
+/* refuseUnappliedSecretMarks runs when every phase that can register a parameter has finished: a marking that still matches nothing is a misspelled name or a key name, and the credential it meant stays in clear. */
+func (instance *Application) refuseUnappliedSecretMarks() {
+    unmatched := instance.retrySecretMarks(instance.unappliedSecretMarks)
+    instance.retrySecretMarks(instance.optionalSecretMarks)
 
     instance.unappliedSecretMarks = nil
+    instance.optionalSecretMarks = nil
+
+    if 0 == len(unmatched) {
+        return
+    }
+
+    exception.Panic(exception.NewError(
+        secretMarkUnmatchedMessage,
+        exceptioncontract.Context{"parameterNames": unmatched},
+        nil,
+    ))
 }
 
 func (instance *Application) registerParameter(

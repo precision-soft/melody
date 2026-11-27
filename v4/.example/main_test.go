@@ -9,6 +9,7 @@ import (
     "testing"
     "time"
 
+    melodycron "github.com/precision-soft/melody/integrations/cron/v4"
     "github.com/precision-soft/melody/v4/.example/config"
 
     "github.com/precision-soft/melody/v4/application"
@@ -116,6 +117,9 @@ func TestFrameworkDoors_RefuseATokenTheFrameworkDidNotBuild(t *testing.T) {
     requireFrameworkOnlyRefusal(t, "NewKernel is called by the framework only", func() {
         invokeNewKernel(kernel.NewKernel)
     })
+
+    /* the .env carries the cron keys, which only a registered cron module declares */
+    applicationInstance.RegisterModule(melodycron.NewModule(melodycron.ModuleConfig{}))
 
     /* the boot runtime door sits on an unexported kernel: reflection is the only reach, and the zero token it builds is refused */
     kernelInstance := applicationInstance.Boot()

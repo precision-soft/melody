@@ -25,34 +25,35 @@ func TestBuilder_AddFirewall_RefusesAMalformedDoorNamingTheField(t *testing.T) {
         config FirewallConfig
         field  string
     }{
-        {FirewallConfig{Login: LoginConfig{Handler: handler}}, "FirewallConfig.Login.Path"},
-        {FirewallConfig{Login: LoginConfig{Handler: typedNilLoginHandler}}, "FirewallConfig.Login.Path"},
+        {FirewallConfig{Login: LoginConfig{Handler: handler, LimiterDisabled: true}}, "FirewallConfig.Login.Path"},
+        {FirewallConfig{Login: LoginConfig{Handler: typedNilLoginHandler, LimiterDisabled: true}}, "FirewallConfig.Login.Path"},
         {FirewallConfig{Login: LoginConfig{Name: "door"}}, "FirewallConfig.Login.Path"},
-        {FirewallConfig{Login: LoginConfig{Path: "/login"}}, "FirewallConfig.Login.Handler"},
-        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: typedNilLoginHandler}}, "FirewallConfig.Login.Handler"},
+        {FirewallConfig{Login: LoginConfig{LimiterDisabled: true}}, "FirewallConfig.Login.Path"},
+        {FirewallConfig{Login: LoginConfig{Path: "/login", LimiterDisabled: true}}, "FirewallConfig.Login.Handler"},
+        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: typedNilLoginHandler, LimiterDisabled: true}}, "FirewallConfig.Login.Handler"},
         {FirewallConfig{Logout: LogoutConfig{Path: "/logout"}}, "FirewallConfig.Logout.Handler"},
         {FirewallConfig{Logout: LogoutConfig{Path: "/logout", Handler: typedNilLogoutHandler}}, "FirewallConfig.Logout.Handler"},
         {FirewallConfig{Logout: LogoutConfig{TargetPath: "/"}}, "FirewallConfig.Logout.Path"},
-        {FirewallConfig{Login: LoginConfig{Path: "login", Handler: handler}}, "FirewallConfig.Login.Path"},
-        {FirewallConfig{Login: LoginConfig{Path: "//login", Handler: handler}}, "FirewallConfig.Login.Path"},
-        {FirewallConfig{Login: LoginConfig{Path: "/a/../login", Handler: handler}}, "FirewallConfig.Login.Path"},
-        {FirewallConfig{Login: LoginConfig{Path: "/login/:step", Handler: handler}}, "FirewallConfig.Login.Path"},
-        {FirewallConfig{Login: LoginConfig{Path: "/*rest...", Handler: handler}}, "FirewallConfig.Login.Path"},
-        {FirewallConfig{Login: LoginConfig{Path: "/log%20in", Handler: handler}}, "FirewallConfig.Login.Path"},
-        {FirewallConfig{Login: LoginConfig{Path: "/login ", Handler: handler}}, "FirewallConfig.Login.Path"},
-        {FirewallConfig{Login: LoginConfig{Path: "/login\u00a0", Handler: handler}}, "FirewallConfig.Login.Path"},
-        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, Attributes: map[string]any{"_zone": "x"}}}, "FirewallConfig.Login.Attributes"},
-        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, Authenticator: typedNilAuthenticator}}, "FirewallConfig.Login.Authenticator"},
-        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, Methods: []string{"GET"}}}, "FirewallConfig.Login.Methods"},
-        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, Methods: []string{"post", "head"}}}, "FirewallConfig.Login.Methods"},
-        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, Methods: []string{"options"}}}, "FirewallConfig.Login.Methods"},
-        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, Methods: []string{"TRACE"}}}, "FirewallConfig.Login.Methods"},
-        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, Methods: []string{""}}}, "FirewallConfig.Login.Methods"},
-        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, TargetPath: "https://elsewhere.example/"}}, "FirewallConfig.Login.TargetPath"},
-        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, TargetPath: "//elsewhere.example/"}}, "FirewallConfig.Login.TargetPath"},
-        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, TargetPath: "relative"}}, "FirewallConfig.Login.TargetPath"},
+        {FirewallConfig{Login: LoginConfig{Path: "login", Handler: handler, LimiterDisabled: true}}, "FirewallConfig.Login.Path"},
+        {FirewallConfig{Login: LoginConfig{Path: "//login", Handler: handler, LimiterDisabled: true}}, "FirewallConfig.Login.Path"},
+        {FirewallConfig{Login: LoginConfig{Path: "/a/../login", Handler: handler, LimiterDisabled: true}}, "FirewallConfig.Login.Path"},
+        {FirewallConfig{Login: LoginConfig{Path: "/login/:step", Handler: handler, LimiterDisabled: true}}, "FirewallConfig.Login.Path"},
+        {FirewallConfig{Login: LoginConfig{Path: "/*rest...", Handler: handler, LimiterDisabled: true}}, "FirewallConfig.Login.Path"},
+        {FirewallConfig{Login: LoginConfig{Path: "/log%20in", Handler: handler, LimiterDisabled: true}}, "FirewallConfig.Login.Path"},
+        {FirewallConfig{Login: LoginConfig{Path: "/login ", Handler: handler, LimiterDisabled: true}}, "FirewallConfig.Login.Path"},
+        {FirewallConfig{Login: LoginConfig{Path: "/login\u00a0", Handler: handler, LimiterDisabled: true}}, "FirewallConfig.Login.Path"},
+        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, Attributes: map[string]any{"_zone": "x"}, LimiterDisabled: true}}, "FirewallConfig.Login.Attributes"},
+        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, Authenticator: typedNilAuthenticator, LimiterDisabled: true}}, "FirewallConfig.Login.Authenticator"},
+        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, Methods: []string{"GET"}, LimiterDisabled: true}}, "FirewallConfig.Login.Methods"},
+        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, Methods: []string{"post", "head"}, LimiterDisabled: true}}, "FirewallConfig.Login.Methods"},
+        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, Methods: []string{"options"}, LimiterDisabled: true}}, "FirewallConfig.Login.Methods"},
+        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, Methods: []string{"TRACE"}, LimiterDisabled: true}}, "FirewallConfig.Login.Methods"},
+        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, Methods: []string{""}, LimiterDisabled: true}}, "FirewallConfig.Login.Methods"},
+        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, TargetPath: "https://elsewhere.example/", LimiterDisabled: true}}, "FirewallConfig.Login.TargetPath"},
+        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, TargetPath: "//elsewhere.example/", LimiterDisabled: true}}, "FirewallConfig.Login.TargetPath"},
+        {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, TargetPath: "relative", LimiterDisabled: true}}, "FirewallConfig.Login.TargetPath"},
         {FirewallConfig{Login: LoginConfig{Path: "/login", Handler: handler, LimiterConfig: httpmiddleware.RateLimitConfig{KeyExtractor: func(httpcontract.Request) string { return "" }}}}, "FirewallConfig.Login.Limiter"},
-        {FirewallConfig{Login: LoginConfig{Path: "/door/", Handler: handler}, Logout: LogoutConfig{Path: "/door", Handler: &noopLogoutHandler{}}}, "FirewallConfig.Logout.Path"},
+        {FirewallConfig{Login: LoginConfig{Path: "/door/", Handler: handler, LimiterDisabled: true}, Logout: LogoutConfig{Path: "/door", Handler: &noopLogoutHandler{}}}, "FirewallConfig.Logout.Path"},
     } {
         t.Run(testCase.field, func(t *testing.T) {
             defer func() {
@@ -67,15 +68,62 @@ func TestBuilder_AddFirewall_RefusesAMalformedDoorNamingTheField(t *testing.T) {
     }
 }
 
+func TestBuilder_AddFirewall_RefusesALoginDoorWithoutALimiterUnlessDisabled(t *testing.T) {
+    handler := &noopLoginHandler{}
+    keyExtractor := func(httpcontract.Request) string { return "" }
+
+    for _, testCase := range []struct {
+        name    string
+        login   LoginConfig
+        field   string
+        message string
+    }{
+        {"no limiter", LoginConfig{Path: "/login", Handler: handler}, "FirewallConfig.Login.Limiter", "a security firewall login door declares a limiter, so credential guessing is bounded; declare FirewallConfig.Login.LimiterDisabled when a limiter in front of the application meters it"},
+        {"disabled beside a limiter", LoginConfig{Path: "/login", Handler: handler, Limiter: &allowingRateLimiter{}, LimiterDisabled: true}, "FirewallConfig.Login.LimiterDisabled", "a security firewall door declared unmetered may not declare a limiter"},
+        {"disabled beside a limiter config", LoginConfig{Path: "/login", Handler: handler, LimiterConfig: httpmiddleware.RateLimitConfig{KeyExtractor: keyExtractor}, LimiterDisabled: true}, "FirewallConfig.Login.LimiterDisabled", "a security firewall door declared unmetered may not declare a limiter"},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            defer func() {
+                refusal, isRefusal := recover().(*exception.Error)
+                if false == isRefusal || testCase.field != refusal.Context()["field"] || testCase.message != refusal.Message() || "/login" != refusal.Context()["value"] {
+                    t.Fatalf("expected the refusal %q naming %s, got %v", testCase.message, testCase.field, refusal)
+                }
+            }()
+
+            NewBuilder().AddFirewall("main", security.NewPathPrefixMatcher("/"), &anonymousTokenSource{}, FirewallConfig{Login: testCase.login})
+        })
+    }
+}
+
+func TestCompile_LoginDoorLimiterAndItsDoorBothCompile(t *testing.T) {
+    for _, testCase := range []struct {
+        name  string
+        login LoginConfig
+    }{
+        {"metered", LoginConfig{Path: "/login", Handler: &noopLoginHandler{}, Limiter: &allowingRateLimiter{}}},
+        {"unmetered on purpose", LoginConfig{Path: "/login", Handler: &noopLoginHandler{}, LimiterDisabled: true}},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            builder := NewBuilder()
+            builder.SetGlobal(GlobalConfig{AccessControl: NewAccessControlBuilder().AllowAnonymous("/").Build()})
+            builder.AddFirewall("main", security.NewPathPrefixMatcher("/"), &anonymousTokenSource{}, FirewallConfig{Login: testCase.login})
+
+            if doors := builder.BuildAndCompile().Firewalls()[0].Doors(); 1 != len(doors) || "/login" != doors[0].Path {
+                t.Fatalf("expected the login door compiled, got %+v", doors)
+            }
+        })
+    }
+}
+
 func TestCompile_ResolvesTheDoorDefaults(t *testing.T) {
     builder := NewBuilder()
-    builder.SetGlobal(GlobalConfig{AccessControl: security.NewAccessControl(nil)})
+    builder.SetGlobal(GlobalConfig{AccessControl: openAccessControl()})
     builder.AddFirewall(
         "main",
         security.NewPathPrefixMatcher("/"),
         &anonymousTokenSource{},
         FirewallConfig{
-            Login:  LoginConfig{Path: "/login", Handler: &noopLoginHandler{}},
+            Login:  LoginConfig{Path: "/login", Handler: &noopLoginHandler{}, LimiterDisabled: true},
             Logout: LogoutConfig{Path: "/logout", Handler: &noopLogoutHandler{}, Name: "app.logout", Methods: []string{"delete"}},
         },
     )
@@ -96,13 +144,13 @@ func TestCompile_ResolvesTheDoorDefaults(t *testing.T) {
 
 func TestCompile_RefusesADoorOutsideItsOwnPrefix(t *testing.T) {
     _, err := Compile(Configuration{
-        global: GlobalConfig{AccessControl: security.NewAccessControl(nil)},
+        global: GlobalConfig{AccessControl: openAccessControl()},
         firewalls: []firewallDeclaration{
             {
                 name:        "admin",
                 matcher:     security.NewSegmentPrefixMatcher("/admin"),
                 tokenSource: &anonymousTokenSource{},
-                config:      FirewallConfig{Login: LoginConfig{Path: "/login", Handler: &noopLoginHandler{}}},
+                config:      FirewallConfig{Login: LoginConfig{Path: "/login", Handler: &noopLoginHandler{}, LimiterDisabled: true}},
             },
         },
     })
@@ -113,14 +161,14 @@ func TestCompile_RefusesADoorOutsideItsOwnPrefix(t *testing.T) {
 
 func TestCompile_RefusesADoorAnEarlierFirewallClaims(t *testing.T) {
     _, err := Compile(Configuration{
-        global: GlobalConfig{AccessControl: security.NewAccessControl(nil)},
+        global: GlobalConfig{AccessControl: openAccessControl()},
         firewalls: []firewallDeclaration{
             {name: "first", matcher: security.NewPathPrefixMatcher("/login"), tokenSource: &anonymousTokenSource{}},
             {
                 name:        "main",
                 matcher:     security.NewPathPrefixMatcher("/"),
                 tokenSource: &anonymousTokenSource{},
-                config:      FirewallConfig{Login: LoginConfig{Path: "/login/check", Handler: &noopLoginHandler{}}},
+                config:      FirewallConfig{Login: LoginConfig{Path: "/login/check", Handler: &noopLoginHandler{}, LimiterDisabled: true}},
             },
         },
     })
@@ -131,14 +179,14 @@ func TestCompile_RefusesADoorAnEarlierFirewallClaims(t *testing.T) {
 
 func TestCompile_AdmitsADoorInsideItsPrefixBehindAnUnrelatedFirewall(t *testing.T) {
     _, err := Compile(Configuration{
-        global: GlobalConfig{AccessControl: security.NewAccessControl(nil)},
+        global: GlobalConfig{AccessControl: openAccessControl()},
         firewalls: []firewallDeclaration{
             {name: "internal", matcher: security.NewSegmentPrefixMatcher("/internal"), tokenSource: &anonymousTokenSource{}},
             {
                 name:        "main",
                 matcher:     security.NewPathPrefixMatcher("/"),
                 tokenSource: &anonymousTokenSource{},
-                config:      FirewallConfig{Login: LoginConfig{Path: "/login/check/", Handler: &noopLoginHandler{}}},
+                config:      FirewallConfig{Login: LoginConfig{Path: "/login/check/", Handler: &noopLoginHandler{}, LimiterDisabled: true}},
             },
         },
     })
@@ -149,8 +197,8 @@ func TestCompile_AdmitsADoorInsideItsPrefixBehindAnUnrelatedFirewall(t *testing.
 
 func TestBootWarnings_NameADoorWhoseReachAMatcherCannotState(t *testing.T) {
     builder := NewBuilder()
-    builder.SetGlobal(GlobalConfig{AccessControl: security.NewAccessControl(nil)})
-    builder.AddFirewall("main", &unclaimingMatcher{}, &anonymousTokenSource{}, FirewallConfig{Login: LoginConfig{Path: "/login", Handler: &noopLoginHandler{}}})
+    builder.SetGlobal(GlobalConfig{AccessControl: openAccessControl()})
+    builder.AddFirewall("main", &unclaimingMatcher{}, &anonymousTokenSource{}, FirewallConfig{Login: LoginConfig{Path: "/login", Handler: &noopLoginHandler{}, LimiterDisabled: true}})
     builder.BuildAndCompile()
 
     for _, warning := range builder.BootWarnings() {
@@ -164,8 +212,8 @@ func TestBootWarnings_NameADoorWhoseReachAMatcherCannotState(t *testing.T) {
 
 func TestBootWarnings_StaySilentOverPrefixMatchers(t *testing.T) {
     builder := NewBuilder()
-    builder.SetGlobal(GlobalConfig{AccessControl: security.NewAccessControl(nil)})
-    builder.AddFirewall("main", security.NewPathPrefixMatcher("/"), &anonymousTokenSource{}, FirewallConfig{Login: LoginConfig{Path: "/login", Handler: &noopLoginHandler{}}})
+    builder.SetGlobal(GlobalConfig{AccessControl: openAccessControl()})
+    builder.AddFirewall("main", security.NewPathPrefixMatcher("/"), &anonymousTokenSource{}, FirewallConfig{Login: LoginConfig{Path: "/login", Handler: &noopLoginHandler{}, LimiterDisabled: true}})
     builder.BuildAndCompile()
 
     for _, warning := range builder.BootWarnings() {
@@ -177,7 +225,7 @@ func TestBootWarnings_StaySilentOverPrefixMatchers(t *testing.T) {
 
 func TestRefuseUnreachableFirewallDoors_TokenPathOutsideThePrefix_Refused(t *testing.T) {
     builder := NewBuilder()
-    builder.AddFirewall("main", security.NewPathPrefixMatcher("/app"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{AccessControl: security.NewAccessControl(nil)}, Csrf: FirewallCsrfConfig{TokenPath: "/csrf-token"}})
+    builder.AddFirewall("main", security.NewPathPrefixMatcher("/app"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{AccessControl: openAccessControl()}, Csrf: FirewallCsrfConfig{TokenPath: "/csrf-token"}})
 
     expectRefusalNamingField(t, "a security firewall door lies outside its firewall's prefix, so no request reaches it", "security.main.csrfToken", func() { builder.BuildAndCompile() })
 }
@@ -211,7 +259,7 @@ func TestBootWarnings_Csrf_LoginFirewallDisabled_Named(t *testing.T) {
 func TestBootWarnings_Csrf_Protected_None(t *testing.T) {
     builder := NewBuilder()
     builder.AddFirewall("main", security.NewPathPrefixMatcher("/"), &anonymousTokenSource{}, csrfLoginFirewallConfig(FirewallCsrfConfig{}))
-    builder.AddFirewall("api", security.NewPathPrefixMatcher("/api"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{AccessControl: security.NewAccessControl(nil)}, Csrf: FirewallCsrfConfig{Mode: security.CsrfModeDisabled}})
+    builder.AddFirewall("api", security.NewPathPrefixMatcher("/api"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{AccessControl: openAccessControl()}, Csrf: FirewallCsrfConfig{Mode: security.CsrfModeDisabled}})
 
     defer func() { _ = recover() }()
     builder.BuildAndCompile()

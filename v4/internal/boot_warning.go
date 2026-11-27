@@ -11,8 +11,6 @@ const (
     BootWarningNameFirewallDoorReachUnknown                   = "security.firewallDoorReachUnknown"
     BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage = "http.session.unboundedTtlOnBoundedDefaultStorage"
     BootWarningNameProcessEnvironmentVariableIgnored          = "application.environment.processVariableIgnored"
-    BootWarningNameSecretMarkUnmatched                        = "application.secretMark.unmatched"
-    BootWarningNameEnvironmentUndeclaredKey                   = "application.environment.undeclaredKey"
     BootWarningNameStaticCacheMaxAgeIgnored                   = "http.static.cacheMaxAgeIgnored"
     BootWarningNameRetryPolicyServiceIgnored                  = "messagebus.retryPolicyServiceIgnored"
     BootWarningNameServiceBuiltAtBootFailed                   = "application.service.builtAtBootFailed"
@@ -31,8 +29,6 @@ func NewBootWarningRegistry() *BootWarningRegistry {
             BootWarningNameFirewallDoorReachUnknown,
             BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage,
             BootWarningNameProcessEnvironmentVariableIgnored,
-            BootWarningNameSecretMarkUnmatched,
-            BootWarningNameEnvironmentUndeclaredKey,
             BootWarningNameStaticCacheMaxAgeIgnored,
             BootWarningNameRetryPolicyServiceIgnored,
             BootWarningNameServiceBuiltAtBootFailed,

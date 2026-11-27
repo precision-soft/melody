@@ -65,8 +65,6 @@ func TestBootWarningRegistry_NamesEachCodeOnce(t *testing.T) {
         BootWarningNameFirewallDoorReachUnknown,
         BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage,
         BootWarningNameProcessEnvironmentVariableIgnored,
-        BootWarningNameSecretMarkUnmatched,
-        BootWarningNameEnvironmentUndeclaredKey,
         BootWarningNameStaticCacheMaxAgeIgnored,
         BootWarningNameRetryPolicyServiceIgnored,
         BootWarningNameServiceBuiltAtBootFailed,
@@ -105,7 +103,7 @@ func TestBootWarningRegistry_DeclareAddsACodeOnceAndKeepsEachRegistryApart(t *te
         t.Fatalf("expected the declared code known")
     }
 
-    if names := registry.Names(); 10 != len(names) || "module.hazard" != names[9] {
+    if names := registry.Names(); 8 != len(names) || "module.hazard" != names[7] {
         t.Fatalf("expected the declared code after the framework's, got %v", names)
     }
 
@@ -115,7 +113,7 @@ func TestBootWarningRegistry_DeclareAddsACodeOnceAndKeepsEachRegistryApart(t *te
         }
     }
 
-    if 10 != len(registry.Names()) {
+    if 8 != len(registry.Names()) {
         t.Fatalf("expected a refused declaration to add nothing, got %v", registry.Names())
     }
 

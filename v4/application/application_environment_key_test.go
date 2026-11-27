@@ -188,7 +188,7 @@ const environmentKeyServicesRanMarker = "the module's services were registered"
 /* Boot exits the process at the refusal, so it runs in a child of the test binary and the parent reads the child's journal */
 func TestBoot_RefusesAModuleKeyOutsideItsRule(t *testing.T) {
     if projectDirectory := os.Getenv(environmentKeyRefusalChildVariable); "" != projectDirectory {
-        applicationInstance := newEnvironmentKeyBootApplicationIn(t, map[string]string{"MELODY_X_COUNT": "%env(MELODY_X_SOURCE)%", "MELODY_X_SOURCE": "-424242"}, projectDirectory)
+        applicationInstance := newEnvironmentKeyBootApplicationIn(t, map[string]string{"MELODY_X_COUNT": "%env(APP_X_SOURCE)%", "APP_X_SOURCE": "-424242"}, projectDirectory)
         applicationInstance.modules = []applicationcontract.Module{&environmentKeyTestModule{
             name: "x",
             keys: []configcontract.EnvironmentKey{environmentKeyCount("")},
@@ -223,14 +223,10 @@ func TestBoot_RefusesAModuleKeyOutsideItsRule(t *testing.T) {
     }
     journal := string(journalBytes)
 
-    for _, expected := range []string{"invalid environment value", `"environmentKey":"MELODY_X_COUNT"`, `"owner":"x"`, `"field":"x.ModuleConfig.Count"`, `"parameterName":"melody.x.count"`, `"bootWarning":"` + internal.BootWarningNameEnvironmentUndeclaredKey + `"`} {
+    for _, expected := range []string{"invalid environment value", `"environmentKey":"MELODY_X_COUNT"`, `"owner":"x"`, `"field":"x.ModuleConfig.Count"`, `"parameterName":"melody.x.count"`} {
         if false == strings.Contains(journal, expected) {
             t.Fatalf("expected the journal to carry %s, got: %s", expected, journal)
         }
-    }
-
-    if true == strings.Contains(journal+text, "424242") {
-        t.Fatalf("expected the value of the undeclared source nowhere, got: %s", journal)
     }
 }
 
@@ -314,7 +310,14 @@ func TestBoot_AModuleReadsItsKeyInRegisterServices(t *testing.T) {
 func TestBoot_AnInactiveModuleDeclaresNothing(t *testing.T) {
     applicationInstance := newEnvironmentKeyBootApplication(t, map[string]string{"MELODY_X_COUNT": "0"})
 
-    applicationInstance.Boot()
+    applicationInstance.bootModuleEnvironmentKeys()
+    if resolveErr := applicationInstance.configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    if refusal := refusalOf(t, applicationInstance.refuseUndeclaredEnvironmentKeys); nil == refusal {
+        t.Fatalf("expected the key of a module this process does not register refused as undeclared")
+    }
 
     if nil != applicationInstance.configuration.Get("melody.x.count") {
         t.Fatalf("expected no parameter under the name of an inactive module's declaration")
@@ -325,29 +328,32 @@ func TestBoot_AnInactiveModuleDeclaresNothing(t *testing.T) {
     }
 }
 
-func TestBoot_NamesTheUndeclaredMelodyKeysInOneBootWarning(t *testing.T) {
+const undeclaredEnvironmentKeysRefusal = "an environment key in the MELODY_ namespace is neither the framework's nor declared by a registered module, so nothing reads it; it may be misspelt, or belong to a module this process does not register: rename it, remove the line, or register the module that declares it"
+
+func TestRefuseUndeclaredEnvironmentKeys_NamesTheUndeclaredMelodyKeysInOneRefusal(t *testing.T) {
     applicationInstance := newEnvironmentKeyBootApplication(t, map[string]string{"MELODY_TYPO": "x", "MELODY_INACTIVE_DSN": "amqp://user:secret@host", "MELODY_X_TEXT": "v", "APP_X": "y"})
     applicationInstance.configuration.RegisterRuntime("app.dsn_reader", "%env(MELODY_INACTIVE_DSN)%")
     applicationInstance.configuration.RegisterRuntime("app.typo_reader", "%env(MELODY_TYPO)%")
     applicationInstance.configuration.RegisterRuntime("app.x_reader", "%env(APP_X)%")
     applicationInstance.modules = []applicationcontract.Module{&environmentKeyTestModule{name: "x", keys: []configcontract.EnvironmentKey{environmentKeyText()}}}
 
-    applicationInstance.Boot()
-
-    warnings := make([]internal.BootWarning, 0)
-    for _, bootWarning := range applicationInstance.bootWarnings {
-        if internal.BootWarningNameEnvironmentUndeclaredKey == bootWarning.Name {
-            warnings = append(warnings, bootWarning)
-        }
+    applicationInstance.bootModuleEnvironmentKeys()
+    if resolveErr := applicationInstance.configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
     }
 
-    if 1 != len(warnings) {
-        t.Fatalf("expected one warning, got %+v", warnings)
+    refusal := refusalOf(t, applicationInstance.refuseUndeclaredEnvironmentKeys)
+    if nil == refusal || undeclaredEnvironmentKeysRefusal != refusal.Message() {
+        t.Fatalf("expected the undeclared keys refused, got %v", refusal)
     }
 
-    keys, _ := warnings[0].Context["environmentKeys"].([]string)
-    if false == slices.Equal([]string{"MELODY_INACTIVE_DSN", "MELODY_TYPO"}, keys) || 1 != len(warnings[0].Context) {
-        t.Fatalf("expected the keys sorted and nothing else in the context, got %v", warnings[0].Context)
+    keys, _ := refusal.Context()["environmentKeys"].([]string)
+    if false == slices.Equal([]string{"MELODY_INACTIVE_DSN", "MELODY_TYPO"}, keys) || 1 != len(refusal.Context()) {
+        t.Fatalf("expected the keys sorted and nothing else in the context, got %v", refusal.Context())
+    }
+
+    if true == strings.Contains(refusal.Error(), "secret") {
+        t.Fatalf("expected no value in the refusal, got %v", refusal)
     }
 
     for _, name := range []string{"app.typo_reader", "app.dsn_reader"} {
@@ -360,41 +366,53 @@ func TestBoot_NamesTheUndeclaredMelodyKeysInOneBootWarning(t *testing.T) {
         t.Fatalf("expected an application key and a declared key left unmarked")
     }
 
-    clean := newEnvironmentKeyBootApplication(t, nil)
-    clean.Boot()
+    for _, mode := range []string{config.ModeCli, config.ModeHttp} {
+        clean := newCacheWarningTestApplicationOver(t, mode, map[string]string{}, &warningRecordingLogger{})
+        if refusal := refusalOf(t, clean.refuseUndeclaredEnvironmentKeys); nil != refusal {
+            t.Fatalf("%s: expected no refusal without an undeclared key, got %v", mode, refusal)
+        }
 
-    for _, bootWarning := range clean.bootWarnings {
-        if internal.BootWarningNameEnvironmentUndeclaredKey == bootWarning.Name {
-            t.Fatalf("expected no warning without an undeclared key, got %+v", bootWarning)
+        typo := newCacheWarningTestApplicationOver(t, mode, map[string]string{"MELODY_TYPO": "x"}, &warningRecordingLogger{})
+        if refusal := refusalOf(t, typo.refuseUndeclaredEnvironmentKeys); nil == refusal || undeclaredEnvironmentKeysRefusal != refusal.Message() {
+            t.Fatalf("%s: expected the undeclared key refused, got %v", mode, refusal)
         }
     }
 }
 
-func TestBoot_ACommandLeavesTheUndeclaredKeyWarningOutWhenItIsIgnored(t *testing.T) {
-    originalArguments := os.Args
-    os.Args = []string{"melody"}
-    defer func() { os.Args = originalArguments }()
+const undeclaredEnvironmentKeyBootChildVariable = "MELODY_TEST_UNDECLARED_ENVIRONMENT_KEY_BOOT_CHILD"
 
-    for _, testCase := range []struct {
-        name     string
-        values   map[string]string
-        expected int
-    }{
-        {"every code", map[string]string{"MELODY_TYPO": "x"}, 1},
-        {"the code ignored", map[string]string{"MELODY_TYPO": "x", config.BootWarningsIgnoredKey: internal.BootWarningNameEnvironmentUndeclaredKey}, 0},
-    } {
-        cliLogger := &warningRecordingLogger{}
-        cliApplication := newCacheWarningTestApplicationOver(t, config.ModeCli, testCase.values, cliLogger)
-        cliApplication.refuseUnknownBootWarningCodes()
-        cliApplication.collectUndeclaredEnvironmentKeys()
+/* Boot exits the process at the refusal, so it runs in a child of the test binary */
+func TestBoot_RefusesAnUndeclaredMelodyKey(t *testing.T) {
+    if projectDirectory := os.Getenv(undeclaredEnvironmentKeyBootChildVariable); "" != projectDirectory {
+        applicationInstance := newEnvironmentKeyBootApplicationIn(t, map[string]string{"MELODY_TYPO": "424242"}, projectDirectory)
 
-        if runErr := cliApplication.runCli(); nil != runErr {
-            t.Fatalf("%s: unexpected run cli error: %v", testCase.name, runErr)
-        }
+        applicationInstance.Boot()
 
-        if warnings := cliLogger.warningsContaining("an environment key in the MELODY_ namespace"); testCase.expected != len(warnings) {
-            t.Fatalf("%s: expected the warning written %d times, got %v", testCase.name, testCase.expected, warnings)
-        }
+        return
+    }
+
+    childProjectDirectory := t.TempDir()
+    command := exec.Command(os.Args[0], "-test.run=^TestBoot_RefusesAnUndeclaredMelodyKey$")
+    command.Env = append(os.Environ(), undeclaredEnvironmentKeyBootChildVariable+"="+childProjectDirectory)
+
+    output, runErr := command.CombinedOutput()
+    text := string(output)
+
+    if nil == runErr || false == strings.Contains(text, "after unrecovered error: "+undeclaredEnvironmentKeysRefusal) {
+        t.Fatalf("expected the boot refused over the undeclared key, got %v: %s", runErr, text[max(0, len(text)-1500):])
+    }
+
+    journal, readErr := os.ReadFile(filepath.Join(childProjectDirectory, "var", "log", "dev.log"))
+    if nil != readErr {
+        t.Fatalf("expected the child's journal: %v", readErr)
+    }
+
+    if false == strings.Contains(string(journal), `"environmentKeys":["MELODY_TYPO"]`) {
+        t.Fatalf("expected the journal to name the undeclared key, got: %s", string(journal))
+    }
+
+    if true == strings.Contains(string(journal)+text, "424242") {
+        t.Fatalf("expected the value of the undeclared key nowhere, got: %s", string(journal))
     }
 }
 
@@ -424,7 +442,7 @@ func TestBoot_RefusesAnEnvironmentKeyModuleOverAConfigurationThatCannotDeclare(t
     if refusal := refusalOf(t, func() {
         applicationInstance.bootModuleEnvironmentKeys()
         applicationInstance.refuseModuleEnvironmentKeys()
-        applicationInstance.collectUndeclaredEnvironmentKeys()
+        applicationInstance.refuseUndeclaredEnvironmentKeys()
     }); nil != refusal {
         t.Fatalf("expected a configuration without the capability admitted when no module declares, got %v", refusal)
     }
@@ -600,20 +618,20 @@ func TestBoot_TheRetiredCliDisabledKeyRefusesACliBootNamingTheOneKeyAndItsNote(t
     }
 }
 
-func TestBoot_RetiredKeyOfAnUnregisteredModule_StaysTheUndeclaredWarning(t *testing.T) {
+func TestRefuseUndeclaredEnvironmentKeys_TheRetiredKeyOfAnUnregisteredModuleIsRefusedAsUndeclared(t *testing.T) {
     applicationInstance := newEnvironmentKeyBootApplication(t, map[string]string{"MELODY_X_TXT": "text"})
 
-    applicationInstance.Boot()
+    applicationInstance.bootModuleEnvironmentKeys()
+    applicationInstance.refuseRetiredEnvironmentKeys()
 
-    for _, bootWarning := range applicationInstance.bootWarnings {
-        if internal.BootWarningNameEnvironmentUndeclaredKey == bootWarning.Name {
-            if keys, _ := bootWarning.Context["environmentKeys"].([]string); true == slices.Equal([]string{"MELODY_X_TXT"}, keys) {
-                return
-            }
-        }
+    refusal := refusalOf(t, applicationInstance.refuseUndeclaredEnvironmentKeys)
+    if nil == refusal {
+        t.Fatalf("expected the undeclared-key refusal")
     }
 
-    t.Fatalf("expected the undeclared-key warning naming the key, got %+v", applicationInstance.bootWarnings)
+    if keys, _ := refusal.Context()["environmentKeys"].([]string); false == slices.Equal([]string{"MELODY_X_TXT"}, keys) {
+        t.Fatalf("expected the undeclared-key refusal naming the key, got %v", refusal)
+    }
 }
 
 func TestRetiredEnvironmentKeysMessage_JoinsInTheGivenOrder(t *testing.T) {

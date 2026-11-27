@@ -8,6 +8,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/security"
+    "github.com/precision-soft/melody/v4/security/accesscontrol"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -24,6 +25,10 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
     if 0 == len(configuration.firewalls) {
         /* a global access control declared without any firewall still enforces: the access control listener falls back to it */
         if nil != configuration.global.AccessControl {
+            if fallbackErr := refuseAccessControlWithoutFallback("", "GlobalConfig.AccessControl", configuration.global.AccessControl, nil); nil != fallbackErr {
+                return nil, fallbackErr
+            }
+
             return security.NewCompiledConfiguration(nil, configuration.global.AccessControl), nil
         }
 
@@ -174,6 +179,10 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
             return nil, managerErr
         }
 
+        if fallbackErr := refuseAccessControlWithoutFallback(firewall.name, "FirewallConfig.Override.AccessControl", effectiveAccessControl, firewall.matcher); nil != fallbackErr {
+            return nil, fallbackErr
+        }
+
         matcherDescription := ""
         if describer, ok := firewall.matcher.(interface{ String() string }); true == ok {
             matcherDescription = describer.String()
@@ -231,6 +240,11 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
         return nil, reachErr
     }
 
+    /* the global control answers every path outside the firewalls */
+    if fallbackErr := refuseAccessControlWithoutFallback("", "GlobalConfig.AccessControl", configuration.global.AccessControl, nil); nil != fallbackErr {
+        return nil, fallbackErr
+    }
+
     return security.NewCompiledConfiguration(
         compiledFirewalls,
         configuration.global.AccessControl,
@@ -248,10 +262,55 @@ func refuseUndeclaredAccessControl(firewall firewallDeclaration) error {
     }
 
     return exception.NewError(
-        "security firewall declares no access control and inherits none, so it would authorize every path it claims for every token; declare FirewallConfig.Override.AccessControl, security.NewAccessControl(nil) to keep it open on purpose",
+        "security firewall declares no access control and inherits none, so it would authorize every path it claims for every token; declare FirewallConfig.Override.AccessControl, a PUBLIC_ACCESS rule on \"/\" to keep it open on purpose",
         context,
         nil,
     )
+}
+
+/* a path no rule claims reaches its handler undecided, so every control states what an unnamed path gets; behind a prefix matcher a rule claiming the firewall's whole prefix is that statement */
+func refuseAccessControlWithoutFallback(firewallName string, field string, accessControl *security.AccessControl, matcher securitycontract.Matcher) error {
+    if nil == accessControl {
+        return nil
+    }
+
+    matcherPrefix, isMatcherSegment, isPrefixMatcher := firewallPrefix(matcher)
+
+    for _, rule := range accessControl.Rules() {
+        if true == ruleClaimsEveryPath(rule) {
+            return nil
+        }
+
+        if true == isPrefixMatcher && "" != rule.PathPrefix() && (accesscontrol.MatchingSegmentPrefix == rule.Matching() || accesscontrol.MatchingRawPrefix == rule.Matching()) && true == prefixClaimsWhole(rule.PathPrefix(), accesscontrol.MatchingSegmentPrefix == rule.Matching(), matcherPrefix, isMatcherSegment) {
+            return nil
+        }
+    }
+
+    context := exceptioncontract.Context{"field": field}
+    if "" != firewallName {
+        context["firewallName"] = firewallName
+    }
+
+    return exception.NewError(
+        accessControlWithoutFallbackMessage,
+        context,
+        nil,
+    )
+}
+
+const accessControlWithoutFallbackMessage = "security access control holds no rule claiming every path, so a path no rule names would reach its handler undecided; declare the fallback, a segment prefix rule on \"/\" (PUBLIC_ACCESS to keep the rest open, a role to refuse it), the empty raw prefix, a last \"^/\" regex rule or, in a firewall, a prefix rule claiming the firewall's whole prefix"
+
+func ruleClaimsEveryPath(rule security.AccessControlRule) bool {
+    switch rule.Matching() {
+    case accesscontrol.MatchingRawPrefix:
+        return "" == rule.PathPrefix() || "/" == rule.PathPrefix()
+    case accesscontrol.MatchingSegmentPrefix:
+        return "/" == rule.PathPrefix()
+    case accesscontrol.MatchingRegex:
+        return "^/" == rule.Pattern()
+    }
+
+    return false
 }
 
 /* refuseTypedNilDependency refuses a dependency that reads as declared and holds a typed nil: the fallback to the global one would be skipped and the first request behind the firewall would dereference it. The refusal names whether the value came from the global configuration or from the firewall's override. */

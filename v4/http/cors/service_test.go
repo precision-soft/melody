@@ -56,6 +56,7 @@ func TestService_OriginAllowed_WildcardMatchesAll(t *testing.T) {
 func TestService_OriginAllowed_SubdomainWildcard(t *testing.T) {
     service := NewService(Config{
         AllowOrigins: []string{"*.example.com"},
+        SchemelessOriginsAdmitted: true,
     })
 
     if false == service.OriginAllowed(nil, "http://api.example.com") {
@@ -211,6 +212,39 @@ func TestNewService_RefusesACredentialedEntryWithoutAScheme(t *testing.T) {
     }, message, "entry", "app.example.com")
 }
 
+func TestNewService_RefusesASchemelessEntryWithoutCredentialsUnlessAdmitted(t *testing.T) {
+    const message = "cors misconfiguration: an origin without a scheme admits that host under any scheme, http included; write it out, https://example.com or https://*.example.com, or set SchemelessOriginsAdmitted"
+
+    for _, entry := range []string{"example.com", " example.com ", "*.example.org", "app.example.com:8443"} {
+        assertPanicsWithContext(t, func() {
+            NewService(Config{AllowOrigins: []string{"https://secure.example.com", entry}})
+        }, message, "entry", strings.TrimSpace(entry))
+
+        assertPanicsWithContext(t, func() {
+            NewService(Config{AllowOrigins: []string{entry}})
+        }, message, "door", "Config.SchemelessOriginsAdmitted")
+
+        admitted := NewService(Config{AllowOrigins: []string{entry}, SchemelessOriginsAdmitted: true})
+        if 1 != len(admitted.AllowOrigins()) {
+            t.Fatalf("expected the admitted schemeless entry kept, got %v", admitted.AllowOrigins())
+        }
+    }
+
+    assertPanicsWithContext(t, func() {
+        NewService(Config{AllowOrigins: []string{"https://a.example.com", "b.example.com"}})
+    }, message, "entry", "b.example.com")
+
+    for _, origins := range [][]string{nil, {}, {"*"}, {"https://a.example.com", "http://localhost:8080"}} {
+        NewService(Config{AllowOrigins: origins})
+    }
+}
+
+func TestNewService_SchemelessDoorDoesNotOpenACredentialedService(t *testing.T) {
+    assertPanicsWithContext(t, func() {
+        NewService(Config{AllowOrigins: []string{"example.com"}, AllowCredentials: true, SchemelessOriginsAdmitted: true})
+    }, "cors misconfiguration: a credentialed service admits an origin without a scheme under any scheme, http included; write it out, https://example.com or https://*.example.com", "entry", "example.com")
+}
+
 func TestNewService_AdmitsTheSchemelessEntryOutsideCredentials(t *testing.T) {
     credentialed := NewService(Config{
         AllowOrigins:     []string{"https://secure.example.com", "https://*.example.net", "http://localhost:8080", "HTTPS://upper.example.com"},
@@ -220,7 +254,7 @@ func TestNewService_AdmitsTheSchemelessEntryOutsideCredentials(t *testing.T) {
         t.Fatalf("expected the scheme-qualified entry admitted")
     }
 
-    withoutCredentials := NewService(Config{AllowOrigins: []string{"example.com"}})
+    withoutCredentials := NewService(Config{AllowOrigins: []string{"example.com"}, SchemelessOriginsAdmitted: true})
     if false == withoutCredentials.OriginAllowed(nil, "http://example.com") {
         t.Fatalf("expected the schemeless entry to admit any scheme without credentials")
     }
@@ -340,6 +374,7 @@ func TestNewService_PanicsWhenCredentialsWithExplicitlyEmptyOrigins(t *testing.T
 func TestService_SchemelessEntryIsPortSignificant(t *testing.T) {
     service := NewService(Config{
         AllowOrigins: []string{"app.example.com"},
+        SchemelessOriginsAdmitted: true,
     })
 
     if false == service.OriginAllowed(nil, "https://app.example.com") {
@@ -354,6 +389,7 @@ func TestService_SchemelessEntryIsPortSignificant(t *testing.T) {
 func TestService_PortedSchemelessEntryMatchesOnlyThatPort(t *testing.T) {
     service := NewService(Config{
         AllowOrigins: []string{"app.example.com:8443"},
+        SchemelessOriginsAdmitted: true,
     })
 
     if false == service.OriginAllowed(nil, "https://app.example.com:8443") {
@@ -372,6 +408,7 @@ func TestService_PortedSchemelessEntryMatchesOnlyThatPort(t *testing.T) {
 func TestService_WildcardEntriesArePortSignificant(t *testing.T) {
     service := NewService(Config{
         AllowOrigins: []string{"*.example.com"},
+        SchemelessOriginsAdmitted: true,
     })
 
     if false == service.OriginAllowed(nil, "http://api.example.com") {

@@ -8,7 +8,7 @@ import (
     "github.com/precision-soft/melody/v4/security/accesscontrol"
 )
 
-const undeclaredAccessControlRefusal = "security firewall declares no access control and inherits none, so it would authorize every path it claims for every token; declare FirewallConfig.Override.AccessControl, security.NewAccessControl(nil) to keep it open on purpose"
+const undeclaredAccessControlRefusal = "security firewall declares no access control and inherits none, so it would authorize every path it claims for every token; declare FirewallConfig.Override.AccessControl, a PUBLIC_ACCESS rule on \"/\" to keep it open on purpose"
 
 func TestBuilder_RefusesAFirewallNoDeclaredAccessControlReaches(t *testing.T) {
     globalAccessControl := security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewRawPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{"ROLE_GLOBAL"}})})
@@ -40,19 +40,19 @@ func TestBuilder_AdmitsAFirewallADeclaredAccessControlReaches(t *testing.T) {
     builder := NewBuilder()
     builder.SetGlobal(GlobalConfig{AccessControl: security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewRawPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{"ROLE_GLOBAL"}})}), AccessDecisionManager: roleDecisionManager()})
 
-    builder.AddFirewall("openOnPurpose", security.NewPathPrefixMatcher("/three"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{GlobalAccessControlDisabled: true, AccessControl: security.NewAccessControl(nil)}})
-    builder.AddFirewall("overrideOnlyOpen", security.NewPathPrefixMatcher("/six"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{MergeStrategy: AccessControlMergeOverrideOnly, AccessControl: security.NewAccessControl(nil)}})
+    builder.AddFirewall("openOnPurpose", security.NewPathPrefixMatcher("/three"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{GlobalAccessControlDisabled: true, AccessControl: openAccessControl()}})
+    builder.AddFirewall("overrideOnlyOpen", security.NewPathPrefixMatcher("/six"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{MergeStrategy: AccessControlMergeOverrideOnly, AccessControl: openAccessControl()}})
     builder.AddFirewall("inherits", security.NewPathPrefixMatcher("/four"), &anonymousTokenSource{}, FirewallConfig{})
-    builder.AddFirewall("declaresItsOwn", security.NewPathPrefixMatcher("/five"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{MergeStrategy: AccessControlMergeOverrideOnly, AccessControl: security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewRawPrefixRule("/five", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}})})}})
+    builder.AddFirewall("declaresItsOwn", security.NewPathPrefixMatcher("/five"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{MergeStrategy: AccessControlMergeOverrideOnly, AccessControl: security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewRawPrefixRule("/five", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}), accesscontrol.NewRawPrefixRule("", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}})}), AccessDecisionManager: roleDecisionManager()}})
 
     if compiled := builder.BuildAndCompile(); 4 != len(compiled.Firewalls()) {
         t.Fatalf("expected the four firewalls compiled, got %d", len(compiled.Firewalls()))
     }
 
     openGlobalBuilder := NewBuilder()
-    openGlobalBuilder.SetGlobal(GlobalConfig{AccessControl: security.NewAccessControl(nil)})
+    openGlobalBuilder.SetGlobal(GlobalConfig{AccessControl: openAccessControl()})
     openGlobalBuilder.AddFirewall("inheritsTheOpenGlobal", security.NewPathPrefixMatcher("/y"), &anonymousTokenSource{}, FirewallConfig{})
-    openGlobalBuilder.AddFirewall("declaresOnlyItsOwn", security.NewPathPrefixMatcher("/x"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{AccessControl: security.NewAccessControl(nil)}})
+    openGlobalBuilder.AddFirewall("declaresOnlyItsOwn", security.NewPathPrefixMatcher("/x"), &anonymousTokenSource{}, FirewallConfig{Override: FirewallOverride{AccessControl: openAccessControl()}})
 
     if compiled := openGlobalBuilder.BuildAndCompile(); 2 != len(compiled.Firewalls()) {
         t.Fatalf("expected the two open firewalls compiled, got %d", len(compiled.Firewalls()))

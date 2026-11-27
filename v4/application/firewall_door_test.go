@@ -123,14 +123,14 @@ type firewallDoorTestModule struct {
 }
 
 func (instance *firewallDoorTestModule) RegisterSecurity(builder *securityconfig.Builder) {
-    builder.SetGlobal(securityconfig.GlobalConfig{AccessControl: security.NewAccessControl(nil)})
+    builder.SetGlobal(securityconfig.GlobalConfig{AccessControl: openAccessControl()})
     builder.AddFirewall(
         "main",
         security.NewPathPrefixMatcher("/"),
         security.NewResolverTokenSource(func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
             return security.NewAnonymousToken(), nil
         }, security.ResolverTokenSourceConfig{}),
-        securityconfig.FirewallConfig{Login: securityconfig.LoginConfig{Path: "/login/check", Name: "door.login", Handler: &firewallDoorTestLoginHandler{}}},
+        securityconfig.FirewallConfig{Login: securityconfig.LoginConfig{Path: "/login/check", Name: "door.login", Handler: &firewallDoorTestLoginHandler{}, LimiterDisabled: true}},
     )
 }
 
@@ -230,7 +230,7 @@ type csrfApplicationTestModule struct {
 }
 
 func (instance *csrfApplicationTestModule) RegisterSecurity(builder *securityconfig.Builder) {
-    builder.SetGlobal(securityconfig.GlobalConfig{AccessControl: security.NewAccessControl(nil), Csrf: instance.csrf})
+    builder.SetGlobal(securityconfig.GlobalConfig{AccessControl: openAccessControl(), Csrf: instance.csrf})
     builder.AddFirewall(
         "main",
         security.NewPathPrefixMatcher("/"),

@@ -21,6 +21,7 @@ func TestBuilder_GlobalAccessControlWithoutFirewallStillCompiles(t *testing.T) {
 
     globalAccessControl := security.NewAccessControl([]security.AccessControlRule{
         accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
+        accesscontrol.NewSegmentPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}}),
     })
     builder.SetGlobal(
         GlobalConfig{
@@ -170,8 +171,8 @@ func TestCompile_RefusesAPartialLoginConfiguration(t *testing.T) {
     var typedNilLoginHandler *noopLoginHandler
 
     for expected, config := range map[string]FirewallConfig{
-        "a security firewall door declares a handler": {Login: LoginConfig{Path: "/login"}},
-        "a security firewall door declares a path":    {Login: LoginConfig{Handler: typedNilLoginHandler}},
+        "a security firewall door declares a handler": {Login: LoginConfig{Path: "/login", LimiterDisabled: true}},
+        "a security firewall door declares a path":    {Login: LoginConfig{Handler: typedNilLoginHandler, LimiterDisabled: true}},
     } {
         _, err := Compile(Configuration{
             firewalls: []firewallDeclaration{
@@ -213,6 +214,7 @@ func compileMergeStrategyFirewall(t *testing.T, mergeStrategy AccessControlMerge
             AccessControl: security.NewAccessControl([]security.AccessControlRule{
                 accesscontrol.NewSegmentPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_GLOBAL"}}),
                 accesscontrol.NewSegmentPrefixRule("/reports", accesscontrol.RuleConfig{Attributes: []string{"ROLE_GLOBAL"}}),
+                accesscontrol.NewSegmentPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}}),
             }),
             AccessDecisionManager: roleDecisionManager(),
         },
@@ -227,6 +229,7 @@ func compileMergeStrategyFirewall(t *testing.T, mergeStrategy AccessControlMerge
                 MergeStrategy: mergeStrategy,
                 AccessControl: security.NewAccessControl([]security.AccessControlRule{
                     accesscontrol.NewSegmentPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
+                    accesscontrol.NewSegmentPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}}),
                 }),
             },
         },
@@ -267,7 +270,7 @@ func TestCompile_TheOverrideOnlyStrategyIgnoresTheGlobalRules(t *testing.T) {
     accessControl := compileMergeStrategyFirewall(t, AccessControlMergeOverrideOnly)
 
     assertMergedAccessControlAnswers(t, accessControl, "/admin", "ROLE_LOCAL")
-    assertMergedAccessControlAnswers(t, accessControl, "/reports", "no rule")
+    assertMergedAccessControlAnswers(t, accessControl, "/reports", securitycontract.AttributePublicAccess)
 }
 
 func impersonationSourceForCompile(hierarchy *security.RoleHierarchy) *security.ImpersonationTokenSource {
@@ -453,7 +456,7 @@ func TestCompile_RefusesAFirewallAnEarlierOneShadows(t *testing.T) {
 
 func TestBuilder_RefusesAFirewallAnEarlierOneShadowsAtBuildAndCompile(t *testing.T) {
     builder := NewBuilder()
-    builder.SetGlobal(GlobalConfig{AccessControl: security.NewAccessControl(nil)})
+    builder.SetGlobal(GlobalConfig{AccessControl: openAccessControl()})
     builder.AddFirewall("api", security.NewPathPrefixMatcher("/api"), &anonymousTokenSource{}, FirewallConfig{})
     builder.AddFirewall("apiAdmin", security.NewPathPrefixMatcher("/api-admin"), &anonymousTokenSource{}, FirewallConfig{})
 
@@ -469,7 +472,7 @@ func TestBuilder_RefusesAFirewallAnEarlierOneShadowsAtBuildAndCompile(t *testing
 
 func TestCompile_RefusesADeclaredPathThatCarriesAPercentEscape(t *testing.T) {
     ruleAt := func(path string) *security.AccessControl {
-        return security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewExactRule(path, accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}})})
+        return security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewExactRule(path, accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}), accesscontrol.NewSegmentPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}})})
     }
 
     cases := []struct {
@@ -537,6 +540,7 @@ func TestCompile_RefusesADeclaredPathThatCarriesAPercentEscape(t *testing.T) {
         accesscontrol.NewExactRule("/files/a%2Fb", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
         accesscontrol.NewExactRule("/files/100%", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
         accesscontrol.NewRegexRule("^/files%41/x$", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
+        accesscontrol.NewRegexRule("^/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}}),
     })
 
     if _, compileErr := Compile(Configuration{
@@ -554,6 +558,7 @@ const protectedRuleWithoutDecisionManagerRefusal = "security firewall access con
 func TestCompile_RefusesAProtectedRuleNoDecisionManagerReaches(t *testing.T) {
     publicRule := accesscontrol.NewExactRule("/open", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}})
     protectedRule := accesscontrol.NewRegexRule("^/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})
+    fallbackRule := accesscontrol.NewRegexRule("^/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}})
 
     for name, declaration := range map[string]struct {
         global   GlobalConfig
@@ -561,7 +566,7 @@ func TestCompile_RefusesAProtectedRuleNoDecisionManagerReaches(t *testing.T) {
     }{
         "its own rule":       {override: FirewallOverride{AccessControl: security.NewAccessControl([]security.AccessControlRule{publicRule, protectedRule})}},
         "an inherited rule":  {global: GlobalConfig{AccessControl: security.NewAccessControl([]security.AccessControlRule{publicRule, protectedRule})}},
-        "override-only rule": {global: GlobalConfig{AccessControl: security.NewAccessControl(nil)}, override: FirewallOverride{MergeStrategy: AccessControlMergeOverrideOnly, AccessControl: security.NewAccessControl([]security.AccessControlRule{publicRule, protectedRule})}},
+        "override-only rule": {global: GlobalConfig{AccessControl: openAccessControl()}, override: FirewallOverride{MergeStrategy: AccessControlMergeOverrideOnly, AccessControl: security.NewAccessControl([]security.AccessControlRule{publicRule, protectedRule})}},
     } {
         _, compileErr := Compile(Configuration{
             global:    declaration.global,
@@ -583,11 +588,11 @@ func TestCompile_RefusesAProtectedRuleNoDecisionManagerReaches(t *testing.T) {
         global   GlobalConfig
         override FirewallOverride
     }{
-        "public rules only":      {override: FirewallOverride{AccessControl: security.NewAccessControl([]security.AccessControlRule{publicRule})}},
-        "an empty control":       {override: FirewallOverride{AccessControl: security.NewAccessControl(nil)}},
-        "the global manager":     {global: GlobalConfig{AccessDecisionManager: roleDecisionManager()}, override: FirewallOverride{AccessControl: security.NewAccessControl([]security.AccessControlRule{protectedRule})}},
-        "the firewall manager":   {override: FirewallOverride{AccessDecisionManager: roleDecisionManager(), AccessControl: security.NewAccessControl([]security.AccessControlRule{protectedRule})}},
-        "a disabled global rule": {global: GlobalConfig{AccessControl: security.NewAccessControl([]security.AccessControlRule{protectedRule})}, override: FirewallOverride{GlobalAccessControlDisabled: true, AccessControl: security.NewAccessControl([]security.AccessControlRule{publicRule})}},
+        "public rules only":      {override: FirewallOverride{AccessControl: security.NewAccessControl([]security.AccessControlRule{publicRule, fallbackRule})}},
+        "an empty control":       {override: FirewallOverride{AccessControl: openAccessControl()}},
+        "the global manager":     {global: GlobalConfig{AccessDecisionManager: roleDecisionManager()}, override: FirewallOverride{AccessControl: security.NewAccessControl([]security.AccessControlRule{protectedRule, fallbackRule})}},
+        "the firewall manager":   {override: FirewallOverride{AccessDecisionManager: roleDecisionManager(), AccessControl: security.NewAccessControl([]security.AccessControlRule{protectedRule, fallbackRule})}},
+        "a disabled global rule": {global: GlobalConfig{AccessControl: security.NewAccessControl([]security.AccessControlRule{protectedRule, fallbackRule})}, override: FirewallOverride{GlobalAccessControlDisabled: true, AccessControl: security.NewAccessControl([]security.AccessControlRule{publicRule, fallbackRule})}},
     } {
         if _, compileErr := Compile(Configuration{
             global:    declaration.global,
@@ -764,5 +769,110 @@ func TestCompile_Csrf_TokenDoorListedAmongTheDoors(t *testing.T) {
     named := compileOneCsrfFirewall(t, security.CsrfConfig{}, &anonymousTokenSource{}, FirewallCsrfConfig{TokenPath: "/csrf-token", TokenName: "app.csrf"}).Doors()
     if "app.csrf" != named[1].Name {
         t.Fatalf("expected the declared name, got %+v", named)
+    }
+}
+
+const accessControlWithoutFallbackRefusal = "security access control holds no rule claiming every path, so a path no rule names would reach its handler undecided; declare the fallback, a segment prefix rule on \"/\" (PUBLIC_ACCESS to keep the rest open, a role to refuse it), the empty raw prefix, a last \"^/\" regex rule or, in a firewall, a prefix rule claiming the firewall's whole prefix"
+
+func TestCompile_RefusesAnAccessControlWithoutAFallbackRule(t *testing.T) {
+    adminRule := accesscontrol.NewSegmentPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})
+    exactRootRule := accesscontrol.NewExactRule("/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}})
+    regexRule := accesscontrol.NewRegexRule("^/api", accesscontrol.RuleConfig{Attributes: []string{"ROLE_API"}})
+    withoutFallback := security.NewAccessControl([]security.AccessControlRule{adminRule, exactRootRule})
+
+    for name, testCase := range map[string]struct {
+        configuration Configuration
+        firewallName  any
+        field         string
+    }{
+        "the global alone": {
+            configuration: Configuration{global: GlobalConfig{AccessControl: withoutFallback, AccessDecisionManager: roleDecisionManager()}},
+            firewallName:  nil,
+            field:         "GlobalConfig.AccessControl",
+        },
+        "an empty global alone": {
+            configuration: Configuration{global: GlobalConfig{AccessControl: security.NewAccessControl(nil)}},
+            firewallName:  nil,
+            field:         "GlobalConfig.AccessControl",
+        },
+        "a firewall's own": {
+            configuration: Configuration{global: GlobalConfig{AccessDecisionManager: roleDecisionManager()}, firewalls: []firewallDeclaration{{name: "admin", matcher: security.NewPathPrefixMatcher("/"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: FirewallOverride{AccessControl: withoutFallback}}}}},
+            firewallName:  "admin",
+            field:         "FirewallConfig.Override.AccessControl",
+        },
+        "a firewall's empty one": {
+            configuration: Configuration{firewalls: []firewallDeclaration{{name: "open", matcher: security.NewPathPrefixMatcher("/"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: FirewallOverride{AccessControl: security.NewAccessControl(nil)}}}}},
+            firewallName:  "open",
+            field:         "FirewallConfig.Override.AccessControl",
+        },
+        "a regex without the last catch-all": {
+            configuration: Configuration{global: GlobalConfig{AccessDecisionManager: roleDecisionManager()}, firewalls: []firewallDeclaration{{name: "api", matcher: security.NewPathPrefixMatcher("/"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: FirewallOverride{AccessControl: security.NewAccessControl([]security.AccessControlRule{regexRule})}}}}},
+            firewallName:  "api",
+            field:         "FirewallConfig.Override.AccessControl",
+        },
+        "a firewall rule claiming part of its prefix": {
+            configuration: Configuration{global: GlobalConfig{AccessDecisionManager: roleDecisionManager()}, firewalls: []firewallDeclaration{{name: "internal", matcher: security.NewSegmentPrefixMatcher("/internal"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: FirewallOverride{AccessControl: security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewSegmentPrefixRule("/internal/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})})}}}}},
+            firewallName:  "internal",
+            field:         "FirewallConfig.Override.AccessControl",
+        },
+        "the global beside firewalls that hold their own": {
+            configuration: Configuration{global: GlobalConfig{AccessControl: withoutFallback, AccessDecisionManager: roleDecisionManager()}, firewalls: []firewallDeclaration{{name: "admin", matcher: security.NewPathPrefixMatcher("/admin"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: FirewallOverride{MergeStrategy: AccessControlMergeOverrideOnly, AccessControl: openAccessControl()}}}}},
+            firewallName:  nil,
+            field:         "GlobalConfig.AccessControl",
+        },
+    } {
+        t.Run(name, func(t *testing.T) {
+            _, compileErr := Compile(testCase.configuration)
+
+            refusal, isRefusal := compileErr.(*exception.Error)
+            if false == isRefusal || accessControlWithoutFallbackRefusal != refusal.Message() {
+                t.Fatalf("expected the fallback refusal, got %v", compileErr)
+            }
+
+            if testCase.field != refusal.Context()["field"] || testCase.firewallName != refusal.Context()["firewallName"] {
+                t.Fatalf("expected the refusal to name %s of %v, got %v", testCase.field, testCase.firewallName, refusal.Context())
+            }
+        })
+    }
+}
+
+func TestCompile_AdmitsEveryFallbackForm(t *testing.T) {
+    adminRule := accesscontrol.NewSegmentPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})
+
+    for name, fallback := range map[string]security.AccessControlRule{
+        "a segment prefix on /":   accesscontrol.NewSegmentPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}}),
+        "a raw prefix on /":       accesscontrol.NewRawPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{"ROLE_USER"}}),
+        "the empty raw prefix":    accesscontrol.NewRawPrefixRule("", accesscontrol.RuleConfig{Attributes: []string{"ROLE_USER"}}),
+        "a last ^/ regex rule":    accesscontrol.NewRegexRule("^/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}}),
+        "AllowAnonymous on /":     NewAccessControlBuilder().AllowAnonymous("/").Build().Rules()[0],
+    } {
+        t.Run(name, func(t *testing.T) {
+            withFallback := security.NewAccessControl([]security.AccessControlRule{adminRule, fallback})
+
+            if _, compileErr := Compile(Configuration{global: GlobalConfig{AccessControl: withFallback, AccessDecisionManager: roleDecisionManager()}}); nil != compileErr {
+                t.Fatalf("expected the global alone admitted, got %v", compileErr)
+            }
+
+            if _, compileErr := Compile(Configuration{global: GlobalConfig{AccessDecisionManager: roleDecisionManager()}, firewalls: []firewallDeclaration{{name: "admin", matcher: security.NewPathPrefixMatcher("/"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: FirewallOverride{AccessControl: withFallback}}}}}); nil != compileErr {
+                t.Fatalf("expected the firewall's own admitted, got %v", compileErr)
+            }
+        })
+    }
+
+    for name, firewall := range map[string]firewallDeclaration{
+        "a segment rule on the segment matcher's prefix": {name: "internal", matcher: security.NewSegmentPrefixMatcher("/internal"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: FirewallOverride{AccessControl: security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewSegmentPrefixRule("/internal", accesscontrol.RuleConfig{Attributes: []string{"ROLE_SERVICE"}})})}}},
+        "a raw rule on the path matcher's prefix":        {name: "api", matcher: security.NewPathPrefixMatcher("/api"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: FirewallOverride{AccessControl: security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewRawPrefixRule("/api", accesscontrol.RuleConfig{Attributes: []string{"ROLE_API"}})})}}},
+    } {
+        if _, compileErr := Compile(Configuration{global: GlobalConfig{AccessDecisionManager: roleDecisionManager()}, firewalls: []firewallDeclaration{firewall}}); nil != compileErr {
+            t.Fatalf("%s: expected the firewall admitted, got %v", name, compileErr)
+        }
+    }
+
+    inheritsTheGlobalFallback := Configuration{
+        global:    GlobalConfig{AccessControl: openAccessControl(), AccessDecisionManager: roleDecisionManager()},
+        firewalls: []firewallDeclaration{{name: "admin", matcher: security.NewPathPrefixMatcher("/"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: FirewallOverride{AccessControl: security.NewAccessControl([]security.AccessControlRule{adminRule})}}}},
+    }
+    if _, compileErr := Compile(inheritsTheGlobalFallback); nil != compileErr {
+        t.Fatalf("expected a firewall merging the global fallback admitted, got %v", compileErr)
     }
 }

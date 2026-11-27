@@ -24,6 +24,9 @@ import (
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    "github.com/precision-soft/melody/v4/security"
+    "github.com/precision-soft/melody/v4/security/accesscontrol"
+    securitycontract "github.com/precision-soft/melody/v4/security/contract"
     "github.com/precision-soft/melody/v4/session"
 )
 
@@ -321,4 +324,9 @@ func awaitServing(t *testing.T, address string) {
 type teardownWalkHolder struct {
     first  *teardownWalkHolder
     second *teardownWalkHolder
+}
+
+/* openAccessControl keeps every path open on purpose: the fallback a compiled access control must hold */
+func openAccessControl() *security.AccessControl {
+    return security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewSegmentPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}})})
 }

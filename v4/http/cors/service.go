@@ -41,7 +41,12 @@ type Config struct {
 
     /* AllowOrigin decides each origin alone, handed the request it came on, whose runtime is the door to the container and the context; a lookup it cannot make answers false, refusing the origin. It runs at each of the request, the middleware and the response doors, the last after the handler, so a lookup reads a store that answers fast or caches per request. */
     AllowOrigin func(request httpcontract.Request, origin string) bool
+
+    /* SchemelessOriginsAdmitted admits an AllowOrigins entry without a scheme, "example.com" or "*.example.com", which matches that host under any scheme, http included; a credentialed service refuses one all the same. */
+    SchemelessOriginsAdmitted bool
 }
+
+const schemelessOriginRefusedMessage = "cors misconfiguration: an origin without a scheme admits that host under any scheme, http included; write it out, https://example.com or https://*.example.com, or set SchemelessOriginsAdmitted"
 
 var maxAgeRule = bound.Rule[int]{
     Name:    "Config.MaxAge",
@@ -49,7 +54,7 @@ var maxAgeRule = bound.Rule[int]{
     Minimum: 0,
 }
 
-/* NewService builds the service the config grants; a max age the rule refuses panics naming the field, and so does a credentialed service holding an origin without a scheme, which would admit that host under any scheme, http included. A blank origin entry, an origin list beside AllowOrigin, which answers alone, and "*" beside other entries, which it leaves dead, are refused too. */
+/* NewService builds the service the config grants; a max age the rule refuses panics naming the field, and so does an origin without a scheme, which would admit that host under any scheme, http included, unless SchemelessOriginsAdmitted, and always on a credentialed service. A blank origin entry, an origin list beside AllowOrigin, which answers alone, and "*" beside other entries, which it leaves dead, are refused too. */
 func NewService(config Config) *Service {
     maxAge, maxAgeErr := bound.Resolve(config.MaxAge, maxAgeRule)
     if nil != maxAgeErr {
@@ -89,6 +94,28 @@ func NewService(config Config) *Service {
                     ),
                 )
             }
+        }
+    }
+
+    if false == config.SchemelessOriginsAdmitted && false == config.AllowCredentials {
+        for index, origin := range config.AllowOrigins {
+            entry := strings.TrimSpace(origin)
+            if "*" == entry || true == strings.Contains(entry, "://") {
+                continue
+            }
+
+            exception.Panic(
+                exception.NewError(
+                    schemelessOriginRefusedMessage,
+                    exceptioncontract.Context{
+                        "field": "Config.AllowOrigins",
+                        "index": index,
+                        "entry": entry,
+                        "door":  "Config.SchemelessOriginsAdmitted",
+                    },
+                    nil,
+                ),
+            )
         }
     }
 

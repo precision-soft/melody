@@ -8,8 +8,6 @@ import (
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
-    "github.com/precision-soft/melody/v4/internal"
-    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
 /* first, so a hand registration of a declared parameter is the duplicate of the aggregated report */
@@ -168,7 +166,8 @@ func (instance *Application) refuseModuleEnvironmentKeys() {
     }
 }
 
-func (instance *Application) collectUndeclaredEnvironmentKeys() {
+/* names keys only, never a value: an undeclared key may hold a credential */
+func (instance *Application) refuseUndeclaredEnvironmentKeys() {
     declarer, isDeclarer := instance.configuration.(configcontract.EnvironmentKeyDeclarer)
     if false == isDeclarer {
         return
@@ -179,13 +178,11 @@ func (instance *Application) collectUndeclaredEnvironmentKeys() {
         return
     }
 
-    instance.bootWarnings = append(instance.bootWarnings, internal.BootWarning{
-        Name:    internal.BootWarningNameEnvironmentUndeclaredKey,
-        Message: "an environment key in the MELODY_ namespace is neither the framework's nor declared by a registered module; it may be misspelt, or belong to a module this process does not register, and its value is redacted",
-        Context: loggingcontract.Context{
-            "environmentKeys": keys,
-        },
-    })
+    exception.Panic(exception.NewError(
+        "an environment key in the MELODY_ namespace is neither the framework's nor declared by a registered module, so nothing reads it; it may be misspelt, or belong to a module this process does not register: rename it, remove the line, or register the module that declares it",
+        exceptioncontract.Context{"environmentKeys": keys},
+        nil,
+    ))
 }
 
 var _ applicationcontract.EnvironmentKeyRegistrar = (*moduleEnvironmentKeyRegistrar)(nil)

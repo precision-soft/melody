@@ -74,7 +74,7 @@ func (instance *Control) Rules() []Rule {
     return append([]Rule{}, instance.rules...)
 }
 
-/* Match resolves by category before position: an exact rule beats every prefix rule, a longer prefix beats a shorter one, every prefix beats every regex, and the empty-prefix fallback answers only when nothing else did; the position in the rule list breaks only the ties inside a category. A false second answer means no rule claimed the path: the access control listener then lets the request reach its handler without a decision, so an application that means to refuse what it did not name declares a final fallback, NewRawPrefixRule("") with a role, or a last "^/" regex rule. */
+/* Match resolves by category before position: an exact rule beats every prefix rule, a longer prefix beats a shorter one, every prefix beats every regex, and the empty-prefix fallback answers only when nothing else did; the position in the rule list breaks only the ties inside a category. A false second answer means no rule claimed the path: the access control listener then lets the request reach its handler without a decision, which is why the security configuration refuses at compile a control that holds no fallback, a prefix rule on "/", NewRawPrefixRule("") or a last "^/" regex rule. */
 func (instance *Control) Match(path string) ([]string, bool) {
     matchedIndex, matched := instance.MatchRuleIndex(path)
     if false == matched {

@@ -680,8 +680,8 @@ func (instance *doorReachUnknownModule) RegisterSecurity(builder *securityconfig
         return security.NewAnonymousToken(), nil
     }, security.ResolverTokenSourceConfig{})
 
-    builder.SetGlobal(securityconfig.GlobalConfig{AccessControl: security.NewAccessControl(nil)})
-    builder.AddFirewall("main", unclaimedDoorMatcher{}, anonymous, securityconfig.FirewallConfig{Login: securityconfig.LoginConfig{Path: "/login", Handler: answeringLoginHandler{}}})
+    builder.SetGlobal(securityconfig.GlobalConfig{AccessControl: openAccessControl()})
+    builder.AddFirewall("main", unclaimedDoorMatcher{}, anonymous, securityconfig.FirewallConfig{Login: securityconfig.LoginConfig{Path: "/login", Handler: answeringLoginHandler{}, LimiterDisabled: true}})
 }
 
 func TestBootModulesPostConfigurationResolve_CollectsTheSecurityBuildersBootWarnings(t *testing.T) {

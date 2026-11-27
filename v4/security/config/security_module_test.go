@@ -83,7 +83,7 @@ func TestBuilder_AddFirewall_CarriesItsDoors(t *testing.T) {
         security.NewPathPrefixMatcher("/"),
         &anonymousTokenSource{},
         FirewallConfig{
-            Login:  LoginConfig{Path: "/login", Handler: &noopLoginHandler{}},
+            Login:  LoginConfig{Path: "/login", Handler: &noopLoginHandler{}, LimiterDisabled: true},
             Logout: LogoutConfig{Path: "/logout", Handler: &noopLogoutHandler{}},
             Override:      openFirewallConfig().Override,
         },
@@ -167,6 +167,7 @@ func TestBuilder_ZeroValueOverrideInheritsGlobalAccessControl(t *testing.T) {
 
     globalAccessControl := security.NewAccessControl([]security.AccessControlRule{
         accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
+        accesscontrol.NewSegmentPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}}),
     })
     builder.SetGlobal(
         GlobalConfig{
@@ -300,7 +301,7 @@ func TestFirewallOverride_GlobalAccessControlDisabledEnforcesOnlyTheFirewallsOwn
     builder := NewBuilder()
     builder.SetGlobal(
         GlobalConfig{
-            AccessControl:         security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
+            AccessControl:         security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}), accesscontrol.NewSegmentPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}})}),
             AccessDecisionManager: security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{security.NewRoleVoter()}, security.AccessDecisionManagerConfig{}),
         },
     )
@@ -312,14 +313,14 @@ func TestFirewallOverride_GlobalAccessControlDisabledEnforcesOnlyTheFirewallsOwn
         FirewallConfig{
             Override: FirewallOverride{
                 GlobalAccessControlDisabled: true,
-                AccessControl:               security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewRawPrefixRule("/local", accesscontrol.RuleConfig{Attributes: []string{"ROLE_USER"}})}),
+                AccessControl:               security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewRawPrefixRule("/local", accesscontrol.RuleConfig{Attributes: []string{"ROLE_USER"}}), accesscontrol.NewSegmentPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}})}),
             },
         },
     )
 
     firewall := builder.BuildAndCompile().Firewalls()[0]
-    if _, matched := firewall.AccessControl().Match("/admin"); true == matched {
-        t.Fatalf("expected the firewall to leave the global /admin rule out, but it inherited it")
+    if attributes, _ := firewall.AccessControl().Match("/admin"); 1 != len(attributes) || securitycontract.AttributePublicAccess != attributes[0] {
+        t.Fatalf("expected the firewall to leave the global /admin rule out, but it inherited it: %v", attributes)
     }
 
     if _, matched := firewall.AccessControl().Match("/local"); false == matched {

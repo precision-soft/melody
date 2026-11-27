@@ -33,6 +33,8 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
 | `v4/application.Application.bootCli` | protection | debug commands outside development | development only | `off:v4/application.ApplicationConfig.DebugCommandsEnabled` | — | [DEBUG.md](package/DEBUG.md) |
+| `v4/application.Application.refuseUnappliedSecretMarks` | refusal | a misspelled secret mark leaving the credential in clear | the boot refused | `use:v4/application.Application.MarkParameterSecretOptional` | the optional mark is the door for a parameter some environments do not define; a mandatory mark that matches nothing is a typo | [CONFIG.md](package/CONFIG.md) |
+| `v4/application.Application.refuseUndeclaredEnvironmentKeys` | refusal | a misspelt MELODY_ key the operator believes is set | the boot refused | `use:v4/application/contract.EnvironmentKeyModule` | the namespace is the framework's and the modules': a key nothing declares is read by nothing, so the door is declaring it in the module that reads it, never a switch | [CONFIG.md](package/CONFIG.md) |
 
 ## `v4/cache`
 
@@ -140,7 +142,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 |---|---|---|---|---|---|---|
 | `v4/http/cors.Config.MaxAge` | limit | a preflight answer cached for good | 86400 min 0 | `value:v4/http/cors.Config.MaxAge` | class T: a cache lifetime; unlimited pins a response in every cache for good | [HTTP.md](package/HTTP.md) |
 | `v4/http/cors.Config.AllowCredentials` | protection | the door: AllowCredentials | refused | `off:v4/http/cors.Config.AllowCredentials` | — | [HTTP.md](package/HTTP.md) |
-| `v4/http/cors.NewService` | refusal | a scheme-less origin matching more than meant | refused when credentialed | none | — | [HTTP.md](package/HTTP.md) |
+| `v4/http/cors.NewService` | protection | a scheme-less origin admitting the host under any scheme, http included | refused | `off:v4/http/cors.Config.SchemelessOriginsAdmitted` | the door admits it only without credentials: a credentialed service refuses one all the same, since a credential would travel over http | [HTTP.md](package/HTTP.md) |
 
 ## `v4/http/middleware`
 
@@ -198,8 +200,6 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | `v4/internal.JournalDirectoryModeFloor` | mode | a journal directory its owner cannot traverse | 0700 | none | the floor a configured journal directory mode may not go below: below it the owner cannot list or create the journal, so the mode is refused, not doored | — |
 | `v4/internal.JournalFileModeFloor` | mode | a journal file its owner cannot write | 0600 | none | the floor a configured journal file mode may not go below: below it the owner cannot write the journal and every line is lost, so the mode is refused, not doored | — |
 | `v4/internal.WriteFileAtomically#1` | mode | generated source in a directory the repository does not own | 0755 | none | generated Go source is committed: its directories and a new file take the repository's modes, an existing file keeps its own | — |
-| `v4/internal.BootWarningNameEnvironmentUndeclaredKey` | refusal | an undeclared MELODY_ key, booting | warning | none | — | — |
-| `v4/internal.BootWarningNameSecretMarkUnmatched` | refusal | a secret mark that protects no parameter, booting | warning | none | — | — |
 
 ## `v4/lock`
 
@@ -290,19 +290,14 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | `v4/security.JwtConfig.AllowWithoutExpiry` | protection | the door: AllowWithoutExpiry | refused | `off:v4/security.JwtConfig.AllowWithoutExpiry` | — | [SECURITY.md](package/SECURITY.md) |
 | `v4/security.JwtAlgorithmHs256` | refusal | an algorithm confusion: a token signed with another algorithm | HS256 only | none | — | [SECURITY.md](package/SECURITY.md) |
 
-## `v4/security/accesscontrol`
-
-| key | kind | protects against | default | door | reason | documented |
-|---|---|---|---|---|---|---|
-| `v4/security/accesscontrol.Control.MatchRuleIndex` | refusal | a path no access rule covers, admitted by omission | admitted | none | — | — |
-
 ## `v4/security/config`
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
 | `v4/security/config.FirewallOverride.GlobalAccessControlDisabled` | protection | the door: cuts this firewall off the global access control | on | `off:v4/security/config.FirewallOverride.GlobalAccessControlDisabled` | — | [SECURITY.md](package/SECURITY.md) |
 | `v4/security/config.LoginConfig.CsrfDisabled` | protection | the door: turns the door's forgery check off, the stated other origin refused without a session cookie included | on | `off:v4/security/config.LoginConfig.CsrfDisabled` | — | [SECURITY.md](package/SECURITY.md) |
-| `v4/security/config.LoginConfig.Limiter` | protection | credential guessing at the login door | none metered | none | — | [SECURITY.md](package/SECURITY.md) |
+| `v4/security/config.LoginConfig.Limiter` | protection | credential guessing at the login door | a door without a limiter refused | `off:v4/security/config.LoginConfig.LimiterDisabled` | — | [SECURITY.md](package/SECURITY.md) |
+| `v4/security/config.refuseAccessControlWithoutFallback` | refusal | a path no access rule covers, reaching its handler undecided | refused at compile | `use:v4/security/accesscontrol.NewSegmentPrefixRule` | the door is the explicit fallback, a rule on "/" (PUBLIC_ACCESS keeps the rest open on purpose), never a switch: the control then states what an unnamed path gets | [SECURITY.md](package/SECURITY.md) |
 | `v4/security/config.LogoutConfig.CsrfDisabled` | protection | the door: CsrfDisabled | on | `off:v4/security/config.LogoutConfig.CsrfDisabled` | — | [SECURITY.md](package/SECURITY.md) |
 
 ## `v4/security/contract`
@@ -557,8 +552,6 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
 | `application.environment.processVariableIgnored` | warning | a process variable the operator believes is read | written | `env:MELODY_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
-| `application.environment.undeclaredKey` | warning | a MELODY_ key nothing reads, a typo the operator believes is set | written | `env:MELODY_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
-| `application.secretMark.unmatched` | warning | a secret mark that protects no parameter | written | `env:MELODY_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
 | `application.service.builtAtBootFailed` | warning | a service that failed its boot build going unnoticed | written in http | `env:MELODY_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
 | `aws.s3.plaintextEndpoint` | warning | object traffic in clear to a non-loopback endpoint | written | `env:MELODY_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
 | `http.session.unboundedTtlOnBoundedDefaultStorage` | warning | sessions without end on a storage that evicts | written in http | `env:MELODY_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |

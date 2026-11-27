@@ -12,6 +12,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/security"
+    "github.com/precision-soft/melody/v4/security/accesscontrol"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -65,7 +66,7 @@ func testRuntime() containercontract.Runtime {
 }
 
 func openFirewallConfig() FirewallConfig {
-    return FirewallConfig{Override: FirewallOverride{AccessControl: security.NewAccessControl(nil)}}
+    return FirewallConfig{Override: FirewallOverride{AccessControl: openAccessControl()}}
 }
 
 type noopAuthenticator struct{}
@@ -127,7 +128,7 @@ func (instance *statelessTokenSource) Stateless() bool {
 
 func csrfLoginFirewallConfig(csrf FirewallCsrfConfig) FirewallConfig {
     config := openFirewallConfig()
-    config.Login = LoginConfig{Path: "/login", Handler: &noopLoginHandler{}}
+    config.Login = LoginConfig{Path: "/login", Handler: &noopLoginHandler{}, LimiterDisabled: true}
     config.Csrf = csrf
 
     return config
@@ -141,4 +142,19 @@ func compileOneCsrfFirewall(t *testing.T, global security.CsrfConfig, tokenSourc
     builder.AddFirewall("main", security.NewPathPrefixMatcher("/"), tokenSource, csrfLoginFirewallConfig(csrf))
 
     return builder.BuildAndCompile().Firewalls()[0]
+}
+
+type allowingRateLimiter struct{}
+
+func (instance *allowingRateLimiter) Allow(runtimeInstance containercontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
+    return httpcontract.RateLimitDecision{Allowed: true}, nil
+}
+
+func (instance *allowingRateLimiter) Reset(runtimeInstance containercontract.Runtime, key string) error {
+    return nil
+}
+
+/* openAccessControl keeps every path open on purpose: the fallback a compiled access control must hold */
+func openAccessControl() *security.AccessControl {
+    return security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewSegmentPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}})})
 }

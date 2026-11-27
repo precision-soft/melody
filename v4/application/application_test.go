@@ -21,7 +21,6 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/internal/openapiseam"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
@@ -430,7 +429,7 @@ func TestRegisterSecretParameter_MarksTheRegistrationAsHoldingACredential(t *tes
     }
 }
 
-/* marking an existing parameter takes effect at once; a name that matches nothing is queued rather than refused, because an environment key is legitimately undefined in some environments and the boot retries the queue before the configuration resolves. */
+/* marking an existing parameter takes effect at once; a name that matches nothing is queued rather than refused at the call, because a module may register the parameter later and the boot retries the queue before the configuration resolves. */
 func TestMarkParameterSecret_MarksWhatExistsAndQueuesWhatDoesNot(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -459,7 +458,7 @@ func TestMarkParameterSecret_RefusesAfterBoot(t *testing.T) {
     }, "cannot mark a parameter secret after application boot")
 }
 
-/* the retry is what makes a marking declared before the module that registers the parameter work at all, and it must run before the resolve or the marking never travels into the templates that read the secret. What still matches nothing stays queued for the warning at the end of the boot. */
+/* the retry is what makes a marking declared before the module that registers the parameter work at all, and it must run before the resolve or the marking never travels into the templates that read the secret. What still matches nothing stays queued for the refusal at the end of the boot. */
 func TestApplyUnappliedSecretMarks_AppliesWhatALaterRegistrationMadeReal(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -485,33 +484,99 @@ func TestApplyUnappliedSecretMarks_AppliesWhatALaterRegistrationMadeReal(t *test
     }
 }
 
-/* the warning at the end of the boot is what keeps a misspelled name from silently redacting nothing: every phase that can register a parameter has run by then, so a marking still matching nothing names something that does not exist. A name a late phase did make real is applied here instead, without a warning, and the queue is emptied either way. */
-func TestCollectUnappliedSecretMarks_CollectsOnlyWhatStillMatchesNothingUnderItsCode(t *testing.T) {
+/* a misspelled name would redact nothing: every phase that can register a parameter has run by then, so a mandatory marking still matching nothing refuses the boot naming it; a name a late phase made real is marked here instead, and an optional marking that matches nothing is dropped */
+func TestRefuseUnappliedSecretMarks_RefusesOnlyWhatStillMatchesNothingAndIsNotOptional(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
     applicationInstance.MarkParameterSecret("app.misspelled")
     applicationInstance.MarkParameterSecret("app.registered.last")
+    applicationInstance.MarkParameterSecretOptional("app.absent.here")
+    applicationInstance.MarkParameterSecretOptional("app.optional.last")
 
     applicationInstance.RegisterParameter("app.registered.last", "sk_live_51H")
+    applicationInstance.RegisterParameter("app.optional.last", "sk_live_52H")
 
-    applicationInstance.collectUnappliedSecretMarks()
-
-    parameter := applicationInstance.configuration.Get("app.registered.last")
-    if nil == parameter || false == parameter.IsSecret() {
-        t.Fatalf("expected a name a late phase made real to be marked here rather than warned about")
+    refusal := refusalOf(t, applicationInstance.refuseUnappliedSecretMarks)
+    if nil == refusal || secretMarkUnmatchedMessage != refusal.Message() {
+        t.Fatalf("expected the unmatched mark refused, got %v", refusal)
     }
 
-    if 1 != len(applicationInstance.bootWarnings) {
-        t.Fatalf("expected exactly one boot warning collected, got %+v", applicationInstance.bootWarnings)
+    if names, isList := refusal.Context()["parameterNames"].([]string); false == isList || 1 != len(names) || "app.misspelled" != names[0] {
+        t.Fatalf("expected the refusal to name only the mandatory mark that matched nothing, got %v", refusal.Context())
     }
 
-    bootWarning := applicationInstance.bootWarnings[0]
-    if internal.BootWarningNameSecretMarkUnmatched != bootWarning.Name || "app.misspelled" != bootWarning.Context["parameterName"] {
-        t.Fatalf("expected the boot warning to name its code and the marking that matched nothing, got %+v", bootWarning)
+    for _, name := range []string{"app.registered.last", "app.optional.last"} {
+        if parameter := applicationInstance.configuration.Get(name); nil == parameter || false == parameter.IsSecret() {
+            t.Fatalf("expected %s, made real by a late phase, marked", name)
+        }
     }
 
-    if 0 != len(applicationInstance.unappliedSecretMarks) {
-        t.Fatalf("expected the queue to be emptied after the last retry, got %#v", applicationInstance.unappliedSecretMarks)
+    if 0 != len(applicationInstance.unappliedSecretMarks) || 0 != len(applicationInstance.optionalSecretMarks) {
+        t.Fatalf("expected both queues emptied, got %#v and %#v", applicationInstance.unappliedSecretMarks, applicationInstance.optionalSecretMarks)
+    }
+
+    if 0 != len(applicationInstance.bootWarnings) {
+        t.Fatalf("expected no boot warning, got %+v", applicationInstance.bootWarnings)
+    }
+}
+
+func TestRefuseUnappliedSecretMarks_AdmitsOptionalMarksThatMatchNothing(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    applicationInstance.MarkParameterSecretOptional("app.absent.here")
+
+    if refusal := refusalOf(t, applicationInstance.refuseUnappliedSecretMarks); nil != refusal {
+        t.Fatalf("expected an optional mark that matched nothing admitted, got %v", refusal)
+    }
+}
+
+func TestMarkParameterSecretOptional_MarksWhatExistsRetriesBeforeTheResolveAndRefusesAfterBoot(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    applicationInstance.RegisterParameter("app.token", "sk_live_51H")
+    applicationInstance.MarkParameterSecretOptional("app.token")
+    applicationInstance.MarkParameterSecretOptional("app.late")
+
+    if parameter := applicationInstance.configuration.Get("app.token"); nil == parameter || false == parameter.IsSecret() {
+        t.Fatalf("expected the existing parameter marked at once")
+    }
+
+    if 1 != len(applicationInstance.optionalSecretMarks) || 0 != len(applicationInstance.unappliedSecretMarks) {
+        t.Fatalf("expected the unmatched optional name queued apart, got %#v and %#v", applicationInstance.optionalSecretMarks, applicationInstance.unappliedSecretMarks)
+    }
+
+    applicationInstance.RegisterParameter("app.late", "sk_live_52H")
+    applicationInstance.applyUnappliedSecretMarks()
+
+    if parameter := applicationInstance.configuration.Get("app.late"); nil == parameter || false == parameter.IsSecret() || 0 != len(applicationInstance.optionalSecretMarks) {
+        t.Fatalf("expected the retry before the resolve to mark the optional name, queue %#v", applicationInstance.optionalSecretMarks)
+    }
+
+    applicationInstance.booted = true
+    testhelper.AssertPanicsWithError(t, func() {
+        applicationInstance.MarkParameterSecretOptional("app.token")
+    }, "cannot mark a parameter secret after application boot")
+}
+
+const unmatchedSecretMarkBootChildVariable = "MELODY_TEST_UNMATCHED_SECRET_MARK_BOOT_CHILD"
+
+/* Boot exits the process at the refusal, so it runs in a child of the test binary */
+func TestBoot_RefusesAnUnmatchedSecretMark(t *testing.T) {
+    if "" != os.Getenv(unmatchedSecretMarkBootChildVariable) {
+        applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+        applicationInstance.MarkParameterSecret("app.misspelled")
+
+        applicationInstance.Boot()
+
+        return
+    }
+
+    command := exec.Command(os.Args[0], "-test.run=^TestBoot_RefusesAnUnmatchedSecretMark$")
+    command.Env = append(os.Environ(), unmatchedSecretMarkBootChildVariable+"=1")
+
+    output, runErr := command.CombinedOutput()
+    if text := string(output); nil == runErr || false == strings.Contains(text, "after unrecovered error: "+secretMarkUnmatchedMessage) {
+        t.Fatalf("expected the boot refused over the unmatched mark, got %v: %s", runErr, text[max(0, len(text)-1500):])
     }
 }
 
