@@ -149,7 +149,7 @@ type JwtConfig struct {
     /* RevocationEpochSkew widens the boundary by the clock skew between instances, and is what the future check of iat tolerates under a RevocationEpochStore, one second more for the claim's resolution: 0 when left out, at least 0, unlimited refused. */
     RevocationEpochSkew bound.Duration
 
-    /* Leeway widens the exp, nbf and iat checks by this much, and the future checks of nbf and iat tolerate one second more, the resolution of a whole-second claim: 5s when left out, bound.Of(time.Duration(0)) for strict, at most 5m, unlimited refused. Neither the revocation boundary nor, under a RevocationEpochStore, the future check of iat is widened by it, since a token an ahead issuer stamped before a revocation would outlive it; RevocationEpochSkew decides those. */
+    /* Leeway widens the exp, nbf and iat checks by this much, and the future checks of nbf and iat tolerate one second more, the resolution of a whole-second claim: 5s when left out, bound.Of(time.Duration(0)) for strict, at most 5m, since a wider skew is a misconfigured clock rather than drift, unlimited refused. Neither the revocation boundary nor, under a RevocationEpochStore, the future check of iat is widened by it, since a token an ahead issuer stamped before a revocation would outlive it; RevocationEpochSkew decides those. */
     Leeway               bound.Duration
     AllowWithoutExpiry   bool
 

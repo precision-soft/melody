@@ -88,7 +88,8 @@ BASELINE_PATH_STRING=".dev/validate/citation.baseline"
 
 # the majors this run gates. All three are gated: v3's documents were brought to the same bar during the
 # stabilization sweep, so a finding there is as actionable as one on the published majors, and the
-# baseline holds the declared collisions for each.
+# baseline holds the declared collisions for each. The link dimension is gated on every major, the fourth
+# included: a document citing a file that does not exist is wrong whatever the major.
 GATED_MAJOR_STRING_LIST=(
     "v1"
     "v2"
@@ -1021,7 +1022,7 @@ while IFS= read -r FINDING_LINE_STRING; do
     FINDING_DIMENSION_STRING="${FINDING_REMAINDER_STRING%%$'\t'*}"
     FINDING_KEY_STRING="${FINDING_REMAINDER_STRING#*$'\t'}"
 
-    if ! is_gated_major "${FINDING_MAJOR_STRING}"; then
+    if ! is_gated_major "${FINDING_MAJOR_STRING}" && [[ "link" != "${FINDING_DIMENSION_STRING}" ]]; then
         UNGATED_COUNT_INTEGER=$((UNGATED_COUNT_INTEGER + 1))
         continue
     fi

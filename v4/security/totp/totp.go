@@ -28,13 +28,13 @@ var base32NoPadding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
 /* Config tunes the TOTP algorithm (RFC 6238); the zero value is the interoperable default authenticator apps assume: a 30s period, 6 digits, one step of skew, the system clock. A field outside its range is refused naming it. */
 type Config struct {
-    /* Period is the step length: 30s by default, at least 1s and at most 24h, in whole seconds, unlimited refused. */
+    /* Period is the step length: 30s by default, at least 1s and at most 24h, in whole seconds, since a longer step makes one code a day-long credential, unlimited refused. */
     Period bound.Duration
 
-    /* Digits is the code length: 6 by default, 6 to 8, unlimited refused. */
+    /* Digits is the code length: 6 by default, 6 to 8, the lengths RFC 4226 admits and authenticator apps show, unlimited refused. */
     Digits bound.Count
 
-    /* Skew is how many steps on either side of the current one a code is accepted from: 1 by default, 0 for the current step alone, at most 10, unlimited refused. */
+    /* Skew is how many steps on either side of the current one a code is accepted from: 1 by default, 0 for the current step alone, at most 10, since each step widens by two periods the window a guessed code is accepted in, unlimited refused. */
     Skew bound.Count
 
     /* Clock is where Verify reads the current step; nil is the system clock. */

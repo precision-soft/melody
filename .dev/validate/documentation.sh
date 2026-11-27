@@ -76,10 +76,24 @@ cd "${REPOSITORY_ROOT_DIRECTORY_STRING}"
 # everything a commit would carry, tracked or not. The integration half below enumerates from this rather
 # than from `find`, for the two reasons the neighbouring bands were repaired for: a walk of the tree
 # descends into the module cache under `.dev-data`, which holds released copies of melody itself, and a
-# walk of the index alone cannot see a document the session ADDS.
+# walk of the index alone cannot see a document the session ADDS, and a file the session deleted is not carried.
 list_repository_path() {
-    git ls-files --cached --others --exclude-standard -- "$@" | sort -u
+    comm -23 \
+        <(git ls-files --cached --others --exclude-standard -- "$@" | sort -u) \
+        <(git ls-files --deleted -- "$@" | sort -u)
 }
+
+# a listed file the readers below cannot open fails only inside a process substitution, so it is refused here
+UNREADABLE_PATH_STRING_LIST=()
+while IFS= read -r LISTED_PATH_STRING; do
+    if [[ ! -f "${LISTED_PATH_STRING}" || ! -r "${LISTED_PATH_STRING}" ]]; then
+        UNREADABLE_PATH_STRING_LIST+=("${LISTED_PATH_STRING}")
+    fi
+done < <(list_repository_path '*.go' '*.md' '*go.mod')
+
+if [[ 0 -lt ${#UNREADABLE_PATH_STRING_LIST[@]} ]]; then
+    fail "the corpus lists ${#UNREADABLE_PATH_STRING_LIST[@]} file(s) the band cannot read: $(printf '%s ' "${UNREADABLE_PATH_STRING_LIST[@]}")"
+fi
 
 MAJOR_DIRECTORY_STRING_LIST=(
     "."

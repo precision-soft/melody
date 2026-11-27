@@ -240,7 +240,7 @@ How long a stopping http server waits for the requests it has already admitted b
 |--------------------------------|--------------------------------|---------|
 | `MELODY_HTTP_SHUTDOWN_TIMEOUT` | `kernel.http.shutdown_timeout` | `""`    |
 
-The value is a Go duration string of at least 1ms, and `unlimited` is refused: zero and negative values fail the boot. Without the key and the field the wait is [`DefaultHttpShutdownTimeout`](../../config/http.go), five seconds; a refused value names `ApplicationConfig.HttpServer.ShutdownTimeout`, and the key when the key carried it. The same budget bounds the shutdown of the server and the drain of the request scopes the kernel still holds, so a deployment whose supervisor grants a longer termination grace raises this to match.
+The value is a Go duration string of at least 1ms, and `unlimited` is refused, since an unlimited drain is a stop that never ends: one request that never finishes would hold the process past every supervisor's grace. Zero and negative values fail the boot. Without the key and the field the wait is [`DefaultHttpShutdownTimeout`](../../config/http.go), five seconds; a refused value names `ApplicationConfig.HttpServer.ShutdownTimeout`, and the key when the key carried it. The same budget bounds the shutdown of the server and the drain of the request scopes the kernel still holds, so a deployment whose supervisor grants a longer termination grace raises this to match.
 
 ### Teardown timeout
 

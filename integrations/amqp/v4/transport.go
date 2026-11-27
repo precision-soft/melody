@@ -173,7 +173,7 @@ func configuredHeaderLimit(limit bound.Count, defaultValue int) int {
 type TransportConfig struct {
     Exchange   string
     RoutingKey string
-    /* Prefetch is the unacknowledged deliveries in flight: 10 by default, 1 to 65535. */
+    /* Prefetch is the unacknowledged deliveries in flight: 10 by default, 1 to 65535, the range of the 16-bit prefetch count of basic.qos, unlimited refused. */
     Prefetch   bound.Count
     Serializer serializercontract.Serializer
     /* DeadLetterDisabled declares the queue without its <queue>.dlx exchange and <queue>.dlq queue, so a poison message is dropped; left out, it is dead-lettered. */

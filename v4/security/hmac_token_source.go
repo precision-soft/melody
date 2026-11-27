@@ -27,7 +27,7 @@ type HmacTokenSourceConfig struct {
     NonceGuard securitycontract.NonceGuard
     HeaderName string
 
-    /* Leeway tolerates clock skew on the issued and expiry checks, and the issued check one second more, the resolution of the IssuedAt claim: 5s when left out, bound.Of(time.Duration(0)) for strict, at most 5m, unlimited refused. The nonce guard remembers a nonce for the leeway too, since an envelope past its expiry by less than the leeway is still honoured and must still be refused as a replay. */
+    /* Leeway tolerates clock skew on the issued and expiry checks, and the issued check one second more, the resolution of the IssuedAt claim: 5s when left out, bound.Of(time.Duration(0)) for strict, at most 5m, since a wider skew is a misconfigured clock rather than drift, unlimited refused. The nonce guard remembers a nonce for the leeway too, since an envelope past its expiry by less than the leeway is still honoured and must still be refused as a replay. */
     Leeway bound.Duration
 
     /* MaxFutureExpiry caps how far past the verifier's clock an envelope's ExpiresAt may sit, since the nonce guard remembers each nonce until its envelope expires and the Leeway passes: 1h by default, at least 1s, unlimited refused, so a signer cannot make the guard hold a nonce for as long as it likes. */

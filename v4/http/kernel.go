@@ -51,7 +51,7 @@ type KernelConfig struct {
     /* NotFoundHandler answers a path no route matches; nil is the framework's 404. */
     NotFoundHandler httpcontract.Handler
 
-    /* UnavailableRetryAfter is the Retry-After of an infrastructure-failure 503: 5s when left out, 1s to 1h in whole seconds, unlimited refused. */
+    /* UnavailableRetryAfter is the Retry-After of an infrastructure-failure 503: 5s when left out, 1s to 1h in whole seconds, since a hint over an hour sends a client away from an outage that lasts seconds, unlimited refused. */
     UnavailableRetryAfter bound.Duration
 }
 

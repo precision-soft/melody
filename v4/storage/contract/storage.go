@@ -40,7 +40,7 @@ type Object struct {
 
 /* PresignConfig declares a presigned url; the zero value is a download link of the default expiry. */
 type PresignConfig struct {
-    /* Expiry is how long the url is honoured, read against PresignExpiryRule: 15m when left out, at least 1s, at most 7 days, unlimited refused, since the url is a bearer credential to the object. A value is applied in whole seconds. */
+    /* Expiry is how long the url is honoured, read against PresignExpiryRule: 15m when left out, at least 1s, at most 7 days, the longest a SigV4 presigned url is signed for, unlimited refused, since the url is a bearer credential to the object. A value is applied in whole seconds. */
     Expiry bound.Duration
 
     /* Method is the http method the url is signed for: http.MethodGet, a download, when left out; http.MethodPut signs an upload of the key, which binds neither a content type nor a size. Any other method is refused with ErrPresignUnsupported. */

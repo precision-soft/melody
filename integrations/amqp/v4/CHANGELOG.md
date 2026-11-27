@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- `transport.go`: the GoDoc of `TransportConfig.Prefetch` states that its range is the one of the 16-bit prefetch count of `basic.qos` and that unlimited is refused
 - **Breaking** — `server_sent_event_backplane.go`: `NewServerSentEventBackplane` refuses a typed-nil `ServerSentEventBackplaneConfig.Logger` as `amqp server sent event backplane logger is a typed nil`, naming the field, where it read as absent; **Behavioural change**: a backplane built without a logger reports its failures on the emergency logger, where only a terminal stop reached it.
 - `README.md`: the bus samples dispatch with the fourth major's `messagebuscontract.DispatchOptions{}` and build the handle middleware with `messagebus.HandleMiddlewareConfig{}`.
 - **Breaking** — `server_sent_event_backplane.go`: `ServerSentEventBackplane.Publish(runtimeInstance, topic, event)` takes the caller's runtime, as `http.ServerSentEventBackplane` now declares; a nil runtime is refused naming `door` `amqp.ServerSentEventBackplane.Publish`, a done context is refused before the event is encoded with `sse backplane publish refused: the caller's context is done` and the context's cause, and the wait for the turn ends at the earlier of `CallTimeout`, the caller's context and the backplane's close, a turn lost to the caller's context keeping the channel and marking nothing, and a write once begun is waited for under `CallTimeout` alone.
