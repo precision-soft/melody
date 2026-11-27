@@ -30,6 +30,9 @@ type Cache interface {
 
     Decrement(runtimeInstance containercontract.Runtime, key string, delta int64, options CounterOptions) (int64, error)
 
+    /* GetCounter reads a key Increment or Decrement wrote, counting nothing: the count is stored as decimal text rather than through the serializer, so Get cannot read it. An absent or expired key answers false and no error; a payload that is not such a count is refused naming the key. */
+    GetCounter(runtimeInstance containercontract.Runtime, key string) (int64, bool, error)
+
     /* RoundTrip writes into target what value reads back as once stored: the cache's own encoding applied and undone locally, the store untouched. Remember gives through it every caller of one flight a value of its own, and refuses once a value that can be written but not read back as its type. A cache that stores values rather than payloads answers a copy as deep as its reads are. */
     RoundTrip(value any, target any) error
 

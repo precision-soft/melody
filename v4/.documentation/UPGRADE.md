@@ -742,6 +742,14 @@ A lock store closed by the teardown while the work still winds down now reads as
 
 **Remedy.** Nothing for a deployment that stops cleanly, since the close compacts. Before a rollback to a build without the journal, stop the process cleanly, or start once with `JournalDisabled: true`, which replays and compacts a journal left at the path and removes it; a deployment that needs the snapshot alone at every instant keeps `JournalDisabled: true`. A backup copies both files, or copies the snapshot after a clean stop.
 
+### Cache: a counter is read through the contract
+
+**What changed.** [`cachecontract.Cache`](../cache/contract/cache.go) declares `GetCounter(runtimeInstance, key) (int64, bool, error)`, the read of a key `Increment` or `Decrement` wrote, counting nothing, an absent or expired key answering false with no error; [`cache.Bound`](../cache/bound.go) forwards it as `GetCounter(key)`. `Manager.GetCounter` answered it before on the manager alone.
+
+**Symptom.** A `Cache` of the application's own, a decorator or a test double, no longer satisfies the interface: `missing method GetCounter`.
+
+**Remedy.** Add `GetCounter(runtimeInstance containercontract.Runtime, key string) (int64, bool, error)`, forwarded to the wrapped cache by a decorator; a fake that stores values answers the count it holds under the key. A caller that asserted the cache to `*cache.Manager` to read a counter calls `cache.For(runtimeInstance, cacheInstance).GetCounter(key)` instead.
+
 ### Cache: a counter carries its ttl
 
 **What changed.** [`cachecontract.Cache`](../cache/contract/cache.go) and `Backend` take `Increment(runtimeInstance, key, delta, options)` and `Decrement(runtimeInstance, key, delta, options)`, the options a [`CounterOptions`](../cache/contract/counter.go): `Ttl`, read as a write's ttl (at least 1s, `bound.UnlimitedDuration()` for none, absent refused), and `RefreshTtl`, false for a fixed window written when the call creates the key or finds it without an expiry, true for a sliding window rewritten on every call; an unlimited sliding call removes an expiry the key carries. The in-memory and the redis backends implement both, the redis one in one script.

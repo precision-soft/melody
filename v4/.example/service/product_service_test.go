@@ -14,36 +14,158 @@ import (
     "github.com/precision-soft/melody/v4/.example/repository"
     melodybound "github.com/precision-soft/melody/v4/bound"
     melodycache "github.com/precision-soft/melody/v4/cache"
+    melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclock "github.com/precision-soft/melody/v4/clock"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyevent "github.com/precision-soft/melody/v4/event"
 )
 
-func TestProductService_RecordViewCountsEachReadOnTheProductsOwnCounter(t *testing.T) {
-    backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{CleanupInterval: melodybound.Of(time.Minute), Clock: melodyclock.NewSystemClock()})
+func viewCounterUnderTest(t *testing.T, window time.Duration) (*ProductService, *melodycache.Manager, *frozenClock) {
+    t.Helper()
+
+    clockInstance := &frozenClock{instant: currencyQuoteInstant}
+    backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{CleanupInterval: melodybound.Of(time.Minute), Clock: clockInstance})
     manager := melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
     t.Cleanup(func() { _ = manager.CloseWithContext(context.Background()) })
 
-    productService := NewProductService(nil, nil, nil, manager, nil, nil)
+    return NewProductService(nil, nil, nil, manager, nil, clockInstance, window), manager, clockInstance
+}
+
+func recordViewOrFail(t *testing.T, productService *ProductService, id string) ProductViews {
+    t.Helper()
+
+    views, recordErr := productService.RecordView(exampleTestRuntime(), id)
+    if nil != recordErr {
+        t.Fatalf("record: %v", recordErr)
+    }
+
+    return views
+}
+
+func TestProductService_RecordViewCountsEachReadOnTheProductsOwnCounter(t *testing.T) {
+    productService, manager, _ := viewCounterUnderTest(t, time.Hour)
 
     for expected := int64(1); expected <= 2; expected++ {
-        views, recordErr := productService.RecordView(exampleTestRuntime(), "prod-1")
-        if nil != recordErr {
-            t.Fatalf("record: %v", recordErr)
-        }
-
-        if expected != views {
-            t.Fatalf("expected %d views, got %d", expected, views)
+        if views := recordViewOrFail(t, productService, "prod-1"); expected != views.Total || expected != views.Daily {
+            t.Fatalf("expected %d views, got %+v", expected, views)
         }
     }
 
-    other, otherErr := productService.RecordView(exampleTestRuntime(), "prod-2")
-    if nil != otherErr || 1 != other {
-        t.Fatalf("expected another product to count from one, got %d (%v)", other, otherErr)
+    if other := recordViewOrFail(t, productService, "prod-2"); 1 != other.Total || 1 != other.Daily {
+        t.Fatalf("expected another product to count from one, got %+v", other)
     }
 
     stored, exists, readErr := manager.GetCounter(exampleTestRuntime(), CacheKeyProductViews("prod-1"))
     if nil != readErr || false == exists || 2 != stored {
         t.Fatalf("expected the counter under the product's key to hold 2, got %d exists=%t (%v)", stored, exists, readErr)
+    }
+
+    storedDaily, dailyExists, dailyErr := manager.GetCounter(exampleTestRuntime(), CacheKeyProductDailyViews("prod-1"))
+    if nil != dailyErr || false == dailyExists || 2 != storedDaily {
+        t.Fatalf("expected the window counter under the product's key to hold 2, got %d exists=%t (%v)", storedDaily, dailyExists, dailyErr)
+    }
+}
+
+func TestProductService_RecordViewCountsTheWindowOnAFixedCounter(t *testing.T) {
+    window := 24 * time.Hour
+    productService, _, clockInstance := viewCounterUnderTest(t, window)
+
+    for range 3 {
+        recordViewOrFail(t, productService, "prod-1")
+    }
+
+    if views := recordViewOrFail(t, productService, "prod-1"); 4 != views.Total || 4 != views.Daily {
+        t.Fatalf("expected four views inside the window, got %+v", views)
+    }
+
+    clockInstance.instant = clockInstance.instant.Add(window + time.Second)
+
+    if views := recordViewOrFail(t, productService, "prod-1"); 5 != views.Total || 1 != views.Daily {
+        t.Fatalf("expected the window to start again past its span while the total kept counting, got %+v", views)
+    }
+}
+
+func TestProductService_RecordViewDoesNotSlideTheWindow(t *testing.T) {
+    window := time.Hour
+    productService, _, clockInstance := viewCounterUnderTest(t, window)
+
+    recordViewOrFail(t, productService, "prod-1")
+
+    clockInstance.instant = clockInstance.instant.Add(window - time.Second)
+    if views := recordViewOrFail(t, productService, "prod-1"); 2 != views.Daily {
+        t.Fatalf("expected the second view inside the window, got %+v", views)
+    }
+
+    clockInstance.instant = clockInstance.instant.Add(2 * time.Second)
+    if views := recordViewOrFail(t, productService, "prod-1"); 1 != views.Daily || 3 != views.Total {
+        t.Fatalf("expected the window opened by the first view to close one span after it, got %+v", views)
+    }
+}
+
+func TestProductService_ViewsReadsBothCountersAndCountsNothing(t *testing.T) {
+    productService, _, clockInstance := viewCounterUnderTest(t, time.Hour)
+
+    if views, viewsErr := productService.Views(exampleTestRuntime(), "prod-1"); nil != viewsErr || (ProductViews{}) != views {
+        t.Fatalf("expected a product never read to read 0 and 0, got %+v (%v)", views, viewsErr)
+    }
+
+    recordViewOrFail(t, productService, "prod-1")
+    recordViewOrFail(t, productService, "prod-1")
+
+    for range 2 {
+        views, viewsErr := productService.Views(exampleTestRuntime(), "prod-1")
+        if nil != viewsErr || 2 != views.Total || 2 != views.Daily {
+            t.Fatalf("expected the read to answer both counters without counting, got %+v (%v)", views, viewsErr)
+        }
+    }
+
+    if views := recordViewOrFail(t, productService, "prod-1"); 3 != views.Total || 3 != views.Daily {
+        t.Fatalf("expected the reads to have counted nothing, got %+v", views)
+    }
+
+    if time.Hour != productService.ViewsWindow() {
+        t.Fatalf("expected the window the service was built with, got %s", productService.ViewsWindow())
+    }
+
+    clockInstance.instant = clockInstance.instant.Add(time.Hour + time.Second)
+    if views, viewsErr := productService.Views(exampleTestRuntime(), "prod-1"); nil != viewsErr || 3 != views.Total || 0 != views.Daily {
+        t.Fatalf("expected the closed window to read 0 beside the total, got %+v (%v)", views, viewsErr)
+    }
+}
+
+/* windowRefusingCache refuses every door on the window counter's keys, so the total's succeeds alone */
+type windowRefusingCache struct {
+    melodycachecontract.Cache
+}
+
+var errWindowCounterRefused = errors.New("the window counter was refused")
+
+func (instance *windowRefusingCache) Increment(runtimeInstance melodycontainercontract.Runtime, key string, delta int64, options melodycachecontract.CounterOptions) (int64, error) {
+    if true == strings.HasPrefix(key, cacheKeyProductDailyViewsPrefix) {
+        return 0, errWindowCounterRefused
+    }
+
+    return instance.Cache.Increment(runtimeInstance, key, delta, options)
+}
+
+func (instance *windowRefusingCache) GetCounter(runtimeInstance melodycontainercontract.Runtime, key string) (int64, bool, error) {
+    if true == strings.HasPrefix(key, cacheKeyProductDailyViewsPrefix) {
+        return 0, false, errWindowCounterRefused
+    }
+
+    return instance.Cache.GetCounter(runtimeInstance, key)
+}
+
+func TestProductService_AWindowCounterRefusedIsAnswered(t *testing.T) {
+    _, manager, clockInstance := viewCounterUnderTest(t, time.Hour)
+    productService := NewProductService(nil, nil, nil, &windowRefusingCache{Cache: manager}, nil, clockInstance, time.Hour)
+
+    if views, recordErr := productService.RecordView(exampleTestRuntime(), "prod-1"); false == errors.Is(recordErr, errWindowCounterRefused) || (ProductViews{}) != views {
+        t.Fatalf("expected the window counter's refusal answered with no counts, got %+v (%v)", views, recordErr)
+    }
+
+    if views, viewsErr := productService.Views(exampleTestRuntime(), "prod-1"); false == errors.Is(viewsErr, errWindowCounterRefused) || (ProductViews{}) != views {
+        t.Fatalf("expected the window counter's refusal answered by the read, got %+v (%v)", views, viewsErr)
     }
 }
 
@@ -57,7 +179,7 @@ func TestProductService_RefusesAReferenceThatNamesNothing(t *testing.T) {
     }
 
     productRepository := newInMemoryProductRepositoryForTest(t)
-    productService := NewProductService(productRepository, NewCategoryService(categoryRepository, productRepository, newTtlRecordingCache(), nil), currencyService, newTtlRecordingCache(), nil, &frozenClock{instant: currencyQuoteInstant})
+    productService := NewProductService(productRepository, NewCategoryService(categoryRepository, productRepository, newTtlRecordingCache(), nil), currencyService, newTtlRecordingCache(), nil, &frozenClock{instant: currencyQuoteInstant}, time.Hour)
 
     if _, createErr := productService.Create(runtimeInstance, "prod-probe", "Probe", "d", "cat-absent", 1, "cur-eur", 1); false == errors.Is(createErr, repository.ErrUnknownCategory) {
         t.Fatalf("a create naming no category answered %v", createErr)
@@ -95,7 +217,7 @@ func (instance *paddingProductRepository) FindById(ctx context.Context, id strin
 
 func TestProductService_FindByIdAnswersAPaddedIdentifierAsAbsentAndCachesNothingUnderIt(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
-    productService := NewProductService(&paddingProductRepository{ProductRepository: newInMemoryProductRepositoryForTest(t)}, nil, nil, cacheInstance, nil, &frozenClock{instant: currencyQuoteInstant})
+    productService := NewProductService(&paddingProductRepository{ProductRepository: newInMemoryProductRepositoryForTest(t)}, nil, nil, cacheInstance, nil, &frozenClock{instant: currencyQuoteInstant}, time.Hour)
 
     assertPaddedIdentifierAnsweredAbsent(t, cacheInstance, CacheKeyProductById, func(id string) (bool, error) {
         _, found, findErr := productService.FindById(exampleTestRuntime(), id)
@@ -124,12 +246,12 @@ func TestProductService_AnswersTheCommittedRowWhenADispatchFails(t *testing.T) {
     catalogue.assertCommittedDispatchFailure(t, event.EventProductUpdated, "prod-committed", CacheKeyProductList, CacheKeyProductById("prod-committed"))
 
     catalogue.logger.records = nil
-    catalogue.prime(t, CacheKeyProductList, CacheKeyProductById("prod-committed"), CacheKeyProductViews("prod-committed"))
+    catalogue.prime(t, CacheKeyProductList, CacheKeyProductById("prod-committed"), CacheKeyProductViews("prod-committed"), CacheKeyProductDailyViews("prod-committed"))
     deleted, deleteErr := catalogue.product.DeleteById(catalogue.runtime, "prod-committed")
     if nil != deleteErr || false == deleted {
         t.Fatalf("expected the delete answered, got %t, %v", deleted, deleteErr)
     }
-    catalogue.assertCommittedDispatchFailure(t, event.EventProductDeleted, "prod-committed", CacheKeyProductList, CacheKeyProductById("prod-committed"), CacheKeyProductViews("prod-committed"))
+    catalogue.assertCommittedDispatchFailure(t, event.EventProductDeleted, "prod-committed", CacheKeyProductList, CacheKeyProductById("prod-committed"), CacheKeyProductViews("prod-committed"), CacheKeyProductDailyViews("prod-committed"))
 }
 
 func TestProductService_JournalsNothingWhenTheDispatchSucceeds(t *testing.T) {
@@ -162,7 +284,7 @@ func TestProductService_ARefusedUpdateLeavesTheStoredEntityUntouched(t *testing.
         t.Fatalf("build the product repository: %v", productRepositoryErr)
     }
 
-    productService := NewProductService(&refusingUpdateProductRepository{ProductRepository: productRepository}, catalogue.category, catalogue.currency, catalogue.cache, melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()}), melodyclock.NewSystemClock())
+    productService := NewProductService(&refusingUpdateProductRepository{ProductRepository: productRepository}, catalogue.category, catalogue.currency, catalogue.cache, melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()}), melodyclock.NewSystemClock(), time.Hour)
 
     before, _, _ := productRepository.FindById(context.Background(), "prod-1")
     name := before.Name
@@ -190,7 +312,7 @@ func (instance *slowProductRepository) FindById(ctx context.Context, id string) 
 }
 
 func TestProductService_TheReadDoorsEndOnTheCallersContext(t *testing.T) {
-    productService := NewProductService(&slowProductRepository{}, nil, nil, newTtlRecordingCache(), nil, melodyclock.NewSystemClock())
+    productService := NewProductService(&slowProductRepository{}, nil, nil, newTtlRecordingCache(), nil, melodyclock.NewSystemClock(), time.Hour)
 
     assertACanceledContextEndsTheRead(t, "List", func(ctx context.Context) error {
         _, listErr := productService.List(exampleTestRuntimeUnder(ctx))
@@ -218,7 +340,7 @@ func TestTheCatalogueListIsAnsweredTypedFromACacheWrittenByAnotherProcess(t *tes
     }
 
     /* no repository: a read that reached it would panic, so the list can only come from the store */
-    products, listErr := NewProductService(nil, nil, nil, reader, nil, nil).List(exampleTestRuntime())
+    products, listErr := NewProductService(nil, nil, nil, reader, nil, nil, time.Hour).List(exampleTestRuntime())
     if nil != listErr || 1 != len(products) || *stored[0] != *products[0] {
         t.Fatalf("expected the stored list answered typed, got %#v (%v)", products, listErr)
     }

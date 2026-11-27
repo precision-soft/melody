@@ -316,6 +316,10 @@ func (instance *valueCache) Increment(runtimeInstance melodycontainercontract.Ru
     return 0, nil
 }
 
+func (instance *valueCache) GetCounter(runtimeInstance melodycontainercontract.Runtime, key string) (int64, bool, error) {
+    return 0, false, nil
+}
+
 func (instance *valueCache) Decrement(runtimeInstance melodycontainercontract.Runtime, key string, delta int64, options melodycachecontract.CounterOptions) (int64, error) {
     return 0, nil
 }

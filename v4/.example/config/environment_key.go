@@ -16,6 +16,7 @@ const (
     environmentKeyCatalogTitle             = "APP_CATALOG_TITLE"
     environmentKeyCronProductUser          = "APP_CRON_PRODUCT_USER"
     environmentKeyReportingRefreshInterval = "APP_REPORTING_REFRESH_INTERVAL"
+    environmentKeyProductViewsWindow       = "APP_PRODUCT_VIEWS_WINDOW"
 )
 
 const (
@@ -24,6 +25,7 @@ const (
     parameterCatalogTitle             = "app.catalog_title"
     parameterCronProductUser          = "app.cron.product_user"
     parameterReportingRefreshInterval = "app.reporting.refresh_interval"
+    parameterProductViewsWindow       = wiring.ParameterProductViewsWindow
 
     parameterMysqlHost     = "app.mysql.host"
     parameterMysqlPort     = "app.mysql.port"
@@ -85,6 +87,7 @@ const (
     defaultCatalogTitle             = "Melody Example Catalog"
     defaultCronProductUser          = "catalog"
     defaultReportingRefreshInterval = 5 * time.Minute
+    defaultProductViewsWindow       = 24 * time.Hour
 
     /* the seed quotes against the euro; a deployment names another base only when it reseeds against another */
     defaultRatesBaseCurrency = "EUR"
@@ -98,6 +101,8 @@ func EnvironmentKeys() []configcontract.EnvironmentKey {
         exampleKey(environmentKeyCatalogTitle, parameterCatalogTitle, defaultCatalogTitle, false, nil),
         exampleKey(environmentKeyCronProductUser, parameterCronProductUser, defaultCronProductUser, false, nil),
         exampleKey(environmentKeyReportingRefreshInterval, parameterReportingRefreshInterval, defaultReportingRefreshInterval.String(), false, melodyconfig.LimitKeyRule(melodybound.Rule[time.Duration]{Default: defaultReportingRefreshInterval})),
+        /* a counter's ttl is at least a second, so a shorter window refuses the boot rather than every read */
+        exampleKey(environmentKeyProductViewsWindow, parameterProductViewsWindow, defaultProductViewsWindow.String(), false, melodyconfig.LimitKeyRule(melodybound.Rule[time.Duration]{Default: defaultProductViewsWindow, Minimum: time.Second})),
 
         exampleKey(environmentKeyMysqlHost, parameterMysqlHost, "", false, nil),
         exampleKey(environmentKeyMysqlPort, parameterMysqlPort, "", false, nil),

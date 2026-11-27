@@ -99,7 +99,7 @@ func ApiReadHandler() melodyhttpcontract.Handler {
         }
 
         response.Converted = converted
-        response.Views = recordedViews(runtimeInstance, productService, product.Id)
+        response.Views, response.DailyViews, response.ViewsWindowSeconds = recordedViews(runtimeInstance, productService, product.Id)
 
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, response), nil
     }
@@ -128,17 +128,20 @@ type readResponse struct {
     /* a pointer with omitempty, so a read that asked for no conversion carries no key */
     Converted *ConvertedPriceResponse `json:"converted,omitempty"`
 
-    /* how many times the product has been read, this read included; absent when the counter could not be written */
-    Views *int64 `json:"views,omitempty"`
+    /* how many times the product has been read, this read included, in all and in the current window, and the window's span; all three absent when a counter could not be written */
+    Views              *int64 `json:"views,omitempty"`
+    DailyViews         *int64 `json:"dailyViews,omitempty"`
+    ViewsWindowSeconds *int64 `json:"viewsWindowSeconds,omitempty"`
 }
 
-/* productViewRecorder is the one door of the product service the read handler counts through */
+/* productViewRecorder is the part of the product service the read handler counts through */
 type productViewRecorder interface {
-    RecordView(runtimeInstance melodycontainercontract.Runtime, id string) (int64, error)
+    RecordView(runtimeInstance melodycontainercontract.Runtime, id string) (service.ProductViews, error)
+    ViewsWindow() time.Duration
 }
 
-/* recordedViews counts the read and answers the count, or nothing when the cache refused: the counter is a hint, so its failure is journaled at warning and the product is still answered */
-func recordedViews(runtimeInstance melodycontainercontract.Runtime, recorder productViewRecorder, productId string) *int64 {
+/* recordedViews counts the read and answers both counts with the window, or none of them when the cache refused: the counters are a hint, so their failure is journaled at warning and the product is still answered */
+func recordedViews(runtimeInstance melodycontainercontract.Runtime, recorder productViewRecorder, productId string) (*int64, *int64, *int64) {
     views, recordErr := recorder.RecordView(runtimeInstance, productId)
     if nil != recordErr {
         examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
@@ -146,10 +149,12 @@ func recordedViews(runtimeInstance melodycontainercontract.Runtime, recorder pro
             melodyexception.LogContext(recordErr, melodyexception.LogContextConfig{Extra: melodyexceptioncontract.Context{"productId": productId}}),
         )
 
-        return nil
+        return nil, nil, nil
     }
 
-    return &views
+    windowSeconds := int64(recorder.ViewsWindow() / time.Second)
+
+    return &views.Total, &views.Daily, &windowSeconds
 }
 
 /* ConvertedPriceResponse is the product's price restated in the currency the caller named. RateAsOf is the older of the two quotes the conversion reads, the product's own currency and the one named, so the price is never presented as fresher than either. */

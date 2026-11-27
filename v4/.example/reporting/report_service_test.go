@@ -276,6 +276,10 @@ func (instance *readingCache) Increment(runtimeInstance melodycontainercontract.
     return 0, nil
 }
 
+func (instance *readingCache) GetCounter(runtimeInstance melodycontainercontract.Runtime, key string) (int64, bool, error) {
+    return 0, false, nil
+}
+
 func (instance *readingCache) Decrement(runtimeInstance melodycontainercontract.Runtime, key string, delta int64, options melodycachecontract.CounterOptions) (int64, error) {
     return 0, nil
 }
@@ -401,7 +405,7 @@ func newReportServiceWithArchive(
 
     reportService, buildErr := NewCatalogReportService(
         NewReportFormatter(),
-        service.NewProductService(&emptyProductRepository{}, nil, nil, cacheInstance, nil, clockInstance),
+        service.NewProductService(&emptyProductRepository{}, nil, nil, cacheInstance, nil, clockInstance, time.Hour),
         &stubJournalRepository{},
         cacheInstance,
         clockInstance,
@@ -865,7 +869,7 @@ func TestCatalogReportServiceRefresh_ListsTheProductsThroughItsContext(t *testin
 
     reportService, buildErr := NewCatalogReportService(
         NewReportFormatter(),
-        service.NewProductService(&stalledProductRepository{}, nil, nil, cacheInstance, nil, clockInstance),
+        service.NewProductService(&stalledProductRepository{}, nil, nil, cacheInstance, nil, clockInstance, time.Hour),
         &stubJournalRepository{},
         cacheInstance,
         clockInstance,
@@ -925,7 +929,7 @@ func TestCatalogReadingHeadlineCountsTheProductsNotTheJournal(t *testing.T) {
     clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 6, 10, 0, 0, 0, time.UTC))
     cacheInstance := &readingCache{values: map[string]any{}}
 
-    reportService, buildErr := NewCatalogReportService(NewReportFormatter(), service.NewProductService(&countedProductRepository{count: 3}, nil, nil, cacheInstance, nil, clockInstance), &stubJournalRepository{}, cacheInstance, clockInstance, "catalog", 10, time.Minute)
+    reportService, buildErr := NewCatalogReportService(NewReportFormatter(), service.NewProductService(&countedProductRepository{count: 3}, nil, nil, cacheInstance, nil, clockInstance, time.Hour), &stubJournalRepository{}, cacheInstance, clockInstance, "catalog", 10, time.Minute)
     if nil != buildErr {
         t.Fatalf("new report service: %v", buildErr)
     }

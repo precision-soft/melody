@@ -314,7 +314,7 @@ func TestTheCatalogueListsAreRememberedUnderTheEntityBound(t *testing.T) {
 
     categoryService := NewCategoryService(categoryRepository, productRepository, cacheInstance, nil)
     currencyService := NewCurrencyService(currencyRepository, productRepository, cacheInstance, nil, melodyclock.NewSystemClock())
-    productService := NewProductService(productRepository, categoryService, currencyService, cacheInstance, nil, melodyclock.NewSystemClock())
+    productService := NewProductService(productRepository, categoryService, currencyService, cacheInstance, nil, melodyclock.NewSystemClock(), time.Hour)
     userRepository, _ := repository.NewUserRepository(storage, &persistence.CatalogSchema{})
     userService := NewUserService(userRepository, cacheInstance, nil)
 

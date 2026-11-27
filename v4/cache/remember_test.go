@@ -843,6 +843,10 @@ func (instance testValueKindCache) Increment(runtimeInstance containercontract.R
     return instance.inner.Increment(runtimeInstance, key, delta, options)
 }
 
+func (instance testValueKindCache) GetCounter(runtimeInstance containercontract.Runtime, key string) (int64, bool, error) {
+    return instance.inner.GetCounter(runtimeInstance, key)
+}
+
 func (instance testValueKindCache) Decrement(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
     return instance.inner.Decrement(runtimeInstance, key, delta, options)
 }
@@ -957,6 +961,10 @@ func (instance *testPanickingSetCache) DeleteMultiple(runtimeInstance containerc
 
 func (instance *testPanickingSetCache) Increment(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
     return instance.inner.Increment(runtimeInstance, key, delta, options)
+}
+
+func (instance *testPanickingSetCache) GetCounter(runtimeInstance containercontract.Runtime, key string) (int64, bool, error) {
+    return instance.inner.GetCounter(runtimeInstance, key)
 }
 
 func (instance *testPanickingSetCache) Decrement(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
@@ -1082,6 +1090,10 @@ func (instance *testScriptedCache) DeleteMultiple(runtimeInstance containercontr
 
 func (instance *testScriptedCache) Increment(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
     return 0, nil
+}
+
+func (instance *testScriptedCache) GetCounter(runtimeInstance containercontract.Runtime, key string) (int64, bool, error) {
+    return 0, false, nil
 }
 
 func (instance *testScriptedCache) Decrement(runtimeInstance containercontract.Runtime, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {

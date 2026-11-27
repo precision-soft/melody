@@ -3,6 +3,7 @@ package config
 import (
     "bufio"
     "context"
+    "errors"
     "io/fs"
     "os"
     "path/filepath"
@@ -12,6 +13,7 @@ import (
     "testing/fstest"
 
     melodyconfig "github.com/precision-soft/melody/v4/config"
+    melodyexception "github.com/precision-soft/melody/v4/exception"
 )
 
 func exampleConfiguration(t *testing.T, values map[string]string) *melodyconfig.Configuration {
@@ -288,6 +290,7 @@ func TestExampleKeys_AnAbsentOrBlankLineTakesTheDeclaredDefault(t *testing.T) {
         {environmentKeyHttpAddress, parameterHttpAddress, defaultHttpAddress},
         {environmentKeyMaxItemsPerPage, parameterMaxItemsPerPage, "25"},
         {environmentKeyReportingRefreshInterval, parameterReportingRefreshInterval, defaultReportingRefreshInterval.String()},
+        {environmentKeyProductViewsWindow, parameterProductViewsWindow, "24h0m0s"},
         {environmentKeyDeviceIdentifierMaxBytes, parameterDeviceIdentifierMaxBytes, "64"},
     } {
         for _, values := range []map[string]string{{}, {testCase.environmentKey: ""}} {
@@ -301,6 +304,22 @@ func TestExampleKeys_AnAbsentOrBlankLineTakesTheDeclaredDefault(t *testing.T) {
     for parameter, expected := range map[string]string{parameterCatalogTitle: defaultCatalogTitle, parameterCronProductUser: defaultCronProductUser} {
         if value := absent.MustGet(parameter).String(); expected != value {
             t.Errorf("expected %s to answer %q when absent, got %q", parameter, expected, value)
+        }
+    }
+}
+
+func TestExampleKeys_TheViewsWindowRefusesAValueUnderOneSecond(t *testing.T) {
+    for _, refused := range []string{"999ms", "0", "0s", "-1h", "unlimited", "a day"} {
+        checkErr := exampleConfiguration(t, map[string]string{environmentKeyProductViewsWindow: refused}).CheckEnvironmentKeys()
+        var refusal *melodyexception.Error
+        if false == errors.As(checkErr, &refusal) || environmentKeyProductViewsWindow != refusal.Context()["environmentKey"] {
+            t.Errorf("expected %s=%q refused naming the key, got %v", environmentKeyProductViewsWindow, refused, checkErr)
+        }
+    }
+
+    for _, admitted := range []string{"", "1s", "1h", "168h"} {
+        if checkErr := exampleConfiguration(t, map[string]string{environmentKeyProductViewsWindow: admitted}).CheckEnvironmentKeys(); nil != checkErr {
+            t.Errorf("expected %s=%q admitted, got %v", environmentKeyProductViewsWindow, admitted, checkErr)
         }
     }
 }

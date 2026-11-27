@@ -547,7 +547,7 @@ func TestCurrencyService_AProductWriteCannotPassItsCheckWhileTheCurrencyIsDelete
     productRepository := newInMemoryProductRepositoryForTest(t)
     gated := &gatedCurrencyRepository{CurrencyRepository: currencyRepository, entered: make(chan struct{}), release: make(chan struct{})}
     currencyService := NewCurrencyService(gated, productRepository, newTtlRecordingCache(), dispatcher.dispatcher, clockInstance)
-    productService := NewProductService(productRepository, NewCategoryService(categoryRepository, productRepository, newTtlRecordingCache(), dispatcher.dispatcher), currencyService, newTtlRecordingCache(), dispatcher.dispatcher, clockInstance)
+    productService := NewProductService(productRepository, NewCategoryService(categoryRepository, productRepository, newTtlRecordingCache(), dispatcher.dispatcher), currencyService, newTtlRecordingCache(), dispatcher.dispatcher, clockInstance, time.Hour)
 
     deleteDone := make(chan error, 1)
     go func() {

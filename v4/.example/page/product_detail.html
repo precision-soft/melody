@@ -23,6 +23,8 @@
 
     <div class="alert alert-info py-2" id="status">Loading...</div>
 
+    <p class="text-muted small d-none" id="productViews"></p>
+
     <div class="row g-3">
         <div class="col-lg-6">
             <div class="card shadow-sm">
@@ -136,6 +138,31 @@
             const createdAtInput = $('#productCreatedAt');
             const updatedAtInput = $('#productUpdatedAt');
             const debug = $('#debug');
+            const productViews = $('#productViews');
+
+            /* the window is a key of the deployment, so the line names its span rather than saying "day" */
+            const windowLabel = (seconds) => {
+                for (const [unit, span] of [['d', 86400], ['h', 3600], ['m', 60]]) {
+                    if (0 === seconds % span) {
+                        return String(seconds / span) + unit;
+                    }
+                }
+
+                return String(seconds) + 's';
+            };
+
+            const renderViews = (detail) => {
+                const views = detail?.views;
+                const dailyViews = detail?.dailyViews;
+                const windowSeconds = detail?.viewsWindowSeconds;
+                if (undefined === views || undefined === dailyViews || undefined === windowSeconds) {
+                    return;
+                }
+
+                productViews
+                    .text('Viewed ' + String(views) + ' times, ' + String(dailyViews) + ' in the current window (' + windowLabel(Number(windowSeconds)) + ')')
+                    .removeClass('d-none');
+            };
 
             const populateSelectOptions = (selectElement, options, valueKey, labelKey) => {
                 const element = $(selectElement);
@@ -200,6 +227,7 @@
                     populateSelectOptions(currencyIdInput, detail?.currencies ?? [], 'id', 'code');
 
                     renderProduct(detail?.product ?? null);
+                    renderViews(detail);
                     deleteButton.removeClass('d-none');
                     debug.text(JSON.stringify(detailResult, null, 2));
                     window.melodyExample.ui.setStatus('');

@@ -2,6 +2,7 @@ package service
 
 import (
     "context"
+    "time"
 
     "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/.example/event"
@@ -27,14 +28,16 @@ func NewProductService(
     cacheInstance melodycachecontract.Cache,
     eventDispatcher melodyeventcontract.EventDispatcher,
     clockInstance melodyclockcontract.Clock,
+    productViewsWindow time.Duration,
 ) *ProductService {
     return &ProductService{
-        productRepository: productRepository,
-        categoryService:   categoryService,
-        currencyService:   currencyService,
-        cache:             cacheInstance,
-        eventDispatcher:   eventDispatcher,
-        clock:             clockInstance,
+        productRepository:  productRepository,
+        categoryService:    categoryService,
+        currencyService:    currencyService,
+        cache:              cacheInstance,
+        eventDispatcher:    eventDispatcher,
+        clock:              clockInstance,
+        productViewsWindow: productViewsWindow,
     }
 }
 
@@ -46,6 +49,14 @@ type ProductService struct {
     cache             melodycachecontract.Cache
     eventDispatcher   melodyeventcontract.EventDispatcher
     clock             melodyclockcontract.Clock
+
+    productViewsWindow time.Duration
+}
+
+/* ProductViews is a product's two view counters: Total since the product was first read, Daily since the first read of the current window, which lasts ViewsWindow from that read. */
+type ProductViews struct {
+    Total int64
+    Daily int64
 }
 
 func (instance *ProductService) List(runtimeInstance melodycontainercontract.Runtime) ([]*entity.Product, error) {
@@ -123,9 +134,43 @@ func (instance *ProductService) refuseUnknownReferences(ctx context.Context, cat
     return nil
 }
 
-/* RecordView counts one read of a product and answers the count so far. The counter is the cache backend's atomic increment, shared by every process on the shared cache; it is a hint rather than a ledger, since example:cache:clear and example:db:reset empty the namespace it lives in. */
-func (instance *ProductService) RecordView(runtimeInstance melodycontainercontract.Runtime, id string) (int64, error) {
-    return cache.For(runtimeInstance, instance.cache).Increment(CacheKeyProductViews(id), 1, melodycachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
+/* RecordView counts one read of a product on both counters and answers the counts so far. Each counter is the cache backend's atomic increment, shared by every process on the shared cache; they are hints rather than a ledger, since example:cache:clear and example:db:reset empty the namespace they live in. The window's counter is a fixed window: its expiry is written by the read that creates it and never moved by the later ones. */
+func (instance *ProductService) RecordView(runtimeInstance melodycontainercontract.Runtime, id string) (ProductViews, error) {
+    boundCache := cache.For(runtimeInstance, instance.cache)
+
+    total, totalErr := boundCache.Increment(CacheKeyProductViews(id), 1, melodycachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
+    if nil != totalErr {
+        return ProductViews{}, totalErr
+    }
+
+    daily, dailyErr := boundCache.Increment(CacheKeyProductDailyViews(id), 1, melodycachecontract.CounterOptions{Ttl: bound.Of(instance.productViewsWindow)})
+    if nil != dailyErr {
+        return ProductViews{}, dailyErr
+    }
+
+    return ProductViews{Total: total, Daily: daily}, nil
+}
+
+/* Views reads both counters without counting a read; a counter never written, or whose window closed, reads 0. */
+func (instance *ProductService) Views(runtimeInstance melodycontainercontract.Runtime, id string) (ProductViews, error) {
+    boundCache := cache.For(runtimeInstance, instance.cache)
+
+    total, _, totalErr := boundCache.GetCounter(CacheKeyProductViews(id))
+    if nil != totalErr {
+        return ProductViews{}, totalErr
+    }
+
+    daily, _, dailyErr := boundCache.GetCounter(CacheKeyProductDailyViews(id))
+    if nil != dailyErr {
+        return ProductViews{}, dailyErr
+    }
+
+    return ProductViews{Total: total, Daily: daily}, nil
+}
+
+/* ViewsWindow is the span of the window counter, APP_PRODUCT_VIEWS_WINDOW */
+func (instance *ProductService) ViewsWindow() time.Duration {
+    return instance.productViewsWindow
 }
 
 func (instance *ProductService) Create(
@@ -236,7 +281,7 @@ func (instance *ProductService) DeleteById(
         return false, nil
     }
 
-    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.EventProductDeleted, event.NewProductDeletedEvent(productId), productId, CacheKeyProductList, CacheKeyProductById(productId), CacheKeyProductViews(productId))
+    dispatchCommitted(runtimeInstance, instance.eventDispatcher, instance.cache, event.EventProductDeleted, event.NewProductDeletedEvent(productId), productId, CacheKeyProductList, CacheKeyProductById(productId), CacheKeyProductViews(productId), CacheKeyProductDailyViews(productId))
 
     return true, nil
 }

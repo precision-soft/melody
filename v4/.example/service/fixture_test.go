@@ -176,6 +176,10 @@ func (instance *ttlRecordingCache) Increment(runtimeInstance melodycontainercont
     return 0, nil
 }
 
+func (instance *ttlRecordingCache) GetCounter(runtimeInstance melodycontainercontract.Runtime, key string) (int64, bool, error) {
+    return 0, false, nil
+}
+
 func (instance *ttlRecordingCache) Decrement(runtimeInstance melodycontainercontract.Runtime, key string, delta int64, options melodycachecontract.CounterOptions) (int64, error) {
     return 0, nil
 }
@@ -493,7 +497,7 @@ func newCatalogueUnderTest(t *testing.T, refusing bool) *catalogueUnderTest {
     currencyService := NewCurrencyService(currencyRepository, productRepository, cacheInstance, dispatcher, clockInstance)
 
     return &catalogueUnderTest{
-        product:  NewProductService(productRepository, categoryService, currencyService, cacheInstance, dispatcher, clockInstance),
+        product:  NewProductService(productRepository, categoryService, currencyService, cacheInstance, dispatcher, clockInstance, time.Hour),
         category: categoryService,
         currency: currencyService,
         cache:    cacheInstance,

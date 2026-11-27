@@ -173,7 +173,7 @@ func historyDoorOver(t *testing.T, cacheInstance melodycachecontract.Cache) map[
 
     reportService, buildErr := reporting.NewCatalogReportService(
         reporting.NewReportFormatter(),
-        service.NewProductService(productRepository, nil, nil, cacheInstance, nil, clockInstance),
+        service.NewProductService(productRepository, nil, nil, cacheInstance, nil, clockInstance, time.Hour),
         journalRepository,
         cacheInstance,
         clockInstance,

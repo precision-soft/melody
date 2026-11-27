@@ -23,6 +23,7 @@ var _ interface {
     DeleteMultiple(keys []string) error
     Increment(key string, delta int64, options cachecontract.CounterOptions) (int64, error)
     Decrement(key string, delta int64, options cachecontract.CounterOptions) (int64, error)
+    GetCounter(key string) (int64, bool, error)
     Runtime() containercontract.Runtime
     Cache() cachecontract.Cache
 } = Bound{}
@@ -149,6 +150,11 @@ func (instance *boundRecordingCache) Decrement(runtimeInstance containercontract
     return -delta, boundRecordedErr
 }
 
+func (instance *boundRecordingCache) GetCounter(runtimeInstance containercontract.Runtime, key string) (int64, bool, error) {
+    instance.record("GetCounter", runtimeInstance, key)
+    return 19, true, boundRecordedErr
+}
+
 func (instance *boundRecordingCache) RoundTrip(value any, target any) error {
     return nil
 }
@@ -181,12 +187,13 @@ func TestBound_EveryMethodReachesItsDoorWithTheBoundRuntimeAndItsArguments(t *te
     deleteMultipleErr := boundCache.DeleteMultiple(keys)
     incremented, incrementErr := boundCache.Increment("increment.key", 13, incrementOptions)
     decremented, decrementErr := boundCache.Decrement("decrement.key", 17, decrementOptions)
+    counted, counterExists, getCounterErr := boundCache.GetCounter("counter.key")
 
-    if true != found || true != held || 13 != incremented || -17 != decremented {
-        t.Fatalf("expected the view to answer what the contract answered, got %v %v %d %d", found, held, incremented, decremented)
+    if true != found || true != held || 13 != incremented || -17 != decremented || 19 != counted || true != counterExists {
+        t.Fatalf("expected the view to answer what the contract answered, got %v %v %d %d %d %v", found, held, incremented, decremented, counted, counterExists)
     }
 
-    for doorName, doorErr := range map[string]error{"Get": getErr, "Set": setErr, "Delete": deleteErr, "Has": hasErr, "Clear": clearErr, "Many": manyErr, "SetMultiple": setMultipleErr, "DeleteMultiple": deleteMultipleErr, "Increment": incrementErr, "Decrement": decrementErr} {
+    for doorName, doorErr := range map[string]error{"Get": getErr, "Set": setErr, "Delete": deleteErr, "Has": hasErr, "Clear": clearErr, "Many": manyErr, "SetMultiple": setMultipleErr, "DeleteMultiple": deleteMultipleErr, "Increment": incrementErr, "Decrement": decrementErr, "GetCounter": getCounterErr} {
         if boundRecordedErr != doorErr {
             t.Fatalf("%s: expected the view to answer the contract's error, got %v", doorName, doorErr)
         }
@@ -203,6 +210,7 @@ func TestBound_EveryMethodReachesItsDoorWithTheBoundRuntimeAndItsArguments(t *te
         {door: "DeleteMultiple", arguments: []any{keys}},
         {door: "Increment", arguments: []any{"increment.key", int64(13), incrementOptions}},
         {door: "Decrement", arguments: []any{"decrement.key", int64(17), decrementOptions}},
+        {door: "GetCounter", arguments: []any{"counter.key"}},
     }
 
     if len(expected) != len(recordingCache.callList) {
@@ -245,8 +253,9 @@ func TestBound_AViewOverNoCacheRefusesEveryDoor(t *testing.T) {
         deleteMultipleErr := boundCache.DeleteMultiple([]string{"k"})
         _, incrementErr := boundCache.Increment("k", 1, cachecontract.CounterOptions{})
         _, decrementErr := boundCache.Decrement("k", 1, cachecontract.CounterOptions{})
+        _, _, getCounterErr := boundCache.GetCounter("k")
 
-        for doorName, doorErr := range map[string]error{"Get": getErr, "Set": setErr, "Delete": deleteErr, "Has": hasErr, "Clear": clearErr, "Many": manyErr, "SetMultiple": setMultipleErr, "DeleteMultiple": deleteMultipleErr, "Increment": incrementErr, "Decrement": decrementErr} {
+        for doorName, doorErr := range map[string]error{"Get": getErr, "Set": setErr, "Delete": deleteErr, "Has": hasErr, "Clear": clearErr, "Many": manyErr, "SetMultiple": setMultipleErr, "DeleteMultiple": deleteMultipleErr, "Increment": incrementErr, "Decrement": decrementErr, "GetCounter": getCounterErr} {
             if nil == doorErr || "cache instance is nil" != doorErr.Error() {
                 t.Fatalf("%s: expected the absent cache refused, got %v", doorName, doorErr)
             }

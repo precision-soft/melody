@@ -3,6 +3,7 @@ package subscriber
 import (
     "context"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v4/.example/event"
     "github.com/precision-soft/melody/v4/.example/service"
@@ -31,6 +32,26 @@ func TestProductEventSubscriber_DropsTheViewCounterOnDelete(t *testing.T) {
     }
     if held, _ := cacheInstance.Has(exampleTestRuntime(), service.CacheKeyProductViews("prod-8")); false == held {
         t.Fatalf("expected another product's view counter kept")
+    }
+}
+
+func TestProductEventSubscriber_DeletedDropsTheDailyCounter(t *testing.T) {
+    cacheInstance, runtimeInstance := userUpdateUnderTest(t)
+
+    for _, productId := range []string{"prod-7", "prod-8"} {
+        if _, incrementErr := cacheInstance.Increment(exampleTestRuntime(), service.CacheKeyProductDailyViews(productId), 2, cachecontract.CounterOptions{Ttl: bound.Of(time.Hour)}); nil != incrementErr {
+            t.Fatalf("prime the window counter of %s: %v", productId, incrementErr)
+        }
+    }
+
+    listener := NewProductEventSubscriber().SubscribedEvents()[event.EventProductDeleted][0].Listener()
+    _ = listener(runtimeInstance, melodyevent.NewEvent(event.EventProductDeleted, event.NewProductDeletedEvent("prod-7"), melodyclock.NewSystemClock().Now()))
+
+    if held, _ := cacheInstance.Has(exampleTestRuntime(), service.CacheKeyProductDailyViews("prod-7")); true == held {
+        t.Fatalf("expected the deleted product's window counter dropped")
+    }
+    if held, _ := cacheInstance.Has(exampleTestRuntime(), service.CacheKeyProductDailyViews("prod-8")); false == held {
+        t.Fatalf("expected another product's window counter kept")
     }
 }
 

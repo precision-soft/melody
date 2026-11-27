@@ -72,7 +72,7 @@ func productListRuntimeOver(t *testing.T, requestContext context.Context, journa
 
     categoryService := service.NewCategoryService(stores.categories, stores.products, cacheInstance, nil)
     currencyService := service.NewCurrencyService(stores.currencies, stores.products, cacheInstance, nil, clockInstance)
-    productService := service.NewProductService(stores.products, categoryService, currencyService, cacheInstance, nil, clockInstance)
+    productService := service.NewProductService(stores.products, categoryService, currencyService, cacheInstance, nil, clockInstance, time.Hour)
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
@@ -251,4 +251,91 @@ func TestProductListCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
             }
         }
     }
+}
+
+func TestProductListCommand_PrintsTheViewColumnsWithoutCounting(t *testing.T) {
+    runtimeInstance, _, stores := productListRuntimeOver(t, context.Background(), &bytes.Buffer{}, func(stores productListStores) productListStores { return stores })
+    productService := service.MustGetProductService(runtimeInstance.Context(), runtimeInstance.Scope())
+
+    products, listErr := stores.products.All(context.Background())
+    if nil != listErr || 0 == len(products) {
+        t.Fatalf("expected seeded products, got %d (%v)", len(products), listErr)
+    }
+    viewedId := products[0].Id
+
+    for range 2 {
+        if _, recordErr := productService.RecordView(runtimeInstance, viewedId); nil != recordErr {
+            t.Fatalf("record: %v", recordErr)
+        }
+    }
+
+    output := &bytes.Buffer{}
+    if runErr := NewProductListCommand().Run(runtimeInstance, newBoolFlagContext("unused", false, output)); nil != runErr {
+        t.Fatalf("run: %v", runErr)
+    }
+
+    lines := strings.Split(output.String(), "\n")
+    if false == strings.Contains(lines[0], "views_window=1h0m0s") || false == strings.Contains(lines[1], "VIEWS  |  VIEWS_WINDOW") {
+        t.Fatalf("expected the window on the first line and the two view columns, got %q", output.String())
+    }
+
+    for _, line := range lines[3:] {
+        if "" == line {
+            continue
+        }
+
+        expected := []string{"0", "0"}
+        if true == strings.HasPrefix(line, viewedId+" ") {
+            expected = []string{"2", "2"}
+        }
+
+        if cells := tableCells(line); expected[0] != cells[5] || expected[1] != cells[6] {
+            t.Fatalf("expected the row to carry %v, got %q", expected, line)
+        }
+    }
+
+    views, viewsErr := productService.Views(runtimeInstance, viewedId)
+    if nil != viewsErr || 2 != views.Total || 2 != views.Daily {
+        t.Fatalf("expected the listing to have counted nothing, got %+v (%v)", views, viewsErr)
+    }
+}
+
+func TestProductListCommand_RendersUnreadableViewsAsDashesAndJournalsOnce(t *testing.T) {
+    journal := &bytes.Buffer{}
+    runtimeInstance, cacheInstance, stores := productListRuntimeOver(t, context.Background(), journal, func(stores productListStores) productListStores { return stores })
+
+    products, listErr := stores.products.All(context.Background())
+    if nil != listErr || 2 > len(products) {
+        t.Fatalf("expected two seeded products, got %d (%v)", len(products), listErr)
+    }
+
+    for _, product := range products {
+        if setErr := cacheInstance.Set(runtimeInstance, service.CacheKeyProductViews(product.Id), "not a count", melodybound.Of(time.Hour)); nil != setErr {
+            t.Fatalf("prime: %v", setErr)
+        }
+    }
+
+    output := &bytes.Buffer{}
+    if runErr := NewProductListCommand().Run(runtimeInstance, newBoolFlagContext("unused", false, output)); nil != runErr {
+        t.Fatalf("expected the listing to render over unreadable counters, got %v", runErr)
+    }
+
+    for _, line := range strings.Split(strings.TrimSpace(output.String()), "\n")[3:] {
+        if cells := tableCells(line); "-" != cells[5] || "-" != cells[6] {
+            t.Fatalf("expected the unreadable counters rendered as dashes, got %q", line)
+        }
+    }
+
+    if 1 != strings.Count(journal.String(), "view counters it could not read") {
+        t.Fatalf("expected the loss journaled once per run, got %q", journal.String())
+    }
+}
+
+func tableCells(line string) []string {
+    cells := strings.Split(line, "|")
+    for index, cell := range cells {
+        cells[index] = strings.TrimSpace(cell)
+    }
+
+    return cells
 }

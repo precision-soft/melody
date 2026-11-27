@@ -110,7 +110,7 @@ func newProductDoorFixtureOver(t *testing.T, wrap func(stores productDoorStores)
     dispatcher := melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: clockInstance})
     categoryService := service.NewCategoryService(stores.categories, stores.products, cacheInstance, dispatcher)
     currencyService := service.NewCurrencyService(stores.currencies, stores.products, cacheInstance, dispatcher, clockInstance)
-    productService := service.NewProductService(stores.products, categoryService, currencyService, cacheInstance, dispatcher, clockInstance)
+    productService := service.NewProductService(stores.products, categoryService, currencyService, cacheInstance, dispatcher, clockInstance, time.Hour)
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })

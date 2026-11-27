@@ -210,26 +210,31 @@ func TestConvertedPriceFor_MarksAnUnusableStoredRateAsTheServersRefusal(t *testi
 }
 
 type stubViewRecorder struct {
-    views     int64
+    views     service.ProductViews
+    window    time.Duration
     recordErr error
     recorded  []string
     contexts  []context.Context
 }
 
-func (instance *stubViewRecorder) RecordView(runtimeInstance melodycontainercontract.Runtime, id string) (int64, error) {
+func (instance *stubViewRecorder) RecordView(runtimeInstance melodycontainercontract.Runtime, id string) (service.ProductViews, error) {
     instance.recorded = append(instance.recorded, id)
     instance.contexts = append(instance.contexts, runtimeInstance.Context())
 
     return instance.views, instance.recordErr
 }
 
-func TestRecordedViews_AnswersTheCountTheServiceRecorded(t *testing.T) {
-    recorder := &stubViewRecorder{views: 7}
+func (instance *stubViewRecorder) ViewsWindow() time.Duration {
+    return instance.window
+}
+
+func TestRecordedViews_AnswersBothCounts(t *testing.T) {
+    recorder := &stubViewRecorder{views: service.ProductViews{Total: 7, Daily: 3}, window: 90 * time.Minute}
     runtimeInstance := newViewRecorderRuntime()
 
-    views := recordedViews(runtimeInstance, recorder, "prod-1")
-    if nil == views || 7 != *views {
-        t.Fatalf("expected 7 views, got %v", views)
+    views, dailyViews, windowSeconds := recordedViews(runtimeInstance, recorder, "prod-1")
+    if nil == views || 7 != *views || nil == dailyViews || 3 != *dailyViews || nil == windowSeconds || 5400 != *windowSeconds {
+        t.Fatalf("expected 7 views, 3 in a window of 5400s, got %v %v %v", views, dailyViews, windowSeconds)
     }
 
     if 1 != len(recorder.recorded) || "prod-1" != recorder.recorded[0] {
@@ -249,10 +254,10 @@ func newViewRecorderRuntime() melodycontainercontract.Runtime {
     return melodyruntime.NewRequest(context.WithValue(context.Background(), viewRecorderContextKey{}, "request"), containerInstance.NewScope())
 }
 
-func TestRecordedViews_LeavesTheCountOutWhenTheCacheRefused(t *testing.T) {
-    views := recordedViews(newViewRecorderRuntime(), &stubViewRecorder{views: 7, recordErr: errors.New("cache down")}, "prod-1")
-    if nil != views {
-        t.Fatalf("expected no count when the counter could not be written, got %d", *views)
+func TestRecordedViews_LeavesBothOutWhenTheCacheRefused(t *testing.T) {
+    views, dailyViews, windowSeconds := recordedViews(newViewRecorderRuntime(), &stubViewRecorder{views: service.ProductViews{Total: 7, Daily: 3}, window: time.Hour, recordErr: errors.New("cache down")}, "prod-1")
+    if nil != views || nil != dailyViews || nil != windowSeconds {
+        t.Fatalf("expected no count when a counter could not be written, got %v %v %v", views, dailyViews, windowSeconds)
     }
 }
 

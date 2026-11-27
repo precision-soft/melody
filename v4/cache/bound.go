@@ -118,6 +118,14 @@ func (instance Bound) Decrement(key string, delta int64, options cachecontract.C
     return instance.cacheInstance.Decrement(instance.runtimeInstance, key, delta, options)
 }
 
+func (instance Bound) GetCounter(key string) (int64, bool, error) {
+    if nilErr := instance.refuseNilCache(); nil != nilErr {
+        return 0, false, nilErr
+    }
+
+    return instance.cacheInstance.GetCounter(instance.runtimeInstance, key)
+}
+
 /* a typed-nil Cache passes a plain comparison and panics on its first method call */
 func (instance Bound) refuseNilCache() error {
     if true == internal.IsNilInterface(instance.cacheInstance) {

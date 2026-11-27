@@ -237,7 +237,7 @@ func newRefreshFixture(t *testing.T, option refreshFixtureOption) *refreshFixtur
 
     reportService, serviceErr := reporting.NewCatalogReportService(
         reporting.NewReportFormatter(),
-        service.NewProductService(productRepository, nil, nil, cacheInstance, nil, clockInstance),
+        service.NewProductService(productRepository, nil, nil, cacheInstance, nil, clockInstance, time.Hour),
         journalRepository,
         cacheInstance,
         clockInstance,

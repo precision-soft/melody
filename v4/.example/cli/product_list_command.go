@@ -53,10 +53,10 @@ func (instance *ProductListCommand) Flags() []melodyclicontract.Flag {
 func (instance *ProductListCommand) Run(runtimeInstance melodycontainercontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
     writer := commandContext.Writer
 
-    limit := int(commandContext.Int(productListFlagLimit))
-    _, _ = fmt.Fprintf(writer, "product list: limit=%d\n", limit)
-
     productService := service.MustGetProductService(runtimeInstance.Context(), runtimeInstance.Scope())
+
+    limit := int(commandContext.Int(productListFlagLimit))
+    _, _ = fmt.Fprintf(writer, "product list: limit=%d views_window=%s\n", limit, productService.ViewsWindow())
     categoryService := service.MustGetCategoryService(runtimeInstance.Context(), runtimeInstance.Scope())
     currencyService := service.MustGetCurrencyService(runtimeInstance.Context(), runtimeInstance.Scope())
 
@@ -75,6 +75,8 @@ func (instance *ProductListCommand) Run(runtimeInstance melodycontainercontract.
         "DESCRIPTION",
         "CATEGORY",
         "CURRENCY",
+        "VIEWS",
+        "VIEWS_WINDOW",
         "CREATED_AT",
         "UPDATED_AT",
     }
@@ -97,6 +99,7 @@ func (instance *ProductListCommand) Run(runtimeInstance melodycontainercontract.
     journalLostNomenclature(runtimeInstance, "currency", currencyListErr)
 
     rows := make([][]string, 0, len(products))
+    viewsLost := false
 
     for _, product := range products {
         if nil == product {
@@ -109,12 +112,25 @@ func (instance *ProductListCommand) Run(runtimeInstance melodycontainercontract.
         currencyId := product.CurrencyId
         currencyName := nameOrDash(currencyNameById, currencyId)
 
+        /* the listing reads the counters without counting, so printing a product is no view of it */
+        views, viewsErr := productService.Views(runtimeInstance, product.Id)
+        totalViews, windowViews := strconv.FormatInt(views.Total, 10), strconv.FormatInt(views.Daily, 10)
+        if nil != viewsErr {
+            totalViews, windowViews = "-", "-"
+            if false == viewsLost {
+                viewsLost = true
+                journalLostViews(runtimeInstance, product.Id, viewsErr)
+            }
+        }
+
         rows = append(rows, []string{
             product.Id,
             product.Name,
             product.Description,
             categoryName + "(" + categoryId + ")",
             currencyName + "(" + currencyId + ")",
+            totalViews,
+            windowViews,
             product.CreatedAt.Format(time.DateTime),
             product.UpdatedAt.Format(time.DateTime),
         })
@@ -155,6 +171,14 @@ func journalLostNomenclature(runtimeInstance melodycontainercontract.Runtime, no
     examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
         "product listing rendered a nomenclature it could not read as dashes",
         melodyexception.LogContext(listErr, melodyexception.LogContextConfig{Extra: melodyloggingcontract.Context{"nomenclature": nomenclature}}),
+    )
+}
+
+/* journalLostViews records, once per run, view counters the listing rendered as dashes */
+func journalLostViews(runtimeInstance melodycontainercontract.Runtime, productId string, viewsErr error) {
+    examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
+        "product listing rendered view counters it could not read as dashes",
+        melodyexception.LogContext(viewsErr, melodyexception.LogContextConfig{Extra: melodyloggingcontract.Context{"productId": productId}}),
     )
 }
 

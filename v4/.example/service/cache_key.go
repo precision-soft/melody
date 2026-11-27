@@ -12,12 +12,13 @@ const (
     CacheKeyCurrencyList = "example-currency-list"
     CacheKeyUserList     = "example-user-list"
 
-    cacheKeyProductByIdPrefix    = "example-product-by-id"
-    cacheKeyProductViewsPrefix   = "example-product-views"
-    cacheKeyCategoryByIdPrefix   = "example-category-by-id"
-    cacheKeyCurrencyByIdPrefix   = "example-currency-by-id"
-    cacheKeyUserByIdPrefix       = "example-user-by-id"
-    cacheKeyUserByUsernamePrefix = "example-user-by-username"
+    cacheKeyProductByIdPrefix       = "example-product-by-id"
+    cacheKeyProductViewsPrefix      = "example-product-views"
+    cacheKeyProductDailyViewsPrefix = "example-product-daily-views"
+    cacheKeyCategoryByIdPrefix      = "example-category-by-id"
+    cacheKeyCurrencyByIdPrefix      = "example-currency-by-id"
+    cacheKeyUserByIdPrefix          = "example-user-by-id"
+    cacheKeyUserByUsernamePrefix    = "example-user-by-username"
 )
 
 /* cacheSafeIdentifierMaximumBytes keeps a composed key under the backends' 1024-byte ceiling with room for every prefix and for the escape, which can triple a byte; the widest column an identifier is stored in holds 255 bytes, so a longer one names no row. */
@@ -44,6 +45,11 @@ func CacheKeyProductById(id string) string {
 /* CacheKeyProductViews names a product's view counter, written by the backend's own increment as decimal text rather than through the serializer, so no entity is ever cached under it; it carries no expiry and is removed with the product */
 func CacheKeyProductViews(id string) string {
     return cacheKeyProductViewsPrefix + "-" + cacheKeyPart(id)
+}
+
+/* CacheKeyProductDailyViews names a product's window counter, written as CacheKeyProductViews is; it expires one window after the read that created it and is removed with the product */
+func CacheKeyProductDailyViews(id string) string {
+    return cacheKeyProductDailyViewsPrefix + "-" + cacheKeyPart(id)
 }
 
 func CacheKeyCategoryById(id string) string {
