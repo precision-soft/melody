@@ -6,14 +6,7 @@
 # occurs fails it just as loudly: the row it holds was repaired, so the line goes. No wildcards. The file empties
 # as the open rows are repaired; a line left at the freeze is a decision the owner took, with its reason.
 
-row ~ integrations/amqp/v4.TransportConfig ~ S-C-SEC-2 Q-5: DeadLetterMaxLength and DeadLetterTtl on the .dlq queue (C8)
-row ~ integrations/bunorm/migrate/v4.printAppliedGroup ~ W-9: db:migrate refuses while a ran-but-not-recorded marker stands, door --force (C8)
-row ~ integrations/bunorm/v4.SplitterConfig ~ M-13: SplitterConfig.PrimaryFallbackDisabled (C8)
-row ~ integrations/cron/v4.GenerateCommand.writeDestinations#1 ~ H-5: a DirectoryMode field per writer, the cron generator with the cron work of the integrations commit (C8)
-row ~ integrations/cron/v4.RunnerCommand.Run ~ W-3: a cron User under the in-process runner refused, door RunnerConfig.EntryUserIgnored (C8)
 row ~ integrations/cron/v4.TickDedupConfig ~ Q-2 / G3R-3: the dedup over a locker without a lease is an open decision of the owner
-row ~ integrations/cron/v4.createTheLogsRoot#1 ~ H-5: a DirectoryMode field per writer, the cron logs root with the cron work of the integrations commit (C8)
-row ~ integrations/cron/v4.resolveEntryLogPath#1 ~ H-5: a DirectoryMode field per writer, the cron logs root with the cron work of the integrations commit (C8)
 row ~ v4/config.kernelConfiguration.validateEnvironment ~ H-7: the reason of the closed MELODY_ENV list in CONFIG.md (C9)
 row ~ v4/http.sessionCookie ~ M-5: the reason of HttpOnly and of Cache-Control private (C9)
 row ~ v4/security.JwtAlgorithmHs256 ~ M-12: the reason of HS256 only next to the check (C9)

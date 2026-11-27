@@ -17,6 +17,9 @@ import (
 type SplitterConfig struct {
     ReplicaNames         []string
     ReplicaRetryInterval bound.Duration
+
+    /* PrimaryFallbackDisabled answers an unreachable replica's read with its failure instead of opening the primary, for a primary sized for writes only; the replica is still remembered for ReplicaRetryInterval, so its reads fail without dialling it again. */
+    PrimaryFallbackDisabled bool
 }
 
 /* long enough that a dead replica does not cost every read a connect timeout, short enough that a recovered one takes reads back promptly */
@@ -49,12 +52,13 @@ func NewReadWriteSplitter(registry *ManagerRegistry, primaryName string, config 
     }
 
     return &ReadWriteSplitter{
-        registry:             registry,
-        primaryName:          primaryName,
-        replicaNames:         append([]string{}, config.ReplicaNames...),
-        replicaRetryInterval: replicaRetryInterval.Value,
-        now:                  time.Now,
-        unreachableReplicas:  map[string]unreachableReplica{},
+        registry:                registry,
+        primaryName:             primaryName,
+        replicaNames:            append([]string{}, config.ReplicaNames...),
+        replicaRetryInterval:    replicaRetryInterval.Value,
+        primaryFallbackDisabled: config.PrimaryFallbackDisabled,
+        now:                     time.Now,
+        unreachableReplicas:     map[string]unreachableReplica{},
     }
 }
 
@@ -64,8 +68,9 @@ type ReadWriteSplitter struct {
     replicaNames []string
     counter      atomic.Uint64
 
-    replicaRetryInterval time.Duration
-    now                  func() time.Time
+    replicaRetryInterval    time.Duration
+    primaryFallbackDisabled bool
+    now                     func() time.Time
 
     /* the replicas whose last open failed as unreachable, read and written under unreachableMutex; an entry is the instant of the failure and the failure itself */
     unreachableMutex    sync.Mutex
@@ -95,7 +100,7 @@ func (instance *ReadWriteSplitter) Writer(runtimeInstance containercontract.Runt
     return instance.registry.Database(runtimeInstance, instance.WriterName())
 }
 
-/* Reader answers the round-robin replica, and falls back to the primary only when the replica is unreachable, an open failure filed under ErrDatabaseUnreachable. Every other failure, a wiring error or a teardown in progress, is refused, so a dead replica configuration is never served silently from the primary. An unreachable replica is remembered for the retry interval, so its reads go to the primary without dialling it again, and the change is journaled once each way: a warning when reads move to the primary, an info when the replica takes them back. When the primary fails too, the answer carries its failure as the cause and names the replica failure beside it. Every open runs under the caller's runtime, and a replica open that the caller's own context ended is answered as that refusal: the caller left, so the replica is not remembered unreachable and the primary is not opened in its place. */
+/* Reader answers the round-robin replica, and falls back to the primary only when the replica is unreachable, an open failure filed under ErrDatabaseUnreachable. Every other failure, a wiring error or a teardown in progress, is refused, so a dead replica configuration is never served silently from the primary. An unreachable replica is remembered for the retry interval, so its reads go to the primary without dialling it again, and the change is journaled once each way: a warning when reads move to the primary, an info when the replica takes them back. Under SplitterConfig.PrimaryFallbackDisabled the unreachable replica's read is refused with its failure as the cause and the primary is not opened. When the primary fails too, the answer carries its failure as the cause and names the replica failure beside it. Every open runs under the caller's runtime, and a replica open that the caller's own context ended is answered as that refusal: the caller left, so the replica is not remembered unreachable and the primary is not opened in its place. */
 func (instance *ReadWriteSplitter) Reader(runtimeInstance containercontract.Runtime) (*bun.DB, error) {
     readerName := instance.ReaderName()
 
@@ -153,6 +158,18 @@ func endedByCallerContext(runtimeInstance containercontract.Runtime, failure err
 }
 
 func (instance *ReadWriteSplitter) primaryInPlaceOf(runtimeInstance containercontract.Runtime, readerName string, replicaErr error) (*bun.DB, error) {
+    if true == instance.primaryFallbackDisabled {
+        return nil, keepLoggedMark(exception.NewError(
+            "read/write splitter replica is unreachable and the primary fallback is disabled",
+            map[string]any{
+                "replica": readerName,
+                "primary": instance.primaryName,
+                "field":   "SplitterConfig.PrimaryFallbackDisabled",
+            },
+            replicaErr,
+        ), replicaErr)
+    }
+
     primary, primaryErr := instance.registry.Database(runtimeInstance, instance.primaryName)
     if nil != primaryErr {
         return nil, keepLoggedMark(exception.NewError(
@@ -228,8 +245,13 @@ func (instance *ReadWriteSplitter) rememberUnreachable(replicaName string, repli
         return
     }
 
+    message := "read replica unreachable, reads served by the primary"
+    if true == instance.primaryFallbackDisabled {
+        message = "read replica unreachable, its reads refused since the primary fallback is disabled"
+    }
+
     instance.registry.logger.Warning(
-        "read replica unreachable, reads served by the primary",
+        message,
         map[string]any{
             "replica":    replicaName,
             "primary":    instance.primaryName,

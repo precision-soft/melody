@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- `transport.go`: `TransportConfig.DeadLetterMaxLength` (a `bound.Count`, at least 1) and `TransportConfig.DeadLetterTtl` (a `bound.Duration`, 1ms to the 32-bit millisecond limit, whole milliseconds) cap the `<queue>.dlq` queue, declared as its `x-max-length` and `x-message-ttl`; each is unlimited when left out and then declares no argument, so the default declare is unchanged; a cap beside `DeadLetterDisabled` is refused naming the field, and a `PRECONDITION_FAILED` declare of the `.dlq` names both fields under `fields`.
 - `ConnectionMustFromRuntime(runtimeInstance)`, the connection read through the runtime's scope under its context, for code that holds a runtime; a nil runtime is refused. `ConnectionMustFromResolver` stays the door of a provider.
 - **Breaking** — `service_resolver.go`: `ConnectionMustFromContainer` is removed, `ConnectionMustFromResolver` taking the container as it takes a scope.
 - This major includes every change of the third major up to v3.3.0; that history is in the third major's changelog, and the third-major fixes released after it are listed below as carried.
@@ -66,6 +67,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Documentation
 
+- `README.md`: the dead-letter caps and the migration a changed cap is; publisher confirms and the mandatory flag have no door, with the reason.
 - `README.md`: the cap of eight delay buckets is written with its reason — each tier is a queue the transport declares on the broker, so the list is topology a deployment migrates — beside the constant's GoDoc.
 - readme: carried from the third major (unreleased): the dead-lettering section states the headers a replay from the dead-letter queue deletes, the retry and failure-transport counters and the broker's `x-death`, and the one it keeps, `x-message-type`.
 - readme: the server-sent event backplane section names `ServerSentEventBackplaneConfig.CloseTimeout` with its default, the provider's when built through one and 30s otherwise, its minimum and the unlimited refusal, and the sample sets `CallTimeout`.

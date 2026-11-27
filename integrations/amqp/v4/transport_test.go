@@ -4032,10 +4032,17 @@ func TestConsumeLoop_AChannelLostAfterLivingTheInitialBackoffReopensAtOnce(t *te
 func openTopologyFor(t *testing.T, connection *amqp091.Connection, queueName string, deadLetterDisabled bool) error {
     t.Helper()
 
+    return openTopologyWith(t, connection, queueName, TransportConfig{DeadLetterDisabled: deadLetterDisabled})
+}
+
+/* openTopologyWith declares the topology of a transport under config through a send and answers the send's error */
+func openTopologyWith(t *testing.T, connection *amqp091.Connection, queueName string, config TransportConfig) error {
+    t.Helper()
+
     registry := NewMessageRegistry()
     RegisterMessage[testMessage](registry, "amqp.test.message")
 
-    transport := NewTransport(queueName, registry, borrowedSource(connection), TransportConfig{DeadLetterDisabled: deadLetterDisabled})
+    transport := NewTransport(queueName, registry, borrowedSource(connection), config)
     defer transport.CloseWithContext(context.Background())
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
@@ -4156,6 +4163,108 @@ func TestTransport_AQueueDeclaredWithoutTheDeadLetterArgumentNamesTheDoor(t *tes
     if false == errors.As(disabledErr, &disabledRefusal) || "amqp queue declare failed" != disabledRefusal.Message() || nil != disabledRefusal.Context()["door"] {
         t.Fatalf("expected the redeclare behind the thrown door refused naming no door, got %v", disabledErr)
     }
+}
+
+/* redeclareQueue declares a durable queue with arguments on a channel of its own, which a refused declare closes */
+func redeclareQueue(t *testing.T, connection *amqp091.Connection, queueName string, arguments amqp091.Table) error {
+    t.Helper()
+
+    channel, channelErr := connection.Channel()
+    if nil != channelErr {
+        t.Fatalf("channel: %v", channelErr)
+    }
+    defer channel.Close()
+
+    _, declareErr := channel.QueueDeclare(queueName, true, false, false, false, arguments)
+
+    return declareErr
+}
+
+/* the caps land on the .dlq queue alone as x-max-length and x-message-ttl; left out, the .dlq queue is declared without arguments, as before; a changed cap is refused by the broker and the refusal names the two fields */
+func TestTransport_TheDeadLetterCapsAreTheDeadLetterQueueArguments(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+
+    provider := NewProvider("melody", ProviderConfig{})
+    connectionOwner, openErr := provider.Open(newReconnectRuntime(t.Context()), dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+    connection := connectionOwner.Raw()
+    defer connectionOwner.CloseWithContext(context.Background())
+
+    suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
+
+    defaultQueue := "melody.amqp.v4.test.dead-letter-uncapped." + suffix
+    defer deleteTopologyOf(connection, defaultQueue)
+
+    if sendErr := openTopologyWith(t, connection, defaultQueue, TransportConfig{}); nil != sendErr {
+        t.Fatalf("send: %v", sendErr)
+    }
+
+    if declareErr := redeclareQueue(t, connection, defaultQueue+".dlq", nil); nil != declareErr {
+        t.Fatalf("expected the uncapped .dlq declared without arguments, got %v", declareErr)
+    }
+
+    cappedQueue := "melody.amqp.v4.test.dead-letter-capped." + suffix
+    defer deleteTopologyOf(connection, cappedQueue)
+
+    capped := TransportConfig{DeadLetterMaxLength: bound.Of(5), DeadLetterTtl: bound.Of(time.Minute)}
+    if sendErr := openTopologyWith(t, connection, cappedQueue, capped); nil != sendErr {
+        t.Fatalf("send: %v", sendErr)
+    }
+
+    if declareErr := redeclareQueue(t, connection, cappedQueue+".dlq", amqp091.Table{"x-max-length": int64(5), "x-message-ttl": int64(60000)}); nil != declareErr {
+        t.Fatalf("expected the .dlq declared with the two caps, got %v", declareErr)
+    }
+
+    if declareErr := redeclareQueue(t, connection, cappedQueue+".dlq", nil); nil == declareErr {
+        t.Fatal("expected the capped .dlq to refuse a declare without its arguments")
+    }
+
+    if declareErr := redeclareQueue(t, connection, cappedQueue, amqp091.Table{"x-dead-letter-exchange": cappedQueue + ".dlx"}); nil != declareErr {
+        t.Fatalf("expected the main queue declared without the caps, got %v", declareErr)
+    }
+
+    changedErr := openTopologyWith(t, connection, cappedQueue, TransportConfig{DeadLetterMaxLength: bound.Of(6), DeadLetterTtl: bound.Of(time.Minute)})
+
+    var refusal *exception.Error
+    if false == errors.As(changedErr, &refusal) || "amqp dead-letter queue declare failed" != refusal.Message() || "[TransportConfig.DeadLetterMaxLength TransportConfig.DeadLetterTtl]" != fmt.Sprint(refusal.Context()["fields"]) {
+        t.Fatalf("expected a changed cap refused naming the two fields, got %v", changedErr)
+    }
+}
+
+func TestResolveDeadLetterQueueArguments_DeclaresOnlyTheCapsSetAndRefusesNamingTheField(t *testing.T) {
+    if arguments, resolveErr := resolveDeadLetterQueueArguments(TransportConfig{}); nil != resolveErr || nil != arguments {
+        t.Fatalf("expected no arguments with both caps left out, got %v, %v", arguments, resolveErr)
+    }
+
+    if arguments, resolveErr := resolveDeadLetterQueueArguments(TransportConfig{DeadLetterMaxLength: bound.Of(1)}); nil != resolveErr || "map[x-max-length:1]" != fmt.Sprint(arguments) {
+        t.Fatalf("expected x-max-length alone, got %v, %v", arguments, resolveErr)
+    }
+
+    if arguments, resolveErr := resolveDeadLetterQueueArguments(TransportConfig{DeadLetterTtl: bound.Of(time.Millisecond), DeadLetterMaxLength: bound.UnlimitedCount()}); nil != resolveErr || "map[x-message-ttl:1]" != fmt.Sprint(arguments) {
+        t.Fatalf("expected x-message-ttl alone, got %v, %v", arguments, resolveErr)
+    }
+
+    for field, config := range map[string]TransportConfig{
+        "TransportConfig.DeadLetterMaxLength":  {DeadLetterMaxLength: bound.Of(0)},
+        "TransportConfig.DeadLetterTtl":        {DeadLetterTtl: bound.Of(time.Millisecond + time.Microsecond)},
+        "TransportConfig.DeadLetterTtl ":       {DeadLetterTtl: bound.Of(time.Duration(maxDelayExpirationMilliseconds+1) * time.Millisecond)},
+        "TransportConfig.DeadLetterTtl  ":      {DeadLetterTtl: bound.Of(time.Microsecond)},
+        "TransportConfig.DeadLetterMaxLength ": {DeadLetterMaxLength: bound.Of(5), DeadLetterDisabled: true},
+        "TransportConfig.DeadLetterTtl   ":    {DeadLetterTtl: bound.Of(time.Second), DeadLetterDisabled: true},
+    } {
+        _, resolveErr := resolveDeadLetterQueueArguments(config)
+
+        var refusal *exception.Error
+        if false == errors.As(resolveErr, &refusal) || strings.TrimSpace(field) != refusal.Context()["field"] {
+            t.Fatalf("%q: expected the refusal naming the field, got %v", field, resolveErr)
+        }
+    }
+
+    expectPanicNamingField(t, "TransportConfig.DeadLetterMaxLength", func() {
+        NewTransport("orders", NewMessageRegistry(), FromDialer(func(dialContext context.Context) (*Connection, error) { return nil, nil }), TransportConfig{DeadLetterMaxLength: bound.Of(0)})
+    })
 }
 
 func TestNewTransport_DeadLetterIsOnUnlessItsDoorIsSet(t *testing.T) {

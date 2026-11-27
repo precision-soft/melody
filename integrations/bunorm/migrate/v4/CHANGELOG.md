@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Behavioural change** — `command_migrate.go`, `option.go`: a `db:migrate` whose last migration ran but was not recorded writes a marker row, `ranNotRecorded:<migrations table>:<name>`, in the locks table, and while a marker stands the next `db:migrate` is refused before any `Up`, naming the migrations and the flag; `--force` (`MigrateForceFlagName`) deletes the markers and migrates. A marker that cannot be written is said in a warning.
 - This major includes every change of the third major up to v3.2.0; that history is in the third major's changelog.
 - `option.go`: `Options.UnlockTimeout`, the budget of the migration lock's release after a run, 5s when left out as the constant was, at least 1ms, unlimited refused, a value outside the rule panicking at registration naming the field; a migration context inherits the base options' value unless its own options set one.
 - `option.go`: `DefaultManagerRegistryServiceId`, `DefaultManagerFlagName` and `DefaultCommandPrefix`, the defaults an `Options` field takes when left out.

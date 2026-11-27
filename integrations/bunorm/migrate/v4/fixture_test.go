@@ -144,7 +144,7 @@ func newSingleMigrationSet(name string, comment string, upCalls *int, downCalls 
 
 func appliedMigrationRowsHook(appliedNames ...string) func(query string) ([]string, [][]driver.Value, error) {
     return func(query string) ([]string, [][]driver.Value, error) {
-        if true == strings.HasPrefix(query, "SELECT") && true == strings.Contains(query, "bun_migrations") {
+        if true == strings.HasPrefix(query, "SELECT") && true == mentionsMigrationsTable(query) {
             rows := make([][]driver.Value, 0, len(appliedNames))
             for index, appliedName := range appliedNames {
                 rows = append(rows, []driver.Value{int64(index + 1), appliedName, int64(1), time.Now().UTC()})
@@ -166,6 +166,11 @@ func lockCountHook(heldLocks int64) func(query string) ([]string, [][]driver.Val
 
         return []string{}, nil, nil
     }
+}
+
+/* a statement on the migrations table, not on the locks table whose marker rows carry the migrations table's name */
+func mentionsMigrationsTable(query string) bool {
+    return strings.Contains(query, "bun_migrations") && false == strings.Contains(query, "bun_migration_locks")
 }
 
 func isLockInsert(query string) bool {
@@ -190,7 +195,7 @@ func unlockDeadlineRecorder(recorder *queryRecorder) *time.Duration {
 }
 
 func isMigrationStatusSelect(query string) bool {
-    return strings.HasPrefix(query, "SELECT") && strings.Contains(query, "bun_migrations")
+    return strings.HasPrefix(query, "SELECT") && mentionsMigrationsTable(query)
 }
 
 /* the connection every definition of these tests declares: the registry refuses an empty host and an empty database, and none of the fake providers dials it */

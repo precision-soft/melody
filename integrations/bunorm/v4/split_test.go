@@ -335,6 +335,40 @@ func TestReadWriteSplitter_AnUnreachableReplicaIsRememberedForTheInterval(t *tes
     }
 }
 
+/* under PrimaryFallbackDisabled an unreachable replica's read is refused with its failure, the primary never opened, and the replica is still remembered for the interval */
+func TestReadWriteSplitter_PrimaryFallbackDisabledRefusesTheReadOfAnUnreachableReplica(t *testing.T) {
+    primary := &switchableSplitProvider{}
+    replica := &switchableSplitProvider{down: true}
+    registry, registryErr := NewManagerRegistry(
+        []ProviderDefinition{
+            ProviderDefinition{Name: "primary", Provider: primary, Parameters: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "replica", Provider: replica, Parameters: testConnectionParameters},
+        },
+        ManagerRegistryConfig{Logger: &fakeLogger{}},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry: %v", registryErr)
+    }
+
+    splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}, ReplicaRetryInterval: bound.Of(time.Minute), PrimaryFallbackDisabled: true})
+
+    for range 2 {
+        database, readerErr := splitter.Reader(testRuntime())
+        if nil != database || nil == readerErr || false == exception.ChainIs(readerErr, ErrDatabaseUnreachable) {
+            t.Fatalf("expected the read refused with the replica's failure, got %v, %v", database, readerErr)
+        }
+
+        var exceptionErr *exception.Error
+        if false == errors.As(readerErr, &exceptionErr) || "SplitterConfig.PrimaryFallbackDisabled" != exceptionErr.Context()["field"] {
+            t.Fatalf("expected the refusal to name the field, got %v", readerErr)
+        }
+    }
+
+    if 0 != primary.openCount || 1 != replica.openCount {
+        t.Fatalf("expected the primary never opened and the replica dialled once inside the interval, got %d and %d", primary.openCount, replica.openCount)
+    }
+}
+
 /* the move of the reads to the primary is journaled once, however many failures follow, and the replica taking them back once more */
 func TestReadWriteSplitter_WritesOneWarningPerTransition(t *testing.T) {
     logger := &capturingDiagnosticLogger{}

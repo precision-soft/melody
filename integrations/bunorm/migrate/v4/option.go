@@ -14,6 +14,11 @@ const (
     DefaultCommandPrefix            = "db"
 )
 
+/* MigrateForceFlagName is the migrate flag that runs past the marker of a migration that ran but was not recorded, clearing it. */
+const MigrateForceFlagName = "force"
+
+const ranNotRecordedMarkerNamePrefix = "ranNotRecorded:"
+
 type Options struct {
     ManagerRegistryServiceId string
     ManagerFlagName          string

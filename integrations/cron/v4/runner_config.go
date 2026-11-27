@@ -32,6 +32,9 @@ type RunnerConfig struct {
 
     /* TickDedup is the per-tick dedup of a runner on several replicas: each tick of an entry runs on one replica. Its zero value is on, over the application's registered locker. */
     TickDedup TickDedupConfig
+
+    /* EntryUserIgnored admits an entry naming EntryConfig.User, run in-process as the process user while the generated manifests run it as the configured one; left false, such an entry is refused at construction like the other manifest-only fields. */
+    EntryUserIgnored bool
 }
 
 var runnerOutputCaptureLimitRule = bound.Rule[int]{

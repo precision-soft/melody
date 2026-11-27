@@ -304,3 +304,21 @@ func TestModule_TemplatesWithoutAConfigurationAreRefused(t *testing.T) {
         NewModule(ModuleConfig{Templates: []Template{&fakeTemplate{name: "json-cron"}}}).RegisterCliCommands(nil)
     })
 }
+
+func TestModule_AGeneratorDirectoryModeOutsideTheRuleIsRefusedNamingTheField(t *testing.T) {
+    expectCronPanicNaming(t, "ModuleConfig.Generator.DirectoryMode", func() {
+        NewModule(ModuleConfig{Generator: GeneratorConfig{DirectoryMode: 0o600}}).RegisterCliCommands(nil)
+    })
+}
+
+func TestModule_TheGeneratorTakesTheConfiguredGenerator(t *testing.T) {
+    commands := NewModule(ModuleConfig{
+        Configuration: staticConfiguration(NewConfiguration()),
+        Generator:     GeneratorConfig{DirectoryMode: 0o750, LogsDirectoryCheckDisabled: true},
+    }).RegisterCliCommands(nil)
+
+    generator := commands[0].(*GenerateCommand).generator
+    if 0o750 != generator.directoryMode || false == generator.logsDirectoryCheckDisabled {
+        t.Fatalf("expected the module's generator configuration handed to the command, got %v", generator)
+    }
+}

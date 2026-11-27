@@ -42,7 +42,7 @@ func TestRollbackCommand_RollsBackLastGroupUnderLock(t *testing.T) {
     lockIndex := recorder.firstIndexMatching(isLockInsert)
     markUnappliedIndex := recorder.firstIndexMatching(func(query string) bool {
         return strings.HasPrefix(query, "DELETE") &&
-            strings.Contains(query, "bun_migrations") &&
+            mentionsMigrationsTable(query) &&
             false == strings.Contains(query, "bun_migration_locks")
     })
     unlockIndex := recorder.firstIndexMatching(isUnlockDelete)

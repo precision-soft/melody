@@ -397,7 +397,9 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | `integrations/amqp/v4.TransportConfig.Prefetch` | limit | unbounded concurrency or connections | defaultPrefetch min 1 max maxPrefetch | `value:integrations/amqp/v4.TransportConfig.Prefetch` | at most 65535: the prefetch count of basic.qos is a 16-bit field; unlimited would let the broker push the whole queue into one consumer's memory | [integrations/amqp/v4/README.md](../../integrations/amqp/v4/README.md) |
 | `integrations/amqp/v4.TransportConfig.PublishReturnBuffer` | limit | unbounded memory or work | 16 min 1 | `value:integrations/amqp/v4.TransportConfig.PublishReturnBuffer` | class T: a size; unlimited is memory or work that only grows | [integrations/amqp/v4/README.md](../../integrations/amqp/v4/README.md) |
 | `integrations/amqp/v4.TransportConfig.DeadLetterDisabled` | protection | the door: declares the queue without its <queue>.dlx exchange and <queue>.dlq queue, so a poison message is dropped | on | `off:integrations/amqp/v4.TransportConfig.DeadLetterDisabled` | — | [integrations/amqp/v4/README.md](../../integrations/amqp/v4/README.md) |
-| `integrations/amqp/v4.TransportConfig` | protection | a dead-letter queue that grows without end | no cap | none | — | [integrations/amqp/v4/README.md](../../integrations/amqp/v4/README.md) |
+| `integrations/amqp/v4.TransportConfig.DeadLetterMaxLength` | limit | a dead-letter queue that grows without end | unlimited (no x-max-length) min 1 | `value:integrations/amqp/v4.TransportConfig.DeadLetterMaxLength` | — | [integrations/amqp/v4/README.md](../../integrations/amqp/v4/README.md) |
+| `integrations/amqp/v4.TransportConfig.DeadLetterTtl` | limit | a dead letter kept forever | unlimited (no x-message-ttl) min time.Millisecond max the 32-bit millisecond limit | `value:integrations/amqp/v4.TransportConfig.DeadLetterTtl` | — | [integrations/amqp/v4/README.md](../../integrations/amqp/v4/README.md) |
+| `integrations/amqp/v4.Transport.publish` | refusal | a message lost in silence: unroutable or nacked by the broker | confirmed and mandatory, a return or a nack is the send's error | none | a publish that may vanish is the loss the transport exists to prevent: an application that accepts it publishes through its own channel, not through the transport | [integrations/amqp/v4/README.md](../../integrations/amqp/v4/README.md) |
 
 ## `integrations/aws/s3/v4`
 
@@ -412,7 +414,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 |---|---|---|---|---|---|---|
 | `integrations/bunorm/migrate/v4.Options.UnlockTimeout` | limit | a call or a wait that never returns | 5 * time.Second min bound.TimeoutMinimum | `value:integrations/bunorm/migrate/v4.Options.UnlockTimeout` | class T: a timeout; unlimited is the wait that never returns | [integrations/bunorm/migrate/v4/README.md](../../integrations/bunorm/migrate/v4/README.md) |
 | `integrations/bunorm/migrate/v4.migrationFileMode` | mode | a generated migration readable beyond the repository's own files | 0644 | none | a migration file is source the repository commits: its mode is the repository's, like any file the developer writes | — |
-| `integrations/bunorm/migrate/v4.printAppliedGroup` | refusal | a migration that ran but was not recorded, run again | warning | none | — | — |
+| `integrations/bunorm/migrate/v4.printAppliedGroup` | refusal | a migration that ran but was not recorded, run again | the next db:migrate refused while its marker stands | `off:integrations/bunorm/migrate/v4.MigrateForceFlagName` | — | [integrations/bunorm/migrate/v4/README.md](../../integrations/bunorm/migrate/v4/README.md) |
 
 ## `integrations/bunorm/mysql/v4`
 
@@ -449,7 +451,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
 | `integrations/bunorm/v4.SplitterConfig.ReplicaRetryInterval` | limit | a loop that spins or never runs | 5 * time.Second min bound.TimeoutMinimum | `value:integrations/bunorm/v4.SplitterConfig.ReplicaRetryInterval` | class T: an interval; unlimited never tries again a replica that came back | [integrations/bunorm/v4/README.md](../../integrations/bunorm/v4/README.md) |
-| `integrations/bunorm/v4.SplitterConfig` | protection | reads failing while the primary still answers | fall back to the primary | none | — | [integrations/bunorm/v4/README.md](../../integrations/bunorm/v4/README.md) |
+| `integrations/bunorm/v4.SplitterConfig` | protection | reads failing while the primary still answers | fall back to the primary | `off:integrations/bunorm/v4.SplitterConfig.PrimaryFallbackDisabled` | — | [integrations/bunorm/v4/README.md](../../integrations/bunorm/v4/README.md) |
 
 ## `integrations/bunorm/v4/audit`
 
@@ -481,14 +483,15 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | `integrations/cron/v4.RunnerConfig.TickDedup.CallTimeout` | limit | a call or a wait that never returns | 5 * time.Second min bound.TimeoutMinimum | `value:integrations/cron/v4.RunnerConfig.TickDedup.CallTimeout` | class T: a timeout; unlimited is the wait that never returns | [integrations/cron/v4/README.md](../../integrations/cron/v4/README.md) |
 | `integrations/cron/v4.RunnerConfig.TickDedup.Window` | limit | state held, or a decision kept, forever | 5 * time.Minute min time.Second | `value:integrations/cron/v4.RunnerConfig.TickDedup.Window` | class T: a lifetime; an unlimited window deduplicates every later tick of the entry too | [integrations/cron/v4/README.md](../../integrations/cron/v4/README.md) |
 | `integrations/cron/v4.RunnerConfig.Timeout` | limit | a call or a wait that never returns | time.Hour min bound.TimeoutMinimum unlimited admitted | `value:integrations/cron/v4.RunnerConfig.Timeout` | — | [integrations/cron/v4/README.md](../../integrations/cron/v4/README.md) |
-| `integrations/cron/v4.GenerateCommand.writeDestinations#1` | mode | a crontab directory writable beyond its owner | 0755 | none | — | — |
-| `integrations/cron/v4.createTheLogsRoot#1` | mode | a logs root writable beyond its owner | 0755 | none | — | — |
-| `integrations/cron/v4.resolveEntryLogPath#1` | mode | a log directory writable beyond its owner | 0755 | none | — | — |
+| `integrations/cron/v4.DefaultGeneratorDirectoryMode` | mode | a crontab or logs directory writable beyond its owner | 0755 | `value:integrations/cron/v4.GeneratorConfig.DirectoryMode` | — | [integrations/cron/v4/README.md](../../integrations/cron/v4/README.md) |
+| `integrations/cron/v4.judgeTheLogsRoot` | protection | a root-run generator leaving a logs directory the entries' users cannot write, so the job never runs | the run refused before anything is written | `off:integrations/cron/v4.GeneratorConfig.LogsDirectoryCheckDisabled` | — | [integrations/cron/v4/README.md](../../integrations/cron/v4/README.md) |
+| `integrations/cron/v4.entryLogPath` | refusal | an entry's log file written outside the logs directory | a LogFileName escaping it refused | none | the logs directory is the one root the generator creates and hands to the entries' users; a log elsewhere is a path the operator owns, named by --logs-directory or by an entry's command | [integrations/cron/v4/README.md](../../integrations/cron/v4/README.md) |
+| `integrations/cron/v4.ErrBusyboxDivergentDaySchedule` | refusal | a day-field pair busybox crond runs on another schedule | refused under the user-less dialect | `use:integrations/cron/v4.TemplateNameCrontab` | the user-less dialect is defined as the one busybox runs as written; a host running vixie crond with user crontabs renders the pair through the crontab dialect | [integrations/cron/v4/README.md](../../integrations/cron/v4/README.md) |
 | `integrations/cron/v4.EntryConfig.LogDisabled` | protection | the door: LogDisabled | on | `off:integrations/cron/v4.EntryConfig.LogDisabled` | — | [integrations/cron/README.md](../../integrations/cron/README.md) |
 | `integrations/cron/v4.EntryTickDedupConfig.Disabled` | protection | the door: runs this entry on every replica that evaluates its tick, whatever RunnerConfig.TickDedup says | on | `off:integrations/cron/v4.EntryTickDedupConfig.Disabled` | — | [integrations/cron/v4/README.md](../../integrations/cron/v4/README.md) |
 | `integrations/cron/v4.TickDedupConfig.Disabled` | protection | the door: turns the dedup off for every entry | on | `off:integrations/cron/v4.TickDedupConfig.Disabled` | — | [integrations/cron/v4/README.md](../../integrations/cron/v4/README.md) |
 | `integrations/cron/v4.TickDedupConfig` | protection | a tick run twice over a locker without a lease | deduplicated | none | — | [integrations/cron/v4/README.md](../../integrations/cron/v4/README.md) |
-| `integrations/cron/v4.RunnerCommand.Run` | refusal | a cron User the in-process runner cannot honour | warning | none | — | [integrations/cron/README.md](../../integrations/cron/README.md) |
+| `integrations/cron/v4.NewRunnerCommand` | refusal | a cron User the in-process runner cannot honour | an entry naming one refused | `off:integrations/cron/v4.RunnerConfig.EntryUserIgnored` | — | [integrations/cron/v4/README.md](../../integrations/cron/v4/README.md) |
 
 ## `integrations/opentelemetry/v4/otlp`
 
@@ -510,6 +513,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | `integrations/outbox/v4.RelayConfig.ResolutionTimeout` | limit | a call or a wait that never returns | 5 * time.Second min bound.TimeoutMinimum | `value:integrations/outbox/v4.RelayConfig.ResolutionTimeout` | class T: a timeout; unlimited is the wait that never returns | [integrations/outbox/v4/README.md](../../integrations/outbox/v4/README.md) |
 | `integrations/outbox/v4.RelayConfig.UnavailableBackoff` | limit | a retry storm, or a retry that never comes back | Initial15 * time.Second Maxtime.Minute | `value:integrations/outbox/v4.RelayConfig.UnavailableBackoff` | class T: a backoff; an unbounded ceiling is a retry that never comes back | [integrations/outbox/v4/README.md](../../integrations/outbox/v4/README.md) |
 | `integrations/outbox/v4.RelayConfig.VisibilityTimeout` | limit | a call or a wait that never returns | 5 * time.Minute min bound.TtlMinimum | `value:integrations/outbox/v4.RelayConfig.VisibilityTimeout` | class T: a lifetime; a row hidden forever is never recovered from a claimer that crashed | [integrations/outbox/v4/README.md](../../integrations/outbox/v4/README.md) |
+| `integrations/outbox/v4.Relay.holdUnreached` | refusal | a row delivered ahead of an older one that failed | the first failed send ends the batch, the rows behind it held | none | ordering is the contract: the relay delivers each row after the rows written before it, so a row past a failure would overtake it | [integrations/outbox/v4/README.md](../../integrations/outbox/v4/README.md) |
 
 ## `integrations/rueidis/v4`
 
@@ -557,5 +561,6 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | `http.session.unboundedTtlOnBoundedDefaultStorage` | warning | sessions without end on a storage that evicts | written in http | `env:MELODY_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
 | `http.static.cacheMaxAgeIgnored` | warning | a cache max age the operator believes is applied | written in http | `env:MELODY_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
 | `messagebus.retryPolicyServiceIgnored` | warning | a retry policy service the operator believes is used | written | `env:MELODY_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
+| `opentelemetry.otlp.insecureCollector` | warning | spans and the exporter headers in clear to a non-loopback collector | written | `env:MELODY_BOOT_WARNINGS_IGNORED` | — | [integrations/opentelemetry/v4/README.md](../../integrations/opentelemetry/v4/README.md) |
 | `security.csrfDisabledOnLoginFirewall` | warning | a login firewall without its forgery check | written in http | `env:MELODY_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |
 | `security.firewallDoorReachUnknown` | warning | a firewall door whose reach the compiler cannot prove | written | `env:MELODY_BOOT_WARNINGS_IGNORED` | — | [APPLICATION.md](package/APPLICATION.md) |

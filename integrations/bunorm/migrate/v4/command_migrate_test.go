@@ -41,7 +41,7 @@ func TestMigrateCommand_TakesLockBeforeMigratingAndReleasesIt(t *testing.T) {
     statusIndex := recorder.firstIndexMatching(isMigrationStatusSelect)
     markAppliedIndex := recorder.firstIndexMatching(func(query string) bool {
         return strings.HasPrefix(query, "INSERT") &&
-            strings.Contains(query, "bun_migrations") &&
+            mentionsMigrationsTable(query) &&
             false == strings.Contains(query, "bun_migration_locks")
     })
     unlockIndex := recorder.firstIndexMatching(isUnlockDelete)
@@ -881,7 +881,7 @@ func TestMigrateCommand_AMarkFailureReportsTheLastMigrationAsRanNotRecorded(t *t
         database, recorder := newFakeBunDatabase()
         recorder.queryHook = appliedMigrationRowsHook()
         recorder.execHook = func(query string) error {
-            if true == markFails && true == strings.HasPrefix(query, "INSERT") && true == strings.Contains(query, "bun_migrations") && true == strings.Contains(query, "20240103000000") {
+            if true == markFails && true == strings.HasPrefix(query, "INSERT") && true == mentionsMigrationsTable(query) && true == strings.Contains(query, "20240103000000") {
                 return errors.New("Error 1205 (HY000): Lock wait timeout exceeded")
             }
 
@@ -940,6 +940,58 @@ func TestMigrateCommand_AMarkFailureReportsTheLastMigrationAsRanNotRecorded(t *t
 
         if false == markFails && ("[]" != ranNotRecorded || true == warned) {
             t.Fatalf("expected an Up failure reported without a ran-not-recorded migration, got %s, warned=%v", ranNotRecorded, warned)
+        }
+
+        markerWritten := 0 <= recorder.firstIndexMatching(func(query string) bool {
+            return true == isLockInsert(query) && true == strings.Contains(query, "ranNotRecorded:bun_migrations:20240103000000")
+        })
+        if markFails != markerWritten {
+            t.Fatalf("markFails=%v: expected the marker written only for a mark failure, got %v in %v", markFails, markerWritten, recorder.recordedQueries())
+        }
+    }
+}
+
+/* a marker an earlier run left refuses the next run before any Up, naming the migration and the flag; under --force the marker is deleted and the run goes on */
+func TestMigrateCommand_AStandingRanNotRecordedMarkerRefusesTheRunUntilForce(t *testing.T) {
+    for _, force := range []bool{false, true} {
+        database, recorder := newFakeBunDatabase()
+        recorder.queryHook = func(query string) ([]string, [][]driver.Value, error) {
+            if true == strings.HasPrefix(query, "SELECT") && true == strings.Contains(query, "ranNotRecorded:") {
+                return []string{"table_name"}, [][]driver.Value{{"ranNotRecorded:bun_migrations:20240101000000"}, {"ranNotRecorded:bun_migrations_other:20240101000000"}}, nil
+            }
+
+            return appliedMigrationRowsHook()(query)
+        }
+
+        upCalls := 0
+        migrations := newSingleMigrationSet("20240101000000", "create_users", &upCalls, nil)
+
+        arguments := []string{"--no-color"}
+        if true == force {
+            arguments = append(arguments, "--"+MigrateForceFlagName)
+        }
+
+        _, runErr := runMigrationCommand(t, newRuntimeWithDatabase(t, database), NewMigrateCommand(migrations, resolvedDefaultOptions), arguments...)
+
+        markerDeleted := 0 <= recorder.firstIndexMatching(func(query string) bool {
+            return true == strings.HasPrefix(query, "DELETE") && true == strings.Contains(query, "'ranNotRecorded:bun_migrations:20240101000000'") && false == strings.Contains(query, "bun_migrations_other")
+        })
+
+        if false == force {
+            var exceptionErr *exception.Error
+            if nil == runErr || 0 != upCalls || true == markerDeleted || false == errors.As(runErr, &exceptionErr) || MigrateForceFlagName != exceptionErr.Context()["flag"] || "[20240101000000]" != fmt.Sprint(exceptionErr.Context()["migrations"]) {
+                t.Fatalf("expected the run refused before any Up naming the migration and the flag, got %v, %d Ups, deleted=%v", runErr, upCalls, markerDeleted)
+            }
+
+            if 0 > recorder.firstIndexMatching(isUnlockDelete) {
+                t.Fatalf("expected the lock released after the refusal: %v", recorder.recordedQueries())
+            }
+
+            continue
+        }
+
+        if nil != runErr || 1 != upCalls || false == markerDeleted {
+            t.Fatalf("expected --force to clear the marker and run, got %v, %d Ups, deleted=%v in %v", runErr, upCalls, markerDeleted, recorder.recordedQueries())
         }
     }
 }

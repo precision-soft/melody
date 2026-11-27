@@ -48,6 +48,42 @@ func TestServiceTracerProvider_IsTheNameTheModuleRegistersUnder(t *testing.T) {
     }
 }
 
+type spyBootWarningRegistrar struct {
+    declared []string
+    warnings []applicationcontract.BootWarning
+}
+
+func (instance *spyBootWarningRegistrar) DeclareBootWarning(name string, config applicationcontract.BootWarningConfig) {
+    instance.declared = append(instance.declared, name)
+}
+
+func (instance *spyBootWarningRegistrar) AddBootWarning(warning applicationcontract.BootWarning) {
+    instance.warnings = append(instance.warnings, warning)
+}
+
+func TestModule_RegisterBootWarningsDeclaresTheCodeAndAddsTheWarningForAnInsecureCollectorOffThisMachine(t *testing.T) {
+    for _, testCase := range []struct {
+        endpoint string
+        insecure bool
+        expected int
+    }{
+        {"otel-collector:4317", true, 1},
+        {"otel-collector:4317", false, 0},
+        {"localhost:4317", true, 0},
+    } {
+        registrar := &spyBootWarningRegistrar{}
+        NewModule(ModuleConfig{Endpoint: testCase.endpoint, Config: Config{Insecure: testCase.insecure}}).RegisterBootWarnings(registrar)
+
+        if 1 != len(registrar.declared) || InsecureCollectorBootWarningName != registrar.declared[0] {
+            t.Fatalf("%q: expected the code declared, got %v", testCase.endpoint, registrar.declared)
+        }
+
+        if testCase.expected != len(registrar.warnings) {
+            t.Fatalf("%q insecure=%v: expected %d warnings, got %v", testCase.endpoint, testCase.insecure, testCase.expected, registrar.warnings)
+        }
+    }
+}
+
 func TestModule_NamesAndDescribesItself(t *testing.T) {
     moduleInstance := NewModule(ModuleConfig{})
 

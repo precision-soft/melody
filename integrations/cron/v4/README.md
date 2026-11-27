@@ -83,7 +83,7 @@ The key `MELODY_CRON_LOGS_DIRECTORY` retires the spelling `MELODY_CRON_LOGS_DIR`
 
 An empty `.env` line takes the default on the three keys with a rule and is the empty value on the seven free-text ones: `MELODY_CRON_DESTINATION_FILE=` and `MELODY_CRON_LOGS_DIRECTORY=` leave the generator with no destination and no logs directory, so a run without `--out` is refused and a run without `--logs-directory` refuses an entry that redirects its output.
 
-The generator creates the logs directory, once the entries are known and before anything is rendered, since under system cron a shell whose `>>` cannot create its file aborts the command. With a template that runs every entry as a user (`crontab`), a generator running as root refuses, before it creates or writes anything, a logs directory the entries' users could not use: a missing one, which root would create as its own, for a user that writes its log file, or the heartbeat, directly in it; an existing one that user cannot write and enter, or, for a user logging in a subdirectory, cannot enter. The refusal, `ErrLogsDirectoryNotWritable` in its chain, names the directory and the users in its message and the commands in its context; create the directory beforehand with an owner or a mode they can write, or give those entries log file names in directories of their own, which the generator creates and hands to their users as before. Not judged: a user the host does not know (a build host generating for others), uid 0 under any name, a user whose groups cannot be read, a directory carrying a POSIX access control list (its mode bits do not tell), and a direct writer whose log file exists already and is writable for it, the shape a `logrotate` `create` line leaves. An existing subdirectory is not judged either.
+The generator creates the logs directory, once the entries are known and before anything is rendered, since under system cron a shell whose `>>` cannot create its file aborts the command. With a template that runs every entry as a user (`crontab`), a generator running as root refuses, before it creates or writes anything, a logs directory the entries' users could not use: a missing one, which root would create as its own, for a user that writes its log file, or the heartbeat, directly in it; an existing one that user cannot write and enter, or, for a user logging in a subdirectory, cannot enter. The refusal, `ErrLogsDirectoryNotWritable` in its chain, names the directory and the users in its message and the commands in its context; create the directory beforehand with an owner or a mode they can write, or give those entries log file names in directories of their own, which the generator creates and hands to their users as before; `GeneratorConfig.LogsDirectoryCheckDisabled` skips the judgement on a host it misjudges. Not judged: a user the host does not know (a build host generating for others), uid 0 under any name, a user whose groups cannot be read, a directory carrying a POSIX access control list (its mode bits do not tell), and a direct writer whose log file exists already and is writable for it, the shape a `logrotate` `create` line leaves. An existing subdirectory is not judged either.
 
 A parameter of these names registered by hand is refused at boot.
 
@@ -115,6 +115,24 @@ app.RegisterModule(melodycron.NewModule(melodycron.ModuleConfig{
 ```
 
 `RunnerConfig` also carries `Dialect`, `OutputCaptureLimit` (64 KiB), `ClockJumpResetThreshold` (3h, at least 2m, whole minutes) and `ShutdownTimeout` (5m); each is its default when left out, and a value below its minimum or an unlimited one where the field refuses it panics at boot naming the field.
+
+## Doors
+
+Every door is Go-side; the generator's flags choose where it writes, never whether a protection runs.
+
+| Door | Default |
+|---|---|
+| `EntryConfig.LogDisabled` | `false`: the entry's output is appended to its log file under the logs directory; `true` renders no redirection, leaving the output to cron's mail |
+| `EntryConfig.LogFileName` | `<command name>.log`, the `:` and `/` of the name written `-`; a relative path, a subdirectory created and handed to the entry's user |
+| `EntryConfig.LogFileNameRaw` | `false`; `true` keeps the `:` of the command name in the default file name |
+| `EntryConfig.Instances` | 1, at least 1, unlimited refused; more than 1 is expanded by the generated manifests and refused by the in-process runner |
+| `EntryConfig.User` | the generator's `--user`; the in-process runner refuses an entry naming one, since it runs every entry as the process user, unless `RunnerConfig.EntryUserIgnored` is `true` |
+| `GeneratorConfig.DirectoryMode` (`ModuleConfig.Generator`) | `cron.DefaultGeneratorDirectoryMode`, `0755`, for every directory the generator creates: the destination's parents, the logs directory and a log file's subdirectory; permission bits only, the owner's read, write and search required, refused at registration naming `ModuleConfig.Generator.DirectoryMode`; a creation mode, narrowed by the umask, an existing directory keeping its own |
+| `GeneratorConfig.LogsDirectoryCheckDisabled` | `false`; `true` skips the judgement of the logs directory a root-run generator makes, for a host whose mode bits misjudge the entries' users: network accounts, or a directory the deployment hands over after the run |
+| `--prune` | off; on, it empties the destinations of dir(`--out`) that carry this application's ownership line and this run no longer writes |
+| `lock.NewExclusiveCommand` | none; wrapping a command serialises its overlapping runs |
+
+Two refusals have no door, by design. A `LogFileName` that escapes the logs directory is refused with `ErrDestinationEscape`: the logs directory is the one root the generator creates and hands to the entries' users, and a log elsewhere is a path the operator owns, named by `--logs-directory` or by the entry's command. A day-field pair busybox crond would run on another schedule is refused under the user-less dialect with `ErrBusyboxDivergentDaySchedule`: that dialect is defined as the one busybox runs as written, and a host running vixie crond with user crontabs renders the pair through the `crontab` dialect.
 
 `NewModule` is available for the v1, v2, v3 and v4 bindings.
 

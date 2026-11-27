@@ -395,7 +395,7 @@ func TestNewMigrator_SqlMigrationExecFailureReachesTheCaller(t *testing.T) {
 
     /* the row is the other half of the defect: a migration marked applied over a statement that never ran can never be retried, and db:status reports it as done */
     for _, query := range recorder.recordedQueries() {
-        if true == strings.HasPrefix(query, "INSERT") && true == strings.Contains(query, "bun_migrations") {
+        if true == strings.HasPrefix(query, "INSERT") && true == mentionsMigrationsTable(query) {
             t.Fatalf("the failed migration was marked applied: %q", query)
         }
     }

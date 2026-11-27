@@ -98,8 +98,18 @@ func (instance *providerHandle) CloseWithContext(closeContext context.Context) e
     return instance.provider.Shutdown(closeContext)
 }
 
+/* the code is declared whether or not the export is insecure, so MELODY_BOOT_WARNINGS_IGNORED may name it in every environment the module is registered in */
+func (instance *Module) RegisterBootWarnings(registrar applicationcontract.BootWarningRegistrar) {
+    registrar.DeclareBootWarning(InsecureCollectorBootWarningName, applicationcontract.BootWarningConfig{})
+
+    if warning, warns := insecureCollectorWarningOf(instance.config.Endpoint, instance.config.Config); true == warns {
+        registrar.AddBootWarning(warning)
+    }
+}
+
 var (
     _ applicationcontract.Module               = (*Module)(nil)
     _ applicationcontract.ServiceModule        = (*Module)(nil)
     _ applicationcontract.HttpMiddlewareModule = (*Module)(nil)
+    _ applicationcontract.BootWarningModule    = (*Module)(nil)
 )

@@ -515,8 +515,14 @@ func TestMain(main *testing.M) {
     os.Exit(main.Run())
 }
 
+func defaultResolvedGenerator() resolvedGenerator {
+    generator, _ := resolveGeneratorConfig(GeneratorConfig{})
+
+    return generator
+}
+
 func newGenerateCommandForTest(configuration *Configuration) *GenerateCommand {
-    return newGenerateCommand(configuration, nil)
+    return newGenerateCommand(configuration, nil, defaultResolvedGenerator())
 }
 
 /* staticConfiguration answers a ModuleConfig.Configuration factory over a configuration built beforehand */

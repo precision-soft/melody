@@ -3524,6 +3524,7 @@ func TestExpandEntriesForCommand_EveryEntryCarriesItsOwnSchedule(t *testing.T) {
         t.TempDir(),
         true,
         &logDirectoryOwnership{},
+        DefaultGeneratorDirectoryMode,
     )
     if nil != expandErr {
         t.Fatalf("unexpected expand error: %v", expandErr)
@@ -4337,7 +4338,7 @@ func TestRunADialectEmbeddingABuiltinCarriesTheApplicationsLineAndItsPruneSweeps
         t.Fatalf("expected the builtin crontab dialect among the builtins")
     }
 
-    generateCommand := newGenerateCommand(buildConfigurationFromFakeCommands([]clicontract.Command{newFakeCommandWithConfig("reports:daily", EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})}), []Template{&decoratingCrontabTemplate{CrontabTemplate: builtin}})
+    generateCommand := newGenerateCommand(buildConfigurationFromFakeCommands([]clicontract.Command{newFakeCommandWithConfig("reports:daily", EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})}), []Template{&decoratingCrontabTemplate{CrontabTemplate: builtin}}, defaultResolvedGenerator())
 
     _, runErr := dispatchGenerateCommand(
         generateCommand,
@@ -4410,10 +4411,73 @@ func TestAtomicWriteFileReplacesADestinationWhoseBasenameFillsTheFilesystemCompo
     }
 }
 
+func TestResolveGeneratorConfig_DefaultsTheDirectoryModeAndRefusesOneOutsideTheRuleNamingTheField(t *testing.T) {
+    if generator, resolveErr := resolveGeneratorConfig(GeneratorConfig{}); nil != resolveErr || 0o755 != generator.directoryMode || 0o755 != DefaultGeneratorDirectoryMode {
+        t.Fatalf("expected the absent mode to resolve to 0755, got %v, %v", generator, resolveErr)
+    }
+
+    if generator, resolveErr := resolveGeneratorConfig(GeneratorConfig{DirectoryMode: 0o700, LogsDirectoryCheckDisabled: true}); nil != resolveErr || 0o700 != generator.directoryMode || false == generator.logsDirectoryCheckDisabled {
+        t.Fatalf("expected the owner-only mode and the door kept, got %v, %v", generator, resolveErr)
+    }
+
+    for _, mode := range []os.FileMode{0o600, 0o500, 0o1755, os.ModeDir | 0o755} {
+        _, resolveErr := resolveGeneratorConfig(GeneratorConfig{DirectoryMode: mode})
+
+        var melodyErr *exception.Error
+        if false == errors.As(resolveErr, &melodyErr) || "ModuleConfig.Generator.DirectoryMode" != melodyErr.Context()["field"] {
+            t.Fatalf("%#o: expected the refusal naming the field, got %v", uint32(mode), resolveErr)
+        }
+    }
+}
+
+/* every directory the generator creates, the destination's parent, the logs root and a LogFileName's subdirectory, takes the configured mode */
+func TestGenerateCommand_CreatesItsDirectoriesUnderTheConfiguredDirectoryMode(t *testing.T) {
+    previousMask := syscall.Umask(0)
+    defer syscall.Umask(previousMask)
+
+    base := t.TempDir()
+    configuration := buildConfigurationFromFakeCommands([]clicontract.Command{newFakeCommandWithConfig("reports:daily", EntryConfig{Schedule: &Schedule{Minute: "0"}, LogFileName: "nested/reports.log"})})
+
+    for _, mode := range []os.FileMode{0o750, 0o711} {
+        directory := filepath.Join(base, fmt.Sprintf("%o", uint32(mode)))
+        generator, _ := resolveGeneratorConfig(GeneratorConfig{DirectoryMode: mode})
+
+        _, runErr := dispatchGenerateCommand(newGenerateCommand(configuration, nil, generator), nil, []string{"--out=" + filepath.Join(directory, "cron.d", "app"), "--logs-directory=" + filepath.Join(directory, "logs"), "--user=deploy", "--binary=/usr/local/bin/app"})
+        if nil != runErr {
+            t.Fatalf("%#o: unexpected error: %v", uint32(mode), runErr)
+        }
+
+        for _, created := range []string{filepath.Join(directory, "cron.d"), filepath.Join(directory, "logs"), filepath.Join(directory, "logs", "nested")} {
+            info, statErr := os.Stat(created)
+            if nil != statErr || mode != info.Mode().Perm() {
+                t.Fatalf("expected %s created at %#o, got %v, %v", created, uint32(mode), info, statErr)
+            }
+        }
+    }
+}
+
+/* the door reaches the run: a root generator configured with LogsDirectoryCheckDisabled writes where the judgement would refuse */
+func TestGenerateCommand_LogsDirectoryCheckDisabledReachesTheRun(t *testing.T) {
+    withLogDirectoryOwnership(t, 0, knownAccount)
+
+    directory := t.TempDir()
+    configuration := buildConfigurationFromFakeCommands([]clicontract.Command{newFakeCommandWithConfig("reports:daily", EntryConfig{Schedule: &Schedule{Minute: "0"}, User: "uma"})})
+    arguments := []string{"--out=" + filepath.Join(directory, "app.crontab"), "--logs-directory=" + filepath.Join(directory, "logs"), "--user=deploy", "--binary=/usr/local/bin/app"}
+
+    if _, runErr := dispatchGenerateCommand(newGenerateCommand(configuration, nil, defaultResolvedGenerator()), nil, arguments); false == errors.Is(runErr, ErrLogsDirectoryNotWritable) {
+        t.Fatalf("expected the judgement to refuse the missing root, got %v", runErr)
+    }
+
+    generator, _ := resolveGeneratorConfig(GeneratorConfig{LogsDirectoryCheckDisabled: true})
+    if _, runErr := dispatchGenerateCommand(newGenerateCommand(configuration, nil, generator), nil, arguments); nil != runErr {
+        t.Fatalf("expected the door to skip the judgement, got %v", runErr)
+    }
+}
+
 func TestResolveEntryLogPath_AMultiInstanceNameInADottedSubdirectoryKeepsTheDirectory(t *testing.T) {
     logsDirectory := t.TempDir()
 
-    resolved, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "cron.d/app.log"}, logsDirectory, 2, 1, true, "")
+    resolved, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "cron.d/app.log"}, logsDirectory, 2, 1, true, "", DefaultGeneratorDirectoryMode)
     if nil != resolveErr {
         t.Fatalf("resolve: %v", resolveErr)
     }
@@ -4451,7 +4515,7 @@ func TestResolveEntryLogPath_TheSubdirectoriesCreatedForAnEntryAreHandedToItsUse
         return &user.User{Username: name, Uid: "1234", Gid: "5678"}, nil
     })
 
-    if _, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "a/b/app.log"}, logsDirectory, 1, 1, true, "deploy"); nil != resolveErr {
+    if _, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "a/b/app.log"}, logsDirectory, 1, 1, true, "deploy", DefaultGeneratorDirectoryMode); nil != resolveErr {
         t.Fatalf("resolve: %v", resolveErr)
     }
 
@@ -4467,7 +4531,7 @@ func TestResolveEntryLogPath_AnEntryUserTheHostDoesNotKnowLeavesTheDirectoryRoot
         return nil, user.UnknownUserError(name)
     })
 
-    resolved, unownedDirectory, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "a/b/app.log"}, logsDirectory, 1, 1, true, "ghost")
+    resolved, unownedDirectory, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "a/b/app.log"}, logsDirectory, 1, 1, true, "ghost", DefaultGeneratorDirectoryMode)
     if nil != resolveErr {
         t.Fatalf("expected the generation to continue over a user the host does not know, got %v", resolveErr)
     }
@@ -4483,17 +4547,17 @@ func TestResolveEntryLogPath_NothingIsHandedAwayWhenNotRootOrWithoutAUserOrWhenN
         return &user.User{Username: name, Uid: "1234", Gid: "5678"}, nil
     })
 
-    if _, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "a/app.log"}, logsDirectory, 1, 1, true, "deploy"); nil != resolveErr {
+    if _, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "a/app.log"}, logsDirectory, 1, 1, true, "deploy", DefaultGeneratorDirectoryMode); nil != resolveErr {
         t.Fatalf("resolve: %v", resolveErr)
     }
 
     logDirectoryEffectiveUserId = func() int { return 0 }
 
-    if _, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "b/app.log"}, logsDirectory, 1, 1, true, ""); nil != resolveErr {
+    if _, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "b/app.log"}, logsDirectory, 1, 1, true, "", DefaultGeneratorDirectoryMode); nil != resolveErr {
         t.Fatalf("resolve: %v", resolveErr)
     }
 
-    if _, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "a/app.log"}, logsDirectory, 1, 1, true, "deploy"); nil != resolveErr {
+    if _, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "a/app.log"}, logsDirectory, 1, 1, true, "deploy", DefaultGeneratorDirectoryMode); nil != resolveErr {
         t.Fatalf("resolve: %v", resolveErr)
     }
 
@@ -4592,7 +4656,7 @@ func TestErrorDetailsOf_ReturnsOnACyclicChain(t *testing.T) {
 }
 
 func logsRootOptions(root string) *runOptions {
-    return &runOptions{logsDirectory: root, defaultUserName: "deploy", logDirectoryOwnership: &logDirectoryOwnership{rendersUserColumn: true}}
+    return &runOptions{directoryMode: DefaultGeneratorDirectoryMode, logsDirectory: root, defaultUserName: "deploy", logDirectoryOwnership: &logDirectoryOwnership{rendersUserColumn: true}}
 }
 
 func scheduledLogging(commandName string, entryUser string, logFileName string) *ScheduledCommand {
@@ -4682,6 +4746,23 @@ func TestCreateTheLogsRoot_ARootGeneratorRefusesAMissingRootItsDirectWritersNeed
 
     if _, statErr := os.Stat(root); false == errors.Is(statErr, os.ErrNotExist) {
         t.Fatalf("expected the directory absent after the refusal, got %v", statErr)
+    }
+}
+
+/* GeneratorConfig.LogsDirectoryCheckDisabled skips the judgement a root generator would refuse with, and the root is created */
+func TestCreateTheLogsRoot_LogsDirectoryCheckDisabledCreatesARootTheJudgementWouldRefuse(t *testing.T) {
+    root := filepath.Join(t.TempDir(), "logs")
+    withLogDirectoryOwnership(t, 0, knownAccount)
+
+    options := logsRootOptions(root)
+    options.logsDirectoryCheckOff = true
+
+    if createErr := createTheLogsRoot([]*ScheduledCommand{scheduledLogging("a:job", "uma", "")}, options, true); nil != createErr {
+        t.Fatalf("expected the door to skip the judgement, got %v", createErr)
+    }
+
+    if info, statErr := os.Stat(root); nil != statErr || false == info.IsDir() {
+        t.Fatalf("expected the root created, got %v", statErr)
     }
 }
 

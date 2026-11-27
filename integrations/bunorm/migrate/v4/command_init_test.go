@@ -23,7 +23,7 @@ func TestInitializeCommand_CreatesMigrationTables(t *testing.T) {
     }
 
     migrationsTableIndex := recorder.firstIndexMatching(func(query string) bool {
-        return strings.HasPrefix(query, "CREATE TABLE") && strings.Contains(query, "bun_migrations")
+        return strings.HasPrefix(query, "CREATE TABLE") && mentionsMigrationsTable(query)
     })
     locksTableIndex := recorder.firstIndexMatching(func(query string) bool {
         return strings.HasPrefix(query, "CREATE TABLE") && strings.Contains(query, "bun_migration_locks")

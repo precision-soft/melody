@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- `otlp/insecure_collector.go`, `otlp/module.go`: the module declares the boot warning `opentelemetry.otlp.insecureCollector` (`InsecureCollectorBootWarningName`) and adds it, naming the endpoint, when `Config.Insecure` exports to a collector off this machine, anything but `localhost` or a loopback address; `MELODY_BOOT_WARNINGS_IGNORED` may list the code.
 - This major includes every change of the third major up to v3.2.0; that history is in the third major's changelog.
 - `otlp/sampling.go`, `otlp/module.go`: `otlp.Sampling`, built by `SampleRatio` and `SampleNone`, its zero value sampling every trace, `SampleNone` sampling no trace that starts here for the first time, a sampled inbound parent still deciding for its trace; `ModuleConfig.ShutdownTimeout` bounds the provider's shutdown when its close carries no deadline, 5s when left out as the constant was, at least 1ms, unlimited refused, a refusal failing `RegisterServices`.
 

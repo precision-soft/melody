@@ -137,6 +137,11 @@ func newTransport(queue string, registry *MessageRegistry, source ConnectionSour
 
     delayBuckets := resolveDelayBuckets(config.DelayBuckets)
 
+    deadLetterQueueArguments, deadLetterQueueArgumentsErr := resolveDeadLetterQueueArguments(config)
+    if nil != deadLetterQueueArgumentsErr {
+        exception.Panic(exception.FromError(deadLetterQueueArgumentsErr))
+    }
+
     return &Transport{
         connection:          source.connection.Raw(),
         connectedOnce:       nil != source.connection,
@@ -148,6 +153,7 @@ func newTransport(queue string, registry *MessageRegistry, source ConnectionSour
         registry:            registry,
         serializer:          serializerInstance,
         deadLetter:          false == config.DeadLetterDisabled,
+        deadLetterQueueArgs: deadLetterQueueArguments,
         publishReturnBuffer: publishReturnBuffer.Value,
         reconnect:           reconnect,
         delayBuckets:        delayBuckets,
@@ -178,6 +184,10 @@ type TransportConfig struct {
     Serializer serializercontract.Serializer
     /* DeadLetterDisabled declares the queue without its <queue>.dlx exchange and <queue>.dlq queue, so a poison message is dropped; left out, it is dead-lettered. */
     DeadLetterDisabled bool
+    /* DeadLetterMaxLength caps the messages the <queue>.dlq queue holds, declared as its x-max-length, the broker dropping the oldest past it: unlimited when left out, which declares no argument, at least 1. Setting it on a queue declared without it, or changing it, is a migration of the queue: the broker refuses the declare until the operator deletes the .dlq queue or applies a policy. */
+    DeadLetterMaxLength bound.Count
+    /* DeadLetterTtl is how long a message stays in the <queue>.dlq queue, declared as its x-message-ttl in whole milliseconds: unlimited when left out, which declares no argument, 1ms to the 32-bit millisecond limit. A migration of the queue, as DeadLetterMaxLength. */
+    DeadLetterTtl bound.Duration
     /* Reconnect is the re-dial backoff; a field left out is inherited from the provider. */
     Reconnect ReconnectConfig
     /* PublishReturnBuffer buffers the broker's returns: 16 by default, at least 1. */
@@ -203,6 +213,8 @@ type Transport struct {
     registry      *MessageRegistry
     serializer    serializercontract.Serializer
     deadLetter    bool
+    /* the x-max-length and x-message-ttl the .dlq queue is declared with; nil declares it without arguments */
+    deadLetterQueueArgs amqp091.Table
 
     publishReturnBuffer int
     reconnect           bound.ResolvedBackoff
@@ -1182,6 +1194,69 @@ func (instance *Transport) consumeLoop(
     }
 }
 
+var transportDeadLetterMaxLengthRule = bound.Rule[int]{
+    Name:             "TransportConfig.DeadLetterMaxLength",
+    DefaultUnlimited: true,
+    Minimum:          1,
+}
+
+var transportDeadLetterTtlRule = bound.Rule[time.Duration]{
+    Name:             "TransportConfig.DeadLetterTtl",
+    DefaultUnlimited: true,
+    Minimum:          time.Millisecond,
+    Maximum:          time.Duration(maxDelayExpirationMilliseconds) * time.Millisecond,
+}
+
+/* resolveDeadLetterQueueArguments answers the .dlq arguments the two caps declare, nil when neither is set, so a transport that sets none declares the queue as before; a cap beside DeadLetterDisabled, which declares no .dlq, and a ttl that is not a whole number of milliseconds are refused naming the field */
+func resolveDeadLetterQueueArguments(config TransportConfig) (amqp091.Table, error) {
+    maxLength, maxLengthErr := bound.Resolve(config.DeadLetterMaxLength, transportDeadLetterMaxLengthRule)
+    if nil != maxLengthErr {
+        return nil, maxLengthErr
+    }
+
+    ttl, ttlErr := bound.Resolve(config.DeadLetterTtl, transportDeadLetterTtlRule)
+    if nil != ttlErr {
+        return nil, ttlErr
+    }
+
+    if true == maxLength.Unlimited && true == ttl.Unlimited {
+        return nil, nil
+    }
+
+    for _, capField := range []struct {
+        name      string
+        unlimited bool
+    }{{transportDeadLetterMaxLengthRule.Name, maxLength.Unlimited}, {transportDeadLetterTtlRule.Name, ttl.Unlimited}} {
+        if false == capField.unlimited && true == config.DeadLetterDisabled {
+            return nil, exception.NewError(
+                "amqp transport caps a dead-letter queue it does not declare",
+                exceptioncontract.Context{"field": capField.name, "door": "TransportConfig.DeadLetterDisabled"},
+                nil,
+            )
+        }
+    }
+
+    arguments := amqp091.Table{}
+
+    if false == maxLength.Unlimited {
+        arguments["x-max-length"] = int64(maxLength.Value)
+    }
+
+    if false == ttl.Unlimited {
+        if 0 != ttl.Value%time.Millisecond {
+            return nil, exception.NewError(
+                "amqp transport dead-letter ttl is not a whole number of milliseconds",
+                exceptioncontract.Context{"field": transportDeadLetterTtlRule.Name, "value": ttl.Value.String()},
+                nil,
+            )
+        }
+
+        arguments["x-message-ttl"] = ttl.Value.Milliseconds()
+    }
+
+    return arguments, nil
+}
+
 /* RabbitMQ parses the expiration as a 32-bit millisecond count */
 const maxDelayExpirationMilliseconds = int64(math.MaxUint32)
 
@@ -1941,9 +2016,16 @@ func (instance *Transport) declareTopology(channel *amqp091.Channel) error {
             return exception.NewError("amqp dead-letter exchange declare failed", map[string]any{"queue": instance.queue, "exchange": deadLetterExchange}, exchangeErr)
         }
 
-        _, queueErr := channel.QueueDeclare(deadLetterQueue, true, false, false, false, nil)
+        _, queueErr := channel.QueueDeclare(deadLetterQueue, true, false, false, false, instance.deadLetterQueueArgs)
         if nil != queueErr {
-            return exception.NewError("amqp dead-letter queue declare failed", map[string]any{"queue": deadLetterQueue}, queueErr)
+            queueContext := map[string]any{"queue": deadLetterQueue}
+
+            var brokerErr *amqp091.Error
+            if true == errors.As(queueErr, &brokerErr) && amqp091.PreconditionFailed == brokerErr.Code {
+                queueContext["fields"] = []string{transportDeadLetterMaxLengthRule.Name, transportDeadLetterTtlRule.Name}
+            }
+
+            return exception.NewError("amqp dead-letter queue declare failed", queueContext, queueErr)
         }
 
         bindErr := channel.QueueBind(deadLetterQueue, "", deadLetterExchange, false, nil)

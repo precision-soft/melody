@@ -156,7 +156,7 @@ omitting the flag.
 With the default prefix (`db`):
 
 - `db:init` — initializes the migrations tables.
-- `db:migrate` — applies pending migrations.
+- `db:migrate` — applies pending migrations. A migration whose `Up` ran and whose mark in the migrations table failed is reported under `data.migrations.ranNotRecorded`, and the run writes a marker for it, a row `ranNotRecorded:<migrations table>:<name>` of the locks table beside bun's lock row; while a marker stands, the next `db:migrate` is refused before any `Up`, naming the migrations and the `--force` flag (`migrate.MigrateForceFlagName`), since running it again is what the report forbids. Insert its row in the migrations table or roll its change back by hand, then run with `--force`, which deletes the markers and migrates. A marker the failed run could not write is said in a warning, and the next run does not refuse.
 - `db:rollback` — rolls back the last migration group.
 - `db:status` — shows applied and pending migrations.
 - `db:unlock` — unlocks the migrations table. It clears the lock whatever holds it, so it is run only once no migration is running against the database: a lock a live run holds, cleared, lets a second run apply the same set beside it. The failure of a run that could not release its lock names the table and this command.

@@ -105,6 +105,30 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** Open in the connection's provider and hand the module its factory: `Connection: func(resolver containercontract.Resolver) (*rueidis.Connection, error) { return provider.Open(resolver.Runtime(), parameters) }`, with `ConnectionBuiltAtBoot: true` and `ConnectionBootFailure: container.BootFailureFailsBoot` for a boot that refuses an unreachable store. Use `connection.Client()` where a client is asked, and `connection.CloseWithContext(closeContext)` for `provider.Close`; registered through the module, the container closes it. `Client: rueidis.ClientConfig{BootPingTimeout: …}` for `TimeoutConfig.ConnectTimeout`; `CommandTimeout` has no successor, since `Ping` runs under the context handed. `Locker: &rueidis.LockerConfig{}` for `AsLocker: true` and `TokenStore: &rueidis.TokenStoreConfig{…}` for `AsTokenStore: true`. `rueidiscache.NewModule(rueidiscache.ModuleConfig{Backend: …})` beside the rueidis module, with no client. Build what needs the client, a limiter, a nonce guard, a backplane, in a provider that resolves `rueidis.ServiceConnection`, and reach it from what was built while wiring through each call's runtime.
 
+### Cron: the in-process runner refuses an entry naming a user
+
+**What changed.** [`NewRunnerCommand`](../../integrations/cron/v4/runner_command.go) refuses at construction an entry naming `EntryConfig.User`, with `ErrUnsupportedRunnerEntry` naming the command, the user and the door `RunnerConfig.EntryUserIgnored`, where it ran the entry as the process user and wrote one warning at `Run`. The runner runs every entry as the process user; the user is honoured only by the generated manifests. `RunnerConfig.EntryUserIgnored` admits such an entry.
+
+**Symptom.** A boot that registers the runner panics with `the in-process runner runs every entry as the process user`, naming an entry that carries a `User`.
+
+**Remedy.** Where one configuration drives both the manifests and the in-process runner, set `RunnerConfig.EntryUserIgnored: true`; otherwise drop the `User` of the entries the runner schedules.
+
+### Bunorm migrate: a migration that ran but was not recorded refuses the next run
+
+**What changed.** A [`db:migrate`](../../integrations/bunorm/migrate/v4/command_migrate.go) whose last migration ran but whose mark failed writes a marker row, `ranNotRecorded:<migrations table>:<name>`, in the locks table; while a marker stands, the next `db:migrate` is refused before any `Up`, naming the migrations under `migrations` and the flag `--force`, where it ran the migration again.
+
+**Symptom.** `db:migrate` fails with `… ran but was not recorded in bun_migrations by an earlier run`, naming the migration.
+
+**Remedy.** Insert the migration's row in the migrations table, or roll its change back by hand, then run `db:migrate --force`, which deletes the marker and migrates.
+
+### Integrations: doors beside their defaults
+
+**What changed.** [`TransportConfig.DeadLetterMaxLength`](../../integrations/amqp/v4/transport.go) and `DeadLetterTtl` cap the amqp `<queue>.dlq` queue, declaring nothing when left out; [`SplitterConfig.PrimaryFallbackDisabled`](../../integrations/bunorm/v4/split.go) refuses the read of an unreachable replica instead of opening the primary; the cron [`ModuleConfig.Generator`](../../integrations/cron/v4/module.go) takes the generator's `DirectoryMode`, `0755` when left out, and `LogsDirectoryCheckDisabled`; the [otlp module](../../integrations/opentelemetry/v4/otlp/module.go) adds the boot warning `opentelemetry.otlp.insecureCollector` for an `Insecure` export to a collector off this machine.
+
+**Symptom.** None for an application that sets none of them, beside the otlp warning, written at boot naming the endpoint.
+
+**Remedy.** None; to set a cap on a `.dlq` the broker already holds, delete that queue first or apply the cap through a broker policy, since a changed argument refuses the declare; list `opentelemetry.otlp.insecureCollector` in `MELODY_BOOT_WARNINGS_IGNORED` for a collector reached in clear on purpose.
+
 ### Amqp: a connection closes under `CloseTimeout`
 
 **What changed.** The close of a connection a [`Transport`](../../integrations/amqp/v4/transport.go) or a [`ServerSentEventBackplane`](../../integrations/amqp/v4/server_sent_event_backplane.go) dialed itself, and of a dial that lands after their close began or that their close stopped waiting for, is bounded by the component's `CloseTimeout`, where it was bounded by its `CallTimeout`; the wait for the publishes in flight and every send keep `CallTimeout`.
@@ -1193,7 +1217,7 @@ As in the third major, a failure ahead of a `Required` listener that did not run
 
 **Symptom.** A deployment whose root-run generator created the logs directory now fails naming the directory and the users.
 
-**Remedy.** Create the logs directory beforehand, owned by or writable for the entries' users, or give those entries log file names in a subdirectory, which the generator creates and hands over. A directory managed through an access control list, and log files that already exist for their users, are not judged. A script can tell the refusal by `errors.Is(err, cron.ErrLogsDirectoryNotWritable)`.
+**Remedy.** Create the logs directory beforehand, owned by or writable for the entries' users, or give those entries log file names in a subdirectory, which the generator creates and hands over. A directory managed through an access control list, and log files that already exist for their users, are not judged. A script can tell the refusal by `errors.Is(err, cron.ErrLogsDirectoryNotWritable)`. Where the judgement misjudges the host, network accounts or a directory the deployment hands over after the run, `ModuleConfig.Generator.LogsDirectoryCheckDisabled` skips it.
 
 ### Bunorm encrypt: the migrator judges its specification against the schema
 

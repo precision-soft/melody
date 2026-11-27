@@ -21,6 +21,9 @@ type ModuleConfig struct {
 
     /* Runner, when it lists Commands, adds the in-process melody:cron:run scheduler beside the generator, built by NewRunnerCommand from this configuration: an entry naming a command absent from Runner.Commands, or a value outside its rule, panics at boot. Without Commands the rest of Runner is not read. */
     Runner RunnerConfig
+
+    /* Generator declares how melody:cron:generate writes; a DirectoryMode outside its rule is refused at registration naming the field. */
+    Generator GeneratorConfig
 }
 
 func NewModule(config ModuleConfig) *Module {
@@ -49,6 +52,11 @@ func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel
     /* the hook runs at every boot, after every parameter hook, whatever the process shape */
     if nil != kernelInstance {
         refuseRetiredParameters(kernelInstance.Config())
+    }
+
+    generator, generatorErr := resolveGeneratorConfig(instance.config.Generator)
+    if nil != generatorErr {
+        exception.Panic(exception.FromError(generatorErr))
     }
 
     for index, template := range instance.config.Templates {
@@ -96,7 +104,7 @@ func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel
         )
     }
 
-    commands := []clicontract.Command{newGenerateCommand(configuration, instance.config.Templates)}
+    commands := []clicontract.Command{newGenerateCommand(configuration, instance.config.Templates, generator)}
 
     if 0 < len(instance.config.Runner.Commands) {
         commands = append(commands, NewRunnerCommand(configuration, instance.config.Runner))

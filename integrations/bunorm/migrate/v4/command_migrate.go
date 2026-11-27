@@ -38,6 +38,10 @@ func (instance *MigrateCommand) Flags() []clicontract.Flag {
         output.StandardFlags(),
         []clicontract.Flag{
             instance.base.managerFlag(),
+            &clicontract.BoolFlag{
+                Name:  MigrateForceFlagName,
+                Usage: "run although a migration of an earlier run ran but was not recorded, clearing its marker: pass it once its row was inserted in the migrations table or its change rolled back by hand",
+            },
         },
     )
 }
@@ -81,10 +85,18 @@ func (instance *MigrateCommand) runMigrate(
         return identityErr
     }
 
+    if markerErr := clearRanNotRecordedMarkers(ctx, db, tables, managerName, commandContext.Bool(MigrateForceFlagName), outputInstance); nil != markerErr {
+        return markerErr
+    }
+
     group, migrateErr := migrator.Migrate(ctx)
     if nil != migrateErr {
         /* a group that fails part way has already applied everything before the migration that broke, and those are reported beside the failure, so the operator can choose between re-running and rolling back */
         printAppliedGroup(outputInstance, managerName, tables.migrations, group, migrateErr)
+
+        if _, ranNotRecorded := appliedNamesOnFailure(group, migrateErr); "" != ranNotRecorded {
+            writeRanNotRecordedMarker(ctx, db, tables, ranNotRecorded, outputInstance)
+        }
 
         return migrateErr
     }
@@ -142,7 +154,7 @@ func migrationNamesOf(group *migrate.MigrationGroup) []string {
     return names
 }
 
-/* printAppliedGroup reports what a failed run had already applied, on both renderings: the text block an operator reads and the data of the machine document, which finish assembles from these same calls and hands over beside the error. It is silent for a run that landed nothing, so a failure on the first migration does not print an empty block claiming a partial state. A migration whose Up ran but whose mark failed is named apart, under "ranNotRecorded", with a warning not to run it again: its change is in the schema, and the migrations table does not say so. */
+/* printAppliedGroup reports what a failed run had already applied, on both renderings: the text block an operator reads and the data of the machine document, which finish assembles from these same calls and hands over beside the error. It is silent for a run that landed nothing, so a failure on the first migration does not print an empty block claiming a partial state. A migration whose Up ran but whose mark failed is named apart, under "ranNotRecorded", with a warning not to run it again: its change is in the schema, and the migrations table does not say so; the run then writes its marker, which refuses the next run until --force clears it. */
 func printAppliedGroup(outputInstance *commandOutput, managerName string, migrationsTable string, group *migrate.MigrationGroup, migrateErr error) {
     names, ranNotRecorded := appliedNamesOnFailure(group, migrateErr)
     if 0 == len(names) && "" == ranNotRecorded {
@@ -183,6 +195,78 @@ func appliedNamesOnFailure(group *migrate.MigrationGroup, migrateErr error) ([]s
 }
 
 var _ clicontract.Command = (*MigrateCommand)(nil)
+
+/* ranNotRecordedMarker is a row of the locks table, beside bun's lock row, that names a migration whose Up ran and whose mark failed: the next run reads it, so it survives the process that saw the failure */
+type ranNotRecordedMarker struct {
+    Id        int64  `bun:"id,pk,autoincrement"`
+    TableName string `bun:"table_name,unique"`
+}
+
+func ranNotRecordedMarkerPrefix(migrationsTable string) string {
+    return ranNotRecordedMarkerNamePrefix + migrationsTable + ":"
+}
+
+/* writeRanNotRecordedMarker records the migration for the next run; a marker that cannot be written leaves the warning the only record, and says so */
+func writeRanNotRecordedMarker(ctx context.Context, database bun.IDB, tables migrationTables, migrationName string, outputInstance *commandOutput) {
+    marker := &ranNotRecordedMarker{TableName: ranNotRecordedMarkerPrefix(tables.migrations) + migrationName}
+
+    if _, insertErr := database.NewInsert().Model(marker).ModelTableExpr(tables.locks).Exec(ctx); nil != insertErr {
+        outputInstance.printWarning("the marker of " + migrationName + " could not be written in " + tables.locks + ", so the next run will not refuse to run it again: " + insertErr.Error())
+    }
+}
+
+/* clearRanNotRecordedMarkers refuses the run while a migration of an earlier run stands as ran but not recorded, naming it, since running again is what its warning forbids; under the force flag it deletes the markers and the run goes on */
+func clearRanNotRecordedMarkers(ctx context.Context, database bun.IDB, tables migrationTables, managerName string, force bool, outputInstance *commandOutput) error {
+    prefix := ranNotRecordedMarkerPrefix(tables.migrations)
+
+    candidates := make([]string, 0)
+    if selectErr := database.NewSelect().TableExpr(tables.locks).Column("table_name").Where("? LIKE ?", bun.Ident("table_name"), prefix+"%").Scan(ctx, &candidates); nil != selectErr {
+        return exception.NewError(
+            "migrate: the markers of migrations that ran but were not recorded could not be read",
+            exceptioncontract.Context{"manager": managerName, "locksTable": tables.locks},
+            selectErr,
+        )
+    }
+
+    markers := make([]string, 0, len(candidates))
+    migrationNames := make([]string, 0, len(candidates))
+    for _, candidate := range candidates {
+        if true == strings.HasPrefix(candidate, prefix) {
+            markers = append(markers, candidate)
+            migrationNames = append(migrationNames, strings.TrimPrefix(candidate, prefix))
+        }
+    }
+
+    if 0 == len(markers) {
+        return nil
+    }
+
+    if false == force {
+        return exception.NewError(
+            "migrate: "+strings.Join(migrationNames, ", ")+" ran but was not recorded in "+tables.migrations+" by an earlier run; insert its row in "+tables.migrations+" or roll its change back by hand, then run again with --"+MigrateForceFlagName,
+            exceptioncontract.Context{
+                "manager":         managerName,
+                "migrations":      migrationNames,
+                "migrationsTable": tables.migrations,
+                "locksTable":      tables.locks,
+                "flag":            MigrateForceFlagName,
+            },
+            nil,
+        )
+    }
+
+    if _, deleteErr := database.NewDelete().Model((*ranNotRecordedMarker)(nil)).ModelTableExpr(tables.locks).Where("? IN (?)", bun.Ident("table_name"), bun.In(markers)).Exec(ctx); nil != deleteErr {
+        return exception.NewError(
+            "migrate: the markers of migrations that ran but were not recorded could not be cleared",
+            exceptioncontract.Context{"manager": managerName, "locksTable": tables.locks, "migrations": migrationNames},
+            deleteErr,
+        )
+    }
+
+    outputInstance.printWarning("cleared the ran-but-not-recorded marker of " + strings.Join(migrationNames, ", ") + " under --" + MigrateForceFlagName)
+
+    return nil
+}
 
 /* lockRefusal answers a migration lock bun could not take. bun files every failure of its lock insert under one "already locked" text, a held lock, a missing locks table, a refused connection and a cancelled context alike, so the refusal asks which it was: a cancelled context first, then the locks table itself. Only a lock row present is answered as held, with the unlock command named, since that remedy is wrong for every other cause. bun's error stays the cause on every branch, so errors.Is still reaches it. */
 func lockRefusal(ctx context.Context, database bun.IDB, lockErr error, managerName string, locksTable string, unlockCommand string) error {

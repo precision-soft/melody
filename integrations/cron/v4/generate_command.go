@@ -41,13 +41,48 @@ const (
 
 const heartbeatDestinationDefault = "default"
 
+/* DefaultGeneratorDirectoryMode is the permission the generator creates its directories with when GeneratorConfig.DirectoryMode is left out. */
+const DefaultGeneratorDirectoryMode os.FileMode = 0o755
+
+/* GeneratorConfig declares how melody:cron:generate writes. */
+type GeneratorConfig struct {
+    /* DirectoryMode is the permission of every directory the generator creates: the destination's parents, the logs directory and a LogFileName's subdirectory. DefaultGeneratorDirectoryMode when left out, since system cron reads the destination and every entry's user enters the logs directory; permission bits only, the owner's read, write and search required, refused at registration naming the field. A creation mode: the umask narrows it and an existing directory keeps its own. */
+    DirectoryMode os.FileMode
+
+    /* LogsDirectoryCheckDisabled skips the judgement a generator running as root makes of the logs directory before writing, for a host whose mode bits misjudge the entries' users: network accounts, or a directory the deployment hands over after the run. */
+    LogsDirectoryCheckDisabled bool
+}
+
+type resolvedGenerator struct {
+    directoryMode              os.FileMode
+    logsDirectoryCheckDisabled bool
+}
+
+func resolveGeneratorConfig(config GeneratorConfig) (resolvedGenerator, error) {
+    directoryMode := config.DirectoryMode
+    if 0 == directoryMode {
+        directoryMode = DefaultGeneratorDirectoryMode
+    }
+
+    if 0 != directoryMode&^os.ModePerm || 0o700 != directoryMode&0o700 {
+        return resolvedGenerator{}, exception.NewError(
+            "the directory mode must be an octal permission that lets the owner read, write and search",
+            exceptioncontract.Context{"field": "ModuleConfig.Generator.DirectoryMode", "value": fmt.Sprintf("%#o", uint32(directoryMode))},
+            nil,
+        )
+    }
+
+    return resolvedGenerator{directoryMode: directoryMode, logsDirectoryCheckDisabled: config.LogsDirectoryCheckDisabled}, nil
+}
+
 type GenerateCommand struct {
     configuration *Configuration
     templates     map[string]Template
+    generator     resolvedGenerator
 }
 
 /* newGenerateCommand builds the generator over the builtin dialects and then the given templates, a template named as an installed one replacing it, which is how an application overrides a builtin dialect. */
-func newGenerateCommand(configuration *Configuration, templates []Template) *GenerateCommand {
+func newGenerateCommand(configuration *Configuration, templates []Template, generator resolvedGenerator) *GenerateCommand {
     if nil == configuration {
         configuration = NewConfiguration()
     }
@@ -55,6 +90,7 @@ func newGenerateCommand(configuration *Configuration, templates []Template) *Gen
     command := &GenerateCommand{
         configuration: configuration,
         templates:     make(map[string]Template),
+        generator:     generator,
     }
 
     for _, builtinTemplate := range BuiltinTemplates() {
@@ -175,6 +211,8 @@ func (instance *GenerateCommand) resolveTemplate(name string) (Template, error) 
 type runOptions struct {
     /* logDirectoryOwnership collects, for the run, the log directories created for an entry whose user the generating host does not know */
     logDirectoryOwnership *logDirectoryOwnership
+    directoryMode         os.FileMode
+    logsDirectoryCheckOff bool
     template              Template
     outputPath            string
     logsDirectory         string
@@ -256,7 +294,7 @@ func (instance *GenerateCommand) resolveRunOptions(
     commandContext *clicontract.CommandContext,
     configuration configcontract.Configuration,
 ) (*runOptions, error) {
-    options := &runOptions{}
+    options := &runOptions{directoryMode: instance.generator.directoryMode, logsDirectoryCheckOff: instance.generator.logsDirectoryCheckDisabled}
 
     templateName := resolveDefault(commandContext, configuration, flagNameTemplate, ParameterTemplate)
     if "" == templateName {
@@ -409,7 +447,7 @@ func (instance *GenerateCommand) collectScheduledEntries(options *runOptions) ([
     for _, scheduled := range scheduledCommands {
         config := scheduled.Config
 
-        expanded, expandErr := expandEntriesForCommand(scheduled.CommandName, &config, binary, options.defaultUserName, options.logsDirectory, requiresLogPath, options.logDirectoryOwnership)
+        expanded, expandErr := expandEntriesForCommand(scheduled.CommandName, &config, binary, options.defaultUserName, options.logsDirectory, requiresLogPath, options.logDirectoryOwnership, options.directoryMode)
         if nil != expandErr {
             return nil, expandErr
         }
@@ -510,7 +548,7 @@ func (instance *GenerateCommand) writeDestinations(
             )
         }
 
-        if mkdirErr := os.MkdirAll(filepath.Dir(destination), 0o755); nil != mkdirErr {
+        if mkdirErr := os.MkdirAll(filepath.Dir(destination), options.directoryMode); nil != mkdirErr {
             return writes, nil, "", exception.NewError(
                 "cron: could not create the output directory",
                 exceptioncontract.Context{"directory": filepath.Dir(destination)},
@@ -1059,6 +1097,7 @@ func expandEntriesForCommand(
     logsDirectory string,
     requiresLogPath bool,
     ownership *logDirectoryOwnership,
+    directoryMode os.FileMode,
 ) ([]Entry, error) {
     user := config.User
     if "" == user {
@@ -1078,7 +1117,7 @@ func expandEntriesForCommand(
 
     entries := make([]Entry, 0, instances)
     for index := 1; index <= instances; index++ {
-        logPath, unownedDirectory, logPathErr := resolveEntryLogPath(commandName, config, logsDirectory, instances, index, requiresLogPath, logDirectoryOwner)
+        logPath, unownedDirectory, logPathErr := resolveEntryLogPath(commandName, config, logsDirectory, instances, index, requiresLogPath, logDirectoryOwner, directoryMode)
         if nil != logPathErr {
             return nil, logPathErr
         }
@@ -1129,6 +1168,7 @@ func resolveEntryLogPath(
     index int,
     requiresLogPath bool,
     logDirectoryOwner string,
+    directoryMode os.FileMode,
 ) (logPath string, unownedDirectory string, err error) {
     joined, joinErr := entryLogPath(commandName, config, logsDirectory, instances, index, requiresLogPath)
     if nil != joinErr || "" == joined {
@@ -1140,7 +1180,7 @@ func resolveEntryLogPath(
     /* a LogFileName with a subdirectory stays within the logs directory but nothing else creates that subdirectory, and under system cron the shell aborts the command when the >> redirection cannot create its file */
     missingDirectories := missingDirectoriesBelow(filepath.Dir(joined), cleanedLogsDirectory)
 
-    if mkdirErr := os.MkdirAll(filepath.Dir(joined), 0o755); nil != mkdirErr {
+    if mkdirErr := os.MkdirAll(filepath.Dir(joined), directoryMode); nil != mkdirErr {
         return "", "", exception.NewError(
             "cron: could not create the log file directory",
             exceptioncontract.Context{
@@ -1459,21 +1499,21 @@ func errorCauseOf(runErr error) *output.ErrorCause {
     return output.NewErrorCause(causeChain[0], map[string]any{"chain": causeChain})
 }
 
-/* createTheLogsRoot creates the logs directory before anything is rendered, since under system cron a shell whose redirection cannot create its file aborts the command, once the entries are known: a generator running as root refuses, before creating anything, a root its entries' users could not use, since the root it would create is root's and nothing hands it over. Only a template that runs every entry as a user is judged. */
+/* createTheLogsRoot creates the logs directory before anything is rendered, since under system cron a shell whose redirection cannot create its file aborts the command, once the entries are known: a generator running as root refuses, before creating anything, a root its entries' users could not use, since the root it would create is root's and nothing hands it over. Only a template that runs every entry as a user is judged, and GeneratorConfig.LogsDirectoryCheckDisabled skips the judgement. */
 func createTheLogsRoot(scheduledCommands []*ScheduledCommand, options *runOptions, requiresLogPath bool) error {
     root := options.logsDirectory
     if "" == root {
         return nil
     }
 
-    if 0 == logDirectoryEffectiveUserId() && true == requiresLogPath && true == options.logDirectoryOwnership.rendersUserColumn {
+    if false == options.logsDirectoryCheckOff && 0 == logDirectoryEffectiveUserId() && true == requiresLogPath && true == options.logDirectoryOwnership.rendersUserColumn {
         if refusalErr := judgeTheLogsRoot(root, logsRootWriters(root, scheduledCommands, options, requiresLogPath)); nil != refusalErr {
             return refusalErr
         }
     }
 
     /* creating it is idempotent, so a run that fails later leaves it behind */
-    if mkdirErr := os.MkdirAll(root, 0o755); nil != mkdirErr {
+    if mkdirErr := os.MkdirAll(root, options.directoryMode); nil != mkdirErr {
         return exception.NewError(
             "cron: could not create the logs directory",
             exceptioncontract.Context{"directory": root},

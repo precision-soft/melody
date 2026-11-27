@@ -97,6 +97,8 @@ app.RegisterModule(otlp.NewModule(otlp.ModuleConfig{
 
 `ModuleConfig` additionally takes `Endpoint`, the collector's `host:port` it hands `NewTracerProvider`, `TracerName` (default `melody`) and `Propagator` (nil selects W3C TraceContext). The provider's shutdown runs under the teardown's own context, `MELODY_TEARDOWN_TIMEOUT`, deadline or none. The endpoint and its credentials are deployment-owned, so read them from a parameter or `.env` rather than hardcoding them. `Config` redacts `Headers` in every `fmt` rendering (`String`/`Format`), since that field carries the collector auth token: a config dropped into a log or an error context prints `Headers:[redacted N]` beside its safe fields, never the token.
 
+With `Insecure` set and an `Endpoint` off this machine, anything but `localhost` or a loopback address, the module adds the boot warning `opentelemetry.otlp.insecureCollector` (`otlp.InsecureCollectorBootWarningName`), naming the endpoint and never a header: the spans, their attributes and `Headers` cross the network in clear. The code is declared whether or not the export is insecure, so `MELODY_BOOT_WARNINGS_IGNORED` may list it where a collector on a trusted network is reached in clear on purpose. A provider built with `NewTracerProvider` outside the module writes no warning.
+
 ### Register as a module
 
 Bundle the middlewares and the `/metrics` route as a self-registering application module — one `RegisterModule` call `Use`s the middlewares and registers the metrics route (`MetricsRouteHandler` adapts the standard handler):

@@ -63,7 +63,6 @@ type RunnerCommand struct {
     inFlight                sync.WaitGroup
     /* the scheduler loop hands each minute's wait to a goroutine of its own, so two minutes' documents can complete in any order: the writer is guarded to keep one document one line */
     writeMutex          sync.Mutex
-    userIgnoredCommands []string
     /* a scheduled dispatch runs on the process's context, under no tree, so Run hands its own tree's version on */
     applicationVersion atomic.Pointer[string]
     tickDedup          resolvedTickDedup
@@ -79,7 +78,7 @@ type runReporting struct {
     reportIdle     bool
 }
 
-/* NewRunnerCommand resolves every scheduled command name against config.Commands and parses each schedule under config.Dialect; a nil configuration is an empty one. It panics at construction on a RunnerConfig or an entry limit outside its rule, naming the field and, for an entry, its command name, an unknown command name, a malformed schedule, an unknown RunnerDialect (ErrUnknownRunnerDialect), an unknown tick dedup failure mode (ErrUnknownTickDedupFailureMode), a typed-nil RunnerConfig.TickDedup.Locker, a RunnerConfig.TickDedup.KeyPrefix holding whitespace or a control character, two commands sharing a name (ErrDuplicateRunnerCommand), a command whose Flags answers a nil flag (ErrNilRunnerCommandFlag), a configured zone the standard library cannot load (ErrUnknownTimezone), and an entry carrying EntryConfig.Command, several Instances or a DestinationFile, which belong to the generated manifests and would otherwise run twice. An entry naming a system user stays runnable as the process user, and Run logs one warning naming those commands. */
+/* NewRunnerCommand resolves every scheduled command name against config.Commands and parses each schedule under config.Dialect; a nil configuration is an empty one. It panics at construction on a RunnerConfig or an entry limit outside its rule, naming the field and, for an entry, its command name, an unknown command name, a malformed schedule, an unknown RunnerDialect (ErrUnknownRunnerDialect), an unknown tick dedup failure mode (ErrUnknownTickDedupFailureMode), a typed-nil RunnerConfig.TickDedup.Locker, a RunnerConfig.TickDedup.KeyPrefix holding whitespace or a control character, two commands sharing a name (ErrDuplicateRunnerCommand), a command whose Flags answers a nil flag (ErrNilRunnerCommandFlag), a configured zone the standard library cannot load (ErrUnknownTimezone), and an entry carrying EntryConfig.Command, several Instances or a DestinationFile, which belong to the generated manifests and would otherwise run twice. An entry naming a system user (EntryConfig.User) is refused too, since in-process it would run as the process user, unless RunnerConfig.EntryUserIgnored admits it. */
 func NewRunnerCommand(configuration *Configuration, config RunnerConfig) *RunnerCommand {
     if nil == configuration {
         configuration = NewConfiguration()
@@ -127,12 +126,20 @@ func NewRunnerCommand(configuration *Configuration, config RunnerConfig) *Runner
         lookup[command.Name()] = command
     }
 
-    userIgnoredCommands := make([]string, 0)
-
     entries := make([]*scheduledRunEntry, 0, len(configuration.Entries()))
     for _, scheduled := range configuration.Entries() {
-        if "" != scheduled.Config.User {
-            userIgnoredCommands = append(userIgnoredCommands, scheduled.CommandName)
+        if "" != scheduled.Config.User && false == config.EntryUserIgnored {
+            exception.Panic(
+                exception.NewError(
+                    "cron: the in-process runner runs every entry as the process user; the entry names a system user (EntryConfig.User), which only the generated manifests honour — set RunnerConfig.EntryUserIgnored to run it here as the process user",
+                    exceptioncontract.Context{
+                        "commandName": scheduled.CommandName,
+                        "user":        scheduled.Config.User,
+                        "door":        "RunnerConfig.EntryUserIgnored",
+                    },
+                    ErrUnsupportedRunnerEntry,
+                ),
+            )
         }
 
         if 0 < len(scheduled.Config.Command) {
@@ -243,7 +250,6 @@ func NewRunnerCommand(configuration *Configuration, config RunnerConfig) *Runner
         shutdownTimeout:         runner.shutdownTimeout,
         outputCaptureLimit:      runner.outputCaptureLimit,
         clockJumpResetThreshold: runner.clockJumpResetThreshold,
-        userIgnoredCommands:     userIgnoredCommands,
         tickDedup:               runner.tickDedup,
         wonTicks:                newWonTickLedger(),
         elapsedSince:            time.Since,
@@ -332,15 +338,6 @@ func (instance *RunnerCommand) Run(
     runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
-    if 0 < len(instance.userIgnoredCommands) {
-        if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
-            logger.Warning(
-                "cron runner ignores EntryConfig.User: in-process every job runs as the process user, unlike the generated manifests which run it as the configured one",
-                map[string]any{"commands": strings.Join(instance.userIgnoredCommands, ", ")},
-            )
-        }
-    }
-
     instance.declareSchedule(runtimeInstance)
 
     dedupRun := instance.resolveTickDedupRun(runtimeInstance)

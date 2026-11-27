@@ -1186,18 +1186,14 @@ func TestRunnerCommand_DuplicateCommandNamePanicsAtConstruction(t *testing.T) {
     NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{newRecordingCommand("job:top"), newRecordingCommand("job:top")}})
 }
 
-/* an entry naming a system user stays runnable in-process — the one Configuration keeps driving both the generated manifests and the runner — and the runner records the affected command for the warning Run logs. */
-func TestRunnerCommand_UserEntryIsAcceptedAndRecordedForTheWarning(t *testing.T) {
+/* an entry naming a system user admitted by RunnerConfig.EntryUserIgnored runs in-process as the process user */
+func TestRunnerCommand_AnAdmittedUserEntryRunsAsTheProcessUser(t *testing.T) {
     job := newRecordingCommand("job:user")
 
     configuration := NewConfiguration().
         Schedule("job:user", EntryConfig{Schedule: &Schedule{Minute: "0"}, User: "app"})
 
-    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
-
-    if 1 != len(runner.userIgnoredCommands) || "job:user" != runner.userIgnoredCommands[0] {
-        t.Fatalf("expected the user-carrying entry to be recorded for the warning, got %v", runner.userIgnoredCommands)
-    }
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, EntryUserIgnored: true})
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     if runErr := runner.runDue(newRunnerTestRuntime(context.Background()), at); nil != runErr {
@@ -2161,6 +2157,36 @@ func TestRunnerCommand_DestinationFileEntryPanicsAtConstruction(t *testing.T) {
         })
 
     NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
+}
+
+/* an entry naming a system user is refused by the in-process runner, naming the command, the user and the door; RunnerConfig.EntryUserIgnored admits it */
+func TestRunnerCommand_AnEntryUserIsRefusedAtConstructionUnlessEntryUserIgnored(t *testing.T) {
+    configuration := NewConfiguration().
+        Schedule("job:as-user", EntryConfig{
+            Schedule: &Schedule{Minute: "0"},
+            User:     "www-data",
+        })
+
+    func() {
+        defer func() {
+            recoveredErr, isError := recover().(error)
+            var exceptionErr *exception.Error
+            if false == isError || false == errors.Is(recoveredErr, ErrUnsupportedRunnerEntry) || false == errors.As(recoveredErr, &exceptionErr) {
+                t.Fatalf("expected ErrUnsupportedRunnerEntry, got %v", recoveredErr)
+            }
+
+            context := exceptionErr.Context()
+            if "job:as-user" != context["commandName"] || "www-data" != context["user"] || "RunnerConfig.EntryUserIgnored" != context["door"] {
+                t.Fatalf("expected the refusal to name the command, the user and the door, got %v", context)
+            }
+        }()
+
+        NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{newRecordingCommand("job:as-user")}})
+    }()
+
+    if runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{newRecordingCommand("job:as-user")}, EntryUserIgnored: true}); 1 != len(runner.entries) {
+        t.Fatalf("expected the door to admit the entry, got %d entries", len(runner.entries))
+    }
 }
 
 type identityProbeCommand struct {
