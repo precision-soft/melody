@@ -271,6 +271,14 @@ go run . melody:cron:run             # run the scheduler loop until interrupted
 
 The runner dispatches each scheduled command with its declared flags, so declared defaults are honored on a scheduled tick exactly as under the cli entry point: `product:list` declares `--limit` with a default of `5` and prints the value it read beside the views window: `product list: limit=5 views_window=24h0m0s` when invoked directly, `product list: limit=2 views_window=24h0m0s` under the runner, which hands it the arguments its entry declares.
 
+`messagebus:dispatch` dispatches three welcome emails onto the async transport, each stamped with a message id of its run (`<run id>-<index>`, the run id 16 random bytes in hex), then consumes until those three are handled and prints `consumed own messages: 3 of 3`. Beside another consumer of the same queue it counts only its own: another producer's message it takes is handled and acked as any consumer of the queue would, and named on a line of its own. `--timeout` bounds the wait (a go duration, `30s` by default, at least `1s`); at the timeout it prints how many of its own it consumed, the rest taken by another consumer or still queued, and exits with an error. A message its handler refuses is nacked without requeue, so a broker queue dead-letters it, and the run ends with the handler's error. `--no-consume` dispatches and returns, leaving the messages to the queue's consumers:
+
+```bash
+cd v4/.example
+go run . messagebus:dispatch --timeout 5s
+go run . messagebus:dispatch --no-consume
+```
+
 `example:grant:role` shows that an application command may declare its own `--role` flag: the runtime's `--role`/`--mode` are recognized only before the command name, so the command receives its flag intact. The flag is required, so the framework refuses an invocation without it before the command runs, naming the flag, and `-r` is its short spelling; the account is the command's one argument. It also holds the example's user service through a `container.Lazy` handle built at command-registration time — the service is resolved at the command's first run, not during the boot phase. The flag is trimmed and has to name one of the three roles the application knows (`ROLE_USER`, `ROLE_EDITOR`, `ROLE_ADMIN`) — the voter compares a role's spelling exactly, so any other spelling would be stored and grant nothing — and the grant goes through the repository's atomic door, which reads and widens the account's set under one lock, so a grant that runs beside an admin update of the same account
 cannot lose the other's write; an account that already holds the role is a no-op, not a second entry:
 

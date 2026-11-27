@@ -28,6 +28,7 @@ func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.
             instance.messageBusDispatch,
             instance.messageBusConsume,
             instance.messageBusTransport,
+            kernelInstance.Clock(),
         ),
         cli.NewAuthenticationTokenCommand(instance.jwtSecret),
         cli.NewInternalSignCommand(
