@@ -118,6 +118,51 @@ func TestRegisterCatalogStorageService_SeedsTheAccountsInDevelopmentOnly(t *test
     }
 }
 
+/* outside development the handle seeds the nomenclature and no account, with or without a database */
+func TestCatalogStorageSeeding_ProductionSeedsTheNomenclatureAlone(t *testing.T) {
+    for _, value := range []string{"", "true"} {
+        storage := resolvedCatalogStorage(t, map[string]string{melodyconfig.EnvironmentNameKey: melodyconfig.EnvironmentProduction, environmentKeyCatalogueSeed: value})
+
+        if false == storage.SeedsNomenclature() || true == storage.SeedsAccounts() {
+            t.Fatalf("%s=%q: expected the nomenclature seeded alone, got nomenclature %v accounts %v", environmentKeyCatalogueSeed, value, storage.SeedsNomenclature(), storage.SeedsAccounts())
+        }
+    }
+}
+
+/* APP_CATALOGUE_SEED=false leaves the nomenclature out in every environment, the accounts untouched by it */
+func TestCatalogStorageSeeding_TheSeedSwitchLeavesItOut(t *testing.T) {
+    for _, environmentCase := range []struct {
+        environment   string
+        seedsAccounts bool
+    }{
+        {melodyconfig.EnvironmentDevelopment, true},
+        {melodyconfig.EnvironmentProduction, false},
+    } {
+        storage := resolvedCatalogStorage(t, map[string]string{melodyconfig.EnvironmentNameKey: environmentCase.environment, environmentKeyCatalogueSeed: "false"})
+
+        if true == storage.SeedsNomenclature() || environmentCase.seedsAccounts != storage.SeedsAccounts() {
+            t.Fatalf("%s: expected no nomenclature seed and accounts %v, got nomenclature %v accounts %v", environmentCase.environment, environmentCase.seedsAccounts, storage.SeedsNomenclature(), storage.SeedsAccounts())
+        }
+    }
+}
+
+func resolvedCatalogStorage(t *testing.T, values map[string]string) *persistence.CatalogStorage {
+    t.Helper()
+
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
+
+    moduleInstance := moduleWithEnvironment(t, values)
+    moduleInstance.registerCatalogStorageService(containerRegistrar{Container: containerInstance})
+
+    storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](t.Context(), containerInstance, persistence.ServiceCatalogStorage)
+    if nil != storageErr {
+        t.Fatalf("resolve catalog storage: %v", storageErr)
+    }
+
+    return storage
+}
+
 /* the catalogue schema is built at boot with the warning mode, and a database that does not answer answers the schema's failure, so an http boot goes on with a warning */
 func TestRegisterCatalogSchemaService_IsBuiltAtBootWarnsAndAnswersACatalogueItCannotPrepare(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})

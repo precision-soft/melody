@@ -12,7 +12,7 @@ import (
 
 func TestInMemoryCategoryRepositoryConcurrentReadAndDelete(t *testing.T) {
     ctx := context.Background()
-    repositoryInstance := newInMemoryCategoryRepository()
+    repositoryInstance := newInMemoryCategoryRepository(true)
 
     waitGroup := sync.WaitGroup{}
     waitGroup.Add(2)

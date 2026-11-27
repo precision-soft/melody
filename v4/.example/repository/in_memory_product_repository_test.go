@@ -14,7 +14,7 @@ import (
 
 func TestInMemoryProductRepositoryConcurrentReadAndDelete(t *testing.T) {
     ctx := context.Background()
-    repositoryInstance := newInMemoryProductRepository()
+    repositoryInstance := newInMemoryProductRepository(true)
 
     waitGroup := sync.WaitGroup{}
     waitGroup.Add(2)
@@ -90,7 +90,7 @@ func TestInMemoryProductRepositoryConcurrentReadAndDelete(t *testing.T) {
 
 func TestInMemoryProductRepositoryAllReturnsCopy(t *testing.T) {
     ctx := context.Background()
-    repositoryInstance := newInMemoryProductRepository()
+    repositoryInstance := newInMemoryProductRepository(true)
 
     products, allErr := repositoryInstance.All(ctx)
     if nil != allErr {
@@ -117,7 +117,7 @@ func TestInMemoryProductRepositoryAllReturnsCopy(t *testing.T) {
 
 func TestInMemoryProductRepositoryCreateRefusesAnIncompleteProduct(t *testing.T) {
     ctx := context.Background()
-    repositoryInstance := newInMemoryProductRepository()
+    repositoryInstance := newInMemoryProductRepository(true)
 
     now := time.Now()
     createErr := repositoryInstance.Create(ctx, entity.NewProduct("prod-blank", "", "black", "cat-1", 1, "cur-eur", 1, now, now))
@@ -132,7 +132,7 @@ func TestInMemoryProductRepositoryCreateRefusesAnIncompleteProduct(t *testing.T)
 
 func TestInMemoryProductRepositoryCreateAnswersATakenIdentifierWithTheSentinel(t *testing.T) {
     ctx := context.Background()
-    repositoryInstance := newInMemoryProductRepository()
+    repositoryInstance := newInMemoryProductRepository(true)
 
     now := time.Now()
     if createErr := repositoryInstance.Create(ctx, entity.NewProduct("prod-taken", "Probe", "black", "cat-1", 1, "cur-eur", 1, now, now)); nil != createErr {
@@ -148,7 +148,7 @@ func TestInMemoryProductRepositoryCreateAnswersATakenIdentifierWithTheSentinel(t
 /* deleting the newest SEEDED product hands its identifier to nobody: the repository starts from the seed's floor */
 func TestInMemoryProductRepositoryCreate_NeverMintsADeletedSeededIdentifier(t *testing.T) {
     ctx := context.Background()
-    repositoryInstance := newInMemoryProductRepository()
+    repositoryInstance := newInMemoryProductRepository(true)
 
     if _, deleteErr := repositoryInstance.DeleteById(ctx, "prod-5"); nil != deleteErr {
         t.Fatalf("delete: %v", deleteErr)
@@ -167,7 +167,7 @@ func TestInMemoryProductRepositoryCreate_NeverMintsADeletedSeededIdentifier(t *t
 /* a stored identifier at the ceiling would raise the floor to it, and every later mint would collide with it */
 func TestInMemoryProductRepositoryCreate_RefusesASuppliedIdentifierAtTheCeiling(t *testing.T) {
     ctx := context.Background()
-    repositoryInstance := newInMemoryProductRepository()
+    repositoryInstance := newInMemoryProductRepository(true)
 
     now := time.Now()
     createErr := repositoryInstance.Create(ctx, entity.NewProduct("prod-9223372036854775806", "Probe", "black", "cat-1", 1, "cur-eur", 1, now, now))
@@ -188,7 +188,7 @@ func TestInMemoryProductRepositoryCreate_RefusesASuppliedIdentifierAtTheCeiling(
 /* a supplied identifier the margin admits still leaves the mints after it room to land */
 func TestInMemoryProductRepositoryCreate_TheMintsAfterTheHighestAdmittedIdentifierStillLand(t *testing.T) {
     ctx := context.Background()
-    repositoryInstance := newInMemoryProductRepository()
+    repositoryInstance := newInMemoryProductRepository(true)
 
     now := time.Now()
     if createErr := repositoryInstance.Create(ctx, entity.NewProduct("prod-9223372032559808510", "Probe", "black", "cat-1", 1, "cur-eur", 1, now, now)); nil != createErr {

@@ -16,7 +16,7 @@ const (
     environmentKeyInternalAuthSecret      = "APP_INTERNAL_AUTH_SECRET"
 )
 
-/* isDevelopment answers whether the kernel runs in development, the one environment that accepts the credentials this example commits and seeds its accounts */
+/* isDevelopment answers whether the kernel runs in development, the one environment that accepts the credentials this example commits and seeds its accounts; the nomenclature is not held to it */
 func (instance *Module) isDevelopment() bool {
     return melodyconfig.EnvironmentDevelopment == instance.configuration.Kernel().Environment()
 }

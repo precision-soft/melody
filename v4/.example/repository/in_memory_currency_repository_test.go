@@ -18,7 +18,7 @@ var currencyProbeQuoteInstant = time.Date(2026, time.September, 7, 9, 0, 0, 0, t
 
 func TestInMemoryCurrencyRepositoryConcurrentReadAndDelete(t *testing.T) {
     ctx := context.Background()
-    repositoryInstance := newInMemoryCurrencyRepository()
+    repositoryInstance := newInMemoryCurrencyRepository(true)
 
     waitGroup := sync.WaitGroup{}
     waitGroup.Add(2)
@@ -89,7 +89,7 @@ func TestInMemoryCurrencyRepositoryConcurrentReadAndDelete(t *testing.T) {
    document that arrives after a newer one is refused, the same document twice is refused, and a newer one
    lands — the rule about "never a newer price" is a rule about the row at the moment of the write */
 func TestInMemoryCurrencyRepositoryUpdateQuoteWritesOnlyOverARowThatIsNotNewer(t *testing.T) {
-    repository := newInMemoryCurrencyRepository()
+    repository := newInMemoryCurrencyRepository(true)
     ctx := context.Background()
 
     newer := time.Date(2026, time.September, 8, 11, 0, 0, 0, time.UTC)
@@ -119,7 +119,7 @@ func TestInMemoryCurrencyRepositoryUpdateQuoteWritesOnlyOverARowThatIsNotNewer(t
 
 /* the reading is judged on this clock, except against the reading the row already names: the provider may re-quote that reading at another rate, landing on this clock a little earlier than the first arrival, and the re-quote is written; the reading itself, arriving again, is not written a second time */
 func TestInMemoryCurrencyRepositoryUpdateQuoteJudgesTheReadingOnThisClockAndByItsStamp(t *testing.T) {
-    repository := newInMemoryCurrencyRepository()
+    repository := newInMemoryCurrencyRepository(true)
     ctx := context.Background()
 
     stamped := time.Date(2026, time.September, 8, 9, 4, 0, 0, time.UTC)
@@ -151,7 +151,7 @@ func TestInMemoryCurrencyRepositoryUpdateQuoteJudgesTheReadingOnThisClockAndByIt
    and the name and leaves the quote the refresh wrote */
 func TestInMemoryCurrencyRepositoryUpdateKeepsAQuoteWrittenAfterTheRenameRead(t *testing.T) {
     ctx := context.Background()
-    repositoryInstance := newInMemoryCurrencyRepository()
+    repositoryInstance := newInMemoryCurrencyRepository(true)
     readAt := time.Date(2026, time.September, 8, 9, 0, 0, 0, time.UTC)
 
     if createErr := repositoryInstance.Create(ctx, entity.NewCurrency("cur-x", "XXX", "Old", 1.1, readAt)); nil != createErr {
@@ -180,7 +180,7 @@ func TestInMemoryCurrencyRepositoryUpdateKeepsAQuoteWrittenAfterTheRenameRead(t 
 /* the highest minted currency deleted, the next create does not adopt its identifier, and with it the products still priced in it */
 func TestInMemoryCurrencyRepositoryNeverMintsADeletedIdentifierAgain(t *testing.T) {
     ctx := context.Background()
-    repositoryInstance := newInMemoryCurrencyRepository()
+    repositoryInstance := newInMemoryCurrencyRepository(true)
 
     first := entity.NewCurrency("", "CHF", "Swiss Franc", 0.94, currencyProbeQuoteInstant)
     if createErr := repositoryInstance.Create(ctx, first); nil != createErr {

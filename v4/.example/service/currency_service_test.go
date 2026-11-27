@@ -638,3 +638,16 @@ func TestCurrencyService_TheReadDoorsEndOnTheCallersContext(t *testing.T) {
         return findErr
     })
 }
+
+/* the in-use read and the delete name the same identifier, so a padded one reaching the service is refused like the bare one */
+func TestCurrencyService_RefusesToDeleteAPaddedIdentifierOfACurrencyAProductIsPricedIn(t *testing.T) {
+    currencyService, _, runtimeInstance := currencyServiceUnderTest(t)
+
+    if deleted, deleteErr := currencyService.DeleteById(runtimeInstance, " cur-ron "); true == deleted || false == errors.Is(deleteErr, repository.ErrCurrencyInUse) {
+        t.Fatalf("the delete of a padded priced currency answered deleted=%v err=%v", deleted, deleteErr)
+    }
+
+    if _, found, _ := currencyService.currencyRepository.FindById(context.Background(), "cur-ron"); false == found {
+        t.Fatalf("a refused delete removed the currency")
+    }
+}

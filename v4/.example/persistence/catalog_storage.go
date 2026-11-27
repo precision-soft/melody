@@ -46,12 +46,14 @@ func ActorFromContext(ctx context.Context) string {
 
    It also owns the one audit tracker the audited repositories share. There is one because the trail is one: a registry per repository would mean each deciding on its own which fields are too sensitive to record, and the answer belongs to the application rather than to whichever repository asked last. */
 type CatalogStorage struct {
-    database      *bun.DB
-    location      string
-    auditRegistry *melodyaudit.Registry
-    tracker       *melodyaudit.Tracker
-    recorder      *melodyaudit.Recorder
-    seedsAccounts bool
+    database                *bun.DB
+    location                string
+    auditRegistry           *melodyaudit.Registry
+    tracker                 *melodyaudit.Tracker
+    recorder                *melodyaudit.Recorder
+    seedsAccounts           bool
+    /* the zero value seeds, so a handle nobody marked starts from the example's nomenclature */
+    withoutNomenclatureSeed bool
 }
 
 func NewCatalogStorage(database *bun.DB) *CatalogStorage {
@@ -91,6 +93,18 @@ func (instance *CatalogStorage) WithAccountSeed() *CatalogStorage {
 /* SeedsAccounts answers whether an empty user directory on this handle starts from the example's accounts (see WithAccountSeed). */
 func (instance *CatalogStorage) SeedsAccounts() bool {
     return instance.seedsAccounts
+}
+
+/* WithoutNomenclatureSeed marks the handle as one whose categories, currencies and products start empty, in any environment; unmarked, an empty catalogue starts from the example's nomenclature everywhere, since unlike the accounts it opens no door. */
+func (instance *CatalogStorage) WithoutNomenclatureSeed() *CatalogStorage {
+    instance.withoutNomenclatureSeed = true
+
+    return instance
+}
+
+/* SeedsNomenclature answers whether an empty catalogue on this handle starts from the example's categories, currencies and products (see WithoutNomenclatureSeed). */
+func (instance *CatalogStorage) SeedsNomenclature() bool {
+    return false == instance.withoutNomenclatureSeed
 }
 
 /* Database is nil when the environment configured no connection. */

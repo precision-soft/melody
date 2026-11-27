@@ -2,6 +2,7 @@ package service
 
 import (
     "context"
+    "strings"
 
     "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/.example/event"
@@ -148,6 +149,8 @@ func (instance *CategoryService) DeleteById(
     runtimeInstance melodycontainercontract.Runtime,
     categoryId string,
 ) (bool, error) {
+    /* the repositories trim the identifier they delete, so the in-use read takes the same one */
+    categoryId = strings.TrimSpace(categoryId)
     ctx := WriteContext(runtimeInstance)
     deleted := false
 

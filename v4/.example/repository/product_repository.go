@@ -45,7 +45,7 @@ func MustGetProductRepository(ctx context.Context, resolver melodycontainercontr
 //melody:service ServiceProductRepository
 func NewProductRepository(storage *persistence.CatalogStorage, catalogSchema *persistence.CatalogSchema) (ProductRepository, error) {
     if false == storage.IsPersistent() {
-        return newInMemoryProductRepository(), nil
+        return newInMemoryProductRepository(storage.SeedsNomenclature()), nil
     }
 
     return newBunProductRepository(storage), nil

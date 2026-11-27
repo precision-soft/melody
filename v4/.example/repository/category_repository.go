@@ -36,7 +36,7 @@ func MustGetCategoryRepository(ctx context.Context, resolver melodycontainercont
 //melody:service ServiceCategoryRepository
 func NewCategoryRepository(storage *persistence.CatalogStorage, catalogSchema *persistence.CatalogSchema) (CategoryRepository, error) {
     if false == storage.IsPersistent() {
-        return newInMemoryCategoryRepository(), nil
+        return newInMemoryCategoryRepository(storage.SeedsNomenclature()), nil
     }
 
     return newBunCategoryRepository(storage.Database()), nil

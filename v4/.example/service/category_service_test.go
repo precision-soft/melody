@@ -73,6 +73,26 @@ func TestCategoryService_RefusesToDeleteACategoryAProductSitsIn(t *testing.T) {
     }
 }
 
+/* the in-use read and the delete name the same identifier, so a padded one reaching the service is refused like the bare one */
+func TestCategoryService_RefusesToDeleteAPaddedIdentifierOfACategoryAProductSitsIn(t *testing.T) {
+    _, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
+
+    categoryRepository, categoryErr := repository.NewCategoryRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
+    if nil != categoryErr {
+        t.Fatalf("build the category repository: %v", categoryErr)
+    }
+
+    categoryService := NewCategoryService(categoryRepository, newInMemoryProductRepositoryForTest(t), newTtlRecordingCache(), dispatcher.dispatcher)
+
+    if deleted, deleteErr := categoryService.DeleteById(runtimeInstance, " cat-1 "); true == deleted || false == errors.Is(deleteErr, repository.ErrCategoryInUse) {
+        t.Fatalf("the delete of a padded used category answered deleted=%v err=%v", deleted, deleteErr)
+    }
+
+    if _, found, _ := categoryRepository.FindById(context.Background(), "cat-1"); false == found {
+        t.Fatalf("a refused delete removed the category")
+    }
+}
+
 func TestCategoryService_AnswersTheCommittedRowWhenADispatchFails(t *testing.T) {
     catalogue := newCatalogueUnderTest(t, true)
     catalogue.prime(t, CacheKeyCategoryList, CacheKeyCategoryById("cat-committed"))

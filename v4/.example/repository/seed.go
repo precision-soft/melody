@@ -129,15 +129,32 @@ func (instance seederFunc) SeedIfEmpty(ctx context.Context) error {
 
 /* the four seeders run the same seedIfEmpty as the catalogue schema's PrepareCatalog, over the database of a persistent storage, so a reset leaves the state of a fresh volume */
 func newCategorySeeder(storage *persistence.CatalogStorage) Seeder {
+    if false == storage.SeedsNomenclature() {
+        return seederFunc(seedNothing)
+    }
+
     return seederFunc(newBunCategoryRepository(storage.Database()).seedIfEmpty)
 }
 
 func newCurrencySeeder(storage *persistence.CatalogStorage) Seeder {
+    if false == storage.SeedsNomenclature() {
+        return seederFunc(seedNothing)
+    }
+
     return seederFunc(newBunCurrencyRepository(storage.Database()).seedIfEmpty)
 }
 
 func newProductSeeder(storage *persistence.CatalogStorage) Seeder {
+    if false == storage.SeedsNomenclature() {
+        return seederFunc(seedNothing)
+    }
+
     return seederFunc(newBunProductRepository(storage).seedIfEmpty)
+}
+
+/* seedNothing is the seeder of a nomenclature the storage was marked to leave empty (see persistence.CatalogStorage.WithoutNomenclatureSeed) */
+func seedNothing(ctx context.Context) error {
+    return nil
 }
 
 func newUserSeeder(storage *persistence.CatalogStorage) Seeder {

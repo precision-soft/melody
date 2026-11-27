@@ -17,6 +17,7 @@ const (
     environmentKeyCronProductUser          = "APP_CRON_PRODUCT_USER"
     environmentKeyReportingRefreshInterval = "APP_REPORTING_REFRESH_INTERVAL"
     environmentKeyProductViewsWindow       = "APP_PRODUCT_VIEWS_WINDOW"
+    environmentKeyCatalogueSeed            = "APP_CATALOGUE_SEED"
 )
 
 const (
@@ -26,6 +27,7 @@ const (
     parameterCronProductUser          = "app.cron.product_user"
     parameterReportingRefreshInterval = "app.reporting.refresh_interval"
     parameterProductViewsWindow       = wiring.ParameterProductViewsWindow
+    parameterCatalogueSeed            = "app.catalogue.seed"
 
     parameterMysqlHost     = "app.mysql.host"
     parameterMysqlPort     = "app.mysql.port"
@@ -88,6 +90,7 @@ const (
     defaultCronProductUser          = "catalog"
     defaultReportingRefreshInterval = 5 * time.Minute
     defaultProductViewsWindow       = 24 * time.Hour
+    defaultCatalogueSeed            = "true"
 
     /* the seed quotes against the euro; a deployment names another base only when it reseeds against another */
     defaultRatesBaseCurrency = "EUR"
@@ -103,6 +106,7 @@ func EnvironmentKeys() []configcontract.EnvironmentKey {
         exampleKey(environmentKeyReportingRefreshInterval, parameterReportingRefreshInterval, defaultReportingRefreshInterval.String(), false, melodyconfig.LimitKeyRule(melodybound.Rule[time.Duration]{Default: defaultReportingRefreshInterval})),
         /* a counter's ttl is at least a second, so a shorter window refuses the boot rather than every read */
         exampleKey(environmentKeyProductViewsWindow, parameterProductViewsWindow, defaultProductViewsWindow.String(), false, melodyconfig.LimitKeyRule(melodybound.Rule[time.Duration]{Default: defaultProductViewsWindow, Minimum: time.Second})),
+        exampleKey(environmentKeyCatalogueSeed, parameterCatalogueSeed, defaultCatalogueSeed, false, switchRule),
 
         exampleKey(environmentKeyMysqlHost, parameterMysqlHost, "", false, nil),
         exampleKey(environmentKeyMysqlPort, parameterMysqlPort, "", false, nil),

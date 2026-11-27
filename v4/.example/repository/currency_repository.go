@@ -42,7 +42,7 @@ func MustGetCurrencyRepository(ctx context.Context, resolver melodycontainercont
 //melody:service ServiceCurrencyRepository
 func NewCurrencyRepository(storage *persistence.CatalogStorage, catalogSchema *persistence.CatalogSchema) (CurrencyRepository, error) {
     if false == storage.IsPersistent() {
-        return newInMemoryCurrencyRepository(), nil
+        return newInMemoryCurrencyRepository(storage.SeedsNomenclature()), nil
     }
 
     return newBunCurrencyRepository(storage.Database()), nil

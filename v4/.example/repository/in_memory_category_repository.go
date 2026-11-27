@@ -9,8 +9,11 @@ import (
     "github.com/precision-soft/melody/v4/.example/entity"
 )
 
-func newInMemoryCategoryRepository() CategoryRepository {
-    categories := seedCategoryList()
+func newInMemoryCategoryRepository(seedsNomenclature bool) CategoryRepository {
+    categories := []*entity.Category{}
+    if true == seedsNomenclature {
+        categories = seedCategoryList()
+    }
 
     identifierList := make([]string, 0, len(categories))
     for _, category := range categories {

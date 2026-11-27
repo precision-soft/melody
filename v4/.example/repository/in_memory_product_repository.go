@@ -10,8 +10,11 @@ import (
     "github.com/precision-soft/melody/v4/.example/entity"
 )
 
-func newInMemoryProductRepository() ProductRepository {
-    products := seedProductList(time.Now())
+func newInMemoryProductRepository(seedsNomenclature bool) ProductRepository {
+    products := []*entity.Product{}
+    if true == seedsNomenclature {
+        products = seedProductList(time.Now())
+    }
 
     identifierList := make([]string, 0, len(products))
     for _, product := range products {

@@ -5,6 +5,7 @@ import (
     "errors"
     "math"
     "strconv"
+    "strings"
     "time"
 
     "github.com/precision-soft/melody/v4/.example/entity"
@@ -389,6 +390,9 @@ func (instance *CurrencyService) DeleteById(
     runtimeInstance melodycontainercontract.Runtime,
     currencyId string,
 ) (bool, error) {
+    /* the repositories trim the identifier they delete, so the in-use read takes the same one */
+    currencyId = strings.TrimSpace(currencyId)
+
     /* the product table's foreign key refuses the delete on the database; the read answers the same refusal on the configuration without one, and names it before the delete is tried */
     deleted := false
 

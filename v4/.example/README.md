@@ -37,6 +37,8 @@ In development (`MELODY_ENV=dev`, what `.env` ships) an empty user directory sta
 
 Each account holds the one role that names its position; the role hierarchy of [`config/security.go`](./config/security.go) is what lets the admin edit and the editor read, so a role added later is one line of the hierarchy rather than an edit of every account. Their passwords are in this README, so they exist in development only: in any other environment the directory starts empty, and its first account is created from the console (see below).
 
+The nomenclature is not held to development: an empty catalogue starts from the example's categories, currencies and products in every environment, since none of it opens a door, and the currencies' rates carry the seed's instant until the first `example:currency:refresh-rates`. `APP_CATALOGUE_SEED=false` leaves an empty catalogue empty in any environment, for a deployment that brings its own; empty or `true` seeds, and any other value refuses the boot. A catalogue that holds rows is never seeded over, and `example:db:reset` reads the same switch, so a reset of an unseeded catalogue leaves it empty. The switch does not touch the accounts.
+
 ## Before production
 
 Every credential this example needs is configuration, and `.env` commits a development value for each so a checkout boots as it is. Those values are public — anyone who read this repository holds them — so outside development (`MELODY_ENV` other than `dev`) the boot refuses a blank value or the committed one, naming the key and never the value:

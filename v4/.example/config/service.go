@@ -208,12 +208,13 @@ func resolvedSessionFilePath(sessionFilePath string, projectDirectory string) st
 func (instance *Module) registerCatalogStorageService(registrar melodyapplicationcontract.ServiceRegistrar) {
     hasDatabase := instance.catalogueWired
     seedsAccounts := instance.isDevelopment()
+    seedsNomenclature := instance.booleanSwitch(environmentKeyCatalogueSeed, parameterCatalogueSeed)
 
     registrar.RegisterService(
         persistence.ServiceCatalogStorage,
         func(resolver melodycontainercontract.Resolver) (*persistence.CatalogStorage, error) {
             if false == hasDatabase {
-                return catalogStorageSeeding(persistence.NewCatalogStorage(nil), seedsAccounts), nil
+                return catalogStorageSeeding(persistence.NewCatalogStorage(nil), seedsAccounts, seedsNomenclature), nil
             }
 
             database, resolveErr := melodycontainer.FromResolver[*bun.DB](resolver.Runtime().Context(), resolver, serviceDatabase)
@@ -221,7 +222,7 @@ func (instance *Module) registerCatalogStorageService(registrar melodyapplicatio
                 return nil, resolveErr
             }
 
-            return catalogStorageSeeding(persistence.NewCatalogStorageAt(database, instance.catalogLocation), seedsAccounts), nil
+            return catalogStorageSeeding(persistence.NewCatalogStorageAt(database, instance.catalogLocation), seedsAccounts, seedsNomenclature), nil
         },
         melodycontainer.RegisterOptions{},
     )
@@ -247,10 +248,14 @@ func (instance *Module) registerCatalogSchemaService(registrar melodyapplication
     )
 }
 
-/* catalogStorageSeeding marks the handle to seed the example's accounts when the kernel runs in development, the one environment their public passwords are accepted in */
-func catalogStorageSeeding(storage *persistence.CatalogStorage, seedsAccounts bool) *persistence.CatalogStorage {
+/* catalogStorageSeeding marks the two seeds: the accounts are the development-only seed, their public passwords accepted there alone; the nomenclature is seeded in every environment unless APP_CATALOGUE_SEED turns it off */
+func catalogStorageSeeding(storage *persistence.CatalogStorage, seedsAccounts bool, seedsNomenclature bool) *persistence.CatalogStorage {
     if true == seedsAccounts {
-        return storage.WithAccountSeed()
+        storage = storage.WithAccountSeed()
+    }
+
+    if false == seedsNomenclature {
+        storage = storage.WithoutNomenclatureSeed()
     }
 
     return storage

@@ -9,8 +9,11 @@ import (
     "github.com/precision-soft/melody/v4/.example/entity"
 )
 
-func newInMemoryCurrencyRepository() CurrencyRepository {
-    currencies := seedCurrencyList()
+func newInMemoryCurrencyRepository(seedsNomenclature bool) CurrencyRepository {
+    currencies := []*entity.Currency{}
+    if true == seedsNomenclature {
+        currencies = seedCurrencyList()
+    }
 
     identifierList := make([]string, 0, len(currencies))
     for _, currency := range currencies {
