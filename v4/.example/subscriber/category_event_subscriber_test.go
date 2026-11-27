@@ -2,15 +2,25 @@ package subscriber
 
 import (
     "context"
+    "encoding/json"
     "testing"
+    "time"
 
+    examplecache "github.com/precision-soft/melody/v4/.example/cache"
     "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/.example/event"
+    "github.com/precision-soft/melody/v4/.example/persistence"
+    "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/service"
     melodybound "github.com/precision-soft/melody/v4/bound"
+    melodycache "github.com/precision-soft/melody/v4/cache"
+    melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclock "github.com/precision-soft/melody/v4/clock"
+    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyevent "github.com/precision-soft/melody/v4/event"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
 )
 
 func TestCategoryEventSubscriber_EveryListenerDropsItsEntriesUnderACanceledEvent(t *testing.T) {
@@ -43,4 +53,113 @@ func TestCategoryEventSubscriber_EveryListenerDropsItsEntriesUnderACanceledEvent
             }
         }
     }
+}
+
+/* categoryNotificationUnderTest answers a runtime holding the cache, the notification hub with one page subscribed to the catalogue topic, and the journal, so a listener runs to its end */
+func categoryNotificationUnderTest(t *testing.T) (*deleteCountingCache, *melodyhttp.ServerSentEventSubscriber, repository.CatalogJournalRepository, melodycontainercontract.Runtime) {
+    t.Helper()
+
+    clockInstance := melodyclock.NewSystemClock()
+    manager := melodycache.NewManager(melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(128), CleanupInterval: melodybound.Of(time.Minute), Clock: clockInstance}), examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
+    cacheInstance := &deleteCountingCache{Cache: manager, deletes: map[string]int{}}
+
+    hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+    page, subscribeErr := hub.Subscribe(catalogNotificationTopic, melodyhttp.SubscribeOptions{})
+    if nil != subscribeErr {
+        t.Fatalf("subscribe: %v", subscribeErr)
+    }
+
+    journalRepository, journalErr := repository.NewCatalogJournalRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
+    if nil != journalErr {
+        t.Fatalf("build the journal: %v", journalErr)
+    }
+
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
+    melodycontainer.MustRegister(
+        containerInstance,
+        melodycache.ServiceCache,
+        func(resolver melodycontainercontract.Resolver) (melodycachecontract.Cache, error) {
+            return cacheInstance, nil
+        },
+        melodycontainer.RegisterOptions{},
+    )
+    melodycontainer.MustRegister(
+        containerInstance,
+        ServiceCatalogNotificationHub,
+        func(resolver melodycontainercontract.Resolver) (*melodyhttp.ServerSentEventHub, error) {
+            return hub, nil
+        },
+        melodycontainer.RegisterOptions{},
+    )
+    melodycontainer.MustRegister(
+        containerInstance,
+        service.ServiceCatalogJournalService,
+        func(resolver melodycontainercontract.Resolver) (*service.CatalogJournalService, error) {
+            return service.NewCatalogJournalService(journalRepository, clockInstance), nil
+        },
+        melodycontainer.RegisterOptions{},
+    )
+
+    return cacheInstance, page, journalRepository, melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
+}
+
+/* assertCategoryChangeHandled runs one listener and asserts what every category write owes: both entries dropped, one notification on the catalogue topic and one journal entry, each naming the action and the category */
+func assertCategoryChangeHandled(t *testing.T, eventName string, payload any, action string) {
+    t.Helper()
+
+    cacheInstance, page, journalRepository, runtimeInstance := categoryNotificationUnderTest(t)
+
+    keyList := []string{service.CacheKeyCategoryById("category-7"), service.CacheKeyCategoryList}
+    for _, key := range keyList {
+        if setErr := cacheInstance.Set(exampleTestRuntime(), key, "stale", melodybound.UnlimitedDuration()); nil != setErr {
+            t.Fatalf("prime %s: %v", key, setErr)
+        }
+    }
+
+    listener := NewCategoryEventSubscriber().SubscribedEvents()[eventName][0].Listener()
+    if listenErr := listener(runtimeInstance, melodyevent.NewEvent(eventName, payload, melodyclock.NewSystemClock().Now())); nil != listenErr {
+        t.Fatalf("%s: the listener failed: %v", eventName, listenErr)
+    }
+
+    for _, key := range keyList {
+        if held, _ := cacheInstance.Has(exampleTestRuntime(), key); true == held {
+            t.Fatalf("%s: expected %s dropped", eventName, key)
+        }
+    }
+
+    select {
+    case delivered := <-page.Events():
+        notification := catalogNotification{}
+        if decodeErr := json.Unmarshal([]byte(delivered.Data), &notification); nil != decodeErr {
+            t.Fatalf("%s: decode the notification %q: %v", eventName, delivered.Data, decodeErr)
+        }
+
+        if catalogNotificationEvent != delivered.Event || action != notification.Action || service.CatalogJournalSubjectCategory != notification.Subject || "category-7" != notification.SubjectId {
+            t.Fatalf("%s: unexpected notification %+v %+v", eventName, delivered, notification)
+        }
+    default:
+        t.Fatalf("%s: expected the catalogue topic notified", eventName)
+    }
+
+    entryList, latestErr := journalRepository.Latest(context.Background(), 10)
+    if nil != latestErr {
+        t.Fatalf("%s: read the journal: %v", eventName, latestErr)
+    }
+
+    if 1 != len(entryList) || action != entryList[0].Action || service.CatalogJournalSubjectCategory != entryList[0].Subject || "category-7" != entryList[0].SubjectId {
+        t.Fatalf("%s: expected one journal entry for the change, got %+v", eventName, entryList)
+    }
+}
+
+func TestCategoryEventSubscriber_CreatedDropsTheListAndNotifiesTheCatalogueTopic(t *testing.T) {
+    assertCategoryChangeHandled(t, event.EventCategoryCreated, event.NewCategoryCreatedEvent(entity.NewCategory("category-7", "Books")), repository.CatalogJournalActionCreated)
+}
+
+func TestCategoryEventSubscriber_UpdatedDropsTheListAndNotifiesTheCatalogueTopic(t *testing.T) {
+    assertCategoryChangeHandled(t, event.EventCategoryUpdated, event.NewCategoryUpdatedEvent(entity.NewCategory("category-7", "Novels")), repository.CatalogJournalActionUpdated)
+}
+
+func TestCategoryEventSubscriber_DeletedDropsTheListAndNotifiesTheCatalogueTopic(t *testing.T) {
+    assertCategoryChangeHandled(t, event.EventCategoryDeleted, event.NewCategoryDeletedEvent("category-7"), repository.CatalogJournalActionDeleted)
 }

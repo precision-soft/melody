@@ -219,7 +219,7 @@ The pages are server-rendered HTML driven by a small TypeScript bundle: every li
 
 **Every page is sent under a content security policy.** [`main.go`](./main.go) hands the application [`config.SecurityHeaders()`](./config/http.go), the framework's default headers with [`page.ContentSecurityPolicy`](./page/page.go): scripts from the application and `cdn.jsdelivr.net`, stylesheets from those and `cdnjs.cloudflare.com`, fonts from `cdnjs.cloudflare.com`, images from the application and `data:`, connections to the application and its websocket, no frame ancestor, no plugin, forms posting to the application alone. It keeps `'unsafe-inline'` for scripts and styles because the pages carry inline `style` attributes and inline scripts holding templated data (`window.melodyRoutes`, `window.melodyViewer`); a page pin checks every external asset's origin against the policy.
 
-**Every account lands on a page its role opens.** The login door answers the page to go to by role, through the role hierarchy: an editor or an admin lands on the product list, and an account holding `ROLE_USER` alone on the read-only catalogue (`GET /catalogue/`, the categories and currencies it may read), since the product pages ask for `ROLE_EDITOR` and the user pages for `ROLE_ADMIN`. Each page also carries the viewer's roles, expanded through the same hierarchy, as `window.melodyViewer`, and a link marked `data-requires-role` is hidden from a viewer without that role — the Users link from an editor, Products and Users from a user. The marking decides what a page offers and nothing the server allows: every door it hides keeps its own access rule, and a browser that reaches one anyway is answered by a `403` page that says the account's role does not open it and offers Back, Home and Log out, rather than a bare refusal with no way to sign in as someone else.
+**Every account lands on a page its role opens.** The login door answers the page to go to by role, through the role hierarchy: an editor or an admin lands on the product list, and an account holding `ROLE_USER` alone on the catalogue (`GET /catalogue/`, the categories and currencies it may read, where a holder of `ROLE_EDITOR` also adds, renames and deletes a category, a refusal shown on the card), since the product pages ask for `ROLE_EDITOR` and the user pages for `ROLE_ADMIN`. Each page also carries the viewer's roles, expanded through the same hierarchy, as `window.melodyViewer`, and a link marked `data-requires-role` is hidden from a viewer without that role — the Users link from an editor, Products and Users from a user. The marking decides what a page offers and nothing the server allows: every door it hides keeps its own access rule, and a browser that reaches one anyway is answered by a `403` page that says the account's role does not open it and offers Back, Home and Log out, rather than a bare refusal with no way to sign in as someone else.
 
 Everything a browser needs beyond the HTML is **generated, not committed**. The dev container produces it at startup, so `./dc up:all --build` needs nothing extra; a bare host run needs one command:
 
@@ -416,6 +416,14 @@ of it was proven by compilation.
   delete. A missing currency is a `404` on both. A product write naming a category or a currency that does not
   exist is the caller's `400`. The currencies are not audited. The write doors validate the body in the
   spelling they store, trimmed: a name of one character padded with a space is refused, not stored.
+- The categories are written through three doors that require `ROLE_EDITOR`, while the listing `GET
+  /categories/api/read/` keeps `ROLE_USER` and is answered from the cache the writes drop: `POST
+  /categories/api/create/` takes an `id` (minted when absent, at most 60 characters and no whitespace) and a
+  `name` (2 to 120 characters) and answers `201`, an `id` another category holds a `409` and one whose number is
+  at the identifier's ceiling a `400`; `PUT /categories/api/update/:id/` renames the category; `DELETE
+  /categories/api/delete/:id/` removes it and answers `409` while a product sits in it. A missing category is a
+  `404` on both. The writes run under the catalogue's write budget, are journaled under the signed-in actor and
+  notify every open page; the bodies are validated trimmed, as the currency bodies are.
 - `catalog:report:refresh` pushes its reading to `APP_REPORTING_EXPORT_ENDPOINT` when one is configured, and
   takes the command's exit code with it if the sink refuses.
 

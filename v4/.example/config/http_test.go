@@ -6,6 +6,7 @@ import (
     "fmt"
     nethttp "net/http"
     "net/http/httptest"
+    "reflect"
     "sort"
     "strings"
     "testing"
@@ -13,6 +14,7 @@ import (
 
     melodyawss3 "github.com/precision-soft/melody/integrations/aws/s3/v4"
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
+    handlercategory "github.com/precision-soft/melody/v4/.example/handler/category"
     handlerevent "github.com/precision-soft/melody/v4/.example/handler/event"
     "github.com/precision-soft/melody/v4/.example/message"
     "github.com/precision-soft/melody/v4/.example/page"
@@ -62,6 +64,49 @@ func TestRegisterCurrencyApiRoutes_RegistersTheFullPatternsAndNamesThroughTheGro
 
         if strings.TrimSuffix(pattern, "/") != strings.TrimSuffix(definition.Pattern(), "/") {
             t.Fatalf("expected %s on %s, got %s", definition.Name(), pattern, definition.Pattern())
+        }
+    }
+}
+
+func TestRegisterCategoryApiRoutes_RegistersTheFourDoorsWithTheirMethodsAndBodies(t *testing.T) {
+    router := melodyhttp.NewRouter()
+
+    (&Module{}).registerCategoryApiRoutes(router)
+
+    type expectedDoor struct {
+        pattern     string
+        method      string
+        requestType reflect.Type
+    }
+
+    expected := map[string]expectedDoor{
+        route.CategoriesApiReadAllName: {pattern: route.CategoriesApiReadAllPattern, method: nethttp.MethodGet},
+        route.CategoriesApiCreateName:  {pattern: route.CategoriesApiCreatePattern, method: nethttp.MethodPost, requestType: reflect.TypeFor[handlercategory.CreateRequest]()},
+        route.CategoriesApiUpdateName:  {pattern: route.CategoriesApiUpdatePattern, method: nethttp.MethodPut, requestType: reflect.TypeFor[handlercategory.UpdateRequest]()},
+        route.CategoriesApiDeleteName:  {pattern: route.CategoriesApiDeletePattern, method: nethttp.MethodDelete},
+    }
+
+    definitions := router.RouteDefinitions()
+    if len(expected) != len(definitions) {
+        t.Fatalf("expected %d category doors, got %d", len(expected), len(definitions))
+    }
+
+    for _, definition := range definitions {
+        door, known := expected[definition.Name()]
+        if false == known {
+            t.Fatalf("expected only the category doors' names, got %q", definition.Name())
+        }
+
+        if strings.TrimSuffix(door.pattern, "/") != strings.TrimSuffix(definition.Pattern(), "/") {
+            t.Fatalf("expected %s on %s, got %s", definition.Name(), door.pattern, definition.Pattern())
+        }
+
+        if methods := definition.Methods(); 1 != len(methods) || door.method != methods[0] {
+            t.Fatalf("expected %s answered on %s, got %v", definition.Name(), door.method, methods)
+        }
+
+        if door.requestType != definition.RequestType() {
+            t.Fatalf("expected %s to declare %v, got %v", definition.Name(), door.requestType, definition.RequestType())
         }
     }
 }
@@ -433,6 +478,8 @@ func TestRegisterHttpRoutes_EveryJsonDoorDeclaresARequestTypeTheValidatorAdmits(
         route.AccessTokenIssueName,
         route.AccessTokenRevokeDeviceName,
         route.AccessTokenRevokeUserName,
+        route.CategoriesApiCreateName,
+        route.CategoriesApiUpdateName,
         route.CurrenciesApiCreateName,
         route.CurrenciesApiUpdateName,
         route.ProductsApiCreateName,
@@ -442,6 +489,6 @@ func TestRegisterHttpRoutes_EveryJsonDoorDeclaresARequestTypeTheValidatorAdmits(
     sort.Strings(declared)
     sort.Strings(expected)
     if strings.Join(expected, ",") != strings.Join(declared, ",") {
-        t.Fatalf("expected the seven json doors to declare their type, got %v", declared)
+        t.Fatalf("expected the nine json doors to declare their type, got %v", declared)
     }
 }

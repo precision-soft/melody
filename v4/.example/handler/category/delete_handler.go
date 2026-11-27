@@ -1,0 +1,52 @@
+package category
+
+import (
+    "errors"
+    nethttp "net/http"
+    "strings"
+
+    "github.com/precision-soft/melody/v4/.example/entity"
+    "github.com/precision-soft/melody/v4/.example/presenter"
+    "github.com/precision-soft/melody/v4/.example/repository"
+    "github.com/precision-soft/melody/v4/.example/service"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodysecurity "github.com/precision-soft/melody/v4/security"
+)
+
+func ApiDeleteHandler() melodyhttpcontract.Handler {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        if false == melodysecurity.IsGranted(runtimeInstance, entity.RoleEditor) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "forbidden"), nil
+        }
+
+        id, exists := request.Parameter("id")
+        if false == exists {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "id is required"), nil
+        }
+
+        id = strings.TrimSpace(id)
+        if "" == id {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "id is required"), nil
+        }
+
+        categoryService := service.MustGetCategoryService(runtimeInstance.Context(), runtimeInstance.Scope())
+
+        deleted, deleteErr := categoryService.DeleteById(runtimeInstance, id)
+        if true == errors.Is(deleteErr, repository.ErrCategoryInUse) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusConflict, "category is in use"), nil
+        }
+
+        if nil != deleteErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to delete category", deleteErr), nil
+        }
+
+        if false == deleted {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusNotFound, "not found"), nil
+        }
+
+        return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, map[string]any{
+            "deleted": true,
+        }), nil
+    }
+}

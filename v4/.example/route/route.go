@@ -62,8 +62,32 @@ const (
 
     CategoriesPrefix = "/categories"
 
-    CategoriesApiReadAllName    = "example.categories.api.read.all"
-    CategoriesApiReadAllPattern = CategoriesPrefix + "/api/read/"
+    /* the category api doors are registered through one route group, as the currency doors are */
+    CategoriesApiGroupPrefix     = CategoriesPrefix + "/api"
+    CategoriesApiGroupNamePrefix = "example.categories.api."
+
+    CategoriesApiReadAllRelativeName    = "read.all"
+    CategoriesApiReadAllRelativePattern = "/read/"
+    CategoriesApiReadAllName            = CategoriesApiGroupNamePrefix + CategoriesApiReadAllRelativeName
+    CategoriesApiReadAllPattern         = CategoriesApiGroupPrefix + CategoriesApiReadAllRelativePattern
+
+    CategoriesApiCreateRelativeName    = "create"
+    CategoriesApiCreateRelativePattern = "/create/"
+    CategoriesApiCreatePrefix          = CategoriesApiGroupPrefix + "/create"
+    CategoriesApiCreateName            = CategoriesApiGroupNamePrefix + CategoriesApiCreateRelativeName
+    CategoriesApiCreatePattern         = CategoriesApiGroupPrefix + CategoriesApiCreateRelativePattern
+
+    CategoriesApiUpdateRelativeName    = "update"
+    CategoriesApiUpdateRelativePattern = "/update/:id/"
+    CategoriesApiUpdatePrefix          = CategoriesApiGroupPrefix + "/update"
+    CategoriesApiUpdateName            = CategoriesApiGroupNamePrefix + CategoriesApiUpdateRelativeName
+    CategoriesApiUpdatePattern         = CategoriesApiGroupPrefix + CategoriesApiUpdateRelativePattern
+
+    CategoriesApiDeleteRelativeName    = "delete"
+    CategoriesApiDeleteRelativePattern = "/delete/:id/"
+    CategoriesApiDeletePrefix          = CategoriesApiGroupPrefix + "/delete"
+    CategoriesApiDeleteName            = CategoriesApiGroupNamePrefix + CategoriesApiDeleteRelativeName
+    CategoriesApiDeletePattern         = CategoriesApiGroupPrefix + CategoriesApiDeleteRelativePattern
 
     CurrenciesPrefix = "/currencies"
 

@@ -4,6 +4,7 @@ import (
     "reflect"
     "testing"
 
+    handlercategory "github.com/precision-soft/melody/v4/.example/handler/category"
     handlercurrency "github.com/precision-soft/melody/v4/.example/handler/currency"
     handleri18n "github.com/precision-soft/melody/v4/.example/handler/i18n"
     handlerproduct "github.com/precision-soft/melody/v4/.example/handler/product"
@@ -30,6 +31,23 @@ func TestOpenApiRegistry_DescribesTheExampleRoutesWithTheirTypes(t *testing.T) {
             Tags:        []string{OpenApiTagProducts},
             RequestType: melodyopenapi.TypeOf[handlerproduct.CreateRequest](),
             Responses:   []melodyopenapi.ResponseDescription{{Status: 201, Type: melodyopenapi.TypeOf[handlerproduct.ProductResponse]()}},
+        },
+        route.CategoriesApiCreateName: {
+            Summary:     "Create a category",
+            Tags:        []string{OpenApiTagCategories},
+            RequestType: melodyopenapi.TypeOf[handlercategory.CreateRequest](),
+            Responses:   []melodyopenapi.ResponseDescription{{Status: 201, Type: melodyopenapi.TypeOf[handlercategory.CategoryResponse]()}},
+        },
+        route.CategoriesApiUpdateName: {
+            Summary:     "Rename a category",
+            Tags:        []string{OpenApiTagCategories},
+            RequestType: melodyopenapi.TypeOf[handlercategory.UpdateRequest](),
+            Responses:   []melodyopenapi.ResponseDescription{{Status: 200, Type: melodyopenapi.TypeOf[handlercategory.CategoryResponse]()}},
+        },
+        route.CategoriesApiDeleteName: {
+            Summary:     "Delete a category",
+            Description: "Refused with 409 while a product sits in the category.",
+            Tags:        []string{OpenApiTagCategories},
         },
         route.CurrenciesApiCreateName: {
             Summary:     "Create a currency",

@@ -101,7 +101,7 @@ func (instance *CategoryService) Create(
 ) (*entity.Category, error) {
     category := entity.NewCategory(categoryId, name)
 
-    createErr := instance.categoryRepository.Create(runtimeInstance.Context(), category)
+    createErr := instance.categoryRepository.Create(WriteContext(runtimeInstance), category)
     if nil != createErr {
         return nil, createErr
     }
@@ -116,7 +116,7 @@ func (instance *CategoryService) Update(
     categoryId string,
     name string,
 ) (*entity.Category, bool, error) {
-    ctx := runtimeInstance.Context()
+    ctx := WriteContext(runtimeInstance)
 
     category, found, findErr := instance.categoryRepository.FindById(ctx, categoryId)
     if nil != findErr {
@@ -148,11 +148,12 @@ func (instance *CategoryService) DeleteById(
     runtimeInstance melodycontainercontract.Runtime,
     categoryId string,
 ) (bool, error) {
+    ctx := WriteContext(runtimeInstance)
     deleted := false
 
     /* the product table's foreign key refuses the delete on the database; the read answers the same refusal on the configuration without one, held with the delete against a concurrent product write naming the category */
     deleteErr := instance.productRepository.HoldingReferences(func() error {
-        categorizedIn, categorizedInErr := instance.productRepository.CategorizedIn(runtimeInstance.Context(), categoryId)
+        categorizedIn, categorizedInErr := instance.productRepository.CategorizedIn(ctx, categoryId)
         if nil != categorizedInErr {
             return categorizedInErr
         }
@@ -162,7 +163,7 @@ func (instance *CategoryService) DeleteById(
         }
 
         var removeErr error
-        deleted, removeErr = instance.categoryRepository.DeleteById(runtimeInstance.Context(), categoryId)
+        deleted, removeErr = instance.categoryRepository.DeleteById(ctx, categoryId)
 
         return removeErr
     })

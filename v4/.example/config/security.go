@@ -102,6 +102,16 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodyaccesscontrol.NewSegmentPrefixRule(route.ProductsPrefix, melodyaccesscontrol.RuleConfig{
             Attributes: []string{entity.RoleEditor},
         }),
+        /* the category writes carry the editor's requirement ahead of the listing's rule, which would otherwise claim them for any user */
+        melodyaccesscontrol.NewSegmentPrefixRule(route.CategoriesApiCreatePrefix, melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleEditor},
+        }),
+        melodyaccesscontrol.NewSegmentPrefixRule(route.CategoriesApiUpdatePrefix, melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleEditor},
+        }),
+        melodyaccesscontrol.NewSegmentPrefixRule(route.CategoriesApiDeletePrefix, melodyaccesscontrol.RuleConfig{
+            Attributes: []string{entity.RoleEditor},
+        }),
         melodyaccesscontrol.NewSegmentPrefixRule(route.CategoriesPrefix, melodyaccesscontrol.RuleConfig{
             Attributes: []string{entity.RoleUser},
         }),

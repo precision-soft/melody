@@ -11,7 +11,13 @@ import (
     "github.com/precision-soft/melody/v4/.example/persistence"
     "github.com/precision-soft/melody/v4/.example/repository"
     melodyclock "github.com/precision-soft/melody/v4/clock"
+    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyevent "github.com/precision-soft/melody/v4/event"
+    melodylogging "github.com/precision-soft/melody/v4/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
 /* paddingCategoryRepository answers a lookup the way MySQL's PAD SPACE collation does: trailing spaces of the identifier asked are ignored */
@@ -157,4 +163,79 @@ func TestCategoryService_TheReadDoorsEndOnTheCallersContext(t *testing.T) {
 
         return findErr
     })
+}
+
+/* actorRecordingCategoryRepository records the actor each write's context carries */
+type actorRecordingCategoryRepository struct {
+    repository.CategoryRepository
+    actorList []string
+}
+
+func (instance *actorRecordingCategoryRepository) Create(ctx context.Context, category *entity.Category) error {
+    instance.actorList = append(instance.actorList, persistence.ActorFromContext(ctx))
+
+    return instance.CategoryRepository.Create(ctx, category)
+}
+
+func (instance *actorRecordingCategoryRepository) Update(ctx context.Context, category *entity.Category) (bool, error) {
+    instance.actorList = append(instance.actorList, persistence.ActorFromContext(ctx))
+
+    return instance.CategoryRepository.Update(ctx, category)
+}
+
+func (instance *actorRecordingCategoryRepository) DeleteById(ctx context.Context, id string) (bool, error) {
+    instance.actorList = append(instance.actorList, persistence.ActorFromContext(ctx))
+
+    return instance.CategoryRepository.DeleteById(ctx, id)
+}
+
+func TestCategoryService_WritesUnderTheWriteContext(t *testing.T) {
+    categoryRepository, categoryErr := repository.NewCategoryRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
+    if nil != categoryErr {
+        t.Fatalf("build the category repository: %v", categoryErr)
+    }
+
+    recording := &actorRecordingCategoryRepository{CategoryRepository: categoryRepository}
+
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
+    melodycontainer.MustRegister(
+        containerInstance,
+        melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return melodylogging.NewNopLogger(), nil
+        },
+        melodycontainer.RegisterOptions{},
+    )
+
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
+    melodysecurity.SecurityContextSetOnRuntime(
+        runtimeInstance,
+        melodysecurity.NewSecurityContext(
+            melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{Name: "main", Matcher: melodysecurity.NewPathPrefixMatcher("/"), MatcherDescription: "prefix /"}),
+            melodysecurity.NewAuthenticatedToken("editor-7", []string{entity.RoleEditor}, nil),
+        ),
+    )
+
+    categoryService := NewCategoryService(recording, newInMemoryProductRepositoryForTest(t), newTtlRecordingCache(), melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()}))
+
+    if _, createErr := categoryService.Create(runtimeInstance, "cat-actor", "Actor"); nil != createErr {
+        t.Fatalf("create: %v", createErr)
+    }
+    if _, _, updateErr := categoryService.Update(runtimeInstance, "cat-actor", "Renamed"); nil != updateErr {
+        t.Fatalf("update: %v", updateErr)
+    }
+    if _, deleteErr := categoryService.DeleteById(runtimeInstance, "cat-actor"); nil != deleteErr {
+        t.Fatalf("delete: %v", deleteErr)
+    }
+
+    if 3 != len(recording.actorList) {
+        t.Fatalf("expected the three writes recorded, got %v", recording.actorList)
+    }
+
+    for index, actor := range recording.actorList {
+        if "editor-7" != actor {
+            t.Fatalf("expected write %d under the signed-in actor, got %q", index, actor)
+        }
+    }
 }

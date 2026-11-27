@@ -145,10 +145,10 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.Handle(route.EventsPublishPattern, instance.throttledWrite(handlerevent.PublishHandler(instance.messageBusDispatch)), melodyhttp.RouteOptions{Name: route.EventsPublishName, Methods: []string{"POST"}})
 
     /* every catalog/user route below is exposed in the frontend zone: the admin SPA generates all of their URLs by name from the route manifest (data-route / route(...)), so an unexposed route would make the client throw "unknown route". */
-    router.Handle(route.CategoriesApiReadAllPattern, handlercategory.ApiReadAllHandler(), frontendRoute(route.CategoriesApiReadAllName, "GET"))
     router.Handle(route.ReportsApiHistoryPattern, handlerreport.ApiHistoryHandler(), frontendRoute(route.ReportsApiHistoryName, "GET"))
     router.Handle(route.ReportsApiExportPattern, handlerreport.ApiExportHandler(), frontendRoute(route.ReportsApiExportName, "GET"))
 
+    instance.registerCategoryApiRoutes(router)
     instance.registerCurrencyApiRoutes(router)
 
     router.Handle(route.ProductsListPagePattern, handlerproduct.ListPageHandler(), frontendRoute(route.ProductsListPageName, "GET"))
@@ -168,6 +168,20 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.Handle(route.UsersApiReadPattern, handleruser.ApiReadHandler(), frontendRoute(route.UsersApiReadName, "GET"))
     router.Handle(route.UsersApiUpdatePattern, instance.throttledWrite(handleruser.ApiUpdateHandler()), frontendRoute(route.UsersApiUpdateName, "PUT"))
     router.Handle(route.UsersApiDeletePattern, instance.throttledWrite(handleruser.ApiDeleteHandler()), frontendRoute(route.UsersApiDeleteName, "DELETE"))
+}
+
+/* registerCategoryApiRoutes registers the four category api doors through one route group; the writes sit behind the catalogue's write budget */
+func (instance *Module) registerCategoryApiRoutes(router melodyhttpcontract.Router) {
+    categoryApi := router.Group(
+        melodyhttpcontract.GroupConfig{
+            PathPrefix: route.CategoriesApiGroupPrefix,
+            NamePrefix: route.CategoriesApiGroupNamePrefix,
+        },
+    )
+    categoryApi.Handle(route.CategoriesApiReadAllRelativePattern, handlercategory.ApiReadAllHandler(), frontendRoute(route.CategoriesApiReadAllRelativeName, "GET"))
+    categoryApi.Handle(route.CategoriesApiCreateRelativePattern, instance.throttledWrite(handlercategory.ApiCreateHandler()), frontendJsonRoute(route.CategoriesApiCreateRelativeName, "POST", reflect.TypeFor[handlercategory.CreateRequest]()))
+    categoryApi.Handle(route.CategoriesApiUpdateRelativePattern, instance.throttledWrite(handlercategory.ApiUpdateHandler()), frontendJsonRoute(route.CategoriesApiUpdateRelativeName, "PUT", reflect.TypeFor[handlercategory.UpdateRequest]()))
+    categoryApi.Handle(route.CategoriesApiDeleteRelativePattern, instance.throttledWrite(handlercategory.ApiDeleteHandler()), frontendRoute(route.CategoriesApiDeleteRelativeName, "DELETE"))
 }
 
 /* registerCurrencyApiRoutes registers the four currency api doors through one route group, which prefixes their patterns and names; the writes sit behind the catalogue's write budget */

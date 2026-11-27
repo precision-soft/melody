@@ -17,7 +17,7 @@
     <div class="d-flex justify-content-between align-items-center mb-3">
         <div>
             <h1 class="h3 mb-0"><i class="fa-solid fa-book-open me-2"></i>Catalogue</h1>
-            <div class="text-muted small">Read-only</div>
+            <div class="text-muted small">Categories and currencies</div>
         </div>
         <div class="d-flex flex-wrap gap-2">
             <a class="btn btn-outline-secondary btn-sm" data-requires-role="ROLE_EDITOR" data-route="example.products.list.page" href="#">
@@ -46,11 +46,24 @@
             <div class="card shadow-sm">
                 <div class="card-header"><i class="fa-solid fa-tags me-2"></i>Categories</div>
                 <div class="card-body">
+                    <form class="row g-2 mb-3" data-requires-role="ROLE_EDITOR" id="categoryCreateForm">
+                        <div class="col-sm-4">
+                            <input class="form-control form-control-sm" id="categoryCreateId" maxlength="60" placeholder="Id (optional)" type="text"/>
+                        </div>
+                        <div class="col-sm-5">
+                            <input class="form-control form-control-sm" id="categoryCreateName" maxlength="120" placeholder="Name" required type="text"/>
+                        </div>
+                        <div class="col-sm-3 d-grid">
+                            <button class="btn btn-primary btn-sm" type="submit"><i class="fa-solid fa-plus me-1"></i>Add</button>
+                        </div>
+                    </form>
+                    <div class="alert alert-danger py-1 small d-none" id="categoryError"></div>
                     <table class="table table-sm align-middle mb-0" id="categoriesTable">
                         <thead>
                         <tr>
                             <th style="width: 40%">Id</th>
                             <th>Name</th>
+                            <th class="text-end" data-requires-role="ROLE_EDITOR">Actions</th>
                         </tr>
                         </thead>
                         <tbody></tbody>
@@ -108,18 +121,114 @@
             }
         };
 
+        const editsCategories = window.melodyExample.viewer.holdsRole('ROLE_EDITOR');
+        const categoryError = $('#categoryError');
+
+        const showCategoryError = (err) => {
+            const message = String(err?.message ?? err ?? '').trim();
+            categoryError.text(message).toggleClass('d-none', '' === message);
+        };
+
+        const renderCategories = (items) => {
+            categoriesBody.empty();
+
+            if (0 === items.length) {
+                const emptyRow = $('<tr/>');
+                $('<td/>').attr('colspan', editsCategories ? 3 : 2).addClass('text-muted').text('Nothing recorded.').appendTo(emptyRow);
+                categoriesBody.append(emptyRow);
+                return;
+            }
+
+            for (const item of items) {
+                const id = String(item?.id ?? '').trim();
+                const name = String(item?.name ?? '').trim();
+                const row = $('<tr/>');
+                $('<td/>').text(id).appendTo(row);
+                $('<td/>').text(name).appendTo(row);
+
+                if (true === editsCategories) {
+                    const actions = $('<td/>').addClass('text-end text-nowrap').appendTo(row);
+                    $('<button type="button"/>').addClass('btn btn-outline-secondary btn-sm me-1').attr('title', 'Rename')
+                        .append($('<i/>').addClass('fa-solid fa-pen'))
+                        .on('click', () => void renameCategory(id, name))
+                        .appendTo(actions);
+                    $('<button type="button"/>').addClass('btn btn-outline-danger btn-sm').attr('title', 'Delete')
+                        .append($('<i/>').addClass('fa-solid fa-trash'))
+                        .on('click', () => void deleteCategory(id))
+                        .appendTo(actions);
+                }
+
+                categoriesBody.append(row);
+            }
+        };
+
+        const loadCategories = async () => {
+            const categoriesResult = await window.melodyExample.http.getJson(
+                window.melodyExample.routing.route('example.categories.api.read.all')
+            );
+
+            renderCategories(Array.isArray(categoriesResult?.payload) ? categoriesResult.payload : []);
+        };
+
+        const writeCategory = async (write) => {
+            showCategoryError('');
+
+            try {
+                await write();
+                await loadCategories();
+            } catch (err) {
+                showCategoryError(err);
+            }
+        };
+
+        const renameCategory = async (id, name) => {
+            const renamed = window.prompt('New name for ' + id, name);
+            if (null === renamed || '' === renamed.trim() || name === renamed.trim()) {
+                return;
+            }
+
+            await writeCategory(() => window.melodyExample.http.putJson(
+                window.melodyExample.routing.route('example.categories.api.update', {id: id}),
+                {name: renamed.trim()}
+            ));
+        };
+
+        const deleteCategory = async (id) => {
+            if (false === window.confirm('Delete the category ' + id + '?')) {
+                return;
+            }
+
+            await writeCategory(() => window.melodyExample.http.deleteJson(
+                window.melodyExample.routing.route('example.categories.api.delete', {id: id})
+            ));
+        };
+
+        $('#categoryCreateForm').on('submit', (submitEvent) => {
+            submitEvent.preventDefault();
+
+            const idInput = $('#categoryCreateId');
+            const nameInput = $('#categoryCreateName');
+
+            void writeCategory(async () => {
+                await window.melodyExample.http.postJson(
+                    window.melodyExample.routing.route('example.categories.api.create'),
+                    {id: String(idInput.val() ?? '').trim(), name: String(nameInput.val() ?? '').trim()}
+                );
+                idInput.val('');
+                nameInput.val('');
+            });
+        });
+
         const load = async () => {
             window.melodyExample.ui.setStatus('Loading catalogue...');
 
             try {
-                const categoriesResult = await window.melodyExample.http.getJson(
-                    window.melodyExample.routing.route('example.categories.api.read.all')
-                );
+                await loadCategories();
+
                 const currenciesResult = await window.melodyExample.http.getJson(
                     window.melodyExample.routing.route('example.currencies.api.read.all')
                 );
 
-                renderRows(categoriesBody, Array.isArray(categoriesResult?.payload) ? categoriesResult.payload : [], 'id', 'name');
                 renderRows(currenciesBody, Array.isArray(currenciesResult?.payload) ? currenciesResult.payload : [], 'code', 'name');
 
                 window.melodyExample.ui.setStatus('');

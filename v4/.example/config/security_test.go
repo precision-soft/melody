@@ -89,6 +89,28 @@ func TestRegisterSecurity_TheCurrencyWritesRequireTheEditor(t *testing.T) {
     }
 }
 
+/* the category writes carry the editor's requirement ahead of the listing's rule, a prefix of theirs, so each write path is asked on its own */
+func TestAccessControl_CategoryWritesRequireTheEditor(t *testing.T) {
+    control := compiledSecurityModule(t).BuildAndCompile().GlobalAccessControl()
+
+    for _, path := range []string{"/categories/api/create/", "/categories/api/update/cat-1/", "/categories/api/delete/cat-1/"} {
+        attributes, matched := control.Match(path)
+
+        if false == matched || 1 != len(attributes) || entity.RoleEditor != attributes[0] {
+            t.Fatalf("expected %s to require %s, got matched=%v attributes=%v", path, entity.RoleEditor, matched, attributes)
+        }
+    }
+}
+
+func TestAccessControl_CategoryListingRequiresAUser(t *testing.T) {
+    control := compiledSecurityModule(t).BuildAndCompile().GlobalAccessControl()
+
+    attributes, matched := control.Match(route.CategoriesApiReadAllPattern)
+    if false == matched || 1 != len(attributes) || entity.RoleUser != attributes[0] {
+        t.Fatalf("expected %s to require %s, got matched=%v attributes=%v", route.CategoriesApiReadAllPattern, entity.RoleUser, matched, attributes)
+    }
+}
+
 /* The public rules are the readiness probe, the login and logout doors, the frontend bundle, the metrics and the openapi document, and the cipher round-trip probe, which reads nothing from the caller; the list is closed, so a rule added as public shows up here as the path that was not expected. */
 func TestRegisterSecurity_ThePublicRulesAreTheClosedListTheReadmeStates(t *testing.T) {
     control := compiledSecurityModule(t).BuildAndCompile().GlobalAccessControl()
