@@ -19,8 +19,10 @@ import (
     melodylogging "github.com/precision-soft/melody/v4/logging"
 )
 
-/* StreamHandler resolves the hub per request rather than taking it at registration, so the provider that installs the hub's logger runs and the container knows it has a hub to close. The slots are the process's one count of open streams, taken at registration. */
-func StreamHandler(slots *StreamSlots) melodyhttpcontract.Handler {
+/* StreamHandler resolves the hub per request rather than taking it at registration, so the provider that installs the hub's logger runs and the container knows it has a hub to close. The slots are the process's one count of open streams, taken at registration; the revision is how an open stream re-reads its account. */
+func StreamHandler(slots *StreamSlots, revision StreamRevisionConfig) melodyhttpcontract.Handler {
+    revision.mustBeComplete("handlerevent.StreamHandler")
+
     return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         topic := TopicOf(request)
 
@@ -45,6 +47,17 @@ func StreamHandler(slots *StreamSlots) melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusTooManyRequests, "too many open event streams"), nil
         }
         defer release()
+
+        /* the authority is opened while the response is still writable, so a request without a signed-in session reads a 401 */
+        var authority *StreamAuthority
+        if false == revision.Disabled {
+            openedAuthority, refusal := OpenStreamAuthority(runtimeInstance, request, revision)
+            if nil != refusal {
+                return refusal, nil
+            }
+
+            authority = openedAuthority
+        }
 
         subscriber, subscribeErr := hub.Subscribe(topic, melodyhttp.SubscribeOptions{})
         if nil != subscribeErr {
@@ -71,6 +84,15 @@ func StreamHandler(slots *StreamSlots) melodyhttpcontract.Handler {
         keepalive := time.NewTicker(keepaliveIntervalFor(writeBudget))
         defer keepalive.Stop()
 
+        /* a ticker of its own, which no event resets, so a busy stream is re-read on the same interval as an idle one; a disabled re-read leaves the channel nil, which never fires */
+        var revisionTicks <-chan time.Time
+        if nil != authority {
+            revisionTicker := time.NewTicker(revision.Interval)
+            defer revisionTicker.Stop()
+
+            revisionTicks = revisionTicker.C
+        }
+
         for {
             select {
             case <-requestContext.Done():
@@ -78,6 +100,12 @@ func StreamHandler(slots *StreamSlots) melodyhttpcontract.Handler {
             case <-keepalive.C:
                 if pingErr := serverSentEventWriter.Ping(); nil != pingErr {
                     journalServerSideCut(runtimeInstance, topic, "keepalive", pingErr)
+
+                    return nil, nil
+                }
+            case <-revisionTicks:
+                if reason := checkStreamAuthority(runtimeInstance, authority, topic); "" != reason {
+                    _ = serverSentEventWriter.Comment("closed: " + reason)
 
                     return nil, nil
                 }

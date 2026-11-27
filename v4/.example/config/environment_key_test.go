@@ -292,6 +292,7 @@ func TestExampleKeys_AnAbsentOrBlankLineTakesTheDeclaredDefault(t *testing.T) {
         {environmentKeyMaxItemsPerPage, parameterMaxItemsPerPage, "25"},
         {environmentKeyReportingRefreshInterval, parameterReportingRefreshInterval, defaultReportingRefreshInterval.String()},
         {environmentKeyProductViewsWindow, parameterProductViewsWindow, "24h0m0s"},
+        {environmentKeyEventStreamRevisionInterval, parameterEventStreamRevisionInterval, "15s"},
         {environmentKeyDeviceIdentifierMaxBytes, parameterDeviceIdentifierMaxBytes, "64"},
     } {
         for _, values := range []map[string]string{{}, {testCase.environmentKey: ""}} {
@@ -321,6 +322,22 @@ func TestExampleKeys_TheViewsWindowRefusesAValueUnderOneSecond(t *testing.T) {
     for _, admitted := range []string{"", "1s", "1h", "168h"} {
         if checkErr := exampleConfiguration(t, map[string]string{environmentKeyProductViewsWindow: admitted}).CheckEnvironmentKeys(); nil != checkErr {
             t.Errorf("expected %s=%q admitted, got %v", environmentKeyProductViewsWindow, admitted, checkErr)
+        }
+    }
+}
+
+func TestExampleKeys_TheRevisionIntervalRefusesAValueUnderOneSecond(t *testing.T) {
+    for _, refused := range []string{"999ms", "0", "0s", "-1s", "unlimited", "often"} {
+        checkErr := exampleConfiguration(t, map[string]string{environmentKeyEventStreamRevisionInterval: refused}).CheckEnvironmentKeys()
+        var refusal *melodyexception.Error
+        if false == errors.As(checkErr, &refusal) || environmentKeyEventStreamRevisionInterval != refusal.Context()["environmentKey"] {
+            t.Errorf("expected %s=%q refused naming the key, got %v", environmentKeyEventStreamRevisionInterval, refused, checkErr)
+        }
+    }
+
+    for _, admitted := range []string{"", "1s", "15s", "5m"} {
+        if checkErr := exampleConfiguration(t, map[string]string{environmentKeyEventStreamRevisionInterval: admitted}).CheckEnvironmentKeys(); nil != checkErr {
+            t.Errorf("expected %s=%q admitted, got %v", environmentKeyEventStreamRevisionInterval, admitted, checkErr)
         }
     }
 }

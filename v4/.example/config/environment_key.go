@@ -18,6 +18,8 @@ const (
     environmentKeyReportingRefreshInterval = "APP_REPORTING_REFRESH_INTERVAL"
     environmentKeyProductViewsWindow       = "APP_PRODUCT_VIEWS_WINDOW"
     environmentKeyCatalogueSeed            = "APP_CATALOGUE_SEED"
+
+    environmentKeyEventStreamRevisionInterval = "APP_EVENT_STREAM_REVISION_INTERVAL"
 )
 
 const (
@@ -28,6 +30,8 @@ const (
     parameterReportingRefreshInterval = "app.reporting.refresh_interval"
     parameterProductViewsWindow       = wiring.ParameterProductViewsWindow
     parameterCatalogueSeed            = "app.catalogue.seed"
+
+    parameterEventStreamRevisionInterval = "app.event_stream.revision_interval"
 
     parameterMysqlHost     = "app.mysql.host"
     parameterMysqlPort     = "app.mysql.port"
@@ -106,6 +110,7 @@ func EnvironmentKeys() []configcontract.EnvironmentKey {
         exampleKey(environmentKeyReportingRefreshInterval, parameterReportingRefreshInterval, defaultReportingRefreshInterval.String(), false, melodyconfig.LimitKeyRule(melodybound.Rule[time.Duration]{Default: defaultReportingRefreshInterval})),
         /* a counter's ttl is at least a second, so a shorter window refuses the boot rather than every read */
         exampleKey(environmentKeyProductViewsWindow, parameterProductViewsWindow, defaultProductViewsWindow.String(), false, melodyconfig.LimitKeyRule(melodybound.Rule[time.Duration]{Default: defaultProductViewsWindow, Minimum: time.Second})),
+        exampleKey(environmentKeyEventStreamRevisionInterval, parameterEventStreamRevisionInterval, defaultEventStreamRevisionInterval.String(), false, melodyconfig.LimitKeyRule(eventStreamRevisionIntervalRule)),
         exampleKey(environmentKeyCatalogueSeed, parameterCatalogueSeed, defaultCatalogueSeed, false, switchRule),
 
         exampleKey(environmentKeyMysqlHost, parameterMysqlHost, "", false, nil),

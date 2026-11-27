@@ -107,3 +107,36 @@ func TestSessionAdmission_ANilRuntimeIsRefusedBeforeTheIndex(t *testing.T) {
         t.Fatalf("expected the index not to be looked up, got %d lookups", len(index.runtimes))
     }
 }
+
+func TestStoredSessionIsLive_AnswersWhatTheStorageHolds(t *testing.T) {
+    storage := melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{})
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    melodycontainer.MustRegister[melodysessioncontract.Storage](containerInstance, melodysession.ServiceSessionStorage, func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Storage, error) {
+        return storage, nil
+    }, melodycontainer.RegisterOptions{})
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
+
+    if saveErr := storage.Save(runtimeInstance, "session-1", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
+        t.Fatalf("saving the session failed: %v", saveErr)
+    }
+
+    if live, liveErr := StoredSessionIsLive(runtimeInstance, "session-1"); nil != liveErr || false == live {
+        t.Fatalf("expected the stored session live, got %v, %v", live, liveErr)
+    }
+
+    if deleteErr := storage.Delete(runtimeInstance, "session-1"); nil != deleteErr {
+        t.Fatalf("deleting the session failed: %v", deleteErr)
+    }
+
+    if live, liveErr := StoredSessionIsLive(runtimeInstance, "session-1"); nil != liveErr || true == live {
+        t.Fatalf("expected the deleted session ended, got %v, %v", live, liveErr)
+    }
+}
+
+func TestStoredSessionIsLive_AnswersTheErrorOfAMissingStorage(t *testing.T) {
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), melodycontainer.NewContainer(melodycontainer.ContainerConfig{}).NewScope())
+
+    if live, liveErr := StoredSessionIsLive(runtimeInstance, "session-1"); nil == liveErr || true == live {
+        t.Fatalf("expected the missing storage answered as an error, got %v, %v", live, liveErr)
+    }
+}

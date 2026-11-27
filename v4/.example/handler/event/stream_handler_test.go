@@ -32,6 +32,7 @@ type recordingResponseWriter struct {
     wroteHeader bool
     status      int
     flushed     bool
+    body        []byte
 }
 
 func (instance *recordingResponseWriter) Header() nethttp.Header {
@@ -46,6 +47,8 @@ func (instance *recordingResponseWriter) Write(payload []byte) (int, error) {
     if false == instance.wroteHeader {
         instance.WriteHeader(nethttp.StatusOK)
     }
+
+    instance.body = append(instance.body, payload...)
 
     return len(payload), nil
 }
@@ -164,7 +167,7 @@ func TestStreamHandler_RefusesTheCatalogueTopicToAReaderWithoutTheEditorRole(t *
     request, runtimeInstance := streamRequestAs(t, "/events/stream/", []string{entity.RoleUser})
     writer := &recordingResponseWriter{}
 
-    response, handlerErr := StreamHandler(NewStreamSlots(StreamCapPerUser, StreamCapPerProcess))(runtimeInstance, writer, request)
+    response, handlerErr := StreamHandler(NewStreamSlots(StreamCapPerUser, StreamCapPerProcess), revisionDisabled)(runtimeInstance, writer, request)
     if nil != handlerErr || nil == response || nethttp.StatusForbidden != response.StatusCode() {
         t.Fatalf("expected a ROLE_USER reader refused with 403, got %v, %v", response, handlerErr)
     }
@@ -179,7 +182,7 @@ func TestStreamHandler_OpensTheCatalogueTopicForAnEditor(t *testing.T) {
     request, runtimeInstance := streamRequestAs(t, "/events/stream/", []string{entity.RoleUser, entity.RoleEditor})
     writer := &recordingResponseWriter{}
 
-    response, handlerErr := StreamHandler(NewStreamSlots(StreamCapPerUser, StreamCapPerProcess))(runtimeInstance, writer, request)
+    response, handlerErr := StreamHandler(NewStreamSlots(StreamCapPerUser, StreamCapPerProcess), revisionDisabled)(runtimeInstance, writer, request)
     if nil != handlerErr || nil != response {
         t.Fatalf("expected the editor's stream to end on the cancelled request context, got %v, %v", response, handlerErr)
     }
@@ -194,7 +197,7 @@ func TestStreamHandler_RefusesTheUserDirectoryTopicToAnEditor(t *testing.T) {
     request, runtimeInstance := streamRequestAs(t, "/events/stream/?topic=user-directory", []string{entity.RoleUser, entity.RoleEditor})
     writer := &recordingResponseWriter{}
 
-    response, handlerErr := StreamHandler(NewStreamSlots(StreamCapPerUser, StreamCapPerProcess))(runtimeInstance, writer, request)
+    response, handlerErr := StreamHandler(NewStreamSlots(StreamCapPerUser, StreamCapPerProcess), revisionDisabled)(runtimeInstance, writer, request)
     if nil != handlerErr || nil == response || nethttp.StatusForbidden != response.StatusCode() {
         t.Fatalf("expected the editor refused the user directory topic with 403, got %v, %v", response, handlerErr)
     }
@@ -209,7 +212,7 @@ func TestStreamHandler_OpensTheUserDirectoryTopicForAnAdministrator(t *testing.T
     request, runtimeInstance := streamRequestAs(t, "/events/stream/?topic=user-directory", []string{entity.RoleUser, entity.RoleEditor, entity.RoleAdmin})
     writer := &recordingResponseWriter{}
 
-    response, handlerErr := StreamHandler(NewStreamSlots(StreamCapPerUser, StreamCapPerProcess))(runtimeInstance, writer, request)
+    response, handlerErr := StreamHandler(NewStreamSlots(StreamCapPerUser, StreamCapPerProcess), revisionDisabled)(runtimeInstance, writer, request)
     if nil != handlerErr || nil != response {
         t.Fatalf("expected the administrator's stream to end on the cancelled request context, got %v, %v", response, handlerErr)
     }
@@ -224,7 +227,7 @@ func TestStreamHandler_RefusesAPrivilegedTopicWithoutCommittingTheResponse(t *te
     request, runtimeInstance := streamRequest(t, "/events/stream/", false)
     writer := &recordingResponseWriter{}
 
-    response, handlerErr := StreamHandler(NewStreamSlots(StreamCapPerUser, StreamCapPerProcess))(runtimeInstance, writer, request)
+    response, handlerErr := StreamHandler(NewStreamSlots(StreamCapPerUser, StreamCapPerProcess), revisionDisabled)(runtimeInstance, writer, request)
     if nil != handlerErr {
         t.Fatalf("expected the handler to answer the refusal itself, got %v", handlerErr)
     }
@@ -257,7 +260,7 @@ func TestStreamHandler_OpensTheStreamForATopicThatNeedsNoRole(t *testing.T) {
     request, runtimeInstance := streamRequestAs(t, "/events/stream/?topic=visitor", []string{entity.RoleUser})
     writer := &recordingResponseWriter{}
 
-    response, handlerErr := StreamHandler(NewStreamSlots(StreamCapPerUser, StreamCapPerProcess))(runtimeInstance, writer, request)
+    response, handlerErr := StreamHandler(NewStreamSlots(StreamCapPerUser, StreamCapPerProcess), revisionDisabled)(runtimeInstance, writer, request)
     if nil != handlerErr {
         t.Fatalf("expected the stream to end on the cancelled request context, got %v", handlerErr)
     }
@@ -284,7 +287,7 @@ func TestStreamHandler_RefusesWithoutCommittingWhenTheHubIsNotRegistered(t *test
     request, runtimeInstance := streamRequestWithoutHub(t, "/events/stream/?topic=visitor")
     writer := &recordingResponseWriter{}
 
-    response, handlerErr := StreamHandler(NewStreamSlots(StreamCapPerUser, StreamCapPerProcess))(runtimeInstance, writer, request)
+    response, handlerErr := StreamHandler(NewStreamSlots(StreamCapPerUser, StreamCapPerProcess), revisionDisabled)(runtimeInstance, writer, request)
     if nil != handlerErr {
         t.Fatalf("expected the handler to answer the refusal itself, got %v", handlerErr)
     }
@@ -358,7 +361,7 @@ func streamServer(t *testing.T, writeTimeout time.Duration) (*httptest.Server, *
 
     server := httptest.NewUnstartedServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, httpRequest *nethttp.Request) {
         request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("stream-test", time.Now())})
-        _, _ = StreamHandler(NewStreamSlots(StreamCapPerUser, StreamCapPerProcess))(runtimeInstance, writer, request)
+        _, _ = StreamHandler(NewStreamSlots(StreamCapPerUser, StreamCapPerProcess), revisionDisabled)(runtimeInstance, writer, request)
     }))
     server.Config.WriteTimeout = writeTimeout
     server.Start()
@@ -596,7 +599,7 @@ func TestStreamHandler_RefusesWithoutCommittingWhenTheHubHasShutDown(t *testing.
 
     writer := &recordingResponseWriter{}
 
-    response, handlerErr := StreamHandler(NewStreamSlots(StreamCapPerUser, StreamCapPerProcess))(runtimeInstance, writer, request)
+    response, handlerErr := StreamHandler(NewStreamSlots(StreamCapPerUser, StreamCapPerProcess), revisionDisabled)(runtimeInstance, writer, request)
     if nil != handlerErr || nil == response || nethttp.StatusServiceUnavailable != response.StatusCode() {
         t.Fatalf("expected the handler to answer 503 itself, got %v and %v", response, handlerErr)
     }
@@ -618,7 +621,7 @@ func TestStreamHandler_RefusesTheStreamPastTheAccountsCapWithoutCommitting(t *te
     request, runtimeInstance := streamRequestAs(t, "/events/stream/?topic=visitor", []string{entity.RoleUser})
     writer := &recordingResponseWriter{}
 
-    response, handlerErr := StreamHandler(slots)(runtimeInstance, writer, request)
+    response, handlerErr := StreamHandler(slots, revisionDisabled)(runtimeInstance, writer, request)
     if nil != handlerErr || nil == response || nethttp.StatusTooManyRequests != response.StatusCode() {
         t.Fatalf("expected the stream past the cap refused with 429, got %v, %v", response, handlerErr)
     }
@@ -631,7 +634,7 @@ func TestStreamHandler_RefusesTheStreamPastTheAccountsCapWithoutCommitting(t *te
     authenticateOnRuntime(otherRuntime, "other-reader", []string{entity.RoleUser})
     otherWriter := &recordingResponseWriter{}
 
-    if _, otherErr := StreamHandler(slots)(otherRuntime, otherWriter, otherRequest); nil != otherErr || nethttp.StatusOK != otherWriter.CommittedStatusCode() {
+    if _, otherErr := StreamHandler(slots, revisionDisabled)(otherRuntime, otherWriter, otherRequest); nil != otherErr || nethttp.StatusOK != otherWriter.CommittedStatusCode() {
         t.Fatalf("expected another account's stream opened, got %d, %v", otherWriter.CommittedStatusCode(), otherErr)
     }
 }
@@ -644,7 +647,7 @@ func TestStreamHandler_AnEndedStreamGivesItsSlotBack(t *testing.T) {
         request, runtimeInstance := streamRequestAs(t, "/events/stream/?topic=visitor", []string{entity.RoleUser})
         writer := &recordingResponseWriter{}
 
-        if _, handlerErr := StreamHandler(slots)(runtimeInstance, writer, request); nil != handlerErr || nethttp.StatusOK != writer.CommittedStatusCode() {
+        if _, handlerErr := StreamHandler(slots, revisionDisabled)(runtimeInstance, writer, request); nil != handlerErr || nethttp.StatusOK != writer.CommittedStatusCode() {
             t.Fatalf("round %d: expected the stream opened, got %d, %v", round, writer.CommittedStatusCode(), handlerErr)
         }
     }
@@ -656,7 +659,7 @@ func TestStreamHandler_ARefusedWriterGivesItsSlotBack(t *testing.T) {
 
     request, runtimeInstance := streamRequestAs(t, "/events/stream/?topic=visitor", []string{entity.RoleUser})
 
-    response, handlerErr := StreamHandler(slots)(runtimeInstance, &nonFlushingResponseWriter{}, request)
+    response, handlerErr := StreamHandler(slots, revisionDisabled)(runtimeInstance, &nonFlushingResponseWriter{}, request)
     if nil != handlerErr || nil == response || nethttp.StatusInternalServerError != response.StatusCode() {
         t.Fatalf("expected a writer without Flush refused with 500, got %v, %v", response, handlerErr)
     }

@@ -26,9 +26,10 @@ func (instance *Module) RegisterHttpMiddlewares(kernelInstance melodykernelcontr
             melodyhttpmiddleware.CompressionMiddleware(melodyhttpmiddleware.CompressionConfig{}),
             NewTimingMiddleware(kernelInstance.Clock()),
             NewCatalogJournalFlushMiddleware(),
-            /* the websocket integration's handler accepts the upgrade itself, so its topic is gated and its connections are counted in front of it, the gate first so a refused topic takes no slot */
+            /* the websocket integration's handler accepts the upgrade itself, so its topic is gated, its connections are counted and its account is re-read in front of it, the gate first so a refused topic takes no slot */
             handlerevent.StreamTopicGateMiddleware(websocketRouteName),
             handlerevent.StreamSlotMiddleware(instance.eventStreamSlots, websocketRouteName),
+            handlerevent.StreamRevisionMiddleware(websocketRouteName, instance.eventStreamRevision()),
         },
     })
 }

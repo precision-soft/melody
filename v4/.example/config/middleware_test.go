@@ -400,3 +400,60 @@ func TestRegisterHttpMiddlewares_TheTopicGateTakesNoSlotWhenItRefuses(t *testing
         t.Fatal("expected the websocket handler never reached for a refused topic")
     }
 }
+
+/* the websocket route's account is re-read after its slot is taken: an account at its cap is told it holds too many streams, 429, before a missing session is read, and with a slot free the missing session is the 401 the revision answers, the slot given back */
+func TestRegisterHttpMiddlewares_OrdersTheTopicGateTheSlotAndTheRevision(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.eventStreamSlots = handlerevent.NewStreamSlots(1, 1)
+
+    registrar := &capturingMiddlewareRegistrar{}
+    moduleInstance.RegisterHttpMiddlewares(&routeKernel{}, registrar)
+
+    handlerRan := false
+    var handler melodyhttpcontract.Handler = func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        handlerRan = true
+
+        return nil, nil
+    }
+    for index := len(registrar.middlewares) - 1; 0 <= index; index-- {
+        handler = registrar.middlewares[index](handler)
+    }
+
+    serve := func() melodyhttpcontract.Response {
+        runtimeInstance := newTrailRuntime(t, &recordingJournalRepository{}, "stream-order")
+        firewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
+            Name:               "main",
+            Matcher:            melodysecurity.NewPathPrefixMatcher("/"),
+            MatcherDescription: "prefix /",
+        })
+        melodysecurity.SecurityContextSetOnRuntime(runtimeInstance, melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken("editor-1", []string{entity.RoleUser, entity.RoleEditor}, nil)))
+
+        request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/ws", nil), runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("stream-order", time.Unix(0, 0))})
+        request.Attributes().Set(melodyhttp.RouteAttributeName, websocketRouteName)
+
+        response, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request)
+        if nil != handlerErr || nil == response {
+            t.Fatalf("expected a refusal, got %v, %v", response, handlerErr)
+        }
+
+        return response
+    }
+
+    if response := serve(); nethttp.StatusUnauthorized != response.StatusCode() {
+        t.Fatalf("expected the revision to refuse a connection without a session with 401, got %d", response.StatusCode())
+    }
+
+    release, taken := moduleInstance.eventStreamSlots.Acquire("editor-1")
+    if false == taken {
+        t.Fatal("expected the refused connection to have given its slot back")
+    }
+    defer release()
+
+    if response := serve(); nethttp.StatusTooManyRequests != response.StatusCode() {
+        t.Fatalf("expected the slot count ahead of the revision, 429 at the cap, got %d", response.StatusCode())
+    }
+
+    if true == handlerRan {
+        t.Fatal("expected the websocket handler never reached")
+    }
+}

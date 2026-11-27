@@ -141,7 +141,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
         melodyhttp.RouteOptions{Name: route.I18nGreetingName, Methods: []string{"GET"}, Locales: route.I18nGreetingLocaleList()},
     )
 
-    router.Handle(route.EventsStreamPattern, handlerevent.StreamHandler(instance.eventStreamSlots), melodyhttp.RouteOptions{Name: route.EventsStreamName, Methods: []string{"GET"}})
+    router.Handle(route.EventsStreamPattern, handlerevent.StreamHandler(instance.eventStreamSlots, instance.eventStreamRevision()), melodyhttp.RouteOptions{Name: route.EventsStreamName, Methods: []string{"GET"}})
     router.Handle(route.EventsPublishPattern, instance.throttledWrite(handlerevent.PublishHandler(instance.messageBusDispatch)), melodyhttp.RouteOptions{Name: route.EventsPublishName, Methods: []string{"POST"}})
 
     /* every catalog/user route below is exposed in the frontend zone: the admin SPA generates all of their URLs by name from the route manifest (data-route / route(...)), so an unexposed route would make the client throw "unknown route". */

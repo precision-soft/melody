@@ -99,6 +99,21 @@ func admitSession(
     )
 }
 
+/* StoredSessionIsLive answers whether the session storage still holds the session named; a sign-out or the account's cap deletes it there. */
+func StoredSessionIsLive(runtimeInstance melodycontainercontract.Runtime, sessionId string) (bool, error) {
+    sessionStorage, sessionStorageErr := melodyruntime.FromRuntime[melodysessioncontract.Storage](
+        runtimeInstance,
+        melodysession.ServiceSessionStorage,
+    )
+    if nil != sessionStorageErr {
+        return false, sessionStorageErr
+    }
+
+    _, exists, loadErr := sessionStorage.Load(runtimeInstance, sessionId)
+
+    return exists, loadErr
+}
+
 /* ReleaseSession removes the row of the session a sign-out ends; the sign-out ends the session whatever this answers. */
 func ReleaseSession(runtimeInstance melodycontainercontract.Runtime, sessionIndex SessionIndexLookup, sessionId string) error {
     if nil == sessionIndex {

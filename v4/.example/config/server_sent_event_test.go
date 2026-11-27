@@ -136,3 +136,12 @@ func TestWebsocketModuleConfig_ResolvesTheTopicFromTheQuery(t *testing.T) {
         }
     }
 }
+
+func TestEventStreamRevision_ReadsTheIntervalFromItsKeyAndKeepsTheReReadOn(t *testing.T) {
+    for value, expected := range map[string]time.Duration{"": 15 * time.Second, "2s": 2 * time.Second} {
+        revision := moduleWithEnvironment(t, map[string]string{environmentKeyEventStreamRevisionInterval: value}).eventStreamRevision()
+        if expected != revision.Interval || true == revision.Disabled || nil == revision.LookupUser || nil == revision.SessionLive {
+            t.Errorf("expected %q to give an enabled re-read every %s, got %+v", value, expected, revision)
+        }
+    }
+}
