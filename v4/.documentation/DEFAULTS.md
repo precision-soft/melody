@@ -88,7 +88,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | `v4/config.HttpConfiguration.StaticCacheMaxAge` | limit | a response cached for good | DefaultStaticCacheMaxAge min 0 | `value:v4/config/contract.HttpConfiguration.StaticCacheMaxAge`, `env:MELODY_STATIC_CACHE_MAX_AGE` | class T: a cache lifetime; unlimited pins a response in every cache for good | [CONFIG.md](package/CONFIG.md) |
 | `v4/config.HttpSessionCookieSecureAlways` | protection | a session cookie sent in clear | from the scheme | `use:v4/http/contract.SessionCookiePolicy.Secure`, `env:MELODY_HTTP_SESSION_COOKIE_SECURE` | the key only hardens it: always is the one value it admits, and the Go field lowers the policy | [HTTP.md](package/HTTP.md) |
 | `v4/config.DefaultCacheDirectoryMode` | mode | a cache directory readable by every local user | 0750 | `env:MELODY_CACHE_DIRECTORY_MODE` | — | [CONFIG.md](package/CONFIG.md) |
-| `v4/config.kernelConfiguration.validateEnvironment` | refusal | an environment name outside the closed list | refused | none | — | — |
+| `v4/config.kernelConfiguration.validateEnvironment` | refusal | an environment name outside the closed list | refused | none | the framework has two behaviours and branches on the name: a third name would fall to one of them by the order of a comparison; a staging deployment runs as prod and names itself in its own keys | [CONFIG.md](package/CONFIG.md) |
 
 ## `v4/container`
 
@@ -126,7 +126,9 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | `v4/http.SubscribeOptions.Buffer` | limit | unbounded memory or work | bufferSize min 1 | `value:v4/http.SubscribeOptions.Buffer` | class T: a size; unlimited is memory or work that only grows | [HTTP.md](package/HTTP.md) |
 | `v4/http.RegisterKernelTerminateAccessLogListener` | protection | a request leaving no access line | on | `off:v4/http.AccessLogConfig.Disabled`, `off:v4/application.ApplicationConfig.AccessLog` | — | [HTTP.md](package/HTTP.md) |
 | `v4/http.AccessLogConfig.MaxFieldBytes` | limit | an access line of any length | internal.DiagnosticTextMaxLength min 1 unlimited admitted | `value:v4/http.AccessLogConfig.MaxFieldBytes`, `value:v4/application.ApplicationConfig.AccessLog` | — | [HTTP.md](package/HTTP.md) |
-| `v4/http.sessionCookie` | protection | a session cookie readable by a script | HttpOnly, always | none | — | — |
+| `v4/http.sessionCookie` | protection | a session cookie readable by a script | HttpOnly, always | none | the cookie is the session's credential and nothing on the page has a use for it: a script reading it is a cross-site scripting flaw taking the session | [HTTP.md](package/HTTP.md) |
+| `v4/http.markResponsePrivateForSessionCookie` | protection | a shared cache replaying one client's session cookie to the next | Cache-Control private on a response carrying the session cookie | none | a shared cache holding the session's Set-Cookie hands one client's session to another; a route meant for a shared cache does not touch the session | [HTTP.md](package/HTTP.md) |
+| `v4/http.requestPathIsCanonical` | refusal | a folded path spelling reaching a resource a rule written on the other spelling guards | 400 before the middleware chain | none | admitting the fold is the disagreement between the router and the rules it prevents, and a redirect teaches the spelling that sidesteps the rule | [HTTP.md](package/HTTP.md) |
 
 ## `v4/http/contract`
 
@@ -165,14 +167,18 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 |---|---|---|---|---|---|---|
 | `v4/http/static.Config.CacheMaxAge` | limit | a response cached for good | 3600 min 0 | `value:v4/http/static.Config.CacheMaxAge` | class T: a cache lifetime; unlimited pins a response in every cache for good | [HTTP.md](package/HTTP.md) |
 | `v4/http/static.Config.CacheDisabled` | protection | the door: sends no Cache-Control, ETag or Last-Modified, so no conditional request can be answered 304. | on | `off:v4/http/static.Config.CacheDisabled` | — | [HTTP.md](package/HTTP.md) |
+| `v4/http/static.hasDotPrefixedPathElement` | protection | serving .env, .git or any dot-prefixed file kept beside the served ones | refused but a .well-known first element | `off:v4/http/static.AllowedDotPrefixAll`, `use:v4/http/static.Config.AllowedDotPrefixList` | — | [HTTP.md](package/HTTP.md) |
+| `v4/http/static.dirFileSystem.Open` | refusal | a symlink publishing a file outside the served directory | refused | none | a link out of the served directory publishes whatever it names; another tree is served by a file server rooted there, and a symlinked base is resolved and served | [HTTP.md](package/HTTP.md) |
 
 ## `v4/httpclient`
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
+| `v4/httpclient.HttpClientConfig.MaxResponseBodyBytes` | limit | unbounded memory or work | defaultMaxResponseBodyBytes min 1 | `value:v4/httpclient.HttpClientConfig.MaxResponseBodyBytes` | class T: a size; the client's cap is the default of every buffered request, whose body is held whole in memory | [HTTPCLIENT.md](package/HTTPCLIENT.md) |
 | `v4/httpclient.HttpClientConfig.MaxRedirects` | limit | a redirect loop followed forever | 10 min 1 | `value:v4/httpclient.HttpClientConfig.MaxRedirects` | class T: a redirect count; unlimited follows a redirect loop forever | [HTTPCLIENT.md](package/HTTPCLIENT.md) |
 | `v4/httpclient.HttpClientConfig.Timeout` | limit | a call or a wait that never returns | 30 * time.Second min bound.TimeoutMinimum unlimited admitted | `value:v4/httpclient.HttpClientConfig.Timeout` | — | [HTTPCLIENT.md](package/HTTPCLIENT.md) |
-| `v4/httpclient.RequestOptions.MaxResponseBodyBytes` | limit | unbounded memory or work | defaultMaxResponseBodyBytes min 1 | `value:v4/httpclient.RequestOptions.MaxResponseBodyBytes` | class T: a size; unlimited is memory or work that only grows | [HTTPCLIENT.md](package/HTTPCLIENT.md) |
+| `v4/httpclient.RequestOptions.MaxResponseBodyBytes` | limit | unbounded memory or work | the client's cap min 1 | `value:v4/httpclient.RequestOptions.MaxResponseBodyBytes`, `value:v4/httpclient.HttpClientConfig.MaxResponseBodyBytes` | class T: a size; unlimited is a body held whole in memory that only grows, so it is admitted on RequestStream alone, where the caller reads the body as it arrives | [HTTPCLIENT.md](package/HTTPCLIENT.md) |
+| `v4/httpclient.HttpClient.credentialStrippingRedirectPolicy` | protection | a credential the caller meant for one origin handed to the origin a redirect names | stripped on every redirect leaving the origin | none | the Location is the server's choice, the party a credential must not follow on its say-so; a caller follows by hand under RedirectsDisabled and attaches the credential it chose | [HTTPCLIENT.md](package/HTTPCLIENT.md) |
 | `v4/httpclient.RequestOptions.Timeout` | limit | a call or a wait that never returns | min bound.TimeoutMinimum unlimited admitted | `value:v4/httpclient.RequestOptions.Timeout` | — | [HTTPCLIENT.md](package/HTTPCLIENT.md) |
 | `v4/httpclient.TransportConfig.DialTimeout` | limit | a call or a wait that never returns | 10 * time.Second min bound.TimeoutMinimum | `value:v4/httpclient.TransportConfig.DialTimeout` | class T: a timeout; unlimited is the wait that never returns | [HTTPCLIENT.md](package/HTTPCLIENT.md) |
 | `v4/httpclient.TransportConfig.ExpectContinueTimeout` | limit | a call or a wait that never returns | 1 * time.Second min 0 | `value:v4/httpclient.TransportConfig.ExpectContinueTimeout` | class T: a timeout; unlimited is the wait that never returns | [HTTPCLIENT.md](package/HTTPCLIENT.md) |
@@ -288,7 +294,9 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | `v4/security.CsrfModeDisabled` | protection | a cross-site request forging an unsafe method on a session firewall | origin check on | `off:v4/security.CsrfModeDisabled`, `off:v4/http/contract.RouteProtectionConfig.CsrfDisabled`, `off:v4/security/config.LoginConfig.CsrfDisabled` | — | [SECURITY.md](package/SECURITY.md) |
 | `v4/security.JwtConfig.AllowFutureIssuedAt` | protection | the door: accepts a token whose iat is ahead of the clock by more than the leeway | refused | `off:v4/security.JwtConfig.AllowFutureIssuedAt` | — | [SECURITY.md](package/SECURITY.md) |
 | `v4/security.JwtConfig.AllowWithoutExpiry` | protection | the door: AllowWithoutExpiry | refused | `off:v4/security.JwtConfig.AllowWithoutExpiry` | — | [SECURITY.md](package/SECURITY.md) |
-| `v4/security.JwtAlgorithmHs256` | refusal | an algorithm confusion: a token signed with another algorithm | HS256 only | none | — | [SECURITY.md](package/SECURITY.md) |
+| `v4/security.JwtAlgorithmHs256` | refusal | an algorithm confusion: a token signed with another algorithm | HS256 only | none | a token choosing among algorithms is the confusion alg none came from; another algorithm is another TokenValidator behind NewBearerTokenSource | [SECURITY.md](package/SECURITY.md) |
+| `v4/security.HmacTokenSourceConfig.NonceGuard` | protection | an internal-auth envelope replayed | the in-process guard | none | an envelope accepted twice is the replay the guard refuses, so no guard remembering nothing is shipped; a shared guard is the door for several instances | [SECURITY.md](package/SECURITY.md) |
+| `v4/security.TotpSecondFactorAuthenticatorConfig.ReplayGuard` | protection | a TOTP code replayed inside its window | the in-process guard | none | a code accepted twice is the replay the guard refuses, so no guard remembering nothing is shipped; a shared guard is the door for several instances | [SECURITY.md](package/SECURITY.md) |
 
 ## `v4/security/config`
 
@@ -297,6 +305,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 | `v4/security/config.FirewallOverride.GlobalAccessControlDisabled` | protection | the door: cuts this firewall off the global access control | on | `off:v4/security/config.FirewallOverride.GlobalAccessControlDisabled` | — | [SECURITY.md](package/SECURITY.md) |
 | `v4/security/config.LoginConfig.CsrfDisabled` | protection | the door: turns the door's forgery check off, the stated other origin refused without a session cookie included | on | `off:v4/security/config.LoginConfig.CsrfDisabled` | — | [SECURITY.md](package/SECURITY.md) |
 | `v4/security/config.LoginConfig.Limiter` | protection | credential guessing at the login door | a door without a limiter refused | `off:v4/security/config.LoginConfig.LimiterDisabled` | — | [SECURITY.md](package/SECURITY.md) |
+| `v4/security/config.validateFirewallDoor` | refusal | a sign-in or sign-out forged by a link | a door on a safe or empty method refused | none | a state change on a safe method is forgeable by an image tag, a sign-out included; a legacy link is served by a GET route rendering a form that posts to the door | [SECURITY.md](package/SECURITY.md) |
 | `v4/security/config.refuseAccessControlWithoutFallback` | refusal | a path no access rule covers, reaching its handler undecided | refused at compile | `use:v4/security/accesscontrol.NewSegmentPrefixRule` | the door is the explicit fallback, a rule on "/" (PUBLIC_ACCESS keeps the rest open on purpose), never a switch: the control then states what an unnamed path gets | [SECURITY.md](package/SECURITY.md) |
 | `v4/security/config.LogoutConfig.CsrfDisabled` | protection | the door: CsrfDisabled | on | `off:v4/security/config.LogoutConfig.CsrfDisabled` | — | [SECURITY.md](package/SECURITY.md) |
 

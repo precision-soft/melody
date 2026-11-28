@@ -18,6 +18,9 @@ const (
 /* DefaultAllowedDotPrefix is the one dot-prefixed element a file server retrieves by default: RFC 8615 publishes an ACME http-01 challenge, security.txt and assetlinks.json under it. */
 const DefaultAllowedDotPrefix = ".well-known"
 
+/* AllowedDotPrefixAll is the AllowedDotPrefixList entry that admits every dot-prefixed element at any depth, for a deployment serving a tree whose dot directories it means to publish. */
+const AllowedDotPrefixAll = "*"
+
 /* Config is what a file server serves and how. A field left out takes its default: the filesystem mode, the "public" directory under the root ".", "index.html", no strip prefix, Cache-Control with a 3600s max-age and strong entity tags, ".well-known" the one dot-prefixed element retrieved, no path excluded. NewFileServer copies it, lists included, so the server is immutable once built. */
 type Config struct {
     /* Mode is filesystem or embedded; "" reads as filesystem. */
@@ -39,7 +42,7 @@ type Config struct {
 
     WeakEtag bool
 
-    /* AllowedDotPrefixList names the dot-prefixed first path elements the file server may retrieve; every other dot-prefixed element is refused, and the allowance never reaches past the first element. nil reads as [DefaultAllowedDotPrefix]; an empty list refuses every dot-prefixed path. */
+    /* AllowedDotPrefixList names the dot-prefixed first path elements the file server may retrieve; every other dot-prefixed element is refused, and the allowance never reaches past the first element. An AllowedDotPrefixAll entry admits every dot-prefixed element at any depth. nil reads as [DefaultAllowedDotPrefix]; an empty list refuses every dot-prefixed path. */
     AllowedDotPrefixList []string
 
     /* ExcludedPathList names the path prefixes the file server declines without looking at the disk, handing them down the chain to the application. An entry is a prefix of the request path as security.NewPathPrefixMatcher reads it, before the strip prefix and any fold, so a firewall rule and this list select the same requests; a request for the mount root is compared a second time with the index file the root resolves to, so an entry naming the index file declines "/" too; an empty entry switches the server off; an entry without its leading slash gets one. The default excludes nothing. An entry is written decoded, as the router reads the path, with %2F for a separator inside a segment: a percent escape other than %2F excludes only a path whose name holds the percent sign literally. */

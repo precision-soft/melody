@@ -68,3 +68,18 @@ func TestConfig_ANilAllowedDotPrefixListAllowsTheWellKnownDirectoryAndNothingEls
         t.Fatalf("expected the allowance not to reach past the first path element")
     }
 }
+
+func TestConfig_TheAllowAllEntryAdmitsEveryDotPrefixedElementAtAnyDepth(t *testing.T) {
+    server := newTestEmbeddedServer(Config{AllowedDotPrefixList: []string{AllowedDotPrefixAll}})
+
+    for _, requestPath := range []string{"/.env", "/.well-known/.env", "/assets/.github/workflow.yml"} {
+        if true == hasDotPrefixedPathElement(requestPath, server.config.allowedDotPrefixList) {
+            t.Fatalf("expected the allow-all entry to admit %q", requestPath)
+        }
+    }
+
+    narrowServer := newTestEmbeddedServer(Config{AllowedDotPrefixList: []string{".github"}})
+    if false == hasDotPrefixedPathElement("/assets/.github/workflow.yml", narrowServer.config.allowedDotPrefixList) {
+        t.Fatalf("expected a named entry to stay a first-element allowance")
+    }
+}

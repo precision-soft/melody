@@ -19,7 +19,7 @@ import (
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-/* JwtAlgorithmHs256 is the one algorithm the validator implements, HMAC with SHA-256. */
+/* JwtAlgorithmHs256 is the one algorithm the validator implements, HMAC with SHA-256, by design: a token choosing among algorithms is the confusion alg none came from, so another algorithm is another TokenValidator behind NewBearerTokenSource. */
 const JwtAlgorithmHs256 = "HS256"
 
 const (

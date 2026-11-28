@@ -7,6 +7,3 @@
 # as the open rows are repaired; a line left at the freeze is a decision the owner took, with its reason.
 
 row ~ integrations/cron/v4.TickDedupConfig ~ Q-2 / G3R-3: the dedup over a locker without a lease is an open decision of the owner
-row ~ v4/config.kernelConfiguration.validateEnvironment ~ H-7: the reason of the closed MELODY_ENV list in CONFIG.md (C9)
-row ~ v4/http.sessionCookie ~ M-5: the reason of HttpOnly and of Cache-Control private (C9)
-row ~ v4/security.JwtAlgorithmHs256 ~ M-12: the reason of HS256 only next to the check (C9)

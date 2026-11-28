@@ -1631,7 +1631,7 @@ A handler that must not lose a write, a cart line or a consent, reads `session.S
 
 ### Httpclient: a request takes one options struct
 
-**What changed.** `Get`, `Delete` and `Request` take the runtime first and a [`RequestOptions`](../httpclient/contract/request_option.go) struct in place of the variadic `RequestOption` functions, and `Post`, `Put` and `Patch` take the runtime first and the struct after their positional body: `Headers`, `Query`, `Body`, `Json`, `Timeout`, `BearerToken`, `BasicAuth` and `MaxResponseBodyBytes`. `NewRequestOptions`, the ten `With*` functions, the `RequestOption` type and the `AuthorizationOptions` and `BasicAuthorizationOptions` types and contracts are removed. A `Body` and a `Json` together, either beside the positional body of `Post`, `Put` or `Patch`, and a `BearerToken` beside a `BasicAuth` are refused before anything is dialled, where the last option or the bearer won. `Timeout` left out is the client's, a value replaces it and unlimited is no deadline; `MaxResponseBodyBytes` left out is 10 MiB, a value is at least one byte, and unlimited is refused. The runtime's context ends the exchange
+**What changed.** `Get`, `Delete` and `Request` take the runtime first and a [`RequestOptions`](../httpclient/contract/request_option.go) struct in place of the variadic `RequestOption` functions, and `Post`, `Put` and `Patch` take the runtime first and the struct after their positional body: `Headers`, `Query`, `Body`, `Json`, `Timeout`, `BearerToken`, `BasicAuth` and `MaxResponseBodyBytes`. `NewRequestOptions`, the ten `With*` functions, the `RequestOption` type and the `AuthorizationOptions` and `BasicAuthorizationOptions` types and contracts are removed. A `Body` and a `Json` together, either beside the positional body of `Post`, `Put` or `Patch`, and a `BearerToken` beside a `BasicAuth` are refused before anything is dialled, where the last option or the bearer won. `Timeout` left out is the client's, a value replaces it and unlimited is no deadline; `MaxResponseBodyBytes` left out is the client's cap, `HttpClientConfig.MaxResponseBodyBytes`, 10 MiB unless the client names another, a value is at least one byte, and unlimited is admitted on `RequestStream` alone. The runtime's context ends the exchange
 when it is cancelled, the body read included, and an absent runtime is refused with `the runtime is nil or carries no context`; the third major ran every buffered request under `context.Background()`.
 
 **Symptom.** A call that passes `With*` options, or none, or a context where the runtime goes, no longer compiles. A request that set both a bearer token and a basic credential, or a body twice, answers an error instead of being sent.
@@ -3915,7 +3915,7 @@ still empty each other's destinations, so applications sharing a directory run u
 
 **Symptom.** A stream that delivers more than ten mebibytes — a large download, a long-lived server-sent-event feed — errors mid-read where it used to run unbounded.
 
-**Remedy.** Name the cap the stream actually needs through `RequestOptions.MaxResponseBodyBytes`; a genuinely unbounded consumer sets one sized far above its expected traffic, since unlimited is refused. Callers of the buffered `Request` are unaffected — the default has always bounded them.
+**Remedy.** Name the cap the stream actually needs through `RequestOptions.MaxResponseBodyBytes`; a genuinely unbounded consumer sets `bound.UnlimitedCount()`, which `RequestStream` alone admits, and a client whose every request carries more sets `HttpClientConfig.MaxResponseBodyBytes` once. Callers of the buffered `Request` are unaffected — the default has always bounded them.
 
 ### Opaque tokens: a stored token with no issue instant is refused once its user is revoked
 
@@ -4679,7 +4679,7 @@ sessionInstance.Set("profile", profile)
 
 **Symptom.** The file server no longer serves a dot-prefixed file outside `.well-known/`. The request passes on as if the file were missing, and a warning `static serve dot prefixed path element` is logged.
 
-**Remedy.** Add each prefix that is meant to be public to `AllowedDotPrefixList`, `.well-known` with them.
+**Remedy.** Add each prefix that is meant to be public to `AllowedDotPrefixList`, `.well-known` with them; a served tree whose dot directories are all meant to be public, at any depth, takes the one entry `static.AllowedDotPrefixAll` (`"*"`).
 
 ### Http: a request whose `RawPath` no longer matches `Path` is refused
 

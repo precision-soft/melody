@@ -3044,3 +3044,75 @@ func TestHttpClient_ADecoratorStillWrapsTheConfiguredTransport(t *testing.T) {
     }
 }
 
+
+func TestHttpClient_TheClientResponseBodyCapIsInheritedAndTheRequestCapWins(t *testing.T) {
+    payload := bytes.Repeat([]byte("a"), 20)
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        writer.WriteHeader(http.StatusOK)
+        _, _ = writer.Write(payload)
+    }))
+    defer server.Close()
+
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL, MaxResponseBodyBytes: bound.Of(10)})
+
+    _, inheritedErr := client.Get(testRuntime(), "/", RequestOptions{})
+    if nil == inheritedErr || false == strings.Contains(inheritedErr.Error(), "response body exceeded max size") {
+        t.Fatalf("expected the client's cap to bind a request that sets none, got: %v", inheritedErr)
+    }
+
+    _, inheritedPostErr := client.Post(testRuntime(), "/", map[string]any{"quantity": 1}, RequestOptions{})
+    if nil == inheritedPostErr || false == strings.Contains(inheritedPostErr.Error(), "response body exceeded max size") {
+        t.Fatalf("expected the client's cap to bind a request with a positional body, got: %v", inheritedPostErr)
+    }
+
+    response, requestErr := client.Get(testRuntime(), "/", RequestOptions{MaxResponseBodyBytes: bound.Of(20)})
+    if nil != requestErr {
+        t.Fatalf("expected the request's cap to win over the client's, got: %v", requestErr)
+    }
+    if 20 != len(response.Body()) {
+        t.Fatalf("expected the whole body under the request's cap, got %d bytes", len(response.Body()))
+    }
+
+    stream, streamErr := client.RequestStream(testRuntime(), http.MethodGet, "/", RequestOptions{})
+    if nil != streamErr {
+        t.Fatalf("unexpected error: %v", streamErr)
+    }
+    defer stream.Close()
+
+    read, readErr := io.ReadAll(stream.Body())
+    if nil == readErr || 10 < len(read) {
+        t.Fatalf("expected the client's cap to bind the stream, read %d bytes, error %v", len(read), readErr)
+    }
+}
+
+func TestHttpClient_TheClientResponseBodyCapRefusesBelowOneAndUnlimited(t *testing.T) {
+    _, belowErr := NewHttpClient(HttpClientConfig{MaxResponseBodyBytes: bound.Of(0)})
+    assertRefusedField(t, belowErr, "HttpClientConfig.MaxResponseBodyBytes", "the limit is below its minimum")
+
+    _, unlimitedErr := NewHttpClient(HttpClientConfig{MaxResponseBodyBytes: bound.UnlimitedCount()})
+    assertRefusedField(t, unlimitedErr, "HttpClientConfig.MaxResponseBodyBytes", "the limit does not admit unlimited")
+}
+
+func TestHttpClient_AStreamUnderAnUnlimitedCapReadsPastTheDefault(t *testing.T) {
+    const bodyBytes = defaultMaxResponseBodyBytes + 1024
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        writer.WriteHeader(http.StatusOK)
+        _, _ = writer.Write(bytes.Repeat([]byte("x"), bodyBytes))
+    }))
+    defer server.Close()
+
+    client := newTestHttpClient(t, HttpClientConfig{BaseUrl: server.URL})
+
+    stream, err := client.RequestStream(testRuntime(), http.MethodGet, "/", RequestOptions{MaxResponseBodyBytes: bound.UnlimitedCount()})
+    if nil != err {
+        t.Fatalf("expected a stream to admit an unlimited cap, got: %v", err)
+    }
+    defer stream.Close()
+
+    read, readErr := io.Copy(io.Discard, stream.Body())
+    if nil != readErr || int64(bodyBytes) != read {
+        t.Fatalf("expected the whole body past the default cap, read %d bytes, error %v", read, readErr)
+    }
+}

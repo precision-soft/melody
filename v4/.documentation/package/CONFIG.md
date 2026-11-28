@@ -46,6 +46,8 @@ The environment name is resolved from `MELODY_ENV` inside the loaded `.env` valu
 
 **The `.env.<name>` files cannot rename the environment that selected them.** The name is read once, from `.env` and `.env.local`, to choose the files; once the four files are merged and the references expanded, `MELODY_ENV` must still name that environment, or the load fails naming the key, both names and the two per-environment files. A per-environment file may repeat the name; an absent or empty value reads as `dev` on both sides, so a `.env.dev` naming `prod` under a defaulted name is refused too. Symfony's Dotenv admits the rename; melody refuses it, since it runs the production files as `dev` with the debug tooling on.
 
+**`MELODY_ENV` admits `dev` and `prod` and nothing else; no door, by design.** Any other name, `staging` included, refuses the boot naming the key and the value. The framework has exactly two behaviours, the development one with its debug page, `debug:*` commands and development credentials, and the production one, and it branches on the name in more than one place: a third name would have to be read as one of the two, and whichever it fell to would be decided by the order of a comparison rather than by the operator. A staging deployment runs as `prod` and says what makes it staging in its own `.env.prod.local` or in an application key of its own, which keeps every production protection on where the production data most often is.
+
 ### Empty string semantics
 
 A present key with an empty string value is considered **present** (it is a valid value for string parameters). Typed conversions for non-string getters treat empty strings as invalid, by design.

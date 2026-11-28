@@ -26,12 +26,19 @@ var (
         UnlimitedAdmitted: true,
     }
 
+    /* the request's cap: absent takes the client's MaxResponseBodyBytes, which replaces Default per client, and RequestStream alone admits unlimited */
     maxResponseBodyBytesRule = bound.Rule[int]{
         Name:    "RequestOptions.MaxResponseBodyBytes",
         Default: defaultMaxResponseBodyBytes,
         Minimum: 1,
     }
 )
+
+/* responseBodyCap is what a request's cap is resolved against: the client's cap an absent one inherits, and whether the body is streamed, the one shape that admits unlimited. */
+type responseBodyCap struct {
+    inherited int
+    streamed  bool
+}
 
 /* resolvedRequestOptions is one request's options with every field decided and every map copied, so a caller writing its maps after the call reaches nothing. */
 type resolvedRequestOptions struct {
@@ -43,10 +50,12 @@ type resolvedRequestOptions struct {
     bearerToken          string
     basicAuth            *BasicAuth
     maxResponseBodyBytes int
+
+    maxResponseBodyUnlimited bool
 }
 
 /* resolveRequestOptions decides the options before anything is dialled, so a refused option never follows a committed side effect a caller would retry. A verb that takes its body positionally hands it as positionalJson, which refuses a Body or a Json beside it. */
-func resolveRequestOptions(options RequestOptions, positionalJson any, hasPositionalJson bool) (resolvedRequestOptions, error) {
+func resolveRequestOptions(options RequestOptions, positionalJson any, hasPositionalJson bool, bodyCap responseBodyCap) (resolvedRequestOptions, error) {
     headers, headersErr := canonicalizeHeaderMap(options.Headers)
     if nil != headersErr {
         return resolvedRequestOptions{}, headersErr
@@ -108,7 +117,11 @@ func resolveRequestOptions(options RequestOptions, positionalJson any, hasPositi
         return resolvedRequestOptions{}, timeoutErr
     }
 
-    maxResponseBodyBytes, capErr := bound.Resolve(options.MaxResponseBodyBytes, maxResponseBodyBytesRule)
+    capRule := maxResponseBodyBytesRule
+    capRule.Default = bodyCap.inherited
+    capRule.UnlimitedAdmitted = bodyCap.streamed
+
+    maxResponseBodyBytes, capErr := bound.Resolve(options.MaxResponseBodyBytes, capRule)
     if nil != capErr {
         return resolvedRequestOptions{}, capErr
     }
@@ -120,6 +133,8 @@ func resolveRequestOptions(options RequestOptions, positionalJson any, hasPositi
         timeout:              options.Timeout,
         bearerToken:          options.BearerToken,
         maxResponseBodyBytes: maxResponseBodyBytes.Value,
+
+        maxResponseBodyUnlimited: maxResponseBodyBytes.Unlimited,
     }
 
     if nil != options.Json {

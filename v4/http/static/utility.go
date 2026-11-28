@@ -6,6 +6,7 @@ import (
     nethttp "net/http"
     "os"
     "path/filepath"
+    "slices"
     "strings"
 )
 
@@ -101,6 +102,10 @@ func isRetrievalMethod(method string) bool {
 
 /* hasDotPrefixedPathElement refuses a dot-prefixed element, such as .env or .git, in both modes, since the embed directive "all:public" packs them too. "." and ".." never arrive here: a non-canonical path is refused first. */
 func hasDotPrefixedPathElement(cleanedPath string, allowedDotPrefixList []string) bool {
+    if true == slices.Contains(allowedDotPrefixList, AllowedDotPrefixAll) {
+        return false
+    }
+
     for index, element := range strings.Split(strings.TrimPrefix(cleanedPath, "/"), "/") {
         if false == strings.HasPrefix(element, ".") {
             continue

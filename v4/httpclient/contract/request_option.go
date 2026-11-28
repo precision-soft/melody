@@ -4,7 +4,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
 )
 
-/* RequestOptions is what one request asks beyond its method and url. A field left out takes the client's behaviour: no extra header or query pair, no body, the client's timeout, no credential, and the default response body cap of 10 MiB. */
+/* RequestOptions is what one request asks beyond its method and url. A field left out takes the client's behaviour: no extra header or query pair, no body, the client's timeout, no credential, and the client's response body cap. */
 type RequestOptions struct {
     /* Headers are set over the client's own headers. Two spellings that collapse onto one header are refused, since one map has no order to pick the survivor. */
     Headers map[string]string
@@ -23,7 +23,7 @@ type RequestOptions struct {
     BearerToken string
     BasicAuth   *BasicAuth
 
-    /* MaxResponseBodyBytes caps the response body: absent is 10 MiB, the minimum is one byte, and unlimited is refused. */
+    /* MaxResponseBodyBytes caps the response body: absent is the client's cap, 10 MiB unless its configuration names another, the minimum is one byte, and unlimited is admitted on RequestStream alone, refused where the body is held whole in memory. */
     MaxResponseBodyBytes bound.Count
 }
 

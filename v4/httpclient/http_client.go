@@ -38,6 +38,8 @@ type HttpClient struct {
     baseUrl      string
     headers      map[string]string
     maxRedirects int
+
+    maxResponseBodyBytes int
 }
 
 /* NewHttpClient builds a client over its own net/http transport and idle connection pool: hold the client while the application calls the service, and close it when done, rather than building one per call. A configuration the client cannot honour is refused, naming the field: a limit below its minimum, an unlimited the field does not admit, a base url path without its trailing slash, two spellings of one header, MaxRedirects beside RedirectsDisabled, or a round tripper decorator that is nil or answers nil. */
@@ -62,6 +64,11 @@ func NewHttpClient(config HttpClientConfig) (*HttpClient, error) {
     }
 
     maxRedirects, err := bound.Resolve(config.MaxRedirects, maxRedirectsRule)
+    if nil != err {
+        return nil, err
+    }
+
+    maxResponseBodyBytes, err := bound.Resolve(config.MaxResponseBodyBytes, clientMaxResponseBodyBytesRule)
     if nil != err {
         return nil, err
     }
@@ -110,6 +117,8 @@ func NewHttpClient(config HttpClientConfig) (*HttpClient, error) {
         baseUrl:      config.BaseUrl,
         headers:      headers,
         maxRedirects: maxRedirects.Value,
+
+        maxResponseBodyBytes: maxResponseBodyBytes.Value,
     }
 
     instance.client.CheckRedirect = instance.credentialStrippingRedirectPolicy
@@ -458,7 +467,7 @@ func (instance *HttpClient) Request(runtimeInstance containercontract.Runtime, m
         return nil, nilErr
     }
 
-    requestOptions, err := resolveRequestOptions(options, nil, false)
+    requestOptions, err := resolveRequestOptions(options, nil, false, responseBodyCap{inherited: instance.maxResponseBodyBytes})
     if nil != err {
         return nil, err
     }
@@ -471,7 +480,7 @@ func (instance *HttpClient) requestWithJson(runtimeInstance containercontract.Ru
         return nil, nilErr
     }
 
-    requestOptions, err := resolveRequestOptions(options, body, true)
+    requestOptions, err := resolveRequestOptions(options, body, true, responseBodyCap{inherited: instance.maxResponseBodyBytes})
     if nil != err {
         return nil, err
     }
@@ -540,7 +549,7 @@ func (instance *HttpClient) exchange(contextInstance context.Context, method str
     ), nil
 }
 
-/* RequestStream hands the caller a response whose body is still on the wire, bound to the context: cancelling it ends the request and the body read. The caller owns the response and closes it on every path, since the stream carries no whole-stream deadline unless the request sets its Timeout to a value; absent and unlimited both leave it unbounded. The response body cap bounds the stream as it bounds a buffered body, the default included. */
+/* RequestStream hands the caller a response whose body is still on the wire, bound to the context: cancelling it ends the request and the body read. The caller owns the response and closes it on every path, since the stream carries no whole-stream deadline unless the request sets its Timeout to a value; absent and unlimited both leave it unbounded. The response body cap bounds the stream as it bounds a buffered body, the client's cap included; a stream alone admits an unlimited cap, which reads the body to its end. */
 func (instance *HttpClient) RequestStream(
     runtimeInstance containercontract.Runtime,
     method string,
@@ -551,7 +560,7 @@ func (instance *HttpClient) RequestStream(
         return nil, nilErr
     }
 
-    requestOptions, err := resolveRequestOptions(options, nil, false)
+    requestOptions, err := resolveRequestOptions(options, nil, false, responseBodyCap{inherited: instance.maxResponseBodyBytes, streamed: true})
     if nil != err {
         return nil, err
     }
@@ -568,12 +577,15 @@ func (instance *HttpClient) RequestStream(
         return nil, newRequestFailedError(method, requestInstance.URL, err)
     }
 
-    body := newLimitedStreamBody(
-        response.Body,
-        requestOptions.maxResponseBodyBytes,
-        method,
-        sanitizeUrlForDiagnostics(requestInstance.URL.String()),
-    )
+    var body io.ReadCloser = response.Body
+    if false == requestOptions.maxResponseBodyUnlimited {
+        body = newLimitedStreamBody(
+            response.Body,
+            requestOptions.maxResponseBodyBytes,
+            method,
+            sanitizeUrlForDiagnostics(requestInstance.URL.String()),
+        )
+    }
 
     return NewStreamResponse(
         response.StatusCode,

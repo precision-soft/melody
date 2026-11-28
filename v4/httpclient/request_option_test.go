@@ -10,7 +10,7 @@ import (
 func mustResolveRequestOptions(t *testing.T, options RequestOptions) resolvedRequestOptions {
     t.Helper()
 
-    resolved, err := resolveRequestOptions(options, nil, false)
+    resolved, err := resolveRequestOptions(options, nil, false, responseBodyCap{inherited: defaultMaxResponseBodyBytes})
     if nil != err {
         t.Fatalf("unexpected refusal: %v", err)
     }
@@ -30,16 +30,16 @@ func TestResolveRequestOptions_MaxResponseBodyBytesDefaultAndOverride(t *testing
 
 func TestResolveRequestOptions_MaxResponseBodyBytesBelowOneOrUnlimitedIsRefused(t *testing.T) {
     for _, capBytes := range []int{0, -1} {
-        _, err := resolveRequestOptions(RequestOptions{MaxResponseBodyBytes: bound.Of(capBytes)}, nil, false)
+        _, err := resolveRequestOptions(RequestOptions{MaxResponseBodyBytes: bound.Of(capBytes)}, nil, false, responseBodyCap{inherited: defaultMaxResponseBodyBytes})
         assertRefusedField(t, err, "RequestOptions.MaxResponseBodyBytes", "the limit is below its minimum")
     }
 
-    _, err := resolveRequestOptions(RequestOptions{MaxResponseBodyBytes: bound.UnlimitedCount()}, nil, false)
+    _, err := resolveRequestOptions(RequestOptions{MaxResponseBodyBytes: bound.UnlimitedCount()}, nil, false, responseBodyCap{inherited: defaultMaxResponseBodyBytes})
     assertRefusedField(t, err, "RequestOptions.MaxResponseBodyBytes", "the limit does not admit unlimited")
 }
 
 func TestResolveRequestOptions_ATimeoutBelowTheMinimumIsRefusedAndUnlimitedIsKept(t *testing.T) {
-    _, err := resolveRequestOptions(RequestOptions{Timeout: bound.Of(time.Millisecond - 1)}, nil, false)
+    _, err := resolveRequestOptions(RequestOptions{Timeout: bound.Of(time.Millisecond - 1)}, nil, false, responseBodyCap{inherited: defaultMaxResponseBodyBytes})
     assertRefusedField(t, err, "RequestOptions.Timeout", "the limit is below its minimum")
 
     resolved := mustResolveRequestOptions(t, RequestOptions{Timeout: bound.UnlimitedDuration()})
@@ -84,7 +84,7 @@ func TestResolveRequestOptions_HeadersAreCanonicalized(t *testing.T) {
 }
 
 func TestResolveRequestOptions_ACollidingHeaderMapIsRefused(t *testing.T) {
-    _, err := resolveRequestOptions(RequestOptions{Headers: map[string]string{"x-api-key": "old", "X-Api-Key": "new"}}, nil, false)
+    _, err := resolveRequestOptions(RequestOptions{Headers: map[string]string{"x-api-key": "old", "X-Api-Key": "new"}}, nil, false, responseBodyCap{inherited: defaultMaxResponseBodyBytes})
 
     if nil == err || "header keys collide after canonicalization" != err.Error() {
         t.Fatalf("expected the collision to be refused, got %v", err)
@@ -92,21 +92,21 @@ func TestResolveRequestOptions_ACollidingHeaderMapIsRefused(t *testing.T) {
 }
 
 func TestResolveRequestOptions_ABodyBesideAJsonIsRefused(t *testing.T) {
-    _, err := resolveRequestOptions(RequestOptions{Body: "raw", Json: map[string]any{"a": 1}}, nil, false)
+    _, err := resolveRequestOptions(RequestOptions{Body: "raw", Json: map[string]any{"a": 1}}, nil, false, responseBodyCap{inherited: defaultMaxResponseBodyBytes})
 
     assertRefusedField(t, err, "RequestOptions.Json", "the request body is given twice")
 }
 
 func TestResolveRequestOptions_APositionalBodyBesideABodyOrAJsonIsRefused(t *testing.T) {
-    _, bodyErr := resolveRequestOptions(RequestOptions{Body: "raw"}, map[string]any{"positional": true}, true)
+    _, bodyErr := resolveRequestOptions(RequestOptions{Body: "raw"}, map[string]any{"positional": true}, true, responseBodyCap{inherited: defaultMaxResponseBodyBytes})
     assertRefusedField(t, bodyErr, "RequestOptions.Body", "the request body is given twice")
 
-    _, jsonErr := resolveRequestOptions(RequestOptions{Json: map[string]any{"a": 1}}, map[string]any{"positional": true}, true)
+    _, jsonErr := resolveRequestOptions(RequestOptions{Json: map[string]any{"a": 1}}, map[string]any{"positional": true}, true, responseBodyCap{inherited: defaultMaxResponseBodyBytes})
     assertRefusedField(t, jsonErr, "RequestOptions.Json", "the request body is given twice")
 }
 
 func TestResolveRequestOptions_ABearerTokenBesideABasicCredentialIsRefused(t *testing.T) {
-    _, err := resolveRequestOptions(RequestOptions{BearerToken: "token", BasicAuth: &BasicAuth{Username: "user"}}, nil, false)
+    _, err := resolveRequestOptions(RequestOptions{BearerToken: "token", BasicAuth: &BasicAuth{Username: "user"}}, nil, false, responseBodyCap{inherited: defaultMaxResponseBodyBytes})
 
     assertRefusedField(t, err, "RequestOptions.BasicAuth", "the request names two credentials")
 }
@@ -122,7 +122,7 @@ func TestResolveRequestOptions_TheBodyFormDecidesTheJsonFlag(t *testing.T) {
         t.Fatalf("expected the json body marked for encoding, got %+v", encoded)
     }
 
-    positional, err := resolveRequestOptions(RequestOptions{}, "positional", true)
+    positional, err := resolveRequestOptions(RequestOptions{}, "positional", true, responseBodyCap{inherited: defaultMaxResponseBodyBytes})
     if nil != err || "positional" != positional.body || false == positional.json {
         t.Fatalf("expected the positional body marked for encoding, got %+v (%v)", positional, err)
     }
@@ -145,7 +145,7 @@ func TestResolveRequestOptions_ATypedCredentialBesideTheRequestsOwnAuthorization
         "bearer": {BearerToken: "token", Headers: map[string]string{"authorization": "Bearer other"}},
         "basic":  {BasicAuth: &BasicAuth{Username: "user"}, Headers: map[string]string{" Authorization ": "Basic other"}},
     } {
-        _, err := resolveRequestOptions(options, nil, false)
+        _, err := resolveRequestOptions(options, nil, false, responseBodyCap{inherited: defaultMaxResponseBodyBytes})
         assertRefusedField(t, err, "RequestOptions.Headers", "the request names two credentials")
 
         if "" == name {
@@ -153,7 +153,7 @@ func TestResolveRequestOptions_ATypedCredentialBesideTheRequestsOwnAuthorization
         }
     }
 
-    if _, err := resolveRequestOptions(RequestOptions{BearerToken: "token", Headers: map[string]string{"X-Trace": "1"}}, nil, false); nil != err {
+    if _, err := resolveRequestOptions(RequestOptions{BearerToken: "token", Headers: map[string]string{"X-Trace": "1"}}, nil, false, responseBodyCap{inherited: defaultMaxResponseBodyBytes}); nil != err {
         t.Fatalf("expected a credential beside other headers admitted, got %v", err)
     }
 }

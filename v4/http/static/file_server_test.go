@@ -1426,6 +1426,45 @@ func TestFileServer_Embedded_RetrievesTheAllowedDotPrefixOnly(t *testing.T) {
     }
 }
 
+func TestFileServer_Embedded_TheAllowAllEntryServesANestedDotPrefixedPath(t *testing.T) {
+    fileSystem := fstest.MapFS{
+        "index.html": &fstest.MapFile{
+            Data: []byte("index"),
+        },
+        "assets/.well-known/token": &fstest.MapFile{
+            Data: []byte("nested"),
+        },
+    }
+
+    config := newTestConfig(
+        ModeEmbedded,
+        "",
+        "index.html",
+        "",
+        true,
+        3600,
+        false,
+    )
+    config.AllowedDotPrefixList = []string{AllowedDotPrefixAll}
+
+    server := NewFileServer(
+        newTestSource(
+            config,
+            "",
+            fileSystem,
+        ),
+    )
+
+    _, _, body, served := server.Serve(
+        testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/assets/.well-known/token"),
+        logging.NewNopLogger(),
+    )
+
+    if false == served || "nested" != string(body) {
+        t.Fatalf("expected the allow-all entry to serve the nested dot-prefixed path, served %v body %q", served, string(body))
+    }
+}
+
 func TestFileServer_ExcludedPathPrefixIsDeclinedWithoutReadingTheDisk(t *testing.T) {
     directory := t.TempDir()
 
