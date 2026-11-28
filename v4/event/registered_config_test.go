@@ -31,7 +31,6 @@ func registeredListenersOf(registeredEvents []eventcontract.RegisteredEvent, eve
     return nil
 }
 
-/* every field of the config a registration declared reaches the report, through AddListener, InstallFloorListener and a subscriber alike, on the dispatcher and on its adapter */
 func TestRegisteredEvents_CarryTheConfigEachRegistrationDeclared(t *testing.T) {
     for _, adapted := range []bool{false, true} {
         dispatcher, _ := testNewEventDispatcher()

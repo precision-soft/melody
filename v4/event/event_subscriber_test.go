@@ -21,7 +21,7 @@ func TestNewSubscribedEvent_CarriesTheListenerAndItsPriority(t *testing.T) {
 
     subscribed := NewSubscribedEvent(listener, eventcontract.ListenerConfig{Priority: 128})
 
-    /* a listener is a function value, which Go refuses to compare, so the subscription is asked to produce it and the produced one is asked to run: that is the only way to say it is the same one. */
+    /* a func value is not comparable, so the listener is identified by running it */
     if runErr := subscribed.Listener()(nil, nil); nil != runErr {
         t.Fatalf("unexpected listener error: %v", runErr)
     }

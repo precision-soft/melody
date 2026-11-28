@@ -5,7 +5,6 @@ import (
     "testing"
 )
 
-/* MatchRule answers the rule and the index MatchRuleIndex resolves, the exact rule winning over the prefix that also covers the path, and nothing with the index -1 for a path no rule claims. */
 func TestControl_MatchRuleAnswersTheRuleMatchRuleIndexResolves(t *testing.T) {
     control := NewControl([]Rule{
         NewSegmentPrefixRule("/admin", RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),

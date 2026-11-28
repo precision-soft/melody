@@ -11,7 +11,6 @@ import (
     "github.com/precision-soft/melody/v4/internal/eventseam"
 )
 
-/* guardRecordingPayload records every announcement and every leave, in the order they happen */
 type guardRecordingPayload struct {
     steps []string
 }

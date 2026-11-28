@@ -9,7 +9,7 @@ import (
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
 )
 
-/* detachedListenerSubscriber answers listeners that do not capture it, the example's idiom, so nothing holds it once the application drops its pointer, the bookkeeping included; the payload keeps it off the zero-size address */
+/* the payload keeps it off the zero-size address every empty struct shares */
 type detachedListenerSubscriber struct {
     payload [16]byte
 }
@@ -32,7 +32,6 @@ type subscriberRegistrar interface {
     RemoveSubscriber(registration eventcontract.SubscriberRegistration) int
 }
 
-/* installs a subscriber and drops the only strong reference the caller held, answering the weak one beside the registration */
 func installDetachedSubscriber(registrar subscriberRegistrar) (weak.Pointer[detachedListenerSubscriber], eventcontract.SubscriberRegistration) {
     subscriber := &detachedListenerSubscriber{}
     registration := registrar.AddSubscriber(subscriber)
@@ -40,7 +39,6 @@ func installDetachedSubscriber(registrar subscriberRegistrar) (weak.Pointer[deta
     return weak.Make(subscriber), registration
 }
 
-/* an installation is filed under its registration and holds no subscriber: one the application dropped, whose listeners do not capture it, is collected while installed, and its registration still removes the listeners it installed */
 func TestSubscriberBookkeeping_HoldsNoSubscriber(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
 

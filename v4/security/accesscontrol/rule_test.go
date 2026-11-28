@@ -7,7 +7,6 @@ import (
     "github.com/precision-soft/melody/v4/internal/testhelper"
 )
 
-/* the four modes are the whole point of the package, and each one answers differently for the same set of paths. The table is the specification: a reader who wants to know which constructor to reach for reads the columns, and a change that blurs two modes into one fails here. */
 func TestTheFourMatchingModesGovernDifferentPaths(t *testing.T) {
     paths := []string{"/admin", "/admin/panel", "/administrator", "/x/admin", "/a/admin/b"}
 
@@ -54,7 +53,6 @@ func TestTheFourMatchingModesGovernDifferentPaths(t *testing.T) {
     }
 }
 
-/* NewRule is the door for a mode chosen by a variable, so it must answer exactly what the mode-specific constructor answers — otherwise the two doors drift and the wrapper becomes a second implementation. */
 func TestNewRuleAnswersTheSameAsTheModeSpecificConstructor(t *testing.T) {
     config := RuleConfig{Attributes: []string{"ROLE_ADMIN"}}
 
@@ -86,7 +84,6 @@ func TestNewRuleAnswersTheSameAsTheModeSpecificConstructor(t *testing.T) {
     }
 }
 
-/* the zero value is refused rather than defaulted: a caller who omits the reach would inherit one they never chose */
 func TestNewRuleRefusesAnUnspecifiedMatching(t *testing.T) {
     defer func() {
         if nil == recover() {
@@ -97,7 +94,6 @@ func TestNewRuleRefusesAnUnspecifiedMatching(t *testing.T) {
     _ = NewRule("/admin", MatchingUnspecified, RuleConfig{Attributes: []string{"ROLE_ADMIN"}})
 }
 
-/* a raw public rule is the longest match wherever it reaches, so it opens every path merely beginning with the prefix and shadows a bounded denial that would have refused. */
 func TestNewRawPrefixRuleRefusesPublicAccess(t *testing.T) {
     defer func() {
         if nil == recover() {
@@ -108,7 +104,6 @@ func TestNewRawPrefixRuleRefusesPublicAccess(t *testing.T) {
     _ = NewRawPrefixRule("/health", RuleConfig{Attributes: []string{"PUBLIC_ACCESS"}})
 }
 
-/* the same attribute is allowed on the bounded reaches, where it cannot claim a path outside the one it names. */
 func TestPublicAccessIsAllowedOnTheBoundedReaches(t *testing.T) {
     defer func() {
         if recovered := recover(); nil != recovered {
@@ -120,7 +115,6 @@ func TestPublicAccessIsAllowedOnTheBoundedReaches(t *testing.T) {
     _ = NewExactRule("/health", RuleConfig{Attributes: []string{"PUBLIC_ACCESS"}})
 }
 
-/* an empty segment prefix would normalize to "" and answer for every path no other rule claimed, so a rule declared for one section would silently govern the whole application. */
 func TestNewSegmentPrefixRuleRefusesAnEmptyPath(t *testing.T) {
     defer func() {
         if nil == recover() {
@@ -131,7 +125,6 @@ func TestNewSegmentPrefixRuleRefusesAnEmptyPath(t *testing.T) {
     _ = NewSegmentPrefixRule("", RuleConfig{Attributes: []string{"ROLE_ADMIN"}})
 }
 
-/* the raw reach keeps the empty spelling: it is the declared catch-all fallback, which answers only when no other rule did. */
 func TestNewRawPrefixRuleKeepsTheEmptyPathAsTheFallback(t *testing.T) {
     control := NewControl([]Rule{
         NewSegmentPrefixRule("/admin", RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
@@ -169,7 +162,6 @@ func TestPublicAccessMayNotBeCombinedWithAnotherAttribute(t *testing.T) {
     _ = NewSegmentPrefixRule("/admin", RuleConfig{Attributes: []string{"PUBLIC_ACCESS", "ROLE_ADMIN"}})
 }
 
-/* Attributes answers a copy: a caller that writes into the slice it is handed must not change the compiled policy. */
 func TestAttributesAnswersACopy(t *testing.T) {
     rule := NewSegmentPrefixRule("/admin", RuleConfig{Attributes: []string{"ROLE_ADMIN"}})
 
@@ -181,7 +173,6 @@ func TestAttributesAnswersACopy(t *testing.T) {
     }
 }
 
-/* the caller's rule slice is copied too, so a later write to it does not change the compiled control. */
 func TestNewControlCopiesTheCallersRules(t *testing.T) {
     rules := []Rule{NewSegmentPrefixRule("/admin", RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}
 
@@ -194,7 +185,6 @@ func TestNewControlCopiesTheCallersRules(t *testing.T) {
     }
 }
 
-/* the request side is canonicalized to a leading slash, so a path declared without one could never match and the paths it names would reach their handlers without a decision. */
 func TestARulePathWithoutALeadingSlashIsRefusedInEveryPathMode(t *testing.T) {
     config := RuleConfig{Attributes: []string{"ROLE_ADMIN"}}
 
@@ -213,7 +203,6 @@ func TestARulePathWithoutALeadingSlashIsRefusedInEveryPathMode(t *testing.T) {
     }
 }
 
-/* the request path is matched cleaned, so a rule spelled with an empty, "." or ".." segment could never match and would govern nothing */
 func TestANonCanonicalRulePathIsRefusedInEveryPathMode(t *testing.T) {
     config := RuleConfig{Attributes: []string{"ROLE_ADMIN"}}
 
@@ -263,7 +252,6 @@ func TestTheCanonicalRefusalOfASegmentRuleNamesTheDeclaredPath(t *testing.T) {
     _ = NewSegmentPrefixRule("/admin///", RuleConfig{Attributes: []string{"ROLE_ADMIN"}})
 }
 
-/* a trailing slash stays each constructor's to read: the exact and segment rules fold it, so the canonical refusal does not reach it */
 func TestACanonicalRulePathWithATrailingSlashIsAccepted(t *testing.T) {
     config := RuleConfig{Attributes: []string{"ROLE_ADMIN"}}
 
@@ -276,7 +264,6 @@ func TestACanonicalRulePathWithATrailingSlashIsAccepted(t *testing.T) {
     }
 }
 
-/* a raw reach spelled with a trailing slash would be stored without it and claim every sibling beginning with the same letters, the reach the slash was written to exclude. */
 func TestNewRawPrefixRuleRefusesATrailingSlash(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
@@ -293,7 +280,6 @@ func TestNewRawPrefixRuleKeepsTheRootSpelling(t *testing.T) {
     }
 }
 
-/* the reach the trailing slash meant is the segment one, and declared so the neighbouring tree stays with the rule that names it. */
 func TestASegmentRuleLeavesTheNeighbouringTreeToItsOwnRule(t *testing.T) {
     control := NewControl([]Rule{
         NewSegmentPrefixRule("/api/", RuleConfig{Attributes: []string{"ROLE_USER"}}),
@@ -311,7 +297,6 @@ func TestASegmentRuleLeavesTheNeighbouringTreeToItsOwnRule(t *testing.T) {
     }
 }
 
-/* the zero rule is the empty-prefix fallback with no attribute, so it would deny every path no other rule claimed. */
 func TestNewControlRefusesTheZeroRule(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
@@ -320,7 +305,6 @@ func TestNewControlRefusesTheZeroRule(t *testing.T) {
     )
 }
 
-/* String answers "unspecified" for every mode outside the four, so the refusal carries the number beside the name: a reader of a refused Matching(42) sees 42, not the zero mode's name alone. */
 func TestNewRuleRefusalOfAnOutOfRangeMatchingCarriesTheNumber(t *testing.T) {
     defer func() {
         refusal, isRefusal := recover().(*exception.Error)
@@ -336,7 +320,6 @@ func TestNewRuleRefusalOfAnOutOfRangeMatchingCarriesTheNumber(t *testing.T) {
     _ = NewRule("/admin", Matching(42), RuleConfig{Attributes: []string{"ROLE_ADMIN"}})
 }
 
-/* a repeated PUBLIC_ACCESS is refused by the same guard as one beside a role, so the sentence says "or repeated" and carries the attributes it counted. */
 func TestARepeatedPublicAccessIsRefusedByNameWithTheAttributesItCounted(t *testing.T) {
     defer func() {
         refusal, isRefusal := recover().(*exception.Error)
