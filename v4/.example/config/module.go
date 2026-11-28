@@ -2,9 +2,11 @@ package config
 
 import (
     "context"
+    "sync"
     "sync/atomic"
 
     minio "github.com/minio/minio-go/v7"
+    amqp "github.com/precision-soft/melody/integrations/amqp/v4"
     melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v4"
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v4/encrypt"
     melodyopentelemetry "github.com/precision-soft/melody/integrations/opentelemetry/v4"
@@ -67,6 +69,10 @@ type Module struct {
     /* redisProvider and redisParameters open redis at boot, through the rueidis module's connection factory; the provider is nil when no address is configured */
     redisProvider   *melodyrueidis.Provider
     redisParameters melodyrueidis.ConnectionParameters
+
+    /* amqpProviderOnce builds the one amqp provider amqpProvider answers */
+    amqpProviderOnce  sync.Once
+    amqpProviderBuilt *amqp.Provider
 
     /* catalogWriteThrottle counts in redis when the environment gives the example one, shared by every replica, and in this process otherwise; it is nil only until the routes are registered */
     catalogWriteThrottle melodyhttpcontract.Middleware

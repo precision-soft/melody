@@ -59,6 +59,10 @@ func Configure(ctx context.Context, app *melodyapplication.Application, applicat
         SealBindings:    twofactor.SealBindings(),
     }))
 
+    if amqpModule := moduleInstance.amqpModule(); nil != amqpModule {
+        app.RegisterModule(amqpModule)
+    }
+
     if true == moduleInstance.catalogueWired {
         app.RegisterModule(melodyoutbox.NewModule(moduleInstance.outboxModuleConfig()))
     }

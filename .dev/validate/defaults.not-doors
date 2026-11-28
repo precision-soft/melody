@@ -11,6 +11,8 @@
 # Every env key the framework or a module declares is a door of some value: a row cites it as env:<KEY>, or a
 # line here says why it sets nothing a row tracks. A line naming no declared key, or a key a row cites, fails.
 
+integrations/amqp/v4.ModuleConfig.ConnectionBootFailure ~ hardens only: the zero value warns, the other mode fails the boot
+integrations/amqp/v4.ModuleConfig.ConnectionBuiltAtBoot ~ moves the dial into Boot; off dials at first use, nothing guarded
 integrations/aws/s3/v4.BucketCheckConfig.BootFailure ~ hardens only: the zero value warns, the other mode fails the boot
 integrations/aws/s3/v4.BucketCheckConfig.Enabled ~ turns an extra boot check on; off checks nothing the default checked
 integrations/bunorm/v4.ProviderDefinition.IsDefault ~ selects the default connection among the registered ones

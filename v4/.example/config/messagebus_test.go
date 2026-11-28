@@ -15,7 +15,7 @@ import (
     melodymessagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
 )
 
-/* Nothing dials at boot. The dsn below points at an address no broker answers on, and the transport is built over it without a packet leaving the process; a dsn this application cannot dial surfaces at the first publish, through the transport's own retry loop. The test is written as a deadline rather than as an assertion on the return, because the failure it guards against is a dial: the address is a discard port on a host that does not resolve, so a boot-time dial would spend the resolver's own timeout before it panicked. */
+/* The transport dials nothing at boot. The dsn below points at an address no broker answers on, and the transport is built over it without a packet leaving the process; a dsn this application cannot dial surfaces at the first publish, through the transport's own retry loop. The test is written as a deadline rather than as an assertion on the return, because the failure it guards against is a dial: the address is a discard port on a host that does not resolve, so a boot-time dial would spend the resolver's own timeout before it panicked. */
 func TestBuildMessageBusTransport_DoesNotDialAtBoot(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{
         "AMQP_DSN": "amqp://guest:guest@broker.invalid:5672/",

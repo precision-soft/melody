@@ -158,6 +158,8 @@ app.RegisterModule(amqp.NewModule(amqp.ModuleConfig{
     Connection: func(resolver containercontract.Resolver) (*amqp.Connection, error) {
         return provider.Open(resolver.Runtime(), dsn)
     },
+    ConnectionBuiltAtBoot: true,
+    ConnectionBootFailure: container.BootFailureFailsBoot,
     Transports: map[string]func(resolver containercontract.Resolver) (*amqp.Transport, error){
         "async": func(resolver containercontract.Resolver) (*amqp.Transport, error) {
             connection := amqp.ConnectionMustFromResolver(resolver.Runtime().Context(), resolver)
@@ -168,7 +170,7 @@ app.RegisterModule(amqp.NewModule(amqp.ModuleConfig{
 }))
 ```
 
-The container closes the connection through its owner's close, under the teardown's budget and the close timeout the owner carries, every transport first; the module has no close timeout of its own. A nil entry of `Transports`, the trace of a discarded constructor error, fails the boot naming the transport, and a factory answering no transport and no error fails its resolution; an empty `ModuleConfig{}` registers nothing.
+The container closes the connection through its owner's close, under the teardown's budget and the close timeout the owner carries, every transport first; the module has no close timeout of its own. A nil entry of `Transports`, the trace of a discarded constructor error, fails the boot naming the transport, and a factory answering no transport and no error fails its resolution; an empty `ModuleConfig{}` registers nothing. `ConnectionBuiltAtBoot` builds the connection inside `Boot`, under the boot runtime, so an unreachable broker is known before the first request, `ConnectionBootFailure` being the registrar's boot failure mode of that build, `BootFailureWarns` when left out; `ConnectionBuiltAtBoot` with no `Connection`, and a `ConnectionBootFailure` with no connection built at boot, are refused at boot naming the field. A cli process builds the connection at its first use.
 
 ### Auto-reconnect
 

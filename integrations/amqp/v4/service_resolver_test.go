@@ -34,7 +34,7 @@ func (instance *recordingRegistrar) has(serviceName string) bool {
 func TestRegisterConnectionServiceUsesConnectionName(t *testing.T) {
     registrar := &recordingRegistrar{}
 
-    registerConnectionService(registrar, nil)
+    registerConnectionService(registrar, nil, containercontract.RegisterOptions{})
 
     if false == registrar.has(ServiceConnection) {
         t.Fatalf("expected %q to be registered, got %v", ServiceConnection, registrar.names)
@@ -54,7 +54,7 @@ func TestRegisterTransportServiceUsesGivenName(t *testing.T) {
 func TestRegisterConnectionAndTransportService_AreNotWalkedAndTheTransportClosesBeforeTheConnection(t *testing.T) {
     registrar := &recordingRegistrar{}
 
-    registerConnectionService(registrar, nil)
+    registerConnectionService(registrar, nil, containercontract.RegisterOptions{})
     registerTransportService(registrar, "async", nil)
 
     if false == registrar.options[0].TeardownReflectionDisabled || false == registrar.options[1].TeardownReflectionDisabled {
@@ -94,7 +94,7 @@ func TestRegisterConnectionService_TheContainerClosesTheConnectionUnderItsDeadli
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     registerConnectionService(&containerRegistrar{serviceContainer: serviceContainer}, func(resolver containercontract.Resolver) (*Connection, error) {
         return NewConnection(wedge.connection, ConnectionConfig{}), nil
-    })
+    }, containercontract.RegisterOptions{})
 
     if wedge.connection != ConnectionMustFromResolver(t.Context(), serviceContainer).Raw() {
         t.Fatal("expected the registered connection resolved as itself")
@@ -126,7 +126,7 @@ func TestRegisterConnectionService_TheConfiguredCloseTimeoutBoundsTheStretchUnde
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     registerConnectionService(&containerRegistrar{serviceContainer: serviceContainer}, func(resolver containercontract.Resolver) (*Connection, error) {
         return NewConnection(wedge.connection, ConnectionConfig{CloseTimeout: bound.Of(100 * time.Millisecond)}), nil
-    })
+    }, containercontract.RegisterOptions{})
     ConnectionMustFromResolver(t.Context(), serviceContainer)
 
     closed := make(chan error, 1)

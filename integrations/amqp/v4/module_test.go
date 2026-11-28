@@ -2,6 +2,7 @@ package amqp
 
 import (
     "context"
+    "strings"
     "testing"
     "time"
 
@@ -25,11 +26,18 @@ func emptyTransportProvider(resolver containercontract.Resolver) (*Transport, er
 }
 
 type spyServiceRegistrar struct {
-    names []string
+    names   []string
+    options map[string]containercontract.RegisterOptions
 }
 
 func (instance *spyServiceRegistrar) RegisterService(serviceName string, provider any, options containercontract.RegisterOptions) {
     instance.names = append(instance.names, serviceName)
+
+    if nil == instance.options {
+        instance.options = map[string]containercontract.RegisterOptions{}
+    }
+
+    instance.options[serviceName] = options
 }
 
 func (instance *spyServiceRegistrar) Register(serviceName string, provider any, options containercontract.RegisterOptions) error {
@@ -115,6 +123,104 @@ func TestModule_ANilTransportIsRefusedNamingItBeforeAnythingIsRegistered(t *test
         Connection: staticConnectionFactory,
         Transports: transportProviders{"discarded": nil},
     }).RegisterServices(registrar)
+}
+
+func TestModule_ABootModeWithoutAConnectionBuiltAtBootIsRefused(t *testing.T) {
+    for _, testCase := range []struct {
+        name     string
+        config   ModuleConfig
+        field    string
+        requires string
+    }{
+        {"built at boot with no connection", ModuleConfig{ConnectionBuiltAtBoot: true}, "ModuleConfig.ConnectionBuiltAtBoot", "ModuleConfig.Connection"},
+        {"a failure mode with no connection", ModuleConfig{ConnectionBootFailure: container.BootFailureFailsBoot}, "ModuleConfig.ConnectionBootFailure", "ModuleConfig.Connection"},
+        {"a failure mode with a connection not built at boot", ModuleConfig{Connection: staticConnectionFactory, ConnectionBootFailure: container.BootFailureFailsBoot}, "ModuleConfig.ConnectionBootFailure", "ModuleConfig.ConnectionBuiltAtBoot"},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            registrar := &spyServiceRegistrar{}
+
+            defer func() {
+                recoveredErr, isError := recover().(error)
+                if false == isError {
+                    t.Fatal("expected the boot mode refused")
+                }
+
+                context := exception.LogContext(recoveredErr, exception.LogContextConfig{})
+                if testCase.field != context["field"] || testCase.requires != context["requires"] || false == strings.Contains(recoveredErr.Error(), "has no connection built at boot") {
+                    t.Fatalf("expected the refusal to name %s and %s, got %v: %v", testCase.field, testCase.requires, context, recoveredErr)
+                }
+
+                if 0 != len(registrar.names) {
+                    t.Fatalf("expected nothing registered before the refusal, got %v", registrar.names)
+                }
+            }()
+
+            NewModule(testCase.config).RegisterServices(registrar)
+        })
+    }
+}
+
+func TestModule_ABootModeIsRefusedAfterANilTransport(t *testing.T) {
+    defer func() {
+        recoveredErr, isError := recover().(error)
+        if false == isError {
+            t.Fatal("expected the module refused")
+        }
+
+        expectErrorNamingField(t, recoveredErr, "ModuleConfig.Transports")
+    }()
+
+    NewModule(ModuleConfig{ConnectionBuiltAtBoot: true, Transports: transportProviders{"orders": nil}}).RegisterServices(&spyServiceRegistrar{})
+}
+
+func TestModule_TheConnectionIsBuiltAtBootWithItsFailureMode(t *testing.T) {
+    registrar := &spyServiceRegistrar{}
+    NewModule(ModuleConfig{
+        Connection:            staticConnectionFactory,
+        ConnectionBuiltAtBoot: true,
+        ConnectionBootFailure: container.BootFailureFailsBoot,
+        Transports:            transportProviders{"orders": emptyTransportProvider},
+    }).RegisterServices(registrar)
+
+    options, registered := registrar.options[ServiceConnection]
+    if false == registered || false == options.BuiltAtBoot || container.BootFailureFailsBoot != options.BootFailure || false == options.TeardownReflectionDisabled {
+        t.Fatalf("expected the connection registered built at boot with its mode and not walked, got %+v (registered %v)", options, registered)
+    }
+
+    if true == registrar.options["orders"].BuiltAtBoot {
+        t.Fatalf("expected a transport built at its first resolution, got %+v", registrar.options["orders"])
+    }
+
+    warns := &spyServiceRegistrar{}
+    NewModule(ModuleConfig{Connection: staticConnectionFactory, ConnectionBuiltAtBoot: true}).RegisterServices(warns)
+    if false == warns.options[ServiceConnection].BuiltAtBoot || container.BootFailureWarns != warns.options[ServiceConnection].BootFailure {
+        t.Fatalf("expected the warning mode when left out, got %+v", warns.options[ServiceConnection])
+    }
+
+    plain := &spyServiceRegistrar{}
+    NewModule(ModuleConfig{Connection: staticConnectionFactory}).RegisterServices(plain)
+    if true == plain.options[ServiceConnection].BuiltAtBoot || false == plain.options[ServiceConnection].TeardownReflectionDisabled {
+        t.Fatalf("expected a connection not asked at boot built at its first resolution and not walked, got %+v", plain.options[ServiceConnection])
+    }
+}
+
+/* the application's Boot builds what the container answers here */
+func TestModule_AConnectionBuiltAtBootIsBuiltByTheContainersBootBuild(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    NewModule(ModuleConfig{
+        Connection:            staticConnectionFactory,
+        ConnectionBuiltAtBoot: true,
+        ConnectionBootFailure: container.BootFailureFailsBoot,
+        Transports:            transportProviders{"orders": emptyTransportProvider},
+    }).RegisterServices(&containerRegistrar{serviceContainer: serviceContainer})
+
+    registrations := serviceContainer.(interface {
+        BuiltAtBootRegistrations() []containercontract.BuiltAtBootRegistration
+    }).BuiltAtBootRegistrations()
+
+    if 1 != len(registrations) || ServiceConnection != registrations[0].ServiceName || container.BootFailureFailsBoot != registrations[0].BootFailure {
+        t.Fatalf("expected the connection alone built at boot with its mode, got %+v", registrations)
+    }
 }
 
 /* the fake broker never answers the close, so the container's teardown of the registered connection ends at the close timeout the owner carries from its provider, the module having none of its own */

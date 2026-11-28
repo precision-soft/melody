@@ -17,12 +17,14 @@ type serviceRegistrar interface {
 }
 
 /* registerConnectionService registers the factory of the connection owner, so the container's teardown closes it through its own CloseWithContext, under the teardown's budget and the close timeout the owner carries. The connection's own goroutines write it, so the teardown's walk does not enter it. */
-func registerConnectionService(registrar serviceRegistrar, connection func(resolver containercontract.Resolver) (*Connection, error)) {
-    registrar.RegisterService(
-        ServiceConnection,
-        connection,
-        container.RegisterOptions{TeardownReflectionDisabled: true},
-    )
+func registerConnectionService(
+    registrar serviceRegistrar,
+    connection func(resolver containercontract.Resolver) (*Connection, error),
+    options containercontract.RegisterOptions,
+) {
+    options.TeardownReflectionDisabled = true
+
+    registrar.RegisterService(ServiceConnection, connection, options)
 }
 
 /* ConnectionMustFromRuntime answers the connection service resolved through the runtime's scope; the container keeps its lifecycle. */

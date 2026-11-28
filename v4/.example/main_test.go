@@ -9,6 +9,7 @@ import (
     "testing"
     "time"
 
+    melodyamqp "github.com/precision-soft/melody/integrations/amqp/v4"
     melodycron "github.com/precision-soft/melody/integrations/cron/v4"
     "github.com/precision-soft/melody/v4/.example/config"
 
@@ -171,6 +172,11 @@ func TestApplicationHttpHandler_ServesTheHealthRouteUnderAnotherServer(t *testin
     /* the websocket module serves /ws, the hub reached per connection through its provider */
     if websocketRoute, found := applicationInstance.Boot().HttpRouter().RouteDefinition("example.websocket"); false == found || "/ws" != websocketRoute.Pattern() {
         t.Fatalf("expected the websocket module to register /ws, got %v %v", websocketRoute, found)
+    }
+
+    /* the .env sets AMQP_DSN, so the amqp module registers its connection as the boot's check of the broker */
+    if false == applicationInstance.Boot().ServiceContainer().Has(melodyamqp.ServiceConnection) {
+        t.Fatal("expected the amqp module registered beside AMQP_DSN")
     }
 
     server := httptest.NewServer(handler)

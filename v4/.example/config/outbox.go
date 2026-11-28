@@ -99,7 +99,7 @@ func (instance *Module) buildOutboxTransport() (melodymessagebuscontract.Transpo
     registry := amqp.NewMessageRegistry()
     amqp.RegisterMessage[message.OutboxNotice](registry, outboxNoticeType)
 
-    return amqp.NewTransport("outbox_notice", registry, amqp.FromDialer(amqp.NewProvider(instance.namespace(), amqp.ProviderConfig{}).Dialer(dsn)), amqp.TransportConfig{}), nil
+    return amqp.NewTransport("outbox_notice", registry, amqp.FromDialer(instance.amqpProvider().Dialer(dsn)), amqp.TransportConfig{}), nil
 }
 
 type outboxNoticeCodec struct{}

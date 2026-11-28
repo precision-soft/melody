@@ -22,7 +22,7 @@ func TestConnectionMustFromRuntime_AnswersTheSiblingsInstanceThroughTheRuntimesS
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     registerConnectionService(&containerRegistrar{serviceContainer: serviceContainer}, func(resolver containercontract.Resolver) (*Connection, error) {
         return first, nil
-    })
+    }, containercontract.RegisterOptions{})
 
     runtimeInstance := runtime.NewRequest(t.Context(), serviceContainer.NewScope())
     if first != ConnectionMustFromRuntime(runtimeInstance) || first != ConnectionMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope()) {
