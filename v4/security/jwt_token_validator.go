@@ -338,7 +338,7 @@ func (instance *JwtTokenValidator) verifyRevocationEpoch(
         return exception.NewError("jwt has no iat claim and a revocation epoch is configured", nil, nil)
     }
 
-    epoch, epochErr := instance.epochStore.RevocationEpoch(runtimeInstance, claims.UserIdentifier, claims.DeviceIdentifier)
+    epoch, epochErr := instance.epochStore.RevocationEpoch(runtimeInstance, claims.UserIdentifier, securitycontract.RevocationOptions{DeviceIdentifier: claims.DeviceIdentifier})
     if nil != epochErr {
         /* the store failing to answer is the platform's failure, marked so the bearer source logs it as an incident; the request fails closed either way */
         return exception.NewError(

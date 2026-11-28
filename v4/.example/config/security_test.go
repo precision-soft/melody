@@ -399,7 +399,7 @@ func TestRegisterSecurity_TheInternalFirewallAnswersAGuardOutageWith503AndRetryA
     })
 
     signer := moduleInstance.internalAuthSigner(hmacTestRuntime(), bound.Duration{})
-    headerValue, signErr := signer.Sign(configTestRuntime(), nethttp.MethodGet, route.InternalWhoamiPattern, nil, nil)
+    headerValue, signErr := signer.Sign(configTestRuntime(), nethttp.MethodGet, route.InternalWhoamiPattern, nil, melodysecurity.SignOptions{})
     if nil != signErr {
         t.Fatalf("sign: %v", signErr)
     }

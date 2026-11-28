@@ -48,12 +48,12 @@ func TestAccessTokenReleaseSubscriber_DeletesTheDeviceTokensOfTheDeletedAccountO
     }
 
     /* the account-wide epoch at the deletion's instant refuses the tokens no store holds — the bearer tokens — and is written for the deleted account alone */
-    deletedEpoch, deletedErr := store.RevocationEpoch(runtimeInstance, "user-4", "")
+    deletedEpoch, deletedErr := store.RevocationEpoch(runtimeInstance, "user-4", melodysecuritycontract.RevocationOptions{})
     if nil != deletedErr || false == deletedEpoch.Equal(deleted.Timestamp()) {
         t.Fatalf("expected the deleted account revoked up to the deletion's instant %v, got %v (%v)", deleted.Timestamp(), deletedEpoch, deletedErr)
     }
 
-    if keptEpoch, _ := store.RevocationEpoch(runtimeInstance, "user-5", ""); false == keptEpoch.IsZero() {
+    if keptEpoch, _ := store.RevocationEpoch(runtimeInstance, "user-5", melodysecuritycontract.RevocationOptions{}); false == keptEpoch.IsZero() {
         t.Fatalf("expected no epoch for the account that was not deleted, got %v", keptEpoch)
     }
 }
@@ -70,7 +70,7 @@ type revocationFailingTokenStore struct {
     deleteErr error
 }
 
-func (instance *revocationFailingTokenStore) RevokeBefore(_ melodycontainercontract.Runtime, _ string, _ string, _ time.Time) error {
+func (instance *revocationFailingTokenStore) RevokeBefore(_ melodycontainercontract.Runtime, _ string, _ time.Time, _ melodysecuritycontract.RevocationOptions) error {
     return instance.revokeErr
 }
 
@@ -113,7 +113,7 @@ func TestAccessTokenReleaseSubscriber_ACancelledRequestStillPublishesTheBoundary
         t.Fatalf("expected the release to outlive the request's cancellation, got %v", listenErr)
     }
 
-    if epoch, _ := store.RevocationEpoch(releaseTestRuntime(), "user-6", ""); false == epoch.Equal(deleted.Timestamp()) {
+    if epoch, _ := store.RevocationEpoch(releaseTestRuntime(), "user-6", melodysecuritycontract.RevocationOptions{}); false == epoch.Equal(deleted.Timestamp()) {
         t.Fatalf("expected the boundary published at the deletion's instant, got %v", epoch)
     }
 

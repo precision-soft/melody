@@ -46,7 +46,7 @@ func (instance *AccessTokenReleaseSubscriber) onUserDeleted() melodyeventcontrac
 
         compensationRuntime := examplesecurity.DetachedRuntime(runtimeInstance)
         store := melodysecurity.TokenStoreFor(compensationRuntime, instance.storeSource(compensationRuntime))
-        revokeErr := store.RevokeBefore(payloadInstance.UserId(), "", eventValue.Timestamp())
+        revokeErr := store.RevokeBefore(payloadInstance.UserId(), eventValue.Timestamp(), melodysecuritycontract.RevocationOptions{})
         released, releaseErr := store.DeleteByUser(payloadInstance.UserId())
         if 0 < released {
             examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Info(

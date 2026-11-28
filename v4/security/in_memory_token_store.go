@@ -126,6 +126,25 @@ func refuseNonUtf8TokenStoreUser(userIdentifier string) error {
     return nil
 }
 
+const (
+    claimsDeviceField = "Claims.DeviceIdentifier"
+
+    revocationOptionsDeviceField = "RevocationOptions.DeviceIdentifier"
+)
+
+/* the device names a boundary field as the user names its key, so it is refused by the user's rule */
+func refuseNonUtf8TokenStoreDevice(deviceIdentifier string, field string) error {
+    if false == utf8.ValidString(deviceIdentifier) {
+        return exception.NewError(
+            "token store device identifier must be valid UTF-8",
+            map[string]any{"deviceLength": len(deviceIdentifier), "field": field},
+            nil,
+        )
+    }
+
+    return nil
+}
+
 func refuseDoneTokenStoreContext(runtimeInstance containercontract.Runtime, door string) error {
     contextErr := runtimeInstance.Context().Err()
     if nil == contextErr {
@@ -158,7 +177,7 @@ type tokenEntry struct {
     expiresAt time.Time
 }
 
-/* Put stores the claims under the ttl, refusing an absent one and one under a second by the ttl's name; unlimited stores with no expiry. The user identifier must be valid UTF-8, as the redis store asks. */
+/* Put stores the claims under the ttl, refusing an absent one and one under a second by the ttl's name; unlimited stores with no expiry. The user and the device identifiers must be valid UTF-8, as the redis store asks. */
 func (instance *InMemoryTokenStore) Put(
     runtimeInstance containercontract.Runtime,
     tokenString string,
@@ -175,6 +194,10 @@ func (instance *InMemoryTokenStore) Put(
     }
 
     if utf8Err := refuseNonUtf8TokenStoreUser(claims.UserIdentifier); nil != utf8Err {
+        return utf8Err
+    }
+
+    if utf8Err := refuseNonUtf8TokenStoreDevice(claims.DeviceIdentifier, claimsDeviceField); nil != utf8Err {
         return utf8Err
     }
 
@@ -417,8 +440,8 @@ func (instance *InMemoryTokenStore) Lookup(
 func (instance *InMemoryTokenStore) RevokeBefore(
     runtimeInstance containercontract.Runtime,
     userIdentifier string,
-    deviceIdentifier string,
     instant time.Time,
+    options securitycontract.RevocationOptions,
 ) error {
     if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance, "security.InMemoryTokenStore.RevokeBefore"); nil != runtimeErr {
         return runtimeErr
@@ -429,6 +452,10 @@ func (instance *InMemoryTokenStore) RevokeBefore(
     }
 
     if utf8Err := refuseNonUtf8TokenStoreUser(userIdentifier); nil != utf8Err {
+        return utf8Err
+    }
+
+    if utf8Err := refuseNonUtf8TokenStoreDevice(options.DeviceIdentifier, revocationOptionsDeviceField); nil != utf8Err {
         return utf8Err
     }
 
@@ -463,7 +490,7 @@ func (instance *InMemoryTokenStore) RevokeBefore(
         instance.epochsByUser[userIdentifier] = boundaries
     }
 
-    field := revocationField(deviceIdentifier)
+    field := revocationField(options.DeviceIdentifier)
     if published, found := boundaries[field]; true == found && false == instant.After(published) {
         return nil
     }
@@ -479,7 +506,7 @@ func (instance *InMemoryTokenStore) RevokeBefore(
 func (instance *InMemoryTokenStore) RevocationEpoch(
     runtimeInstance containercontract.Runtime,
     userIdentifier string,
-    deviceIdentifier string,
+    options securitycontract.RevocationOptions,
 ) (time.Time, error) {
     if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance, "security.InMemoryTokenStore.RevocationEpoch"); nil != runtimeErr {
         return time.Time{}, runtimeErr
@@ -492,7 +519,7 @@ func (instance *InMemoryTokenStore) RevocationEpoch(
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
 
-    return instance.revocationEpochLocked(userIdentifier, deviceIdentifier), nil
+    return instance.revocationEpochLocked(userIdentifier, options.DeviceIdentifier), nil
 }
 
 func (instance *InMemoryTokenStore) revocationEpochLocked(userIdentifier string, deviceIdentifier string) time.Time {

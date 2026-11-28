@@ -357,7 +357,7 @@ func deadlinePassed(ctx context.Context) bool {
     return true == hasDeadline && false == time.Now().Before(deadline)
 }
 
-/* Put stores the token under the ttl, read against the contract's TokenTtlRule: an absent ttl and one under a second are refused naming the ttl, since the likeliest caller of a lapsed one computed a remaining lifetime that already elapsed, and unlimited stores it with no expiry. The user identifier must be valid UTF-8. The token is keyed by its SHA-256 digest, which an unkeyed hash makes safe only for a token of at least 128 bits of entropy: a guessable token is found from its digest by whoever reads the keyspace. */
+/* Put stores the token under the ttl, read against the contract's TokenTtlRule: an absent ttl and one under a second are refused naming the ttl, since the likeliest caller of a lapsed one computed a remaining lifetime that already elapsed, and unlimited stores it with no expiry. The user and the device identifiers must be valid UTF-8. The token is keyed by its SHA-256 digest, which an unkeyed hash makes safe only for a token of at least 128 bits of entropy: a guessable token is found from its digest by whoever reads the keyspace. */
 func (instance *RedisTokenStore) Put(
     runtimeInstance containercontract.Runtime,
     tokenString string,
@@ -647,8 +647,8 @@ func (instance *RedisTokenStore) Lookup(
 func (instance *RedisTokenStore) RevokeBefore(
     runtimeInstance containercontract.Runtime,
     userIdentifier string,
-    deviceIdentifier string,
     instant time.Time,
+    options securitycontract.RevocationOptions,
 ) error {
     if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance, "rueidis.RedisTokenStore.RevokeBefore"); nil != runtimeErr {
         return runtimeErr
@@ -659,6 +659,10 @@ func (instance *RedisTokenStore) RevokeBefore(
     }
 
     if utf8Err := refuseNonUtf8UserIdentifier(userIdentifier); nil != utf8Err {
+        return utf8Err
+    }
+
+    if utf8Err := refuseNonUtf8DeviceIdentifier(options.DeviceIdentifier, revocationOptionsDeviceField); nil != utf8Err {
         return utf8Err
     }
 
@@ -683,7 +687,7 @@ func (instance *RedisTokenStore) RevokeBefore(
         instance.client,
         []string{instance.epochKey(userIdentifier), instance.userKey(userIdentifier)},
         []string{
-            revocationField(deviceIdentifier),
+            revocationField(options.DeviceIdentifier),
             strconv.FormatInt(instant.UnixNano(), 10),
             strconv.FormatInt(instance.epochRetentionMilliseconds, 10),
         },
@@ -698,15 +702,15 @@ func (instance *RedisTokenStore) RevokeBefore(
 func (instance *RedisTokenStore) RevocationEpoch(
     runtimeInstance containercontract.Runtime,
     userIdentifier string,
-    deviceIdentifier string,
+    options securitycontract.RevocationOptions,
 ) (time.Time, error) {
     if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance, "rueidis.RedisTokenStore.RevocationEpoch"); nil != runtimeErr {
         return time.Time{}, runtimeErr
     }
 
     fields := []string{revocationUserField}
-    if "" != deviceIdentifier {
-        fields = append(fields, revocationDeviceFieldPrefix+deviceIdentifier)
+    if "" != options.DeviceIdentifier {
+        fields = append(fields, revocationDeviceFieldPrefix+options.DeviceIdentifier)
     }
 
     parentContext := runtimeInstance.Context()
@@ -831,8 +835,31 @@ func refuseNonUtf8UserIdentifier(userIdentifier string) error {
     return nil
 }
 
+const (
+    claimsDeviceField = "Claims.DeviceIdentifier"
+
+    revocationOptionsDeviceField = "RevocationOptions.DeviceIdentifier"
+)
+
+/* the lookup script reads the device from the stored json, which rewrites an invalid byte, so a device boundary written under the raw identifier would never match its tokens */
+func refuseNonUtf8DeviceIdentifier(deviceIdentifier string, field string) error {
+    if false == utf8.ValidString(deviceIdentifier) {
+        return exception.NewError(
+            "redis token store device identifier must be valid UTF-8",
+            map[string]any{"deviceLength": len(deviceIdentifier), "field": field},
+            nil,
+        )
+    }
+
+    return nil
+}
+
 func (instance *RedisTokenStore) put(parentContext context.Context, tokenString string, claims securitycontract.Claims, ttl time.Duration) error {
     if utf8Err := refuseNonUtf8UserIdentifier(claims.UserIdentifier); nil != utf8Err {
+        return utf8Err
+    }
+
+    if utf8Err := refuseNonUtf8DeviceIdentifier(claims.DeviceIdentifier, claimsDeviceField); nil != utf8Err {
         return utf8Err
     }
 

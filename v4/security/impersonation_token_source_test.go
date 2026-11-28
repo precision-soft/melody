@@ -193,7 +193,7 @@ func TestImpersonation_PropagatesImpersonatorBetweenServicesOverHmac(t *testing.
     }
 
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
-    headerValue, signErr := signer.Sign(newTestRuntime(), "POST", "/internal/orders", nil, actor)
+    headerValue, signErr := signer.Sign(newTestRuntime(), "POST", "/internal/orders", nil, SignOptions{Actor: actor})
     if nil != signErr {
         t.Fatalf("sign: %v", signErr)
     }

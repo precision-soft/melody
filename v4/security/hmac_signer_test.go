@@ -14,6 +14,7 @@ import (
     "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
+    securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
 func hmacSignerProbeSecrets() *StaticHmacSecretProvider {
@@ -85,7 +86,7 @@ func TestHmacEnvelopeSigner_AnAbsentTtlSignsForThirtySeconds(t *testing.T) {
         Clock: clock.NewFrozenClock(time.Unix(1000, 0)),
     })
 
-    headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/orders", nil, nil)
+    headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/orders", nil, SignOptions{})
     if nil != signErr {
         t.Fatalf("unexpected sign error: %v", signErr)
     }
@@ -97,6 +98,46 @@ func TestHmacEnvelopeSigner_AnAbsentTtlSignsForThirtySeconds(t *testing.T) {
 
     if 1030 != envelope.ExpiresAt {
         t.Fatalf("expected the envelope to expire 30s after its issue, got exp=%d iat=%d", envelope.ExpiresAt, envelope.IssuedAt)
+    }
+}
+
+func TestHmacEnvelopeSigner_SignPropagatesTheOptionsActor(t *testing.T) {
+    signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacSignerProbeSecrets(), "billing", HmacEnvelopeSignerConfig{})
+    actor := NewActor("user-7", securitycontract.ActorTypeUser, ActorConfig{Roles: []string{"ROLE_BUYER"}})
+
+    headerValue, signErr := signer.Sign(newTestRuntime(), "POST", "/orders", nil, SignOptions{Actor: actor})
+    if nil != signErr {
+        t.Fatalf("unexpected sign error: %v", signErr)
+    }
+
+    envelope, _, decodeErr := decodeHmacHeaderValue(newTestRuntime(), headerValue, hmacSignerProbeSecrets(), minimumHmacSha256SecretLength)
+    if nil != decodeErr {
+        t.Fatalf("unexpected decode error: %v", decodeErr)
+    }
+
+    if nil == envelope.Actor || "user-7" != envelope.Actor.Identifier || securitycontract.ActorTypeUser != envelope.Actor.Type {
+        t.Fatalf("expected the envelope to carry the options' actor, got %+v", envelope.Actor)
+    }
+}
+
+func TestHmacEnvelopeSigner_SignWithoutAnActorCarriesNone(t *testing.T) {
+    signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacSignerProbeSecrets(), "billing", HmacEnvelopeSignerConfig{})
+    var typedNil *Actor
+
+    for name, options := range map[string]SignOptions{"left out": {}, "typed nil": {Actor: typedNil}} {
+        headerValue, signErr := signer.Sign(newTestRuntime(), "POST", "/orders", nil, options)
+        if nil != signErr {
+            t.Fatalf("%s: unexpected sign error: %v", name, signErr)
+        }
+
+        envelope, _, decodeErr := decodeHmacHeaderValue(newTestRuntime(), headerValue, hmacSignerProbeSecrets(), minimumHmacSha256SecretLength)
+        if nil != decodeErr {
+            t.Fatalf("%s: unexpected decode error: %v", name, decodeErr)
+        }
+
+        if nil != envelope.Actor {
+            t.Fatalf("%s: expected no actor in the envelope, got %+v", name, envelope.Actor)
+        }
     }
 }
 
@@ -115,7 +156,7 @@ func TestHmacEnvelopeSigner_SignSplitsTheQueryOffThePath(t *testing.T) {
         Clock:    clock.NewFrozenClock(time.Unix(1000, 0)),
     })
 
-    headerValue, signErr := signer.Sign(newTestRuntime(), "POST", "/orders?page=2&size=10", []byte("payload"), nil)
+    headerValue, signErr := signer.Sign(newTestRuntime(), "POST", "/orders?page=2&size=10", []byte("payload"), SignOptions{})
     if nil != signErr {
         t.Fatalf("unexpected sign error: %v", signErr)
     }
@@ -152,8 +193,8 @@ func TestHmacEnvelopeSigner_SignMintsAFreshNonceEachTime(t *testing.T) {
         Clock: clock.NewFrozenClock(time.Unix(1000, 0)),
     })
 
-    firstValue, _ := signer.Sign(newTestRuntime(), "GET", "/orders", nil, nil)
-    secondValue, _ := signer.Sign(newTestRuntime(), "GET", "/orders", nil, nil)
+    firstValue, _ := signer.Sign(newTestRuntime(), "GET", "/orders", nil, SignOptions{})
+    secondValue, _ := signer.Sign(newTestRuntime(), "GET", "/orders", nil, SignOptions{})
 
     first, _, _ := decodeHmacHeaderValue(newTestRuntime(), firstValue, hmacSignerProbeSecrets(), minimumHmacSha256SecretLength)
     second, _, _ := decodeHmacHeaderValue(newTestRuntime(), secondValue, hmacSignerProbeSecrets(), minimumHmacSha256SecretLength)
@@ -179,7 +220,7 @@ func TestHmacEnvelopeSigner_SignReturnsAProviderFailureMarked(t *testing.T) {
         signer := NewHmacEnvelopeSigner(hmacTestRuntime(), provider, "wms-service", HmacEnvelopeSignerConfig{})
         fail(provider)
 
-        headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal", nil, nil)
+        headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal", nil, SignOptions{})
         if "" != headerValue || false == errors.Is(signErr, failure) || false == exception.AnswersUnavailable(signErr) {
             t.Fatalf("expected the %s failure returned marked, got %q %v", door, headerValue, signErr)
         }
@@ -189,7 +230,7 @@ func TestHmacEnvelopeSigner_SignReturnsAProviderFailureMarked(t *testing.T) {
 func TestHmacEnvelopeSigner_SignRefusesANilRuntime(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacSignerProbeSecrets(), "billing", HmacEnvelopeSignerConfig{})
 
-    if _, signErr := signer.Sign(nil, "GET", "/internal", nil, nil); "runtimeInstance" != exception.LogContext(signErr, exception.LogContextConfig{})["argument"] {
+    if _, signErr := signer.Sign(nil, "GET", "/internal", nil, SignOptions{}); "runtimeInstance" != exception.LogContext(signErr, exception.LogContextConfig{})["argument"] {
         t.Fatalf("expected a nil runtime refused naming the argument, got %v", signErr)
     }
 }
@@ -202,7 +243,7 @@ func TestHmacEnvelopeSigner_SignRefusesACurrentKeyMovedToAnotherApplication(t *t
     provider.application = "crm"
 
     signErr := func() error {
-        _, err := signer.Sign(newTestRuntime(), "GET", "/internal", nil, nil)
+        _, err := signer.Sign(newTestRuntime(), "GET", "/internal", nil, SignOptions{})
 
         return err
     }()
@@ -216,17 +257,17 @@ func TestHmacEnvelopeSigner_SignJudgesTheBindingOnlyWhenTheCurrentKeyIdChanges(t
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), provider, "wms-service", HmacEnvelopeSignerConfig{})
 
     provider.application = "crm"
-    if _, signErr := signer.Sign(newTestRuntime(), "GET", "/internal", nil, nil); nil != signErr {
+    if _, signErr := signer.Sign(newTestRuntime(), "GET", "/internal", nil, SignOptions{}); nil != signErr {
         t.Fatalf("expected the key judged at construction not judged again, got %v", signErr)
     }
 
     provider.keyId = "key-rotated"
-    if _, signErr := signer.Sign(newTestRuntime(), "GET", "/internal", nil, nil); nil == signErr {
+    if _, signErr := signer.Sign(newTestRuntime(), "GET", "/internal", nil, SignOptions{}); nil == signErr {
         t.Fatalf("expected the rotated key judged and refused")
     }
 
     provider.application = ""
-    if _, signErr := signer.Sign(newTestRuntime(), "GET", "/internal", nil, nil); nil != signErr {
+    if _, signErr := signer.Sign(newTestRuntime(), "GET", "/internal", nil, SignOptions{}); nil != signErr {
         t.Fatalf("expected the rotated key signing once bound, got %v", signErr)
     }
 }
@@ -288,7 +329,7 @@ func TestHmacEnvelopeSigner_AsksTheProviderUnderTheConstructionRuntimeThenTheCal
 
     signContainer := container.NewContainer(container.ContainerConfig{})
     signRuntime := runtime.NewRequest(context.WithValue(context.Background(), hmacSignerContextKey{}, "sign"), signContainer.NewScope())
-    if _, signErr := signer.Sign(signRuntime, "GET", "/internal", nil, nil); nil != signErr {
+    if _, signErr := signer.Sign(signRuntime, "GET", "/internal", nil, SignOptions{}); nil != signErr {
         t.Fatalf("sign: %v", signErr)
     }
 

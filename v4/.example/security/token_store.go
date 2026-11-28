@@ -31,8 +31,8 @@ func (instance ResolvedTokenStore) Lookup(
 func (instance ResolvedTokenStore) RevokeBefore(
     _ melodycontainercontract.Runtime,
     _ string,
-    _ string,
     _ time.Time,
+    _ melodysecuritycontract.RevocationOptions,
 ) error {
     return melodyexception.NewError("a revocation boundary is published through the store resolved from the container, not through this adapter", nil, nil)
 }
@@ -40,9 +40,9 @@ func (instance ResolvedTokenStore) RevokeBefore(
 func (instance ResolvedTokenStore) RevocationEpoch(
     runtimeInstance melodycontainercontract.Runtime,
     userIdentifier string,
-    deviceIdentifier string,
+    options melodysecuritycontract.RevocationOptions,
 ) (time.Time, error) {
-    return TokenStoreFromRuntime(runtimeInstance).RevocationEpoch(userIdentifier, deviceIdentifier)
+    return TokenStoreFromRuntime(runtimeInstance).RevocationEpoch(userIdentifier, options)
 }
 
 /* TokenStoreFromRuntime binds the store the token firewalls read, redis when wired and the process's own otherwise, both registered under the rueidis module's name */

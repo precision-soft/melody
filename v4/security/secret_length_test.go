@@ -212,7 +212,7 @@ func TestHmacEnvelopeSigner_RefusesToSignWithAShortSecret(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), rotatingProvider, "wms-service", HmacEnvelopeSignerConfig{})
     rotatingProvider.secret = []byte("short-custom-secret")
 
-    headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal", nil, nil)
+    headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal", nil, SignOptions{})
     if "" != headerValue {
         t.Fatalf("expected nothing signed, got %q", headerValue)
     }
@@ -223,7 +223,7 @@ func TestHmacEnvelopeSigner_RefusesToSignWithAShortSecret(t *testing.T) {
     }
 
     longSigner := NewHmacEnvelopeSigner(hmacTestRuntime(), &customHmacSecretProvider{secret: []byte(thirtyTwoByteSecret)}, "wms-service", HmacEnvelopeSignerConfig{})
-    if _, longErr := longSigner.Sign(newTestRuntime(), "GET", "/internal", nil, nil); nil != longErr {
+    if _, longErr := longSigner.Sign(newTestRuntime(), "GET", "/internal", nil, SignOptions{}); nil != longErr {
         t.Fatalf("expected a 32-byte secret to sign, got %v", longErr)
     }
 

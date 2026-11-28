@@ -20,8 +20,8 @@ var _ interface {
     Delete(tokenString string) error
     DeleteByUser(userIdentifier string) (int, error)
     PurgeExpired() (int, error)
-    RevokeBefore(userIdentifier string, deviceIdentifier string, instant time.Time) error
-    RevocationEpoch(userIdentifier string, deviceIdentifier string) (time.Time, error)
+    RevokeBefore(userIdentifier string, instant time.Time, options securitycontract.RevocationOptions) error
+    RevocationEpoch(userIdentifier string, options securitycontract.RevocationOptions) (time.Time, error)
     Runtime() containercontract.Runtime
     TokenStore() securitycontract.EpochRevocableTokenStore
 } = BoundTokenStore{}
@@ -145,14 +145,14 @@ func (instance *boundRecordingTokenStore) PurgeExpired(runtimeInstance container
     return 5, boundTokenStoreRecordedErr
 }
 
-func (instance *boundRecordingTokenStore) RevokeBefore(runtimeInstance containercontract.Runtime, userIdentifier string, deviceIdentifier string, instant time.Time) error {
-    instance.record("RevokeBefore", runtimeInstance, userIdentifier, deviceIdentifier, instant)
+func (instance *boundRecordingTokenStore) RevokeBefore(runtimeInstance containercontract.Runtime, userIdentifier string, instant time.Time, options securitycontract.RevocationOptions) error {
+    instance.record("RevokeBefore", runtimeInstance, userIdentifier, instant, options)
 
     return boundTokenStoreRecordedErr
 }
 
-func (instance *boundRecordingTokenStore) RevocationEpoch(runtimeInstance containercontract.Runtime, userIdentifier string, deviceIdentifier string) (time.Time, error) {
-    instance.record("RevocationEpoch", runtimeInstance, userIdentifier, deviceIdentifier)
+func (instance *boundRecordingTokenStore) RevocationEpoch(runtimeInstance containercontract.Runtime, userIdentifier string, options securitycontract.RevocationOptions) (time.Time, error) {
+    instance.record("RevocationEpoch", runtimeInstance, userIdentifier, options)
 
     return time.Unix(1700000000, 0).UTC(), boundTokenStoreRecordedErr
 }
@@ -187,8 +187,8 @@ func TestBoundTokenStore_EveryMethodReachesItsDoorWithTheBoundRuntimeAndAnswersW
     deleteErr := boundStore.Delete("deleted-token")
     deletedCount, deleteByUserErr := boundStore.DeleteByUser("deleted-user")
     purgedCount, purgeErr := boundStore.PurgeExpired()
-    revokeErr := boundStore.RevokeBefore("revoked-user", "revoked-device", instant)
-    epoch, epochErr := boundStore.RevocationEpoch("epoch-user", "epoch-device")
+    revokeErr := boundStore.RevokeBefore("revoked-user", instant, securitycontract.RevocationOptions{DeviceIdentifier: "revoked-device"})
+    epoch, epochErr := boundStore.RevocationEpoch("epoch-user", securitycontract.RevocationOptions{DeviceIdentifier: "epoch-device"})
 
     expected := []boundTokenStoreRecordedCall{
         {door: "Lookup", arguments: []any{"looked-up-token"}},
@@ -196,8 +196,8 @@ func TestBoundTokenStore_EveryMethodReachesItsDoorWithTheBoundRuntimeAndAnswersW
         {door: "Delete", arguments: []any{"deleted-token"}},
         {door: "DeleteByUser", arguments: []any{"deleted-user"}},
         {door: "PurgeExpired", arguments: nil},
-        {door: "RevokeBefore", arguments: []any{"revoked-user", "revoked-device", instant}},
-        {door: "RevocationEpoch", arguments: []any{"epoch-user", "epoch-device"}},
+        {door: "RevokeBefore", arguments: []any{"revoked-user", instant, securitycontract.RevocationOptions{DeviceIdentifier: "revoked-device"}}},
+        {door: "RevocationEpoch", arguments: []any{"epoch-user", securitycontract.RevocationOptions{DeviceIdentifier: "epoch-device"}}},
     }
 
     if len(expected) != len(recordingStore.callList) {
@@ -248,8 +248,8 @@ func TestBoundTokenStore_AViewOverNoStoreRefusesEveryDoor(t *testing.T) {
         deleteErr := boundStore.Delete("token")
         deletedCount, deleteByUserErr := boundStore.DeleteByUser("user")
         purgedCount, purgeErr := boundStore.PurgeExpired()
-        revokeErr := boundStore.RevokeBefore("user", "device", time.Now())
-        epoch, epochErr := boundStore.RevocationEpoch("user", "device")
+        revokeErr := boundStore.RevokeBefore("user", time.Now(), securitycontract.RevocationOptions{DeviceIdentifier: "device"})
+        epoch, epochErr := boundStore.RevocationEpoch("user", securitycontract.RevocationOptions{DeviceIdentifier: "device"})
 
         for doorName, doorErr := range map[string]error{"Lookup": lookupErr, "Put": putErr, "Delete": deleteErr, "DeleteByUser": deleteByUserErr, "PurgeExpired": purgeErr, "RevokeBefore": revokeErr, "RevocationEpoch": epochErr} {
             if nil == doorErr || "token store instance is nil" != doorErr.Error() {

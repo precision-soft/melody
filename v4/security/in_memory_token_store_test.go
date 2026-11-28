@@ -3,6 +3,7 @@ package security
 import (
     "context"
     "strconv"
+    "strings"
     "sync"
     "testing"
     "time"
@@ -305,7 +306,7 @@ func TestInMemoryTokenStore_RevokeBeforeRejectsAnOlderTokenWithoutDeletingIt(t *
     store.Put(newTestRuntime(), "tok", securitycontract.Claims{UserIdentifier: "u1"}, bound.UnlimitedDuration())
 
     frozen.Advance(time.Minute)
-    store.RevokeBefore(newTestRuntime(), "u1", "", frozen.Now())
+    store.RevokeBefore(newTestRuntime(), "u1", frozen.Now(), securitycontract.RevocationOptions{})
 
     if _, found, err := store.Lookup(rt, "tok"); true == found || nil != err {
         t.Fatalf("expected the revoked token to stop resolving, got found=%v err=%v", found, err)
@@ -322,10 +323,10 @@ func TestInMemoryTokenStore_RevocationEpochOnlyEverMovesForward(t *testing.T) {
     rt := tokenStoreRuntime()
 
     later := time.Unix(5000, 0)
-    store.RevokeBefore(newTestRuntime(), "u1", "", later)
-    store.RevokeBefore(newTestRuntime(), "u1", "", later.Add(-time.Minute))
+    store.RevokeBefore(newTestRuntime(), "u1", later, securitycontract.RevocationOptions{})
+    store.RevokeBefore(newTestRuntime(), "u1", later.Add(-time.Minute), securitycontract.RevocationOptions{})
 
-    published, err := store.RevocationEpoch(rt, "u1", "")
+    published, err := store.RevocationEpoch(rt, "u1", securitycontract.RevocationOptions{})
     if nil != err {
         t.Fatalf("revocation epoch: %v", err)
     }
@@ -344,7 +345,7 @@ func TestInMemoryTokenStore_DeviceRevocationSparesAnotherDeviceOfTheSameUser(t *
     store.Put(newTestRuntime(), "tok-laptop", securitycontract.Claims{UserIdentifier: "u1", DeviceIdentifier: "laptop"}, bound.UnlimitedDuration())
 
     frozen.Advance(time.Minute)
-    store.RevokeBefore(newTestRuntime(), "u1", "phone", frozen.Now())
+    store.RevokeBefore(newTestRuntime(), "u1", frozen.Now(), securitycontract.RevocationOptions{DeviceIdentifier: "phone"})
 
     if _, found, _ := store.Lookup(rt, "tok-phone"); true == found {
         t.Fatalf("expected the revoked device's token to stop resolving")
@@ -352,6 +353,27 @@ func TestInMemoryTokenStore_DeviceRevocationSparesAnotherDeviceOfTheSameUser(t *
 
     if _, found, err := store.Lookup(rt, "tok-laptop"); false == found || nil != err {
         t.Fatalf("revoking one device ended another device's token, got found=%v err=%v", found, err)
+    }
+}
+
+func TestInMemoryTokenStore_RevocationEpochReadsTheLaterOfTheUserAndTheDevice(t *testing.T) {
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
+    userInstant := time.Unix(1000, 0)
+    deviceInstant := time.Unix(2000, 0)
+
+    store.RevokeBefore(newTestRuntime(), "u1", userInstant, securitycontract.RevocationOptions{})
+    store.RevokeBefore(newTestRuntime(), "u1", deviceInstant, securitycontract.RevocationOptions{DeviceIdentifier: "phone"})
+
+    if epoch, _ := store.RevocationEpoch(newTestRuntime(), "u1", securitycontract.RevocationOptions{DeviceIdentifier: "phone"}); false == deviceInstant.Equal(epoch) {
+        t.Fatalf("expected the device's later boundary, got %v", epoch)
+    }
+
+    if epoch, _ := store.RevocationEpoch(newTestRuntime(), "u1", securitycontract.RevocationOptions{}); false == userInstant.Equal(epoch) {
+        t.Fatalf("expected the whole user's boundary when the device is left out, got %v", epoch)
+    }
+
+    if epoch, _ := store.RevocationEpoch(newTestRuntime(), "u1", securitycontract.RevocationOptions{DeviceIdentifier: "laptop"}); false == userInstant.Equal(epoch) {
+        t.Fatalf("expected another device to read the user's boundary alone, got %v", epoch)
     }
 }
 
@@ -364,7 +386,7 @@ func TestInMemoryTokenStore_UserRevocationCoversEveryDevice(t *testing.T) {
     store.Put(newTestRuntime(), "tok-laptop", securitycontract.Claims{UserIdentifier: "u1", DeviceIdentifier: "laptop"}, bound.UnlimitedDuration())
 
     frozen.Advance(time.Minute)
-    store.RevokeBefore(newTestRuntime(), "u1", "", frozen.Now())
+    store.RevokeBefore(newTestRuntime(), "u1", frozen.Now(), securitycontract.RevocationOptions{})
 
     for _, tokenString := range []string{"tok-phone", "tok-laptop"} {
         if _, found, _ := store.Lookup(rt, tokenString); true == found {
@@ -378,7 +400,7 @@ func TestInMemoryTokenStore_PutAlwaysStampsTheIssueInstant(t *testing.T) {
     store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen})
     rt := tokenStoreRuntime()
 
-    store.RevokeBefore(newTestRuntime(), "u1", "", time.Unix(900, 0))
+    store.RevokeBefore(newTestRuntime(), "u1", time.Unix(900, 0), securitycontract.RevocationOptions{})
     store.Put(newTestRuntime(), "tok", securitycontract.Claims{UserIdentifier: "u1", IssuedAt: time.Unix(500, 0)}, bound.UnlimitedDuration())
 
     claims, found, err := store.Lookup(rt, "tok")
@@ -400,11 +422,11 @@ func TestInMemoryTokenStore_PurgeExpiredKeepsTheBoundaryWhileATokenRemains(t *te
     store.Put(newTestRuntime(), "tok-long", securitycontract.Claims{UserIdentifier: "u1"}, bound.UnlimitedDuration())
 
     frozen.Advance(time.Minute)
-    store.RevokeBefore(newTestRuntime(), "u1", "", frozen.Now())
+    store.RevokeBefore(newTestRuntime(), "u1", frozen.Now(), securitycontract.RevocationOptions{})
 
     store.PurgeExpired(newTestRuntime())
 
-    published, err := store.RevocationEpoch(rt, "u1", "")
+    published, err := store.RevocationEpoch(rt, "u1", securitycontract.RevocationOptions{})
     if nil != err {
         t.Fatalf("revocation epoch: %v", err)
     }
@@ -423,12 +445,12 @@ func TestInMemoryTokenStore_PurgeExpiredKeepsTheBoundaryOfAUserWithNoStoredToken
     store.Put(newTestRuntime(), "tok", securitycontract.Claims{UserIdentifier: "u1"}, bound.Of(time.Second))
 
     frozen.Advance(time.Minute)
-    store.RevokeBefore(newTestRuntime(), "u1", "", frozen.Now())
+    store.RevokeBefore(newTestRuntime(), "u1", frozen.Now(), securitycontract.RevocationOptions{})
 
     frozen.Advance(time.Minute)
     store.PurgeExpired(newTestRuntime())
 
-    published, err := store.RevocationEpoch(rt, "u1", "")
+    published, err := store.RevocationEpoch(rt, "u1", securitycontract.RevocationOptions{})
     if nil != err {
         t.Fatalf("revocation epoch: %v", err)
     }
@@ -443,15 +465,15 @@ func TestInMemoryTokenStore_PurgeExpiredHonorsTheRevocationEpochRetentionWindow(
     store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen, RevocationEpochRetention: bound.Of(time.Hour)})
     rt := tokenStoreRuntime()
 
-    store.RevokeBefore(newTestRuntime(), "u1", "", frozen.Now())
+    store.RevokeBefore(newTestRuntime(), "u1", frozen.Now(), securitycontract.RevocationOptions{})
 
     frozen.Advance(30 * time.Minute)
-    store.RevokeBefore(newTestRuntime(), "u1", "phone", frozen.Now())
+    store.RevokeBefore(newTestRuntime(), "u1", frozen.Now(), securitycontract.RevocationOptions{DeviceIdentifier: "phone"})
 
     frozen.Advance(45 * time.Minute)
     store.PurgeExpired(newTestRuntime())
 
-    userBoundary, userErr := store.RevocationEpoch(rt, "u1", "")
+    userBoundary, userErr := store.RevocationEpoch(rt, "u1", securitycontract.RevocationOptions{})
     if nil != userErr {
         t.Fatalf("revocation epoch: %v", userErr)
     }
@@ -460,7 +482,7 @@ func TestInMemoryTokenStore_PurgeExpiredHonorsTheRevocationEpochRetentionWindow(
         t.Fatalf("expected the user boundary published beyond the retention window to be purged, got %v", userBoundary)
     }
 
-    deviceBoundary, deviceErr := store.RevocationEpoch(rt, "u1", "phone")
+    deviceBoundary, deviceErr := store.RevocationEpoch(rt, "u1", securitycontract.RevocationOptions{DeviceIdentifier: "phone"})
     if nil != deviceErr {
         t.Fatalf("revocation epoch: %v", deviceErr)
     }
@@ -475,19 +497,19 @@ func TestInMemoryTokenStore_KeepsARevocationBoundarySevenDaysByDefault(t *testin
     store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen})
     rt := tokenStoreRuntime()
 
-    store.RevokeBefore(newTestRuntime(), "u1", "", frozen.Now())
+    store.RevokeBefore(newTestRuntime(), "u1", frozen.Now(), securitycontract.RevocationOptions{})
 
     frozen.Advance(7*24*time.Hour - time.Minute)
     store.PurgeExpired(newTestRuntime())
 
-    if kept, _ := store.RevocationEpoch(rt, "u1", ""); true == kept.IsZero() {
+    if kept, _ := store.RevocationEpoch(rt, "u1", securitycontract.RevocationOptions{}); true == kept.IsZero() {
         t.Fatal("the default retention dropped a boundary younger than seven days")
     }
 
     frozen.Advance(2 * time.Minute)
     store.PurgeExpired(newTestRuntime())
 
-    if dropped, _ := store.RevocationEpoch(rt, "u1", ""); false == dropped.IsZero() {
+    if dropped, _ := store.RevocationEpoch(rt, "u1", securitycontract.RevocationOptions{}); false == dropped.IsZero() {
         t.Fatalf("expected the default retention to drop a boundary older than seven days, got %v", dropped)
     }
 }
@@ -497,12 +519,12 @@ func TestInMemoryTokenStore_AnUnlimitedRetentionKeepsTheBoundary(t *testing.T) {
     store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen, RevocationEpochRetention: bound.UnlimitedDuration()})
     rt := tokenStoreRuntime()
 
-    store.RevokeBefore(newTestRuntime(), "u1", "", frozen.Now())
+    store.RevokeBefore(newTestRuntime(), "u1", frozen.Now(), securitycontract.RevocationOptions{})
 
     frozen.Advance(365 * 24 * time.Hour)
     store.PurgeExpired(newTestRuntime())
 
-    if kept, _ := store.RevocationEpoch(rt, "u1", ""); true == kept.IsZero() {
+    if kept, _ := store.RevocationEpoch(rt, "u1", securitycontract.RevocationOptions{}); true == kept.IsZero() {
         t.Fatal("an unlimited retention dropped the boundary")
     }
 }
@@ -577,7 +599,7 @@ func TestInMemoryTokenStore_PutStampsAndInsertsAtomicallyAgainstRevokeBefore(t *
 
     revokeDone := make(chan struct{})
     go func() {
-        store.RevokeBefore(newTestRuntime(), "u1", "", frozen.Now().Add(time.Second))
+        store.RevokeBefore(newTestRuntime(), "u1", frozen.Now().Add(time.Second), securitycontract.RevocationOptions{})
         close(revokeDone)
     }()
 
@@ -607,7 +629,7 @@ func TestInMemoryTokenStore_ConcurrentRevokeAndLookupIsRaceFree(t *testing.T) {
             defer waitGroup.Done()
 
             for round := 0; round < 200; round++ {
-                store.RevokeBefore(newTestRuntime(), "u1", "phone", time.Now())
+                store.RevokeBefore(newTestRuntime(), "u1", time.Now(), securitycontract.RevocationOptions{DeviceIdentifier: "phone"})
             }
         }()
 
@@ -631,7 +653,7 @@ func TestInMemoryTokenStore_ATokenIssuedExactlyAtTheRevocationBoundaryIsRevoked(
 
     store.Put(newTestRuntime(), "tok", securitycontract.Claims{UserIdentifier: "u1"}, bound.UnlimitedDuration())
 
-    store.RevokeBefore(newTestRuntime(), "u1", "", frozen.Now())
+    store.RevokeBefore(newTestRuntime(), "u1", frozen.Now(), securitycontract.RevocationOptions{})
 
     if _, found, err := store.Lookup(rt, "tok"); true == found || nil != err {
         t.Fatalf("expected a token stamped at the boundary instant to be revoked, got found=%v err=%v", found, err)
@@ -669,8 +691,8 @@ func TestInMemoryTokenStore_PurgeExpiredKeepsARevokedTokenRevokedOnceItsBoundary
     store.Put(newTestRuntime(), "other-device", securitycontract.Claims{UserIdentifier: "device-user", DeviceIdentifier: "phone"}, bound.UnlimitedDuration())
 
     frozenClock.Advance(time.Second)
-    store.RevokeBefore(newTestRuntime(), "user", "", frozenClock.Now())
-    store.RevokeBefore(newTestRuntime(), "device-user", "tablet", frozenClock.Now())
+    store.RevokeBefore(newTestRuntime(), "user", frozenClock.Now(), securitycontract.RevocationOptions{})
+    store.RevokeBefore(newTestRuntime(), "device-user", frozenClock.Now(), securitycontract.RevocationOptions{DeviceIdentifier: "tablet"})
 
     frozenClock.Advance(time.Second)
     store.Put(newTestRuntime(), "after", securitycontract.Claims{UserIdentifier: "user"}, bound.UnlimitedDuration())
@@ -734,10 +756,10 @@ func TestInMemoryTokenStore_ARevocationAloneSweepsTheLapsedTokensAndKeepsEveryBo
     store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen, SweepInterval: bound.Of(time.Minute), RevocationEpochRetention: bound.Of(time.Second)})
 
     store.Put(newTestRuntime(), "lapsing", securitycontract.Claims{UserIdentifier: "u1"}, bound.Of(time.Second))
-    store.RevokeBefore(newTestRuntime(), "u2", "", frozen.Now())
+    store.RevokeBefore(newTestRuntime(), "u2", frozen.Now(), securitycontract.RevocationOptions{})
 
     frozen.Advance(2 * time.Minute)
-    store.RevokeBefore(newTestRuntime(), "u3", "", frozen.Now())
+    store.RevokeBefore(newTestRuntime(), "u3", frozen.Now(), securitycontract.RevocationOptions{})
 
     if _, held := store.entriesByToken["lapsing"]; true == held {
         t.Fatal("expected a revocation to sweep the lapsed token")
@@ -849,7 +871,7 @@ func TestInMemoryTokenStore_TheCeilingSweepsLapsedAndRevokedTokensBeforeRefusing
 
     frozen.Advance(time.Second)
 
-    if revokeErr := revoking.RevokeBefore(newTestRuntime(), "u-revoked", "", frozen.Now()); nil != revokeErr {
+    if revokeErr := revoking.RevokeBefore(newTestRuntime(), "u-revoked", frozen.Now(), securitycontract.RevocationOptions{}); nil != revokeErr {
         t.Fatalf("revoke: %v", revokeErr)
     }
 
@@ -882,11 +904,11 @@ func TestInMemoryTokenStore_RevokeBeforeAtTheCeilingIsAdmitted(t *testing.T) {
     store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{MaxEntries: bound.Of(1), Clock: frozen})
     fillTokenStore(t, store, bound.UnlimitedDuration(), "a")
 
-    if revokeErr := store.RevokeBefore(newTestRuntime(), "someone-else", "", frozen.Now()); nil != revokeErr {
+    if revokeErr := store.RevokeBefore(newTestRuntime(), "someone-else", frozen.Now(), securitycontract.RevocationOptions{}); nil != revokeErr {
         t.Fatalf("expected a revocation at the ceiling admitted, got %v", revokeErr)
     }
 
-    if epoch, _ := store.RevocationEpoch(newTestRuntime(), "someone-else", ""); false == epoch.Equal(frozen.Now()) {
+    if epoch, _ := store.RevocationEpoch(newTestRuntime(), "someone-else", securitycontract.RevocationOptions{}); false == epoch.Equal(frozen.Now()) {
         t.Fatalf("expected the boundary published, got %v", epoch)
     }
 }
@@ -941,8 +963,8 @@ func TestInMemoryTokenStore_ArgumentRefusalsAreUnmarkedErrors(t *testing.T) {
         "ttl absent": func() error {
             return store.Put(runtimeInstance, "t", securitycontract.Claims{UserIdentifier: "u"}, bound.Duration{})
         },
-        "empty user":   func() error { return store.RevokeBefore(runtimeInstance, "", "", time.Now()) },
-        "zero instant": func() error { return store.RevokeBefore(runtimeInstance, "u", "", time.Time{}) },
+        "empty user":   func() error { return store.RevokeBefore(runtimeInstance, "", time.Now(), securitycontract.RevocationOptions{}) },
+        "zero instant": func() error { return store.RevokeBefore(runtimeInstance, "u", time.Time{}, securitycontract.RevocationOptions{}) },
         "non-UTF-8 user at Put": func() error {
             return store.Put(runtimeInstance, "t", securitycontract.Claims{UserIdentifier: "\xff"}, bound.UnlimitedDuration())
         },
@@ -951,17 +973,49 @@ func TestInMemoryTokenStore_ArgumentRefusalsAreUnmarkedErrors(t *testing.T) {
 
             return deleteErr
         },
-        "non-UTF-8 user at RevokeBefore": func() error { return store.RevokeBefore(runtimeInstance, "\xff", "", time.Now()) },
+        "non-UTF-8 user at RevokeBefore": func() error { return store.RevokeBefore(runtimeInstance, "\xff", time.Now(), securitycontract.RevocationOptions{}) },
         "instant before 1970": func() error {
-            return store.RevokeBefore(runtimeInstance, "u", "", time.Date(1960, time.January, 1, 0, 0, 0, 0, time.UTC))
+            return store.RevokeBefore(runtimeInstance, "u", time.Date(1960, time.January, 1, 0, 0, 0, 0, time.UTC), securitycontract.RevocationOptions{})
         },
         "instant past 2262": func() error {
-            return store.RevokeBefore(runtimeInstance, "u", "", time.Date(2300, time.January, 1, 0, 0, 0, 0, time.UTC))
+            return store.RevokeBefore(runtimeInstance, "u", time.Date(2300, time.January, 1, 0, 0, 0, 0, time.UTC), securitycontract.RevocationOptions{})
         },
     } {
         if refusalErr := call(); nil == refusalErr || true == exception.IsInfrastructureFailure(refusalErr) {
             t.Fatalf("expected the %s refusal to be an unmarked error, got %v", refusal, refusalErr)
         }
+    }
+}
+
+func TestInMemoryTokenStore_ANonUtf8DeviceIdentifierIsRefusedNamingTheField(t *testing.T) {
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
+    runtimeInstance := newTestRuntime()
+
+    for field, call := range map[string]func() error{
+        "Claims.DeviceIdentifier": func() error {
+            return store.Put(runtimeInstance, "t", securitycontract.Claims{UserIdentifier: "u", DeviceIdentifier: "phone\xff"}, bound.UnlimitedDuration())
+        },
+        "RevocationOptions.DeviceIdentifier": func() error {
+            return store.RevokeBefore(runtimeInstance, "u", time.Now(), securitycontract.RevocationOptions{DeviceIdentifier: "phone\xff"})
+        },
+    } {
+        refusal := call()
+        if nil == refusal || false == strings.Contains(refusal.Error(), "device identifier must be valid UTF-8") || true == exception.IsInfrastructureFailure(refusal) {
+            t.Fatalf("expected %s refused unmarked as not UTF-8, got %v", field, refusal)
+        }
+
+        refusalContext := exception.FromError(refusal).Context()
+        if field != refusalContext["field"] || 6 != refusalContext["deviceLength"] {
+            t.Fatalf("expected the refusal to name %s and the length, never the bytes, got %v", field, refusalContext)
+        }
+    }
+
+    if _, found, _ := store.Lookup(runtimeInstance, "t"); true == found {
+        t.Fatalf("expected the refused put to store nothing")
+    }
+
+    if epoch, _ := store.RevocationEpoch(runtimeInstance, "u", securitycontract.RevocationOptions{DeviceIdentifier: "phone\xff"}); false == epoch.IsZero() {
+        t.Fatalf("expected the refused revocation to publish no boundary, got %v", epoch)
     }
 }
 
@@ -994,9 +1048,9 @@ func TestInMemoryTokenStore_RefusesADoneContextAtEveryDoorMarked(t *testing.T) {
 
             return purgeErr
         },
-        "RevokeBefore": func() error { return store.RevokeBefore(cancelledRuntime, "u-kept", "", time.Now()) },
+        "RevokeBefore": func() error { return store.RevokeBefore(cancelledRuntime, "u-kept", time.Now(), securitycontract.RevocationOptions{}) },
         "RevocationEpoch": func() error {
-            _, epochErr := store.RevocationEpoch(cancelledRuntime, "u-kept", "")
+            _, epochErr := store.RevocationEpoch(cancelledRuntime, "u-kept", securitycontract.RevocationOptions{})
 
             return epochErr
         },
@@ -1011,7 +1065,7 @@ func TestInMemoryTokenStore_RefusesADoneContextAtEveryDoorMarked(t *testing.T) {
         t.Fatalf("expected the refused calls to change nothing, got %+v (found=%t)", claims, found)
     }
 
-    if epoch, _ := store.RevocationEpoch(newTestRuntime(), "u-kept", ""); false == epoch.IsZero() {
+    if epoch, _ := store.RevocationEpoch(newTestRuntime(), "u-kept", securitycontract.RevocationOptions{}); false == epoch.IsZero() {
         t.Fatalf("expected no boundary published by a refused revocation, got %v", epoch)
     }
 }
@@ -1033,7 +1087,7 @@ func TestInMemoryTokenStore_TheCeilingSweepsATokenBornUnderAFutureBoundary(t *te
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
     store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{MaxEntries: bound.Of(1), SweepInterval: bound.UnlimitedDuration(), Clock: frozen})
 
-    if revokeErr := store.RevokeBefore(newTestRuntime(), "u-born", "", frozen.Now().Add(time.Hour)); nil != revokeErr {
+    if revokeErr := store.RevokeBefore(newTestRuntime(), "u-born", frozen.Now().Add(time.Hour), securitycontract.RevocationOptions{}); nil != revokeErr {
         t.Fatalf("revoke: %v", revokeErr)
     }
 
@@ -1060,7 +1114,7 @@ func TestInMemoryTokenStore_ABoundaryOfAUserWithNoStoredTokenForcesNoWalk(t *tes
     for range 2 {
         frozen.Advance(time.Minute)
 
-        if revokeErr := store.RevokeBefore(newTestRuntime(), "nobody", "", frozen.Now()); nil != revokeErr {
+        if revokeErr := store.RevokeBefore(newTestRuntime(), "nobody", frozen.Now(), securitycontract.RevocationOptions{}); nil != revokeErr {
             t.Fatalf("revoke: %v", revokeErr)
         }
 

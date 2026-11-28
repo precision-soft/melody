@@ -80,20 +80,20 @@ func (instance BoundTokenStore) PurgeExpired() (int, error) {
     return instance.storeInstance.PurgeExpired(instance.runtimeInstance)
 }
 
-func (instance BoundTokenStore) RevokeBefore(userIdentifier string, deviceIdentifier string, instant time.Time) error {
+func (instance BoundTokenStore) RevokeBefore(userIdentifier string, instant time.Time, options securitycontract.RevocationOptions) error {
     if nilErr := instance.refuseNilStore(); nil != nilErr {
         return nilErr
     }
 
-    return instance.storeInstance.RevokeBefore(instance.runtimeInstance, userIdentifier, deviceIdentifier, instant)
+    return instance.storeInstance.RevokeBefore(instance.runtimeInstance, userIdentifier, instant, options)
 }
 
-func (instance BoundTokenStore) RevocationEpoch(userIdentifier string, deviceIdentifier string) (time.Time, error) {
+func (instance BoundTokenStore) RevocationEpoch(userIdentifier string, options securitycontract.RevocationOptions) (time.Time, error) {
     if nilErr := instance.refuseNilStore(); nil != nilErr {
         return time.Time{}, nilErr
     }
 
-    return instance.storeInstance.RevocationEpoch(instance.runtimeInstance, userIdentifier, deviceIdentifier)
+    return instance.storeInstance.RevocationEpoch(instance.runtimeInstance, userIdentifier, options)
 }
 
 /* a typed-nil store passes a plain comparison and panics on its first method call */

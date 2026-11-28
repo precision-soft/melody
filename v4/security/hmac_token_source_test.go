@@ -71,7 +71,7 @@ func TestHmacTokenSource_ValidEnvelopeAuthenticatesAsServiceWithActor(t *testing
     actor := NewActor("user-7", securitycontract.ActorTypeUser, ActorConfig{Roles: []string{"ROLE_BUYER"}, Attributes: map[string]string{"tenant": "acme"}})
     body := []byte(`{"sku":"X-1"}`)
 
-    headerValue, signErr := signer.Sign(newTestRuntime(), "POST", "/internal/orders", body, actor)
+    headerValue, signErr := signer.Sign(newTestRuntime(), "POST", "/internal/orders", body, SignOptions{Actor: actor})
     if nil != signErr {
         t.Fatalf("sign: %v", signErr)
     }
@@ -103,7 +103,7 @@ func TestHmacTokenSource_ValidEnvelopeAuthenticatesAsServiceWithActor(t *testing
 func TestHmacTokenSource_MatchingAudienceAuthenticates(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{Audience: "orders-service"})
 
-    headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, nil)
+    headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, SignOptions{})
     if nil != signErr {
         t.Fatalf("sign: %v", signErr)
     }
@@ -123,7 +123,7 @@ func TestHmacTokenSource_MatchingAudienceAuthenticates(t *testing.T) {
 func TestHmacTokenSource_MismatchedAudienceIsAnonymous(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{Audience: "billing-service"})
 
-    headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, nil)
+    headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, SignOptions{})
 
     source := NewHmacTokenSource(hmacTestSecrets(), hmacTestApplications(), HmacTokenSourceConfig{
         NonceGuard:      NewMemoryNonceGuard(MemoryNonceGuardConfig{}),
@@ -140,7 +140,7 @@ func TestHmacTokenSource_MismatchedAudienceIsAnonymous(t *testing.T) {
 func TestHmacTokenSource_AudienceUnenforcedWhenNoServiceIdentity(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
 
-    headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, nil)
+    headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, SignOptions{})
 
     source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
@@ -154,7 +154,7 @@ func TestHmacTokenSource_AudienceUnenforcedWhenNoServiceIdentity(t *testing.T) {
 func TestHmacTokenSource_TamperedSignatureIsAnonymous(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
 
-    headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, nil)
+    headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, SignOptions{})
     tampered := tamperHmacPayload(headerValue)
 
     source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
@@ -168,7 +168,7 @@ func TestHmacTokenSource_TamperedSignatureIsAnonymous(t *testing.T) {
 func TestHmacTokenSource_ExpiredEnvelopeIsAnonymous(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{Clock: clock.NewFrozenClock(time.Now().Add(-time.Hour))})
 
-    headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, nil)
+    headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, SignOptions{})
 
     source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
     token, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/ping", nil, signer.HeaderName(), headerValue))
@@ -180,7 +180,7 @@ func TestHmacTokenSource_ExpiredEnvelopeIsAnonymous(t *testing.T) {
 
 func TestHmacTokenSource_ReplayedNonceIsRejected(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
-    headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, nil)
+    headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, SignOptions{})
 
     source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
@@ -200,7 +200,7 @@ func TestHmacTokenSource_UnknownApplicationIsAnonymous(t *testing.T) {
     ghostKeys := map[string]HmacKey{"key-ghost": {Application: "ghost-service", Secret: []byte("ghost-shared-secret-value-00001-padded-to-the-hs256-minimum")}}
 
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-ghost", Keys: ghostKeys}), "ghost-service", HmacEnvelopeSignerConfig{})
-    headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, nil)
+    headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, SignOptions{})
 
     source := NewHmacTokenSource(NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-ghost", Keys: ghostKeys}), hmacTestApplications(), HmacTokenSourceConfig{
         NonceGuard:   NewMemoryNonceGuard(MemoryNonceGuardConfig{}),
@@ -271,7 +271,7 @@ func craftHmacHeaderValueWithNonce(t *testing.T, keyId string, secret []byte, ap
 
 func TestHmacTokenSource_EndpointMismatchIsAnonymous(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
-    headerValue, _ := signer.Sign(newTestRuntime(), "POST", "/internal/orders", nil, nil)
+    headerValue, _ := signer.Sign(newTestRuntime(), "POST", "/internal/orders", nil, SignOptions{})
 
     source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
@@ -293,25 +293,25 @@ func TestHmacTokenSource_EndpointIsBoundToTheSpellingTheRouterRoutes(t *testing.
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
     source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
-    decodedHeader, _ := signer.Sign(newTestRuntime(), "GET", "/internal/files/a/b", nil, nil)
+    decodedHeader, _ := signer.Sign(newTestRuntime(), "GET", "/internal/files/a/b", nil, SignOptions{})
     crossed, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/files/a%2Fb", nil, signer.HeaderName(), decodedHeader))
     if true == crossed.IsAuthenticated() {
         t.Fatal("expected an envelope signed for /internal/files/a/b to be refused for the one-segment resource /internal/files/a%2Fb")
     }
 
-    decodedBraceHeader, _ := signer.Sign(newTestRuntime(), "GET", "/internal/files/a/b{", nil, nil)
+    decodedBraceHeader, _ := signer.Sign(newTestRuntime(), "GET", "/internal/files/a/b{", nil, SignOptions{})
     crossedBrace, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/files/a%2Fb{", nil, signer.HeaderName(), decodedBraceHeader))
     if true == crossedBrace.IsAuthenticated() {
         t.Fatal("expected an envelope signed for /internal/files/a/b{ to be refused for the one-segment resource /internal/files/a%2Fb{")
     }
 
-    routedHeader, _ := signer.Sign(newTestRuntime(), "GET", "/internal/files/a%2Fb", nil, nil)
+    routedHeader, _ := signer.Sign(newTestRuntime(), "GET", "/internal/files/a%2Fb", nil, SignOptions{})
     routed, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/files/a%2Fb", nil, signer.HeaderName(), routedHeader))
     if false == routed.IsAuthenticated() {
         t.Fatal("expected an envelope signed for the routed spelling /internal/files/a%2Fb to authenticate")
     }
 
-    decodedSegmentHeader, _ := signer.Sign(newTestRuntime(), "GET", "/internal/files/café", nil, nil)
+    decodedSegmentHeader, _ := signer.Sign(newTestRuntime(), "GET", "/internal/files/café", nil, SignOptions{})
     decodedSegment, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/files/caf%C3%A9", nil, signer.HeaderName(), decodedSegmentHeader))
     if false == decodedSegment.IsAuthenticated() {
         t.Fatal("expected a segment that decodes to no separator to be bound by its decoded spelling, as before")
@@ -322,19 +322,19 @@ func TestHmacTokenSource_RefusesASegmentThatDecodesToALiteralEncodedSeparator(t 
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
     source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
-    routedHeader, _ := signer.Sign(newTestRuntime(), "GET", "/internal/files/a%2Fb", nil, nil)
+    routedHeader, _ := signer.Sign(newTestRuntime(), "GET", "/internal/files/a%2Fb", nil, SignOptions{})
     crossed, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/files/a%252Fb", nil, signer.HeaderName(), routedHeader))
     if true == crossed.IsAuthenticated() {
         t.Fatal("expected an envelope signed for the encoded separator /internal/files/a%2Fb to be refused for /internal/files/a%252Fb")
     }
 
-    lowercaseLiteralHeader, _ := signer.Sign(newTestRuntime(), "GET", "/internal/files/a%2fb", nil, nil)
+    lowercaseLiteralHeader, _ := signer.Sign(newTestRuntime(), "GET", "/internal/files/a%2fb", nil, SignOptions{})
     lowercaseLiteral, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/files/a%252fb", nil, signer.HeaderName(), lowercaseLiteralHeader))
     if false == lowercaseLiteral.IsAuthenticated() {
         t.Fatal("expected a lowercase literal, which no encoded separator is routed as, to authenticate under its routed spelling")
     }
 
-    literalPercentHeader, _ := signer.Sign(newTestRuntime(), "GET", "/internal/files/a%25b", nil, nil)
+    literalPercentHeader, _ := signer.Sign(newTestRuntime(), "GET", "/internal/files/a%25b", nil, SignOptions{})
     literalPercent, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/files/a%2525b", nil, signer.HeaderName(), literalPercentHeader))
     if false == literalPercent.IsAuthenticated() {
         t.Fatal("expected a literal percent that does not spell an encoded separator to authenticate")
@@ -343,7 +343,7 @@ func TestHmacTokenSource_RefusesASegmentThatDecodesToALiteralEncodedSeparator(t 
 
 func TestHmacTokenSource_BodyTamperingIsAnonymous(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
-    headerValue, _ := signer.Sign(newTestRuntime(), "POST", "/internal/orders", []byte(`{"sku":"X-1"}`), nil)
+    headerValue, _ := signer.Sign(newTestRuntime(), "POST", "/internal/orders", []byte(`{"sku":"X-1"}`), SignOptions{})
 
     source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
     token, _ := source.Resolve(
@@ -358,7 +358,7 @@ func TestHmacTokenSource_BodyTamperingIsAnonymous(t *testing.T) {
 
 func TestHmacTokenSource_QueryIsSignedAndMatched(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
-    headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/orders?status=open&limit=50", nil, nil)
+    headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/orders?status=open&limit=50", nil, SignOptions{})
 
     source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
     token, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/orders?status=open&limit=50", nil, signer.HeaderName(), headerValue))
@@ -371,7 +371,7 @@ func TestHmacTokenSource_QueryIsSignedAndMatched(t *testing.T) {
 /* negative control: the query string is covered by the signature, so tampering with it (as the body and path already are) is rejected. */
 func TestHmacTokenSource_QueryTamperingIsAnonymous(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
-    headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/orders?status=open", nil, nil)
+    headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/orders?status=open", nil, SignOptions{})
 
     source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
     token, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/orders?status=all", nil, signer.HeaderName(), headerValue))
@@ -422,7 +422,7 @@ func TestHmacTokenSource_NonceIsNamespacedAwayFromTotpGuard(t *testing.T) {
 func TestHmacTokenSource_AcceptsPreviousActiveKey(t *testing.T) {
     /* a signer pinned to the previous key id still verifies while that key stays active (rotation overlap) */
     previousSigner := NewHmacEnvelopeSigner(hmacTestRuntime(), NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-previous", Keys: map[string]HmacKey{"key-previous": {Application: "wms-service", Secret: []byte("previous-shared-secret-value-002")}}}), "wms-service", HmacEnvelopeSignerConfig{})
-    headerValue, _ := previousSigner.Sign(newTestRuntime(), "GET", "/internal/ping", nil, nil)
+    headerValue, _ := previousSigner.Sign(newTestRuntime(), "GET", "/internal/ping", nil, SignOptions{})
 
     source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
     token, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/ping", nil, previousSigner.HeaderName(), headerValue))
@@ -434,7 +434,7 @@ func TestHmacTokenSource_AcceptsPreviousActiveKey(t *testing.T) {
 
 func TestHmacTokenSource_RejectsUnknownKeyId(t *testing.T) {
     unknownSigner := NewHmacEnvelopeSigner(hmacTestRuntime(), NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-retired", Keys: map[string]HmacKey{"key-retired": {Application: "wms-service", Secret: []byte("retired-shared-secret-value-0003")}}}), "wms-service", HmacEnvelopeSignerConfig{})
-    headerValue, _ := unknownSigner.Sign(newTestRuntime(), "GET", "/internal/ping", nil, nil)
+    headerValue, _ := unknownSigner.Sign(newTestRuntime(), "GET", "/internal/ping", nil, SignOptions{})
 
     source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
     token, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/ping", nil, unknownSigner.HeaderName(), headerValue))
@@ -460,7 +460,7 @@ func TestHmacTokenSource_MissingHeaderIsAnonymousWithoutError(t *testing.T) {
 func TestHmacTokenSource_RestoresBodyForDownstreamHandler(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
     body := []byte(`{"sku":"X-1"}`)
-    headerValue, _ := signer.Sign(newTestRuntime(), "POST", "/internal/orders", body, nil)
+    headerValue, _ := signer.Sign(newTestRuntime(), "POST", "/internal/orders", body, SignOptions{})
 
     request := hmacRequest("POST", "/internal/orders", body, signer.HeaderName(), headerValue)
 
@@ -482,7 +482,7 @@ func TestHmacTokenSource_RestoresBodyForDownstreamHandler(t *testing.T) {
 /* an envelope whose expiry sits beyond the configured MaxFutureExpiry is rejected, so a holder of a valid secret can not mint a far-future-expiry envelope that pins unbounded memory in an in-process nonce guard (which remembers each nonce until its envelope expires). */
 func TestHmacTokenSource_RejectsExpiryBeyondMaxFutureExpiry(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{Ttl: bound.Of(time.Hour)})
-    headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, nil)
+    headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, SignOptions{})
 
     source := NewHmacTokenSource(hmacTestSecrets(), hmacTestApplications(), HmacTokenSourceConfig{
         NonceGuard:      NewMemoryNonceGuard(MemoryNonceGuardConfig{}),
@@ -504,7 +504,7 @@ func TestHmacTokenSource_TheDefaultHorizonIsAnHour(t *testing.T) {
         {ttl: 61 * time.Minute, admitted: false},
     } {
         signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{Ttl: bound.Of(probe.ttl)})
-        headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, nil)
+        headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, SignOptions{})
 
         source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
         token, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/ping", nil, signer.HeaderName(), headerValue))
@@ -519,7 +519,7 @@ func TestHmacTokenSource_TheDefaultHorizonIsAnHour(t *testing.T) {
 func TestHmacTokenSource_BodyBeforeNonceSurvivesNonceBurn(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
     body := []byte(`{"sku":"X-1"}`)
-    headerValue, _ := signer.Sign(newTestRuntime(), "POST", "/internal/orders", body, nil)
+    headerValue, _ := signer.Sign(newTestRuntime(), "POST", "/internal/orders", body, SignOptions{})
 
     source := NewHmacTokenSource(hmacTestSecrets(), hmacTestApplications(), HmacTokenSourceConfig{
         NonceGuard:            NewMemoryNonceGuard(MemoryNonceGuardConfig{}),
@@ -541,7 +541,7 @@ func TestHmacTokenSource_BodyBeforeNonceSurvivesNonceBurn(t *testing.T) {
 func TestHmacTokenSource_NonceFirstBurnDeniesGenuineRequest(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
     body := []byte(`{"sku":"X-1"}`)
-    headerValue, _ := signer.Sign(newTestRuntime(), "POST", "/internal/orders", body, nil)
+    headerValue, _ := signer.Sign(newTestRuntime(), "POST", "/internal/orders", body, SignOptions{})
 
     source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
@@ -568,7 +568,7 @@ func hmacGenuineSurvivesAMutatedReplay(t *testing.T, sourceBodyFirst bool, hmacC
 
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
     body := []byte(`{"sku":"X-1"}`)
-    headerValue, _ := signer.Sign(newTestRuntime(), "POST", "/internal/orders", body, nil)
+    headerValue, _ := signer.Sign(newTestRuntime(), "POST", "/internal/orders", body, SignOptions{})
 
     source := NewHmacTokenSource(hmacTestSecrets(), hmacTestApplications(), HmacTokenSourceConfig{
         NonceGuard:            NewMemoryNonceGuard(MemoryNonceGuardConfig{}),
@@ -656,7 +656,7 @@ func TestHmacTokenSource_EndToEndResolvesServiceWithActorThroughFirewall(t *test
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), secrets, "wms-service", HmacEnvelopeSignerConfig{})
     actor := NewActor("user-7", securitycontract.ActorTypeUser, ActorConfig{Roles: []string{"ROLE_BUYER"}, Attributes: map[string]string{"tenant": "acme"}})
 
-    headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, actor)
+    headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, SignOptions{Actor: actor})
     if nil != signErr {
         t.Fatalf("sign: %v", signErr)
     }
@@ -768,7 +768,7 @@ func (instance *failingNonceGuard) Remember(_ containercontract.Runtime, _ strin
 
 func TestHmacTokenSource_ANonceGuardThatCannotAnswerIsUnavailable(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
-    headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, nil)
+    headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, SignOptions{})
     if nil != signErr {
         t.Fatalf("sign: %v", signErr)
     }
@@ -805,8 +805,8 @@ func TestHmacTokenSource_ANonceGuardThatCannotAnswerIsUnavailable(t *testing.T) 
 
 func TestHmacTokenSource_AFullNonceGuardIsUnavailable(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
-    first, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, nil)
-    second, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, nil)
+    first, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, SignOptions{})
+    second, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, SignOptions{})
 
     source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{MaxEntries: bound.Of(1)}))
 
@@ -824,7 +824,7 @@ func TestHmacTokenSource_AFullNonceGuardIsUnavailable(t *testing.T) {
 
 func TestHmacTokenSource_ForgedEnvelopeStaysAtInfo(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
-    headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, nil)
+    headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, SignOptions{})
 
     source := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
     runtimeInstance, logger := runtimeWithRecordingLogger()
@@ -846,7 +846,7 @@ func TestHmacTokenSource_ForgedEnvelopeStaysAtInfo(t *testing.T) {
 /* both query strings carry whatever the caller put in the url; only the parameter NAMES may reach the journal. */
 func TestHmacTokenSource_QueryMismatchContextCarriesNamesButNoValues(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
-    headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal/ping?api_key=SIGNEDSECRETVALUE", nil, nil)
+    headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal/ping?api_key=SIGNEDSECRETVALUE", nil, SignOptions{})
     if nil != signErr {
         t.Fatalf("sign: %v", signErr)
     }
@@ -882,7 +882,7 @@ func TestHmacTokenSource_TimeWindowRunsOnTheInjectedClock(t *testing.T) {
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
 
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{Clock: frozen})
-    headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, nil)
+    headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, SignOptions{})
     if nil != signErr {
         t.Fatalf("sign: %v", signErr)
     }
@@ -1160,7 +1160,7 @@ func TestHmacTokenSource_TheIssuedAtToleranceDoesNotWidenTheExpiry(t *testing.T)
 /* the refusal fires only when the two queries differ byte for byte, so a reordered pair renders as two different strings in the journal */
 func TestHmacTokenSource_QueryMismatchByReorderingRendersTwoDifferentQueries(t *testing.T) {
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), "wms-service", HmacEnvelopeSignerConfig{})
-    headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal/ping?b=2&a=1", nil, nil)
+    headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal/ping?b=2&a=1", nil, SignOptions{})
     if nil != signErr {
         t.Fatalf("sign: %v", signErr)
     }
@@ -1190,7 +1190,7 @@ func TestHmacTokenSource_QueryMismatchByReorderingRendersTwoDifferentQueries(t *
 func TestHmacTokenSource_AnUnknownApplicationIsJournaledByItsName(t *testing.T) {
     ghostKeys := map[string]HmacKey{"key-ghost": {Application: "ghost-service", Secret: []byte("ghost-shared-secret-value-00001-padded-to-the-hs256-minimum")}}
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-ghost", Keys: ghostKeys}), "ghost-service", HmacEnvelopeSignerConfig{})
-    headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, nil)
+    headerValue, _ := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, SignOptions{})
 
     source := NewHmacTokenSource(NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-ghost", Keys: ghostKeys}), hmacTestApplications(), HmacTokenSourceConfig{
         NonceGuard:   NewMemoryNonceGuard(MemoryNonceGuardConfig{}),
@@ -1252,7 +1252,7 @@ func signedWithCustomProvider(t *testing.T, provider *customHmacSecretProvider) 
     t.Helper()
 
     signer := NewHmacEnvelopeSigner(hmacTestRuntime(), provider, "wms-service", HmacEnvelopeSignerConfig{})
-    headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, nil)
+    headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, SignOptions{})
     if nil != signErr {
         t.Fatalf("sign: %v", signErr)
     }
@@ -1415,7 +1415,7 @@ func TestHmacTokenSource_UrlEncodedBody_HashedFromTheRawBytes_ThenStillParsable(
     body := []byte("sku=X-1&quantity=2")
 
     for _, formFirst := range []bool{false, true} {
-        headerValue, _ := signer.Sign(newTestRuntime(), "POST", "/internal/orders", body, nil)
+        headerValue, _ := signer.Sign(newTestRuntime(), "POST", "/internal/orders", body, SignOptions{})
         netRequest := httptest.NewRequest("POST", "/internal/orders", bytes.NewReader(body))
         netRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
         netRequest.Header.Set(signer.HeaderName(), headerValue)

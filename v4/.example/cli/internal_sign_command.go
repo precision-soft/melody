@@ -124,7 +124,7 @@ func (instance *InternalSignCommand) Run(
         return signerErr
     }
 
-    header, signErr := signer.Sign(runtimeInstance, method, path, body, actor)
+    header, signErr := signer.Sign(runtimeInstance, method, path, body, melodysecurity.SignOptions{Actor: actor})
     if nil != signErr {
         return signErr
     }

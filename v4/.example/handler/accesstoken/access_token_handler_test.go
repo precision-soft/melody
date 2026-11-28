@@ -393,12 +393,37 @@ type contextRefusingTokenStore struct {
     *melodysecurity.InMemoryTokenStore
 }
 
-func (instance *contextRefusingTokenStore) RevokeBefore(runtimeInstance melodycontainercontract.Runtime, userIdentifier string, deviceIdentifier string, instant time.Time) error {
+func (instance *contextRefusingTokenStore) RevokeBefore(runtimeInstance melodycontainercontract.Runtime, userIdentifier string, instant time.Time, options melodysecuritycontract.RevocationOptions) error {
     if contextErr := runtimeInstance.Context().Err(); nil != contextErr {
         return contextErr
     }
 
-    return instance.InMemoryTokenStore.RevokeBefore(runtimeInstance, userIdentifier, deviceIdentifier, instant)
+    return instance.InMemoryTokenStore.RevokeBefore(runtimeInstance, userIdentifier, instant, options)
+}
+
+func TestPublishBoundary_ADevicesRevocationPublishesTheDevicesBoundaryAlone(t *testing.T) {
+    store := melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{})
+
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
+    melodycontainer.MustRegister(containerInstance, melodyrueidis.ServiceTokenStore, func(resolver melodycontainercontract.Resolver) (melodysecuritycontract.EpochRevocableTokenStore, error) {
+        return store, nil
+    }, melodycontainer.RegisterOptions{})
+    melodycontainer.MustRegister(containerInstance, melodyclock.ServiceClock, func(resolver melodycontainercontract.Resolver) (melodyclockcontract.Clock, error) {
+        return melodyclock.NewSystemClock(), nil
+    }, melodycontainer.RegisterOptions{})
+
+    if _, publishErr := publishBoundary(melodyruntime.NewRequest(context.Background(), containerInstance.NewScope()), "user-9", "phone"); nil != publishErr {
+        t.Fatalf("expected the device's boundary published, got %v", publishErr)
+    }
+
+    if epoch, _ := store.RevocationEpoch(accessTokenTestRuntime(), "user-9", melodysecuritycontract.RevocationOptions{DeviceIdentifier: "phone"}); true == epoch.IsZero() {
+        t.Fatalf("expected the device's boundary published")
+    }
+
+    if epoch, _ := store.RevocationEpoch(accessTokenTestRuntime(), "user-9", melodysecuritycontract.RevocationOptions{}); false == epoch.IsZero() {
+        t.Fatalf("expected no user-wide boundary from a device's revocation, got %v", epoch)
+    }
 }
 
 func TestPublishBoundary_ACancelledRequestStillPublishesTheRevocation(t *testing.T) {
@@ -420,7 +445,7 @@ func TestPublishBoundary_ACancelledRequestStillPublishesTheRevocation(t *testing
         t.Fatalf("expected the boundary published although the request was cancelled, got %v", publishErr)
     }
 
-    epoch, epochErr := store.RevocationEpoch(accessTokenTestRuntime(), "user-9", "")
+    epoch, epochErr := store.RevocationEpoch(accessTokenTestRuntime(), "user-9", melodysecuritycontract.RevocationOptions{})
     if nil != epochErr || true == epoch.IsZero() {
         t.Fatalf("expected the revocation epoch published, got %v %v", epoch, epochErr)
     }

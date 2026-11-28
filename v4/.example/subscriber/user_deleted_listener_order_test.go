@@ -95,7 +95,7 @@ func TestUserDeleted_AFailingListenerDoesNotLeaveTheDeletedAccountsTokens(t *tes
         t.Fatal("expected the deleted account's device token released ahead of the listeners that failed")
     }
 
-    if epoch, _ := tokenStore.RevocationEpoch(runtimeInstance, "user-4", ""); true == epoch.IsZero() {
+    if epoch, _ := tokenStore.RevocationEpoch(runtimeInstance, "user-4", melodysecuritycontract.RevocationOptions{}); true == epoch.IsZero() {
         t.Fatal("expected the deleted account revoked ahead of the listeners that failed")
     }
 

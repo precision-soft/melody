@@ -149,11 +149,13 @@ func publishBoundary(
     store := examplesecurity.TokenStoreFromRuntime(examplesecurity.DetachedRuntime(runtimeInstance))
     instant := melodyclock.ClockMustFromRuntime(runtimeInstance).Now()
 
-    if revokeErr := store.RevokeBefore(userIdentifier, deviceIdentifier, instant); nil != revokeErr {
+    options := melodysecuritycontract.RevocationOptions{DeviceIdentifier: deviceIdentifier}
+
+    if revokeErr := store.RevokeBefore(userIdentifier, instant, options); nil != revokeErr {
         return nil, revokeErr
     }
 
-    published, epochErr := store.RevocationEpoch(userIdentifier, deviceIdentifier)
+    published, epochErr := store.RevocationEpoch(userIdentifier, options)
     if nil != epochErr {
         return nil, epochErr
     }

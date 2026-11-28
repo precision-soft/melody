@@ -104,6 +104,12 @@ func NewHmacEnvelopeSigner(
     return signer
 }
 
+/* SignOptions is what one Sign declares beside what it signs. */
+type SignOptions struct {
+    /* Actor is the originating actor the envelope propagates; left out, the envelope carries none. */
+    Actor securitycontract.Actor
+}
+
 type HmacEnvelopeSigner struct {
     application         string
     secrets             HmacSecretProvider
@@ -120,13 +126,13 @@ func (instance *HmacEnvelopeSigner) HeaderName() string {
     return instance.headerName
 }
 
-/* Sign builds the internal-auth header value binding the call to method, path, query string and the given body, optionally propagating an originating actor. The path argument may carry a query string (everything after the first '?'); it is signed separately and matched against the request's raw query at the callee. The path is matched at the callee against the spelling its router matched — each segment decoded on its own, a separator encoded inside a segment kept as "%2F", in upper case whatever case the request line used — so a caller signs "/files/café" for a request line "/files/caf%C3%A9" and "/files/a%2Fb" for the one-segment resource "a/b"; a request whose segment decodes to a literal "%2F" cannot be signed and is refused. Since the argument is cut at its first "?", a request whose path segment decodes to a name carrying "?" cannot be signed either: the signature covers the path before it, and the callee refuses the envelope. The provider is asked under the caller's runtime. A provider that could not answer is returned marked as an infrastructure failure; a current key the provider rotated to is judged as the constructor judges it. The returned string is written to HeaderName() on the outgoing request. */
+/* Sign builds the internal-auth header value binding the call to method, path, query string and the given body, propagating the originating actor SignOptions.Actor names, none when left out. The path argument may carry a query string (everything after the first '?'); it is signed separately and matched against the request's raw query at the callee. The path is matched at the callee against the spelling its router matched — each segment decoded on its own, a separator encoded inside a segment kept as "%2F", in upper case whatever case the request line used — so a caller signs "/files/café" for a request line "/files/caf%C3%A9" and "/files/a%2Fb" for the one-segment resource "a/b"; a request whose segment decodes to a literal "%2F" cannot be signed and is refused. Since the argument is cut at its first "?", a request whose path segment decodes to a name carrying "?" cannot be signed either: the signature covers the path before it, and the callee refuses the envelope. The provider is asked under the caller's runtime. A provider that could not answer is returned marked as an infrastructure failure; a current key the provider rotated to is judged as the constructor judges it. The returned string is written to HeaderName() on the outgoing request. */
 func (instance *HmacEnvelopeSigner) Sign(
     runtimeInstance containercontract.Runtime,
     method string,
     path string,
     body []byte,
-    actor securitycontract.Actor,
+    options SignOptions,
 ) (string, error) {
     if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance, "security.HmacEnvelopeSigner.Sign"); nil != runtimeErr {
         return "", runtimeErr
@@ -169,7 +175,7 @@ func (instance *HmacEnvelopeSigner) Sign(
         ExpiresAt:   now.Add(instance.ttl).Unix(),
         Nonce:       nonce,
         BodyHash:    hashBody(body),
-        Actor:       ActorToData(actor),
+        Actor:       ActorToData(options.Actor),
     }
 
     return encodeHmacHeaderValue(keyId, envelope, secret)
