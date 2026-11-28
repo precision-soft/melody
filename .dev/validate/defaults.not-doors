@@ -39,6 +39,7 @@ v4/http/static.Config.Mode ~ selects the file system, a directory or an embedded
 v4/http/static.Config.WeakEtag ~ the form of the validator, weak or strong
 v4/internal/plaintext.Options.LabelKeys ~ the spelling of the keys of a rendered body
 v4/logging.JsonLoggerConfig.MinLevel ~ the lowest level written; redaction applies at every level
+v4/logging.RecoverOptions.PanicAgain ~ what the deferred recovery does with a panic it logged, chosen per call: nothing is guarded either way
 v4/mailer.SmtpConfig.ImplicitTls ~ selects TLS from the first byte in place of STARTTLS; neither form is plaintext, AllowPlaintext is the door
 v4/mailer.SmtpConfig.RequireAuthentication ~ hardens only: on refuses a send without a username, off is the default
 v4/messagebus/contract.NackConfig.Requeue ~ the outcome of one negative acknowledgement, chosen per call

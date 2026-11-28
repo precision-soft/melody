@@ -56,13 +56,13 @@ func (instance *VersionCommand) Run(
         )
 
         if "" != envelope.Meta.Version.Application {
-            block.AddRow("application", envelope.Meta.Version.Application)
+            block.AddRow([]string{"application", envelope.Meta.Version.Application})
         } else {
-            block.AddRow("application", output.UnknownApplicationVersion)
+            block.AddRow([]string{"application", output.UnknownApplicationVersion})
         }
 
-        block.AddRow("melody", envelope.Meta.Version.Melody)
-        block.AddRow("go", envelope.Meta.Version.Go)
+        block.AddRow([]string{"melody", envelope.Meta.Version.Melody})
+        block.AddRow([]string{"go", envelope.Meta.Version.Go})
 
         envelope.Table = builder.Build()
     } else {

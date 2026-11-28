@@ -254,7 +254,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 if false == internal.IsNilInterface(entryPoint) {
                     response, startErr := entryPoint.Start(runtimeInstance, requestEvent.Request())
                     if nil != startErr {
-                        http.CloseDiscardedResponseBody(response, logging.LoggerFromRuntime(runtimeInstance))
+                        http.CloseDiscardedResponseBody(response, http.DiscardedBodyOptions{Logger: logging.LoggerFromRuntime(runtimeInstance)})
 
                         requestEvent.Refuse(startErr)
 
@@ -356,7 +356,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 }
 
                 if nil != handlerErr {
-                    http.CloseDiscardedResponseBody(response, logging.LoggerFromRuntime(runtimeInstance))
+                    http.CloseDiscardedResponseBody(response, http.DiscardedBodyOptions{Logger: logging.LoggerFromRuntime(runtimeInstance)})
 
                     /* both errors are the cause, the authorization decision first, so the renderer resolves the denial status through the chain and the handler's own error stays reachable; the handler error alone would turn a 403 into a 500 */
                     decisionErr = exception.NewError(

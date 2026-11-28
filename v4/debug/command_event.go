@@ -161,13 +161,13 @@ func (instance *EventCommand) Run(
         )
 
         for _, item := range items {
-            block.AddRow(
+            block.AddRow([]string{
                 item.EventName,
                 fmt.Sprintf("%d", item.ListenerCount),
                 fmt.Sprintf("%d", item.FromSubscriberCount),
                 fmt.Sprintf("%d", item.SubscriberOwnerCount),
                 item.Priorities,
-            )
+            })
         }
 
         if true == option.Verbose {
@@ -177,7 +177,7 @@ func (instance *EventCommand) Run(
             )
 
             for _, registeredEvent := range selectSortedRegisteredEvents(registeredEvents, items, option.Order) {
-                verboseBlock.AddRow(output.TableRowSeparatorToken)
+                verboseBlock.AddRow([]string{output.TableRowSeparatorToken})
 
                 /* the rows keep the dispatcher's slice order, which is the dispatch order */
                 for index, listener := range registeredEvent.Listeners {
@@ -186,7 +186,7 @@ func (instance *EventCommand) Run(
                         eventCell = registeredEvent.EventName
                     }
 
-                    verboseBlock.AddRow(
+                    verboseBlock.AddRow([]string{
                         eventCell,
                         fmt.Sprintf("%d", index+1),
                         fmt.Sprintf("%d", listener.Config.Priority),
@@ -196,10 +196,10 @@ func (instance *EventCommand) Run(
                         listener.Source,
                         listener.Owner,
                         listener.ListenerName,
-                    )
+                    })
                 }
 
-                verboseBlock.AddRow(output.TableRowSeparatorToken)
+                verboseBlock.AddRow([]string{output.TableRowSeparatorToken})
             }
 
             /* a declaration is listed on its own, so one made for an event no listener carries yet stays visible */
@@ -211,10 +211,10 @@ func (instance *EventCommand) Run(
                 )
 
                 for _, declarationItem := range declarationItems {
-                    declarationBlock.AddRow(
+                    declarationBlock.AddRow([]string{
                         declarationItem.EventName,
                         renderListenerTags(declarationItem.Config.TagsToRunAfterFailure),
-                    )
+                    })
                 }
             }
         }
@@ -428,12 +428,12 @@ func renderDeferredListenerBlock(builder *output.TableBuilder, deferredListeners
     )
 
     for _, deferredListener := range deferredListeners {
-        deferredBlock.AddRow(
+        deferredBlock.AddRow([]string{
             deferredListener.EventName,
             fmt.Sprintf("%d", deferredListener.Priority),
             deferredListener.ListenerName,
             deferredListener.Note,
-        )
+        })
     }
 }
 

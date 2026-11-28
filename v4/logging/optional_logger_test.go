@@ -90,11 +90,11 @@ func TestOptionalDependencies_NilIsTheDefaultAndATypedNilIsRefused(t *testing.T)
 
             return storageErr
         }},
-        {"static.FileServer.Serve", "static file server logger is a typed nil", "FileServer.Serve.logger", "static serve skipped because request is nil", func(logger loggingcontract.Logger) error {
-            return capturePanic(func() { static.NewFileServer(static.Config{Root: t.TempDir()}).Serve(nil, logger) })
+        {"static.FileServer.Serve", "static file server logger is a typed nil", "ServeOptions.Logger", "static serve skipped because request is nil", func(logger loggingcontract.Logger) error {
+            return capturePanic(func() { static.NewFileServer(static.Config{Root: t.TempDir()}).Serve(nil, static.ServeOptions{Logger: logger}) })
         }},
-        {"static.FileServer.ServeReader", "static file server logger is a typed nil", "FileServer.ServeReader.logger", "static serve reader skipped because request is nil", func(logger loggingcontract.Logger) error {
-            return capturePanic(func() { static.NewFileServer(static.Config{Root: t.TempDir()}).ServeReader(nil, logger) })
+        {"static.FileServer.ServeReader", "static file server logger is a typed nil", "ServeOptions.Logger", "static serve reader skipped because request is nil", func(logger loggingcontract.Logger) error {
+            return capturePanic(func() { static.NewFileServer(static.Config{Root: t.TempDir()}).ServeReader(nil, static.ServeOptions{Logger: logger}) })
         }},
     }
 

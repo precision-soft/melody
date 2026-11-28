@@ -532,8 +532,7 @@ func newEnvelopeErrorCommand() *testCommand {
             envelope.SetError(
                 "debug.notFound",
                 "service not found",
-                nil,
-                nil,
+                output.ErrorConfig{},
             )
 
             return output.Render(commandContext.Writer, envelope, option)

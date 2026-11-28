@@ -29,10 +29,11 @@ func TestRender_ReturnsAnExitErrorWhenTheEnvelopeCarriesAnError(t *testing.T) {
     envelope.SetError(
         "debug.notFound",
         "service not found",
-        map[string]any{
-            "serviceName": "missing.service.name",
+        ErrorConfig{
+            Details: map[string]any{
+                "serviceName": "missing.service.name",
+            },
         },
-        nil,
     )
 
     renderErr := Render(buffer, envelope, Option{Format: FormatJson})
@@ -86,7 +87,7 @@ func TestRender_ReturnsNilForAnEnvelopeCarryingOnlyWarnings(t *testing.T) {
 
 func TestRender_ReturnsTheEnvelopeFailureUnmarked(t *testing.T) {
     envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
-    envelope.SetError("cmd.failed", "the command failed", nil, nil)
+    envelope.SetError("cmd.failed", "the command failed", ErrorConfig{})
 
     renderErr := Render(&bytes.Buffer{}, envelope, Option{})
     if nil == renderErr {
@@ -110,13 +111,14 @@ func TestRender_LeavesTheUnnamedAndReservedDetailsOutOfTheReportedContext(t *tes
     envelope.SetError(
         "cmd.failed",
         "the command failed",
-        map[string]any{
-            "":          "filed under no name",
-            "command":   "an impostor command",
-            "errorCode": "an impostor code",
-            "subject":   "order",
+        ErrorConfig{
+            Details: map[string]any{
+                "":          "filed under no name",
+                "command":   "an impostor command",
+                "errorCode": "an impostor code",
+                "subject":   "order",
+            },
         },
-        nil,
     )
 
     renderErr := Render(&bytes.Buffer{}, envelope, Option{})
@@ -151,7 +153,7 @@ func (instance *failingRenderWriter) Write(payload []byte) (int, error) {
 
 func TestRender_KeepsTheEnvelopeFailureWhenThePrintingFails(t *testing.T) {
     envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
-    envelope.SetError("cmd.failed", "the business failure", nil, nil)
+    envelope.SetError("cmd.failed", "the business failure", ErrorConfig{})
 
     renderErr := Render(&failingRenderWriter{}, envelope, Option{})
     if nil == renderErr {

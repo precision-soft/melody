@@ -175,7 +175,7 @@ func (instance *RouterCommand) Run(
                 )
             }
 
-            block.AddRow(cells...)
+            block.AddRow(cells)
         }
 
         envelope.Table = builder.Build()

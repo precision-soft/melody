@@ -760,8 +760,10 @@ func (instance *GenerateCommand) reportWrites(
             envelope.SetError(
                 "cron.generateFailed",
                 "the cron manifest generation failed",
-                errorDetailsOf(runErr),
-                errorCauseOf(runErr),
+                output.ErrorConfig{
+                    Details: errorDetailsOf(runErr),
+                    Cause:   errorCauseOf(runErr),
+                },
             )
         }
 

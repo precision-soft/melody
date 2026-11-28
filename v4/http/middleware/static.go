@@ -17,7 +17,7 @@ func StaticMiddleware(config static.Config) httpcontract.Middleware {
         return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             logger := logging.LoggerMustFromRuntime(runtimeInstance)
 
-            statusCode, headers, bodyReader, ok := staticServer.ServeReader(request, logger)
+            statusCode, headers, bodyReader, ok := staticServer.ServeReader(request, static.ServeOptions{Logger: logger})
             if true == ok {
                 response := http.EmptyResponse(statusCode)
 

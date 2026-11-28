@@ -13,10 +13,16 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-/* LogOnRecover recovers the panic in flight, logs it, and panics again when panicAgain is set. It never terminates the process, which would skip the teardown above it; a recovered *exception.ExitError is re-panicked unchanged when panicAgain is set, so its code reaches the process boundary, and is logged and swallowed like any other panic when it is not; LogOnRecoverAndExit is the helper that exits. */
+/* RecoverOptions is what one LogOnRecover declares; the zero value logs the panic and ends it there. */
+type RecoverOptions struct {
+    /* PanicAgain re-panics what was recovered once it is logged; left out, the panic ends here. */
+    PanicAgain bool
+}
+
+/* LogOnRecover recovers the panic in flight, logs it, and panics again when RecoverOptions.PanicAgain is set. It is the deferred function itself, since recover answers only in the deferred frame. It never terminates the process, which would skip the teardown above it; a recovered *exception.ExitError is re-panicked unchanged when PanicAgain is set, so its code reaches the process boundary, and is logged and swallowed like any other panic when it is not; LogOnRecoverAndExit is the helper that exits. */
 func LogOnRecover(
     logger loggingcontract.Logger,
-    panicAgain bool,
+    options RecoverOptions,
 ) {
     recoveredValue := recover()
     if nil == recoveredValue {
@@ -40,7 +46,7 @@ func LogOnRecover(
             err.MarkAsLogged()
         }
 
-        if true == panicAgain {
+        if true == options.PanicAgain {
             /* the wrapper is re-panicked rather than the error it carries: the exit code lives on the wrapper */
             exception.Exit(exitError)
         }
@@ -49,7 +55,7 @@ func LogOnRecover(
     }
 
     if true == isAlreadyLoggedValue(recoveredValue) {
-        if true == panicAgain {
+        if true == options.PanicAgain {
             /* the recovered value is re-panicked unchanged, since the mark that suppressed this record lives on it */
             panic(recoveredValue)
         }
@@ -91,7 +97,7 @@ func LogOnRecover(
     LogError(logger, err)
     err.MarkAsLogged()
 
-    if true == panicAgain {
+    if true == options.PanicAgain {
         exception.Panic(err)
     }
 }

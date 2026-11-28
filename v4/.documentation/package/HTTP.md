@@ -714,7 +714,7 @@ Where the list itself comes from is the application's business — a constant as
 - [`NewKernelExceptionEvent(runtimeInstance, request, err, KernelExceptionEventConfig)`](../../http/kernel_event.go) — [`KernelExceptionEventConfig`](../../http/kernel_event.go) holds `UnavailableRetryAfter`, 5s when left out, a refused value a panic naming the field
 - [`(*KernelExceptionEvent).UnavailableRetryAfter() time.Duration`](../../http/kernel_event.go) — the delay a marked infrastructure failure is answered with, the kernel's
 - [`(*KernelExceptionEvent).IsPropagationStopped() bool`](../../http/kernel_event.go)
-- [`CloseDiscardedResponseBody(response, logger)`](../../http/router_utility.go)
+- [`CloseDiscardedResponseBody(response, DiscardedBodyOptions)`](../../http/router_utility.go) — [`DiscardedBodyOptions`](../../http/router_utility.go) holds `Logger`, which receives a failed close, the failure dropped when left out
 - [`(*KernelRequestEvent).Refuse(err error)`](../../http/kernel_event.go)
 - [`(*KernelRequestEvent).Refusal() error`](../../http/kernel_event.go)
 - Cross-site request forgery ([`csrf.go`](../../http/csrf.go)): `CsrfToken(request) (string, error)`, a masked token of the session's secret, issued under `SessionKeyCsrf` (`_csrf`) on the first call; `VerifyCsrfToken(request, presented) (bool, error)`; `RotateCsrfToken(request) error`; `IsSafeMethod(method) bool`, exactly `GET`, `HEAD`, `OPTIONS` and `TRACE`; `DefaultCsrfHeaderName` (`X-CSRF-Token`), `DefaultCsrfFieldName` (`_csrf_token`); [`RequestCarriesSessionCookie(request) bool`](../../http/request_session.go); [`RouteProtection(request)`](../../http/route.go) and `RouteAttributeProtection`
@@ -839,7 +839,7 @@ Where the list itself comes from is the application's business — a constant as
 - [`type FileServer`](../../http/static/file_server.go)
     - [`NewFileServer(config Config)`](../../http/static/file_server.go) — panics at construction on what it cannot serve: a `CacheMaxAge` below 0, unlimited or set beside `CacheDisabled`, the embedded mode without a filesystem, a public directory the embedded filesystem does not hold as a directory
     - [`ServeReader`](../../http/static/file_server.go) — the path every request actually takes: it answers the status, the headers and the body as a reader the caller closes
-    - [`Serve`](../../http/static/file_server.go) — the whole-response form; both take the logger a serve reports its read failures and refusals in, the emergency logger when nil, a typed nil panicking naming `FileServer.Serve.logger` or `FileServer.ServeReader.logger`
+    - [`Serve`](../../http/static/file_server.go) — the whole-response form; both take a [`ServeOptions`](../../http/static/file_server.go) beside the request, whose `Logger` receives the serve's read failures and refusals, the emergency logger when left out, a typed nil panicking naming `ServeOptions.Logger`
 
 - [`type Config`](../../http/static/option.go) — the zero value serves `public` under `.` with `index.html`, `Cache-Control` with a 3600s max age and strong entity tags
     - `Mode`, `PublicDirectory`, `IndexFile`, `StripPrefix`, `WeakEtag`, `Root` and `FileSystem`, the filesystem consulted only in the embedded mode

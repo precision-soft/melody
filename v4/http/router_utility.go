@@ -865,9 +865,15 @@ func sessionIdLogReference(sessionId string) string {
     return hex.EncodeToString(digest[:])[:16]
 }
 
-/* CloseDiscardedResponseBody closes an unserved response's body, logging a failure to a logger that may be nil. */
-func CloseDiscardedResponseBody(response httpcontract.Response, logger loggingcontract.Logger) {
-    closeDiscardedResponseBody(response, logger)
+/* DiscardedBodyOptions is what one CloseDiscardedResponseBody declares beside the response. */
+type DiscardedBodyOptions struct {
+    /* Logger receives a failed close; left out, the failure is dropped. */
+    Logger loggingcontract.Logger
+}
+
+/* CloseDiscardedResponseBody closes an unserved response's body, logging a failure to the options' logger when one is handed. */
+func CloseDiscardedResponseBody(response httpcontract.Response, options DiscardedBodyOptions) {
+    closeDiscardedResponseBody(response, options.Logger)
 }
 
 func closeDiscardedResponseBody(response httpcontract.Response, logger loggingcontract.Logger) {

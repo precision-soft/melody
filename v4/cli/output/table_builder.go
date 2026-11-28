@@ -1,6 +1,8 @@
 package output
 
 import (
+    "slices"
+
     "github.com/precision-soft/melody/v4/exception"
 )
 
@@ -51,7 +53,8 @@ type TableBlockBuilder struct {
     index int
 }
 
-func (instance *TableBlockBuilder) AddRow(cells ...string) *TableBlockBuilder {
+/* AddRow appends a row of exactly the block's column count, or the separator marker; the builder keeps a copy, so a caller reusing its slice does not change a built row. */
+func (instance *TableBlockBuilder) AddRow(cells []string) *TableBlockBuilder {
     block := &instance.owner.table.Blocks[instance.index]
 
     /* a row whose cell count disagrees with the declared columns is refused, since the printer sizes by the columns alone and would drop or blank a cell silently; the separator row is a single-token marker the printer expands */
@@ -69,7 +72,7 @@ func (instance *TableBlockBuilder) AddRow(cells ...string) *TableBlockBuilder {
         )
     }
 
-    block.Rows = append(block.Rows, cells)
+    block.Rows = append(block.Rows, slices.Clone(cells))
 
     return instance
 }

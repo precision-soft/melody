@@ -95,7 +95,7 @@ func (instance *MiddlewareCommand) Run(
 
     /* the zero value is constructible without providers; the refusal travels through the envelope, so the document is written before the command fails */
     if nil == instance.descriptionProvider || nil == instance.buildProvider {
-        envelope.SetError("debug.providerNil", "middleware provider is nil", nil, nil)
+        envelope.SetError("debug.providerNil", "middleware provider is nil", output.ErrorConfig{})
         envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
         return output.Render(commandContext.Writer, envelope, option)
@@ -132,8 +132,9 @@ func (instance *MiddlewareCommand) populateDescription(
         envelope.SetError(
             "debug.describeFailed",
             "middleware pipeline cannot be assembled",
-            nil,
-            output.NewErrorCause(describeErr.Error(), nil),
+            output.ErrorConfig{
+                Cause: output.NewErrorCause(describeErr.Error(), nil),
+            },
         )
     }
 
@@ -189,8 +190,9 @@ func (instance *MiddlewareCommand) populateDescription(
         envelope.SetError(
             "debug.optionRefused",
             "the list window cannot be applied",
-            nil,
-            output.NewErrorCause(windowItemsErr.Error(), nil),
+            output.ErrorConfig{
+                Cause: output.NewErrorCause(windowItemsErr.Error(), nil),
+            },
         )
 
         return
@@ -227,14 +229,14 @@ func (instance *MiddlewareCommand) populateDescription(
                 indexCell = fmt.Sprintf("%d", item.Index)
             }
 
-            block.AddRow(
+            block.AddRow([]string{
                 indexCell,
                 item.Name,
                 fmt.Sprintf("%d", item.Priority),
                 item.Function,
                 item.Status,
                 item.Reason,
-            )
+            })
         }
 
         envelope.Table = builder.Build()
@@ -263,14 +265,15 @@ func (instance *MiddlewareCommand) populateBuiltChain(
         envelope.SetError(
             "debug.buildFailed",
             "middleware chain failed to build",
-            nil,
-            output.NewErrorCause(
-                buildErr.Error(),
-                map[string]any{
-                    /* built from the failure with the head dropped, so a joined failure keeps its causes */
-                    "causeChain": resolveErrorCauseChain(buildErr),
-                },
-            ),
+            output.ErrorConfig{
+                Cause: output.NewErrorCause(
+                    buildErr.Error(),
+                    map[string]any{
+                        /* built from the failure with the head dropped, so a joined failure keeps its causes */
+                        "causeChain": resolveErrorCauseChain(buildErr),
+                    },
+                ),
+            },
         )
     }
 
@@ -299,8 +302,9 @@ func (instance *MiddlewareCommand) populateBuiltChain(
         envelope.SetError(
             "debug.optionRefused",
             "the list window cannot be applied",
-            nil,
-            output.NewErrorCause(windowItemsErr.Error(), nil),
+            output.ErrorConfig{
+                Cause: output.NewErrorCause(windowItemsErr.Error(), nil),
+            },
         )
 
         return
@@ -332,10 +336,10 @@ func (instance *MiddlewareCommand) populateBuiltChain(
         )
 
         for _, item := range items {
-            block.AddRow(
+            block.AddRow([]string{
                 fmt.Sprintf("%d", item.Index),
                 item.Function,
-            )
+            })
         }
 
         envelope.Table = builder.Build()

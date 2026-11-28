@@ -24,7 +24,7 @@ func TestLogOnRecover_DoesNothingWhenNoPanic(t *testing.T) {
     logger := &captureLogger{}
 
     func() {
-        defer LogOnRecover(logger, false)
+        defer LogOnRecover(logger, RecoverOptions{})
     }()
 
     if 0 != logger.calls {
@@ -36,7 +36,7 @@ func TestLogOnRecover_LogsExceptionError(t *testing.T) {
     logger := &captureLogger{}
 
     func() {
-        defer LogOnRecover(logger, false)
+        defer LogOnRecover(logger, RecoverOptions{})
 
         exception.Panic(exception.NewError("boom", map[string]any{"a": "b"}, nil))
     }()
@@ -62,7 +62,7 @@ func TestLogOnRecover_SkipsAlreadyLoggedException(t *testing.T) {
     logger := &captureLogger{}
 
     func() {
-        defer LogOnRecover(logger, false)
+        defer LogOnRecover(logger, RecoverOptions{})
 
         err := exception.NewError("boom", nil, nil)
         err.MarkAsLogged()
@@ -95,7 +95,7 @@ func TestLogOnRecover_PanicAgainRePanicsAndMarksLogged(t *testing.T) {
     }()
 
     func() {
-        defer LogOnRecover(logger, true)
+        defer LogOnRecover(logger, RecoverOptions{PanicAgain: true})
 
         exception.Panic(exception.NewError("boom", nil, nil))
     }()
@@ -110,7 +110,7 @@ func TestLogOnRecover_DoesNotTerminateTheProcessOnAnExitError(t *testing.T) {
                 _, _ = os.Stdout.WriteString("deferred-below-ran\n")
             }()
 
-            defer LogOnRecover(logger, false)
+            defer LogOnRecover(logger, RecoverOptions{})
 
             exception.Exit(
                 exception.NewExitError(9, exception.NewError("boom", nil, nil)),
@@ -152,7 +152,7 @@ func TestLogOnRecover_ZeroValueExitErrorLogsTheAnomaly(t *testing.T) {
     logger := &captureLogger{}
 
     func() {
-        defer LogOnRecover(logger, false)
+        defer LogOnRecover(logger, RecoverOptions{})
 
         panic(&exception.ExitError{})
     }()
@@ -171,7 +171,7 @@ func TestLogOnRecover_TypedNilPanicValuesAreLoggedAsPanics(t *testing.T) {
         logger := &captureLogger{}
 
         func() {
-            defer LogOnRecover(logger, false)
+            defer LogOnRecover(logger, RecoverOptions{})
 
             panic(panicValue)
         }()
@@ -190,7 +190,7 @@ func TestLogOnRecover_MarksLoggedWithoutPanicAgain(t *testing.T) {
     err := exception.NewError("boom", nil, nil)
 
     func() {
-        defer LogOnRecover(&captureLogger{}, false)
+        defer LogOnRecover(&captureLogger{}, RecoverOptions{})
 
         exception.Panic(err)
     }()
@@ -204,7 +204,7 @@ func TestLogOnRecover_ForeignPanicCarriesThePanicStack(t *testing.T) {
     logger := &captureLogger{}
 
     func() {
-        defer LogOnRecover(logger, false)
+        defer LogOnRecover(logger, RecoverOptions{})
 
         panic(errors.New("boom"))
     }()
@@ -244,7 +244,7 @@ func TestLogOnRecover_PanicAgainCarriesTheExitErrorOnward(t *testing.T) {
     }()
 
     func() {
-        defer LogOnRecover(logger, true)
+        defer LogOnRecover(logger, RecoverOptions{PanicAgain: true})
 
         exception.Exit(
             exception.NewExitError(9, exception.NewError("boom", nil, nil)),
@@ -450,7 +450,7 @@ func TestLogOnRecover_AnErrorWhoseMessagePanicsIsStillRecorded(t *testing.T) {
     logger := &captureLogger{}
 
     func() {
-        defer LogOnRecover(logger, false)
+        defer LogOnRecover(logger, RecoverOptions{})
 
         panic(recoveredMessagePanicsError{})
     }()
@@ -734,7 +734,7 @@ func TestLogOnRecover_AlreadyLoggedException_RePanicsWithoutASecondRecord(t *tes
     }()
 
     func() {
-        defer LogOnRecover(logger, true)
+        defer LogOnRecover(logger, RecoverOptions{PanicAgain: true})
 
         panic(alreadyLogged)
     }()
@@ -744,7 +744,7 @@ func TestLogOnRecover_TypedNilForeignError_IsLoggedAsAPanicValue(t *testing.T) {
     logger := &captureLogger{}
 
     func() {
-        defer LogOnRecover(logger, false)
+        defer LogOnRecover(logger, RecoverOptions{})
 
         panic(error((*typedNilProbeError)(nil)))
     }()
@@ -782,7 +782,7 @@ func TestLogOnRecover_PlainValuePanic_CarriesTheValueAndTheStack(t *testing.T) {
     logger := &captureLogger{}
 
     func() {
-        defer LogOnRecover(logger, false)
+        defer LogOnRecover(logger, RecoverOptions{})
 
         panic("a plain string")
     }()
@@ -808,7 +808,7 @@ func TestLogOnRecover_AlreadyLoggedHttpException_ProducesNoSecondRecord(t *testi
     logger := &captureLogger{}
 
     func() {
-        defer LogOnRecover(logger, false)
+        defer LogOnRecover(logger, RecoverOptions{})
 
         panic(httpException)
     }()
@@ -832,7 +832,7 @@ func TestLogOnRecover_AlreadyLoggedHttpException_RePanicsTheMarkedValueUnchanged
             rePanicked = recover()
         }()
 
-        defer LogOnRecover(logger, true)
+        defer LogOnRecover(logger, RecoverOptions{PanicAgain: true})
 
         panic(httpException)
     }()
@@ -881,7 +881,7 @@ func TestLogOnRecover_UnmarkedHttpException_IsStillLogged(t *testing.T) {
     logger := &captureLogger{}
 
     func() {
-        defer LogOnRecover(logger, false)
+        defer LogOnRecover(logger, RecoverOptions{})
 
         panic(httpException)
     }()

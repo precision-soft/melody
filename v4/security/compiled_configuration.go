@@ -356,7 +356,7 @@ func (instance *CompiledFirewall) Login(
 
     dispatchErr := instance.dispatchLoginSuccess(runtimeInstance, request, result.Token)
     if nil != dispatchErr {
-        http.CloseDiscardedResponseBody(result.Response, logging.LoggerFromRuntime(runtimeInstance))
+        http.CloseDiscardedResponseBody(result.Response, http.DiscardedBodyOptions{Logger: logging.LoggerFromRuntime(runtimeInstance)})
 
         return nil, dispatchErr
     }

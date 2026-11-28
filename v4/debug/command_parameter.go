@@ -159,7 +159,7 @@ func (instance *ParameterCommand) Run(
         )
 
         for _, item := range items {
-            block.AddRow(
+            block.AddRow([]string{
                 item.Name,
                 item.EnvironmentKey,
                 item.Template,
@@ -167,7 +167,7 @@ func (instance *ParameterCommand) Run(
                 fmt.Sprintf("%t", item.IsDefault),
                 fmt.Sprintf("%t", item.IsOverridden),
                 fmt.Sprintf("%t", item.IsSecret),
-            )
+            })
         }
 
         envelope.Table = builder.Build()

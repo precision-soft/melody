@@ -14,6 +14,7 @@ import (
     "github.com/precision-soft/melody/v4/http/static"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
 func newStaticTestRuntime() containercontract.Runtime {
@@ -60,4 +61,54 @@ func TestStaticMiddleware_DoesNotDuplicateContentType(t *testing.T) {
     if "text/css; charset=utf-8" != contentTypes[0] {
         t.Fatalf("expected the file's Content-Type to win, got: %q", contentTypes[0])
     }
+}
+
+func TestStaticMiddleware_ReportsOnTheRuntimesLogger(t *testing.T) {
+    config := static.Config{PublicDirectory: t.TempDir(), CacheDisabled: true}
+
+    nextCalled := false
+    handler := StaticMiddleware(config)(
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            nextCalled = true
+
+            return nil, nil
+        },
+    )
+
+    logger := &staticRecordingLogger{Logger: logging.NewNopLogger()}
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    scope := serviceContainer.NewScope()
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
+
+    request := testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/missing.css")
+
+    if _, err := handler(runtime.NewRequest(context.Background(), scope), httptest.NewRecorder(), request); nil != err {
+        t.Fatalf("expected nil error, got: %v", err)
+    }
+
+    if false == nextCalled {
+        t.Fatalf("expected a missing file to fall through to next")
+    }
+
+    if 0 == len(logger.messages) {
+        t.Fatalf("expected the serve to report the missing file on the runtime's logger")
+    }
+}
+
+type staticRecordingLogger struct {
+    loggingcontract.Logger
+    messages []string
+}
+
+func (instance *staticRecordingLogger) Debug(message string, context loggingcontract.Context) {
+    instance.messages = append(instance.messages, message)
+}
+
+func (instance *staticRecordingLogger) Info(message string, context loggingcontract.Context) {
+    instance.messages = append(instance.messages, message)
+}
+
+func (instance *staticRecordingLogger) Warning(message string, context loggingcontract.Context) {
+    instance.messages = append(instance.messages, message)
 }

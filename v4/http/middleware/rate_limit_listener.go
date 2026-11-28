@@ -73,7 +73,7 @@ func (instance *RateLimitGate) Apply(runtimeInstance containercontract.Runtime, 
     response, limitErr := instance.settings.onLimitExceeded(request, decision)
 
     if false == internal.IsNilInterface(limitErr) {
-        http.CloseDiscardedResponseBody(response, logging.LoggerFromRuntime(runtimeInstance))
+        http.CloseDiscardedResponseBody(response, http.DiscardedBodyOptions{Logger: logging.LoggerFromRuntime(runtimeInstance)})
 
         requestEvent.Refuse(withDecisionRetryAfterError(limitErr, decision))
 

@@ -53,7 +53,7 @@ func TestFileServer_Filesystem_ServesFile(t *testing.T) {
 
     statusCode, headers, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/index.html"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served {
@@ -100,7 +100,7 @@ func TestFileServer_Embedded_ServesFile(t *testing.T) {
 
     statusCode, _, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served {
@@ -144,7 +144,7 @@ func TestFileServer_ExplicitZeroCacheMaxAge_IsHonouredAsAlwaysRevalidate(t *test
 
     statusCode, headers, _, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served {
@@ -176,7 +176,7 @@ func TestFileServer_AbsentCacheMaxAge_TakesTheDefault(t *testing.T) {
 
     _, headers, _, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served {
@@ -200,7 +200,7 @@ func TestFileServer_CacheDisabledSendsNoValidator(t *testing.T) {
 
     _, headers, _, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served {
@@ -277,7 +277,7 @@ func TestFileServer_Head_ReturnsNoBodyAndSetsContentLength(t *testing.T) {
 
     statusCode, headers, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodHead, "http://example.com/a.txt"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served {
@@ -330,7 +330,7 @@ func TestFileServer_IfModifiedSince_SubSecondModTime_ReturnsNotModified(t *testi
 
     statusCode, _, _, served := server.Serve(
         request,
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served {
@@ -372,7 +372,7 @@ func TestFileServer_IfNoneMatch_ReturnsNotModified(t *testing.T) {
 
     firstStatusCode, firstHeaders, _, firstServed := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == firstServed {
@@ -393,7 +393,7 @@ func TestFileServer_IfNoneMatch_ReturnsNotModified(t *testing.T) {
 
     statusCode, _, _, served := server.Serve(
         request,
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served {
@@ -432,7 +432,7 @@ func TestFileServer_StripPrefix_ServesFileWhenPrefixMatches(t *testing.T) {
 
     statusCode, _, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/a.txt"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served {
@@ -475,7 +475,7 @@ func TestFileServer_StripPrefix_RejectsWhenPrefixMismatch(t *testing.T) {
 
     _, _, _, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/a.txt"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if true == served {
@@ -510,7 +510,7 @@ func TestFileServer_ServesIndexFileForRootPath(t *testing.T) {
 
     statusCode, _, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served {
@@ -549,7 +549,7 @@ func TestFileServer_ReturnsNotServedForMissingFile(t *testing.T) {
 
     _, _, _, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/nonexistent.txt"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if true == served {
@@ -615,7 +615,7 @@ func TestFileServer_Embedded_StripPrefixCannotEscapeThePublicDirectory(t *testin
     } {
         _, _, body, served := server.Serve(
             testhelper.NewHttpTestRequest(http.MethodGet, requestPath),
-            logging.NewNopLogger(),
+            ServeOptions{Logger: logging.NewNopLogger()},
         )
 
         if true == served {
@@ -625,7 +625,7 @@ func TestFileServer_Embedded_StripPrefixCannotEscapeThePublicDirectory(t *testin
 
     statusCode, _, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/index.html"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served || 200 != statusCode || "public-index" != string(body) {
@@ -661,7 +661,7 @@ func TestFileServer_Filesystem_DoesNotResolveAWhitespacePaddedPath(t *testing.T)
 
     statusCode, _, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/%20app.css"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if true == served {
@@ -670,7 +670,7 @@ func TestFileServer_Filesystem_DoesNotResolveAWhitespacePaddedPath(t *testing.T)
 
     _, _, controlBody, controlServed := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/app.css"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == controlServed || "body{}" != string(controlBody) {
@@ -717,7 +717,7 @@ func TestFileServer_Embedded_RefusesANonCanonicalPath(t *testing.T) {
     } {
         _, _, body, served := server.Serve(
             testhelper.NewHttpTestRequest(http.MethodGet, requestPath),
-            logging.NewNopLogger(),
+            ServeOptions{Logger: logging.NewNopLogger()},
         )
 
         if true == served {
@@ -727,7 +727,7 @@ func TestFileServer_Embedded_RefusesANonCanonicalPath(t *testing.T) {
 
     statusCode, _, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/internal/secret.json"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served || http.StatusOK != statusCode || "secret" != string(body) {
@@ -772,7 +772,7 @@ func TestFileServer_Filesystem_RefusesANonCanonicalPath(t *testing.T) {
     } {
         _, _, body, served := server.Serve(
             testhelper.NewHttpTestRequest(http.MethodGet, requestPath),
-            logging.NewNopLogger(),
+            ServeOptions{Logger: logging.NewNopLogger()},
         )
 
         if true == served {
@@ -782,7 +782,7 @@ func TestFileServer_Filesystem_RefusesANonCanonicalPath(t *testing.T) {
 
     statusCode, _, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/internal/secret.json"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served || http.StatusOK != statusCode || "secret" != string(body) {
@@ -818,7 +818,7 @@ func TestFileServer_StripPrefix_ResolvesTheFileFromTheSpellingTheRouterRoutes(t 
 
     _, _, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/private%2Fsecret.txt"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if true == served {
@@ -827,7 +827,7 @@ func TestFileServer_StripPrefix_ResolvesTheFileFromTheSpellingTheRouterRoutes(t 
 
     _, _, body, served = server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/private%2Fsecret.txt{"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if true == served {
@@ -836,7 +836,7 @@ func TestFileServer_StripPrefix_ResolvesTheFileFromTheSpellingTheRouterRoutes(t 
 
     statusCode, _, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/private/secret.txt"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served || http.StatusOK != statusCode || "TOP SECRET" != string(body) {
@@ -845,7 +845,7 @@ func TestFileServer_StripPrefix_ResolvesTheFileFromTheSpellingTheRouterRoutes(t 
 
     statusCode, _, body, served = server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/caf%C3%A9.txt"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served || http.StatusOK != statusCode || "café" != string(body) {
@@ -892,7 +892,7 @@ func TestFileServer_StripPrefix_RefusesANonCanonicalPath(t *testing.T) {
     } {
         _, _, body, served := server.Serve(
             testhelper.NewHttpTestRequest(http.MethodGet, requestPath),
-            logging.NewNopLogger(),
+            ServeOptions{Logger: logging.NewNopLogger()},
         )
 
         if true == served {
@@ -902,7 +902,7 @@ func TestFileServer_StripPrefix_RefusesANonCanonicalPath(t *testing.T) {
 
     statusCode, _, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/a.txt"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served || http.StatusOK != statusCode || "a" != string(body) {
@@ -911,7 +911,7 @@ func TestFileServer_StripPrefix_RefusesANonCanonicalPath(t *testing.T) {
 
     rootStatusCode, _, rootBody, rootServed := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == rootServed || http.StatusOK != rootStatusCode || "index" != string(rootBody) {
@@ -928,7 +928,7 @@ func TestFileServer_ServesTheIndexFileForTheMountRoot(t *testing.T) {
     } {
         statusCode, _, body, served := server.Serve(
             testhelper.NewHttpTestRequest(http.MethodGet, requestPath),
-            logging.NewNopLogger(),
+            ServeOptions{Logger: logging.NewNopLogger()},
         )
 
         if false == served || http.StatusOK != statusCode || "index" != string(body) {
@@ -948,7 +948,7 @@ func TestFileServer_RefusesTheSpellingsThatFoldIntoTheRoot(t *testing.T) {
     } {
         _, _, _, served := server.Serve(
             testhelper.NewHttpTestRequest(http.MethodGet, requestPath),
-            logging.NewNopLogger(),
+            ServeOptions{Logger: logging.NewNopLogger()},
         )
 
         if true == served {
@@ -963,7 +963,7 @@ func TestFileServer_ServeReaderRefusesTheSpellingsThatFoldIntoTheRoot(t *testing
 
     statusCode, _, bodyReader, served := server.ServeReader(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/open/.."),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if true == served || 0 != statusCode || nil != bodyReader {
@@ -1039,7 +1039,7 @@ func TestFileServer_Embedded_RefusesADotPrefixedPathElement(t *testing.T) {
     } {
         _, headers, body, served := server.Serve(
             testhelper.NewHttpTestRequest(http.MethodGet, requestPath),
-            logging.NewNopLogger(),
+            ServeOptions{Logger: logging.NewNopLogger()},
         )
 
         if true == served {
@@ -1049,7 +1049,7 @@ func TestFileServer_Embedded_RefusesADotPrefixedPathElement(t *testing.T) {
 
     statusCode, _, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/index.html"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served || http.StatusOK != statusCode || "index" != string(body) {
@@ -1088,7 +1088,7 @@ func TestFileServer_Filesystem_RefusesADotPrefixedPathElement(t *testing.T) {
 
     _, headers, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/.env"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if true == served {
@@ -1097,7 +1097,7 @@ func TestFileServer_Filesystem_RefusesADotPrefixedPathElement(t *testing.T) {
 
     statusCode, _, controlBody, controlServed := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/index.html"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == controlServed || http.StatusOK != statusCode || "index" != string(controlBody) {
@@ -1140,7 +1140,7 @@ func TestFileServer_AnswersOnlyRetrievalMethods(t *testing.T) {
     } {
         _, _, body, served := server.Serve(
             testhelper.NewHttpTestRequest(method, "http://example.com/a.txt"),
-            logging.NewNopLogger(),
+            ServeOptions{Logger: logging.NewNopLogger()},
         )
 
         if true == served {
@@ -1149,7 +1149,7 @@ func TestFileServer_AnswersOnlyRetrievalMethods(t *testing.T) {
 
         _, _, bodyReader, readerServed := server.ServeReader(
             testhelper.NewHttpTestRequest(method, "http://example.com/a.txt"),
-            logging.NewNopLogger(),
+            ServeOptions{Logger: logging.NewNopLogger()},
         )
 
         if true == readerServed {
@@ -1167,7 +1167,7 @@ func TestFileServer_AnswersOnlyRetrievalMethods(t *testing.T) {
     } {
         statusCode, _, _, served := server.Serve(
             testhelper.NewHttpTestRequest(method, "http://example.com/a.txt"),
-            logging.NewNopLogger(),
+            ServeOptions{Logger: logging.NewNopLogger()},
         )
 
         if false == served || http.StatusOK != statusCode {
@@ -1211,7 +1211,7 @@ func TestFileServer_IgnoresIfModifiedSinceWhenIfNoneMatchIsPresent(t *testing.T)
 
     statusCode, _, body, served := server.Serve(
         request,
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served {
@@ -1262,7 +1262,7 @@ func TestFileServer_AcceptsEveryHttpDateFormatForIfModifiedSince(t *testing.T) {
 
         statusCode, _, _, served := server.Serve(
             request,
-            logging.NewNopLogger(),
+            ServeOptions{Logger: logging.NewNopLogger()},
         )
 
         if false == served {
@@ -1325,7 +1325,7 @@ func TestFileServer_ServeReader_LogsTheRefusedResolution(t *testing.T) {
 
         _, _, bodyReader, served := server.ServeReader(
             testhelper.NewHttpTestRequest(http.MethodGet, expectation.requestPath),
-            logging.NewJsonLogger(output, logging.JsonLoggerConfig{MinLevel: loggingcontract.LevelDebug}),
+            ServeOptions{Logger: logging.NewJsonLogger(output, logging.JsonLoggerConfig{MinLevel: loggingcontract.LevelDebug})},
         )
 
         if true == served {
@@ -1380,7 +1380,7 @@ func TestFileServer_Embedded_RetrievesTheAllowedDotPrefixOnly(t *testing.T) {
 
     _, _, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/.well-known/acme-challenge/token"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served {
@@ -1398,7 +1398,7 @@ func TestFileServer_Embedded_RetrievesTheAllowedDotPrefixOnly(t *testing.T) {
     } {
         _, _, refusedBody, refusedServed := server.Serve(
             testhelper.NewHttpTestRequest(http.MethodGet, requestPath),
-            logging.NewNopLogger(),
+            ServeOptions{Logger: logging.NewNopLogger()},
         )
 
         if true == refusedServed {
@@ -1418,7 +1418,7 @@ func TestFileServer_Embedded_RetrievesTheAllowedDotPrefixOnly(t *testing.T) {
 
     _, _, _, servedAfterClearing := clearedServer.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/.well-known/acme-challenge/token"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if true == servedAfterClearing {
@@ -1457,7 +1457,7 @@ func TestFileServer_Embedded_TheAllowAllEntryServesANestedDotPrefixedPath(t *tes
 
     _, _, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/assets/.well-known/token"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served || "nested" != string(body) {
@@ -1502,7 +1502,7 @@ func TestFileServer_ExcludedPathPrefixIsDeclinedWithoutReadingTheDisk(t *testing
 
     _, _, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/private/report.json"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if true == served {
@@ -1511,7 +1511,7 @@ func TestFileServer_ExcludedPathPrefixIsDeclinedWithoutReadingTheDisk(t *testing
 
     statusCode, _, publicBody, publicServed := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/index.html"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == publicServed {
@@ -1564,7 +1564,7 @@ func TestFileServer_ExcludedPathPrefixIsDeclinedByTheStreamingResolution(t *test
 
     _, _, reader, served := server.ServeReader(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/private/report.json"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if true == served {
@@ -1575,7 +1575,7 @@ func TestFileServer_ExcludedPathPrefixIsDeclinedByTheStreamingResolution(t *test
 
     _, _, openReader, openServed := server.ServeReader(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/open.json"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == openServed {
@@ -1619,7 +1619,7 @@ func TestFileServer_ExcludedPathPrefixIsComparedBeforeTheStripPrefixIsRemoved(t 
 
     _, _, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/private/report.json"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if true == served {
@@ -1652,7 +1652,7 @@ func TestFileServer_ExcludedPathListDefaultsToExcludingNothing(t *testing.T) {
 
     _, _, _, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/index.html"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served {
@@ -1779,7 +1779,7 @@ func TestFileServer_RootDoesNotServeAnExcludedIndexFile(t *testing.T) {
 
     _, _, _, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
     if true == served {
         t.Fatalf("expected the root not to serve an index file the exclusion list names")
@@ -1814,7 +1814,7 @@ func TestFileServer_RootStillServesTheIndexFileWhenNotExcluded(t *testing.T) {
 
     statusCode, _, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
     if false == served {
         t.Fatalf("expected the root to keep serving an index file the exclusion list does not name")
@@ -1954,7 +1954,7 @@ func TestNewFileServer_AnUnnamedPublicDirectoryDefaultsToPublic(t *testing.T) {
 
     _, _, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served {
@@ -2049,7 +2049,7 @@ func TestFileServer_ServeReader_ANilRequestIsRefusedAndRecorded(t *testing.T) {
         ),
     )
 
-    statusCode, headers, bodyReader, served := server.ServeReader(nil, logger)
+    statusCode, headers, bodyReader, served := server.ServeReader(nil, ServeOptions{Logger: logger})
 
     if true == served {
         t.Fatalf("expected a nil request not to be served")
@@ -2084,7 +2084,7 @@ func TestFileServer_Serve_ANilRequestIsRefusedAndRecorded(t *testing.T) {
         ),
     )
 
-    statusCode, headers, body, served := server.Serve(nil, logger)
+    statusCode, headers, body, served := server.Serve(nil, ServeOptions{Logger: logger})
 
     if true == served {
         t.Fatalf("expected a nil request not to be served")
@@ -2162,7 +2162,7 @@ func TestFileServer_ServeReader_HeadAnswersTheLengthWithoutABodyAndClosesTheFile
 
     statusCode, headers, bodyReader, served := server.ServeReader(
         testhelper.NewHttpTestRequest(http.MethodHead, "http://example.com/a.txt"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served {
@@ -2220,7 +2220,7 @@ func TestFileServer_ServeReader_ANotModifiedAnswerCarriesNoBody(t *testing.T) {
     request := testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt")
     request.HttpRequest().Header.Set("If-None-Match", etag)
 
-    statusCode, headers, bodyReader, served := server.ServeReader(request, logging.NewNopLogger())
+    statusCode, headers, bodyReader, served := server.ServeReader(request, ServeOptions{Logger: logging.NewNopLogger()})
 
     if false == served {
         t.Fatalf("expected the conditional request to be answered")
@@ -2378,7 +2378,7 @@ func TestFileServer_Serve_AnIndexFileThatLeavesThePublicDirectoryIsRefused(t *te
 
     _, _, _, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/"),
-        logger,
+        ServeOptions{Logger: logger},
     )
 
     if true == served {
@@ -2442,7 +2442,7 @@ func TestFileServer_Serve_AFileThatCannotBeDescribedIsNotServed(t *testing.T) {
 
     statusCode, _, _, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if true == served {
@@ -2504,7 +2504,7 @@ func TestFileServer_Serve_ADirectoryIsNotServed(t *testing.T) {
 
     _, _, _, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/assets"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if true == served {
@@ -2568,7 +2568,7 @@ func TestFileServer_Serve_AFileThatCannotBeReadAnswersInternalServerError(t *tes
 
     statusCode, headers, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served {
@@ -2608,7 +2608,7 @@ func TestFileServer_ServeReader_StripPrefixServesTheFileBeneathTheMount(t *testi
 
     statusCode, _, bodyReader, served := server.ServeReader(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/a.txt"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served {
@@ -2657,7 +2657,7 @@ func TestFileServer_ServeReader_TheMountPointAloneResolvesToTheIndexFile(t *test
 
     statusCode, _, bodyReader, served := server.ServeReader(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served {
@@ -2706,7 +2706,7 @@ func TestFileServer_ServeReader_APathOutsideTheMountIsDeclined(t *testing.T) {
 
     _, _, bodyReader, served := server.ServeReader(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/elsewhere/a.txt"),
-        logger,
+        ServeOptions{Logger: logger},
     )
 
     if true == served {
@@ -2748,7 +2748,7 @@ func TestFileServer_ServeReader_AMountWithoutATrailingSlashDoesNotMatchALongerSe
 
     _, _, bodyReader, served := server.ServeReader(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/staticky/a.txt"),
-        logger,
+        ServeOptions{Logger: logger},
     )
 
     if true == served {
@@ -2788,7 +2788,7 @@ func TestFileServer_ServeReader_TheEmbeddedPublicDirectoryIsJoinedOntoThePath(t 
 
     statusCode, _, bodyReader, served := server.ServeReader(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served {
@@ -3066,7 +3066,7 @@ func TestFileServer_TheBufferedAndStreamingResolutionsAgreeOnEveryRefusal(t *tes
     } {
         _, _, _, bufferedServed := server.Serve(
             testhelper.NewHttpTestRequest(probe.method, "http://example.com"+probe.requestPath),
-            logging.NewNopLogger(),
+            ServeOptions{Logger: logging.NewNopLogger()},
         )
 
         _, _, file, _, streamingServed := server.serveForStreaming(
@@ -3126,7 +3126,7 @@ func TestNewFileServer_CopiesBothListsOfTheConfiguration(t *testing.T) {
     for _, requestPath := range []string{"/a.txt", "/.well-known/b.txt"} {
         _, _, _, served := server.Serve(
             testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com"+requestPath),
-            logging.NewNopLogger(),
+            ServeOptions{Logger: logging.NewNopLogger()},
         )
 
         if false == served {
@@ -3170,7 +3170,7 @@ func TestFileServer_ANonRetrievalMethodIsRecordedAtDebugOnTheBufferedHalf(t *tes
 
     _, _, _, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodPost, "http://example.com/app.css"),
-        logger,
+        ServeOptions{Logger: logger},
     )
 
     if true == served {
@@ -3256,7 +3256,7 @@ func TestFileServer_AnUndatedFileEmitsNoLastModifiedAndAnswersNoConditional304(t
     request := testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt")
     request.HttpRequest().Header.Set("If-Modified-Since", "Mon, 02 Jan 2006 15:04:05 GMT")
 
-    statusCode, headers, body, served := server.Serve(request, logging.NewNopLogger())
+    statusCode, headers, body, served := server.Serve(request, ServeOptions{Logger: logging.NewNopLogger()})
 
     if false == served {
         t.Fatalf("expected the asset to be served")
@@ -3298,7 +3298,7 @@ func TestFileServer_ServeReader_AnUndatedFileEmitsNoLastModifiedAndAnswersNoCond
     request := testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt")
     request.HttpRequest().Header.Set("If-Modified-Since", "Mon, 02 Jan 2006 15:04:05 GMT")
 
-    statusCode, headers, bodyReader, served := server.ServeReader(request, logging.NewNopLogger())
+    statusCode, headers, bodyReader, served := server.ServeReader(request, ServeOptions{Logger: logging.NewNopLogger()})
 
     if false == served {
         t.Fatalf("expected the asset to be served")
@@ -3339,7 +3339,7 @@ func TestFileServer_ADatedFileKeepsItsLastModifiedAndItsConditional304(t *testin
     request := testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt")
     request.HttpRequest().Header.Set("If-Modified-Since", modifiedAt.Format(http.TimeFormat))
 
-    statusCode, headers, _, served := server.Serve(request, logging.NewNopLogger())
+    statusCode, headers, _, served := server.Serve(request, ServeOptions{Logger: logging.NewNopLogger()})
 
     if false == served {
         t.Fatalf("expected the asset to be served")
@@ -3426,7 +3426,7 @@ func TestNewFileServer_AcceptsAnEmptyEmbeddedPublicDirectory(t *testing.T) {
 
     _, _, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/app.css"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served {
@@ -3470,7 +3470,7 @@ func TestFileServer_RefusesAFifoInThePublicDirectory(t *testing.T) {
     go func() {
         _, _, _, served := server.Serve(
             testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/pipe.html"),
-            logging.NewNopLogger(),
+            ServeOptions{Logger: logging.NewNopLogger()},
         )
         done <- served
     }()
@@ -3509,7 +3509,7 @@ func TestFileServer_ATypedNilRequestIsSkippedByBothDoors(t *testing.T) {
        and refuses the request too, so a probe that only asks whether the door served cannot tell which guard
        answered. */
     serveLogger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
-    if _, _, _, served := server.Serve(unassignedRequest, serveLogger); true == served {
+    if _, _, _, served := server.Serve(unassignedRequest, ServeOptions{Logger: serveLogger}); true == served {
         t.Fatalf("expected Serve to skip a typed nil request")
     }
     if 1 != len(serveLogger.warningMessages) || "static serve skipped because request is nil" != serveLogger.warningMessages[0] {
@@ -3517,7 +3517,7 @@ func TestFileServer_ATypedNilRequestIsSkippedByBothDoors(t *testing.T) {
     }
 
     readerLogger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
-    if _, _, _, served := server.ServeReader(unassignedRequest, readerLogger); true == served {
+    if _, _, _, served := server.ServeReader(unassignedRequest, ServeOptions{Logger: readerLogger}); true == served {
         t.Fatalf("expected ServeReader to skip a typed nil request")
     }
     if 1 != len(readerLogger.warningMessages) || "static serve reader skipped because request is nil" != readerLogger.warningMessages[0] {
@@ -3549,7 +3549,7 @@ func TestFileServer_Embedded_RefusesAnEntryThatIsNotARegularFile(t *testing.T) {
 
     statusCode, _, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/pipe.txt"),
-        logger,
+        ServeOptions{Logger: logger},
     )
 
     if true == served {
@@ -3598,7 +3598,7 @@ func TestFileServer_ExclusionListReadsTheSpellingTheRouterRoutes(t *testing.T) {
 
     statusCode, _, body, served := server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/assets%2Fx.txt"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if false == served || http.StatusOK != statusCode || "ONE SEGMENT" != string(body) {
@@ -3607,7 +3607,7 @@ func TestFileServer_ExclusionListReadsTheSpellingTheRouterRoutes(t *testing.T) {
 
     _, _, _, served = server.Serve(
         testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/static/assets/y.txt"),
-        logging.NewNopLogger(),
+        ServeOptions{Logger: logging.NewNopLogger()},
     )
 
     if true == served {
@@ -3630,7 +3630,7 @@ func TestFileServer_Embedded_ServesANewTagForAChangedAssetOfTheSameSize(t *testi
     servedTag := func(server *FileServer) string {
         _, headers, _, served := server.Serve(
             testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/app.css"),
-            logging.NewNopLogger(),
+            ServeOptions{Logger: logging.NewNopLogger()},
         )
         if false == served {
             t.Fatalf("expected the asset served")
@@ -3642,7 +3642,7 @@ func TestFileServer_Embedded_ServesANewTagForAChangedAssetOfTheSameSize(t *testi
     streamedTag := func(server *FileServer) string {
         _, headers, reader, served := server.ServeReader(
             testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/app.css"),
-            logging.NewNopLogger(),
+            ServeOptions{Logger: logging.NewNopLogger()},
         )
         if false == served {
             t.Fatalf("expected the asset streamed")
@@ -3698,7 +3698,7 @@ func TestFileServer_AFifoInThePublicDirectoryIsRefusedAndNamedByItsMode(t *testi
 
     logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
 
-    _, _, _, served := server.Serve(testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/pipe.html"), logger)
+    _, _, _, served := server.Serve(testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/pipe.html"), ServeOptions{Logger: logger})
     if true == served {
         t.Fatalf("expected the fifo not to be served")
     }
@@ -3811,12 +3811,12 @@ func TestFileServer_ReturnsOnACyclicChainFromTheFileSystem(t *testing.T) {
 
         server.Serve(
             testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
-            logging.NewNopLogger(),
+            ServeOptions{Logger: logging.NewNopLogger()},
         )
 
         pathErrorServer.Serve(
             testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
-            logging.NewNopLogger(),
+            ServeOptions{Logger: logging.NewNopLogger()},
         )
     })
 }

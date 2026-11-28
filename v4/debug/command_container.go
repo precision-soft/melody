@@ -87,7 +87,7 @@ func (instance *ContainerCommand) Run(
 
     /* the zero value is constructible without a container; the refusal travels through the envelope, as debug:middleware's does */
     if true == internal.IsNilInterface(instance.serviceContainer) {
-        envelope.SetError("debug.containerNil", "the container command was built without a container: build it with NewContainerCommand", nil, nil)
+        envelope.SetError("debug.containerNil", "the container command was built without a container: build it with NewContainerCommand", output.ErrorConfig{})
         envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
 
         return output.Render(commandContext.Writer, envelope, option)
@@ -199,8 +199,9 @@ func (instance *ContainerCommand) describeServiceList(
         envelope.SetError(
             "debug.optionRefused",
             "the list window cannot be applied",
-            nil,
-            output.NewErrorCause(windowItemsErr.Error(), nil),
+            output.ErrorConfig{
+                Cause: output.NewErrorCause(windowItemsErr.Error(), nil),
+            },
         )
 
         return
@@ -250,7 +251,7 @@ func (instance *ContainerCommand) describeServiceList(
                 continue
             }
 
-            containerBlock.AddRow(item.Name, renderServiceDescriptionState(item), item.TypeName)
+            containerBlock.AddRow([]string{item.Name, renderServiceDescriptionState(item), item.TypeName})
         }
 
         if 0 < len(scopedItems) {
@@ -260,7 +261,7 @@ func (instance *ContainerCommand) describeServiceList(
             )
 
             for _, item := range scopedItems {
-                scopedBlock.AddRow(item.Name, renderServiceDescriptionState(item), item.TypeName)
+                scopedBlock.AddRow([]string{item.Name, renderServiceDescriptionState(item), item.TypeName})
             }
         }
 
@@ -457,7 +458,7 @@ func (instance *teardownView) addBlock(builder *output.TableBuilder, shownNames 
     )
 
     for _, row := range rows {
-        teardownBlock.AddRow(row...)
+        teardownBlock.AddRow(row)
     }
 }
 
@@ -665,8 +666,9 @@ func (instance *ContainerCommand) populateServiceList(
         envelope.SetError(
             "debug.optionRefused",
             "the list window cannot be applied",
-            nil,
-            output.NewErrorCause(windowItemsErr.Error(), nil),
+            output.ErrorConfig{
+                Cause: output.NewErrorCause(windowItemsErr.Error(), nil),
+            },
         )
 
         return
@@ -763,7 +765,7 @@ func (instance *ContainerCommand) populateServiceList(
         )
 
         for _, item := range okItems {
-            okBlock.AddRow(item.Name, item.TypeName)
+            okBlock.AddRow([]string{item.Name, item.TypeName})
         }
 
         hasAnyType := false
@@ -782,14 +784,14 @@ func (instance *ContainerCommand) populateServiceList(
                 )
 
                 for _, item := range errorItems {
-                    errorBlock.AddRow(output.TableRowSeparatorToken)
+                    errorBlock.AddRow([]string{output.TableRowSeparatorToken})
 
                     rows := buildContainerServiceTableRows(item, option)
                     for _, row := range rows {
-                        errorBlock.AddRow(row[0], row[1], row[2])
+                        errorBlock.AddRow([]string{row[0], row[1], row[2]})
                     }
 
-                    errorBlock.AddRow(output.TableRowSeparatorToken)
+                    errorBlock.AddRow([]string{output.TableRowSeparatorToken})
                 }
             } else {
                 errorBlock := builder.AddBlock(
@@ -798,7 +800,7 @@ func (instance *ContainerCommand) populateServiceList(
                 )
 
                 for _, item := range errorItems {
-                    errorBlock.AddRow(output.TableRowSeparatorToken)
+                    errorBlock.AddRow([]string{output.TableRowSeparatorToken})
 
                     errorLines := buildContainerServiceErrorLines(item, option.VerbosityLevel)
 
@@ -808,10 +810,10 @@ func (instance *ContainerCommand) populateServiceList(
                             nameCell = item.Name
                         }
 
-                        errorBlock.AddRow(nameCell, errorLines[index])
+                        errorBlock.AddRow([]string{nameCell, errorLines[index]})
                     }
 
-                    errorBlock.AddRow(output.TableRowSeparatorToken)
+                    errorBlock.AddRow([]string{output.TableRowSeparatorToken})
                 }
             }
         }
@@ -854,17 +856,19 @@ func reportServiceSweepFailures(
     envelope.SetError(
         "debug.buildFailed",
         "services failed to build",
-        map[string]any{
-            "failedCount": len(errorItems),
-            "failedNames": failedNames,
-        },
-        output.NewErrorCause(
-            errorItems[0].ErrorString,
-            map[string]any{
-                "serviceName": errorItems[0].Name,
-                "causeChain":  errorItems[0].ErrorCauseChain,
+        output.ErrorConfig{
+            Details: map[string]any{
+                "failedCount": len(errorItems),
+                "failedNames": failedNames,
             },
-        ),
+            Cause: output.NewErrorCause(
+                errorItems[0].ErrorString,
+                map[string]any{
+                    "serviceName": errorItems[0].Name,
+                    "causeChain":  errorItems[0].ErrorCauseChain,
+                },
+            ),
+        },
     )
 }
 
@@ -1306,13 +1310,15 @@ func (instance *ContainerCommand) populateSingleService(
         envelope.SetError(
             errorCode,
             errorMessage,
-            map[string]any{
-                "serviceName": serviceName,
+            output.ErrorConfig{
+                Details: map[string]any{
+                    "serviceName": serviceName,
+                },
+                Cause: output.NewErrorCause(
+                    errorString,
+                    causeDetails,
+                ),
             },
-            output.NewErrorCause(
-                errorString,
-                causeDetails,
-            ),
         )
     }
 
@@ -1346,24 +1352,24 @@ func (instance *ContainerCommand) populateSingleService(
             []string{"key", "value"},
         )
 
-        block.AddRow("name", details.Name)
-        block.AddRow("lifetime", details.Lifetime)
-        block.AddRow("type", details.TypeName)
+        block.AddRow([]string{"name", details.Name})
+        block.AddRow([]string{"lifetime", details.Lifetime})
+        block.AddRow([]string{"type", details.TypeName})
 
         statusValue := "ok"
         if "" != details.ErrorString {
             statusValue = "error"
         }
-        block.AddRow("status", statusValue)
+        block.AddRow([]string{"status", statusValue})
 
         if "" != details.ErrorString {
-            block.AddRow("error", details.ErrorString)
+            block.AddRow([]string{"error", details.ErrorString})
 
             for _, causeEntry := range details.ErrorCauseChain {
-                block.AddRow("caused by", causeEntry)
+                block.AddRow([]string{"caused by", causeEntry})
             }
 
-            block.AddRow("errorContextJson", details.ErrorContextJson)
+            block.AddRow([]string{"errorContextJson", details.ErrorContextJson})
         }
 
         /* windowed on this service only where the plan can list it */

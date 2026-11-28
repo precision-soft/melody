@@ -1443,6 +1443,25 @@ func TestCloseDiscardedResponseBody_ReadsATypedNilResponseAsAbsent(t *testing.T)
     closeDiscardedResponseBody(unassignedResponse, nil)
 }
 
+func TestCloseDiscardedResponseBody_LogsAFailedCloseOnItsLogger(t *testing.T) {
+    response := TextResponse(nethttp.StatusOK, "discarded")
+    response.SetBodyReader(&failingCloser{Reader: strings.NewReader("discarded")})
+
+    logger := &errorContextRecordingLogger{}
+    CloseDiscardedResponseBody(response, DiscardedBodyOptions{Logger: logger})
+
+    if _, logged := logger.errorContextFor("failed to close discarded response body"); false == logged {
+        t.Fatalf("expected the failed close on the options' logger, got %v", logger.errorMessages)
+    }
+}
+
+func TestCloseDiscardedResponseBody_WithoutALoggerDropsTheFailure(t *testing.T) {
+    response := TextResponse(nethttp.StatusOK, "discarded")
+    response.SetBodyReader(&failingCloser{Reader: strings.NewReader("discarded")})
+
+    CloseDiscardedResponseBody(response, DiscardedBodyOptions{})
+}
+
 func TestWriteResponse_ReadsATypedNilResponseAsTheEmptyDefault(t *testing.T) {
     var unassignedResponse *Response
 

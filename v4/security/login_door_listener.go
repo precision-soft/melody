@@ -516,7 +516,7 @@ func serveLogoutDoor(
 
     registerErr := http.OnSessionPersisted(request, logoutOutcomeDispatcher(runtimeInstance, request, firewall))
     if nil != registerErr {
-        http.CloseDiscardedResponseBody(result.Response, logging.LoggerFromRuntime(runtimeInstance))
+        http.CloseDiscardedResponseBody(result.Response, http.DiscardedBodyOptions{Logger: logging.LoggerFromRuntime(runtimeInstance)})
 
         requestEvent.Refuse(registerErr)
 

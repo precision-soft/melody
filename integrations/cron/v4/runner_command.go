@@ -469,8 +469,10 @@ func (instance *RunnerCommand) renderRunReport(
         envelope.SetError(
             "cron.runFailed",
             "one or more scheduled commands failed",
-            map[string]any{"failed": failedCommandsOf(report)},
-            output.NewErrorCause(runErr.Error(), nil),
+            output.ErrorConfig{
+                Details: map[string]any{"failed": failedCommandsOf(report)},
+                Cause:   output.NewErrorCause(runErr.Error(), nil),
+            },
         )
     }
 

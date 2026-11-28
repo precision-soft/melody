@@ -73,8 +73,7 @@ func (instance *Envelope) AddWarning(
 func (instance *Envelope) SetError(
     code string,
     message string,
-    details map[string]any,
-    cause *ErrorCause,
+    config ErrorConfig,
 ) {
-    instance.Error = NewError(code, message, ErrorConfig{Details: details, Cause: cause})
+    instance.Error = NewError(code, message, config)
 }

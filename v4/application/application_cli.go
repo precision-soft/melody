@@ -315,10 +315,11 @@ func suggestCliCommand(
         envelope.SetError(
             "cli.commandNotFound",
             "cli command not found",
-            map[string]any{
-                "command": commandName,
+            output.ErrorConfig{
+                Details: map[string]any{
+                    "command": commandName,
+                },
             },
-            nil,
         )
 
         builder.AddSummaryLine("MATCHES: 0")
@@ -334,10 +335,10 @@ func suggestCliCommand(
                 description = "-"
             }
 
-            block.AddRow(
+            block.AddRow([]string{
                 availableCommand.Name,
                 description,
-            )
+            })
         }
 
         envelope.Table = builder.Build()
@@ -368,12 +369,13 @@ func suggestCliCommand(
     envelope.SetError(
         "cli.commandNotFound",
         "cli command not found, matches found",
-        map[string]any{
-            "command":        commandName,
-            "matchesTotal":   len(matchingCommands),
-            "matchesPrinted": len(matchesToPrint),
+        output.ErrorConfig{
+            Details: map[string]any{
+                "command":        commandName,
+                "matchesTotal":   len(matchingCommands),
+                "matchesPrinted": len(matchesToPrint),
+            },
         },
-        nil,
     )
 
     builder.AddSummaryLine(
@@ -395,10 +397,10 @@ func suggestCliCommand(
             description = "-"
         }
 
-        block.AddRow(
+        block.AddRow([]string{
             match.Name,
             description,
-        )
+        })
     }
 
     if maxMatchesToPrint < len(matchingCommands) {

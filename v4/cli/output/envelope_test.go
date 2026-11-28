@@ -34,12 +34,14 @@ func TestEnvelope_SetErrorReplacesTheSingleSlot(t *testing.T) {
         t.Fatalf("expected a fresh envelope to carry no error")
     }
 
-    envelope.SetError("first.code", "the first failure", nil, nil)
+    envelope.SetError("first.code", "the first failure", ErrorConfig{})
     envelope.SetError(
         "second.code",
         "the second failure",
-        map[string]any{"attempt": 2},
-        NewErrorCause("the underlying refusal", map[string]any{"host": "acme.example"}),
+        ErrorConfig{
+            Details: map[string]any{"attempt": 2},
+            Cause:   NewErrorCause("the underlying refusal", map[string]any{"host": "acme.example"}),
+        },
     )
 
     if nil == envelope.Error {
@@ -56,5 +58,19 @@ func TestEnvelope_SetErrorReplacesTheSingleSlot(t *testing.T) {
 
     if nil == envelope.Error.Cause || "the underlying refusal" != envelope.Error.Cause.Message {
         t.Fatalf("expected the cause to be carried, got %#v", envelope.Error.Cause)
+    }
+}
+
+func TestEnvelope_SetErrorWithAnEmptyConfigCarriesNeither(t *testing.T) {
+    envelope := Envelope{}
+
+    envelope.SetError("only.code", "only the code and the message", ErrorConfig{})
+
+    if nil == envelope.Error || "only.code" != envelope.Error.Code {
+        t.Fatalf("expected the envelope to carry the error, got %#v", envelope.Error)
+    }
+
+    if nil != envelope.Error.Details || nil != envelope.Error.Cause {
+        t.Fatalf("expected an empty config to carry no details and no cause, got %#v", envelope.Error)
     }
 }

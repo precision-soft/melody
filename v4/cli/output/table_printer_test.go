@@ -85,10 +85,12 @@ func TestTablePrinter_RendersTheEnvelopeErrorUnderQuiet(t *testing.T) {
     envelope.SetError(
         "cmd.failed",
         "the command failed",
-        map[string]any{
-            "subject": "order",
+        ErrorConfig{
+            Details: map[string]any{
+                "subject": "order",
+            },
+            Cause: NewErrorCause("the backend refused", map[string]any{"status": 503}),
         },
-        NewErrorCause("the backend refused", map[string]any{"status": 503}),
     )
 
     buffer := &bytes.Buffer{}
@@ -206,11 +208,12 @@ func TestTablePrinter_SkipsAnUnnamedErrorDetail(t *testing.T) {
     envelope.SetError(
         "cmd.failed",
         "the command failed",
-        map[string]any{
-            "":        "filed under no name",
-            "subject": "order",
+        ErrorConfig{
+            Details: map[string]any{
+                "":        "filed under no name",
+                "subject": "order",
+            },
         },
-        nil,
     )
 
     buffer := &bytes.Buffer{}
@@ -451,7 +454,7 @@ func TestTablePrinter_ReportsAShortWriteAsAFailure(t *testing.T) {
     envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
 
     builder := NewTableBuilder()
-    builder.AddBlock("BLOCK", []string{"name"}).AddRow("value")
+    builder.AddBlock("BLOCK", []string{"name"}).AddRow([]string{"value"})
     envelope.Table = builder.Build()
 
     writer := &shortTableWriter{}
@@ -469,7 +472,7 @@ func TestTablePrinter_ReturnsTheFirstWriteFailure(t *testing.T) {
     envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
 
     builder := NewTableBuilder()
-    builder.AddBlock("BLOCK", []string{"name"}).AddRow("value")
+    builder.AddBlock("BLOCK", []string{"name"}).AddRow([]string{"value"})
     envelope.Table = builder.Build()
 
     printErr := NewTablePrinter(TablePrinterConfig{}).Print(&failingTableWriter{failAfter: 1}, envelope, Option{})
@@ -486,8 +489,7 @@ func TestTablePrinter_EscapesControlCharactersInTheTextChannels(t *testing.T) {
     envelope.SetError(
         "cmd.failed",
         "open failed: file\rERROR: disk gone\x1b[2J",
-        nil,
-        nil,
+        ErrorConfig{},
     )
     envelope.AddWarning("warning.code", "careful\x1b]0;pwned\x07", nil)
     envelope.Table = &TableData{

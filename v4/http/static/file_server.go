@@ -99,11 +99,19 @@ func NewFileServer(config Config) *FileServer {
     }
 }
 
+/* ServeOptions is what one serve declares beside its request. */
+type ServeOptions struct {
+    /* Logger receives the serve's read failures and refusals: the emergency logger when left out; a typed nil is a wiring defect and panics naming the field. */
+    Logger loggingcontract.Logger
+}
+
+const serveLoggerField = "ServeOptions.Logger"
+
 func (instance *FileServer) ServeReader(
     request httpcontract.Request,
-    logger loggingcontract.Logger,
+    options ServeOptions,
 ) (int, nethttp.Header, io.ReadCloser, bool) {
-    logger = resolveServeLogger(logger, "FileServer.ServeReader")
+    logger := resolveServeLogger(options.Logger)
 
     if true == internal.IsNilInterface(request) {
         logger.Warning("static serve reader skipped because request is nil", nil)
@@ -166,9 +174,9 @@ type resolvedFile struct {
 
 func (instance *FileServer) Serve(
     request httpcontract.Request,
-    logger loggingcontract.Logger,
+    options ServeOptions,
 ) (int, nethttp.Header, []byte, bool) {
-    logger = resolveServeLogger(logger, "FileServer.Serve")
+    logger := resolveServeLogger(options.Logger)
 
     if true == internal.IsNilInterface(request) {
         logger.Warning("static serve skipped because request is nil", nil)
@@ -630,9 +638,9 @@ func logOpenFailure(logger loggingcontract.Logger, relativePath string, openErr 
     logger.Debug("static serve open failed", logContext)
 }
 
-/* resolveServeLogger answers the logger a serve reports its read failures and refusals in: the emergency logger when none is handed; a typed nil is a wiring defect and panics, naming the door's argument. */
-func resolveServeLogger(logger loggingcontract.Logger, door string) loggingcontract.Logger {
-    resolved, resolveErr := logging.ResolveOptionalLogger(logger, "static file server", door+".logger")
+/* resolveServeLogger answers the logger a serve reports its read failures and refusals in: the emergency logger when none is handed; a typed nil is a wiring defect and panics, naming the options field. */
+func resolveServeLogger(logger loggingcontract.Logger) loggingcontract.Logger {
+    resolved, resolveErr := logging.ResolveOptionalLogger(logger, "static file server", serveLoggerField)
     if nil != resolveErr {
         exception.Panic(exception.FromError(resolveErr))
     }
