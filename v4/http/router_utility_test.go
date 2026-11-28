@@ -1455,12 +1455,6 @@ func TestCloseDiscardedResponseBody_LogsAFailedCloseOnItsLogger(t *testing.T) {
     }
 }
 
-func TestCloseDiscardedResponseBody_WithoutALoggerDropsTheFailure(t *testing.T) {
-    response := TextResponse(nethttp.StatusOK, "discarded")
-    response.SetBodyReader(&failingCloser{Reader: strings.NewReader("discarded")})
-
-    CloseDiscardedResponseBody(response, DiscardedBodyOptions{})
-}
 
 func TestWriteResponse_ReadsATypedNilResponseAsTheEmptyDefault(t *testing.T) {
     var unassignedResponse *Response

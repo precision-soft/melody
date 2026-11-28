@@ -30,6 +30,9 @@ type InMemoryTokenStoreConfig struct {
 
     /* Clock is where the issue stamps and the expiries are read; nil is the system clock. */
     Clock clockcontract.Clock
+
+    /* MaxIdentifierBytes bounds the user and the device identifier Put and RevokeBefore accept, each a key the store keeps, a boundary held for RevocationEpochRetention: past it the call is refused naming the identifier's field and its length, never its bytes. 255 by default, at least 1, unlimited for identifiers the application bounds itself. */
+    MaxIdentifierBytes bound.Count
 }
 
 /* ErrTokenStoreFull is in the chain of a Put the in-memory store refused at InMemoryTokenStoreConfig.MaxEntries. */
@@ -46,6 +49,13 @@ var inMemoryTokenStoreRevocationEpochRetentionRule = bound.Rule[time.Duration]{
     Name:              "InMemoryTokenStoreConfig.RevocationEpochRetention",
     Default:           7 * 24 * time.Hour,
     Minimum:           bound.TtlMinimum,
+    UnlimitedAdmitted: true,
+}
+
+var inMemoryTokenStoreMaxIdentifierBytesRule = bound.Rule[int]{
+    Name:              "InMemoryTokenStoreConfig.MaxIdentifierBytes",
+    Default:           255,
+    Minimum:           1,
     UnlimitedAdmitted: true,
 }
 
@@ -73,6 +83,11 @@ func NewInMemoryTokenStore(config InMemoryTokenStoreConfig) *InMemoryTokenStore 
         exception.Panic(exception.FromError(sweepIntervalErr))
     }
 
+    maxIdentifierBytes, maxIdentifierBytesErr := bound.Resolve(config.MaxIdentifierBytes, inMemoryTokenStoreMaxIdentifierBytesRule)
+    if nil != maxIdentifierBytesErr {
+        exception.Panic(exception.FromError(maxIdentifierBytesErr))
+    }
+
     clockInstance, clockErr := clock.ResolveOptionalClock(config.Clock, "in-memory token store", "InMemoryTokenStoreConfig.Clock")
     if nil != clockErr {
         exception.Panic(exception.FromError(clockErr))
@@ -88,6 +103,7 @@ func NewInMemoryTokenStore(config InMemoryTokenStoreConfig) *InMemoryTokenStore 
         revocationEpochRetention: retention.Value,
         sweepInterval:            sweepInterval.Value,
         sweepDisabled:            sweepInterval.Unlimited,
+        maxIdentifierBytes:       maxIdentifierBytes.Value,
     }
 }
 
@@ -102,6 +118,7 @@ type InMemoryTokenStore struct {
     sweepInterval            time.Duration
     sweepDisabled            bool
     lastSweep                time.Time
+    maxIdentifierBytes       int
 
     /* so a store at its ceiling does not walk every entry on each refused Put */
     earliestExpiry              time.Time
@@ -127,10 +144,27 @@ func refuseNonUtf8TokenStoreUser(userIdentifier string) error {
 }
 
 const (
+    claimsUserField = "Claims.UserIdentifier"
+
     claimsDeviceField = "Claims.DeviceIdentifier"
+
+    revocationUserArgument = "userIdentifier"
 
     revocationOptionsDeviceField = "RevocationOptions.DeviceIdentifier"
 )
+
+/* a maxIdentifierBytes of 0 is the unlimited bound */
+func refuseOversizedTokenStoreIdentifier(identifier string, field string, maxIdentifierBytes int) error {
+    if 0 == maxIdentifierBytes || maxIdentifierBytes >= len(identifier) {
+        return nil
+    }
+
+    return exception.NewError(
+        "token store identifier is longer than the maximum",
+        map[string]any{"field": field, "identifierLength": len(identifier), "maxIdentifierBytes": maxIdentifierBytes, "limit": inMemoryTokenStoreMaxIdentifierBytesRule.Name},
+        nil,
+    )
+}
 
 /* the device names a boundary field as the user names its key, so it is refused by the user's rule */
 func refuseNonUtf8TokenStoreDevice(deviceIdentifier string, field string) error {
@@ -199,6 +233,14 @@ func (instance *InMemoryTokenStore) Put(
 
     if utf8Err := refuseNonUtf8TokenStoreDevice(claims.DeviceIdentifier, claimsDeviceField); nil != utf8Err {
         return utf8Err
+    }
+
+    if lengthErr := refuseOversizedTokenStoreIdentifier(claims.UserIdentifier, claimsUserField, instance.maxIdentifierBytes); nil != lengthErr {
+        return lengthErr
+    }
+
+    if lengthErr := refuseOversizedTokenStoreIdentifier(claims.DeviceIdentifier, claimsDeviceField, instance.maxIdentifierBytes); nil != lengthErr {
+        return lengthErr
     }
 
     if doneErr := refuseDoneTokenStoreContext(runtimeInstance, "Put"); nil != doneErr {
@@ -457,6 +499,14 @@ func (instance *InMemoryTokenStore) RevokeBefore(
 
     if utf8Err := refuseNonUtf8TokenStoreDevice(options.DeviceIdentifier, revocationOptionsDeviceField); nil != utf8Err {
         return utf8Err
+    }
+
+    if lengthErr := refuseOversizedTokenStoreIdentifier(userIdentifier, revocationUserArgument, instance.maxIdentifierBytes); nil != lengthErr {
+        return lengthErr
+    }
+
+    if lengthErr := refuseOversizedTokenStoreIdentifier(options.DeviceIdentifier, revocationOptionsDeviceField, instance.maxIdentifierBytes); nil != lengthErr {
+        return lengthErr
     }
 
     if true == instant.IsZero() {

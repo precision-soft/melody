@@ -196,6 +196,16 @@ type TokenStoreConfig struct {
 
     /* RevocationEpochRetention is how long a user's revocation boundary outlives its instant: 7 days by default, at least 1s, unlimited keeping it for ever, as the in-memory store does, at the cost of one hash kept per user that ever revoked. */
     RevocationEpochRetention bound.Duration
+
+    /* MaxIdentifierBytes bounds the user and the device identifier Put and RevokeBefore accept, each a key or a hash field the store keeps, a boundary held for RevocationEpochRetention: past it the call is refused before any round trip naming the identifier's field and its length, never its bytes. 255 by default, at least 1, unlimited for identifiers the application bounds itself. */
+    MaxIdentifierBytes bound.Count
+}
+
+var tokenStoreMaxIdentifierBytesRule = bound.Rule[int]{
+    Name:              "TokenStoreConfig.MaxIdentifierBytes",
+    Default:           255,
+    Minimum:           1,
+    UnlimitedAdmitted: true,
 }
 
 var tokenStoreScanCountRule = bound.Rule[int]{
@@ -226,6 +236,7 @@ type resolvedTokenStore struct {
     clock                      clockcontract.Clock
     maximumClockSkew           time.Duration
     epochRetentionMilliseconds int64
+    maxIdentifierBytes         int
 }
 
 func resolveTokenStoreConfig(config TokenStoreConfig) (resolvedTokenStore, error) {
@@ -254,6 +265,11 @@ func resolveTokenStoreConfig(config TokenStoreConfig) (resolvedTokenStore, error
         return resolvedTokenStore{}, epochRetentionErr
     }
 
+    maxIdentifierBytes, maxIdentifierBytesErr := bound.Resolve(config.MaxIdentifierBytes, tokenStoreMaxIdentifierBytesRule)
+    if nil != maxIdentifierBytesErr {
+        return resolvedTokenStore{}, maxIdentifierBytesErr
+    }
+
     /* empty is the connection's default, filled at construction */
     prefix := config.Prefix
 
@@ -270,6 +286,7 @@ func resolveTokenStoreConfig(config TokenStoreConfig) (resolvedTokenStore, error
         clock:                      config.Clock,
         maximumClockSkew:           maximumClockSkew.Value,
         epochRetentionMilliseconds: epochRetentionMilliseconds,
+        maxIdentifierBytes:         maxIdentifierBytes.Value,
     }, nil
 }
 
@@ -304,6 +321,7 @@ func newTokenStoreFromResolved(connection *Connection, resolved resolvedTokenSto
         epochRetentionMilliseconds: resolved.epochRetentionMilliseconds,
         maximumClockSkew:           resolved.maximumClockSkew,
         callTimeout:                resolved.callTimeout,
+        maxIdentifierBytes:         resolved.maxIdentifierBytes,
     }
 }
 
@@ -316,6 +334,7 @@ type RedisTokenStore struct {
     epochRetentionMilliseconds int64
     maximumClockSkew           time.Duration
     callTimeout                time.Duration
+    maxIdentifierBytes         int
 }
 
 func (instance *RedisTokenStore) runtimeCallContext(parentContext context.Context) (context.Context, context.CancelFunc) {
@@ -666,6 +685,14 @@ func (instance *RedisTokenStore) RevokeBefore(
         return utf8Err
     }
 
+    if lengthErr := refuseOversizedIdentifier(userIdentifier, revocationUserArgument, instance.maxIdentifierBytes); nil != lengthErr {
+        return lengthErr
+    }
+
+    if lengthErr := refuseOversizedIdentifier(options.DeviceIdentifier, revocationOptionsDeviceField, instance.maxIdentifierBytes); nil != lengthErr {
+        return lengthErr
+    }
+
     if true == instant.IsZero() || true == instant.Before(revocationEpochLowerBound) || true == instant.After(revocationEpochUpperBound) {
         return exception.NewError(
             "redis token store revocation instant is not representable",
@@ -836,10 +863,27 @@ func refuseNonUtf8UserIdentifier(userIdentifier string) error {
 }
 
 const (
+    claimsUserField = "Claims.UserIdentifier"
+
     claimsDeviceField = "Claims.DeviceIdentifier"
+
+    revocationUserArgument = "userIdentifier"
 
     revocationOptionsDeviceField = "RevocationOptions.DeviceIdentifier"
 )
+
+/* a maxIdentifierBytes of 0 is the unlimited bound */
+func refuseOversizedIdentifier(identifier string, field string, maxIdentifierBytes int) error {
+    if 0 == maxIdentifierBytes || maxIdentifierBytes >= len(identifier) {
+        return nil
+    }
+
+    return exception.NewError(
+        "redis token store identifier is longer than the maximum",
+        map[string]any{"field": field, "identifierLength": len(identifier), "maxIdentifierBytes": maxIdentifierBytes, "limit": tokenStoreMaxIdentifierBytesRule.Name},
+        nil,
+    )
+}
 
 /* the lookup script reads the device from the stored json, which rewrites an invalid byte, so a device boundary written under the raw identifier would never match its tokens */
 func refuseNonUtf8DeviceIdentifier(deviceIdentifier string, field string) error {
@@ -861,6 +905,14 @@ func (instance *RedisTokenStore) put(parentContext context.Context, tokenString 
 
     if utf8Err := refuseNonUtf8DeviceIdentifier(claims.DeviceIdentifier, claimsDeviceField); nil != utf8Err {
         return utf8Err
+    }
+
+    if lengthErr := refuseOversizedIdentifier(claims.UserIdentifier, claimsUserField, instance.maxIdentifierBytes); nil != lengthErr {
+        return lengthErr
+    }
+
+    if lengthErr := refuseOversizedIdentifier(claims.DeviceIdentifier, claimsDeviceField, instance.maxIdentifierBytes); nil != lengthErr {
+        return lengthErr
     }
 
     /* stamped from the injected clock, not redis's; a RevokeBefore slipping into the round trip fails closed */

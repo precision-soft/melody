@@ -42,7 +42,7 @@ var reportableSealFormatPattern = regexp.MustCompile(`^[a-z0-9]{1,16}$`)
 
 /* EncryptOptions is what one seal declares beside its plaintext. */
 type EncryptOptions struct {
-    /* KeyId names the key the value is sealed under; left out, the provider's current key. */
+    /* KeyId names the key the value is sealed under; left out, the provider's current key, the reading every Cipher implementation gives it, since the column types and the Migrator seal with it left out. */
     KeyId string
 }
 

@@ -999,6 +999,7 @@ func TestNewTokenStore_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T) {
         {field: "TokenStoreConfig.MaximumClockSkew", config: TokenStoreConfig{MaximumClockSkew: bound.UnlimitedDuration()}},
         {field: "TokenStoreConfig.RevocationEpochRetention", config: TokenStoreConfig{RevocationEpochRetention: bound.Of(-time.Second)}},
         {field: "TokenStoreConfig.RevocationEpochRetention", config: TokenStoreConfig{RevocationEpochRetention: bound.Of(500 * time.Millisecond)}},
+        {field: "TokenStoreConfig.MaxIdentifierBytes", config: TokenStoreConfig{MaxIdentifierBytes: bound.Of(0)}},
     } {
         expectPanicNamingField(t, testCase.field, func() {
             NewTokenStore(newTestConnection(&stubClient{}), testCase.config)
@@ -1246,6 +1247,96 @@ func TestRedisTokenStore_ANonUtf8DeviceIdentifierIsRefusedNamingTheField(t *test
         refusalContext := exception.FromError(refusal).Context()
         if field != refusalContext["field"] || 6 != refusalContext["deviceLength"] {
             t.Fatalf("expected the refusal to name %s and the length, never the bytes, got %v", field, refusalContext)
+        }
+    }
+}
+
+func TestRedisTokenStore_AnIdentifierPastMaxIdentifierBytesIsRefusedNamingTheFieldAndTheLength(t *testing.T) {
+    oversized := strings.Repeat("a", 256)
+    store := NewTokenStore(newTestConnection(&stubClient{}), TokenStoreConfig{})
+
+    for field, call := range map[string]func() error{
+        "Claims.UserIdentifier": func() error {
+            return store.Put(newTokenStoreRuntime(), "token", securitycontract.Claims{UserIdentifier: oversized}, bound.UnlimitedDuration())
+        },
+        "Claims.DeviceIdentifier": func() error {
+            return store.Put(newTokenStoreRuntime(), "token", securitycontract.Claims{UserIdentifier: "alice", DeviceIdentifier: oversized}, bound.UnlimitedDuration())
+        },
+        "userIdentifier": func() error {
+            return store.RevokeBefore(newTokenStoreRuntime(), oversized, time.Now(), securitycontract.RevocationOptions{})
+        },
+        "RevocationOptions.DeviceIdentifier": func() error {
+            return store.RevokeBefore(newTokenStoreRuntime(), "alice", time.Now(), securitycontract.RevocationOptions{DeviceIdentifier: oversized})
+        },
+    } {
+        refusal := call()
+        if nil == refusal || true == exception.AnswersUnavailable(refusal) {
+            t.Fatalf("expected %s of 256 bytes refused unmarked before any round trip, got %v", field, refusal)
+        }
+
+        refusalContext := exception.FromError(refusal).Context()
+        if field != refusalContext["field"] || 256 != refusalContext["identifierLength"] || 255 != refusalContext["maxIdentifierBytes"] || "TokenStoreConfig.MaxIdentifierBytes" != refusalContext["limit"] {
+            t.Fatalf("expected the refusal to name %s, its length and the limit, never the bytes, got %v", field, refusalContext)
+        }
+
+        if true == strings.Contains(refusal.Error(), oversized) {
+            t.Fatalf("expected the refusal never to carry the identifier, got %v", refusal)
+        }
+    }
+
+    for _, testCase := range []struct {
+        config             TokenStoreConfig
+        maxIdentifierBytes int
+    }{
+        {config: TokenStoreConfig{}, maxIdentifierBytes: 255},
+        {config: TokenStoreConfig{MaxIdentifierBytes: bound.Of(4)}, maxIdentifierBytes: 4},
+        {config: TokenStoreConfig{MaxIdentifierBytes: bound.UnlimitedCount()}, maxIdentifierBytes: 0},
+    } {
+        if resolved := NewTokenStore(newTestConnection(&stubClient{}), testCase.config); testCase.maxIdentifierBytes != resolved.maxIdentifierBytes {
+            t.Fatalf("expected the bound %d resolved, got %d", testCase.maxIdentifierBytes, resolved.maxIdentifierBytes)
+        }
+    }
+
+    bounded := NewTokenStore(newTestConnection(&stubClient{}), TokenStoreConfig{MaxIdentifierBytes: bound.Of(4)})
+    refusal := bounded.RevokeBefore(newTokenStoreRuntime(), "abcde", time.Now(), securitycontract.RevocationOptions{})
+    if nil == refusal || 4 != exception.FromError(refusal).Context()["maxIdentifierBytes"] {
+        t.Fatalf("expected the configured bound applied, got %v", refusal)
+    }
+}
+
+func TestRefuseOversizedIdentifier_AdmitsTheBoundItselfAndAnyLengthWhenUnlimited(t *testing.T) {
+    if refusal := refuseOversizedIdentifier(strings.Repeat("a", 255), claimsUserField, 255); nil != refusal {
+        t.Fatalf("expected an identifier of 255 bytes admitted under a bound of 255, got %v", refusal)
+    }
+
+    if refusal := refuseOversizedIdentifier(strings.Repeat("a", 256), claimsUserField, 255); nil == refusal {
+        t.Fatalf("expected an identifier of 256 bytes refused under a bound of 255")
+    }
+
+    if refusal := refuseOversizedIdentifier(strings.Repeat("a", 1<<16), claimsDeviceField, 0); nil != refusal {
+        t.Fatalf("expected the unlimited bound to admit any length, got %v", refusal)
+    }
+}
+
+/* the read refuses no identifier the writes refuse: no boundary can stand under it, so the user's alone answers */
+func TestRedisTokenStore_RevocationEpochAnswersTheUsersBoundaryForADeviceNoWriteAccepts(t *testing.T) {
+    client := newTokenStoreClient(t)
+    store := NewTokenStore(newTestConnection(client), TokenStoreConfig{Prefix: "melody:token:test:epochunwritabledevice"})
+    defer client.Do(context.Background(), client.B().Del().Key(store.epochKey("wanda")).Build())
+
+    instant := time.Now().Add(-time.Minute).Truncate(time.Millisecond)
+    if revokeErr := store.RevokeBefore(newTokenStoreRuntime(), "wanda", instant, securitycontract.RevocationOptions{}); nil != revokeErr {
+        t.Fatalf("revoke: %v", revokeErr)
+    }
+
+    for _, device := range []string{"phone\xff", strings.Repeat("a", 256)} {
+        epoch, epochErr := store.RevocationEpoch(newTokenStoreRuntime(), "wanda", securitycontract.RevocationOptions{DeviceIdentifier: device})
+        if nil != epochErr {
+            t.Fatalf("expected the read to answer for a device no write accepts, got %v", epochErr)
+        }
+
+        if false == epoch.Equal(instant) {
+            t.Fatalf("expected the user's boundary %v, got %v", instant, epoch)
         }
     }
 }

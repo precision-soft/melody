@@ -96,6 +96,12 @@ func TestOptionalDependencies_NilIsTheDefaultAndATypedNilIsRefused(t *testing.T)
         {"static.FileServer.ServeReader", "static file server logger is a typed nil", "ServeOptions.Logger", "static serve reader skipped because request is nil", func(logger loggingcontract.Logger) error {
             return capturePanic(func() { static.NewFileServer(static.Config{Root: t.TempDir()}).ServeReader(nil, static.ServeOptions{Logger: logger}) })
         }},
+        {"http.CloseDiscardedResponseBody", "discarded response body logger is a typed nil", "DiscardedBodyOptions.Logger", "failed to close discarded response body", func(logger loggingcontract.Logger) error {
+            response := http.TextResponse(200, "discarded")
+            response.SetBodyReader(failingCloseReader{Reader: strings.NewReader("discarded")})
+
+            return capturePanic(func() { http.CloseDiscardedResponseBody(response, http.DiscardedBodyOptions{Logger: logger}) })
+        }},
     }
 
     for _, row := range rows {
@@ -113,6 +119,14 @@ func TestOptionalDependencies_NilIsTheDefaultAndATypedNilIsRefused(t *testing.T)
             requireTypedNilLoggerRefusal(t, row.build(typedNil), row.message, row.field)
         })
     }
+}
+
+type failingCloseReader struct {
+    io.Reader
+}
+
+func (instance failingCloseReader) Close() error {
+    return errors.New("close failed")
 }
 
 func captureStandardError(t *testing.T, action func()) string {

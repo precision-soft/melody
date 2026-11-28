@@ -70,6 +70,21 @@ func (instance *spyServiceRegistrar) MustRegister(serviceName string, provider a
     instance.RegisterService(serviceName, provider, options)
 }
 
+/* scopelessRuntime answers a typed-nil scope, the runtime of another implementation the framework's own never are */
+type scopelessRuntime struct {
+    containercontract.Runtime
+}
+
+type absentScope struct {
+    containercontract.Scope
+}
+
+func (instance scopelessRuntime) Scope() containercontract.Scope {
+    var scope *absentScope
+
+    return scope
+}
+
 /* singleAttemptRetry keeps a refused dial from being retried under the default backoff */
 var singleAttemptRetry = RetryConfig{MaxAttempts: bound.Of(1)}
 

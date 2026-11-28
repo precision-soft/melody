@@ -242,6 +242,44 @@ func TestProvider_ThePostBuildHookRunsUnderTheOpenersRuntime(t *testing.T) {
     if "opener" != seenRuntime.Context().Value(postBuildHookContextKey{}) {
         t.Fatal("expected the hook's context derived from the opener's")
     }
+
+    if nil == seenRuntime.Context().Err() {
+        t.Fatal("expected the hook's runtime done once the open returned")
+    }
+}
+
+func TestProvider_ARuntimeWithoutAScopeIsRefusedBeforeThePostBuildHookNamingTheArgument(t *testing.T) {
+    hookRan := false
+    provider := newTestProvider(ProviderConfig{
+        PostBuildHook: func(runtimeInstance containercontract.Runtime, driverConfig *driver.Config) error {
+            hookRan = true
+
+            return nil
+        },
+        Retry: singleAttemptRetry,
+    })
+
+    runtimeInstance := scopelessRuntime{Runtime: testRuntime()}
+    parameters := newTestParameters("db.internal", "3306", "melody", "melody_user", "melody_password")
+
+    for door, open := range map[string]func() (*bun.DB, error){
+        "mysql.Provider.Open":             func() (*bun.DB, error) { return provider.Open(runtimeInstance, parameters, nil) },
+        "mysql.Provider.OpenForMigration": func() (*bun.DB, error) { return provider.OpenForMigration(runtimeInstance, parameters, nil) },
+    } {
+        _, openErr := open()
+        if nil == openErr {
+            t.Fatalf("%s: expected a runtime without a scope to be refused", door)
+        }
+
+        context := exception.LogContext(openErr, exception.LogContextConfig{})
+        if "runtimeInstance" != context["argument"] || door != context["door"] || "ProviderConfig.PostBuildHook" != context["field"] {
+            t.Fatalf("%s: expected the refusal to name the argument, the door and the hook's field, got %v: %v", door, context, openErr)
+        }
+    }
+
+    if true == hookRan {
+        t.Fatal("expected the hook not to run under a runtime without a scope")
+    }
 }
 
 func TestProvider_ThePostBuildHooksContextEndsAtTheConnectTimeout(t *testing.T) {

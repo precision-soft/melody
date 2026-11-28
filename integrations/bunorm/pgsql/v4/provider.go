@@ -63,6 +63,10 @@ func (instance *Provider) Open(runtimeInstance containercontract.Runtime, parame
         return nil, runtimeErr
     }
 
+    if scopeErr := instance.refuseARuntimeWithoutAScope(runtimeInstance, "pgsql.Provider.Open"); nil != scopeErr {
+        return nil, scopeErr
+    }
+
     resolvedLogger, loggerErr := logging.ResolveOptionalLogger(logger, "pgsql provider", "pgsql.Provider.Open.logger")
     if nil != loggerErr {
         return nil, loggerErr
@@ -84,7 +88,24 @@ func (instance *Provider) OpenForMigration(runtimeInstance containercontract.Run
         return nil, refuseErr
     }
 
+    if scopeErr := instance.refuseARuntimeWithoutAScope(runtimeInstance, "pgsql.Provider.OpenForMigration"); nil != scopeErr {
+        return nil, scopeErr
+    }
+
     return instance.migrationProvider().Open(runtimeInstance, parameters, logger)
+}
+
+/* refuseARuntimeWithoutAScope refuses, when a post-build hook is configured, a runtime whose scope is nil: the hook is handed the runtime re-wrapped over its own context, and the re-wrap panics on a nil scope */
+func (instance *Provider) refuseARuntimeWithoutAScope(runtimeInstance containercontract.Runtime, door string) error {
+    if nil == instance.postBuildHook || false == isNilInterface(runtimeInstance.Scope()) {
+        return nil
+    }
+
+    return exception.NewError(
+        "the runtime carries no scope to hand the post-build hook",
+        exceptioncontract.Context{"argument": "runtimeInstance", "door": door, "field": "ProviderConfig.PostBuildHook"},
+        nil,
+    )
 }
 
 /* migrationProvider derives the provider OpenForMigration dials with: the same hook, retry policy and transport settings, over the migration pool and the lifted deadlines. */

@@ -120,7 +120,7 @@ The configuration is resolved at the registration, so a refused `ReleaseTimeout`
 
 ## Advanced connector customization
 
-For driver options not exposed by the typed configs, use a post-build hook set as `ProviderConfig.PostBuildHook`, with the [`pgsql.PostBuildHook`](./post_build_hook.go) signature. The hook runs during `Open`, after Melody defaults and typed configs are applied and before the SQL database is opened, handed the opener's runtime, its context ending at the connect timeout.
+For driver options not exposed by the typed configs, use a post-build hook set as `ProviderConfig.PostBuildHook`, with the [`pgsql.PostBuildHook`](./post_build_hook.go) signature. The hook runs during `Open`, after Melody defaults and typed configs are applied and before the SQL database is opened, handed the opener's runtime, its context ending at the connect timeout. That runtime is whichever caller's opened the pool, the boot's, a command's or the first request's, and its context ends when the open returns: the hook resolves through the runtime's scope what it needs and keeps the services, never the runtime, and reads nothing scoped to a request. A runtime whose scope is nil is refused naming `ProviderConfig.PostBuildHook` when a hook is set.
 
 ```go
 provider := pgsql.NewProvider(pgsql.ProviderConfig{

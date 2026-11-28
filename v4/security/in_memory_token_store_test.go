@@ -1019,6 +1019,98 @@ func TestInMemoryTokenStore_ANonUtf8DeviceIdentifierIsRefusedNamingTheField(t *t
     }
 }
 
+func TestInMemoryTokenStore_AnIdentifierPastMaxIdentifierBytesIsRefusedNamingTheFieldAndTheLength(t *testing.T) {
+    runtimeInstance := newTestRuntime()
+    oversized := strings.Repeat("a", 256)
+    longest := strings.Repeat("a", 255)
+
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
+
+    for field, call := range map[string]func() error{
+        "Claims.UserIdentifier": func() error {
+            return store.Put(runtimeInstance, "t", securitycontract.Claims{UserIdentifier: oversized}, bound.UnlimitedDuration())
+        },
+        "Claims.DeviceIdentifier": func() error {
+            return store.Put(runtimeInstance, "t", securitycontract.Claims{UserIdentifier: "u", DeviceIdentifier: oversized}, bound.UnlimitedDuration())
+        },
+        "userIdentifier": func() error {
+            return store.RevokeBefore(runtimeInstance, oversized, time.Now(), securitycontract.RevocationOptions{})
+        },
+        "RevocationOptions.DeviceIdentifier": func() error {
+            return store.RevokeBefore(runtimeInstance, "u", time.Now(), securitycontract.RevocationOptions{DeviceIdentifier: oversized})
+        },
+    } {
+        refusal := call()
+        if nil == refusal || true == exception.IsInfrastructureFailure(refusal) {
+            t.Fatalf("expected %s of 256 bytes refused unmarked, got %v", field, refusal)
+        }
+
+        refusalContext := exception.FromError(refusal).Context()
+        if field != refusalContext["field"] || 256 != refusalContext["identifierLength"] || 255 != refusalContext["maxIdentifierBytes"] || "InMemoryTokenStoreConfig.MaxIdentifierBytes" != refusalContext["limit"] {
+            t.Fatalf("expected the refusal to name %s, its length and the limit, never the bytes, got %v", field, refusalContext)
+        }
+
+        if true == strings.Contains(refusal.Error(), oversized) {
+            t.Fatalf("expected the refusal never to carry the identifier, got %v", refusal)
+        }
+    }
+
+    if _, found, _ := store.Lookup(runtimeInstance, "t"); true == found {
+        t.Fatalf("expected the refused put to store nothing")
+    }
+
+    if putErr := store.Put(runtimeInstance, "kept", securitycontract.Claims{UserIdentifier: longest, DeviceIdentifier: longest}, bound.UnlimitedDuration()); nil != putErr {
+        t.Fatalf("expected identifiers of 255 bytes admitted, got %v", putErr)
+    }
+
+    if revokeErr := store.RevokeBefore(runtimeInstance, longest, time.Now(), securitycontract.RevocationOptions{DeviceIdentifier: longest}); nil != revokeErr {
+        t.Fatalf("expected identifiers of 255 bytes admitted at the revocation, got %v", revokeErr)
+    }
+
+    bounded := NewInMemoryTokenStore(InMemoryTokenStoreConfig{MaxIdentifierBytes: bound.Of(4)})
+    if putErr := bounded.Put(runtimeInstance, "t", securitycontract.Claims{UserIdentifier: "abcd", DeviceIdentifier: "abcd"}, bound.UnlimitedDuration()); nil != putErr {
+        t.Fatalf("expected identifiers at the configured bound admitted, got %v", putErr)
+    }
+
+    refusal := bounded.Put(runtimeInstance, "t", securitycontract.Claims{UserIdentifier: "abcde"}, bound.UnlimitedDuration())
+    if nil == refusal || 4 != exception.FromError(refusal).Context()["maxIdentifierBytes"] {
+        t.Fatalf("expected the configured bound applied, got %v", refusal)
+    }
+
+    unlimited := NewInMemoryTokenStore(InMemoryTokenStoreConfig{MaxIdentifierBytes: bound.UnlimitedCount()})
+    if putErr := unlimited.Put(runtimeInstance, "t", securitycontract.Claims{UserIdentifier: oversized + oversized, DeviceIdentifier: oversized}, bound.UnlimitedDuration()); nil != putErr {
+        t.Fatalf("expected an unlimited bound to admit any length, got %v", putErr)
+    }
+}
+
+/* the read refuses no identifier the writes refuse: no boundary can stand under it, so the user's alone answers */
+func TestInMemoryTokenStore_RevocationEpochAnswersTheUsersBoundaryForADeviceNoWriteAccepts(t *testing.T) {
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
+    runtimeInstance := newTestRuntime()
+
+    instant := time.Now().Add(-time.Minute)
+    if revokeErr := store.RevokeBefore(runtimeInstance, "u", instant, securitycontract.RevocationOptions{}); nil != revokeErr {
+        t.Fatalf("revoke: %v", revokeErr)
+    }
+
+    for _, device := range []string{"phone\xff", strings.Repeat("a", 256)} {
+        epoch, epochErr := store.RevocationEpoch(runtimeInstance, "u", securitycontract.RevocationOptions{DeviceIdentifier: device})
+        if nil != epochErr {
+            t.Fatalf("expected the read to answer for a device no write accepts, got %v", epochErr)
+        }
+
+        if false == epoch.Equal(instant) {
+            t.Fatalf("expected the user's boundary %v, got %v", instant, epoch)
+        }
+    }
+}
+
+func TestInMemoryTokenStore_AMaxIdentifierBytesBelowOnePanicsNamingTheField(t *testing.T) {
+    expectPanicNamingField(t, "InMemoryTokenStoreConfig.MaxIdentifierBytes", func() {
+        NewInMemoryTokenStore(InMemoryTokenStoreConfig{MaxIdentifierBytes: bound.Of(0)})
+    })
+}
+
 func TestInMemoryTokenStore_RefusesADoneContextAtEveryDoorMarked(t *testing.T) {
     store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
     fillTokenStore(t, store, bound.UnlimitedDuration(), "kept")

@@ -129,6 +129,7 @@ The instants on both sides of that comparison come from application clocks. `Tok
 - `Clock` — the clock stamping a token's issue instant; nil is the system clock, and the module fills it from the container when the config names none.
 - `MaximumClockSkew` — the window the paragraph above describes: 0 when left out, which is no tolerance, at least 0, unlimited refused.
 - `RevocationEpochRetention` — how long a revocation boundary outlives its instant: 7 days when left out, at least 1s, and `bound.UnlimitedDuration()` keeps it for ever, as the in-memory store does, at the cost of one hash kept per user that ever revoked.
+- `MaxIdentifierBytes` — the longest user or device identifier `Put` and `RevokeBefore` accept, refused before any round trip naming the identifier's field and its length, never its bytes: 255 when left out, at least 1, and `bound.UnlimitedCount()` admits any length; `RevocationEpoch` refuses no identifier.
 
 ## Nonce guard
 
