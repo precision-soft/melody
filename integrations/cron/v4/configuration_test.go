@@ -1,0 +1,215 @@
+package cron
+
+import (
+    "testing"
+    "time"
+
+    "github.com/precision-soft/melody/v4/bound"
+    clicontract "github.com/precision-soft/melody/v4/cli/contract"
+)
+
+func TestCommandName_AnswersTheNameTheFactoryBuilds(t *testing.T) {
+    name := CommandName(func() clicontract.Command { return newRecordingCommand("backup:run") })
+
+    if "backup:run" != name {
+        t.Fatalf("CommandName = %q, want %q", name, "backup:run")
+    }
+}
+
+func TestNewConfiguration_StartsEmptyAndNonNil(t *testing.T) {
+    configuration := NewConfiguration()
+
+    if nil == configuration {
+        t.Fatal("NewConfiguration must answer a configuration")
+    }
+
+    if 0 != len(configuration.Entries()) {
+        t.Fatalf("a fresh configuration holds no entries, got %d", len(configuration.Entries()))
+    }
+}
+
+func TestSchedule_KeepsEveryEntryInRegistrationOrder(t *testing.T) {
+    configuration := NewConfiguration().
+        Schedule("first:command", EntryConfig{Schedule: &Schedule{Minute: "0"}}).
+        Schedule("second:command", EntryConfig{}).
+        Schedule("third:command", EntryConfig{Timeout: bound.Of(time.Minute)})
+
+    entries := configuration.Entries()
+    if 3 != len(entries) {
+        t.Fatalf("expected the three scheduled entries, got %d", len(entries))
+    }
+
+    expectedNames := []string{"first:command", "second:command", "third:command"}
+    for index, expectedName := range expectedNames {
+        if expectedName != entries[index].CommandName {
+            t.Fatalf("entry %d = %q, want %q", index, entries[index].CommandName, expectedName)
+        }
+    }
+
+    if nil != entries[1].Config.Schedule {
+        t.Fatal("an entry scheduled with an empty config keeps it empty rather than being given a schedule")
+    }
+
+    if bound.Of(time.Minute) != entries[2].Config.Timeout {
+        t.Fatalf("the entry's own config must reach the registry, got %s", entries[2].Config.Timeout)
+    }
+}
+
+func TestSchedule_AnswersTheSameConfiguration(t *testing.T) {
+    configuration := NewConfiguration()
+
+    if configuration != configuration.Schedule("backup:run", EntryConfig{}) {
+        t.Fatal("Schedule must answer the configuration it registered into")
+    }
+}
+
+func TestSchedule_KeepsTwoEntriesThatShareOneCommandName(t *testing.T) {
+    configuration := NewConfiguration().
+        Schedule("backup:run", EntryConfig{Schedule: &Schedule{Minute: "0"}}).
+        Schedule("backup:run", EntryConfig{Schedule: &Schedule{Minute: "30"}})
+
+    entries := configuration.Entries()
+    if 2 != len(entries) {
+        t.Fatalf("expected both registrations to survive, got %d", len(entries))
+    }
+
+    if "0" == entries[1].Config.Schedule.Minute {
+        t.Fatal("the second registration must keep its own schedule")
+    }
+}
+
+func TestConfiguration_ScheduleCopiesTheCallersEntryConfig(t *testing.T) {
+    entryConfig := EntryConfig{
+        Schedule: &Schedule{Minute: "5"},
+        Command:  []string{"app", "run"},
+        Timeout:  bound.Of(time.Minute),
+    }
+
+    configuration := NewConfiguration().Schedule("job:report", entryConfig)
+
+    entryConfig.Timeout = bound.Of(time.Hour)
+    entryConfig.Schedule.Minute = "0"
+    entryConfig.Command[0] = "rewritten"
+
+    registered := configuration.Entries()[0].Config
+    if bound.Of(time.Minute) != registered.Timeout {
+        t.Fatalf("expected the registered timeout untouched, got %v", registered.Timeout)
+    }
+
+    if "5" != registered.Schedule.Minute {
+        t.Fatalf("expected the registered schedule untouched, got %q", registered.Schedule.Minute)
+    }
+
+    if "app" != registered.Command[0] {
+        t.Fatalf("expected the registered command untouched, got %q", registered.Command[0])
+    }
+}
+
+func TestConfiguration_EntriesHandsOutACopyOfTheList(t *testing.T) {
+    configuration := NewConfiguration().Schedule("job:one", EntryConfig{Schedule: &Schedule{Minute: "*"}})
+
+    entries := configuration.Entries()
+    entries[0] = nil
+
+    if nil == configuration.Entries()[0] {
+        t.Fatal("expected the registry's list untouched by mutation of the handed-out slice")
+    }
+}
+
+func TestConfiguration_EntriesHandsOutACopyOfEachRegistration(t *testing.T) {
+    configuration := NewConfiguration().Schedule(
+        "job:one",
+        EntryConfig{
+            Schedule:  &Schedule{Minute: "5", Hour: "3"},
+            Command:   []string{"app"},
+            Arguments: []string{"--format=json"},
+            Timeout:   bound.Of(time.Minute),
+        },
+    )
+
+    handed := configuration.Entries()[0]
+    handed.CommandName = "job:hijacked"
+    handed.Config.Timeout = bound.Of(time.Hour)
+    handed.Config.Schedule.Hour = "23"
+    handed.Config.Command[0] = "rewritten"
+    handed.Config.Arguments[0] = "--format=table"
+
+    registered := configuration.Entries()[0]
+
+    if "job:one" != registered.CommandName {
+        t.Fatalf("expected the registered command name untouched, got %q", registered.CommandName)
+    }
+
+    if bound.Of(time.Minute) != registered.Config.Timeout {
+        t.Fatalf("expected the registered timeout untouched, got %v", registered.Config.Timeout)
+    }
+
+    if "3" != registered.Config.Schedule.Hour {
+        t.Fatalf("expected the registered schedule untouched, got %q", registered.Config.Schedule.Hour)
+    }
+
+    if "app" != registered.Config.Command[0] {
+        t.Fatalf("expected the registered command untouched, got %q", registered.Config.Command[0])
+    }
+
+    if "--format=json" != registered.Config.Arguments[0] {
+        t.Fatalf("expected the registered arguments untouched, got %q", registered.Config.Arguments[0])
+    }
+}
+
+func TestConfiguration_EntriesHandsOutADistinctObjectOnEveryCall(t *testing.T) {
+    configuration := NewConfiguration().Schedule("job:one", EntryConfig{Schedule: &Schedule{Minute: "*"}})
+
+    first := configuration.Entries()[0]
+    second := configuration.Entries()[0]
+
+    if first == second {
+        t.Fatal("expected a distinct ScheduledCommand on every call")
+    }
+
+    if first.Config.Schedule == second.Config.Schedule {
+        t.Fatal("expected a distinct Schedule on every call")
+    }
+}
+
+func TestConfiguration_InTimezoneIsDeclaredOnceAndReadBack(t *testing.T) {
+    configuration := NewConfiguration()
+
+    if "" != configuration.TimezoneName() {
+        t.Fatalf("expected no zone by default, got %q", configuration.TimezoneName())
+    }
+
+    returned := configuration.InTimezone("Europe/Bucharest")
+
+    if configuration != returned {
+        t.Fatal("expected InTimezone to answer the configuration it was called on, for chaining")
+    }
+
+    if "Europe/Bucharest" != configuration.TimezoneName() {
+        t.Fatalf("expected the declared zone, got %q", configuration.TimezoneName())
+    }
+}
+
+func TestConfiguration_InTimezoneSurvivesTheEntriesRegisteredAfterIt(t *testing.T) {
+    configuration := NewConfiguration().
+        InTimezone("Europe/Bucharest").
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    if "Europe/Bucharest" != configuration.TimezoneName() {
+        t.Fatalf("expected the declared zone to survive the registration, got %q", configuration.TimezoneName())
+    }
+
+    if 1 != len(configuration.Entries()) {
+        t.Fatalf("expected the entry to be registered, got %d", len(configuration.Entries()))
+    }
+}
+
+func TestSchedule_KeepsTheEntryTickDedup(t *testing.T) {
+    tickDedup := EntryTickDedupConfig{Disabled: true, Window: bound.Of(time.Minute), FailureMode: TickDedupFailureRun}
+
+    entries := NewConfiguration().Schedule("job:top", EntryConfig{TickDedup: tickDedup}).Entries()
+
+    if 1 != len(entries) || tickDedup != entries[0].Config.TickDedup {
+        t.Fatalf("expected the tick dedup to survive both copies, got %+v", entries)
+    }
+}

@@ -1,0 +1,101 @@
+package wiring
+
+import (
+    "testing"
+)
+
+func TestBindSet_NameKeepsTheDeclarationOrderAndTheLastValue(t *testing.T) {
+    bindSet := NewBindSet()
+
+    chained := bindSet.Name("address", "parameter.address").Name("timeout", "parameter.timeout").Name("address", "parameter.address.other")
+
+    if bindSet != chained {
+        t.Fatal("expected Name to answer the set it was called on")
+    }
+
+    names := bindSet.GlobalBindNames()
+    if 2 != len(names) || "address" != names[0] || "timeout" != names[1] {
+        t.Fatalf("expected the declaration order to survive a re-bind, got %v", names)
+    }
+
+    parameterName, exists := bindSet.GlobalBind("address")
+    if false == exists || "parameter.address.other" != parameterName {
+        t.Fatalf("expected the last value of a re-bound name, got %q exists=%v", parameterName, exists)
+    }
+
+    if parameterName, exists := bindSet.GlobalBind("absent"); true == exists || "" != parameterName {
+        t.Fatalf("expected an undeclared name to be absent, got %q", parameterName)
+    }
+}
+
+func TestBindSet_ReadersHandOutCopies(t *testing.T) {
+    bindSet := NewBindSet()
+    bindSet.Name("address", "parameter.address")
+    bindSet.Package("example.com/domain", "domain")
+
+    names := bindSet.GlobalBindNames()
+    names[0] = "rewritten"
+    if "address" != bindSet.GlobalBindNames()[0] {
+        t.Fatalf("expected the set to keep its own bind names, got %v", bindSet.GlobalBindNames())
+    }
+
+    packages := bindSet.Packages()
+    packages[0] = nil
+    if nil == bindSet.Packages()[0] {
+        t.Fatal("expected the set to keep its own package list")
+    }
+}
+
+func TestBindSet_PackageDeclaresAScannedPackageInOrder(t *testing.T) {
+    bindSet := NewBindSet()
+
+    domain := bindSet.Package("example.com/domain", "domain")
+    infrastructure := bindSet.Package("example.com/infrastructure", "infrastructure")
+
+    packages := bindSet.Packages()
+    if 2 != len(packages) || domain != packages[0] || infrastructure != packages[1] {
+        t.Fatalf("expected both packages in declaration order, got %v", packages)
+    }
+
+    if "example.com/domain" != domain.ImportPath() || "domain" != domain.Directory() {
+        t.Fatalf("expected the import path and directory to be carried, got %q %q", domain.ImportPath(), domain.Directory())
+    }
+
+    if nil == domain.BindNames() || 0 != len(domain.BindNames()) {
+        t.Fatalf("expected no binds on a fresh package, got %v", domain.BindNames())
+    }
+}
+
+func TestPackageBinding_NameChainsAndKeepsItsOrder(t *testing.T) {
+    packageBinding := NewBindSet().Package("example.com/domain", "domain")
+
+    chained := packageBinding.Name("address", "parameter.address").Name("timeout", "parameter.timeout").Name("address", "parameter.address.other")
+    if packageBinding != chained {
+        t.Fatal("expected Name to answer the package binding it was called on")
+    }
+
+    names := packageBinding.BindNames()
+    if 2 != len(names) || "address" != names[0] || "timeout" != names[1] {
+        t.Fatalf("expected the declaration order to survive a re-bind, got %v", names)
+    }
+
+    parameterName, exists := packageBinding.Bind("address")
+    if false == exists || "parameter.address.other" != parameterName {
+        t.Fatalf("expected the last value of a re-bound name, got %q exists=%v", parameterName, exists)
+    }
+
+    if parameterName, exists := packageBinding.Bind("absent"); true == exists || "" != parameterName {
+        t.Fatalf("expected an undeclared name to be absent, got %q", parameterName)
+    }
+}
+
+func TestPackageBinding_ReadersHandOutCopies(t *testing.T) {
+    packageBinding := NewBindSet().Package("example.com/domain", "domain")
+    packageBinding.Name("address", "parameter.address")
+
+    names := packageBinding.BindNames()
+    names[0] = "rewritten"
+    if "address" != packageBinding.BindNames()[0] {
+        t.Fatalf("expected the package to keep its own bind names, got %v", packageBinding.BindNames())
+    }
+}

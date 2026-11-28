@@ -1,0 +1,191 @@
+package config
+
+import (
+    "context"
+    "sync"
+    "sync/atomic"
+
+    minio "github.com/minio/minio-go/v7"
+    amqp "github.com/precision-soft/melody/integrations/amqp/v4"
+    melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v4"
+    melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v4/encrypt"
+    melodyopentelemetry "github.com/precision-soft/melody/integrations/opentelemetry/v4"
+    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
+    handlerevent "github.com/precision-soft/melody/v4/.example/handler/event"
+    "github.com/precision-soft/melody/v4/.example/security"
+    melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    melodyconfigcontract "github.com/precision-soft/melody/v4/config/contract"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
+    melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodymailercontract "github.com/precision-soft/melody/v4/mailer/contract"
+    melodymessagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
+    melodyopenapi "github.com/precision-soft/melody/v4/openapi"
+    melodysecurity "github.com/precision-soft/melody/v4/security"
+    melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
+    melodytranslationcontract "github.com/precision-soft/melody/v4/translation/contract"
+)
+
+type Module struct {
+    configuration melodyconfigcontract.Configuration
+    /* the version the build stamped through -ldflags, dev when it stamped none; the health route reports it, so a supervisor reads which build answers */
+    applicationVersion string
+
+    messageBusDispatch  melodymessagebuscontract.Bus
+    messageBusConsume   melodymessagebuscontract.Bus
+    messageBusTransport melodymessagebuscontract.Transport
+
+    jwtSecret            []byte
+    tokenValidator       melodysecuritycontract.TokenValidator
+    opaqueTokenStore     *melodysecurity.InMemoryTokenStore
+    opaqueTokenValidator melodysecuritycontract.TokenValidator
+
+    hmacSecrets      melodysecurity.HmacSecretProvider
+    hmacApplications melodysecurity.HmacApplicationRegistry
+    /* the caller application the internal envelopes are signed for, as APP_INTERNAL_AUTH_APP names it; the signer of internal:sign reads it beside the secret provider */
+    internalAuthApplication string
+
+    impersonatedUsers melodysecuritycontract.ImpersonatedUserResolver
+
+    translator melodytranslationcontract.Translator
+
+    /* builtServerSentEventHub is the hub its provider built, for the http shutdown hook, which is handed no runtime to resolve it through; nil until the provider ran */
+    builtServerSentEventHub atomic.Pointer[melodyhttp.ServerSentEventHub]
+    /* eventStreamSlots is the process's one count of the streams held open on the hub, over the event stream door and the websocket route alike */
+    eventStreamSlots *handlerevent.StreamSlots
+
+    openApiRegistry *melodyopenapi.Registry
+
+    mailer melodymailercontract.Mailer
+
+    metricsMiddleware melodyhttpcontract.Middleware
+    prometheusMetrics *melodyopentelemetry.PrometheusMetrics
+
+    /* metricsToken is the bearer credential the scraper presents on /metrics; empty leaves the exposition public */
+    metricsToken string
+
+    /* lifecycleDecorator counts every request at the seam around the kernel handler, the short-circuits the metrics middleware never sees included */
+    lifecycleDecorator melodyapplicationcontract.HttpHandlerDecorator
+
+    /* redisProvider and redisParameters open redis at boot, through the rueidis module's connection factory; the provider is nil when no address is configured */
+    redisProvider   *melodyrueidis.Provider
+    redisParameters melodyrueidis.ConnectionParameters
+
+    /* amqpProviderOnce builds the one amqp provider amqpProvider answers */
+    amqpProviderOnce  sync.Once
+    amqpProviderBuilt *amqp.Provider
+
+    /* catalogWriteThrottle counts in redis when the environment gives the example one, shared by every replica, and in this process otherwise; it is nil only until the routes are registered */
+    catalogWriteThrottle melodyhttpcontract.Middleware
+
+    /* the sign-in door's chain and budget, declared with the firewall and bound when the routes register */
+    loginDoorAuthenticator security.LoginDoorAuthenticator
+    loginDoorLimiter       lateBoundRateLimiter
+
+    storageClient *minio.Client
+    storageBucket string
+
+    /* the definitions the registry is built over, by its provider: the registry is the one door onto both connections, and the catalogue handle is its default manager. Both are opened at the first resolution of the service that publishes them, under that resolution's runtime, so a command that never reads the catalogue never dials it, an http process reading it at boot through the catalogue schema, and a pool that was opened is one the container resolved and therefore closes at its teardown; catalogueWired says the environment declared the catalogue. */
+    databaseDefinitions []melodybunorm.ProviderDefinition
+    catalogueWired      bool
+
+    /* processContext is the process's own context, which the archive storage is bound to */
+    processContext context.Context
+
+    /* trustedProxyResolver is the one client resolver both budgets read the client through; the list it resolves is re-read on a schedule, so a balancer restarted onto a new address is trusted again within the interval */
+    trustedProxyResolver *trustedProxyResolver
+
+    /* archiveWired is what the environment armed, kept as an answer rather than re-derived: the services, the migration context and the reset command each ask it, and asking the registry instead would open the connection to find out. */
+    archiveWired bool
+
+    /* the two databases as their connections were declared — host:port/schema — carried to the handles the reset prints before it destroys anything; the registry knows them, but only by the manager's name, which is not what an operator reads a plan for */
+    catalogLocation string
+    archiveLocation string
+    cipher          melodyencrypt.Cipher
+}
+
+/* NewExampleModule builds the eager half of the wiring. The context is the process's: a signal cancels it, and the archive storage and the outbox schema are bound to it. The database registry opens a handle under the runtime of the resolution that publishes it, the boot's in an http process, whose context is this one. */
+func NewExampleModule(ctx context.Context, configuration melodyconfigcontract.Configuration) *Module {
+    moduleInstance := &Module{
+        processContext:   ctx,
+        configuration:    configuration,
+        eventStreamSlots: handlerevent.NewStreamSlots(handlerevent.StreamCapPerUser, handlerevent.StreamCapPerProcess),
+    }
+    moduleInstance.buildTrustedProxyResolver()
+    moduleInstance.buildObservability()
+    moduleInstance.buildEncrypt()
+    moduleInstance.buildRedis()
+    moduleInstance.buildStorage()
+    moduleInstance.buildDatabase()
+    moduleInstance.buildMessageBus()
+    moduleInstance.buildTokenAuth()
+    moduleInstance.buildInternalAuth()
+    moduleInstance.buildMetricsAuth()
+    moduleInstance.buildImpersonation()
+    moduleInstance.buildTranslation()
+    moduleInstance.buildOpenApi()
+    moduleInstance.buildMailer()
+
+    return moduleInstance
+}
+
+const (
+    environmentKeyMysqlHost     = "MYSQL_HOST"
+    environmentKeyMysqlPort     = "MYSQL_PORT"
+    environmentKeyMysqlDatabase = "MYSQL_DATABASE"
+    environmentKeyMysqlUser     = "MYSQL_USER"
+    environmentKeyMysqlPassword = "MYSQL_PASSWORD"
+    environmentKeyMysqlInsecure = "MYSQL_INSECURE"
+
+    /* the archive connection is the example's SECOND database, on postgres, and it carries a switch of its own: the catalogue on mysql and the reading archive on postgres are independently wired, so every combination boots — both live, either one alone, or neither. */
+    environmentKeyPgsqlHost     = "PGSQL_HOST"
+    environmentKeyPgsqlPort     = "PGSQL_PORT"
+    environmentKeyPgsqlDatabase = "PGSQL_DATABASE"
+    environmentKeyPgsqlUser     = "PGSQL_USER"
+    environmentKeyPgsqlPassword = "PGSQL_PASSWORD"
+    environmentKeyPgsqlInsecure = "PGSQL_INSECURE"
+
+    environmentKeyRedisAddress      = "REDIS_ADDRESS"
+    environmentKeySessionFile       = "APP_SESSION_FILE"
+    environmentKeyMetricsToken      = "APP_METRICS_TOKEN"
+    environmentKeyEncryptKeys       = "APP_ENCRYPT_KEYS"
+    environmentKeyEncryptCurrentKey = "APP_ENCRYPT_CURRENT_KEY"
+
+    environmentKeyAmqpDsn = "AMQP_DSN"
+
+    environmentKeyS3Endpoint  = "S3_ENDPOINT"
+    environmentKeyS3AccessKey = "S3_ACCESS_KEY"
+    environmentKeyS3SecretKey = "S3_SECRET_KEY"
+    environmentKeyS3Insecure  = "S3_INSECURE"
+    environmentKeyS3Region    = "S3_REGION"
+    environmentKeyS3Bucket    = "S3_BUCKET"
+
+    environmentKeySmtpAddress     = "SMTP_ADDRESS"
+    environmentKeySmtpUsername    = "SMTP_USERNAME"
+    environmentKeySmtpPassword    = "SMTP_PASSWORD"
+    environmentKeySmtpAllowPlaintext  = "SMTP_ALLOW_PLAINTEXT"
+    environmentKeySmtpImplicitTls = "SMTP_IMPLICIT_TLS"
+
+    environmentKeyDeviceIdentifierMaxBytes = "APP_DEVICE_IDENTIFIER_MAX_BYTES"
+
+    environmentKeyLocalStorageDirectory = "APP_LOCAL_STORAGE_DIRECTORY"
+
+    environmentKeyOtelExporterEndpoint = "OTEL_EXPORTER_OTLP_ENDPOINT"
+
+    environmentKeyCorsAllowOrigins     = "APP_CORS_ALLOW_ORIGINS"
+    environmentKeyRequestBudgetPerHour = "APP_REQUEST_BUDGET_PER_HOUR"
+    environmentKeyTrustedProxyList     = "APP_TRUSTED_PROXY_LIST"
+    environmentKeyRatesBaseUrl         = "RATES_BASE_URL"
+    environmentKeyRatesApiKey          = "RATES_API_KEY"
+    environmentKeyRatesBaseCurrency    = "RATES_BASE_CURRENCY"
+    environmentKeyReportExportEndpoint = "APP_REPORTING_EXPORT_ENDPOINT"
+)
+
+func (instance *Module) Name() string {
+    return "example"
+}
+
+func (instance *Module) Description() string {
+    return "melody product catalog example application"
+}
+
+var _ melodyapplicationcontract.Module = (*Module)(nil)

@@ -1,0 +1,505 @@
+# APPLICATION
+
+The [`application`](../../application) package provides Melody’s high-level entrypoint for building and running a combined HTTP + CLI application.
+
+It coordinates configuration resolution, container bootstrapping, module wiring (parameters/services/HTTP/CLI/events/security), and process lifecycle.
+
+## Scope
+
+- Package: [`application/`](../../application)
+- Subpackage: [`application/contract/`](../../application/contract)
+
+## Subpackages
+
+- [`application/contract`](../../application/contract)
+  Public module contracts (`Module`, `ModuleProvider`, `ParameterModule`, `ServiceModule`, `HttpModule`, `HttpMiddlewareModule`, `HttpMiddlewareRegistrar`, `MiddlewareRegistration`, `HttpHandlerDecoratorModule`, `CliModule`, `EventModule`, `ConfigModule`, `BootWarningModule`, `BootWarningRegistrar`, `BootWarning`, `EnvironmentKeyModule`, `EnvironmentKeyRegistrar`).
+
+## Responsibilities
+
+- Provide the [`Application`](../../application/application.go) type that:
+    - wires modules in a deterministic lifecycle
+    - resolves configuration before HTTP/CLI module wiring so modules can safely read config values during registration
+    - boots the container and runs either CLI or HTTP mode based on runtime flags
+- Provide a small module system for application-level composition ([`application/contract`](../../application/contract)).
+- Provide an HTTP middleware wiring helper ([`HttpMiddleware`](../../application/http_middleware.go)) for user-registered middleware and middleware factories.
+
+## Lifecycle overview
+
+The application boot is split around configuration resolve:
+
+1. **Pre-resolve**: modules declare the `.env` keys they own via [`EnvironmentKeyModule`](../../application/contract/environment_key_module.go), before any other hook, a [retired key](CONFIG.md#retired-keys) the `.env` artifacts still set then refusing the boot naming its successor, then may register module-level configurations via [`ConfigModule`](../../application/contract/config_module.go), then register parameters via [`ParameterModule`](../../application/contract/parameter_module.go), then declare their boot warning codes and add their boot warnings via [`BootWarningModule`](../../application/contract/boot_warning_module.go).
+2. **Resolve**: application configuration is resolved.
+3. **Post-resolve**: modules may register services via [`ServiceModule`](../../application/contract/service_module.go), then request-lifetime services via [`ScopedServiceModule`](../../application/contract/scoped_service_module.go), then register security, event subscribers, HTTP middlewares, HTTP handler decorators, HTTP routes and, last, CLI commands.
+
+This allows HTTP/CLI module code to read resolved configuration values during registration, e.g.
+`kernelInstance.Config().MustGet("my.param").String()`.
+
+`Run` is called once per process. It closes the application when it returns, and a second call panics with `application run called twice` before anything is booted or marked serving, a plain Go panic raised before `Run`'s exit handler, so it carries a stack trace and no exit record. An application serves through `Run` or hands its handler out through `HttpHandler`, never both: one claim decides, so `HttpHandler` after `Run` started answers `the http handler is asked of an application that runs its own server`, and `Run` after the handler was handed out panics with `application run called after its http handler was handed out` (see [Serving under another server](#serving-under-another-server)). `Boot` and `CloseWithContext` may be called again and do nothing the second time; `Run` may not, so return from `main` after it.
+
+`Boot` opens the boot runtime before its first step and finishes it before it returns: every module hook reads it through `Kernel.BootRuntime()`, the services registered `BuiltAtBoot` are built under it after every registration is in, each failure judged by its `BootFailure` mode, a warn-mode service built at boot by an http process only, and in an http process the session manager's storage timeout is judged and the middleware pipeline built under it, so their refusals fail `Boot`. The finish closes the boot scope and ends the boot context with `ErrBootFinished`; a boot scope that fails to close refuses the boot.
+
+## Runtime mode
+
+Runtime mode is determined by [`ParseRuntimeFlags`](../../application/cli.go). The full contract, in precedence order:
+
+1. An explicit `--mode=http` or `--mode=cli` flag (also `-mode=...`, or the space-separated form `--mode cli`) wins when it precedes the command name; after the command name the flag is the command's own.
+2. Without an explicit flag, ANY other non-runtime argument implies CLI mode — `./app melody:messagebus:consume`, `./app db:migrate` and so on each run that one command and exit.
+3. With no arguments at all, the `MELODY_DEFAULT_MODE` parameter applies (settable only through the `.env` artifacts — see the CONFIG note below), and it defaults to `http`.
+
+An invalid mode panics at startup. The consequence worth internalizing: **`./app` with no arguments starts HTTP mode**, which boots every module — so anything wired to run in the serving process (outbox relays, consumers, schedulers) starts too. Any command argv flips the process to a one-shot CLI run. This is a supported contract, not an implementation detail; applications may rely on it as their web/background gate, or use the dedicated process role below for a gate that is independent of the transport.
+
+## Process role
+
+A process additionally declares a role — `web`, `worker` or `all` — resolved by the same [`ParseRuntimeFlags`](../../application/cli.go), from the `Role` of the [`RuntimeFlagsConfig`](../../application/cli.go) it is handed:
+
+1. An explicit `--role=web|worker|all` flag (also `-role=...` or space-separated) wins when it precedes the command name; after the command name the flag is the command's own.
+2. Otherwise the `MELODY_PROCESS_ROLE` parameter applies, defaulting to `all`.
+
+Melody itself gates nothing on the role: it is declared intent for the composition root and long-running runners to query — through [`Application.ProcessRole()`](../../application/application.go), the `KernelConfiguration.ProcessRole()` accessor, the [`ServiceProcessRole`](../../application/service_resolver.go) container service, and the predicates [`config.RoleAllowsBackgroundWork` / `config.RoleAllowsHttp`](../../config/process_role.go). The flag exists because melody never reads the process environment: a docker-compose deployment differentiates containers built from one image with `command: ["/app", "--role=worker"]`, where an `APP_ROLE` environment variable would be silently inert.
+
+Like `--mode`, the `--role` flag never implies CLI mode and is stripped from `os.Args` before the CLI framework parses the arguments.
+
+## Service registration
+
+`Application` is itself a container registrar: [`ServiceRegistrar`](../../application/contract/service_module.go) embeds [`container/contract.Registrar`](../../container/contract/registrar.go), so a `RegisterServices` hook reaches the container's own typed helpers — `container.MustRegisterType` and anything generated on top of it (see [WIRING](WIRING.md)) — through `registrar.Register` / `registrar.MustRegister`, not only the name-based `RegisterService`. A duplicate registration is absorbed into the aggregated boot-collision report whichever entry point produced it, naming the user's registration call site.
+
+## Middleware ordering
+
+An [`HttpMiddlewareModule`](../../application/contract/http_middleware_module.go) registers middleware through [`HttpMiddlewareRegistrar`](../../application/contract/http_middleware_module.go), whose one door `Use` takes a [`MiddlewareRegistration`](../../application/contract/http_middleware_module.go): the `Middlewares` and the `Factories`, a factory building its middleware from the booted kernel, installed in the order given, middlewares first, at one `Priority`, whose zero value is `MiddlewarePriorityDefault` (`0`). A nil entry in either list panics naming the field. The registrar a module receives is bound to its `Name()`, and the application's own `RegisterHttpMiddlewares` / `RegisterHttpMiddlewareFactories` register as `the application`, so a factory that fails and a factory that yields nil are refused with `moduleName` beside `middlewareName` in the context, and a nil entry with `moduleName` beside `field` and `index`, the module declaring nothing; [`pipeline.HttpMiddlewareDefinition.Module`](../../http/middleware/pipeline/definition.go) carries the name, and a definition built with none carries no `moduleName` key.
+
+The order is decided when the pipeline is built, not at registration:
+
+1. A **lower** priority value ends up **further out** in the chain: it wraps everything after it, so it runs earlier on the way in and sees the response last on the way out.
+2. Registrations at **equal priority** keep **registration order**, the first registered being the outer one. A factory registration and a direct one share one registration sequence, so they compete on the same footing.
+3. `Before` / `After` edges declared on a [`pipeline.HttpMiddlewareDefinition`](../../http/middleware/pipeline/definition.go) override both. The registrar exposes priority only; edges are for a pipeline assembled directly through [`pipeline.NewBuilder`](../../http/middleware/pipeline/builder.go), which takes a `[]HttpMiddlewareDefinition` and copies each definition's lists.
+
+A middleware that answers a request itself, without calling `next`, short-circuits everything ordered inside it — the framework's own static middleware serves a matching file and returns without calling the rest of the chain. It is registered at a priority below the default, which keeps it outermost, so a request for a file that exists is answered before anything registered through the registrar observes it. [`(*HttpMiddleware).LastBuildReport`](../../application/http_middleware.go) reports the chain the serving process actually built, for in-process inspection; `debug:middleware` describes and — under `--build` — builds a report of its own rather than reading that record. See [HTTP](HTTP.md) for the full ordering contract and for what a `before`/`after` edge does to the build when it names a definition that is not there.
+
+In a filesystem build, `New` refuses an explicitly set `MELODY_PUBLIC_DIRECTORY` that is not an existing directory, in every process role, resolved against the project directory as the static file server resolves it, a blank value reading as `public`; the default `public` may be absent, for an application that serves no asset. An embedded build is checked by [`static.NewFileServer`](../../http/static/file_server.go) against the embedded filesystem instead.
+
+
+The boot creates the logs directory at `MELODY_LOG_DIRECTORY_MODE`, `0750` by default, and the cache directory at `MELODY_CACHE_DIRECTORY_MODE`, `0750` by default; the container's journal file is created at `MELODY_LOG_FILE_MODE`, `0640` by default, every missing directory of `MELODY_LOG_PATH` at the directory mode, by the writer itself on the first open and on every reopen after a rotation. An existing file or directory keeps its mode (see [Journal modes](CONFIG.md#journal-modes)).
+
+The chain is not the outermost thing there is, though: a request that a `kernel.request` listener answers or refuses never reaches it at all; a refusal is rendered through `kernel.exception`. Wrapping *those* too is what [Handler decorators](#handler-decorators) are for.
+
+## Handler decorators
+
+A **handler decorator** and a middleware are two different seams, and the distance between them is the reason both exist. [`HttpHandlerDecorator`](../../application/contract/http_handler_decorator_module.go) is `func(next nethttp.Handler) nethttp.Handler` — plain `net/http` — and it wraps the single handler [`(*Kernel).ServeHttp`](../../http/kernel.go) produces, which [`runHttp`](../../application/application_http.go) then hands to `nethttp.Server` as its `Handler`. A middleware is `func(next httpcontract.Handler) httpcontract.Handler` and is composed *inside* that handler, around the routed one.
+
+Everything the kernel does for a request therefore happens **inside** what a decorator wraps: opening the container scope, building the request logger, stamping `X-Request-Id` on the writer, loading the session, dispatching `kernel.request`, matching the route, recovering a panic, dispatching `kernel.response` and `kernel.terminate`. The middleware chain is the last of those steps and it is not always reached — when a `kernel.request` listener produces a response, the kernel writes it and returns without ever building the chain, and the same holds for `kernel.controller`. An access-control denial is exactly that shape. So a middleware observes only requests that reached the handler stage — which does include the kernel's own `404` and `405` fallbacks, since the chain is wrapped around those too, but not one answered before the chain was built — while a decorator observes **every** request the server accepted: the `401` and `403` the security listener wrote, the response a listener
+substituted, the `500` the recovery path produced. That is where a metric, a trace span or a per-request timer belongs, because those want the requests the chain never saw as much as the ones it did.
+
+What a decorator gives up in exchange is the request itself. It runs before the container scope exists, so there is no scoped service to resolve, no [`httpcontract.Request`](../../http/contract/request.go), no [`containercontract.Runtime`](../../container/contract/runtime.go) — only the raw `*nethttp.Request` and `nethttp.ResponseWriter`. Reading the status code means wrapping the writer; reading the request id means reading `X-Request-Id` back off `writer.Header()` after `next` returns, since the kernel sets it there. A decorator also sits outside the kernel's panic recovery for the one case the kernel deliberately re-panics — `net/http`'s `ErrAbortHandler` — so work that must happen on the way out belongs in a `defer`, not on the line after the `next` call.
+
+Decorators come from two places and share one order:
+
+1. [`(*Application).RegisterHttpHandlerDecorator`](../../application/application_http.go) registers one directly. It panics after boot, and it panics on a `nil` decorator rather than storing one.
+2. A module implementing [`HttpHandlerDecoratorModule`](../../application/contract/http_handler_decorator_module.go) returns a slice from `RegisterHttpHandlerDecorators(kernelInstance)` during boot. A `nil` entry in that slice fails the boot, naming the module and the index, since a skipped decorator would leave its wrapping silently absent.
+
+**The first registered decorator is the outermost**: [`runHttp`](../../application/application_http.go) wraps the kernel handler last-to-first, so registration order reads outside-in, the same way the middleware chain does. Direct registrations all happen before `Boot`, and a module's hook runs during it, so a directly registered decorator is always outside every module-contributed one. A decorator that answers nil, a typed nil included, is refused before the next one wraps it, `http handler decorator answered nil` naming its `index`: `HttpHandler` answers that error and `Run` refuses to serve, since a nil handler would serve net/http's default mux. A decorator that panics leaves nothing built and nothing handed out: the application stays unclaimed, so the next `HttpHandler` call builds again, every decorator running again, and `Run` may serve instead.
+
+```go
+package main
+
+import (
+    nethttp "net/http"
+    "sync/atomic"
+    "time"
+
+    applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+)
+
+var servedRequestCount atomic.Int64
+var servedNanoseconds atomic.Int64
+
+type observabilityModule struct{}
+
+func (instance *observabilityModule) Name() string {
+    return "observability"
+}
+
+func (instance *observabilityModule) Description() string {
+    return "times every request, the short-circuited ones included"
+}
+
+func (instance *observabilityModule) RegisterHttpHandlerDecorators(
+    kernelInstance kernelcontract.Kernel,
+) []applicationcontract.HttpHandlerDecorator {
+    _ = kernelInstance
+
+    return []applicationcontract.HttpHandlerDecorator{
+        func(next nethttp.Handler) nethttp.Handler {
+            return nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+                startedAt := time.Now()
+
+                /*
+                 * deferred rather than written after the call, so an aborted
+                 * connection — which the kernel re-panics with ErrAbortHandler —
+                 * is still counted.
+                 */
+                defer func() {
+                    servedRequestCount.Add(1)
+                    servedNanoseconds.Add(int64(time.Since(startedAt)))
+                }()
+
+                next.ServeHTTP(writer, request)
+            })
+        },
+    }
+}
+
+var _ applicationcontract.HttpHandlerDecoratorModule = (*observabilityModule)(nil)
+```
+
+
+## Serving under another server
+
+[`(*Application).HttpHandler()`](../../application/application_http.go) answers the `nethttp.Handler` `Run` would serve, for a server the application does not own: a test's `httptest.Server`, a `net/http` server assembled by hand, a platform adapter. It boots the application when `Boot` has not run, marks the configuration and the openapi registry serving, writes the boot warnings, and answers the kernel's handler wrapped in the [handler decorators](#handler-decorators), built from `ApplicationConfig.HttpKernel` and the middleware pipeline the boot installed. The `.env` refusals `Run` raises before it listens hold here too: a scope teardown outlasting the shutdown wait or a server limit outside its rule is returned as the error. The handler, or that error, is built once and answered on every call. It is refused in cli mode (`the http handler is asked of a process in cli mode`, naming the `mode`) and once `Run` started. Only a handler handed out claims the application: a refused build or a decorator that panics leaves it unclaimed, so `Run` is refused only once a handler is out; a `Run` called while a build is in progress waits for its outcome. A boot failure inside it exits the process, as `Boot` does, its before-exit close tearing the container down at once.
+
+The server's owner drives the stop the way `Run` drives its own: [`(*Application).BeginHttpShutdown(shutdownContext)`](../../application/application_http.go) just before the server's `Shutdown`, which starts the `OnHttpShutdown` hooks once, each handed `shutdownContext`, and returns without waiting, then the server's `Shutdown(shutdownContext)`, then [`CloseWithContext`](../../application/application_close.go). The close of an application that handed its handler out first starts the hooks unless `BeginHttpShutdown` did, waits for them and for the open request scopes, a hijacked connection's included, bounded by the http shutdown timeout as `Run` bounds its own, the close's context winning when it ends earlier, the hooks handed that bound, so the close never waits without one; then it tears the container down under what is left of the caller's context. Every phase of the close is handed the caller's context, its deadline and its cancel, and a cancel during the wind-down reaches the teardown; a closer that ignores its context is not cut at the deadline, the close lasting as long as that closer, and the overrun is written as `service container teardown overran its deadline`. A close context the stop already spent leaves the teardown an expired context, every closer handed a done one, so the close gets a budget of its own, covering the wind-down and the teardown, not the context the server's `Shutdown` was handed; `CloseWithContext(context.Background())` tears the container down without one. An application that runs its own server, or handed nothing out, closes under the caller's context and its `TeardownTimeout` (`MELODY_TEARDOWN_TIMEOUT`), the earlier ending the close, and a failure past the configured bound carries `bound` naming the key; `CloseWithContext` is its one close door. A scope still open at the deadline is `http shutdown left request scopes open`, joined with a failure of the teardown. A nil context is refused (`the shutdown context is nil`, `door` `Application.BeginHttpShutdown`); an application that runs its own server, or handed nothing out, starts nothing.
+
+```go
+package main
+
+import (
+    "context"
+    nethttp "net/http"
+    "net/http/httptest"
+    "os"
+    "testing"
+    "time"
+
+    "github.com/precision-soft/melody/v4/application"
+)
+
+/* newApplication is the composition root main builds and configures its application through */
+func newApplication() *application.Application {
+    return application.NewApplication(context.Background(), application.ApplicationConfig{EnvironmentFiles: embeddedEnvironmentFiles})
+}
+
+func TestHealth(t *testing.T) {
+    /* the test binary's own flags would read as a cli command, which HttpHandler refuses */
+    originalArguments := os.Args
+    os.Args = originalArguments[:1]
+    defer func() { os.Args = originalArguments }()
+
+    app := newApplication()
+
+    handler, handlerErr := app.HttpHandler()
+    if nil != handlerErr {
+        t.Fatal(handlerErr)
+    }
+
+    server := httptest.NewServer(handler)
+
+    response, requestErr := nethttp.Get(server.URL + "/health")
+    if nil != requestErr {
+        t.Fatal(requestErr)
+    }
+    _ = response.Body.Close()
+
+    shutdownContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+
+    _ = app.BeginHttpShutdown(shutdownContext)
+    server.Close()
+
+    /* a close context the stop already spent would leave the teardown an expired one */
+    closeContext, cancelClose := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancelClose()
+
+    if closeErr := app.CloseWithContext(closeContext); nil != closeErr {
+        t.Fatal(closeErr)
+    }
+}
+```
+
+The hook needs the shutdown's context, which does not exist when a server is assembled, so `BeginHttpShutdown` is called by the code that calls `Shutdown`, not registered through `Server.RegisterOnShutdown`.
+
+## Usage
+
+The example below demonstrates creating an application and registering a module that:
+
+- registers module-level configurations (pre-resolve),
+- registers parameters (pre-resolve),
+- registers services (post-resolve),
+- registers HTTP routes (post-resolve) while reading from resolved configuration.
+
+```go
+package main
+
+import (
+    "context"
+    "io/fs"
+    nethttp "net/http"
+
+    "github.com/precision-soft/melody/v4/application"
+    applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    "github.com/precision-soft/melody/v4/logging"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+)
+
+type demoModule struct{}
+
+func (instance *demoModule) Name() string {
+    return "demo"
+}
+
+func (instance *demoModule) Description() string {
+    return "demo module"
+}
+
+func (instance *demoModule) RegisterConfigurations(registrar applicationcontract.ConfigRegistrar) {
+    registrar.RegisterConfiguration(
+        loggingcontract.LoggingConfigurationName,
+        logging.NewLoggingConfiguration(loggingcontract.LevelLabels{
+            loggingcontract.LevelDebug:     loggingcontract.LevelLabelFromInt(100),
+            loggingcontract.LevelInfo:      loggingcontract.LevelLabelFromInt(200),
+            loggingcontract.LevelWarning:   loggingcontract.LevelLabelFromInt(300),
+            loggingcontract.LevelError:     loggingcontract.LevelLabelFromInt(400),
+            loggingcontract.LevelEmergency: loggingcontract.LevelLabelFromInt(500),
+        }),
+    )
+}
+
+func (instance *demoModule) RegisterParameters(registrar applicationcontract.ParameterRegistrar) {
+    registrar.RegisterParameter(
+        "app.name",
+        "demo",
+    )
+}
+
+func (instance *demoModule) RegisterServices(
+    registrar applicationcontract.ServiceRegistrar,
+) {
+    registrar.RegisterService(
+        "service.demo.value",
+        func(resolver containercontract.Resolver) (string, error) {
+            _ = resolver
+            return "value", nil
+        },
+        containercontract.RegisterOptions{},
+    )
+}
+
+func (instance *demoModule) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
+    router := kernelInstance.HttpRouter()
+
+    router.Handle(
+        "/health",
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            _ = runtimeInstance
+            _ = writer
+            _ = request
+
+            return melodyhttp.NewResponse(
+                200,
+                []byte("ok"),
+            ), nil
+        },
+        melodyhttp.RouteOptions{Name: "health", Methods: []string{nethttp.MethodGet}},
+    )
+}
+
+var _ applicationcontract.ConfigModule = (*demoModule)(nil)
+var _ applicationcontract.ParameterModule = (*demoModule)(nil)
+var _ applicationcontract.ServiceModule = (*demoModule)(nil)
+var _ applicationcontract.HttpModule = (*demoModule)(nil)
+
+func buildApplication(ctx context.Context, embeddedEnvironmentFiles fs.FS, embeddedPublicFiles fs.FS) *application.Application {
+    app := application.NewApplication(
+        ctx,
+        application.ApplicationConfig{
+            EnvironmentFiles: embeddedEnvironmentFiles,
+            PublicFiles:      embeddedPublicFiles,
+        },
+    )
+
+    app.RegisterModule(&demoModule{})
+
+    /*
+     * Backwards compatible: direct registration is still available
+     * (RegisterParameter/RegisterService/RegisterHttpRoute/etc.).
+     */
+
+    app.RegisterHttpRoute(
+        "/ping",
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            _ = runtimeInstance
+            _ = writer
+            _ = request
+
+            return melodyhttp.NewResponse(
+                200,
+                []byte("pong"),
+            ), nil
+        },
+        httpcontract.RouteOptions{Name: "ping", Methods: []string{nethttp.MethodGet}},
+    )
+
+    return app
+}
+
+func run(ctx context.Context, embeddedEnvironmentFiles fs.FS, embeddedPublicFiles fs.FS) {
+    app := buildApplication(ctx, embeddedEnvironmentFiles, embeddedPublicFiles)
+    app.Run()
+}
+```
+
+## Userland API
+
+### Contracts (`application/contract`)
+
+#### Types
+
+- [`Module`](../../application/contract/module.go)
+- [`ModuleProvider`](../../application/contract/module.go)
+- [`ConfigModule`](../../application/contract/config_module.go)
+- [`ConfigRegistrar`](../../application/contract/config_module.go)
+- [`ParameterModule`](../../application/contract/parameter_module.go)
+- [`ParameterRegistrar`](../../application/contract/parameter_module.go)
+- [`ServiceModule`](../../application/contract/service_module.go)
+- [`ServiceRegistrar`](../../application/contract/service_module.go)
+- [`ScopedServiceModule`](../../application/contract/scoped_service_module.go)\
+  `RegisterScopedServices(registrar)` declares services whose lifetime is one scope — one http request, one command run. What it registers is built on the first resolution through a scope and closed when that scope closes. The hook is a separate interface, so an existing module is unaffected by its arrival.
+- [`ScopedServiceRegistrar`](../../application/contract/scoped_service_module.go)\
+  Shares no method with `ServiceRegistrar`: calling `RegisterService` on the scoped hook's registrar, or `RegisterScopedService` in `RegisterServices`, does not compile. Both take the provider as `any`, so matching a provider to the lifetime it was written for stays the caller's. See [CONTAINER](CONTAINER.md) for what the two lifetimes may read.
+- [`BootWarningModule`](../../application/contract/boot_warning_module.go)\
+  `RegisterBootWarnings(registrar)` runs after the parameters are registered, before the configuration resolves. A declared code is one `MELODY_BOOT_WARNINGS_IGNORED` may list, in the http and the cli process alike; a warning added under it is written once with the framework's [boot warnings](SECURITY.md#boot-warnings) and honours that key. The code is declared even when the module's configuration calls for no warning, so the key may name it in every environment the module is registered in.
+- [`BootWarningRegistrar`](../../application/contract/boot_warning_module.go)\
+  `DeclareBootWarning(name, config)`, [`BootWarningConfig`](../../application/contract/boot_warning_module.go), which holds no field yet, and `AddBootWarning(warning)`. A name the framework or another module holds, a warning under a name the module did not declare and an empty message fail the boot, naming the module.
+- [`BootWarningContextKey`](../../application/contract/boot_warning_module.go)\
+  `bootWarning`, the context key every boot warning carries its code under, the framework's and a module's alike; a module that writes a coded warning outside the boot, as the cron runner's `Run` does, writes the code under it.
+- [`BootWarning`](../../application/contract/boot_warning_module.go)\
+  `Name`, `Message` and `Context`; the context names the configuration and never a value that may be a secret.
+- [`EnvironmentKeyModule`](../../application/contract/environment_key_module.go)\
+  `RegisterEnvironmentKeys(registrar)` runs first in `Boot`, before any parameter hook, and declares the module's `.env` keys; it declares and must not read. A declaration the configuration refuses fails the boot naming the module, the key and the field, and after the resolve a value its rule refuses fails it as `a declared environment key is refused`. A configuration without [`EnvironmentKeyDeclarer`](../../config/contract/environment_key.go) is refused as soon as a module declares over it, naming the module and the configuration's type. See [CONFIG](CONFIG.md#module-keys).
+- [`EnvironmentKeyRegistrar`](../../application/contract/environment_key_module.go)\
+  `DeclareEnvironmentKey(key)`, one [`EnvironmentKey`](../../config/contract/environment_key.go) per key.
+- [`HttpModule`](../../application/contract/http_module.go)
+- [`HttpMiddlewareModule`](../../application/contract/http_middleware_module.go)
+- [`HttpMiddlewareRegistrar`](../../application/contract/http_middleware_module.go)
+- [`MiddlewareRegistration`](../../application/contract/http_middleware_module.go)
+- [`pipeline.MiddlewareFactory`](../../http/middleware/pipeline/definition.go) — `func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error)`, the form of a `MiddlewareRegistration.Factories` entry; an error refuses the build, naming the middleware
+- [`HttpHandlerDecoratorModule`](../../application/contract/http_handler_decorator_module.go)
+- [`HttpHandlerDecorator`](../../application/contract/http_handler_decorator_module.go)
+- [`CliModule`](../../application/contract/cli_module.go)
+- [`EventModule`](../../application/contract/event_module.go)
+- [`ProcessContext`](../../application/contract/process_context.go)\
+  The console counterpart of the http request context: the identity of one cli run — the generated process id every log record of the run is correlated under, and the moment the run started. It lives on the run's scope, installed by the cli entry point, so a scoped service resolves it exactly the way a request-scoped service resolves the request context; the root container never carries it, and an http process carries the request context instead.
+
+### Types
+
+- [`Application`](../../application/application.go)
+- [`RuntimeFlags`](../../application/cli.go)
+- [`RouteRegistrar`](../../application/application.go) — `func(kernelInstance kernelcontract.Kernel)` function alias used for deferred HTTP route registration
+- [`HttpMiddleware`](../../application/http_middleware.go)
+- [`SecurityModule`](../../application/security_module.go) — module contract for registering security configuration via `RegisterSecurity(builder *securityconfig.Builder)`
+
+### Constants
+
+- [`MiddlewareGroupHttp`](../../application/http_middleware.go)
+- [`MiddlewareNameStatic`](../../application/http_middleware.go)
+- [`MiddlewarePriorityStatic`](../../application/http_middleware.go)
+- [`MiddlewarePriorityDefault`](../../application/http_middleware.go)
+- [`ServiceProcessRole`](../../application/service_resolver.go) — resolves to the process role string, so a service can gate background work without reaching back to the application instance
+    - [`ProcessRoleMustFromRuntime(runtimeInstance)`](../../application/service_resolver.go)
+    - [`ProcessRoleMustFromResolver(ctx, resolver)`](../../application/service_resolver.go)
+- [`ServiceProcessContext`](../../application/service_resolver.go) — resolves to the console run's `ProcessContext`. The cli entry point installs it into the run's scope, so it takes a resolver rather than the container
+    - [`ProcessContextFromRuntime(runtimeInstance)`](../../application/service_resolver.go), [`ProcessContextMustFromRuntime(runtimeInstance)`](../../application/service_resolver.go) — a runtime that is not a run's answers an error under `containercontract.ErrRuntimeKindRefused` naming both kinds, so code that runs on both process shapes tells absence apart by the error
+
+### Constructors
+
+- [`NewApplication(ctx, ApplicationConfig)`](../../application/application_new.go) — [`ApplicationConfig`](../../application/application_new.go) carries `Version`, the application's own version, which the root command's `--version` prints, `<unknown>` when empty, and the meta of every command document carries, `EnvironmentFiles` and `PublicFiles`, the embedded filesystems, `EnvironmentKeys`, the `.env` keys the application owns (see [CONFIG](CONFIG.md#application-keys)), `ParameterOverrides`, the templates it writes over framework and module parameters (see [CONFIG](CONFIG.md#parameter-overrides)), `Events`, by framework event name, the tags that still run after a failure on the framework's twelve events, which the application declares itself through `DeclareEvent`, with the framework's own tags first and under the dispatcher's rules (see [EVENT](EVENT.md#the-frameworks-events)), a name the framework does not own refusing `NewApplication` by name and a tag the dispatcher refuses answered naming `ApplicationConfig.Events["<name>"].TagsToRunAfterFailure`, the dispatcher's refusal as the cause, `MessageBus`, a `MessageBusConfig{Retry}` whose retry policy the framework hands the `melody:messagebus:consume` command it registers, a field outside its rule refusing `NewApplication` by name, `SecurityHeaders`, the security headers every response carries, a value outside its rule refusing `NewApplication` naming the field and no `.env` key turning them off (see [HTTP](HTTP.md#security-headers)), `AccessLog`, an [`http.AccessLogConfig`](../../http/terminate_access_log_listener.go) whose `Disabled` registers no access log listener and whose `MaxFieldBytes` cuts each request-supplied field of the record, 512 when left out, unlimited admitted, a value below one refusing `NewApplication` naming `AccessLogConfig.MaxFieldBytes` (see [HTTP](HTTP.md#access-log)), `DebugCommandsEnabled`, which registers the `debug:*` commands in every environment where they are registered under `MELODY_ENV=dev` alone (see [DEBUG](DEBUG.md)), both Go fields and no key, and the six limits the application states its own default for; every field left out takes its default, see [Server limits](#server-limits)
+- [`NewRuntimeFlags(RuntimeFlagsConfig)`](../../application/cli.go) — the flags as given, an empty `Role` reading as `all`
+- [`ParseRuntimeFlags(RuntimeFlagsConfig)`](../../application/cli.go) — the mode and the role resolved from `os.Args` against the defaults given. An explicit `--role`/`-role` placed before the command name wins over `Role`; the flag exists because melody reads configuration only from `.env` artifacts and never from the process environment
+- [`NewSignalContext()`](../../application/signal_context.go) — the context to hand `Run`: cancelled by the first `SIGINT` or `SIGTERM`, giving the application its shutdown window, while a second one, arriving more than half a second after the first, prints a line to stderr and forces the conventional `128+signal` exit, so an operator facing a hung shutdown is never reduced to `SIGKILL`. The returned stop function unregisters the notifications and is safe to call more than once and concurrently. Call it whenever the process outlives the application: a watcher left armed makes the next application cycle in the same process run under two watchers, and the older one reads that cycle's first `SIGTERM` as its own escalation — a forced exit 143 where a graceful shutdown was owed
+- [`NewHttpMiddleware(staticConfig)`](../../application/http_middleware.go)
+
+### Application lifecycle
+
+- [`(*Application).Boot()`](../../application/application.go)
+- [`(*Application).Run()`](../../application/application.go)
+- [`(*Application).HttpHandler() (nethttp.Handler, error)`](../../application/application_http.go) — the handler `Run` serves, for a server of the caller's; see [Serving under another server](#serving-under-another-server)
+- [`(*Application).BeginHttpShutdown(shutdownContext context.Context) error`](../../application/application_http.go) — starts the shutdown hooks of a handed-out handler, once, without waiting
+- [`(*Application).CloseWithContext(closeContext context.Context) error`](../../application/application_close.go)
+- [`(*Application).ProcessRole()`](../../application/application.go) — the role this process resolved to, the same string `ServiceProcessRole` answers
+
+### Registration APIs
+
+- [`(*Application).RegisterConfiguration(name, configuration)`](../../application/application.go) — accepts exactly one name in this major, `loggingcontract.LoggingConfigurationName`; any other name panics at registration, because nothing can ever consume it
+- [`(*Application).RegisterParameter(name, value)`](../../application/application.go)
+- [`(*Application).RegisterService(name, factory, options)`](../../application/application_container.go)
+- [`(*Application).RegisterScopedService(serviceName, provider, options)`](../../application/application_container.go) — the scoped counterpart: what it registers is built on the first resolution through a scope and closed when that scope closes. In console the run's scope spans the whole command, so a long-running command that processes many units creates a child runtime per unit, as the cron runner does: a child run from `runtime.NewChildRun(runtimeInstance, ctx)`, over a new scope of the container, and a `CloseWithContext` of that scope whose error joins the unit's own
+- [`(*Application).RegisterModule(module)`](../../application/application_module.go)
+- [`(*Application).RegisterModuleProvider(provider)`](../../application/application_module.go) — registers every module returned by a [`ModuleProvider`](../../application/contract/module.go). `RegisterModule` also expands a module that additionally implements `ModuleProvider`, so a single registration can contribute a whole group of capability-modules. Each Melody integration ships a self-registering module via its `NewModule(ModuleConfig{...})` (e.g. `app.RegisterModule(amqp.NewModule(...))`) that wires that integration's services, parameters and commands in one call instead of hand-calling the individual `Register*` helpers. A module's `Name()`, folded to lower case, is its identity in the application: a second module of a name already registered in any case, the same instance reached again through a provider included, is recorded at the line that registered it and fails the boot at its start in the aggregated report of duplicate registrations as `module "<name>"`, with `already registered as "<first spelling>"` when the two spellings differ, running no hook and expanding no module it provides; an empty `Name()`, or one that begins or ends with whitespace, is refused where it is registered.
+- [`(*Application).RegisterCliCommand(command)`](../../application/application_cli.go)
+- [`(*Application).RegisterHttpRoute(pattern, handler, options)`](../../application/application_http.go) — queues one of the application's own routes with its `RouteOptions`, as `Router.Handle` registers one: a name, the methods, every method when they are empty, and the rest of the options, copied at the call
+- [`(*Application).RegisterHttpMiddlewares(middlewares []httpcontract.Middleware)`](../../application/application_http.go)
+- [`(*Application).RegisterHttpMiddlewareFactories(factories []pipeline.MiddlewareFactory)`](../../application/application_http.go)
+- [`(*Application).RegisterHttpHandlerDecorator(decorator)`](../../application/application_http.go) — see [Handler decorators](#handler-decorators)
+- [`(*Application).OnHttpShutdown(hook func(shutdownContext context.Context))`](../../application/application_http.go) — runs the moment the http server begins shutting down, before it waits for connections to drain, handed the shutdown's context, which carries the shutdown deadline and is done when its budget ends, which is how a Server-Sent Events stream or a websocket is released instead of blocking the whole shutdown timeout
+
+### Boot refusals and the process exit
+
+Boot fails fast where serving would be the widening: an **http** process whose `.env` artifacts contributed **no keys at all** refuses to boot rather than serve on development defaults (a cli process meets the next refusal instead), and a process of either mode whose `MELODY_ENV` no artifact sets refuses to boot, naming the key, since the default selects the `.env.dev` files and turns the debug tooling on. Two more doors close for the boot window itself: a module registered from inside a module boot hook is refused, because the phase loops iterate a snapshot of the module list and such a module would receive only the hooks still ahead of it; and so is a route queued from inside one, because the queue has already drained by then. A configuration registered under any name but `logging` is refused outright, since nothing in this major can read it back.
+
+An http process is refused at boot too when the framework's fallback session storage stands beside `MELODY_HTTP_SESSION_TTL=unlimited` and `MELODY_HTTP_SESSION_MAX_SESSIONS=unlimited` (see [CONFIG](CONFIG.md#session-max-sessions)). What the boot admits and names instead, its [boot warnings](SECURITY.md#boot-warnings), an http process writes once before it serves and a command once before it runs, each filtered by `MELODY_BOOT_WARNINGS_IGNORED` (see [CONFIG](CONFIG.md#boot-warnings-ignored)).
+
+The http server limits and the teardown budget are described under [Server limits](#server-limits); the shutdown timeout is configured through `MELODY_HTTP_SHUTDOWN_TIMEOUT` (`kernel.http.shutdown_timeout`) over `ApplicationConfig.HttpServer.ShutdownTimeout`, defaulting to 5s, because its right value belongs to the supervisor's termination grace rather than to the framework. What `net/http` reports on its own — a connection that fails before a request exists, a request the server rejects before any handler, the listener degrading — reaches the application's journal instead of stderr, so it is structured like every other line the process writes.
+
+**The shutdown budget covers the request scopes as well as the connections.** `net/http`'s own `Shutdown` drains the connections the server still owns — and a **hijacked** connection is not one of them: a handler that upgrades to a websocket or takes the socket for any other reason removes it from the server's accounting, so `Shutdown` returns immediately and reports success while that handler is still running. Melody counts the request scopes the http kernel opened ([`Kernel.OpenRequestScopes`](../../http/kernel.go)) and waits for them under the *same* budget after `Shutdown` returns and the shutdown hooks were joined. A drain that finishes leaves the exit exactly as it was; one that does not is recorded as `http shutdown left request scopes open`, carrying the count, and the process exits non-zero — the same signal an overrun `Shutdown` gives, for the same reason. The `OnHttpShutdown` hooks are what release the long-lived handlers so the drain has something to succeed at; without
+one, the budget is what bounds the wait.
+
+### Server limits
+
+An http process serves with five per-request limits, a clean stop spends one teardown budget, the close of a scope runs under one term, the container bounds the resolutions waiting on one creation, and the `503` answering an infrastructure failure outside a firewall carries one `Retry-After` delay. Each is a [`bound`](../../bound/limit.go) limit with three sources, decided in this order: the configuration key a deployment sets, then the field of [`ApplicationConfig`](../../application/application_new.go), then the framework default.
+
+| Field                              | Key                                   | Default | Minimum | Unlimited |
+|------------------------------------|---------------------------------------|---------|---------|-----------|
+| `HttpServer.ReadTimeout`           | `MELODY_HTTP_READ_TIMEOUT`            | 15s     | 1ms     | refused   |
+| `HttpServer.ReadHeaderTimeout`     | `MELODY_HTTP_READ_HEADER_TIMEOUT`     | 5s      | 1ms     | refused   |
+| `HttpServer.WriteTimeout`          | `MELODY_HTTP_WRITE_TIMEOUT`           | 30s     | 1ms     | refused   |
+| `HttpServer.IdleTimeout`           | `MELODY_HTTP_IDLE_TIMEOUT`            | 60s     | 1ms     | refused   |
+| `HttpServer.MaxHeaderBytes`        | `MELODY_HTTP_MAX_HEADER_BYTES`        | 1 MiB   | 4 KiB   | refused   |
+| `HttpServer.ShutdownTimeout`       | `MELODY_HTTP_SHUTDOWN_TIMEOUT`        | 5s      | 1ms     | refused   |
+| `TeardownTimeout`                  | `MELODY_TEARDOWN_TIMEOUT`             | 10s     | 1ms     | admitted  |
+| `ScopeTeardownTimeout`             | `MELODY_SCOPE_TEARDOWN_TIMEOUT`       | 3s      | 1ms     | admitted  |
+| `ContainerCreationWaiters`         | `MELODY_CONTAINER_CREATION_WAITERS`   | 1,024   | 1       | admitted  |
+| `HttpKernel.UnavailableRetryAfter` | `MELODY_HTTP_UNAVAILABLE_RETRY_AFTER` | 5s      | 1s      | refused   |
+
+The field is the default of the `kernel.*` parameter the key feeds, and the key is the deployment's word over it; an entry of `ParameterOverrides` for that parameter replaces the key as its one source (see [CONFIG](CONFIG.md#parameter-overrides)). A key read `unlimited` where the rule refuses it, or a value below the minimum from either source, fails the boot naming the field, and the key when the key carried it. Unlimited is refused on the five server limits because `net/http` reads no bound as no timeout, which leaves a slow client holding a connection; a deployment that wants a long one names it. A teardown without a deadline is `unlimited`, and so is a container that admits every waiter. The unavailable delay is at most 1h and a whole number of seconds, since `Retry-After` carries whole seconds; a firewall answers its own refusal with its own `UnavailableRetryAfter` (see [SECURITY.md](SECURITY.md#a-store-that-cannot-answer)).
+
+The public base of the absolute urls is a value beside them, decided the same way: `HttpPublicUrl` is the default of `MELODY_HTTP_PUBLIC_URL`, which wins when a deployment sets it, both judged at `New` as an `http` or `https` url with a host name and no user info, query, fragment or empty, `.` or `..` path segment, a refusal naming the field or the key; `Http().PublicUrl()` answers the key, then the field, and the url generator the application registers answers `GenerateUrl` behind that base (see [HTTP](HTTP.md#absolute-urls)).
+
+The application namespace is a value beside them, decided the same way: `Namespace` is the default of `MELODY_NAMESPACE`, which wins when a deployment sets it, `melody` when both are empty, a value outside `config.ValidateNamespace` refused naming the field or the key; `Kernel().Namespace()` answers it and every store family derives its default names from it (see [CONFIG.md](CONFIG.md#application-namespace)).
+
+The container's teardown order is a switch beside them, decided the same way: `ContainerTeardownSequential` closes the services one after the other instead of in dependency waves, and `MELODY_CONTAINER_TEARDOWN_SEQUENTIAL`, when set, wins over it (see [CONFIG.md](CONFIG.md#container-teardown-order)). So is the session's answer to a storage outage: `HttpKernel.SessionPolicy.EmptyOnOutage` serves a reader of the session an empty, unavailable session instead of the marked error, and `MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE` can only turn it off, a true value refused at boot naming the key (see [CONFIG.md](CONFIG.md#session-storage-outage)). Once the modules registered their services, the boot refuses, before `Run`, a declared teardown dependency that does not name one container service — the framework's container carries the verification door, and a container of another implementation that does not is not checked (see [CONTAINER.md](CONTAINER.md)).
+
+Three container limits have no key, set in Go only: `ContainerTeardownWalk`, a `container.TeardownWalkConfig` of `Depth`, `Elements` and `Nodes` (12, 256 and 65,536 when left out, at least 1, unlimited refused), bounds the walk that infers the teardown edges; `ContainerCloseFailureStackBytes` (2,048 when left out, at least 4, unlimited admitted) bounds what one failed close contributes to the teardown error; and `CliErrorCauseChainDepth` (8 when left out, at least 0, unlimited refused) bounds the causes a failed command's `[error]` line carries, handed to `cli.RootConfig.ErrorCauseChainDepth`. A value outside its rule fails `NewApplication` naming the `ContainerConfig` or `RootConfig` field. When the node budget ended the walk of a service, the close writes the warning `TeardownWalkBudgetEndedMessage` naming its nodes and the field before the teardown, since an edge past the budget was not gained (see [CONTAINER.md](CONTAINER.md)).
+
+### Http server
+
+[`ApplicationConfig.HttpServer`](../../application/application_new.go), an `application.HttpServerConfig`, is the server `Run` listens with: `ReadTimeout`, `ReadHeaderTimeout`, `WriteTimeout`, `IdleTimeout`, `MaxHeaderBytes` and `ShutdownTimeout`, each the default of the key in the table above, which wins when a deployment sets it. The zero value is the framework's server. A value outside its rule refuses `NewApplication`, the refusal naming `ApplicationConfig.HttpServer.<Field>`.
+
+### Http kernel
+
+[`ApplicationConfig.HttpKernel`](../../application/application_new.go), an [`http.KernelConfig`](../../http/kernel.go), is what the http kernel is built with, once, at `NewApplication`: it is the kernel's one source, and nothing configures the kernel after it. Its policies without a key, `MethodPolicy`, `ForwardedHeadersPolicy`, `SessionCookiePolicy.Path`, `.Domain` and `.SameSite`, and `NotFoundHandler`, are read from the field alone. Three values have a key that wins over the field, which is their default:
+
+| Field                                       | Key                                   | Admitted                          |
+|---------------------------------------------|---------------------------------------|-----------------------------------|
+| `HttpKernel.UnavailableRetryAfter`          | `MELODY_HTTP_UNAVAILABLE_RETRY_AFTER` | 1s to 1h in whole seconds         |
+| `HttpKernel.SessionPolicy.EmptyOnOutage`    | `MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE` | `false`                           |
+| `HttpKernel.SessionCookiePolicy.Secure`     | `MELODY_HTTP_SESSION_COOKIE_SECURE`   | `always`                          |
+
+The two session keys only harden: `SessionCookieSecureFromScheme` and `SessionCookieSecureNever` have no key spelling, and neither has `EmptyOnOutage` on, since a key that wins over the field would let a deployment lower the `always` or turn on the empty session the composition root left off, so only the application's Go loosens either policy. `HttpKernel.Middlewares` is refused at `NewApplication`, naming the field and the count: the application's middlewares go through `RegisterHttpMiddlewares` or a module's registrar, which order them by priority, and the pipeline is installed on the kernel at Boot through a framework-only door. A `SameSite=None` cookie policy with `Secure` never and an unparsable trusted-proxy entry are refused at `NewApplication` too. A module cannot set a kernel policy: the composition root owns the kernel. The application keeps the kernel it built; `kernelcontract.Kernel` hands no http kernel out, and [`HttpHandler`](#serving-under-another-server) is the one door to the handler it serves.
+
+### Middleware helpers
+
+- [`(*HttpMiddleware).Use(registration applicationcontract.MiddlewareRegistration)`](../../application/http_middleware.go)
+- [`(*HttpMiddleware).LastBuildReport()`](../../application/http_middleware.go) — an empty report before the first build

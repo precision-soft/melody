@@ -1,0 +1,45 @@
+package event
+
+import (
+    nethttp "net/http"
+
+    "github.com/precision-soft/melody/v4/.example/message"
+    "github.com/precision-soft/melody/v4/.example/presenter"
+    melodybag "github.com/precision-soft/melody/v4/bag"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodymessagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
+)
+
+func PublishHandler(bus melodymessagebuscontract.Bus) melodyhttpcontract.Handler {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        topic := TopicOf(request)
+
+        /* a topic's role is the role its content is written behind, so a caller who may not read it may not write onto it either */
+        if false == topicIsReadableBy(runtimeInstance, topic) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "not allowed to publish onto this topic"), nil
+        }
+
+        text := queryStringOr(request, "text", "hello")
+
+        _, dispatchErr := bus.Dispatch(runtimeInstance, message.Notification{Topic: topic, Text: text}, melodymessagebuscontract.DispatchOptions{})
+        if nil != dispatchErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not publish notification", dispatchErr), nil
+        }
+
+        return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusAccepted, map[string]any{
+            "published": true,
+            "topic":     topic,
+        }), nil
+    }
+}
+
+/* queryStringOr falls back on a present but empty value too, where StringOrDefault answers the empty string. */
+func queryStringOr(request melodyhttpcontract.Request, name string, fallback string) string {
+    value := melodybag.StringOrDefault(request.Query(), name, fallback)
+    if "" == value {
+        return fallback
+    }
+
+    return value
+}

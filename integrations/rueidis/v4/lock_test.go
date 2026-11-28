@@ -1,0 +1,871 @@
+package rueidis
+
+import (
+    "context"
+    "errors"
+    "os"
+    "strconv"
+    "sync"
+    "sync/atomic"
+    "testing"
+    "time"
+
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
+    "github.com/precision-soft/melody/v4/exception"
+    lockcontract "github.com/precision-soft/melody/v4/lock/contract"
+)
+
+func newLockRuntime() containercontract.Runtime {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    return runtime.NewRun(context.Background(), serviceContainer.NewScope())
+}
+
+func newCancelledLockRuntime() containercontract.Runtime {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    return runtime.NewRun(cancelledContext, serviceContainer.NewScope())
+}
+
+var lockTestSequence atomic.Uint64
+
+func lockTestName(t *testing.T, subject string) string {
+    t.Helper()
+
+    return "melody:lock:test:" + subject + ":" + t.Name() + ":" + strconv.FormatUint(lockTestSequence.Add(1), 10)
+}
+
+func requireStoredToken(t *testing.T, name string, wanted string) {
+    t.Helper()
+
+    outOfBand := newTokenStoreClient(t)
+
+    stored, storedErr := outOfBand.Do(context.Background(), outOfBand.B().Get().Key(defaultLockKey(name)).Build()).ToString()
+    if nil != storedErr {
+        stored = ""
+    }
+
+    if wanted != stored {
+        t.Fatalf("expected the key to hold %q, it holds %q", wanted, stored)
+    }
+}
+
+func TestRedisLock_MutualExclusionReleaseAndRefresh(t *testing.T) {
+    address := os.Getenv("REDIS_ADDRESS")
+    if "" == address {
+        t.Skip("REDIS_ADDRESS not set; skipping redis lock integration test")
+    }
+
+    provider := NewProvider("melody", ProviderConfig{})
+    connection, openErr := provider.Open(openRuntime(t), ConnectionParameters{Address: address})
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer connection.CloseWithContext(context.Background())
+
+    client := connection.Client()
+
+    locker := NewLocker(newTestConnection(client), LockerConfig{})
+    runtimeInstance := newLockRuntime()
+
+    name := "melody:lock:test"
+
+    first := mustCreateLock(locker.CreateLock(name, lockcontract.CreateLockOptions{Ttl: bound.Of(10*time.Second)}))
+    second := mustCreateLock(locker.CreateLock(name, lockcontract.CreateLockOptions{Ttl: bound.Of(10*time.Second)}))
+
+    acquired, acquireErr := first.Acquire(runtimeInstance)
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected first acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    contended, contendedErr := second.Acquire(runtimeInstance)
+    if nil != contendedErr || true == contended {
+        t.Fatalf("expected contention while held: %v %v", contended, contendedErr)
+    }
+
+    if refreshErr := first.Refresh(runtimeInstance, lockcontract.RefreshOptions{Ttl: bound.Of(10*time.Second)}); nil != refreshErr {
+        t.Fatalf("refresh: %v", refreshErr)
+    }
+
+    if releaseErr := first.Release(runtimeInstance); nil != releaseErr {
+        t.Fatalf("release: %v", releaseErr)
+    }
+
+    afterRelease, afterReleaseErr := second.Acquire(runtimeInstance)
+    if nil != afterReleaseErr || false == afterRelease {
+        t.Fatalf("expected acquire after release: %v %v", afterRelease, afterReleaseErr)
+    }
+
+    _ = second.Release(runtimeInstance)
+}
+
+func TestRedisLock_RefreshFailsWhenLostToAnotherClient(t *testing.T) {
+    address := os.Getenv("REDIS_ADDRESS")
+    if "" == address {
+        t.Skip("REDIS_ADDRESS not set; skipping redis lock integration test")
+    }
+
+    provider := NewProvider("melody", ProviderConfig{})
+    connection, openErr := provider.Open(openRuntime(t), ConnectionParameters{Address: address})
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer connection.CloseWithContext(context.Background())
+
+    client := connection.Client()
+
+    locker := NewLocker(newTestConnection(client), LockerConfig{})
+    runtimeInstance := newLockRuntime()
+
+    name := "melody:lock:lost"
+
+    lock := mustCreateLock(locker.CreateLock(name, lockcontract.CreateLockOptions{Ttl: bound.Of(10*time.Second)}))
+    acquired, acquireErr := lock.Acquire(runtimeInstance)
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    if delErr := client.Do(runtimeInstance.Context(), client.B().Del().Key(defaultLockKey(name)).Build()).Error(); nil != delErr {
+        t.Fatalf("del: %v", delErr)
+    }
+
+    if refreshErr := lock.Refresh(runtimeInstance, lockcontract.RefreshOptions{Ttl: bound.Of(10*time.Second)}); nil == refreshErr {
+        t.Fatalf("expected refresh to fail once the lock was lost")
+    }
+}
+
+func TestRedisLock_ReacquireIsReentrantForSameLock(t *testing.T) {
+    address := os.Getenv("REDIS_ADDRESS")
+    if "" == address {
+        t.Skip("REDIS_ADDRESS not set; skipping redis lock integration test")
+    }
+
+    provider := NewProvider("melody", ProviderConfig{})
+    connection, openErr := provider.Open(openRuntime(t), ConnectionParameters{Address: address})
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer connection.CloseWithContext(context.Background())
+
+    client := connection.Client()
+
+    locker := NewLocker(newTestConnection(client), LockerConfig{})
+    runtimeInstance := newLockRuntime()
+
+    lock := mustCreateLock(locker.CreateLock("melody:lock:reentrant", lockcontract.CreateLockOptions{Ttl: bound.Of(10*time.Second)}))
+    defer lock.Release(runtimeInstance)
+
+    first, firstErr := lock.Acquire(runtimeInstance)
+    if nil != firstErr || false == first {
+        t.Fatalf("expected first acquire to succeed: %v %v", first, firstErr)
+    }
+
+    second, secondErr := lock.Acquire(runtimeInstance)
+    if nil != secondErr || false == second {
+        t.Fatalf("expected re-acquire of the same lock to be reentrant: %v %v", second, secondErr)
+    }
+}
+
+func TestFloorPositiveMilliseconds_FloorsSubMillisecondToOne(t *testing.T) {
+    cases := []struct {
+        name     string
+        ttl      time.Duration
+        expected int64
+    }{
+        {"sub-millisecond floors to 1", 500 * time.Microsecond, 1},
+        {"one nanosecond floors to 1", time.Nanosecond, 1},
+        {"exact millisecond preserved", time.Millisecond, 1},
+        {"two milliseconds preserved", 2 * time.Millisecond, 2},
+        {"one second is 1000ms", time.Second, 1000},
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            actual := floorPositiveMilliseconds(testCase.ttl)
+            if testCase.expected != actual {
+                t.Fatalf("floorPositiveMilliseconds(%v) = %d, want %d", testCase.ttl, actual, testCase.expected)
+            }
+        })
+    }
+}
+
+func newWedgedLock(t *testing.T, config LockerConfig) (lockcontract.Lock, *gate) {
+    t.Helper()
+
+    if true == config.CallTimeout.IsAbsent() {
+        config.CallTimeout = bound.Of(50 * time.Millisecond)
+    }
+
+    client, lockGate := dialGated(t)
+    locker := NewLocker(newTestConnection(client), config)
+
+    /* the sequence restarts at 1 in every process and this warm-up lease is never released, so the key carries more than the name */
+    name := lockTestName(t, "wedge")
+
+    outOfBand := newTokenStoreClient(t)
+    if deleteErr := outOfBand.Do(context.Background(), outOfBand.B().Del().Key(defaultLockKey(name)).Build()).Error(); nil != deleteErr {
+        t.Fatalf("clearing the key: %v", deleteErr)
+    }
+
+    lock := mustCreateLock(locker.CreateLock(name, lockcontract.CreateLockOptions{Ttl: bound.Of(10*time.Second)}))
+
+    acquired, acquireErr := lock.Acquire(newLockRuntime())
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected the warm-up acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    lockGate.Wedge()
+
+    return lock, lockGate
+}
+
+func TestRedisLock_AcquireIsBoundedByTheCallTimeout(t *testing.T) {
+    lock, _ := newWedgedLock(t, LockerConfig{})
+
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
+        _, acquireErr := lock.Acquire(newLockRuntime())
+
+        return acquireErr
+    }))
+}
+
+func TestRedisLock_ReleaseIsBoundedByTheCallTimeout(t *testing.T) {
+    lock, _ := newWedgedLock(t, LockerConfig{})
+
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
+        return lock.Release(newLockRuntime())
+    }))
+}
+
+func TestRedisLock_RefreshIsBoundedByTheCallTimeout(t *testing.T) {
+    lock, _ := newWedgedLock(t, LockerConfig{})
+
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
+        return lock.Refresh(newLockRuntime(), lockcontract.RefreshOptions{Ttl: bound.Of(10*time.Second)})
+    }))
+}
+
+func TestRedisLock_AcquireKeepsATighterRequestDeadline(t *testing.T) {
+    lock, _ := newWedgedLock(t, LockerConfig{CallTimeout: bound.Of(time.Second)})
+
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+    defer cancel()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
+
+    started := time.Now()
+    requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
+        _, acquireErr := lock.Acquire(runtimeInstance)
+
+        return acquireErr
+    }))
+
+    if elapsed := time.Since(started); 500*time.Millisecond < elapsed {
+        t.Fatalf("expected the caller's own deadline to end the acquire, it took %s", elapsed)
+    }
+}
+
+func TestNewLocker_RefusesACallTimeoutOutsideItsRuleNamingTheField(t *testing.T) {
+    for _, callTimeout := range []bound.Duration{bound.UnlimitedDuration(), bound.Of(time.Duration(0)), bound.Of(-time.Second), bound.Of(time.Microsecond)} {
+        expectPanicNamingField(t, "LockerConfig.CallTimeout", func() {
+            NewLocker(newTestConnection(fakeClient{}), LockerConfig{CallTimeout: callTimeout})
+        })
+    }
+}
+
+func TestNewLocker_DefaultCallTimeout(t *testing.T) {
+    locker := NewLocker(newTestConnection(fakeClient{}), LockerConfig{})
+
+    if defaultLockerCallTimeout != locker.callTimeout {
+        t.Fatalf("expected the default call timeout, got %v", locker.callTimeout)
+    }
+}
+
+func TestLocker_CreateLockHandsTheCallTimeoutToTheLock(t *testing.T) {
+    locker := NewLocker(newTestConnection(fakeClient{}), LockerConfig{CallTimeout: bound.Of(750 * time.Millisecond)})
+
+    lock, ok := mustCreateLock(locker.CreateLock("melody:lock:test:budget", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Second)})).(*redisLock)
+    if false == ok {
+        t.Fatalf("expected a *redisLock, got %T", mustCreateLock(locker.CreateLock("melody:lock:test:budget", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Second)})))
+    }
+
+    if 750*time.Millisecond != lock.callTimeout {
+        t.Fatalf("expected the lock to carry the locker's call timeout, got %v", lock.callTimeout)
+    }
+}
+
+func TestRedisLock_AnAcquireThatLostItsReplyDoesNotStrandTheLease(t *testing.T) {
+    outOfBand := newTokenStoreClient(t)
+    name := lockTestName(t, "ambiguous")
+
+    if deleteErr := outOfBand.Do(context.Background(), outOfBand.B().Del().Key(defaultLockKey(name)).Build()).Error(); nil != deleteErr {
+        t.Fatalf("clearing the key: %v", deleteErr)
+    }
+
+    client, lockGate := dialGated(t)
+    locker := NewLocker(newTestConnection(client), LockerConfig{CallTimeout: bound.Of(50 * time.Millisecond)})
+    lock := mustCreateLock(locker.CreateLock(name, lockcontract.CreateLockOptions{Ttl: bound.Of(10*time.Second)}))
+
+    lockGate.WedgeIntegerReplies()
+
+    acquired, acquireErr := lock.Acquire(newLockRuntime())
+    if nil == acquireErr {
+        t.Fatalf("expected the acquire to fail while its reply is swallowed")
+    }
+
+    if true == acquired {
+        t.Fatalf("an acquire that never read its answer must not report the lock as held")
+    }
+
+    deadline := time.Now().Add(2 * time.Second)
+    for time.Now().Before(deadline) {
+        stored, storedErr := outOfBand.Do(context.Background(), outOfBand.B().Get().Key(defaultLockKey(name)).Build()).ToString()
+        if nil != storedErr {
+            return
+        }
+
+        if time.Now().Add(50 * time.Millisecond).After(deadline) {
+            t.Fatalf("the lease was stranded: the key still holds %q, and every fresh campaign is refused until it lapses", stored)
+        }
+
+        time.Sleep(20 * time.Millisecond)
+    }
+
+    t.Fatalf("the lease was stranded")
+}
+
+func TestRedisLock_AnAmbiguousReacquireKeepsTheLeaseItAlreadyHolds(t *testing.T) {
+    outOfBand := newTokenStoreClient(t)
+    name := lockTestName(t, "reentrant-ambiguous")
+
+    if deleteErr := outOfBand.Do(context.Background(), outOfBand.B().Del().Key(defaultLockKey(name)).Build()).Error(); nil != deleteErr {
+        t.Fatalf("clearing the key: %v", deleteErr)
+    }
+
+    client, lockGate := dialGated(t)
+    locker := NewLocker(newTestConnection(client), LockerConfig{CallTimeout: bound.Of(50 * time.Millisecond)})
+    lock := mustCreateLock(locker.CreateLock(name, lockcontract.CreateLockOptions{Ttl: bound.Of(10*time.Second)}))
+
+    acquired, acquireErr := lock.Acquire(newLockRuntime())
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected the first acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    held, heldErr := outOfBand.Do(context.Background(), outOfBand.B().Get().Key(defaultLockKey(name)).Build()).ToString()
+    if nil != heldErr {
+        t.Fatalf("reading the lease this handle owns: %v", heldErr)
+    }
+
+    lockGate.WedgeIntegerReplies()
+
+    if _, reacquireErr := lock.Acquire(newLockRuntime()); nil == reacquireErr {
+        t.Fatalf("expected the re-acquire to fail while its reply is swallowed")
+    }
+
+    /* the give-back is detached, so the window it would act in is given time to pass rather than assumed away */
+    time.Sleep(500 * time.Millisecond)
+
+    still, stillErr := outOfBand.Do(context.Background(), outOfBand.B().Get().Key(defaultLockKey(name)).Build()).ToString()
+    if nil != stillErr {
+        t.Fatalf("the ambiguous re-acquire took the lease this handle legitimately owns: %v", stillErr)
+    }
+
+    if held != still {
+        t.Fatalf("the lease changed hands under its own holder: had %q, now %q", held, still)
+    }
+}
+
+func TestRedisLock_AReleasedHandleGivesBackAnAmbiguousAcquireAgain(t *testing.T) {
+    outOfBand := newTokenStoreClient(t)
+    name := lockTestName(t, "released-then-ambiguous")
+
+    if deleteErr := outOfBand.Do(context.Background(), outOfBand.B().Del().Key(defaultLockKey(name)).Build()).Error(); nil != deleteErr {
+        t.Fatalf("clearing the key: %v", deleteErr)
+    }
+
+    client, lockGate := dialGated(t)
+    locker := NewLocker(newTestConnection(client), LockerConfig{CallTimeout: bound.Of(50 * time.Millisecond)})
+    lock := mustCreateLock(locker.CreateLock(name, lockcontract.CreateLockOptions{Ttl: bound.Of(10*time.Second)}))
+
+    if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || false == acquired {
+        t.Fatalf("expected the first acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    if releaseErr := lock.Release(newLockRuntime()); nil != releaseErr {
+        t.Fatalf("release: %v", releaseErr)
+    }
+
+    if released := lock.(*redisLock).heldToken(); "" != released {
+        t.Fatalf("expected a released handle to claim nothing, it claims %q", released)
+    }
+
+    lockGate.WedgeIntegerReplies()
+
+    if _, reacquireErr := lock.Acquire(newLockRuntime()); nil == reacquireErr {
+        t.Fatalf("expected the acquire to fail while its reply is swallowed")
+    }
+
+    deadline := time.Now().Add(2 * time.Second)
+    for time.Now().Before(deadline) {
+        stored, storedErr := outOfBand.Do(context.Background(), outOfBand.B().Get().Key(defaultLockKey(name)).Build()).ToString()
+        if nil != storedErr {
+            return
+        }
+
+        if time.Now().Add(50 * time.Millisecond).After(deadline) {
+            t.Fatalf("a released handle kept its claim, so the lease was stranded: the key still holds %q", stored)
+        }
+
+        time.Sleep(20 * time.Millisecond)
+    }
+
+    t.Fatalf("the lease was stranded")
+}
+
+func TestRedisLock_ARefreshThatLostTheLeaseDropsTheClaim(t *testing.T) {
+    outOfBand := newTokenStoreClient(t)
+    name := lockTestName(t, "lost-then-ambiguous")
+
+    if deleteErr := outOfBand.Do(context.Background(), outOfBand.B().Del().Key(defaultLockKey(name)).Build()).Error(); nil != deleteErr {
+        t.Fatalf("clearing the key: %v", deleteErr)
+    }
+
+    client, lockGate := dialGated(t)
+    locker := NewLocker(newTestConnection(client), LockerConfig{CallTimeout: bound.Of(50 * time.Millisecond)})
+    lock := mustCreateLock(locker.CreateLock(name, lockcontract.CreateLockOptions{Ttl: bound.Of(10*time.Second)}))
+
+    if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || false == acquired {
+        t.Fatalf("expected the first acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    if stealErr := outOfBand.Do(context.Background(), outOfBand.B().Set().Key(defaultLockKey(name)).Value("someone-else").Build()).Error(); nil != stealErr {
+        t.Fatalf("stealing the key: %v", stealErr)
+    }
+
+    if refreshErr := lock.Refresh(newLockRuntime(), lockcontract.RefreshOptions{Ttl: bound.Of(10*time.Second)}); nil == refreshErr {
+        t.Fatalf("expected the refresh to report the lease lost")
+    }
+
+    if "" != lock.(*redisLock).heldToken() {
+        t.Fatalf("expected a handle told its lease was lost to hold none, it holds %q", lock.(*redisLock).heldToken())
+    }
+
+    if deleteErr := outOfBand.Do(context.Background(), outOfBand.B().Del().Key(defaultLockKey(name)).Build()).Error(); nil != deleteErr {
+        t.Fatalf("clearing the stolen key: %v", deleteErr)
+    }
+
+    lockGate.WedgeIntegerReplies()
+
+    if _, reacquireErr := lock.Acquire(newLockRuntime()); nil == reacquireErr {
+        t.Fatalf("expected the acquire to fail while its reply is swallowed")
+    }
+
+    deadline := time.Now().Add(2 * time.Second)
+    for time.Now().Before(deadline) {
+        stored, storedErr := outOfBand.Do(context.Background(), outOfBand.B().Get().Key(defaultLockKey(name)).Build()).ToString()
+        if nil != storedErr {
+            return
+        }
+
+        if time.Now().Add(50 * time.Millisecond).After(deadline) {
+            t.Fatalf("a handle told its lease was lost kept its claim, so the lease was stranded: the key still holds %q", stored)
+        }
+
+        time.Sleep(20 * time.Millisecond)
+    }
+
+    t.Fatalf("the lease was stranded")
+}
+
+func TestRedisLock_AnAmbiguousAcquireAfterTheLeaseEndedStillGivesItBack(t *testing.T) {
+    outOfBand := newTokenStoreClient(t)
+    name := lockTestName(t, "lapsed-then-ambiguous")
+
+    if deleteErr := outOfBand.Do(context.Background(), outOfBand.B().Del().Key(defaultLockKey(name)).Build()).Error(); nil != deleteErr {
+        t.Fatalf("clearing the key: %v", deleteErr)
+    }
+
+    client, lockGate := dialGated(t)
+    locker := NewLocker(newTestConnection(client), LockerConfig{CallTimeout: bound.Of(50 * time.Millisecond)})
+    lock := mustCreateLock(locker.CreateLock(name, lockcontract.CreateLockOptions{Ttl: bound.Of(10*time.Second)}))
+
+    acquired, acquireErr := lock.Acquire(newLockRuntime())
+    if nil != acquireErr || false == acquired {
+        t.Fatalf("expected the first acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    if deleteErr := outOfBand.Do(context.Background(), outOfBand.B().Del().Key(defaultLockKey(name)).Build()).Error(); nil != deleteErr {
+        t.Fatalf("ending the lease out of band: %v", deleteErr)
+    }
+
+    lockGate.WedgeIntegerReplies()
+
+    if _, reacquireErr := lock.Acquire(newLockRuntime()); nil == reacquireErr {
+        t.Fatalf("expected the acquire to fail while its reply is swallowed")
+    }
+
+    deadline := time.Now().Add(2 * time.Second)
+    for time.Now().Before(deadline) {
+        stored, storedErr := outOfBand.Do(context.Background(), outOfBand.B().Get().Key(defaultLockKey(name)).Build()).ToString()
+        if nil != storedErr {
+            return
+        }
+
+        if time.Now().Add(50 * time.Millisecond).After(deadline) {
+            t.Fatalf("the lease was stranded over a handle whose own lease had lapsed: the key still holds %q", stored)
+        }
+
+        time.Sleep(20 * time.Millisecond)
+    }
+
+    t.Fatalf("the lease was stranded over a handle whose own lease had lapsed")
+}
+
+func TestRedisLock_AReleaseThatNeverReachedTheStoreKeepsTheLeaseNameable(t *testing.T) {
+    client := newTokenStoreClient(t)
+    name := lockTestName(t, "release-never-sent")
+
+    if deleteErr := client.Do(context.Background(), client.B().Del().Key(defaultLockKey(name)).Build()).Error(); nil != deleteErr {
+        t.Fatalf("clearing the key: %v", deleteErr)
+    }
+
+    locker := NewLocker(newTestConnection(client), LockerConfig{})
+    lock := mustCreateLock(locker.CreateLock(name, lockcontract.CreateLockOptions{Ttl: bound.Of(30*time.Second)}))
+
+    if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || false == acquired {
+        t.Fatalf("expected the first acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    if releaseErr := lock.Release(newCancelledLockRuntime()); nil == releaseErr {
+        t.Fatalf("expected the release to fail while its context is already done")
+    }
+
+    if releaseErr := lock.Release(newLockRuntime()); nil != releaseErr {
+        t.Fatalf("expected the retried release to succeed: %v", releaseErr)
+    }
+
+    requireStoredToken(t, name, "")
+
+    if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || false == acquired {
+        t.Fatalf("expected the lease to be acquirable again: %v %v", acquired, acquireErr)
+    }
+}
+
+func TestRedisLock_ConcurrentAcquiresOnOneHandleAreBothGranted(t *testing.T) {
+    client := newTokenStoreClient(t)
+    locker := NewLocker(newTestConnection(client), LockerConfig{})
+
+    for round := 0; round < 50; round++ {
+        name := lockTestName(t, "concurrent-acquire")
+
+        if deleteErr := client.Do(context.Background(), client.B().Del().Key(defaultLockKey(name)).Build()).Error(); nil != deleteErr {
+            t.Fatalf("clearing the key: %v", deleteErr)
+        }
+
+        lock := mustCreateLock(locker.CreateLock(name, lockcontract.CreateLockOptions{Ttl: bound.Of(10*time.Second)}))
+
+        var waitGroup sync.WaitGroup
+        var mutex sync.Mutex
+
+        granted := 0
+        start := make(chan struct{})
+
+        for caller := 0; caller < 2; caller++ {
+            waitGroup.Add(1)
+
+            go func() {
+                defer waitGroup.Done()
+
+                <-start
+
+                acquired, acquireErr := lock.Acquire(newLockRuntime())
+
+                mutex.Lock()
+                defer mutex.Unlock()
+
+                if nil != acquireErr {
+                    t.Errorf("round %d: acquire failed: %v", round, acquireErr)
+
+                    return
+                }
+
+                if true == acquired {
+                    granted++
+                }
+            }()
+        }
+
+        close(start)
+        waitGroup.Wait()
+
+        if 2 != granted {
+            t.Fatalf("round %d: expected both callers of one handle to be granted, %d were", round, granted)
+        }
+
+        held := lock.(*redisLock).heldToken()
+        if "" == held {
+            t.Fatalf("round %d: expected the handle to hold the lease it was twice granted", round)
+        }
+
+        stored, storedErr := client.Do(context.Background(), client.B().Get().Key(defaultLockKey(name)).Build()).ToString()
+        if nil != storedErr {
+            t.Fatalf("round %d: reading the key: %v", round, storedErr)
+        }
+
+        if held != stored {
+            t.Fatalf("round %d: the handle claims %q while the store carries %q", round, held, stored)
+        }
+    }
+}
+
+func TestRedisLock_AnAcquireThatNeverReachedTheStoreCostsNoGiveBack(t *testing.T) {
+    client, scriptFrames := newScriptCountingClient(t)
+    name := lockTestName(t, "no-give-back")
+
+    if deleteErr := client.Do(context.Background(), client.B().Del().Key(defaultLockKey(name)).Build()).Error(); nil != deleteErr {
+        t.Fatalf("clearing the key: %v", deleteErr)
+    }
+
+    locker := NewLocker(newTestConnection(client), LockerConfig{})
+    lock := mustCreateLock(locker.CreateLock(name, lockcontract.CreateLockOptions{Ttl: bound.Of(30*time.Second)}))
+
+    if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || false == acquired {
+        t.Fatalf("expected the warm-up acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    if 0 == scriptFrames.Load() {
+        t.Fatal("the warm-up acquire ran a script this client did not count, so the zero below would prove nothing")
+    }
+
+    mark := scriptFrames.Load()
+
+    if _, acquireErr := lock.Acquire(newCancelledLockRuntime()); nil == acquireErr {
+        t.Fatalf("expected the acquire to fail while its context is already done")
+    }
+
+    /* the give-back the guarded form skips runs detached, so the window has to be one it comfortably fits in */
+    time.Sleep(300 * time.Millisecond)
+
+    if written := scriptFrames.Load() - mark; 0 != written {
+        t.Fatalf("expected an acquire that never reached the store to cost no round trip of its own, this client wrote %d script frames", written)
+    }
+}
+
+func TestRedisLock_ARefusedAcquireDropsTheClaimItCouldNotKeep(t *testing.T) {
+    outOfBand := newTokenStoreClient(t)
+    name := lockTestName(t, "refused-drops-claim")
+
+    if deleteErr := outOfBand.Do(context.Background(), outOfBand.B().Del().Key(defaultLockKey(name)).Build()).Error(); nil != deleteErr {
+        t.Fatalf("clearing the key: %v", deleteErr)
+    }
+
+    client := newTokenStoreClient(t)
+    locker := NewLocker(newTestConnection(client), LockerConfig{})
+    lock := mustCreateLock(locker.CreateLock(name, lockcontract.CreateLockOptions{Ttl: bound.Of(30*time.Second)}))
+
+    if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || false == acquired {
+        t.Fatalf("expected the first acquire to succeed: %v %v", acquired, acquireErr)
+    }
+
+    if stealErr := outOfBand.Do(context.Background(), outOfBand.B().Set().Key(defaultLockKey(name)).Value("held-by-somebody-else").Px(30*time.Second).Build()).Error(); nil != stealErr {
+        t.Fatalf("stealing the key: %v", stealErr)
+    }
+
+    if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || true == acquired {
+        t.Fatalf("expected the acquire to be refused: %v %v", acquired, acquireErr)
+    }
+
+    if held := lock.(*redisLock).heldToken(); "" != held {
+        t.Fatalf("expected a refused handle to claim nothing, it claims %q", held)
+    }
+
+    if releaseErr := lock.Release(newLockRuntime()); nil != releaseErr {
+        t.Fatalf("expected the release of a handle that holds nothing to be a no-op: %v", releaseErr)
+    }
+
+    requireStoredToken(t, name, "held-by-somebody-else")
+}
+
+func TestRedisLock_AFailedDetachedGiveBackLocksTheSameHandleOutUntilTheTtlExpires(t *testing.T) {
+    outOfBand := newTokenStoreClient(t)
+    name := lockTestName(t, "failed-give-back")
+
+    t.Cleanup(func() {
+        _ = outOfBand.Do(context.Background(), outOfBand.B().Del().Key(defaultLockKey(name)).Build()).Error()
+    })
+
+    ttl := 2 * time.Second
+
+    earlierAttemptToken := newLockToken()
+    if plantErr := outOfBand.Do(context.Background(), outOfBand.B().Set().Key(defaultLockKey(name)).Value(earlierAttemptToken).Px(ttl).Build()).Error(); nil != plantErr {
+        t.Fatalf("planting the earlier attempt's token: %v", plantErr)
+    }
+
+    lock := mustCreateLock(NewLocker(newTestConnection(newTokenStoreClient(t)), LockerConfig{}).CreateLock(name, lockcontract.CreateLockOptions{Ttl: bound.Of(ttl)}))
+
+    if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || true == acquired {
+        t.Fatalf("expected the handle to be refused over its earlier attempt's token: %v %v", acquired, acquireErr)
+    }
+
+    if held := lock.(*redisLock).heldToken(); "" != held {
+        t.Fatalf("expected the refused handle to claim nothing, it claims %q", held)
+    }
+
+    deadline := time.Now().Add(ttl + time.Second)
+    for {
+        exists, existsErr := outOfBand.Do(context.Background(), outOfBand.B().Exists().Key(defaultLockKey(name)).Build()).AsInt64()
+        if nil != existsErr {
+            t.Fatalf("reading the key: %v", existsErr)
+        }
+
+        if 0 == exists {
+            break
+        }
+
+        if time.Now().After(deadline) {
+            t.Fatalf("expected the planted lease to lapse on its ttl")
+        }
+
+        time.Sleep(50 * time.Millisecond)
+    }
+
+    if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || false == acquired {
+        t.Fatalf("expected the handle to be granted once the ttl lapsed: %v %v", acquired, acquireErr)
+    }
+
+    requireStoredToken(t, name, lock.(*redisLock).heldToken())
+}
+
+func TestRedisLock_AnUnlimitedTtlIsRefusedAtCreateLockNamingIt(t *testing.T) {
+    name := lockTestName(t, "unlimited")
+
+    lock, createErr := NewLocker(newTestConnection(newTokenStoreClient(t)), LockerConfig{}).CreateLock(name, lockcontract.CreateLockOptions{Ttl: bound.UnlimitedDuration()})
+    if nil != lock || nil == createErr || "CreateLockOptions.Ttl" != exception.LogContext(createErr, exception.LogContextOptions{})["field"] {
+        t.Fatalf("expected an unlimited ttl to be refused naming it, got %v %v", lock, createErr)
+    }
+
+    requireStoredToken(t, name, "")
+}
+
+func TestRedisLock_AnAbsentTtlWritesTheThirtySecondLease(t *testing.T) {
+    outOfBand := newTokenStoreClient(t)
+    name := lockTestName(t, "absent")
+
+    t.Cleanup(func() {
+        _ = outOfBand.Do(context.Background(), outOfBand.B().Del().Key(defaultLockKey(name)).Build()).Error()
+    })
+
+    lock := mustCreateLock(NewLocker(newTestConnection(newTokenStoreClient(t)), LockerConfig{}).CreateLock(name, lockcontract.CreateLockOptions{}))
+    if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || false == acquired {
+        t.Fatalf("expected the absent ttl to be acquired: %v %v", acquired, acquireErr)
+    }
+
+    remaining, ttlErr := outOfBand.Do(context.Background(), outOfBand.B().Pttl().Key(defaultLockKey(name)).Build()).AsInt64()
+    if nil != ttlErr || remaining <= 29_000 || remaining > 30_000 {
+        t.Fatalf("expected the key to expire in just under 30s, got %dms and %v", remaining, ttlErr)
+    }
+}
+
+func TestRedisLock_RefreshWithoutATtlKeepsTheLocksOwn(t *testing.T) {
+    outOfBand := newTokenStoreClient(t)
+    name := lockTestName(t, "refresh-absent")
+
+    t.Cleanup(func() {
+        _ = outOfBand.Do(context.Background(), outOfBand.B().Del().Key(defaultLockKey(name)).Build()).Error()
+    })
+
+    lock := mustCreateLock(NewLocker(newTestConnection(newTokenStoreClient(t)), LockerConfig{}).CreateLock(name, lockcontract.CreateLockOptions{Ttl: bound.Of(5 * time.Minute)}))
+    if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || false == acquired {
+        t.Fatalf("expected the lock to be acquired: %v %v", acquired, acquireErr)
+    }
+
+    /* the lease is shortened out of band so the pttl read after the refresh can only come from the refresh */
+    if shortenErr := outOfBand.Do(context.Background(), outOfBand.B().Pexpire().Key(defaultLockKey(name)).Milliseconds(1_000).Build()).Error(); nil != shortenErr {
+        t.Fatalf("expected the lease to be shortened: %v", shortenErr)
+    }
+
+    if refreshErr := lock.Refresh(newLockRuntime(), lockcontract.RefreshOptions{}); nil != refreshErr {
+        t.Fatalf("expected the refresh without a ttl to succeed: %v", refreshErr)
+    }
+
+    remaining, ttlErr := outOfBand.Do(context.Background(), outOfBand.B().Pttl().Key(defaultLockKey(name)).Build()).AsInt64()
+    if nil != ttlErr || remaining <= 30_000 || remaining > 300_000 {
+        t.Fatalf("expected the refresh without a ttl to write the lock's own 5m, got %dms and %v", remaining, ttlErr)
+    }
+}
+
+func TestRedisLock_ARefreshTheRuleRefusesIsAnsweredBeforeTheStoreNamingIt(t *testing.T) {
+    outOfBand := newTokenStoreClient(t)
+    name := lockTestName(t, "refresh-refused")
+
+    t.Cleanup(func() {
+        _ = outOfBand.Do(context.Background(), outOfBand.B().Del().Key(defaultLockKey(name)).Build()).Error()
+    })
+
+    lock := mustCreateLock(NewLocker(newTestConnection(newTokenStoreClient(t)), LockerConfig{}).CreateLock(name, lockcontract.CreateLockOptions{Ttl: bound.Of(10*time.Second)}))
+    if acquired, acquireErr := lock.Acquire(newLockRuntime()); nil != acquireErr || false == acquired {
+        t.Fatalf("expected the lock to be acquired: %v %v", acquired, acquireErr)
+    }
+
+    for _, refused := range []bound.Duration{bound.Of(time.Duration(0)), bound.UnlimitedDuration()} {
+        refreshErr := lock.Refresh(newLockRuntime(), lockcontract.RefreshOptions{Ttl: refused})
+        if nil == refreshErr || "RefreshOptions.Ttl" != exception.LogContext(refreshErr, exception.LogContextOptions{})["field"] {
+            t.Fatalf("expected the refresh ttl %s to be refused naming it, got %v", refused, refreshErr)
+        }
+    }
+
+    if refreshErr := lock.Refresh(newLockRuntime(), lockcontract.RefreshOptions{Ttl: bound.Of(10*time.Second)}); nil != refreshErr {
+        t.Fatalf("expected the refused refreshes to leave the lease held: %v", refreshErr)
+    }
+}
+
+var _ lockcontract.Locker = (*Locker)(nil)
+
+func TestLocker_CreateLockRefusesAnUnlimitedTtl(t *testing.T) {
+    lock, createErr := (&Locker{}).CreateLock("melody:lock:test:unlimited", lockcontract.CreateLockOptions{Ttl: bound.UnlimitedDuration()})
+    if nil != lock || false == errors.Is(createErr, lockcontract.ErrUnlimitedTtlRefused) {
+        t.Fatalf("expected an unlimited ttl refused at CreateLock, got %v %v", lock, createErr)
+    }
+}
+
+func defaultLockKey(name string) string {
+    return "melody:lock:" + name
+}
+
+func TestLocker_TheKeyIsPrefixedAndTheDoorKeysTheBareName(t *testing.T) {
+    connection := NewConnection(&stubClient{}, "shop")
+
+    for label, testCase := range map[string]struct {
+        config   LockerConfig
+        expected string
+    }{
+        "the namespace's prefix": {config: LockerConfig{}, expected: "shop:lock:x"},
+        "an explicit prefix":     {config: LockerConfig{KeyPrefix: "legacy:"}, expected: "legacy:x"},
+        "the bare name":          {config: LockerConfig{KeyPrefixDisabled: true}, expected: "x"},
+    } {
+        lock := mustCreateLock(NewLocker(connection, testCase.config).CreateLock("x", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
+        if key := lock.(*redisLock).key; testCase.expected != key {
+            t.Fatalf("%s: expected the key %q, got %q", label, testCase.expected, key)
+        }
+    }
+
+    expectPanicNamingField(t, "LockerConfig.KeyPrefix", func() {
+        NewLocker(connection, LockerConfig{KeyPrefix: "legacy:", KeyPrefixDisabled: true})
+    })
+}
+
+func TestLocker_AnswersTheSharedLeaseMark(t *testing.T) {
+    /* fakeClient embeds a nil client: a round trip would panic */
+    locker := NewLocker(newTestConnection(fakeClient{}), LockerConfig{})
+
+    shared, err := lockcontract.LeasesAcrossReplicas(newLockRuntime(), locker)
+    if nil != err || false == shared {
+        t.Fatalf("expected the rueidis locker to answer a lease shared by the replicas, got %v and %v", shared, err)
+    }
+}

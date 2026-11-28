@@ -1,0 +1,5750 @@
+package container
+
+import (
+    "context"
+    "errors"
+    "fmt"
+    "reflect"
+    "runtime"
+    "sort"
+    "strings"
+    "sync"
+    "sync/atomic"
+    "testing"
+    "time"
+    "unicode/utf8"
+
+    "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+)
+
+type closeOrderServiceD struct {
+    recorder *closeOrderRecorder
+}
+
+func (instance *closeOrderServiceD) CloseWithContext(closeContext context.Context) error {
+    instance.recorder.record("d")
+    return nil
+}
+
+func TestContainer_Close_ClosesDependentsBeforeDependencies_ByServiceName(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    err := serviceContainer.Register(
+        "service.a",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    err = serviceContainer.Register(
+        "service.b",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            _, err := resolver.Get(resolver.Runtime().Context(), "service.a")
+            if nil != err {
+                return nil, err
+            }
+
+            return &closeOrderServiceB{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    _, err = serviceContainer.Get(t.Context(), "service.b")
+    if nil != err {
+        t.Fatalf("unexpected get error: %v", err)
+    }
+
+    err = serviceContainer.CloseWithContext(context.Background())
+    if nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    if 2 != len(closeSequence) {
+        t.Fatalf("expected 2 close calls, got %d", len(closeSequence))
+    }
+
+    if "b" != closeSequence[0] {
+        t.Fatalf("expected b to close first, got %s", closeSequence[0])
+    }
+
+    if "a" != closeSequence[1] {
+        t.Fatalf("expected a to close second, got %s", closeSequence[1])
+    }
+}
+
+func TestContainer_TheSequentialCloseOrderInterleavesTheWaves(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 3)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    serviceContainer.MustRegister(
+        "service.b",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return &closeOrderServiceB{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    )
+    serviceContainer.MustRegister(
+        "service.a",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    )
+    serviceContainer.MustRegister(
+        "service.c",
+        func(resolver containercontract.Resolver) (*closeOrderServiceC, error) {
+            if _, resolveErr := resolver.Get(resolver.Runtime().Context(), "service.a"); nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return &closeOrderServiceC{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    )
+
+    MustFromResolver[*closeOrderServiceB](t.Context(), serviceContainer, "service.b")
+    MustFromResolver[*closeOrderServiceC](t.Context(), serviceContainer, "service.c")
+
+    expectedWaves := map[string]int{"service:service.c": 0, "service:service.a": 1, "service:service.b": 0}
+    for _, entry := range serviceContainer.(teardownPlanner).TeardownPlan() {
+        if expectedWave, planned := expectedWaves[entry.NodeKey]; false == planned || expectedWave != entry.WaveIndex {
+            t.Fatalf("expected %s in wave %d, got wave %d", entry.NodeKey, expectedWave, entry.WaveIndex)
+        }
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if "[c a b]" != fmt.Sprint(closeSequence) {
+        t.Fatalf("expected the sequential teardown to close c, a, b — the wave-one a before the wave-zero b — got %v", closeSequence)
+    }
+}
+
+type closeOrderTypeDependency struct {
+    recorder *closeOrderRecorder
+}
+
+func (instance *closeOrderTypeDependency) CloseWithContext(closeContext context.Context) error {
+    instance.recorder.record("dep")
+    return nil
+}
+
+type closeOrderTypeDependent struct {
+    recorder *closeOrderRecorder
+}
+
+func (instance *closeOrderTypeDependent) CloseWithContext(closeContext context.Context) error {
+    instance.recorder.record("dependent")
+    return nil
+}
+
+func TestContainer_Close_ClosesDependentsBeforeDependencies_ByTypeResolution(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    err := RegisterType[*closeOrderTypeDependency](
+        serviceContainer,
+        func(resolver containercontract.Resolver) (*closeOrderTypeDependency, error) {
+            return &closeOrderTypeDependency{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != err {
+        t.Fatalf("unexpected register type error: %v", err)
+    }
+
+    err = RegisterType[*closeOrderTypeDependent](
+        serviceContainer,
+        func(resolver containercontract.Resolver) (*closeOrderTypeDependent, error) {
+            _, err := resolver.GetByType(resolver.Runtime().Context(), reflect.TypeOf((*closeOrderTypeDependency)(nil)))
+            if nil != err {
+                return nil, err
+            }
+
+            return &closeOrderTypeDependent{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != err {
+        t.Fatalf("unexpected register type error: %v", err)
+    }
+
+    _, err = serviceContainer.GetByType(t.Context(), reflect.TypeOf((*closeOrderTypeDependent)(nil)))
+    if nil != err {
+        t.Fatalf("unexpected get by type error: %v", err)
+    }
+
+    err = serviceContainer.CloseWithContext(context.Background())
+    if nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    if 2 != len(closeSequence) {
+        t.Fatalf("expected 2 close calls, got %d", len(closeSequence))
+    }
+
+    if "dependent" != closeSequence[0] {
+        t.Fatalf("expected dependent to close first, got %s", closeSequence[0])
+    }
+
+    if "dep" != closeSequence[1] {
+        t.Fatalf("expected dep to close second, got %s", closeSequence[1])
+    }
+}
+
+type valueCloser struct {
+    counter *int
+    lock    *sync.Mutex
+}
+
+func (instance valueCloser) CloseWithContext(closeContext context.Context) error {
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    *instance.counter++
+
+    return nil
+}
+
+func TestContainer_Close_ValueTypeServiceClosedOnce(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var lock sync.Mutex
+    count := 0
+
+    MustRegister[valueCloser](
+        serviceContainer,
+        "value.closer",
+        func(resolver containercontract.Resolver) (valueCloser, error) {
+            return valueCloser{counter: &count, lock: &lock}, nil
+        },
+        RegisterOptions{},
+    )
+
+    _ = MustFromResolver[valueCloser](t.Context(), serviceContainer, "value.closer")
+    _ = MustFromResolverByType[valueCloser](t.Context(), serviceContainer)
+
+    if err := serviceContainer.CloseWithContext(context.Background()); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    lock.Lock()
+    defer lock.Unlock()
+
+    if 1 != count {
+        t.Fatalf("expected value-type service Close to be called once, got %d", count)
+    }
+}
+
+type unhashableValueCloser struct {
+    counter *int
+    lock    *sync.Mutex
+    payload any
+}
+
+func (instance unhashableValueCloser) CloseWithContext(closeContext context.Context) error {
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    *instance.counter++
+
+    return nil
+}
+
+func TestContainer_Close_ValueTypeServiceWithUnhashableContentDoesNotPanicAndClosesOnce(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var lock sync.Mutex
+    count := 0
+
+    MustRegister[unhashableValueCloser](
+        serviceContainer,
+        "unhashable.value.closer",
+        func(resolver containercontract.Resolver) (unhashableValueCloser, error) {
+            return unhashableValueCloser{counter: &count, lock: &lock, payload: []int{1, 2, 3}}, nil
+        },
+        RegisterOptions{},
+    )
+
+    _ = MustFromResolver[unhashableValueCloser](t.Context(), serviceContainer, "unhashable.value.closer")
+    _ = MustFromResolverByType[unhashableValueCloser](t.Context(), serviceContainer)
+
+    if err := serviceContainer.CloseWithContext(context.Background()); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    lock.Lock()
+    defer lock.Unlock()
+
+    if 1 != count {
+        t.Fatalf("expected value-type service Close to be called once, got %d", count)
+    }
+}
+
+type nonComparableValueCloser struct {
+    counter *int
+    lock    *sync.Mutex
+    tags    []string
+}
+
+func (instance nonComparableValueCloser) CloseWithContext(closeContext context.Context) error {
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    *instance.counter++
+
+    return nil
+}
+
+func TestContainer_Close_NonComparableValueTypeServiceClosedOnce(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var lock sync.Mutex
+    count := 0
+
+    MustRegister[nonComparableValueCloser](
+        serviceContainer,
+        "non.comparable.value.closer",
+        func(resolver containercontract.Resolver) (nonComparableValueCloser, error) {
+            return nonComparableValueCloser{counter: &count, lock: &lock, tags: []string{"a", "b"}}, nil
+        },
+        RegisterOptions{},
+    )
+
+    _ = MustFromResolver[nonComparableValueCloser](t.Context(), serviceContainer, "non.comparable.value.closer")
+    _ = MustFromResolverByType[nonComparableValueCloser](t.Context(), serviceContainer)
+
+    if err := serviceContainer.CloseWithContext(context.Background()); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    lock.Lock()
+    defer lock.Unlock()
+
+    if 1 != count {
+        t.Fatalf("expected non-comparable value-type service Close to be called once, got %d", count)
+    }
+}
+
+func TestContainer_Close_ClosesDependentsBeforeDependencies_NamedServiceDependsByTypeOnTypeRegisteredService(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    err := Register(
+        serviceContainer,
+        "service.b",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return &closeOrderServiceB{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    err = Register(
+        serviceContainer,
+        "service.a",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            _, dependencyErr := FromResolverByType[*closeOrderServiceB](resolver.Runtime().Context(), resolver)
+            if nil != dependencyErr {
+                return nil, dependencyErr
+            }
+
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    _, err = serviceContainer.Get(t.Context(), "service.a")
+    if nil != err {
+        t.Fatalf("unexpected get error: %v", err)
+    }
+
+    err = serviceContainer.CloseWithContext(context.Background())
+    if nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    if 2 != len(closeSequence) {
+        t.Fatalf("expected 2 close calls, got %d", len(closeSequence))
+    }
+
+    if "a" != closeSequence[0] {
+        t.Fatalf("expected dependent a to close first, got %s", closeSequence[0])
+    }
+
+    if "b" != closeSequence[1] {
+        t.Fatalf("expected dependency b to close second, got %s", closeSequence[1])
+    }
+}
+
+type circularServiceA struct{}
+type circularServiceB struct{}
+
+func TestContainer_Get_DetectsCircularDependency_SameResolverContext(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    err := serviceContainer.Register(
+        "service.a",
+        func(resolver containercontract.Resolver) (*circularServiceA, error) {
+            _, err := resolver.Get(resolver.Runtime().Context(), "service.b")
+            if nil != err {
+                return nil, err
+            }
+
+            return &circularServiceA{}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    err = serviceContainer.Register(
+        "service.b",
+        func(resolver containercontract.Resolver) (*circularServiceB, error) {
+            _, err := resolver.Get(resolver.Runtime().Context(), "service.a")
+            if nil != err {
+                return nil, err
+            }
+
+            return &circularServiceB{}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    _, err = serviceContainer.Get(t.Context(), "service.a")
+    if false == errors.Is(err, ErrCircularDependency) {
+        t.Fatalf("expected the one-chain ring refused with ErrCircularDependency, got %v", err)
+    }
+}
+
+func TestContainer_Close_ClosesDiamondDependencyInDeterministicOrder(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 4)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    err := serviceContainer.Register(
+        "service.d",
+        func(resolver containercontract.Resolver) (*closeOrderServiceD, error) {
+            return &closeOrderServiceD{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    err = serviceContainer.Register(
+        "service.b",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            _, err := resolver.Get(resolver.Runtime().Context(), "service.d")
+            if nil != err {
+                return nil, err
+            }
+
+            return &closeOrderServiceB{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    err = serviceContainer.Register(
+        "service.c",
+        func(resolver containercontract.Resolver) (*closeOrderServiceC, error) {
+            _, err := resolver.Get(resolver.Runtime().Context(), "service.d")
+            if nil != err {
+                return nil, err
+            }
+
+            return &closeOrderServiceC{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    err = serviceContainer.Register(
+        "service.a",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            _, err := resolver.Get(resolver.Runtime().Context(), "service.b")
+            if nil != err {
+                return nil, err
+            }
+
+            _, err = resolver.Get(resolver.Runtime().Context(), "service.c")
+            if nil != err {
+                return nil, err
+            }
+
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    _, err = serviceContainer.Get(t.Context(), "service.a")
+    if nil != err {
+        t.Fatalf("unexpected get error: %v", err)
+    }
+
+    err = serviceContainer.CloseWithContext(context.Background())
+    if nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    if 4 != len(closeSequence) {
+        t.Fatalf("expected 4 close calls, got %d", len(closeSequence))
+    }
+
+    expected := []string{"a", "c", "b", "d"}
+
+    for index := range expected {
+        if expected[index] != closeSequence[index] {
+            t.Fatalf("expected closeSequence[%d] == %s, got %s", index, expected[index], closeSequence[index])
+        }
+    }
+}
+
+type overrideValueCloser struct {
+    counter *int
+    lock    *sync.Mutex
+    tags    []string
+}
+
+func (instance overrideValueCloser) CloseWithContext(closeContext context.Context) error {
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    *instance.counter++
+
+    return nil
+}
+
+func TestContainer_Close_OverrideProtectedInstanceWithTypeRegistrationDisabledClosesOnce(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var lock sync.Mutex
+    count := 0
+
+    MustRegister[overrideValueCloser](
+        serviceContainer,
+        "override.no.type.value.closer",
+        func(resolver containercontract.Resolver) (overrideValueCloser, error) {
+            return overrideValueCloser{counter: &count, lock: &lock, tags: []string{"a", "b"}}, nil
+        },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    )
+
+    if overrideErr := serviceContainer.OverrideProtectedInstance(
+        "override.no.type.value.closer",
+        overrideValueCloser{counter: &count, lock: &lock, tags: []string{"x", "y"}},
+        OverrideOptions{},
+    ); nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    if err := serviceContainer.CloseWithContext(context.Background()); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    lock.Lock()
+    defer lock.Unlock()
+
+    if 1 != count {
+        t.Fatalf("expected overridden non-type-registered value-type service Close to be called once, got %d", count)
+    }
+}
+
+func TestClose_ConcurrentCallersShareTheResult(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    releaseClose := make(chan struct{})
+    closeObserved := make(chan struct{}, 1)
+
+    MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*blockingCloser, error) {
+        return &blockingCloser{release: releaseClose, observed: closeObserved}, nil
+    }, RegisterOptions{})
+
+    _, getErr := FromResolverByType[*blockingCloser](t.Context(), serviceContainer)
+    if nil != getErr {
+        t.Fatalf("expected the service to resolve, got %v", getErr)
+    }
+
+    firstDone := make(chan error, 1)
+    go func() {
+        firstDone <- serviceContainer.CloseWithContext(context.Background())
+    }()
+
+    <-closeObserved
+
+    secondDone := make(chan error, 1)
+    go func() {
+        secondDone <- serviceContainer.CloseWithContext(context.Background())
+    }()
+
+    select {
+    case <-secondDone:
+        t.Fatalf("the second Close returned before the first finished tearing down")
+    case <-time.After(50 * time.Millisecond):
+    }
+
+    close(releaseClose)
+
+    firstErr := <-firstDone
+    secondErr := <-secondDone
+
+    if nil == firstErr {
+        t.Fatalf("expected the teardown failure to be reported to the first caller, got nil")
+    }
+
+    if firstErr != secondErr {
+        t.Fatalf("expected both callers to share the teardown result, got %v and %v", firstErr, secondErr)
+    }
+}
+
+type blockingCloser struct {
+    release  chan struct{}
+    observed chan struct{}
+}
+
+var errBlockingCloserFailed = errors.New("the blocking closer failed")
+
+func (instance *blockingCloser) CloseWithContext(closeContext context.Context) error {
+    instance.observed <- struct{}{}
+    <-instance.release
+
+    return errBlockingCloserFailed
+}
+
+type panickingCloseService struct{}
+
+func (instance *panickingCloseService) CloseWithContext(closeContext context.Context) error {
+    panic("teardown exploded")
+}
+
+func TestContainer_Close_PanickingServiceCloseIsRecordedAndSiblingsStillClose(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 1)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    err := serviceContainer.Register(
+        "service.z.panics",
+        func(resolver containercontract.Resolver) (*panickingCloseService, error) {
+            return &panickingCloseService{}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    err = serviceContainer.Register(
+        "service.a.sibling",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "service.z.panics"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "service.a.sibling"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    closeErr := serviceContainer.CloseWithContext(context.Background())
+    if nil == closeErr {
+        t.Fatalf("expected the panicking Close to surface as a close failure")
+    }
+
+    typedError, isTyped := closeErr.(*exception.Error)
+    if false == isTyped {
+        t.Fatalf("expected an exception error, got %T", closeErr)
+    }
+
+    failures, hasFailures := typedError.Context()["failures"].(map[string]string)
+    if false == hasFailures {
+        t.Fatalf("expected a failures map in the close error context, got %+v", typedError.Context())
+    }
+
+    if "service close panicked" != failures["service:service.z.panics"] {
+        t.Fatalf("expected the panic recorded against the panicking service, got %+v", failures)
+    }
+
+    if 1 != len(closeSequence) || "a" != closeSequence[0] {
+        t.Fatalf("expected the sibling service to still close after the panic, got %v", closeSequence)
+    }
+
+    repeatedErr := serviceContainer.CloseWithContext(context.Background())
+    if closeErr != repeatedErr {
+        t.Fatalf("expected a repeated Close to report the same teardown error, got %v and %v", closeErr, repeatedErr)
+    }
+}
+
+type panickingErrorMessage struct{}
+
+func (instance panickingErrorMessage) Error() string {
+    panic("boom from Error()")
+}
+
+type panickingErrorMessageService struct{}
+
+func (instance *panickingErrorMessageService) CloseWithContext(closeContext context.Context) error {
+    return panickingErrorMessage{}
+}
+
+func TestContainer_Close_PanickingErrorMessageIsContainedAndRecorded(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    err := serviceContainer.Register(
+        "service.panicking.message",
+        func(resolver containercontract.Resolver) (*panickingErrorMessageService, error) {
+            return &panickingErrorMessageService{}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "service.panicking.message"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    closeErr := serviceContainer.CloseWithContext(context.Background())
+    if nil == closeErr {
+        t.Fatalf("expected the panicking error message to surface as a close failure")
+    }
+
+    typedError, isTyped := closeErr.(*exception.Error)
+    if false == isTyped {
+        t.Fatalf("expected an exception error, got %T", closeErr)
+    }
+
+    failures, hasFailures := typedError.Context()["failures"].(map[string]string)
+    if false == hasFailures {
+        t.Fatalf("expected a failures map in the close error context, got %+v", typedError.Context())
+    }
+
+    if "close error message panicked: boom from Error()" != failures["service:service.panicking.message"] {
+        t.Fatalf("expected the contained panic message, got %+v", failures)
+    }
+
+    repeatedErr := serviceContainer.CloseWithContext(context.Background())
+    if closeErr != repeatedErr {
+        t.Fatalf("expected a repeated Close to report the same teardown error, got %v and %v", closeErr, repeatedErr)
+    }
+}
+
+type zeroSizeCloserOne struct{}
+
+func (instance *zeroSizeCloserOne) CloseWithContext(closeContext context.Context) error {
+    zeroSizeCloserOneClosed = true
+    return nil
+}
+
+type zeroSizeCloserTwo struct{}
+
+func (instance *zeroSizeCloserTwo) CloseWithContext(closeContext context.Context) error {
+    zeroSizeCloserTwoClosed = true
+    return nil
+}
+
+var (
+    zeroSizeCloserOneClosed = false
+    zeroSizeCloserTwoClosed = false
+)
+
+func TestContainer_Close_DistinctZeroSizeServicesEachClose(t *testing.T) {
+    zeroSizeCloserOneClosed = false
+    zeroSizeCloserTwoClosed = false
+
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    MustRegister[*zeroSizeCloserOne](
+        serviceContainer,
+        "zero.size.one",
+        func(resolver containercontract.Resolver) (*zeroSizeCloserOne, error) {
+            return &zeroSizeCloserOne{}, nil
+        },
+        RegisterOptions{},
+    )
+
+    MustRegister[*zeroSizeCloserTwo](
+        serviceContainer,
+        "zero.size.two",
+        func(resolver containercontract.Resolver) (*zeroSizeCloserTwo, error) {
+            return &zeroSizeCloserTwo{}, nil
+        },
+        RegisterOptions{},
+    )
+
+    _ = MustFromResolver[*zeroSizeCloserOne](t.Context(), serviceContainer, "zero.size.one")
+    _ = MustFromResolver[*zeroSizeCloserTwo](t.Context(), serviceContainer, "zero.size.two")
+
+    if err := serviceContainer.CloseWithContext(context.Background()); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    if false == zeroSizeCloserOneClosed {
+        t.Fatalf("expected the first zero-size service to be closed")
+    }
+
+    if false == zeroSizeCloserTwoClosed {
+        t.Fatalf("expected the second zero-size service to be closed")
+    }
+}
+
+type firstFieldOuterCloser struct {
+    inner   firstFieldInnerCloser
+    counter *int
+    lock    *sync.Mutex
+}
+
+func (instance *firstFieldOuterCloser) CloseWithContext(closeContext context.Context) error {
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    *instance.counter++
+
+    return nil
+}
+
+type firstFieldInnerCloser struct {
+    counter *int
+    lock    *sync.Mutex
+}
+
+func (instance *firstFieldInnerCloser) CloseWithContext(closeContext context.Context) error {
+    instance.lock.Lock()
+    defer instance.lock.Unlock()
+
+    *instance.counter += 10
+
+    return nil
+}
+
+func TestContainer_Close_FirstFieldPointerAliasEachClose(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var lock sync.Mutex
+    count := 0
+
+    outer := &firstFieldOuterCloser{counter: &count, lock: &lock}
+    outer.inner = firstFieldInnerCloser{counter: &count, lock: &lock}
+
+    MustRegister[*firstFieldOuterCloser](
+        serviceContainer,
+        "first.field.outer",
+        func(resolver containercontract.Resolver) (*firstFieldOuterCloser, error) {
+            return outer, nil
+        },
+        RegisterOptions{},
+    )
+
+    MustRegister[*firstFieldInnerCloser](
+        serviceContainer,
+        "first.field.inner",
+        func(resolver containercontract.Resolver) (*firstFieldInnerCloser, error) {
+            return &outer.inner, nil
+        },
+        RegisterOptions{},
+    )
+
+    _ = MustFromResolver[*firstFieldOuterCloser](t.Context(), serviceContainer, "first.field.outer")
+    _ = MustFromResolver[*firstFieldInnerCloser](t.Context(), serviceContainer, "first.field.inner")
+
+    if err := serviceContainer.CloseWithContext(context.Background()); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    lock.Lock()
+    defer lock.Unlock()
+
+    if 11 != count {
+        t.Fatalf("expected both the outer and the first-field-aliased inner service to close, got counter %d", count)
+    }
+}
+
+type sameTypeZeroSizeCloser struct{}
+
+/* atomic: the two services share no edge, so the default teardown closes them in one wave, concurrently */
+var sameTypeZeroSizeCloseCount atomic.Int64
+
+func (instance *sameTypeZeroSizeCloser) CloseWithContext(closeContext context.Context) error {
+    sameTypeZeroSizeCloseCount.Add(1)
+
+    return nil
+}
+
+/* two services of one zero-size type share an address, so address and type alone cannot tell them apart */
+func TestContainer_Close_DistinctServicesOfOneZeroSizeTypeEachClose(t *testing.T) {
+    sameTypeZeroSizeCloseCount.Store(0)
+
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    MustRegister[*sameTypeZeroSizeCloser](
+        serviceContainer,
+        "same.type.zero.size.first",
+        func(resolver containercontract.Resolver) (*sameTypeZeroSizeCloser, error) {
+            return &sameTypeZeroSizeCloser{}, nil
+        },
+        RegisterOptions{},
+    )
+
+    MustRegister[*sameTypeZeroSizeCloser](
+        serviceContainer,
+        "same.type.zero.size.second",
+        func(resolver containercontract.Resolver) (*sameTypeZeroSizeCloser, error) {
+            return &sameTypeZeroSizeCloser{}, nil
+        },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    )
+
+    _ = MustFromResolver[*sameTypeZeroSizeCloser](t.Context(), serviceContainer, "same.type.zero.size.first")
+    _ = MustFromResolver[*sameTypeZeroSizeCloser](t.Context(), serviceContainer, "same.type.zero.size.second")
+
+    if err := serviceContainer.CloseWithContext(context.Background()); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    if 2 != sameTypeZeroSizeCloseCount.Load() {
+        t.Fatalf("expected both distinct zero-size services to be closed, got %d", sameTypeZeroSizeCloseCount.Load())
+    }
+}
+
+func TestContainer_Close_ResolverMediatedZeroSizeAliasClosesOnce(t *testing.T) {
+    sameTypeZeroSizeCloseCount.Store(0)
+
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    MustRegister[*sameTypeZeroSizeCloser](
+        serviceContainer,
+        "zero.size.origin",
+        func(resolver containercontract.Resolver) (*sameTypeZeroSizeCloser, error) {
+            return &sameTypeZeroSizeCloser{}, nil
+        },
+        RegisterOptions{},
+    )
+
+    MustRegister[*sameTypeZeroSizeCloser](
+        serviceContainer,
+        "zero.size.alias",
+        func(resolver containercontract.Resolver) (*sameTypeZeroSizeCloser, error) {
+            return FromResolver[*sameTypeZeroSizeCloser](resolver.Runtime().Context(), resolver, "zero.size.origin")
+        },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    )
+
+    _ = MustFromResolver[*sameTypeZeroSizeCloser](t.Context(), serviceContainer, "zero.size.alias")
+
+    if err := serviceContainer.CloseWithContext(context.Background()); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    if 1 != sameTypeZeroSizeCloseCount.Load() {
+        t.Fatalf("expected the shared instance to be closed exactly once, got %d", sameTypeZeroSizeCloseCount.Load())
+    }
+}
+
+type failingCloseService struct{}
+
+func (instance *failingCloseService) CloseWithContext(closeContext context.Context) error {
+    return errors.New("refusing to close")
+}
+
+type replacedBuiltProbe struct {
+    label    string
+    recorder *closeOrderRecorder
+}
+
+func (instance *replacedBuiltProbe) CloseWithContext(closeContext context.Context) error {
+    instance.recorder.record(instance.label)
+
+    return nil
+}
+
+func TestContainer_Close_ReplacedBuiltInstanceIsClosed(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    registerErr := serviceContainer.Register(
+        "app.replaced.built",
+        func(resolver containercontract.Resolver) (*replacedBuiltProbe, error) {
+            return &replacedBuiltProbe{label: "built", recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "app.replaced.built"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    overrideErr := serviceContainer.OverrideProtectedInstance(
+        "app.replaced.built",
+        &replacedBuiltProbe{label: "override", recorder: recorder},
+        OverrideOptions{},
+    )
+    if nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    builtCloses := 0
+    overrideCloses := 0
+    for _, label := range closeSequence {
+        if "built" == label {
+            builtCloses = builtCloses + 1
+        }
+        if "override" == label {
+            overrideCloses = overrideCloses + 1
+        }
+    }
+
+    if 1 != builtCloses {
+        t.Fatalf("expected the replaced built instance to be closed exactly once, got %v", closeSequence)
+    }
+
+    if 1 != overrideCloses {
+        t.Fatalf("expected the final override to be closed exactly once, got %v", closeSequence)
+    }
+}
+
+type replacedFailingProbe struct {
+    failure error
+}
+
+func (instance *replacedFailingProbe) CloseWithContext(closeContext context.Context) error {
+    return instance.failure
+}
+
+type secondReplacedFailingProbe struct {
+    failure error
+}
+
+func (instance *secondReplacedFailingProbe) CloseWithContext(closeContext context.Context) error {
+    return instance.failure
+}
+
+func TestContainer_Close_TwoFailingReplacedInstancesAreBothRecorded(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    registerFirstErr := serviceContainer.Register(
+        "app.replaced.failing.first",
+        func(resolver containercontract.Resolver) (*replacedFailingProbe, error) {
+            return &replacedFailingProbe{failure: errors.New("refusing to close app.replaced.failing.first")}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != registerFirstErr {
+        t.Fatalf("unexpected register error: %v", registerFirstErr)
+    }
+
+    registerSecondErr := serviceContainer.Register(
+        "app.replaced.failing.second",
+        func(resolver containercontract.Resolver) (*secondReplacedFailingProbe, error) {
+            return &secondReplacedFailingProbe{failure: errors.New("refusing to close app.replaced.failing.second")}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != registerSecondErr {
+        t.Fatalf("unexpected register error: %v", registerSecondErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "app.replaced.failing.first"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "app.replaced.failing.second"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    if overrideErr := serviceContainer.OverrideProtectedInstance("app.replaced.failing.first", &replacedFailingProbe{}, OverrideOptions{}); nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    if overrideErr := serviceContainer.OverrideProtectedInstance("app.replaced.failing.second", &secondReplacedFailingProbe{}, OverrideOptions{}); nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    closeErr := serviceContainer.CloseWithContext(context.Background())
+    if nil == closeErr {
+        t.Fatalf("expected the two failing replaced closes to be reported")
+    }
+
+    typedError, isTyped := closeErr.(*exception.Error)
+    if false == isTyped {
+        t.Fatalf("expected an exception error, got %T", closeErr)
+    }
+
+    failures, hasFailures := typedError.Context()["failures"].(map[string]string)
+    if false == hasFailures {
+        t.Fatalf("expected a failures map in the close error context, got %+v", typedError.Context())
+    }
+
+    if "refusing to close app.replaced.failing.first" != failures["container.replacedInstance[0]"] {
+        t.Fatalf("expected the first replaced failure under its own key, got %+v", failures)
+    }
+
+    if "refusing to close app.replaced.failing.second" != failures["container.replacedInstance[1]"] {
+        t.Fatalf("expected the second replaced failure under its own key, got %+v", failures)
+    }
+}
+
+func TestContainer_Close_ReplacedOverrideIsNotClosed(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    registerErr := serviceContainer.Register(
+        "app.replaced.override",
+        func(resolver containercontract.Resolver) (*replacedBuiltProbe, error) {
+            return &replacedBuiltProbe{label: "built", recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    firstOverrideErr := serviceContainer.OverrideProtectedInstance(
+        "app.replaced.override",
+        &replacedBuiltProbe{label: "first-override", recorder: recorder},
+        OverrideOptions{},
+    )
+    if nil != firstOverrideErr {
+        t.Fatalf("unexpected override error: %v", firstOverrideErr)
+    }
+
+    secondOverrideErr := serviceContainer.OverrideProtectedInstance(
+        "app.replaced.override",
+        &replacedBuiltProbe{label: "second-override", recorder: recorder},
+        OverrideOptions{},
+    )
+    if nil != secondOverrideErr {
+        t.Fatalf("unexpected override error: %v", secondOverrideErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != len(closeSequence) || "second-override" != closeSequence[0] {
+        t.Fatalf("expected only the surviving override to be closed, got %v", closeSequence)
+    }
+}
+
+func TestContainer_Close_CycleFailureNamesTheNodes(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{}).(*container)
+
+    registerFirstErr := serviceContainer.Register(
+        "app.cycle.first",
+        func(resolver containercontract.Resolver) (*failingCloseService, error) {
+            return &failingCloseService{}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != registerFirstErr {
+        t.Fatalf("unexpected register error: %v", registerFirstErr)
+    }
+
+    registerSecondErr := serviceContainer.Register(
+        "app.cycle.second",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: &closeOrderRecorder{mutex: &sync.Mutex{}, closeSequence: &[]string{}}}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != registerSecondErr {
+        t.Fatalf("unexpected register error: %v", registerSecondErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "app.cycle.first"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+    if _, getErr := serviceContainer.Get(t.Context(), "app.cycle.second"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    serviceContainer.mutex.Lock()
+    serviceContainer.registerDependencyLocked("service:app.cycle.first", "service:app.cycle.second")
+    serviceContainer.registerDependencyLocked("service:app.cycle.second", "service:app.cycle.first")
+    serviceContainer.mutex.Unlock()
+
+    closeErr := serviceContainer.CloseWithContext(context.Background())
+    if nil == closeErr {
+        t.Fatalf("expected the failing close to be reported")
+    }
+
+    var typedError *exception.Error
+    if false == errors.As(closeErr, &typedError) {
+        t.Fatalf("expected a melody error, got %T", closeErr)
+    }
+
+    failures, hasFailures := typedError.Context()["failures"].(map[string]string)
+    if false == hasFailures {
+        t.Fatalf("expected the failures map in the close error context")
+    }
+
+    cycleText, hasCycle := failures["container.dependencyCycle"]
+    if false == hasCycle {
+        t.Fatalf("expected the dependency cycle to be recorded among the failures")
+    }
+
+    if false == strings.Contains(cycleText, "app.cycle.first") || false == strings.Contains(cycleText, "app.cycle.second") {
+        t.Fatalf("expected the cycle failure to name its nodes, got %q", cycleText)
+    }
+}
+
+func TestContainerIsClosed_FlipsExactlyAtClose(t *testing.T) {
+    containerInstance := NewContainer(ContainerConfig{})
+
+    closedChecker, isChecker := interface{}(containerInstance).(interface{ IsClosed() bool })
+    if false == isChecker {
+        t.Fatalf("expected the container to report closedness")
+    }
+
+    if true == closedChecker.IsClosed() {
+        t.Fatalf("expected a fresh container to report not closed")
+    }
+
+    if closeErr := containerInstance.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if false == closedChecker.IsClosed() {
+        t.Fatalf("expected a closed container to report closed")
+    }
+}
+
+type lazyHoldingService struct {
+    recorder *closeOrderRecorder
+    handle   *LazyService[*closeOrderServiceA]
+}
+
+func (instance *lazyHoldingService) CloseWithContext(closeContext context.Context) error {
+    instance.recorder.record("holder")
+    return nil
+}
+
+func TestContainer_Close_ClosesAHolderBeforeTheServiceItResolvedThroughAKeptResolver(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    if err := serviceContainer.Register(
+        "service.a",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    ); nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    if err := serviceContainer.Register(
+        "app.holder",
+        func(resolver containercontract.Resolver) (*lazyHoldingService, error) {
+            return &lazyHoldingService{
+                recorder: recorder,
+                handle:   Lazy[*closeOrderServiceA](resolver, "service.a"),
+            }, nil
+        },
+        RegisterOptions{},
+    ); nil != err {
+        t.Fatalf("unexpected register error: %v", err)
+    }
+
+    holder, err := FromResolver[*lazyHoldingService](t.Context(), serviceContainer, "app.holder")
+    if nil != err {
+        t.Fatalf("unexpected get error: %v", err)
+    }
+
+    if _, err := serviceContainer.Get(t.Context(), "service.a"); nil != err {
+        t.Fatalf("unexpected get error: %v", err)
+    }
+
+    if nil == holder.handle.getOver(t.Context()) {
+        t.Fatalf("expected the lazy handle to resolve the service")
+    }
+
+    if err := serviceContainer.CloseWithContext(context.Background()); nil != err {
+        t.Fatalf("unexpected close error: %v", err)
+    }
+
+    if 2 != len(closeSequence) {
+        t.Fatalf("expected 2 close calls, got %d: %v", len(closeSequence), closeSequence)
+    }
+
+    if "holder" != closeSequence[0] {
+        t.Fatalf("expected the holder to close before the service it resolved, got %v", closeSequence)
+    }
+
+    if "a" != closeSequence[1] {
+        t.Fatalf("expected the resolved service to close last, got %v", closeSequence)
+    }
+}
+
+type panickingCloseWithTextService struct{}
+
+func (instance *panickingCloseWithTextService) CloseWithContext(closeContext context.Context) error {
+    panic("the drain buffer was nil")
+}
+
+func TestContainer_Close_APanickingCloseCarriesItsCauseAndItsStack(t *testing.T) {
+    panicCause := exception.NewError(
+        "the socket was already gone",
+        map[string]any{"peer": "10.0.0.7"},
+        errors.New("connection reset by peer"),
+    )
+
+    closeErr := closeServiceValueWithin(t.Context(), &panickingCloseWithCauseService{cause: panicCause})
+
+    if nil == closeErr {
+        t.Fatalf("expected the panic to be contained as a failure")
+    }
+
+    if false == errors.Is(closeErr, panicCause) {
+        t.Fatalf("expected the panic value to travel as the cause, got %v", closeErr)
+    }
+
+    typedError, isTyped := closeErr.(*exception.Error)
+    if false == isTyped {
+        t.Fatalf("expected an exception error, got %T", closeErr)
+    }
+
+    panicStack, hasStack := typedError.Context()["panicStack"].(string)
+    if false == hasStack || false == strings.Contains(panicStack, "closeServiceValue") {
+        t.Fatalf("expected the frames that ran to be captured, got %v", typedError.Context()["panicStack"])
+    }
+
+    causeChain := exception.BuildCauseChain(closeErr, 8)
+    if 3 != len(causeChain) {
+        t.Fatalf("expected the whole chain beneath the panic, got %v", causeChain)
+    }
+}
+
+func TestContainer_Close_CarriesTheFailureDetailsOfAPanickingCloseBesideItsLine(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    registerErr := serviceContainer.Register(
+        "service.panics",
+        func(resolver containercontract.Resolver) (*panickingCloseWithCauseService, error) {
+            return &panickingCloseWithCauseService{cause: errors.New("the drain buffer was nil")}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "service.panics"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    closeErr := serviceContainer.CloseWithContext(context.Background())
+    if nil == closeErr {
+        t.Fatalf("expected the panicking close to be reported")
+    }
+
+    var typedError *exception.Error
+    if false == errors.As(closeErr, &typedError) {
+        t.Fatalf("expected a melody error, got %T", closeErr)
+    }
+
+    assertCloseFailureDetails(t, typedError.Context(), "service:service.panics")
+}
+
+func TestContainer_Close_AFailureThatSaysNothingBeyondItsLineAddsNoDetailsMap(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    registerErr := serviceContainer.Register(
+        "service.refuses",
+        func(resolver containercontract.Resolver) (*failingCloseService, error) {
+            return &failingCloseService{}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "service.refuses"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    closeErr := serviceContainer.CloseWithContext(context.Background())
+
+    var typedError *exception.Error
+    if false == errors.As(closeErr, &typedError) {
+        t.Fatalf("expected a melody error, got %T", closeErr)
+    }
+
+    failures, hasFailures := typedError.Context()["failures"].(map[string]string)
+    if false == hasFailures || "refusing to close" != failures["service:service.refuses"] {
+        t.Fatalf("expected the failure line, got %v", typedError.Context()["failures"])
+    }
+
+    if _, hasDetails := typedError.Context()["failureDetails"]; true == hasDetails {
+        t.Fatalf("expected no details map beside a line that already says everything, got %v", typedError.Context()["failureDetails"])
+    }
+}
+
+func TestContainer_Close_TheDuplicateDropTakesOnlyTheSeededMessage(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    registerErr := serviceContainer.Register(
+        "service.refuses",
+        func(resolver containercontract.Resolver) (*operatorFailingCloseService, error) {
+            return &operatorFailingCloseService{}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "service.refuses"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    var typedError *exception.Error
+    if false == errors.As(serviceContainer.CloseWithContext(context.Background()), &typedError) {
+        t.Fatalf("expected a melody error")
+    }
+
+    failureDetails, hasDetails := typedError.Context()["failureDetails"].(map[string]exceptioncontract.Context)
+    if false == hasDetails {
+        t.Fatalf("expected the failure details beside the failure map, got %v", typedError.Context()["failureDetails"])
+    }
+
+    details := failureDetails["service:service.refuses"]
+
+    if _, seeded := details["error"]; true == seeded {
+        t.Fatalf("expected the seeded message to be dropped as the duplicate of the line, got %v", details)
+    }
+
+    if "the pool is still draining" != details["operator"] {
+        t.Fatalf("expected the producer's own key to survive the drop, got %v", details)
+    }
+
+    if "db-1" != details["host"] {
+        t.Fatalf("expected the producer's other key to survive, got %v", details)
+    }
+}
+
+type operatorFailingCloseService struct{}
+
+func (instance *operatorFailingCloseService) CloseWithContext(closeContext context.Context) error {
+    return exception.NewError(
+        "the pool is still draining",
+        exceptioncontract.Context{"host": "db-1", "operator": "the pool is still draining"},
+        nil,
+    )
+}
+
+func TestContainer_Close_TheRecoveredValueOfAPanickingCloseIsBounded(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    registerErr := serviceContainer.Register(
+        "service.panics",
+        func(resolver containercontract.Resolver) (*hugePanicCloseService, error) {
+            return &hugePanicCloseService{}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "service.panics"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    var typedError *exception.Error
+    if false == errors.As(serviceContainer.CloseWithContext(context.Background()), &typedError) {
+        t.Fatalf("expected a melody error")
+    }
+
+    failureDetails, hasDetails := typedError.Context()["failureDetails"].(map[string]exceptioncontract.Context)
+    if false == hasDetails {
+        t.Fatalf("expected the failure details, got %v", typedError.Context()["failureDetails"])
+    }
+
+    recoveredValue, isText := failureDetails["service:service.panics"]["recoveredValue"].(string)
+    if false == isText {
+        t.Fatalf("expected the recovered value to be recorded as text, got %v", failureDetails["service:service.panics"])
+    }
+
+    if 5000 <= len(recoveredValue) {
+        t.Fatalf("expected the recovered value to be cut, it is %d bytes", len(recoveredValue))
+    }
+
+    if false == strings.Contains(recoveredValue, "bytes kept") {
+        t.Fatalf("expected the cut to name itself, got %q", recoveredValue[:64])
+    }
+}
+
+type hugePanicCloseService struct{}
+
+func (instance *hugePanicCloseService) CloseWithContext(closeContext context.Context) error {
+    panic(strings.Repeat("H", 5000))
+}
+
+func TestContainer_Close_TheFramesOfAPanickingCloseAreBounded(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    registerErr := serviceContainer.Register(
+        "service.panics",
+        func(resolver containercontract.Resolver) (*deeplyPanickingCloseService, error) {
+            return &deeplyPanickingCloseService{depth: 60}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "service.panics"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    var typedError *exception.Error
+    if false == errors.As(serviceContainer.CloseWithContext(context.Background()), &typedError) {
+        t.Fatalf("expected a melody error")
+    }
+
+    failureDetails, _ := typedError.Context()["failureDetails"].(map[string]exceptioncontract.Context)
+    panicStack, hasStack := failureDetails["service:service.panics"]["panicStack"].(string)
+    if false == hasStack {
+        t.Fatalf("expected the frames that ran, got %v", failureDetails)
+    }
+
+    if false == strings.Contains(panicStack, "bytes kept") {
+        t.Fatalf("expected a stack this deep to be cut and to say so, got %d bytes", len(panicStack))
+    }
+
+    if CloseFailureStackBytesRule().Default+128 < len(panicStack) {
+        t.Fatalf("expected the cut to bound the frames near the limit, got %d bytes", len(panicStack))
+    }
+}
+
+func TestContainer_Close_ACloseErrorWhoseUnwrapPanicsDoesNotEndTheTeardown(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    registerErr := serviceContainer.Register(
+        "service.unwrapPanics",
+        func(resolver containercontract.Resolver) (*panickingUnwrapCloseService, error) {
+            return &panickingUnwrapCloseService{}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "service.unwrapPanics"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    var typedError *exception.Error
+    if false == errors.As(serviceContainer.CloseWithContext(context.Background()), &typedError) {
+        t.Fatalf("expected the failed close to be reported rather than ending the process")
+    }
+
+    failures, _ := typedError.Context()["failures"].(map[string]string)
+    if "the drain refused" != failures["service:service.unwrapPanics"] {
+        t.Fatalf("expected the failure line to survive, got %v", typedError.Context()["failures"])
+    }
+
+    failureDetails, _ := typedError.Context()["failureDetails"].(map[string]exceptioncontract.Context)
+    if cause := failureDetails["service:service.unwrapPanics"]["cause"]; "the links below could not be read, their Unwrap panicked: unwrap of a half-built error" != cause {
+        t.Fatalf("expected the details to say where the chain was cut and why, got %v", failureDetails)
+    }
+}
+
+type deeplyPanickingCloseService struct {
+    depth int
+}
+
+func (instance *deeplyPanickingCloseService) CloseWithContext(closeContext context.Context) error {
+    instance.panicAtDepth(instance.depth)
+
+    return nil
+}
+
+func (instance *deeplyPanickingCloseService) panicAtDepth(remaining int) {
+    if 0 >= remaining {
+        panic(errors.New("the drain buffer was nil"))
+    }
+
+    instance.panicAtDepth(remaining - 1)
+}
+
+type panickingUnwrapError struct{}
+
+func (instance panickingUnwrapError) Error() string { return "the drain refused" }
+
+func (instance panickingUnwrapError) Unwrap() error { panic("unwrap of a half-built error") }
+
+func TestContainer_Close_APanickingCloseWithoutAnErrorValueStillRecordsTheStack(t *testing.T) {
+    closeErr := closeServiceValueWithin(t.Context(), &panickingCloseWithTextService{})
+
+    typedError, isTyped := closeErr.(*exception.Error)
+    if false == isTyped {
+        t.Fatalf("expected an exception error, got %T", closeErr)
+    }
+
+    if nil != typedError.Unwrap() {
+        t.Fatalf("expected no cause for a panic value that is not an error, got %v", typedError.Unwrap())
+    }
+
+    if _, hasStack := typedError.Context()["panicStack"].(string); false == hasStack {
+        t.Fatalf("expected the stack to be captured anyway, got %v", typedError.Context())
+    }
+}
+
+func TestContainer_Close_ClosesTheEarliestCreatedServiceLast(t *testing.T) {
+    for _, dependentName := range []string{"service.aaa.worker", "service.zzz.worker"} {
+        serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
+
+        var mutex sync.Mutex
+        closeSequence := make([]string, 0, 2)
+        recorder := &closeOrderRecorder{
+            mutex:         &mutex,
+            closeSequence: &closeSequence,
+        }
+
+        if registerErr := serviceContainer.Register(
+            "service.mmm.shared",
+            func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+                return &closeOrderServiceA{recorder: recorder}, nil
+            },
+            RegisterOptions{},
+        ); nil != registerErr {
+            t.Fatalf("unexpected register error: %v", registerErr)
+        }
+
+        if registerErr := serviceContainer.Register(
+            dependentName,
+            func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+                return &closeOrderServiceB{recorder: recorder}, nil
+            },
+            RegisterOptions{},
+        ); nil != registerErr {
+            t.Fatalf("unexpected register error: %v", registerErr)
+        }
+
+        if _, getErr := serviceContainer.Get(t.Context(), "service.mmm.shared"); nil != getErr {
+            t.Fatalf("unexpected get error: %v", getErr)
+        }
+
+        if _, getErr := serviceContainer.Get(t.Context(), dependentName); nil != getErr {
+            t.Fatalf("unexpected get error: %v", getErr)
+        }
+
+        if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+            t.Fatalf("unexpected close error: %v", closeErr)
+        }
+
+        if 2 != len(closeSequence) {
+            t.Fatalf("expected both services closed, got %v", closeSequence)
+        }
+
+        if "b" != closeSequence[0] || "a" != closeSequence[1] {
+            t.Fatalf("expected the later-created service closed first for %s, got %v", dependentName, closeSequence)
+        }
+    }
+}
+
+func TestContainer_Close_ADeclaredEdgeIsHonoured(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    if registerErr := serviceContainer.Register(
+        "service.dependency",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "service.dependent",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            if _, resolveErr := resolver.Get(resolver.Runtime().Context(), "service.dependency"); nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return &closeOrderServiceB{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "service.dependent"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 2 != len(closeSequence) || "b" != closeSequence[0] || "a" != closeSequence[1] {
+        t.Fatalf("expected the declared edge to decide, got %v", closeSequence)
+    }
+}
+
+type closeTimeResolvingService struct {
+    serviceContainer containercontract.Container
+    resolveErr       error
+    resolvedValue    any
+}
+
+func (instance *closeTimeResolvingService) CloseWithContext(closeContext context.Context) error {
+    instance.resolvedValue, instance.resolveErr = instance.serviceContainer.Get(context.Background(), "service.mmm.shared")
+
+    return nil
+}
+
+func TestContainer_Close_AServiceStillResolvesDuringTheTeardown(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 1)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    if registerErr := serviceContainer.Register(
+        "service.mmm.shared",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    resolvingService := &closeTimeResolvingService{serviceContainer: serviceContainer}
+
+    if registerErr := serviceContainer.Register(
+        "service.zzz.worker",
+        func(resolver containercontract.Resolver) (*closeTimeResolvingService, error) {
+            return resolvingService, nil
+        },
+        RegisterOptions{},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "service.mmm.shared"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "service.zzz.worker"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if nil != resolvingService.resolveErr {
+        t.Fatalf("expected a service closing to still resolve what it reports through, got %v", resolvingService.resolveErr)
+    }
+
+    if nil == resolvingService.resolvedValue {
+        t.Fatalf("expected the resolution during the teardown to answer the instance")
+    }
+}
+
+func TestContainer_Get_RefusesAfterTheTeardownFinished(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    closed := false
+
+    if registerErr := serviceContainer.Register(
+        "service.probe",
+        func(resolver containercontract.Resolver) (*probeClosableService, error) {
+            return &probeClosableService{closed: &closed}, nil
+        },
+        RegisterOptions{},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "service.probe"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    lateValue, lateErr := serviceContainer.Get(t.Context(), "service.probe")
+
+    if nil == lateErr {
+        t.Fatalf("expected a resolution after the teardown to be refused, got %v", lateValue)
+    }
+
+    if false == strings.Contains(lateErr.Error(), "container is closed") {
+        t.Fatalf("expected the closed-container refusal, got %v", lateErr)
+    }
+
+    if nil != lateValue {
+        t.Fatalf("expected no value beside the refusal, got %v", lateValue)
+    }
+}
+
+func TestContainer_GetByType_RefusesAfterTheTeardownFinished(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    closed := false
+
+    if registerErr := serviceContainer.Register(
+        "service.probe",
+        func(resolver containercontract.Resolver) (*probeClosableService, error) {
+            return &probeClosableService{closed: &closed}, nil
+        },
+        RegisterOptions{},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    probeType := reflect.TypeOf((*probeClosableService)(nil))
+
+    if _, getErr := serviceContainer.GetByType(t.Context(), probeType); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    lateValue, lateErr := serviceContainer.GetByType(t.Context(), probeType)
+
+    if nil == lateErr || false == strings.Contains(lateErr.Error(), "container is closed") {
+        t.Fatalf("expected the closed-container refusal, got %v and %v", lateValue, lateErr)
+    }
+
+    if nil != lateValue {
+        t.Fatalf("expected no value beside the refusal, got %v", lateValue)
+    }
+}
+
+type probeClosableService struct {
+    closed *bool
+}
+
+func (instance *probeClosableService) CloseWithContext(closeContext context.Context) error {
+    *instance.closed = true
+
+    return nil
+}
+
+func TestScope_Get_RefusesAfterTheContainerTeardownFinished(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    closed := false
+
+    if registerErr := serviceContainer.Register(
+        "service.probe",
+        func(resolver containercontract.Resolver) (*probeClosableService, error) {
+            return &probeClosableService{closed: &closed}, nil
+        },
+        RegisterOptions{},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+
+    if _, getErr := scopeInstance.Get(t.Context(), "service.probe"); nil != getErr {
+        t.Fatalf("unexpected warm get error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    lateValue, lateErr := scopeInstance.Get(t.Context(), "service.probe")
+
+    if nil == lateErr {
+        t.Fatalf("expected the resolution through the scope to be refused, got %v", lateValue)
+    }
+
+    if false == strings.Contains(lateErr.Error(), "container is closed") {
+        t.Fatalf("expected the closed-container refusal, got %v", lateErr)
+    }
+}
+
+func TestContainer_Close_AnEvictedOverrideAfterABuiltInstanceIsNotClosed(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 3)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    registerErr := serviceContainer.Register(
+        "app.built.then.replaced",
+        func(resolver containercontract.Resolver) (*replacedBuiltProbe, error) {
+            return &replacedBuiltProbe{label: "built", recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "app.built.then.replaced"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    firstOverrideErr := serviceContainer.OverrideProtectedInstance(
+        "app.built.then.replaced",
+        &replacedBuiltProbe{label: "first-override", recorder: recorder},
+        OverrideOptions{},
+    )
+    if nil != firstOverrideErr {
+        t.Fatalf("unexpected override error: %v", firstOverrideErr)
+    }
+
+    secondOverrideErr := serviceContainer.OverrideProtectedInstance(
+        "app.built.then.replaced",
+        &replacedBuiltProbe{label: "second-override", recorder: recorder},
+        OverrideOptions{},
+    )
+    if nil != secondOverrideErr {
+        t.Fatalf("unexpected override error: %v", secondOverrideErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    builtCloses := 0
+    for _, label := range closeSequence {
+        if "first-override" == label {
+            t.Fatalf("expected the evicted override to stay its installer's, got %v", closeSequence)
+        }
+        if "built" == label {
+            builtCloses = builtCloses + 1
+        }
+    }
+
+    if 1 != builtCloses {
+        t.Fatalf("expected the replaced built instance to be closed exactly once, got %v", closeSequence)
+    }
+}
+
+func TestContainer_Close_ADeclaredTeardownDependencyBeatsTheCreationOrder(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    if registerErr := serviceContainer.Register(
+        "service.dependency",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "service.dependent",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return &closeOrderServiceB{recorder: recorder}, nil
+        },
+        RegisterOptions{TeardownDependencyNames: []string{"service.dependency"}},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "service.dependent"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "service.dependency"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 2 != len(closeSequence) || "b" != closeSequence[0] || "a" != closeSequence[1] {
+        t.Fatalf("expected the declared teardown dependency to decide, got %v", closeSequence)
+    }
+}
+
+func TestContainer_Close_TheCreationOrderAloneClosesTheDependencyFirst(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    if registerErr := serviceContainer.Register(
+        "service.dependency",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "service.dependent",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return &closeOrderServiceB{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "service.dependent"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "service.dependency"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 2 != len(closeSequence) || "a" != closeSequence[0] || "b" != closeSequence[1] {
+        t.Fatalf("expected the creation-order tie-break to close the dependency first, got %v", closeSequence)
+    }
+}
+
+func TestContainer_Close_ADeclaredTeardownDependencyOnAnUnbuiltServiceIsDropped(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 1)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    if registerErr := serviceContainer.Register(
+        "service.dependency",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "service.dependent",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return &closeOrderServiceB{recorder: recorder}, nil
+        },
+        RegisterOptions{TeardownDependencyNames: []string{"service.dependency"}},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "service.dependent"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != len(closeSequence) || "b" != closeSequence[0] {
+        t.Fatalf("expected the dependent alone to close, got %v", closeSequence)
+    }
+}
+
+type labelledLazyHolder struct {
+    label    string
+    recorder *closeOrderRecorder
+    handle   *LazyService[*closeOrderServiceA]
+}
+
+func (instance *labelledLazyHolder) CloseWithContext(closeContext context.Context) error {
+    instance.recorder.record(instance.label)
+
+    return nil
+}
+
+func TestContainer_Close_ASharedDependencyWaitsForEveryDependent(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 3)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    if registerErr := serviceContainer.Register(
+        "service.shared",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    /* both holders carry the same Go type, so neither files a type node: the stamps below are the name nodes alone */
+    if registerErr := serviceContainer.Register(
+        "app.holder.first",
+        func(resolver containercontract.Resolver) (*labelledLazyHolder, error) {
+            return &labelledLazyHolder{
+                label:    "first",
+                recorder: recorder,
+                handle:   Lazy[*closeOrderServiceA](resolver, "service.shared"),
+            }, nil
+        },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.holder.second",
+        func(resolver containercontract.Resolver) (*labelledLazyHolder, error) {
+            return &labelledLazyHolder{
+                label:    "second",
+                recorder: recorder,
+                handle:   Lazy[*closeOrderServiceA](resolver, "service.shared"),
+            }, nil
+        },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    firstHolder, firstErr := FromResolver[*labelledLazyHolder](t.Context(), serviceContainer, "app.holder.first")
+    if nil != firstErr {
+        t.Fatalf("unexpected get error: %v", firstErr)
+    }
+
+    secondHolder, secondErr := FromResolver[*labelledLazyHolder](t.Context(), serviceContainer, "app.holder.second")
+    if nil != secondErr {
+        t.Fatalf("unexpected get error: %v", secondErr)
+    }
+
+    if nil == firstHolder.handle.getOver(t.Context()) {
+        t.Fatalf("expected the first handle to resolve the shared service")
+    }
+
+    if nil == secondHolder.handle.getOver(t.Context()) {
+        t.Fatalf("expected the second handle to resolve the shared service")
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 3 != len(closeSequence) {
+        t.Fatalf("expected 3 close calls, got %d: %v", len(closeSequence), closeSequence)
+    }
+
+    if "second" != closeSequence[0] || "first" != closeSequence[1] || "a" != closeSequence[2] {
+        t.Fatalf("expected the shared service to wait for both holders, got %v", closeSequence)
+    }
+}
+
+func TestContainer_Close_AnAliasGroupIsAsOldAsItsOldestMember(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    shared := &closeOrderServiceA{recorder: recorder}
+
+    if registerErr := serviceContainer.Register(
+        "app.aaa.first",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return shared, nil
+        },
+        RegisterOptions{},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.middle",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return &closeOrderServiceB{recorder: recorder}, nil
+        },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.zzz.second",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "app.aaa.first"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "app.middle"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if overrideErr := serviceContainer.OverrideInstance("app.zzz.second", shared, OverrideOptions{}); nil != overrideErr {
+        t.Fatalf("unexpected override error: %v", overrideErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 2 != len(closeSequence) {
+        t.Fatalf("expected 2 close calls, got %d: %v", len(closeSequence), closeSequence)
+    }
+
+    if "b" != closeSequence[0] || "a" != closeSequence[1] {
+        t.Fatalf("expected the alias group to close as old as its oldest member, got %v", closeSequence)
+    }
+}
+
+func TestContainer_Close_TheCycleRemainderClosesLatestFirst(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{}).(*container)
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.cycle.early",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.cycle.late",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return &closeOrderServiceB{recorder: recorder}, nil
+        },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "app.cycle.early"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "app.cycle.late"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    serviceContainer.mutex.Lock()
+    serviceContainer.registerDependencyLocked("service:app.cycle.early", "service:app.cycle.late")
+    serviceContainer.registerDependencyLocked("service:app.cycle.late", "service:app.cycle.early")
+    serviceContainer.mutex.Unlock()
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil == closeErr {
+        t.Fatalf("expected the dependency cycle to be reported")
+    }
+
+    if 2 != len(closeSequence) {
+        t.Fatalf("expected 2 close calls, got %d: %v", len(closeSequence), closeSequence)
+    }
+
+    if "b" != closeSequence[0] || "a" != closeSequence[1] {
+        t.Fatalf("expected the cycle remainder to close latest first, got %v", closeSequence)
+    }
+}
+
+type contextCloseRecorder struct {
+    plainCalls   int
+    contextCalls int
+    grantedTerm  time.Duration
+    hadDeadline  bool
+}
+
+func (instance *contextCloseRecorder) Close() error {
+    instance.plainCalls = instance.plainCalls + 1
+
+    return nil
+}
+
+func (instance *contextCloseRecorder) CloseWithContext(closeContext context.Context) error {
+    instance.contextCalls = instance.contextCalls + 1
+
+    deadline, hasDeadline := closeContext.Deadline()
+    instance.hadDeadline = hasDeadline
+    if true == hasDeadline {
+        instance.grantedTerm = time.Until(deadline)
+    }
+
+    return nil
+}
+
+func TestContainer_CloseWithContext_PrefersTheContextTakingDoorAndHandsItTheDeadline(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    recorder := &contextCloseRecorder{}
+
+    registerErr := serviceContainer.Register(
+        "service.context-closeable",
+        func(resolver containercontract.Resolver) (*contextCloseRecorder, error) {
+            return recorder, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "service.context-closeable"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    closeContext, cancel := context.WithTimeout(context.Background(), time.Minute)
+    defer cancel()
+
+    concreteContainer, isConcrete := serviceContainer.(interface {
+        CloseWithContext(closeContext context.Context) error
+    })
+    if false == isConcrete {
+        t.Fatal("the container does not carry the context-taking teardown")
+    }
+
+    if closeErr := concreteContainer.CloseWithContext(closeContext); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != recorder.contextCalls {
+        t.Fatalf("the context-taking door was called %d times, wanted once", recorder.contextCalls)
+    }
+
+    if 0 != recorder.plainCalls {
+        t.Fatalf("the plain door was called %d times, wanted none", recorder.plainCalls)
+    }
+
+    if false == recorder.hadDeadline {
+        t.Fatal("the service was handed a context with no deadline")
+    }
+
+    if 0 >= recorder.grantedTerm || time.Minute < recorder.grantedTerm {
+        t.Fatalf("the service was handed %s of a one minute teardown deadline", recorder.grantedTerm)
+    }
+}
+
+func TestContainer_Close_ReachesTheContextTakingDoorWithoutADeadline(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    recorder := &contextCloseRecorder{}
+
+    registerErr := serviceContainer.Register(
+        "service.context-closeable",
+        func(resolver containercontract.Resolver) (*contextCloseRecorder, error) {
+            return recorder, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "service.context-closeable"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != recorder.contextCalls {
+        t.Fatalf("the context-taking door was called %d times, wanted once", recorder.contextCalls)
+    }
+
+    if true == recorder.hadDeadline {
+        t.Fatal("a close with no budget handed the service a deadline")
+    }
+}
+
+type waveMateCloser struct {
+    started      chan struct{}
+    mateStarted  <-chan struct{}
+    mateDeadline time.Duration
+}
+
+func (instance *waveMateCloser) CloseWithContext(closeContext context.Context) error {
+    close(instance.started)
+
+    select {
+    case <-instance.mateStarted:
+        return nil
+    case <-time.After(instance.mateDeadline):
+        return errors.New("the wave mate had not started")
+    }
+}
+
+func registerWaveMatePair(t *testing.T, serviceContainer containercontract.Container, mateDeadline time.Duration) {
+    t.Helper()
+
+    firstStarted := make(chan struct{})
+    secondStarted := make(chan struct{})
+
+    first := &waveMateCloser{started: firstStarted, mateStarted: secondStarted, mateDeadline: mateDeadline}
+    second := &waveMateCloser{started: secondStarted, mateStarted: firstStarted, mateDeadline: mateDeadline}
+
+    if registerErr := serviceContainer.Register(
+        "app.wave.first",
+        func(resolver containercontract.Resolver) (*waveMateCloser, error) {
+            return first, nil
+        },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.wave.second",
+        func(resolver containercontract.Resolver) (*waveMateCloser, error) {
+            return second, nil
+        },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := FromResolver[*waveMateCloser](t.Context(), serviceContainer, "app.wave.first"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, getErr := FromResolver[*waveMateCloser](t.Context(), serviceContainer, "app.wave.second"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+}
+
+func TestContainer_Close_WavesTheServicesOfOneWaveCloseAtOnce(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    registerWaveMatePair(t, serviceContainer, time.Second)
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("expected both services of the wave to be closing at the same moment, got: %v", closeErr)
+    }
+}
+
+func TestContainer_Close_SequentialTheServicesOfOneWaveCloseOneAfterTheOther(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
+
+    registerWaveMatePair(t, serviceContainer, 50*time.Millisecond)
+
+    closeErr := serviceContainer.CloseWithContext(context.Background())
+    if nil == closeErr {
+        t.Fatalf("expected the serial teardown to report a service that waited for a mate that had not started")
+    }
+
+    if false == strings.Contains(closeErr.Error(), "failed to close container services") {
+        t.Fatalf("expected the failure map to carry the report, got: %v", closeErr)
+    }
+}
+
+func TestTeardownCloseOrder_ADependencyIsOneWavePastItsLastDependent(t *testing.T) {
+    nodeKeys := []string{"service:dependent.first", "service:dependent.second", "service:shared", "service:unrelated"}
+
+    edges := map[string]map[string]struct{}{
+        "service:dependent.first":  {"service:shared": struct{}{}},
+        "service:dependent.second": {"service:shared": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:dependent.first":  1,
+        "service:dependent.second": 2,
+        "service:shared":           3,
+        "service:unrelated":        4,
+    }
+
+    closeOrder, closeWaveIndexOf, remaining := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    if 0 != len(remaining) {
+        t.Fatalf("expected no cycle remainder, got %v", remaining)
+    }
+
+    if 4 != len(closeOrder) {
+        t.Fatalf("expected every node in the close order, got %v", closeOrder)
+    }
+
+    for _, nodeKey := range []string{"service:dependent.first", "service:dependent.second", "service:unrelated"} {
+        if 0 != closeWaveIndexOf[nodeKey] {
+            t.Fatalf("expected %s to open the teardown in wave 0, got wave %d", nodeKey, closeWaveIndexOf[nodeKey])
+        }
+    }
+
+    if 1 != closeWaveIndexOf["service:shared"] {
+        t.Fatalf("expected the shared dependency one wave past both dependents, got wave %d", closeWaveIndexOf["service:shared"])
+    }
+}
+
+func TestTeardownCloseOrder_TheSerialOrderIsUnchangedByTheWaves(t *testing.T) {
+    nodeKeys := []string{"service:dependent.first", "service:dependent.second", "service:shared", "service:unrelated"}
+
+    edges := map[string]map[string]struct{}{
+        "service:dependent.first":  {"service:shared": struct{}{}},
+        "service:dependent.second": {"service:shared": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:dependent.first":  1,
+        "service:dependent.second": 2,
+        "service:shared":           3,
+        "service:unrelated":        4,
+    }
+
+    closeOrder, _, _ := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    expectedOrder := []string{"service:unrelated", "service:dependent.second", "service:dependent.first", "service:shared"}
+
+    if false == reflect.DeepEqual(expectedOrder, closeOrder) {
+        t.Fatalf("expected the serial order untouched by the waves, wanted %v got %v", expectedOrder, closeOrder)
+    }
+}
+
+func TestTeardownCloseOrder_APureDependencyOfARingMemberClosesAfterTheRingAndIsNotARingMember(t *testing.T) {
+    nodeKeys := []string{"service:ring.a", "service:ring.b", "service:ring.dependency"}
+
+    edges := map[string]map[string]struct{}{
+        "service:ring.a": {"service:ring.b": struct{}{}},
+        "service:ring.b": {"service:ring.a": struct{}{}, "service:ring.dependency": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:ring.a":          1,
+        "service:ring.b":          2,
+        "service:ring.dependency": 3,
+    }
+
+    closeOrder, closeWaveIndexOf, ringMembers := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    expectedOrder := []string{"service:ring.b", "service:ring.a", "service:ring.dependency"}
+    if false == reflect.DeepEqual(expectedOrder, closeOrder) {
+        t.Fatalf("expected the ring closed first and its pure dependency after it, wanted %v got %v", expectedOrder, closeOrder)
+    }
+
+    sort.Strings(ringMembers)
+    if false == reflect.DeepEqual([]string{"service:ring.a", "service:ring.b"}, ringMembers) {
+        t.Fatalf("expected the ring members alone to be reported, got %v", ringMembers)
+    }
+
+    if closeWaveIndexOf["service:ring.dependency"] <= closeWaveIndexOf["service:ring.a"] {
+        t.Fatalf("expected the pure dependency one wave past the ring, got ring %d dependency %d", closeWaveIndexOf["service:ring.a"], closeWaveIndexOf["service:ring.dependency"])
+    }
+}
+
+func TestTeardownCloseOrder_TwoRingsJoinedByABridgeCloseInOrderAndTheBridgeIsNoRingMember(t *testing.T) {
+    nodeKeys := []string{"service:ring.a", "service:ring.b", "service:bridge", "service:ring.e", "service:ring.f"}
+
+    edges := map[string]map[string]struct{}{
+        "service:ring.a": {"service:ring.b": struct{}{}, "service:bridge": struct{}{}},
+        "service:ring.b": {"service:ring.a": struct{}{}},
+        "service:bridge": {"service:ring.e": struct{}{}},
+        "service:ring.e": {"service:ring.f": struct{}{}},
+        "service:ring.f": {"service:ring.e": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:ring.a": 1,
+        "service:ring.b": 2,
+        "service:bridge": 3,
+        "service:ring.e": 4,
+        "service:ring.f": 5,
+    }
+
+    closeOrder, closeWaveIndexOf, ringMembers := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    expectedOrder := []string{"service:ring.b", "service:ring.a", "service:bridge", "service:ring.f", "service:ring.e"}
+    if false == reflect.DeepEqual(expectedOrder, closeOrder) {
+        t.Fatalf("expected the first ring, the bridge, then the second ring, wanted %v got %v", expectedOrder, closeOrder)
+    }
+
+    sort.Strings(ringMembers)
+    if false == reflect.DeepEqual([]string{"service:ring.a", "service:ring.b", "service:ring.e", "service:ring.f"}, ringMembers) {
+        t.Fatalf("expected the four ring members alone to be reported, got %v", ringMembers)
+    }
+
+    if closeWaveIndexOf["service:ring.a"] != closeWaveIndexOf["service:ring.b"] || closeWaveIndexOf["service:ring.e"] != closeWaveIndexOf["service:ring.f"] {
+        t.Fatalf("expected each ring in one wave of its own, got %v", closeWaveIndexOf)
+    }
+
+    if closeWaveIndexOf["service:ring.a"] >= closeWaveIndexOf["service:bridge"] || closeWaveIndexOf["service:bridge"] >= closeWaveIndexOf["service:ring.e"] {
+        t.Fatalf("expected the waves ring, bridge, ring in that order, got %v", closeWaveIndexOf)
+    }
+}
+
+func TestTeardownCloseOrder_ARingDependingDirectlyOnAnotherRingClosesBeforeIt(t *testing.T) {
+    nodeKeys := []string{"service:ring.a", "service:ring.b", "service:ring.c", "service:ring.d"}
+
+    edges := map[string]map[string]struct{}{
+        "service:ring.a": {"service:ring.b": struct{}{}, "service:ring.c": struct{}{}},
+        "service:ring.b": {"service:ring.a": struct{}{}},
+        "service:ring.c": {"service:ring.d": struct{}{}},
+        "service:ring.d": {"service:ring.c": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:ring.a": 1,
+        "service:ring.b": 2,
+        "service:ring.c": 3,
+        "service:ring.d": 4,
+    }
+
+    closeOrder, closeWaveIndexOf, _ := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    expectedOrder := []string{"service:ring.b", "service:ring.a", "service:ring.d", "service:ring.c"}
+    if false == reflect.DeepEqual(expectedOrder, closeOrder) {
+        t.Fatalf("expected the dependent ring before the ring it depends on, wanted %v got %v", expectedOrder, closeOrder)
+    }
+
+    if closeWaveIndexOf["service:ring.a"] >= closeWaveIndexOf["service:ring.c"] {
+        t.Fatalf("expected the dependent ring's wave before the dependency ring's, got %v", closeWaveIndexOf)
+    }
+}
+
+func TestTeardownCloseOrder_ARingTakesAWaveOfItsOwn(t *testing.T) {
+    nodeKeys := []string{"service:lone.dependent", "service:lone.dependency", "service:ring.a", "service:ring.b"}
+
+    edges := map[string]map[string]struct{}{
+        "service:lone.dependent": {"service:lone.dependency": struct{}{}},
+        "service:ring.a":         {"service:ring.b": struct{}{}},
+        "service:ring.b":         {"service:ring.a": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:lone.dependent":  1,
+        "service:lone.dependency": 2,
+        "service:ring.a":          3,
+        "service:ring.b":          4,
+    }
+
+    _, closeWaveIndexOf, _ := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    for _, loneKey := range []string{"service:lone.dependent", "service:lone.dependency"} {
+        if closeWaveIndexOf[loneKey] == closeWaveIndexOf["service:ring.a"] {
+            t.Fatalf("expected the ring in a wave no unrelated node shares, got %v", closeWaveIndexOf)
+        }
+    }
+}
+
+func TestTeardownCloseOrder_TheWaveIndexesHaveNoHole(t *testing.T) {
+    nodeKeys := []string{"service:chain.0", "service:chain.1", "service:chain.2", "service:dep", "service:ring.a", "service:ring.b"}
+
+    edges := map[string]map[string]struct{}{
+        "service:chain.0": {"service:chain.1": struct{}{}},
+        "service:chain.1": {"service:chain.2": struct{}{}},
+        "service:chain.2": {"service:dep": struct{}{}},
+        "service:ring.a":  {"service:ring.b": struct{}{}, "service:dep": struct{}{}},
+        "service:ring.b":  {"service:ring.a": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:chain.0": 1,
+        "service:chain.1": 2,
+        "service:chain.2": 3,
+        "service:dep":     4,
+        "service:ring.a":  5,
+        "service:ring.b":  6,
+    }
+
+    _, closeWaveIndexOf, _ := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    highest := 0
+    populated := make(map[int]struct{})
+    for _, waveIndex := range closeWaveIndexOf {
+        populated[waveIndex] = struct{}{}
+        if waveIndex > highest {
+            highest = waveIndex
+        }
+    }
+
+    for waveIndex := 0; waveIndex <= highest; waveIndex++ {
+        if _, closesSomething := populated[waveIndex]; false == closesSomething {
+            t.Fatalf("expected every wave up to %d to close something, wave %d closes nothing: %v", highest, waveIndex, closeWaveIndexOf)
+        }
+    }
+
+    if closeWaveIndexOf["service:dep"] <= closeWaveIndexOf["service:ring.a"] {
+        t.Fatalf("expected the dependency the ring releases to close after the ring, got %v", closeWaveIndexOf)
+    }
+}
+
+func TestTeardownCloseOrder_ADependencyLandsOnePastItsLatestDependentNotItsLastReleaser(t *testing.T) {
+    nodeKeys := []string{"service:y", "service:p", "service:q", "service:r"}
+
+    edges := map[string]map[string]struct{}{
+        "service:p": {"service:y": struct{}{}},
+        "service:q": {"service:y": struct{}{}},
+        "service:r": {"service:q": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:y": 1,
+        "service:p": 2,
+        "service:q": 3,
+        "service:r": 4,
+    }
+
+    closeOrder, closeWaveIndexOf, ringMembers := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    if 0 != len(ringMembers) {
+        t.Fatalf("expected no ring, got %v", ringMembers)
+    }
+
+    if "[service:r service:q service:p service:y]" != fmt.Sprint(closeOrder) {
+        t.Fatalf("expected the drain to close r, q, p, y, got %v", closeOrder)
+    }
+
+    expectedWaves := map[string]int{"service:p": 0, "service:r": 0, "service:q": 1, "service:y": 2}
+    for nodeKey, expectedWave := range expectedWaves {
+        if expectedWave != closeWaveIndexOf[nodeKey] {
+            t.Fatalf("expected %s in wave %d, got %v", nodeKey, expectedWave, closeWaveIndexOf)
+        }
+    }
+}
+
+func TestTeardownCloseOrder_TwoIndependentRingsCloseLatestFirst(t *testing.T) {
+    nodeKeys := []string{"service:a1", "service:a2", "service:b1", "service:b2"}
+
+    edges := map[string]map[string]struct{}{
+        "service:a1": {"service:a2": struct{}{}},
+        "service:a2": {"service:a1": struct{}{}},
+        "service:b1": {"service:b2": struct{}{}},
+        "service:b2": {"service:b1": struct{}{}},
+    }
+
+    creationOrderOf := map[string]int{
+        "service:a1": 1,
+        "service:a2": 2,
+        "service:b1": 3,
+        "service:b2": 4,
+    }
+
+    closeOrder, closeWaveIndexOf, ringMembers := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+
+    if 4 != len(ringMembers) {
+        t.Fatalf("expected both rings reported, got %v", ringMembers)
+    }
+
+    if "[service:b2 service:b1 service:a2 service:a1]" != fmt.Sprint(closeOrder) {
+        t.Fatalf("expected the ring created last closed first, got %v", closeOrder)
+    }
+
+    if 0 != closeWaveIndexOf["service:b1"] || 0 != closeWaveIndexOf["service:b2"] || 1 != closeWaveIndexOf["service:a1"] || 1 != closeWaveIndexOf["service:a2"] {
+        t.Fatalf("expected the later ring in wave zero and the earlier in wave one, got %v", closeWaveIndexOf)
+    }
+}
+
+func TestTeardownCloseOrder_HundredsOfRingsCloseInMilliseconds(t *testing.T) {
+    const ringCount = 400
+
+    nodeKeys := make([]string, 0, 2*ringCount)
+    edges := make(map[string]map[string]struct{}, 2*ringCount)
+    creationOrderOf := make(map[string]int, 2*ringCount)
+
+    for ringIndex := 0; ringIndex < ringCount; ringIndex++ {
+        first := fmt.Sprintf("service:ring.%d.a", ringIndex)
+        second := fmt.Sprintf("service:ring.%d.b", ringIndex)
+        nodeKeys = append(nodeKeys, first, second)
+        edges[first] = map[string]struct{}{second: {}}
+        edges[second] = map[string]struct{}{first: {}}
+        creationOrderOf[first] = 2 * ringIndex
+        creationOrderOf[second] = 2*ringIndex + 1
+    }
+
+    startedAt := time.Now()
+    closeOrder, _, cycleNodeKeys := teardownCloseOrder(nodeKeys, edges, creationOrderOf)
+    elapsed := time.Since(startedAt)
+
+    if 2*ringCount != len(closeOrder) || 2*ringCount != len(cycleNodeKeys) {
+        t.Fatalf("expected every ring member closed and reported, got %d closed and %d reported", len(closeOrder), len(cycleNodeKeys))
+    }
+
+    if 500*time.Millisecond < elapsed {
+        t.Fatalf("expected %d rings to drain within 500ms, took %s", ringCount, elapsed)
+    }
+}
+
+func TestContainer_VerifyDeclaredTeardownDependencies_RefusesADeclaredDependencyOnAServiceThatWasNeverRegistered(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    if registerErr := serviceContainer.Register(
+        "app.reporter",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{}, nil
+        },
+        RegisterOptions{TeardownDependencyNames: []string{"app.stroage"}},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    verifier, verifies := serviceContainer.(declaredTeardownVerifier)
+    if false == verifies {
+        t.Fatalf("expected the container to carry the declared teardown dependency door")
+    }
+
+    verifyErr := verifier.VerifyDeclaredTeardownDependencies()
+    if nil == verifyErr {
+        t.Fatalf("expected the misspelled teardown dependency to refuse the verification")
+    }
+
+    if false == errors.Is(verifyErr, ErrTeardownDependencyWasNeverRegistered) {
+        t.Fatalf("expected the never-registered sentinel, got: %v", verifyErr)
+    }
+
+    if false == strings.Contains(verifyErr.Error(), "never registered") {
+        t.Fatalf("expected the refusal to name what is missing, got: %v", verifyErr)
+    }
+
+    refusalContext := exception.LogContext(verifyErr, exception.LogContextOptions{})
+    if "app.reporter" != refusalContext["serviceName"] || "app.stroage" != refusalContext["dependency"] || "service:app.stroage" != refusalContext["dependencyNodeKey"] {
+        t.Fatalf("expected the refusal to carry the declaring service, the spelling it declared and the node key it stands for, got %v", refusalContext)
+    }
+}
+
+func TestContainer_VerifyDeclaredTeardownDependencies_AdmitsADeclaredDependencyOnARegisteredServiceNobodyBuilt(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    if registerErr := serviceContainer.Register(
+        "app.storage",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return &closeOrderServiceB{}, nil
+        },
+        RegisterOptions{},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.reporter",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{}, nil
+        },
+        RegisterOptions{TeardownDependencyNames: []string{"app.storage"}},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    verifyDeclaredTeardownDependencies(t, serviceContainer)
+}
+
+func TestContainer_Close_ADeclaredTeardownDependencyKeyedByTypeOrdersTheTeardown(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{
+        mutex:         &mutex,
+        closeSequence: &closeSequence,
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.storage",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return &closeOrderServiceB{recorder: recorder}, nil
+        },
+        RegisterOptions{},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.reporter",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{recorder: recorder}, nil
+        },
+        RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[closeOrderServiceB]()}},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := FromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.reporter"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, getErr := FromResolver[*closeOrderServiceB](t.Context(), serviceContainer, "app.storage"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 2 != len(closeSequence) {
+        t.Fatalf("expected 2 close calls, got %d: %v", len(closeSequence), closeSequence)
+    }
+
+    if "a" != closeSequence[0] || "b" != closeSequence[1] {
+        t.Fatalf("expected the type-keyed declaration to close the dependent first, got %v", closeSequence)
+    }
+}
+
+type labelledCloser struct {
+    label    string
+    recorder *closeOrderRecorder
+}
+
+func (instance *labelledCloser) CloseWithContext(closeContext context.Context) error {
+    instance.recorder.record(instance.label)
+
+    return nil
+}
+
+type declaringCloser struct {
+    label    string
+    recorder *closeOrderRecorder
+}
+
+func (instance *declaringCloser) CloseWithContext(closeContext context.Context) error {
+    instance.recorder.record(instance.label)
+
+    return nil
+}
+
+func newAmbiguousTypeRecorder() (*closeOrderRecorder, *[]string) {
+    mutex := &sync.Mutex{}
+    closeSequence := make([]string, 0, 4)
+
+    return &closeOrderRecorder{mutex: mutex, closeSequence: &closeSequence}, &closeSequence
+}
+
+func registerAmbiguousTypeWiring(t *testing.T, serviceContainer containercontract.Container, recorder *closeOrderRecorder) {
+    t.Helper()
+
+    if registerErr := serviceContainer.Register(
+        "app.fallback",
+        func(_ containercontract.Resolver) (*labelledCloser, error) {
+            return &labelledCloser{label: "fallback", recorder: recorder}, nil
+        },
+        RegisterOptions{TypeRegistrationRelaxed: true},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.primary",
+        func(_ containercontract.Resolver) (*labelledCloser, error) {
+            return &labelledCloser{label: "primary", recorder: recorder}, nil
+        },
+        RegisterOptions{TypeRegistrationRelaxed: true, TeardownDependencyNames: []string{"app.router"}},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.router",
+        func(_ containercontract.Resolver) (*declaringCloser, error) {
+            return &declaringCloser{label: "router", recorder: recorder}, nil
+        },
+        RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*labelledCloser]()}},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+}
+
+func TestContainer_Close_ADeclarationOnAnAmbiguousTypeOrdersNothingAndReportsNoCycle(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
+
+    recorder, closeSequence := newAmbiguousTypeRecorder()
+
+    registerAmbiguousTypeWiring(t, serviceContainer, recorder)
+    buildEveryRegisteredService(t, serviceContainer, "app.fallback", "app.primary", "app.router")
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("a declaration on an ambiguous type reported a failure over a teardown that closed everything: %v", closeErr)
+    }
+
+    if 3 != len(*closeSequence) {
+        t.Fatalf("expected all three services to close, got %v", *closeSequence)
+    }
+}
+
+func TestContainer_Register_RefusesADeclarationOnAnAmbiguousType(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    recorder, _ := newAmbiguousTypeRecorder()
+
+    for _, serviceName := range []string{"app.fallback", "app.primary"} {
+        label := serviceName
+        serviceContainer.MustRegister(
+            serviceName,
+            func(_ containercontract.Resolver) (*labelledCloser, error) {
+                return &labelledCloser{label: label, recorder: recorder}, nil
+            },
+            RegisterOptions{TypeRegistrationRelaxed: true},
+        )
+    }
+
+    verifyErr := serviceContainer.Register(
+        "app.router",
+        func(_ containercontract.Resolver) (*declaringCloser, error) {
+            return &declaringCloser{label: "router", recorder: recorder}, nil
+        },
+        RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*labelledCloser]()}},
+    )
+    if nil == verifyErr {
+        t.Fatalf("the registration was admitted with a declaration that names a type more than one service is registered under")
+    }
+
+    if false == errors.Is(verifyErr, ErrTeardownDependencyTypeIsAmbiguous) {
+        t.Fatalf("the refusal does not carry the ambiguity cause: %v", verifyErr)
+    }
+
+    if false == strings.Contains(verifyErr.Error(), "more than one service is registered under") {
+        t.Fatalf("the refusal does not name what is ambiguous: %v", verifyErr)
+    }
+
+    if true == serviceContainer.Has("app.router") {
+        t.Fatalf("expected the refused registration to leave nothing behind")
+    }
+
+    var typedError *exception.Error
+    if false == errors.As(verifyErr, &typedError) {
+        t.Fatalf("the refusal is not a melody error carrying a context: %v", verifyErr)
+    }
+
+    if "app.router" != typedError.Context()["serviceName"] {
+        t.Fatalf("the refusal does not name the declaring service: %v", typedError.Context())
+    }
+
+    registeredNames, areNames := typedError.Context()["registered"].([]string)
+    if false == areNames || 2 != len(registeredNames) {
+        t.Fatalf("the refusal does not name the services the type stands for: %v", typedError.Context())
+    }
+}
+
+func TestContainer_ADeclarationOnAnUnambiguousTypeClosingARingIsRefused(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    recorder, _ := newAmbiguousTypeRecorder()
+
+    serviceContainer.MustRegister(
+        "app.primary",
+        func(_ containercontract.Resolver) (*labelledCloser, error) {
+            return &labelledCloser{label: "primary", recorder: recorder}, nil
+        },
+        RegisterOptions{TypeRegistrationRelaxed: true, TeardownDependencyNames: []string{"app.router"}},
+    )
+
+    registerErr := serviceContainer.Register(
+        "app.router",
+        func(_ containercontract.Resolver) (*declaringCloser, error) {
+            return &declaringCloser{label: "router", recorder: recorder}, nil
+        },
+        RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*labelledCloser]()}},
+    )
+    if false == errors.Is(registerErr, ErrCircularDependency) {
+        t.Fatalf("expected the type declaration closing the ring refused, got %v", registerErr)
+    }
+}
+
+type concurrentCloser struct {
+    running *atomic.Int64
+    peak    *atomic.Int64
+    closed  *atomic.Int64
+}
+
+func (instance *concurrentCloser) CloseWithContext(closeContext context.Context) error {
+    now := instance.running.Add(1)
+
+    for {
+        peak := instance.peak.Load()
+        if now <= peak || true == instance.peak.CompareAndSwap(peak, now) {
+            break
+        }
+    }
+
+    time.Sleep(50 * time.Millisecond)
+    instance.running.Add(-1)
+
+    if nil != instance.closed {
+        instance.closed.Add(1)
+    }
+
+    return nil
+}
+
+func TestContainer_Close_WavesTheCycleRemainderClosesOneAfterTheOther(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var running, peak atomic.Int64
+
+    for _, pair := range [][2]string{{"cycle.a", "cycle.b"}, {"cycle.b", "cycle.c"}, {"cycle.c", ""}} {
+        options := RegisterOptions{TypeRegistrationDisabled: true}
+        if "" != pair[1] {
+            options.TeardownDependencyNames = []string{pair[1]}
+        }
+
+        if registerErr := serviceContainer.Register(
+            pair[0],
+            func(_ containercontract.Resolver) (*concurrentCloser, error) {
+                return &concurrentCloser{running: &running, peak: &peak}, nil
+            },
+            options,
+        ); nil != registerErr {
+            t.Fatalf("unexpected register error: %v", registerErr)
+        }
+    }
+
+    writeDependencyRingEdge(t, serviceContainer, "cycle.c", "cycle.a")
+
+    verifyDeclaredTeardownDependencies(t, serviceContainer)
+
+    buildEveryRegisteredService(t, serviceContainer, "cycle.a", "cycle.b", "cycle.c")
+
+    closeErr := serviceContainer.CloseWithContext(context.Background())
+    if nil == closeErr || false == strings.Contains(closeErr.Error(), "dependency cycle detected") {
+        t.Fatalf("expected the cycle to still be reported, got %v", closeErr)
+    }
+
+    if 1 != peak.Load() {
+        t.Fatalf("expected the cycle remainder to close one service at a time, got %d at once", peak.Load())
+    }
+}
+
+func TestContainer_Close_WavesEachRingClosesOneAfterTheOther(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var running, peak atomic.Int64
+
+    for _, pair := range [][2]string{{"ring.a", "ring.b"}, {"ring.b", ""}, {"ring.e", "ring.f"}, {"ring.f", ""}} {
+        options := RegisterOptions{TypeRegistrationDisabled: true}
+        if "" != pair[1] {
+            options.TeardownDependencyNames = []string{pair[1]}
+        }
+
+        if registerErr := serviceContainer.Register(
+            pair[0],
+            func(_ containercontract.Resolver) (*concurrentCloser, error) {
+                return &concurrentCloser{running: &running, peak: &peak}, nil
+            },
+            options,
+        ); nil != registerErr {
+            t.Fatalf("unexpected register error: %v", registerErr)
+        }
+    }
+
+    writeDependencyRingEdge(t, serviceContainer, "ring.b", "ring.a")
+    writeDependencyRingEdge(t, serviceContainer, "ring.f", "ring.e")
+
+    verifyDeclaredTeardownDependencies(t, serviceContainer)
+
+    buildEveryRegisteredService(t, serviceContainer, "ring.a", "ring.b", "ring.e", "ring.f")
+
+    closeErr := serviceContainer.CloseWithContext(context.Background())
+    if nil == closeErr || false == strings.Contains(closeErr.Error(), "dependency cycle detected") {
+        t.Fatalf("expected the two rings to be reported, got %v", closeErr)
+    }
+
+    if 1 != peak.Load() {
+        t.Fatalf("expected each ring to close one service at a time, got %d at once", peak.Load())
+    }
+}
+
+func TestContainer_Close_TheCycleReportNamesTheRingMembersAlone(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    serviceContainer.MustRegister(
+        "cycle.c",
+        func(_ containercontract.Resolver) (*poolDeclarerService, error) { return &poolDeclarerService{label: "c"}, nil },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    )
+
+    serviceContainer.MustRegister(
+        "cycle.b",
+        func(resolver containercontract.Resolver) (*poolDeclarerService, error) {
+            if _, resolveErr := resolver.Get(resolver.Runtime().Context(), "cycle.c"); nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return &poolDeclarerService{label: "b"}, nil
+        },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    )
+
+    serviceContainer.MustRegister(
+        "cycle.a",
+        func(resolver containercontract.Resolver) (*poolDeclarerService, error) {
+            if _, resolveErr := resolver.Get(resolver.Runtime().Context(), "cycle.b"); nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return &poolDeclarerService{label: "a"}, nil
+        },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    )
+
+    MustFromResolver[*poolDeclarerService](t.Context(), serviceContainer, "cycle.a")
+
+    writeDependencyRingEdge(t, serviceContainer, "cycle.b", "cycle.a")
+
+    closeErr := serviceContainer.CloseWithContext(context.Background())
+    if nil == closeErr {
+        t.Fatalf("expected the ring to be reported")
+    }
+
+    var typedError *exception.Error
+    if false == errors.As(closeErr, &typedError) {
+        t.Fatalf("expected a melody error, got %T", closeErr)
+    }
+
+    nodes, areNodes := typedError.Context()["nodes"].([]string)
+    if false == areNodes {
+        t.Fatalf("expected the ring members in the close error context, got %v", typedError.Context())
+    }
+
+    sort.Strings(nodes)
+    if false == reflect.DeepEqual([]string{"service:cycle.a", "service:cycle.b"}, nodes) {
+        t.Fatalf("expected the ring members alone to be named, got %v", nodes)
+    }
+}
+
+func TestContainer_Register_RefusesADeclaredDependencyOnAScopedService(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    if registerErr := serviceContainer.RegisterScoped(
+        "scoped.store",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return &closeOrderServiceB{}, nil
+        },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    ); nil != registerErr {
+        t.Fatalf("unexpected scoped register error: %v", registerErr)
+    }
+
+    registerErr := serviceContainer.Register(
+        "app.reporter",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{}, nil
+        },
+        RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"scoped.store"}},
+    )
+    if false == errors.Is(registerErr, ErrTeardownDependencyIsScoped) {
+        t.Fatalf("expected the dependency on a registered scoped service to be refused at the registration with ErrTeardownDependencyIsScoped, got %v", registerErr)
+    }
+}
+
+func TestContainer_VerifyDeclaredTeardownDependencies_RefusesADeclarationThatNamedAScopedServiceRegisteredAfterIt(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    serviceContainer.MustRegister(
+        "app.reporter",
+        func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            return &closeOrderServiceA{}, nil
+        },
+        RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"scoped.store"}},
+    )
+
+    serviceContainer.MustRegisterScoped(
+        "scoped.store",
+        func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            return &closeOrderServiceB{}, nil
+        },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    )
+
+    verifyErr := serviceContainer.(declaredTeardownVerifier).VerifyDeclaredTeardownDependencies()
+    if false == errors.Is(verifyErr, ErrTeardownDependencyIsScoped) {
+        t.Fatalf("expected the verification to refuse the dependency on a scoped service with ErrTeardownDependencyIsScoped, got %v", verifyErr)
+    }
+}
+
+func TestContainer_Close_WavesTheReplacedInstancesCloseOneAfterTheOther(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var running, peak, closed atomic.Int64
+
+    for _, serviceName := range []string{"app.replaced.first", "app.replaced.second"} {
+        if registerErr := serviceContainer.Register(
+            serviceName,
+            func(resolver containercontract.Resolver) (*concurrentCloser, error) {
+                return &concurrentCloser{running: &running, peak: &peak, closed: &closed}, nil
+            },
+            RegisterOptions{TypeRegistrationDisabled: true},
+        ); nil != registerErr {
+            t.Fatalf("unexpected register error: %v", registerErr)
+        }
+
+        if _, getErr := serviceContainer.Get(t.Context(), serviceName); nil != getErr {
+            t.Fatalf("unexpected get error: %v", getErr)
+        }
+
+        if overrideErr := serviceContainer.OverrideProtectedInstance(serviceName, &closeOrderServiceA{recorder: &closeOrderRecorder{mutex: &sync.Mutex{}, closeSequence: &[]string{}}}, OverrideOptions{}); nil != overrideErr {
+            t.Fatalf("unexpected override error: %v", overrideErr)
+        }
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 2 != closed.Load() {
+        t.Fatalf("expected both replaced instances to be closed, got %d", closed.Load())
+    }
+
+    if 1 != peak.Load() {
+        t.Fatalf("expected the replaced instances to close one at a time, got %d at once", peak.Load())
+    }
+}
+
+type mutualConcurrentCloser struct {
+    running *atomic.Int64
+    peak    *atomic.Int64
+    closed  *atomic.Int64
+    partner *mutualConcurrentCloser
+}
+
+func (instance *mutualConcurrentCloser) CloseWithContext(closeContext context.Context) error {
+    return (&concurrentCloser{running: instance.running, peak: instance.peak, closed: instance.closed}).CloseWithContext(context.Background())
+}
+
+func TestContainer_Close_WavesAMutuallyHeldPairClosesOneAfterTheOther(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var running, peak, closed atomic.Int64
+
+    holder := &mutualConcurrentCloser{running: &running, peak: &peak, closed: &closed}
+    collaborator := &mutualConcurrentCloser{running: &running, peak: &peak, closed: &closed, partner: holder}
+    holder.partner = collaborator
+
+    if registerErr := serviceContainer.Register(
+        "app.mutual.holder",
+        func(resolver containercontract.Resolver) (*mutualConcurrentCloser, error) { return holder, nil },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.Register(
+        "app.mutual.collaborator",
+        func(resolver containercontract.Resolver) (*mutualConcurrentCloser, error) { return collaborator, nil },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    buildEveryRegisteredService(t, serviceContainer, "app.mutual.holder", "app.mutual.collaborator")
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 2 != closed.Load() {
+        t.Fatalf("expected both services of the pair to be closed, got %d", closed.Load())
+    }
+
+    if 1 != peak.Load() {
+        t.Fatalf("expected the mutually held pair to close one at a time, got %d at once", peak.Load())
+    }
+}
+
+type mutualWaveMate struct {
+    mate    *waveMateCloser
+    partner *mutualWaveMate
+}
+
+func (instance *mutualWaveMate) CloseWithContext(closeContext context.Context) error {
+    return instance.mate.CloseWithContext(context.Background())
+}
+
+func TestContainer_Close_WavesTwoUnrelatedMutuallyHeldPairsCloseAtOnce(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    firstStarted := make(chan struct{})
+    secondStarted := make(chan struct{})
+    mates := []*waveMateCloser{
+        {started: firstStarted, mateStarted: secondStarted, mateDeadline: time.Second},
+        {started: secondStarted, mateStarted: firstStarted, mateDeadline: time.Second},
+    }
+
+    for pairIndex := 0; pairIndex < 2; pairIndex = pairIndex + 1 {
+        plainMateStarted := make(chan struct{})
+        close(plainMateStarted)
+        plain := &waveMateCloser{started: make(chan struct{}), mateStarted: plainMateStarted, mateDeadline: time.Second}
+        first := &mutualWaveMate{mate: mates[pairIndex]}
+        second := &mutualWaveMate{mate: plain, partner: first}
+        first.partner = second
+
+        for memberIndex, member := range []*mutualWaveMate{first, second} {
+            captured := member
+            serviceName := fmt.Sprintf("app.pair%d.member%d", pairIndex, memberIndex)
+
+            if registerErr := serviceContainer.Register(
+                serviceName,
+                func(resolver containercontract.Resolver) (*mutualWaveMate, error) { return captured, nil },
+                RegisterOptions{TypeRegistrationDisabled: true},
+            ); nil != registerErr {
+                t.Fatalf("unexpected register error: %v", registerErr)
+            }
+
+            if _, getErr := serviceContainer.Get(t.Context(), serviceName); nil != getErr {
+                t.Fatalf("unexpected get error: %v", getErr)
+            }
+        }
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("expected the two groups to be closing at the same moment, got: %v", closeErr)
+    }
+}
+
+type budgetSleeper struct {
+    sleep time.Duration
+    label string
+}
+
+func (instance *budgetSleeper) CloseWithContext(_ context.Context) error {
+    time.Sleep(instance.sleep)
+
+    return nil
+}
+
+func (instance *budgetSleeper) Close() error {
+    return instance.CloseWithContext(context.Background())
+}
+
+type deadlineNotingCloser struct {
+    sawDeadline bool
+}
+
+func (instance *deadlineNotingCloser) CloseWithContext(closeContext context.Context) error {
+    _, instance.sawDeadline = closeContext.Deadline()
+
+    return nil
+}
+
+func (instance *deadlineNotingCloser) Close() error {
+    return instance.CloseWithContext(context.Background())
+}
+
+type refusingSleeper struct {
+    sleep time.Duration
+}
+
+func (instance *refusingSleeper) CloseWithContext(closeContext context.Context) error {
+    time.Sleep(instance.sleep)
+
+    return errors.New("the sleeper refused")
+}
+
+func teardownDeadlineOverrunOf(t *testing.T, serviceContainer containercontract.Container) exceptioncontract.Context {
+    t.Helper()
+
+    reporter, carriesDoor := serviceContainer.(interface {
+        TeardownDeadlineOverrun() exceptioncontract.Context
+    })
+    if false == carriesDoor {
+        t.Fatalf("expected the container to carry the deadline overrun door")
+    }
+
+    return reporter.TeardownDeadlineOverrun()
+}
+
+func closeContainerWithin(t *testing.T, serviceContainer containercontract.Container, budget time.Duration) error {
+    t.Helper()
+
+    closeContext, cancel := context.WithTimeout(context.Background(), budget)
+    defer cancel()
+
+    return serviceContainer.(interface {
+        CloseWithContext(context.Context) error
+    }).CloseWithContext(closeContext)
+}
+
+func durationOfRecord(t *testing.T, record exceptioncontract.Context, key string) time.Duration {
+    t.Helper()
+
+    text, isText := record[key].(string)
+    if false == isText {
+        t.Fatalf("expected %s rendered as a duration, got %v", key, record[key])
+    }
+
+    duration, parseErr := time.ParseDuration(text)
+    if nil != parseErr {
+        t.Fatalf("expected %s to parse as a duration, got %q: %v", key, text, parseErr)
+    }
+
+    return duration
+}
+
+func namedDurations(t *testing.T, record exceptioncontract.Context, key string) map[string]string {
+    t.Helper()
+
+    named, isNamed := record[key].(map[string]string)
+    if false == isNamed {
+        t.Fatalf("expected %s as durations by node, got %v", key, record[key])
+    }
+
+    return named
+}
+
+func TestContainer_CloseWithContext_AnOverrunNamesTheServiceThatSpentTheBudget(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    serviceContainer.MustRegister("app.eater", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 80 * time.Millisecond, label: "eater"}, nil }, RegisterOptions{})
+    MustFromResolver[*budgetSleeper](t.Context(), serviceContainer, "app.eater")
+
+    if closeErr := closeContainerWithin(t, serviceContainer, 40*time.Millisecond); nil != closeErr {
+        t.Fatalf("expected the overrun alone not to be a failure, got %v", closeErr)
+    }
+
+    record := teardownDeadlineOverrunOf(t, serviceContainer)
+    if nil == record {
+        t.Fatalf("expected a teardown that ran past its deadline to keep a record")
+    }
+
+    if _, named := namedDurations(t, record, "spentBy")["service:app.eater"]; false == named {
+        t.Fatalf("expected the closer running when the deadline passed to be named, got %v", record)
+    }
+
+    if starved, _ := record["starved"].([]string); 0 != len(starved) {
+        t.Fatalf("expected no closer reached after the deadline, got %v", starved)
+    }
+
+    if spent := durationOfRecord(t, record, "spent"); spent < 80*time.Millisecond {
+        t.Fatalf("expected the whole teardown spent at least the eater's eighty milliseconds, got %v", spent)
+    }
+
+    if budget := durationOfRecord(t, record, "budget"); budget > 40*time.Millisecond || 0 >= budget {
+        t.Fatalf("expected the budget recorded as what was left of forty milliseconds, got %v", budget)
+    }
+}
+
+func TestContainer_ATeardownReachedWithTheBudgetGoneRecordsAZeroBudget(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    closer := &deadlineNotingCloser{}
+    serviceContainer.MustRegister("app.x", func(_ containercontract.Resolver) (*deadlineNotingCloser, error) { return closer, nil }, RegisterOptions{TypeRegistrationDisabled: true})
+    MustFromResolver[*deadlineNotingCloser](t.Context(), serviceContainer, "app.x")
+
+    closeContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    if closeErr := serviceContainer.(containercontract.ContextCloser).CloseWithContext(closeContext); nil != closeErr {
+        t.Fatalf("expected a spent budget alone not to fail the teardown, got %v", closeErr)
+    }
+
+    if false == closer.sawDeadline {
+        t.Fatalf("expected the closer handed the teardown's deadline")
+    }
+
+    record := teardownDeadlineOverrunOf(t, serviceContainer)
+    if nil == record {
+        t.Fatalf("expected a teardown reached with the budget gone to keep a record")
+    }
+
+    if "0s" != record["budget"] {
+        t.Fatalf("expected the budget floored at zero, got %v", record["budget"])
+    }
+
+    if starved, _ := record["starved"].([]string); "[service:app.x]" != fmt.Sprint(starved) {
+        t.Fatalf("expected the one closer reached after the deadline starved, got %v", record)
+    }
+
+    if 0 != len(namedDurations(t, record, "spentBy")) {
+        t.Fatalf("expected nothing named as running when the deadline passed, got %v", record)
+    }
+}
+
+func TestContainer_TeardownDeadlineOverrunAnswersItsOwnCopyOfTheRecord(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    serviceContainer.MustRegister("app.slow", func(_ containercontract.Resolver) (*refusingSleeper, error) { return &refusingSleeper{sleep: 30 * time.Millisecond}, nil }, RegisterOptions{TypeRegistrationDisabled: true})
+    MustFromResolver[*refusingSleeper](t.Context(), serviceContainer, "app.slow")
+
+    closeErr := closeContainerWithin(t, serviceContainer, 5*time.Millisecond)
+    if nil == closeErr {
+        t.Fatalf("expected the refusing closer to fail the teardown")
+    }
+
+    var melodyErr *exception.Error
+    if false == errors.As(closeErr, &melodyErr) {
+        t.Fatalf("expected the failure to carry the record, got %T", closeErr)
+    }
+
+    errorRecord, carriesRecord := melodyErr.Context()["deadline"].(exceptioncontract.Context)
+    if false == carriesRecord {
+        t.Fatalf("expected the error to carry the deadline record, got %v", melodyErr.Context())
+    }
+
+    doorRecord := teardownDeadlineOverrunOf(t, serviceContainer)
+    if nil == doorRecord {
+        t.Fatalf("expected the door to answer the record of the overrun")
+    }
+
+    if _, named := namedDurations(t, errorRecord, "spentBy")["service:app.slow"]; false == named {
+        t.Fatalf("expected the error's record to name the closer running when the deadline passed, got %v", errorRecord)
+    }
+
+    doorRecord["spentBy"] = "edited by a reader"
+    doorRecord["starved"] = []string{"edited by a reader"}
+
+    if _, named := namedDurations(t, errorRecord, "spentBy")["service:app.slow"]; false == named {
+        t.Fatalf("expected the error's record untouched by an edit of what the door answered, got %v", errorRecord)
+    }
+
+    if starved, _ := errorRecord["starved"].([]string); 0 != len(starved) {
+        t.Fatalf("expected the error's starved list untouched by an edit of what the door answered, got %v", starved)
+    }
+
+    secondRecord := teardownDeadlineOverrunOf(t, serviceContainer)
+    if _, named := namedDurations(t, secondRecord, "spentBy")["service:app.slow"]; false == named {
+        t.Fatalf("expected a second reader of the door untouched by the first reader's edit, got %v", secondRecord)
+    }
+}
+
+func TestContainer_CloseWithContext_AServiceReachedWithTheBudgetSpentIsNamedStarved(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
+
+    serviceContainer.MustRegister("app.fast", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 0, label: "fast"}, nil }, RegisterOptions{TypeRegistrationDisabled: true})
+    serviceContainer.MustRegister("app.eater", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 80 * time.Millisecond, label: "eater"}, nil }, RegisterOptions{TypeRegistrationDisabled: true})
+    MustFromResolver[*budgetSleeper](t.Context(), serviceContainer, "app.fast")
+    MustFromResolver[*budgetSleeper](t.Context(), serviceContainer, "app.eater")
+
+    if closeErr := closeContainerWithin(t, serviceContainer, 40*time.Millisecond); nil != closeErr {
+        t.Fatalf("expected the overrun alone not to be a failure, got %v", closeErr)
+    }
+
+    record := teardownDeadlineOverrunOf(t, serviceContainer)
+    if nil == record {
+        t.Fatalf("expected a record of the overrun")
+    }
+
+    starved, _ := record["starved"].([]string)
+    if 1 != len(starved) || "service:app.fast" != starved[0] {
+        t.Fatalf("expected the service reached after the deadline named starved, got %v", record)
+    }
+
+    if _, named := namedDurations(t, record, "spentBy")["service:app.eater"]; false == named {
+        t.Fatalf("expected the eater named as the closer that spent the budget, got %v", record)
+    }
+
+    if _, timed := namedDurations(t, record, "durations")["service:app.fast"]; false == timed {
+        t.Fatalf("expected every close timed, the starved one included, got %v", record)
+    }
+}
+
+func TestContainer_CloseWithContext_WavesTwoClosersOfOneWaveThatOverlapAreBothNamed(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    serviceContainer.MustRegister("app.first", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 80 * time.Millisecond, label: "first"}, nil }, RegisterOptions{TypeRegistrationDisabled: true})
+    serviceContainer.MustRegister("app.second", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 80 * time.Millisecond, label: "second"}, nil }, RegisterOptions{TypeRegistrationDisabled: true})
+    MustFromResolver[*budgetSleeper](t.Context(), serviceContainer, "app.first")
+    MustFromResolver[*budgetSleeper](t.Context(), serviceContainer, "app.second")
+
+    if closeErr := closeContainerWithin(t, serviceContainer, 40*time.Millisecond); nil != closeErr {
+        t.Fatalf("expected the overrun alone not to be a failure, got %v", closeErr)
+    }
+
+    record := teardownDeadlineOverrunOf(t, serviceContainer)
+    if nil == record {
+        t.Fatalf("expected a record of the overrun")
+    }
+
+    spentBy := namedDurations(t, record, "spentBy")
+    if _, named := spentBy["service:app.first"]; false == named {
+        t.Fatalf("expected the first closer named, got %v", record)
+    }
+
+    if _, named := spentBy["service:app.second"]; false == named {
+        t.Fatalf("expected the second closer named beside it, got %v", record)
+    }
+
+    if spent := durationOfRecord(t, record, "spent"); spent >= 160*time.Millisecond {
+        t.Fatalf("expected the two closers to overlap in one wave, got a teardown of %v", spent)
+    }
+}
+
+func TestContainer_CloseWithContext_ATeardownThatClosedNothingKeepsNoOverrunRecord(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    spentContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    if closeErr := serviceContainer.(interface {
+        CloseWithContext(context.Context) error
+    }).CloseWithContext(spentContext); nil != closeErr {
+        t.Fatalf("expected a clean close of an empty container, got %v", closeErr)
+    }
+
+    if record := serviceContainer.(interface {
+        TeardownDeadlineOverrun() exceptioncontract.Context
+    }).TeardownDeadlineOverrun(); nil != record {
+        t.Fatalf("expected no overrun record for a teardown that closed nothing, got %v", record)
+    }
+}
+
+func TestContainer_CloseWithContext_AFailureUnderAnOverrunCarriesTheDeadlineRecordBesideTheFailures(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    serviceContainer.MustRegister("app.eater", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 80 * time.Millisecond, label: "eater"}, nil }, RegisterOptions{})
+    serviceContainer.MustRegister("app.failing", func(_ containercontract.Resolver) (*failingCloser, error) { return &failingCloser{}, nil }, RegisterOptions{})
+    MustFromResolver[*budgetSleeper](t.Context(), serviceContainer, "app.eater")
+    MustFromResolver[*failingCloser](t.Context(), serviceContainer, "app.failing")
+
+    closeErr := closeContainerWithin(t, serviceContainer, 40*time.Millisecond)
+    if nil == closeErr {
+        t.Fatalf("expected the failing close reported")
+    }
+
+    errorContext := exception.LogContext(closeErr, exception.LogContextOptions{})
+
+    failures, hasFailures := errorContext["failures"].(map[string]string)
+    if false == hasFailures || "" == failures["service:app.failing"] {
+        t.Fatalf("expected the failure map beside the record, got %v", errorContext)
+    }
+
+    record, hasRecord := errorContext["deadline"].(exceptioncontract.Context)
+    if false == hasRecord {
+        t.Fatalf("expected the deadline record beside the failures, got %v", errorContext)
+    }
+
+    if _, named := namedDurations(t, record, "spentBy")["service:app.eater"]; false == named {
+        t.Fatalf("expected the eater named in the record carried by the error, got %v", record)
+    }
+}
+
+func TestContainer_CloseWithContext_ATeardownWithinItsBudgetLeavesNoDeadlineRecord(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    serviceContainer.MustRegister("app.fast", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 0, label: "fast"}, nil }, RegisterOptions{})
+    MustFromResolver[*budgetSleeper](t.Context(), serviceContainer, "app.fast")
+
+    if closeErr := closeContainerWithin(t, serviceContainer, time.Second); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if record := teardownDeadlineOverrunOf(t, serviceContainer); nil != record {
+        t.Fatalf("expected no record for a teardown inside its budget, got %v", record)
+    }
+}
+
+func TestContainer_Close_WithoutADeadlineLeavesNoDeadlineRecord(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    serviceContainer.MustRegister("app.eater", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 20 * time.Millisecond, label: "eater"}, nil }, RegisterOptions{})
+    MustFromResolver[*budgetSleeper](t.Context(), serviceContainer, "app.eater")
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if record := teardownDeadlineOverrunOf(t, serviceContainer); nil != record {
+        t.Fatalf("expected no record for a close with no deadline, got %v", record)
+    }
+}
+
+type plainValueService struct {
+    label string
+}
+
+func TestContainer_CloseWithContext_ANonCloserAndADuplicateValueAreNotRecorded(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    eater := &budgetSleeper{sleep: 80 * time.Millisecond, label: "eater"}
+
+    serviceContainer.MustRegister("app.eater", func(_ containercontract.Resolver) (*budgetSleeper, error) { return eater, nil }, RegisterOptions{TypeRegistrationDisabled: true})
+    serviceContainer.MustRegister("app.eater.again", func(_ containercontract.Resolver) (*budgetSleeper, error) { return eater, nil }, RegisterOptions{TypeRegistrationDisabled: true})
+    serviceContainer.MustRegister("app.plain", func(_ containercontract.Resolver) (*plainValueService, error) { return &plainValueService{label: "plain"}, nil }, RegisterOptions{})
+    MustFromResolver[*budgetSleeper](t.Context(), serviceContainer, "app.eater")
+    MustFromResolver[*budgetSleeper](t.Context(), serviceContainer, "app.eater.again")
+    MustFromResolver[*plainValueService](t.Context(), serviceContainer, "app.plain")
+
+    if closeErr := closeContainerWithin(t, serviceContainer, 40*time.Millisecond); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    record := teardownDeadlineOverrunOf(t, serviceContainer)
+    if nil == record {
+        t.Fatalf("expected a record of the overrun")
+    }
+
+    if durations := namedDurations(t, record, "durations"); 1 != len(durations) {
+        t.Fatalf("expected exactly the one close that ran timed, got %v", durations)
+    }
+}
+
+type failingCloser struct{}
+
+func (instance *failingCloser) CloseWithContext(closeContext context.Context) error {
+    return errors.New("the close refused")
+}
+
+type scopedOnlyService struct {
+    label string
+}
+
+func (instance *scopedOnlyService) CloseWithContext(closeContext context.Context) error { return nil }
+
+func TestContainer_VerifyDeclaredTeardownDependencies_RefusesADeclaredDependencyOnAScopedTypeAsScoped(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    if registerErr := serviceContainer.Register(
+        "app.declarer",
+        func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{}, nil },
+        RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*scopedOnlyService]()}},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    serviceContainer.MustRegisterScoped(
+        "app.scoped",
+        func(_ containercontract.Resolver) (*scopedOnlyService, error) { return &scopedOnlyService{label: "scoped"}, nil },
+        RegisterOptions{},
+    )
+
+    verifyErr := serviceContainer.(declaredTeardownVerifier).VerifyDeclaredTeardownDependencies()
+    if false == errors.Is(verifyErr, ErrTeardownDependencyIsScoped) {
+        t.Fatalf("expected the dependency on a scoped type to refuse the verification as scoped, got %v", verifyErr)
+    }
+}
+
+func TestContainer_ADeclarationOnATypeRefusesTheTypeResolutionClosingARing(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    serviceContainer.MustRegister(
+        "app.declarer",
+        func(_ containercontract.Resolver) (*poolDeclarerService, error) { return &poolDeclarerService{label: "declarer"}, nil },
+        RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*sharedPoolService]()}},
+    )
+
+    serviceContainer.MustRegister(
+        "app.pool.first",
+        func(resolver containercontract.Resolver) (*sharedPoolService, error) {
+            if _, resolveErr := resolver.Get(resolver.Runtime().Context(), "app.declarer"); nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return &sharedPoolService{label: "first"}, nil
+        },
+        RegisterOptions{TypeRegistrationRelaxed: true},
+    )
+
+    if _, getErr := serviceContainer.GetByType(t.Context(), reflect.TypeOf((*sharedPoolService)(nil))); false == errors.Is(getErr, ErrCircularDependency) {
+        t.Fatalf("expected the type resolution closing the ring with the declaration refused, got %v", getErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("expected a clean teardown, got %v", closeErr)
+    }
+}
+
+type capturedDeclarerPool struct {
+    declarer *poolDeclarerService
+}
+
+func (instance *capturedDeclarerPool) CloseWithContext(closeContext context.Context) error {
+    return nil
+}
+
+func TestContainer_Close_WavesACapturedPointerBackAgainstATypeDeclarationIsNoRing(t *testing.T) {
+    for _, byType := range []bool{true, false} {
+        serviceContainer := NewContainer(ContainerConfig{})
+        declarerInstance := &poolDeclarerService{label: "declarer"}
+
+        option := RegisterOptions{TeardownDependencyNames: []string{"app.pool"}}
+        if true == byType {
+            option = RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*capturedDeclarerPool]()}}
+        }
+
+        serviceContainer.MustRegister(
+            "app.declarer",
+            func(_ containercontract.Resolver) (*poolDeclarerService, error) { return declarerInstance, nil },
+            option,
+        )
+
+        serviceContainer.MustRegister(
+            "app.pool",
+            func(_ containercontract.Resolver) (*capturedDeclarerPool, error) {
+                return &capturedDeclarerPool{declarer: declarerInstance}, nil
+            },
+            RegisterOptions{},
+        )
+
+        if verifyErr := serviceContainer.(declaredTeardownVerifier).VerifyDeclaredTeardownDependencies(); nil != verifyErr {
+            t.Fatalf("byType=%v verify: %v", byType, verifyErr)
+        }
+
+        MustFromResolver[*poolDeclarerService](t.Context(), serviceContainer, "app.declarer")
+        MustFromResolver[*capturedDeclarerPool](t.Context(), serviceContainer, "app.pool")
+
+        plan := serviceContainer.(teardownPlanner).TeardownPlan()
+
+        for _, entry := range plan {
+            if "service:app.pool" == entry.NodeKey && 0 != len(entry.Dependencies) {
+                t.Fatalf("byType=%v: the held pointer back was written as an inference over the declaration it contradicts: %v", byType, entry.Dependencies)
+            }
+        }
+
+        if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+            t.Fatalf("byType=%v: expected a clean teardown in waves, got %v", byType, closeErr)
+        }
+    }
+}
+
+func TestContainer_TeardownPlan_AResolutionBetweenTwoNamesOfOneInstanceIsNoEdge(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    serviceContainer.MustRegister(
+        "app.a",
+        func(_ containercontract.Resolver) (*poolDeclarerService, error) { return &poolDeclarerService{label: "a"}, nil },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    )
+
+    serviceContainer.MustRegister(
+        "app.b",
+        func(resolver containercontract.Resolver) (*poolDeclarerService, error) {
+            value, resolveErr := resolver.Get(resolver.Runtime().Context(), "app.a")
+            if nil != resolveErr {
+                return nil, resolveErr
+            }
+
+            return value.(*poolDeclarerService), nil
+        },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    )
+
+    MustFromResolver[*poolDeclarerService](t.Context(), serviceContainer, "app.b")
+
+    for _, entry := range serviceContainer.(teardownPlanner).TeardownPlan() {
+        if 0 != len(entry.Dependencies) {
+            t.Fatalf("%s is listed as closed before %v — one instance under two names, ordered against itself", entry.NodeKey, entry.Dependencies)
+        }
+    }
+}
+
+func TestContainer_Close_TheViewLeavesNoExpandedTypeEdgeBehindOnTheSequentialPath(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
+
+    serviceContainer.MustRegister(
+        "app.declarer",
+        func(_ containercontract.Resolver) (*poolDeclarerService, error) { return &poolDeclarerService{label: "declarer"}, nil },
+        RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*sharedPoolService]()}},
+    )
+
+    serviceContainer.MustRegister(
+        "app.pool.first",
+        func(_ containercontract.Resolver) (*sharedPoolService, error) {
+            return &sharedPoolService{label: "first"}, nil
+        },
+        RegisterOptions{TypeRegistrationRelaxed: true},
+    )
+
+    MustFromResolver[*poolDeclarerService](t.Context(), serviceContainer, "app.declarer")
+    MustFromResolver[*sharedPoolService](t.Context(), serviceContainer, "app.pool.first")
+
+    serviceContainer.(interface {
+        TeardownPlan() []containercontract.TeardownPlanEntry
+    }).TeardownPlan()
+
+    concrete := serviceContainer.(*container)
+    concrete.mutex.Lock()
+    declarerEdges := len(concrete.dependencyGraph["service:app.declarer"])
+    concrete.mutex.Unlock()
+
+    if 0 != declarerEdges {
+        t.Fatalf("expected the view to write no expanded edge into the graph, got %d edges from the declarer", declarerEdges)
+    }
+
+    serviceContainer.MustRegister(
+        "app.pool.second",
+        func(_ containercontract.Resolver) (*sharedPoolService, error) { return &sharedPoolService{label: "second"}, nil },
+        RegisterOptions{TypeRegistrationRelaxed: true},
+    )
+
+    MustFromResolver[*sharedPoolService](t.Context(), serviceContainer, "app.pool.second")
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("expected a clean teardown once the declaration turned ambiguous, got %v", closeErr)
+    }
+}
+
+type contextDoorOnlyService struct {
+    closes      int
+    hadDeadline bool
+}
+
+func (instance *contextDoorOnlyService) CloseWithContext(closeContext context.Context) error {
+    instance.closes = instance.closes + 1
+    _, instance.hadDeadline = closeContext.Deadline()
+
+    return nil
+}
+
+func TestContainer_Close_ClosesAServiceThatCarriesOnlyCloseWithContextAndHandsItTheDeadline(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    service := &contextDoorOnlyService{}
+
+    MustRegister[*contextDoorOnlyService](
+        serviceContainer,
+        "context.door.only",
+        func(resolver containercontract.Resolver) (*contextDoorOnlyService, error) {
+            return service, nil
+        },
+        RegisterOptions{},
+    )
+    _ = MustFromResolver[*contextDoorOnlyService](t.Context(), serviceContainer, "context.door.only")
+
+    if closeErr := closeContainerWithin(t, serviceContainer, time.Second); nil != closeErr {
+        t.Fatalf("expected a clean teardown, got %v", closeErr)
+    }
+
+    if 1 != service.closes {
+        t.Fatalf("expected the service carrying only CloseWithContext to be closed once, got %d closes", service.closes)
+    }
+
+    if false == service.hadDeadline {
+        t.Fatalf("expected the teardown's deadline to reach the service through its only door")
+    }
+}
+
+type typedNilCloseErrorService struct {
+    closeCount int
+}
+
+func (instance *typedNilCloseErrorService) CloseWithContext(closeContext context.Context) error {
+    instance.closeCount++
+
+    var refusal *exception.Error
+
+    return refusal
+}
+
+func TestContainerClose_ATypedNilCloseErrorIsReadAsASuccessfulClose(t *testing.T) {
+    containerInstance := NewContainer(ContainerConfig{})
+    service := &typedNilCloseErrorService{}
+
+    registerErr := Register[*typedNilCloseErrorService](
+        containerInstance,
+        "service.typednil",
+        func(resolver containercontract.Resolver) (*typedNilCloseErrorService, error) {
+            return service, nil
+        },
+        RegisterOptions{},
+    )
+    if nil != registerErr {
+        t.Fatalf("register: %v", registerErr)
+    }
+
+    if _, resolveErr := FromResolver[*typedNilCloseErrorService](t.Context(), containerInstance, "service.typednil"); nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
+    }
+
+    if closeErr := containerInstance.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("expected the typed nil to read as a successful close, got %v", closeErr)
+    }
+
+    if 1 != service.closeCount {
+        t.Fatalf("expected the service to be closed exactly once, closed %d times", service.closeCount)
+    }
+}
+
+func TestRecordCloseFailureDetails_ATypedNilErrorWritesIntoNoNilMap(t *testing.T) {
+    failureDetails := map[string]exceptioncontract.Context{}
+    var refusal *exception.Error
+
+    recordCloseFailureDetails(failureDetails, "service:typednil", refusal, "typed nil", defaultCloseFailureStackBytes())
+
+    if 0 != len(failureDetails) {
+        t.Fatalf("expected a typed nil, which carries no context, to book no details, got %v", failureDetails)
+    }
+}
+
+func TestBoundedCloseFailureDetail_CutsOnARuneBoundary(t *testing.T) {
+    /* one filler byte short of the limit, then a three-byte rune straddling it */
+    detail := strings.Repeat("a", CloseFailureStackBytesRule().Default-1) + strings.Repeat("\u4e16", 64)
+
+    bounded, isText := boundedCloseFailureDetail(detail, defaultCloseFailureStackBytes()).(string)
+    if false == isText {
+        t.Fatalf("the detail came back as %T, wanted the cut text", boundedCloseFailureDetail(detail, defaultCloseFailureStackBytes()))
+    }
+
+    kept := strings.Split(bounded, "\n\t\u2026 cut,")[0]
+
+    if false == utf8.ValidString(kept) {
+        t.Fatalf("the cut left invalid utf8: %q", kept[len(kept)-8:])
+    }
+
+    if CloseFailureStackBytesRule().Default < len(kept) {
+        t.Fatalf("the cut kept %d bytes, over the limit of %d", len(kept), CloseFailureStackBytesRule().Default)
+    }
+}
+
+func TestBoundedCloseFailureDetail_KeepsTheLimitPastAnInvalidByte(t *testing.T) {
+    for _, invalidAt := range []int{0, 100, CloseFailureStackBytesRule().Default - 8} {
+        detail := strings.Repeat("a", invalidAt) + "\xff" + strings.Repeat("a", 2*CloseFailureStackBytesRule().Default)
+
+        bounded, isText := boundedCloseFailureDetail(detail, defaultCloseFailureStackBytes()).(string)
+        if false == isText {
+            t.Fatalf("the detail came back as %T, wanted the cut text", boundedCloseFailureDetail(detail, defaultCloseFailureStackBytes()))
+        }
+
+        kept := strings.Split(bounded, "\n\t\u2026 cut,")[0]
+
+        if CloseFailureStackBytesRule().Default != len(kept) {
+            t.Fatalf("an invalid byte at %d cut the detail to %d bytes, wanted the limit of %d", invalidAt, len(kept), CloseFailureStackBytesRule().Default)
+        }
+    }
+
+    detail := strings.Repeat("a", CloseFailureStackBytesRule().Default-8) + strings.Repeat("\x80", 20) + strings.Repeat("a", CloseFailureStackBytesRule().Default)
+    bounded, _ := boundedCloseFailureDetail(detail, defaultCloseFailureStackBytes()).(string)
+    if kept := strings.Split(bounded, "\n\t\u2026 cut,")[0]; CloseFailureStackBytesRule().Default-(utf8.UTFMax-1) != len(kept) {
+        t.Fatalf("a run of continuation bytes across the limit cut the detail to %d bytes, wanted the three-byte bound at %d", len(kept), CloseFailureStackBytesRule().Default-(utf8.UTFMax-1))
+    }
+}
+
+type doublyPanickingCloseValue struct{}
+
+func (instance doublyPanickingCloseValue) Error() string {
+    panic(panickingErrorMessage{})
+}
+
+type doublyPanickingCloseService struct{}
+
+func (instance *doublyPanickingCloseService) CloseWithContext(closeContext context.Context) error {
+    panic(doublyPanickingCloseValue{})
+}
+
+func TestContainer_Close_APanicValueWhoseRenderingPanicsIsRecordedInsteadOfEscapingTheTeardown(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    MustRegister[*doublyPanickingCloseService](serviceContainer, "service.doubly.panics", func(resolver containercontract.Resolver) (*doublyPanickingCloseService, error) {
+        return &doublyPanickingCloseService{}, nil
+    }, RegisterOptions{})
+
+    MustFromResolver[*doublyPanickingCloseService](t.Context(), serviceContainer, "service.doubly.panics")
+
+    closeErr := serviceContainer.CloseWithContext(context.Background())
+
+    typedError, isTyped := closeErr.(*exception.Error)
+    if false == isTyped {
+        t.Fatalf("expected the close failure to be recorded, got %T %v", closeErr, closeErr)
+    }
+
+    failures, _ := typedError.Context()["failures"].(map[string]string)
+    if "service close panicked" != failures["service:service.doubly.panics"] {
+        t.Fatalf("expected the panic recorded against its service, got %+v", typedError.Context())
+    }
+}
+
+func TestContainer_ARingClosedThroughALazyHandleIsRefusedAtTheResolutionThatClosesIt(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{}).(*container)
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
+
+    registerLazyRing(t, serviceContainer, recorder, true, false, RegisterOptions{})
+
+    holder, getErr := FromResolver[*lazyRingHolder](t.Context(), serviceContainer, "app.lazy.holder")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, resolveErr := holder.partner.resolveOver(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
+        t.Fatalf("expected the lazy resolution closing the ring refused with ErrCircularDependency, got %v", resolveErr)
+    }
+
+    serviceContainer.mutex.Lock()
+    _, partnerBuilt := serviceContainer.instances["app.lazy.partner"]
+    partnerToHolder := hasDependencyEdge(serviceContainer.dependencyGraph, "service:app.lazy.partner", "service:app.lazy.holder")
+    cycleNodeKeys := serviceContainer.teardownPlanLocked().cycleNodeKeys
+    serviceContainer.mutex.Unlock()
+
+    if true == partnerBuilt || true == partnerToHolder {
+        t.Fatalf("expected neither the partner nor the edge closing the ring recorded, built=%v edge=%v", partnerBuilt, partnerToHolder)
+    }
+
+    if 0 != len(cycleNodeKeys) {
+        t.Fatalf("expected the plan to hold no cycle, got %v", cycleNodeKeys)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("expected a clean teardown, got %v", closeErr)
+    }
+
+    if 1 != len(closeSequence) || "holder" != closeSequence[0] {
+        t.Fatalf("expected the holder alone closed, got %v", closeSequence)
+    }
+}
+
+func TestContainer_ADeclaredEdgeRefusesTheLazyResolutionThatWouldCloseARing(t *testing.T) {
+    for _, declaration := range []struct {
+        name   string
+        option containercontract.RegisterOptions
+    }{
+        {name: "byType", option: RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*lazyRingPartner]()}}},
+        {name: "byName", option: RegisterOptions{TeardownDependencyNames: []string{"app.lazy.partner"}}},
+    } {
+        t.Run(declaration.name, func(t *testing.T) {
+            serviceContainer := NewContainer(ContainerConfig{}).(*container)
+
+            var mutex sync.Mutex
+            closeSequence := make([]string, 0, 2)
+            recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
+
+            registerLazyRing(t, serviceContainer, recorder, true, true, declaration.option)
+
+            holder, getErr := FromResolver[*lazyRingHolder](t.Context(), serviceContainer, "app.lazy.holder")
+            if nil != getErr {
+                t.Fatalf("unexpected get error: %v", getErr)
+            }
+
+            if _, resolveErr := holder.partner.resolveOver(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
+                t.Fatalf("expected the resolution closing the declared ring refused with ErrCircularDependency, got %v", resolveErr)
+            }
+
+            if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+                t.Fatalf("expected a clean teardown, got %v", closeErr)
+            }
+        })
+    }
+}
+
+func TestContainer_Close_ALazyEdgeThatClosesNoRingStillOrders(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{}).(*container)
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
+
+    registerLazyRing(t, serviceContainer, recorder, false, false, RegisterOptions{})
+
+    holder, getErr := FromResolver[*lazyRingHolder](t.Context(), serviceContainer, "app.lazy.holder")
+    if nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if _, resolveErr := holder.partner.resolveOver(t.Context()); nil != resolveErr {
+        t.Fatalf("unexpected lazy resolution error: %v", resolveErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("expected a clean teardown, got %v", closeErr)
+    }
+
+    if 2 != len(closeSequence) || "holder" != closeSequence[0] || "partner" != closeSequence[1] {
+        t.Fatalf("expected the holder closed before the partner its handle resolved, got %v", closeSequence)
+    }
+}
+
+func TestContainer_ADeclaredRingIsRefusedAtTheDeclaration(t *testing.T) {
+    newDeclaredPair := func(t *testing.T) containercontract.Container {
+        t.Helper()
+
+        serviceContainer := NewContainer(ContainerConfig{})
+        serviceContainer.MustRegister("app.first", func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{}, nil }, RegisterOptions{TeardownDependencyNames: []string{"app.second"}})
+
+        return serviceContainer
+    }
+
+    t.Run("RegisterByName", func(t *testing.T) {
+        serviceContainer := newDeclaredPair(t)
+
+        registerErr := serviceContainer.Register("app.second", func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{}, nil }, RegisterOptions{TeardownDependencyNames: []string{"app.first"}})
+        if false == errors.Is(registerErr, ErrCircularDependency) {
+            t.Fatalf("expected the declaration closing the ring refused, got %v", registerErr)
+        }
+
+        if true == serviceContainer.Has("app.second") {
+            t.Fatalf("expected the refused registration not kept")
+        }
+    })
+
+    t.Run("RegisterByType", func(t *testing.T) {
+        serviceContainer := newDeclaredPair(t)
+
+        registerErr := serviceContainer.Register("app.second", func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{}, nil }, RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*closeOrderServiceA]()}})
+        if false == errors.Is(registerErr, ErrCircularDependency) {
+            t.Fatalf("expected the type declaration closing the ring refused, got %v", registerErr)
+        }
+    })
+
+    t.Run("DeclareTeardownDependency", func(t *testing.T) {
+        serviceContainer := newDeclaredPair(t)
+        serviceContainer.MustRegister("app.second", func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{}, nil }, RegisterOptions{})
+
+        declareErr := serviceContainer.(teardownDependencyDeclarer).DeclareTeardownDependency("app.second", []string{"app.first"})
+        if false == errors.Is(declareErr, ErrCircularDependency) {
+            t.Fatalf("expected the declaration closing the ring refused, got %v", declareErr)
+        }
+
+        concrete := serviceContainer.(*container)
+        concrete.mutex.Lock()
+        defer concrete.mutex.Unlock()
+
+        if true == hasDependencyEdge(concrete.dependencyGraph, "service:app.second", "service:app.first") || 1 != len(concrete.declaredTeardownEdges) {
+            t.Fatalf("expected nothing of the refused declaration kept, got %d declarations", len(concrete.declaredTeardownEdges))
+        }
+    })
+
+    t.Run("ARegistrationTurningOnAForwardTypeDeclaration", func(t *testing.T) {
+        serviceContainer := NewContainer(ContainerConfig{})
+        serviceContainer.MustRegister("app.first", func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{}, nil }, RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*closeOrderServiceB]()}})
+
+        registerErr := serviceContainer.Register("app.second", func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{}, nil }, RegisterOptions{TeardownDependencyNames: []string{"app.first"}})
+        if false == errors.Is(registerErr, ErrCircularDependency) {
+            t.Fatalf("expected the registration turning on the type declaration into a ring refused, got %v", registerErr)
+        }
+
+        if true == serviceContainer.Has("app.second") || true == serviceContainer.HasType(reflect.TypeFor[*closeOrderServiceB]()) {
+            t.Fatalf("expected the refused registration not kept")
+        }
+    })
+
+    t.Run("AResolutionByTypeAgainstADeclaration", func(t *testing.T) {
+        serviceContainer := NewContainer(ContainerConfig{})
+        serviceContainer.MustRegister("app.first", func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+            if _, getErr := resolver.GetByType(resolver.Runtime().Context(), reflect.TypeFor[*closeOrderServiceB]()); nil != getErr {
+                return nil, getErr
+            }
+
+            return &closeOrderServiceA{}, nil
+        }, RegisterOptions{})
+        serviceContainer.MustRegister("app.second", func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{}, nil }, RegisterOptions{TeardownDependencyNames: []string{"app.first"}})
+
+        if _, getErr := serviceContainer.Get(t.Context(), "app.first"); false == errors.Is(getErr, ErrCircularDependency) {
+            t.Fatalf("expected the resolution by type closing a ring with the declaration refused, got %v", getErr)
+        }
+    })
+
+    t.Run("AResolutionAgainstADeclaration", func(t *testing.T) {
+        serviceContainer := newDeclaredPair(t)
+        serviceContainer.MustRegister("app.second", func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+            if _, getErr := resolver.Get(resolver.Runtime().Context(), "app.first"); nil != getErr {
+                return nil, getErr
+            }
+
+            return &closeOrderServiceB{}, nil
+        }, RegisterOptions{})
+
+        if _, getErr := serviceContainer.Get(t.Context(), "app.second"); false == errors.Is(getErr, ErrCircularDependency) {
+            t.Fatalf("expected the resolution closing a ring with the declaration refused, got %v", getErr)
+        }
+    })
+}
+
+func TestContainer_AFailedLookupLeavesNoDependency(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{}).(*container)
+
+    serviceContainer.MustRegister("app.fallback", func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
+        if _, getErr := resolver.Get(resolver.Runtime().Context(), "app.optional"); nil == getErr {
+            t.Fatalf("expected the optional collaborator to be missing")
+        }
+
+        if _, getErr := resolver.GetByType(resolver.Runtime().Context(), reflect.TypeFor[*closeOrderServiceB]()); nil == getErr {
+            t.Fatalf("expected the optional collaborator's type to be missing")
+        }
+
+        return &closeOrderServiceA{}, nil
+    }, RegisterOptions{})
+
+    MustFromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.fallback")
+
+    serviceContainer.mutex.Lock()
+    leftEdges := len(serviceContainer.dependencyGraph["service:app.fallback"])
+    leftProvisional := len(serviceContainer.provisionalDependencyEdges)
+    serviceContainer.mutex.Unlock()
+
+    if 0 != leftEdges || 0 != leftProvisional {
+        t.Fatalf("expected the failed lookups to leave nothing, got %d edges and %d provisional entries", leftEdges, leftProvisional)
+    }
+
+    serviceContainer.MustRegister("app.optional", func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
+        if _, getErr := resolver.Get(resolver.Runtime().Context(), "app.fallback"); nil != getErr {
+            return nil, getErr
+        }
+
+        return &closeOrderServiceB{}, nil
+    }, RegisterOptions{})
+
+    if _, getErr := serviceContainer.Get(t.Context(), "app.optional"); nil != getErr {
+        t.Fatalf("expected the late collaborator to depend on the fallback, got %v", getErr)
+    }
+}
+
+func TestHoldProvisionalEdge_TheLastFailingHolderTakesTheEdgeBackAndAnAcquiredOneStays(t *testing.T) {
+    graph := make(map[string]map[string]struct{})
+    provisional := make(map[string]map[string]int)
+
+    firstRelease := holdProvisionalEdge(graph, provisional, "service:a", "service:b")
+    secondRelease := holdProvisionalEdge(graph, provisional, "service:a", "service:b")
+
+    firstRelease(false)
+    if false == hasDependencyEdge(graph, "service:a", "service:b") {
+        t.Fatalf("expected the edge kept while another resolution holds it")
+    }
+
+    secondRelease(false)
+    if true == hasDependencyEdge(graph, "service:a", "service:b") || 0 != len(provisional) {
+        t.Fatalf("expected the last failing holder to take the edge back")
+    }
+
+    acquiringRelease := holdProvisionalEdge(graph, provisional, "service:a", "service:b")
+    failingRelease := holdProvisionalEdge(graph, provisional, "service:a", "service:b")
+
+    acquiringRelease(true)
+    failingRelease(false)
+    if false == hasDependencyEdge(graph, "service:a", "service:b") || 0 != len(provisional) {
+        t.Fatalf("expected an acquired edge kept whatever the other holder answers")
+    }
+
+    if release := holdProvisionalEdge(graph, provisional, "service:a", "service:b"); nil != release {
+        release(false)
+    }
+
+    if false == hasDependencyEdge(graph, "service:a", "service:b") {
+        t.Fatalf("expected an acquired edge not held again, so a failing resolution cannot take it back")
+    }
+}
+
+func TestContainer_ADeclarationAcquiresAnEdgeAFailingResolutionHolds(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{}).(*container)
+
+    serviceContainer.mutex.Lock()
+    defer serviceContainer.mutex.Unlock()
+
+    release := holdProvisionalEdge(serviceContainer.dependencyGraph, serviceContainer.provisionalDependencyEdges, "service:app.first", "service:app.second")
+    serviceContainer.recordDeclaredTeardownEdgeLocked(declaredNameEdge("app.first", "app.second"))
+    release(false)
+
+    if false == hasDependencyEdge(serviceContainer.dependencyGraph, "service:app.first", "service:app.second") {
+        t.Fatalf("expected the declared edge kept after the resolution holding it failed")
+    }
+}
+
+func TestContainer_ASecondNameUnderATypeDoesNotUnfoldAResolvedEdge(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    serviceContainer.MustRegister("app.holder", func(resolver containercontract.Resolver) (*lazyRingHolder, error) {
+        return &lazyRingHolder{partnerByType: LazyByType[*lazyRingPartner](resolver)}, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true})
+
+    serviceContainer.MustRegister("app.partner", func(resolver containercontract.Resolver) (*lazyRingPartner, error) {
+        return &lazyRingPartner{holderHandle: Lazy[*lazyRingHolder](resolver, "app.holder")}, nil
+    }, RegisterOptions{TypeRegistrationRelaxed: true})
+
+    partner := MustFromResolver[*lazyRingPartner](t.Context(), serviceContainer, "app.partner")
+    holder := MustFromResolver[*lazyRingHolder](t.Context(), serviceContainer, "app.holder")
+
+    if _, resolveErr := holder.partnerByType.resolveOver(t.Context()); nil != resolveErr {
+        t.Fatalf("unexpected lazy resolution error: %v", resolveErr)
+    }
+
+    serviceContainer.MustRegister("app.partner.second", func(_ containercontract.Resolver) (*lazyRingPartner, error) { return &lazyRingPartner{}, nil }, RegisterOptions{TypeRegistrationRelaxed: true})
+
+    if _, resolveErr := partner.holderHandle.resolveOver(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
+        t.Fatalf("expected the ring closed after the second name refused with ErrCircularDependency, got %v", resolveErr)
+    }
+
+    dependentContainer := NewContainer(ContainerConfig{})
+
+    dependentContainer.MustRegister("app.holder", func(resolver containercontract.Resolver) (*lazyRingHolder, error) {
+        return &lazyRingHolder{partner: Lazy[*lazyRingPartner](resolver, "app.partner")}, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true})
+
+    dependentContainer.MustRegister("app.partner", func(resolver containercontract.Resolver) (*lazyRingPartner, error) {
+        holder, getErr := FromResolver[*lazyRingHolder](resolver.Runtime().Context(), resolver, "app.holder")
+        if nil != getErr {
+            return nil, getErr
+        }
+
+        return &lazyRingPartner{holder: holder}, nil
+    }, RegisterOptions{TypeRegistrationRelaxed: true})
+
+    builtPartner := MustFromResolverByType[*lazyRingPartner](t.Context(), dependentContainer)
+
+    dependentContainer.MustRegister("app.partner.second", func(_ containercontract.Resolver) (*lazyRingPartner, error) { return &lazyRingPartner{}, nil }, RegisterOptions{TypeRegistrationRelaxed: true})
+
+    if _, resolveErr := builtPartner.holder.partner.resolveOver(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
+        t.Fatalf("expected the ring closed onto a service built through its type refused with ErrCircularDependency, got %v", resolveErr)
+    }
+}
+
+func TestContainer_ADeclarationOnASameNamedTypeClosesNoRing(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    serviceContainer.MustRegister("app.alpha", localCollisionProviderFirst(), RegisterOptions{TeardownDependencyNames: []string{"app.declarer"}})
+
+    sameNamedType := reflect.TypeOf(localCollisionProviderSecond()).Out(0)
+
+    registerErr := serviceContainer.Register("app.declarer", func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{}, nil }, RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyTypes: []reflect.Type{sameNamedType}})
+    if nil != registerErr {
+        t.Fatalf("expected a declaration on a type nothing is registered under admitted, got %v", registerErr)
+    }
+
+    reversedContainer := NewContainer(ContainerConfig{})
+    reversedContainer.MustRegister("app.declarer", func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{}, nil }, RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyTypes: []reflect.Type{sameNamedType}})
+
+    if registerErr := reversedContainer.Register("app.alpha", localCollisionProviderFirst(), RegisterOptions{TeardownDependencyNames: []string{"app.declarer"}}); nil != registerErr {
+        t.Fatalf("expected the registration of a same-named type the declaration does not name admitted, got %v", registerErr)
+    }
+}
+
+func TestContainer_DeclareTeardownDependency_OrdersAServiceAgainstOneItCaptured(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 2)
+    recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
+
+    serviceContainer.MustRegister("app.bus", func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{recorder: recorder}, nil }, RegisterOptions{})
+    serviceContainer.MustRegister("app.transports", func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{recorder: recorder}, nil }, RegisterOptions{})
+
+    MustFromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.bus")
+    MustFromResolver[*closeOrderServiceB](t.Context(), serviceContainer, "app.transports")
+
+    if declareErr := serviceContainer.(teardownDependencyDeclarer).DeclareTeardownDependency("app.bus", []string{"app.transports"}); nil != declareErr {
+        t.Fatalf("unexpected declare error: %v", declareErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 2 != len(closeSequence) || "a" != closeSequence[0] || "b" != closeSequence[1] {
+        t.Fatalf("expected the declaring service closed before its dependency, got %v", closeSequence)
+    }
+}
+
+func TestContainer_DeclareTeardownDependency_RefusesWhatTheOptionRefuses(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    serviceContainer.MustRegister("app.bus", func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{}, nil }, RegisterOptions{})
+
+    declarer := serviceContainer.(teardownDependencyDeclarer)
+
+    cases := []struct {
+        serviceName    string
+        dependencyName string
+        cause          error
+    }{
+        {serviceName: "app.unknown", dependencyName: "app.bus", cause: ErrTeardownDependencyWasNeverRegistered},
+        {serviceName: "app.bus", dependencyName: "", cause: ErrTeardownDependencyNameIsRequired},
+        {serviceName: "app.bus", dependencyName: "app.bus", cause: ErrTeardownDependencyIsSelf},
+    }
+
+    for _, testCase := range cases {
+        if declareErr := declarer.DeclareTeardownDependency(testCase.serviceName, []string{testCase.dependencyName}); false == errors.Is(declareErr, testCase.cause) {
+            t.Fatalf("expected %v for %q -> %q, got %v", testCase.cause, testCase.serviceName, testCase.dependencyName, declareErr)
+        }
+    }
+
+    if verifyErr := serviceContainer.(declaredTeardownVerifier).VerifyDeclaredTeardownDependencies(); nil != verifyErr {
+        t.Fatalf("unexpected verify error: %v", verifyErr)
+    }
+
+    if declareErr := declarer.DeclareTeardownDependency("app.bus", []string{"app.never"}); nil != declareErr {
+        t.Fatalf("expected a dependency nothing registered yet to be admitted at the door, got %v", declareErr)
+    }
+
+    if verifyErr := serviceContainer.(declaredTeardownVerifier).VerifyDeclaredTeardownDependencies(); false == errors.Is(verifyErr, ErrTeardownDependencyWasNeverRegistered) {
+        t.Fatalf("expected the verification to refuse a dependency nothing registered, got %v", verifyErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); false == errors.Is(closeErr, ErrTeardownDependencyWasNeverRegistered) {
+        t.Fatalf("expected the teardown to report the dependency nothing registered, got %v", closeErr)
+    }
+
+    if declareErr := declarer.DeclareTeardownDependency("app.bus", []string{"app.other"}); false == errors.Is(declareErr, ErrContainerClosed) {
+        t.Fatalf("expected a closed container to refuse the declaration, got %v", declareErr)
+    }
+}
+
+func TestContainer_DeclareTeardownDependency_NilDeclaresNothingAndARefusedSliceRecordsNone(t *testing.T) {
+    for _, testCase := range []struct {
+        name            string
+        dependencyNames []string
+        expectedCause   error
+    }{
+        {name: "nil", dependencyNames: nil, expectedCause: nil},
+        {name: "second name refused", dependencyNames: []string{"app.transports", ""}, expectedCause: ErrTeardownDependencyNameIsRequired},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
+
+            var mutex sync.Mutex
+            closeSequence := make([]string, 0, 2)
+            recorder := &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}
+
+            serviceContainer.MustRegister("app.bus", func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{recorder: recorder}, nil }, RegisterOptions{})
+            serviceContainer.MustRegister("app.transports", func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{recorder: recorder}, nil }, RegisterOptions{})
+
+            MustFromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.bus")
+            MustFromResolver[*closeOrderServiceB](t.Context(), serviceContainer, "app.transports")
+
+            declarer := serviceContainer.(teardownDependencyDeclarer)
+
+            if declareErr := declarer.DeclareTeardownDependency("app.unknown", nil); false == errors.Is(declareErr, ErrTeardownDependencyWasNeverRegistered) {
+                t.Fatalf("expected an unregistered declaring service refused with nil names, got %v", declareErr)
+            }
+
+            declareErr := declarer.DeclareTeardownDependency("app.bus", testCase.dependencyNames)
+            if nil == testCase.expectedCause && nil != declareErr {
+                t.Fatalf("unexpected declare error: %v", declareErr)
+            }
+
+            if nil != testCase.expectedCause && false == errors.Is(declareErr, testCase.expectedCause) {
+                t.Fatalf("expected %v, got %v", testCase.expectedCause, declareErr)
+            }
+
+            if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+                t.Fatalf("unexpected close error: %v", closeErr)
+            }
+
+            if 2 != len(closeSequence) || "b" != closeSequence[0] || "a" != closeSequence[1] {
+                t.Fatalf("expected no edge recorded, the newest closed first, got %v", closeSequence)
+            }
+        })
+    }
+}
+
+type plainCloseOnlyService struct {
+    closeCalls atomic.Int32
+    closeErr   error
+}
+
+func (instance *plainCloseOnlyService) Close() error {
+    instance.closeCalls.Add(1)
+
+    return instance.closeErr
+}
+
+type plainCloseOnlyHolder interface {
+    Close() error
+}
+
+func TestRegister_AConcreteTypeCarryingCloseAloneIsRefusedAtEveryRegistrationDoor(t *testing.T) {
+    provider := func(_ containercontract.Resolver) (*plainCloseOnlyService, error) {
+        return &plainCloseOnlyService{}, nil
+    }
+    serviceType := reflect.TypeFor[*plainCloseOnlyService]()
+
+    doors := map[string]func(serviceContainer containercontract.Container) (error, bool){
+        "Register[T]": func(serviceContainer containercontract.Container) (error, bool) {
+            registerErr := Register[*plainCloseOnlyService](serviceContainer, "plain.close", provider, RegisterOptions{})
+
+            return registerErr, serviceContainer.Has("plain.close") || serviceContainer.HasType(serviceType)
+        },
+        "RegisterType[T]": func(serviceContainer containercontract.Container) (error, bool) {
+            registerErr := RegisterType[*plainCloseOnlyService](serviceContainer, provider, RegisterOptions{})
+
+            return registerErr, serviceContainer.HasType(serviceType)
+        },
+        "Registrar.Register": func(serviceContainer containercontract.Container) (error, bool) {
+            registerErr := serviceContainer.Register("plain.close", provider, RegisterOptions{})
+
+            return registerErr, serviceContainer.Has("plain.close") || serviceContainer.HasType(serviceType)
+        },
+        "RegisterScoped[T]": func(serviceContainer containercontract.Container) (error, bool) {
+            registerErr := RegisterScoped[*plainCloseOnlyService](serviceContainer, "plain.close", provider, RegisterOptions{})
+            scope := serviceContainer.NewScope()
+            defer func() {
+                _ = scope.CloseWithContext(context.Background())
+            }()
+
+            return registerErr, scope.Has("plain.close") || scope.HasType(serviceType)
+        },
+        "scope RegisterScoped": func(serviceContainer containercontract.Container) (error, bool) {
+            scope := serviceContainer.NewScope()
+            defer func() {
+                _ = scope.CloseWithContext(context.Background())
+            }()
+
+            registerErr := scope.(containercontract.ScopedRegistrar).RegisterScoped("plain.close", provider, RegisterOptions{})
+
+            return registerErr, scope.Has("plain.close") || scope.HasType(serviceType)
+        },
+    }
+
+    for door, register := range doors {
+        registerErr, leftRegistered := register(NewContainer(ContainerConfig{}))
+        if false == errors.Is(registerErr, ErrCloseDoorRequired) {
+            t.Fatalf("%s: expected ErrCloseDoorRequired, got %v", door, registerErr)
+        }
+
+        if true == leftRegistered {
+            t.Fatalf("%s: expected nothing registered under the refused name or type", door)
+        }
+
+        renderedContext := fmt.Sprintf("%v", registerErr.(*exception.Error).Context())
+        if false == strings.Contains(renderedContext, "plainCloseOnlyService") {
+            t.Fatalf("%s: expected the refusal to name the type, got %s", door, renderedContext)
+        }
+    }
+}
+
+func TestRegister_ACloseOnlyTypeIsAdmittedWithACloserAndClosedThroughIt(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    service := &plainCloseOnlyService{}
+
+    closerCalls := 0
+    MustRegister[*plainCloseOnlyService](
+        serviceContainer,
+        "plain.close",
+        func(_ containercontract.Resolver) (*plainCloseOnlyService, error) {
+            return service, nil
+        },
+        RegisterOptions{Closer: NewCloser(func(_ context.Context, value *plainCloseOnlyService) error {
+            closerCalls++
+
+            return nil
+        })},
+    )
+
+    if _, getErr := serviceContainer.Get(t.Context(), "plain.close"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != closerCalls || 0 != service.closeCalls.Load() {
+        t.Fatalf("expected the closer once and the plain Close never, got closer=%d Close=%d", closerCalls, service.closeCalls.Load())
+    }
+}
+
+func TestRegister_ATypeCarryingBothDoorsIsAdmittedAndClosedThroughTheContextDoor(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    service := &contextCloseRecorder{}
+
+    MustRegister[*contextCloseRecorder](serviceContainer, "both.doors", func(_ containercontract.Resolver) (*contextCloseRecorder, error) {
+        return service, nil
+    }, RegisterOptions{})
+
+    if _, getErr := serviceContainer.Get(t.Context(), "both.doors"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+    if 1 != service.contextCalls || 0 != service.plainCalls {
+        t.Fatalf("expected the context door once and Close never, got CloseWithContext=%d Close=%d", service.contextCalls, service.plainCalls)
+    }
+}
+
+func TestOverrideInstance_AValueCarryingCloseAloneIsRefusedUnlessTheRegistrationsCloserTakesIt(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    MustRegister[*contextCloseRecorder](serviceContainer, "overridden", func(_ containercontract.Resolver) (*contextCloseRecorder, error) {
+        return &contextCloseRecorder{}, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true})
+
+    overrideErr := serviceContainer.OverrideInstance("overridden", &plainCloseOnlyService{}, containercontract.OverrideOptions{})
+    if false == errors.Is(overrideErr, ErrCloseDoorRequired) {
+        t.Fatalf("expected the override refused with ErrCloseDoorRequired, got %v", overrideErr)
+    }
+
+    closedContainer := NewContainer(ContainerConfig{})
+    MustRegister[plainCloseOnlyHolder](closedContainer, "overridden", func(_ containercontract.Resolver) (plainCloseOnlyHolder, error) {
+        return &plainCloseOnlyService{}, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true, Closer: NewCloser(func(_ context.Context, value plainCloseOnlyHolder) error {
+        return value.Close()
+    })})
+
+    if overrideErr := closedContainer.OverrideInstance("overridden", &plainCloseOnlyService{}, containercontract.OverrideOptions{}); nil != overrideErr {
+        t.Fatalf("expected the closer to admit the override, got %v", overrideErr)
+    }
+}
+
+func TestScopeOverrideInstance_AValueCarryingCloseAloneIsRefusedOnlyWhenTheScopeClosesIt(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    MustRegister[*contextCloseRecorder](serviceContainer, "overridden", func(_ containercontract.Resolver) (*contextCloseRecorder, error) {
+        return &contextCloseRecorder{}, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true})
+
+    scope := serviceContainer.NewScope()
+    defer func() {
+        _ = scope.CloseWithContext(context.Background())
+    }()
+
+    overrideErr := scope.OverrideInstance("overridden", &plainCloseOnlyService{}, containercontract.OverrideOptions{ClosedWithScope: true})
+    if false == errors.Is(overrideErr, ErrCloseDoorRequired) {
+        t.Fatalf("expected the override closed with the scope refused with ErrCloseDoorRequired, got %v", overrideErr)
+    }
+
+    if overrideErr := scope.OverrideInstance("overridden", &plainCloseOnlyService{}, containercontract.OverrideOptions{}); nil != overrideErr {
+        t.Fatalf("expected an override its installer keeps admitted, got %v", overrideErr)
+    }
+}
+
+func TestResolve_ACloseOnlyValueBehindAnInterfaceProviderIsRefusedAtCreationAndClosedOnce(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    built := make([]*plainCloseOnlyService, 0, 2)
+
+    MustRegister[plainCloseOnlyHolder](serviceContainer, "interface.typed", func(_ containercontract.Resolver) (plainCloseOnlyHolder, error) {
+        service := &plainCloseOnlyService{}
+        built = append(built, service)
+
+        return service, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true})
+
+    _, getErr := serviceContainer.Get(t.Context(), "interface.typed")
+    if false == errors.Is(getErr, ErrCloseDoorRequired) {
+        t.Fatalf("expected the creation refused with ErrCloseDoorRequired, got %v", getErr)
+    }
+
+    if 1 != len(built) || 1 != built[0].closeCalls.Load() {
+        t.Fatalf("expected the refused value closed exactly once, got %d values", len(built))
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != built[0].closeCalls.Load() {
+        t.Fatalf("expected the teardown not to close a refused value again, got %d", built[0].closeCalls.Load())
+    }
+}
+
+func TestResolve_TheRefusalOfACloseOnlyValueCarriesTheFailureOfItsClose(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    closeFailure := errors.New("the descriptor was already gone")
+
+    MustRegister[plainCloseOnlyHolder](serviceContainer, "interface.typed", func(_ containercontract.Resolver) (plainCloseOnlyHolder, error) {
+        return &plainCloseOnlyService{closeErr: closeFailure}, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true})
+
+    _, getErr := serviceContainer.Get(t.Context(), "interface.typed")
+    if false == errors.Is(getErr, ErrCloseDoorRequired) || false == errors.Is(getErr, closeFailure) {
+        t.Fatalf("expected the refusal to carry both the sentinel and the close failure, got %v", getErr)
+    }
+}
+
+func TestResolve_ACloseOnlyValueBehindAnInterfaceProviderIsAdmittedWhenTheCloserTakesIt(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    service := &plainCloseOnlyService{}
+
+    MustRegister[plainCloseOnlyHolder](serviceContainer, "interface.typed", func(_ containercontract.Resolver) (plainCloseOnlyHolder, error) {
+        return service, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true, Closer: NewCloser(func(_ context.Context, value plainCloseOnlyHolder) error {
+        return value.Close()
+    })})
+
+    if _, getErr := serviceContainer.Get(t.Context(), "interface.typed"); nil != getErr {
+        t.Fatalf("unexpected resolution error: %v", getErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != service.closeCalls.Load() {
+        t.Fatalf("expected the closer to close the value once, got %d", service.closeCalls.Load())
+    }
+}
+
+func TestScopeResolve_ACloseOnlyValueBehindAnInterfaceProviderIsRefusedAtCreationAndClosedOnce(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    built := make([]*plainCloseOnlyService, 0, 1)
+
+    MustRegisterScoped[plainCloseOnlyHolder](serviceContainer, "scoped.interface.typed", func(_ containercontract.Resolver) (plainCloseOnlyHolder, error) {
+        service := &plainCloseOnlyService{}
+        built = append(built, service)
+
+        return service, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true})
+
+    scope := serviceContainer.NewScope()
+
+    _, getErr := scope.Get(t.Context(), "scoped.interface.typed")
+    if false == errors.Is(getErr, ErrCloseDoorRequired) {
+        t.Fatalf("expected the scoped creation refused with ErrCloseDoorRequired, got %v", getErr)
+    }
+
+    if closeErr := scope.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected scope close error: %v", closeErr)
+    }
+
+    if 1 != len(built) || 1 != built[0].closeCalls.Load() {
+        t.Fatalf("expected the refused scoped value closed exactly once, got %d values", len(built))
+    }
+}
+
+func newDeclarationProbeRecorder() (*closeOrderRecorder, *[]string) {
+    var mutex sync.Mutex
+    closeSequence := make([]string, 0, 4)
+
+    return &closeOrderRecorder{mutex: &mutex, closeSequence: &closeSequence}, &closeSequence
+}
+
+func teardownDependenciesOf(t *testing.T, serviceContainer containercontract.Container, nodeKey string) []string {
+    t.Helper()
+
+    for _, entry := range serviceContainer.(teardownPlanner).TeardownPlan() {
+        if nodeKey == entry.NodeKey {
+            return entry.Dependencies
+        }
+    }
+
+    t.Fatalf("expected %s in the teardown plan", nodeKey)
+
+    return nil
+}
+
+func TestContainer_Close_ADanglingDeclarationClosesSequentiallyAndReportsTheRefusal(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    registerWaveMatePair(t, serviceContainer, 50*time.Millisecond)
+
+    recorder, _ := newDeclarationProbeRecorder()
+    serviceContainer.MustRegister(
+        "app.reporter",
+        func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{recorder: recorder}, nil },
+        RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"app.missing"}},
+    )
+    MustFromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.reporter")
+
+    closeErr := serviceContainer.CloseWithContext(context.Background())
+    if false == errors.Is(closeErr, ErrTeardownDependencyWasNeverRegistered) {
+        t.Fatalf("expected the teardown to carry the refusal of the dangling declaration, got %v", closeErr)
+    }
+
+    if false == strings.Contains(closeErr.Error(), "failed to close container services") {
+        t.Fatalf("expected the mates to have closed one after the other and report it, got %v", closeErr)
+    }
+}
+
+func TestContainer_Close_ADanglingDeclarationAloneIsTheAnswerAndEveryServiceCloses(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    recorder, closeSequence := newDeclarationProbeRecorder()
+    serviceContainer.MustRegister(
+        "app.reporter",
+        func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{recorder: recorder}, nil },
+        RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"app.missing"}},
+    )
+    serviceContainer.MustRegister(
+        "app.storage",
+        func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{recorder: recorder}, nil },
+        RegisterOptions{TypeRegistrationDisabled: true},
+    )
+    MustFromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.reporter")
+    MustFromResolver[*closeOrderServiceB](t.Context(), serviceContainer, "app.storage")
+
+    closeErr := serviceContainer.CloseWithContext(context.Background())
+    if false == errors.Is(closeErr, ErrTeardownDependencyWasNeverRegistered) {
+        t.Fatalf("expected the refusal as the teardown's answer, got %v", closeErr)
+    }
+
+    refusalContext := exception.LogContext(closeErr, exception.LogContextOptions{})
+    if "app.reporter" != refusalContext["serviceName"] || "app.missing" != refusalContext["dependency"] {
+        t.Fatalf("expected the refusal to name the declaration, got %v", refusalContext)
+    }
+
+    if 2 != len(*closeSequence) {
+        t.Fatalf("expected both services closed, got %v", *closeSequence)
+    }
+}
+
+func TestContainer_TeardownSequential_AdmitsADanglingDeclaration(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{TeardownSequential: true})
+
+    recorder, closeSequence := newDeclarationProbeRecorder()
+    serviceContainer.MustRegister(
+        "app.reporter",
+        func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{recorder: recorder}, nil },
+        RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"app.missing"}},
+    )
+    MustFromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.reporter")
+
+    verifyDeclaredTeardownDependencies(t, serviceContainer)
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != len(*closeSequence) {
+        t.Fatalf("expected the service closed, got %v", *closeSequence)
+    }
+}
+
+func TestContainer_Register_AnOptionalTeardownDependencyOnARegisteredServiceOrdersTheTeardown(t *testing.T) {
+    for _, testCase := range []struct {
+        name    string
+        options RegisterOptions
+    }{
+        {name: "name", options: RegisterOptions{TypeRegistrationDisabled: true, OptionalTeardownDependencyNames: []string{"app.storage"}}},
+        {name: "type", options: RegisterOptions{TypeRegistrationDisabled: true, OptionalTeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*closeOrderServiceB]()}}},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            serviceContainer := NewContainer(ContainerConfig{})
+
+            recorder, closeSequence := newDeclarationProbeRecorder()
+            serviceContainer.MustRegister(
+                "app.reporter",
+                func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{recorder: recorder}, nil },
+                testCase.options,
+            )
+            serviceContainer.MustRegister(
+                "app.storage",
+                func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{recorder: recorder}, nil },
+                RegisterOptions{},
+            )
+
+            MustFromResolver[*closeOrderServiceB](t.Context(), serviceContainer, "app.storage")
+            MustFromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.reporter")
+
+            verifyDeclaredTeardownDependencies(t, serviceContainer)
+
+            dependencies := teardownDependenciesOf(t, serviceContainer, "service:app.reporter")
+            if 1 != len(dependencies) || "service:app.storage" != dependencies[0] {
+                t.Fatalf("expected the reporter ordered before the storage, got %v", dependencies)
+            }
+
+            if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+                t.Fatalf("unexpected close error: %v", closeErr)
+            }
+
+            if 2 != len(*closeSequence) || "a" != (*closeSequence)[0] || "b" != (*closeSequence)[1] {
+                t.Fatalf("expected the reporter closed before the storage, got %v", *closeSequence)
+            }
+        })
+    }
+}
+
+func TestContainer_VerifyDeclaredTeardownDependencies_AdmitsAnOptionalDependencyNothingRegistered(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    recorder, closeSequence := newDeclarationProbeRecorder()
+    serviceContainer.MustRegister(
+        "app.reporter",
+        func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{recorder: recorder}, nil },
+        RegisterOptions{
+            TypeRegistrationDisabled:        true,
+            OptionalTeardownDependencyNames: []string{"app.missing"},
+            OptionalTeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*closeOrderServiceB]()},
+        },
+    )
+    MustFromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.reporter")
+
+    verifyDeclaredTeardownDependencies(t, serviceContainer)
+
+    if 0 != len(teardownDependenciesOf(t, serviceContainer, "service:app.reporter")) {
+        t.Fatalf("expected the optional declarations to order nothing")
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != len(*closeSequence) {
+        t.Fatalf("expected the service closed, got %v", *closeSequence)
+    }
+}
+
+func TestContainer_Register_RefusesWhatTheOptionalTeardownDependenciesRefuse(t *testing.T) {
+    for _, testCase := range []struct {
+        name     string
+        scoped   bool
+        options  RegisterOptions
+        expected error
+    }{
+        {name: "empty name", options: RegisterOptions{OptionalTeardownDependencyNames: []string{""}}, expected: ErrTeardownDependencyNameIsRequired},
+        {name: "own name", options: RegisterOptions{OptionalTeardownDependencyNames: []string{"app.declarer"}}, expected: ErrTeardownDependencyIsSelf},
+        {name: "nil type", options: RegisterOptions{OptionalTeardownDependencyTypes: []reflect.Type{nil}}, expected: ErrTeardownDependencyTypeIsRequired},
+        {name: "own type", options: RegisterOptions{OptionalTeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*closeOrderServiceA]()}}, expected: ErrTeardownDependencyIsSelf},
+        {name: "scoped name", options: RegisterOptions{OptionalTeardownDependencyNames: []string{"scoped.store"}}, expected: ErrTeardownDependencyIsScoped},
+        {name: "on a scoped registration", scoped: true, options: RegisterOptions{OptionalTeardownDependencyNames: []string{"app.other"}}, expected: ErrScopedTeardownDependencyUnsupported},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            serviceContainer := NewContainer(ContainerConfig{})
+            serviceContainer.MustRegisterScoped(
+                "scoped.store",
+                func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{}, nil },
+                RegisterOptions{TypeRegistrationDisabled: true},
+            )
+
+            provider := func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{}, nil }
+
+            var registerErr error
+            if true == testCase.scoped {
+                registerErr = serviceContainer.RegisterScoped("app.declarer", provider, testCase.options)
+            } else {
+                registerErr = serviceContainer.Register("app.declarer", provider, testCase.options)
+            }
+
+            if false == errors.Is(registerErr, testCase.expected) {
+                t.Fatalf("expected %v, got %v", testCase.expected, registerErr)
+            }
+
+            if true == serviceContainer.Has("app.declarer") {
+                t.Fatalf("expected the refused registration to leave nothing behind")
+            }
+        })
+    }
+}
+
+func TestContainer_Register_RefusesARingClosedThroughAnOptionalTeardownDependency(t *testing.T) {
+    for _, testCase := range []struct {
+        name   string
+        first  RegisterOptions
+        second RegisterOptions
+    }{
+        {name: "recorded", first: RegisterOptions{TypeRegistrationDisabled: true, OptionalTeardownDependencyNames: []string{"app.second"}}, second: RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"app.first"}}},
+        {name: "closing", first: RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"app.second"}}, second: RegisterOptions{TypeRegistrationDisabled: true, OptionalTeardownDependencyNames: []string{"app.first"}}},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            serviceContainer := NewContainer(ContainerConfig{})
+
+            serviceContainer.MustRegister(
+                "app.first",
+                func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{}, nil },
+                testCase.first,
+            )
+
+            registerErr := serviceContainer.Register(
+                "app.second",
+                func(_ containercontract.Resolver) (*closeOrderServiceB, error) { return &closeOrderServiceB{}, nil },
+                testCase.second,
+            )
+            if false == errors.Is(registerErr, ErrCircularDependency) {
+                t.Fatalf("expected the ring through the optional declaration refused, got %v", registerErr)
+            }
+        })
+    }
+}
+
+func TestContainer_VerifyDeclaredTeardownDependencies_RefusesAnOptionalDeclarationThatNamedAScopedServiceRegisteredAfterIt(t *testing.T) {
+    for _, options := range []RegisterOptions{
+        {TypeRegistrationDisabled: true, OptionalTeardownDependencyNames: []string{"app.scoped"}},
+        {TypeRegistrationDisabled: true, OptionalTeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*scopedOnlyService]()}},
+    } {
+        serviceContainer := NewContainer(ContainerConfig{})
+
+        serviceContainer.MustRegister("app.declarer", func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{}, nil }, options)
+        serviceContainer.MustRegisterScoped("app.scoped", func(_ containercontract.Resolver) (*scopedOnlyService, error) { return &scopedOnlyService{label: "scoped"}, nil }, RegisterOptions{})
+
+        if verifyErr := serviceContainer.(declaredTeardownVerifier).VerifyDeclaredTeardownDependencies(); false == errors.Is(verifyErr, ErrTeardownDependencyIsScoped) {
+            t.Fatalf("expected the verification to refuse the optional declaration on a scoped service, got %v", verifyErr)
+        }
+
+        if closeErr := serviceContainer.CloseWithContext(context.Background()); false == errors.Is(closeErr, ErrTeardownDependencyIsScoped) {
+            t.Fatalf("expected the teardown to report the optional declaration on a scoped service, got %v", closeErr)
+        }
+    }
+}
+
+func TestContainer_Register_RefusesADeclaredDependencyOnARegisteredScopedType(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    serviceContainer.MustRegisterScoped("app.scoped", func(_ containercontract.Resolver) (*scopedOnlyService, error) { return &scopedOnlyService{label: "scoped"}, nil }, RegisterOptions{})
+
+    registerErr := serviceContainer.Register(
+        "app.declarer",
+        func(_ containercontract.Resolver) (*closeOrderServiceA, error) { return &closeOrderServiceA{}, nil },
+        RegisterOptions{TeardownDependencyTypes: []reflect.Type{reflect.TypeFor[*scopedOnlyService]()}},
+    )
+    if false == errors.Is(registerErr, ErrTeardownDependencyIsScoped) {
+        t.Fatalf("expected the type declaration on a registered scoped type to be refused at the registration, got %v", registerErr)
+    }
+}
+
+type foreignConnectionWithoutCloseDoor struct {
+    closed atomic.Int32
+}
+
+func TestContainerClose_AClosersRegistrationDoesNotHangOnHowTheNamesOfOneInstanceSort(t *testing.T) {
+    for _, names := range [][2]string{{"db", "db.readonly"}, {"zdb", "alias"}} {
+        serviceContainer := NewContainer(ContainerConfig{})
+        connection := &foreignConnectionWithoutCloseDoor{}
+        provider := func(containercontract.Resolver) (*foreignConnectionWithoutCloseDoor, error) {
+            return connection, nil
+        }
+
+        MustRegister(serviceContainer, names[0], provider, containercontract.RegisterOptions{
+            TypeRegistrationDisabled: true,
+            Closer: NewCloser(func(closeContext context.Context, value *foreignConnectionWithoutCloseDoor) error {
+                value.closed.Add(1)
+
+                return nil
+            }),
+        })
+        MustRegister(serviceContainer, names[1], provider, containercontract.RegisterOptions{TypeRegistrationDisabled: true})
+
+        for _, name := range names {
+            if _, getErr := serviceContainer.Get(context.Background(), name); nil != getErr {
+                t.Fatalf("unexpected resolve error: %v", getErr)
+            }
+        }
+
+        if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+            t.Fatalf("names %v: unexpected close error: %v", names, closeErr)
+        }
+
+        if 1 != connection.closed.Load() {
+            t.Fatalf("names %v: expected the declared closer to run once, ran %d", names, connection.closed.Load())
+        }
+    }
+}
+
+func TestContainerResolve_AProviderLeavingThroughGoexitAnswersTheWaiterAndRunsAgain(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    entered := make(chan struct{})
+    release := make(chan struct{})
+    var calls atomic.Int32
+
+    MustRegister(serviceContainer, "goexit", func(containercontract.Resolver) (*foreignConnectionWithoutCloseDoor, error) {
+        if 1 == calls.Add(1) {
+            close(entered)
+            <-release
+            runtime.Goexit()
+        }
+
+        return &foreignConnectionWithoutCloseDoor{}, nil
+    }, containercontract.RegisterOptions{TypeRegistrationDisabled: true})
+
+    creatorDone := make(chan struct{})
+    go func() {
+        defer close(creatorDone)
+        _, _ = serviceContainer.Get(context.Background(), "goexit")
+    }()
+    <-entered
+
+    waiterDone := make(chan error, 1)
+    go func() {
+        _, getErr := serviceContainer.Get(context.Background(), "goexit")
+        waiterDone <- getErr
+    }()
+
+    time.Sleep(20 * time.Millisecond)
+    close(release)
+    <-creatorDone
+
+    select {
+    case <-waiterDone:
+    case <-time.After(5 * time.Second):
+        t.Fatal("the waiter must not stay parked on a provider that left through Goexit")
+    }
+
+    if _, getErr := serviceContainer.Get(context.Background(), "goexit"); nil != getErr {
+        t.Fatalf("expected a later resolve to run the provider again, got %v", getErr)
+    }
+}
+
+type closerlessService struct {
+    name string
+}
+
+type otherCloserlessService struct {
+    name string
+}
+
+func TestClose_AnEvictedInstanceHeldUnderASecondNameIsClosedThroughItsDeclaredCloser(t *testing.T) {
+    for _, sequential := range []bool{false, true} {
+        t.Run(fmt.Sprintf("sequential=%v", sequential), func(t *testing.T) {
+            closeAnEvictedInstanceHeldUnderASecondName(t, ContainerConfig{TeardownSequential: sequential})
+        })
+    }
+}
+
+func closeAnEvictedInstanceHeldUnderASecondName(t *testing.T, config ContainerConfig) {
+    serviceContainer := NewContainer(config)
+    original := &closerlessService{name: "original"}
+
+    closed := make([]string, 0)
+    MustRegister[*closerlessService](serviceContainer, "a", func(_ containercontract.Resolver) (*closerlessService, error) {
+        return original, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true, Closer: NewCloser(func(_ context.Context, value *closerlessService) error {
+        closed = append(closed, value.name)
+
+        return nil
+    })})
+    MustRegister[*closerlessService](serviceContainer, "b", func(resolver containercontract.Resolver) (*closerlessService, error) {
+        value, getErr := resolver.Get(t.Context(), "a")
+        if nil != getErr {
+            return nil, getErr
+        }
+
+        return value.(*closerlessService), nil
+    }, RegisterOptions{TypeRegistrationDisabled: true})
+
+    if _, getErr := serviceContainer.Get(t.Context(), "b"); nil != getErr {
+        t.Fatalf("build b: %v", getErr)
+    }
+
+    if overrideErr := serviceContainer.OverrideInstance("a", &closerlessService{name: "override"}, containercontract.OverrideOptions{}); nil != overrideErr {
+        t.Fatalf("override: %v", overrideErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if fmt.Sprint([]string{"original", "override"}) != fmt.Sprint(closed) {
+        t.Fatalf("expected the evicted instance closed at its live name's place, then the override, once each through the declared closer, got %v", closed)
+    }
+}
+
+func TestClose_ACollapsedNodeUsesTheCloserThatTakesItsValueWhateverTheNamesSort(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    shared := &otherCloserlessService{name: "c"}
+
+    closedByOther := 0
+    MustRegister[*closerlessService](serviceContainer, "z", func(_ containercontract.Resolver) (*closerlessService, error) {
+        return &closerlessService{name: "z"}, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true, Closer: NewCloser(func(_ context.Context, value *closerlessService) error {
+        return nil
+    })})
+    MustRegister[*otherCloserlessService](serviceContainer, "c", func(_ containercontract.Resolver) (*otherCloserlessService, error) {
+        return shared, nil
+    }, RegisterOptions{Closer: NewCloser(func(_ context.Context, value *otherCloserlessService) error {
+        closedByOther++
+
+        return nil
+    })})
+
+    if _, getErr := serviceContainer.Get(t.Context(), "c"); nil != getErr {
+        t.Fatalf("build c: %v", getErr)
+    }
+
+    if overrideErr := serviceContainer.OverrideInstance("z", shared, containercontract.OverrideOptions{}); nil != overrideErr {
+        t.Fatalf("override: %v", overrideErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if 1 != closedByOther {
+        t.Fatalf("expected the shared instance closed once through the closer that takes it, got %d", closedByOther)
+    }
+}
+
+type ownDoorService struct {
+    ownCloses int
+}
+
+func (instance *ownDoorService) CloseWithContext(context.Context) error {
+    instance.ownCloses++
+
+    return nil
+}
+
+func TestClose_ADeclaredCloserWinsOverTheDoorASecondNameReachesTheValueBy(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    original := &ownDoorService{}
+
+    declared := 0
+    MustRegister[*ownDoorService](serviceContainer, "a", func(_ containercontract.Resolver) (*ownDoorService, error) {
+        return original, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true, Closer: NewCloser(func(_ context.Context, value *ownDoorService) error {
+        if value == original {
+            declared++
+        }
+
+        return nil
+    })})
+    MustRegister[*ownDoorService](serviceContainer, "b", func(resolver containercontract.Resolver) (*ownDoorService, error) {
+        value, getErr := resolver.Get(t.Context(), "a")
+        if nil != getErr {
+            return nil, getErr
+        }
+
+        return value.(*ownDoorService), nil
+    }, RegisterOptions{TypeRegistrationDisabled: true})
+
+    if _, getErr := serviceContainer.Get(t.Context(), "b"); nil != getErr {
+        t.Fatalf("build b: %v", getErr)
+    }
+
+    if overrideErr := serviceContainer.OverrideInstance("a", &ownDoorService{}, containercontract.OverrideOptions{}); nil != overrideErr {
+        t.Fatalf("override: %v", overrideErr)
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if 1 != declared || 0 != original.ownCloses {
+        t.Fatalf("expected the declared closer once and the value's own door never, got declared=%d own=%d", declared, original.ownCloses)
+    }
+}
+
+func TestClose_EachNameOfARelaxedTypeClosesThroughItsOwnCloser(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    var closedByMutex sync.Mutex
+    closedBy := map[string]string{}
+    for _, name := range []string{"first", "second"} {
+        name := name
+        MustRegister[*closerlessService](serviceContainer, name, func(_ containercontract.Resolver) (*closerlessService, error) {
+            return &closerlessService{name: name}, nil
+        }, RegisterOptions{TypeRegistrationRelaxed: true, Closer: NewCloser(func(_ context.Context, value *closerlessService) error {
+            closedByMutex.Lock()
+            defer closedByMutex.Unlock()
+
+            closedBy[value.name] = name
+
+            return nil
+        })})
+    }
+
+    for _, name := range []string{"first", "second"} {
+        if _, getErr := serviceContainer.Get(t.Context(), name); nil != getErr {
+            t.Fatalf("build %s: %v", name, getErr)
+        }
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if "first" != closedBy["first"] || "second" != closedBy["second"] {
+        t.Fatalf("expected each value closed by its own name's closer, got %v", closedBy)
+    }
+}
+
+func TestClose_ACollapsedNodeUsesTheCloserThatTakesItsValueInEitherSortOrder(t *testing.T) {
+    for _, names := range [][2]string{{"z", "c"}, {"a", "y"}} {
+        serviceContainer := NewContainer(ContainerConfig{})
+        shared := &otherCloserlessService{name: names[1]}
+
+        closedByOther := 0
+        MustRegister[*closerlessService](serviceContainer, names[0], func(_ containercontract.Resolver) (*closerlessService, error) {
+            return &closerlessService{name: names[0]}, nil
+        }, RegisterOptions{TypeRegistrationDisabled: true, Closer: NewCloser(func(_ context.Context, value *closerlessService) error {
+            return nil
+        })})
+        MustRegister[*otherCloserlessService](serviceContainer, names[1], func(_ containercontract.Resolver) (*otherCloserlessService, error) {
+            return shared, nil
+        }, RegisterOptions{Closer: NewCloser(func(_ context.Context, value *otherCloserlessService) error {
+            closedByOther++
+
+            return nil
+        })})
+
+        if _, getErr := serviceContainer.Get(t.Context(), names[1]); nil != getErr {
+            t.Fatalf("%v: build: %v", names, getErr)
+        }
+
+        if overrideErr := serviceContainer.OverrideInstance(names[0], shared, containercontract.OverrideOptions{}); nil != overrideErr {
+            t.Fatalf("%v: override: %v", names, overrideErr)
+        }
+
+        if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+            t.Fatalf("%v: close: %v", names, closeErr)
+        }
+
+        if 1 != closedByOther {
+            t.Fatalf("%v: expected the shared instance closed once through the closer that takes it, got %d", names, closedByOther)
+        }
+    }
+}
+
+func TestWithDeclarationRefusal_AForeignErrorKeepsTheDeadlineRecordAndIsReachable(t *testing.T) {
+    foreign := errors.New("declared nothing")
+
+    answered := withDeclarationRefusal(nil, foreign, func(context exceptioncontract.Context) exceptioncontract.Context {
+        context["deadline"] = "kept"
+
+        return context
+    })
+
+    var melodyErr *exception.Error
+    if false == errors.Is(answered, foreign) || false == errors.As(answered, &melodyErr) || "kept" != melodyErr.Context()["deadline"] {
+        t.Fatalf("expected the foreign declaration error reachable with the deadline record beside it, got %v", answered)
+    }
+}
+
+
+func TestClose_ANameWithoutACloserIsNotClosedThroughTheTypeNodesCloser(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    closedByB := make([]string, 0)
+    MustRegister[*closerlessService](serviceContainer, "a", func(_ containercontract.Resolver) (*closerlessService, error) {
+        return &closerlessService{name: "a"}, nil
+    }, RegisterOptions{TypeRegistrationRelaxed: true})
+    MustRegister[*closerlessService](serviceContainer, "b", func(_ containercontract.Resolver) (*closerlessService, error) {
+        return &closerlessService{name: "b"}, nil
+    }, RegisterOptions{TypeRegistrationRelaxed: true, Closer: NewCloser(func(_ context.Context, value *closerlessService) error {
+        closedByB = append(closedByB, value.name)
+
+        return nil
+    })})
+
+    for _, name := range []string{"a", "b"} {
+        if _, getErr := serviceContainer.Get(t.Context(), name); nil != getErr {
+            t.Fatalf("build %s: %v", name, getErr)
+        }
+    }
+
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if fmt.Sprint([]string{"b"}) != fmt.Sprint(closedByB) {
+        t.Fatalf("expected b's closer to close b alone, got %v", closedByB)
+    }
+}
+
+func TestClose_AnEvictedInstanceASecondNameHoldsClosesBeforeWhatItDependsOn(t *testing.T) {
+    for _, sequential := range []bool{false, true} {
+        t.Run(fmt.Sprintf("sequential=%v", sequential), func(t *testing.T) {
+            serviceContainer := NewContainer(ContainerConfig{TeardownSequential: sequential})
+            original := &closerlessService{name: "original"}
+
+            var bookMutex sync.Mutex
+            closed := make([]string, 0)
+            recordingCloser := NewCloser(func(_ context.Context, value *closerlessService) error {
+                bookMutex.Lock()
+                defer bookMutex.Unlock()
+
+                closed = append(closed, value.name)
+
+                return nil
+            })
+
+            MustRegister[*closerlessService](serviceContainer, "dependency", func(_ containercontract.Resolver) (*closerlessService, error) {
+                return &closerlessService{name: "dependency"}, nil
+            }, RegisterOptions{TypeRegistrationDisabled: true, Closer: recordingCloser})
+            MustRegister[*closerlessService](serviceContainer, "a", func(resolver containercontract.Resolver) (*closerlessService, error) {
+                if _, getErr := resolver.Get(t.Context(), "dependency"); nil != getErr {
+                    return nil, getErr
+                }
+
+                return original, nil
+            }, RegisterOptions{TypeRegistrationDisabled: true, Closer: recordingCloser})
+            MustRegister[*closerlessService](serviceContainer, "b", func(resolver containercontract.Resolver) (*closerlessService, error) {
+                value, getErr := resolver.Get(t.Context(), "a")
+                if nil != getErr {
+                    return nil, getErr
+                }
+
+                return value.(*closerlessService), nil
+            }, RegisterOptions{TypeRegistrationDisabled: true})
+
+            if _, getErr := serviceContainer.Get(t.Context(), "b"); nil != getErr {
+                t.Fatalf("build b: %v", getErr)
+            }
+
+            if overrideErr := serviceContainer.OverrideInstance("a", &closerlessService{name: "override"}, containercontract.OverrideOptions{}); nil != overrideErr {
+                t.Fatalf("override: %v", overrideErr)
+            }
+
+            if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+                t.Fatalf("close: %v", closeErr)
+            }
+
+            originalAt, dependencyAt := -1, -1
+            for index, name := range closed {
+                switch name {
+                case "original":
+                    originalAt = index
+                case "dependency":
+                    dependencyAt = index
+                }
+            }
+
+            if -1 == originalAt || -1 == dependencyAt || originalAt > dependencyAt || 3 != len(closed) {
+                t.Fatalf("expected the evicted instance closed once through the closer before what it depends on, got %v", closed)
+            }
+        })
+    }
+}
+
+func TestBoundedCloseFailureDetail_FollowsTheConfiguredCut(t *testing.T) {
+    detail := strings.Repeat("a", 5000)
+
+    raised, isText := boundedCloseFailureDetail(detail, bound.Resolved[int]{Value: 4096}).(string)
+    if false == isText || false == strings.HasPrefix(raised, strings.Repeat("a", 4096)+"\n\t… cut, 4096 of 5000 bytes kept") {
+        t.Fatalf("expected a raised cut to keep 4096 bytes, got %q", raised[len(raised)-40:])
+    }
+
+    if whole := boundedCloseFailureDetail(detail, bound.Resolved[int]{Unlimited: true}); detail != whole {
+        t.Fatalf("expected an unlimited cut to keep the detail whole")
+    }
+}
+
+type hugePanicScopedService struct {
+    hugePanicCloseService
+}
+
+func recoveredValueOfAnyFailure(t *testing.T, closeErr error) string {
+    t.Helper()
+
+    var typedError *exception.Error
+    if false == errors.As(closeErr, &typedError) {
+        t.Fatalf("expected a melody error, got %v", closeErr)
+    }
+
+    failureDetails, _ := typedError.Context()["failureDetails"].(map[string]exceptioncontract.Context)
+    for _, details := range failureDetails {
+        if recovered, isText := details["recoveredValue"].(string); true == isText {
+            return recovered
+        }
+    }
+
+    t.Fatalf("expected a recovered value in the failure details, got %v", failureDetails)
+
+    return ""
+}
+
+func TestContainer_Close_TheConfiguredStackBytesCutAContainerAndAScopeFailure(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{CloseFailureStackBytes: bound.Of(64)})
+
+    if registerErr := serviceContainer.Register("service.huge", func(resolver containercontract.Resolver) (*hugePanicCloseService, error) {
+        return &hugePanicCloseService{}, nil
+    }, RegisterOptions{}); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if registerErr := serviceContainer.RegisterScoped("scoped.huge", func(resolver containercontract.Resolver) (*hugePanicScopedService, error) {
+        return &hugePanicScopedService{}, nil
+    }, RegisterOptions{}); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    scopeInstance := serviceContainer.NewScope()
+    if _, getErr := scopeInstance.Get(t.Context(), "scoped.huge"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if scoped := recoveredValueOfAnyFailure(t, scopeInstance.CloseWithContext(context.Background())); false == strings.HasPrefix(scoped, strings.Repeat("H", 64)+"\n\t… cut, 64 of") {
+        t.Fatalf("expected the scope's failure cut at the configured 64 bytes, got %q", scoped[:min(len(scoped), 120)])
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "service.huge"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    if contained := recoveredValueOfAnyFailure(t, serviceContainer.CloseWithContext(context.Background())); false == strings.HasPrefix(contained, strings.Repeat("H", 64)+"\n\t… cut, 64 of") {
+        t.Fatalf("expected the container's failure cut at the configured 64 bytes, got %q", contained[:min(len(contained), 120)])
+    }
+}

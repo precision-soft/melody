@@ -1,0 +1,240 @@
+package rueidis
+
+import (
+    "context"
+    "crypto/rand"
+    "encoding/hex"
+    "encoding/json"
+    "errors"
+    "time"
+
+    "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
+    "github.com/precision-soft/melody/v4/logging"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    "github.com/redis/rueidis"
+)
+
+const serverSentEventBackplaneChannelSuffix = "sse"
+
+const defaultServerSentEventBackplaneCallTimeout = time.Second
+
+type serverSentEventWireEvent struct {
+    Origin string                     `json:"origin"`
+    Topic  string                     `json:"topic"`
+    Event  melodyhttp.ServerSentEvent `json:"event"`
+}
+
+type ServerSentEventBackplane struct {
+    client      rueidis.Client
+    hub         *melodyhttp.ServerSentEventHub
+    channel     string
+    origin      string
+    logger      loggingcontract.Logger
+    reconnect   bound.ResolvedBackoff
+    callTimeout time.Duration
+
+    ctx    context.Context
+    cancel context.CancelFunc
+    /* listenerDone is closed by the listener as it leaves, so a close reads its exit without a goroutine of its own */
+    listenerDone chan struct{}
+}
+
+/* ServerSentEventBackplaneConfig declares the backplane; its zero value is the default backplane. A limit outside its rule is refused before the backplane is installed on the hub or its listener starts. */
+type ServerSentEventBackplaneConfig struct {
+    /* Channel is the pub/sub channel every instance shares, used verbatim: <namespace>:sse when empty, the connection's namespace. */
+    Channel string
+
+    /* Logger is the journal of subscription failures and reconnects; nil is the emergency logger, a typed nil is refused. */
+    Logger loggingcontract.Logger
+
+    /* Reconnect is the re-subscribe backoff. */
+    Reconnect ReconnectConfig
+
+    /* CallTimeout bounds one Publish round trip, so a broadcasting request, whose context typically carries no deadline, fails fast against an unresponsive store: 1s by default, at least 1ms, unlimited refused. */
+    CallTimeout bound.Duration
+}
+
+var serverSentEventBackplaneCallTimeoutRule = callTimeoutRule("ServerSentEventBackplaneConfig.CallTimeout", defaultServerSentEventBackplaneCallTimeout)
+
+/* NewServerSentEventBackplane resolves the configuration once, then installs the backplane on the hub and starts its listener; a nil client or hub, or a limit outside its rule, panics naming it and leaves the hub without a backplane. */
+func NewServerSentEventBackplane(connection *Connection, hub *melodyhttp.ServerSentEventHub, config ServerSentEventBackplaneConfig) *ServerSentEventBackplane {
+    refuseNilConnection(connection)
+
+    if nil == hub {
+        exception.Panic(exception.NewError("redis sse backplane hub is nil", nil, nil))
+    }
+
+    reconnect, reconnectErr := resolveReconnect(config.Reconnect)
+    if nil != reconnectErr {
+        exception.Panic(exception.FromError(reconnectErr))
+    }
+
+    callTimeout, callTimeoutErr := bound.Resolve(config.CallTimeout, serverSentEventBackplaneCallTimeoutRule)
+    if nil != callTimeoutErr {
+        exception.Panic(exception.FromError(callTimeoutErr))
+    }
+
+    channel := config.Channel
+    if "" == channel {
+        channel = connection.namespacedName(serverSentEventBackplaneChannelSuffix)
+    }
+
+    logger, loggerErr := logging.ResolveOptionalLogger(config.Logger, "rueidis server sent event backplane", "ServerSentEventBackplaneConfig.Logger")
+    if nil != loggerErr {
+        exception.Panic(exception.FromError(loggerErr))
+    }
+
+    ctx, cancel := context.WithCancel(context.Background())
+
+    backplane := &ServerSentEventBackplane{
+        client:       connection.Client(),
+        hub:          hub,
+        channel:      channel,
+        origin:       newBackplaneOrigin(),
+        logger:       logger,
+        reconnect:    reconnect,
+        callTimeout:  callTimeout.Value,
+        ctx:          ctx,
+        cancel:       cancel,
+        listenerDone: make(chan struct{}),
+    }
+
+    hub.SetBackplane(backplane)
+
+    go backplane.listen()
+
+    return backplane
+}
+
+/* Publish refuses a nil runtime and a done caller's context before the event is encoded; the round trip runs under the caller's context capped by the call timeout, and a CloseWithContext ends it too. */
+func (instance *ServerSentEventBackplane) Publish(runtimeInstance containercontract.Runtime, topic string, event melodyhttp.ServerSentEvent) error {
+    if refusal := containercontract.RefuseNilRuntime(runtimeInstance, "rueidis.ServerSentEventBackplane.Publish"); nil != refusal {
+        return refusal
+    }
+
+    callerContext := runtimeInstance.Context()
+    if nil != callerContext.Err() {
+        return exception.NewError("sse backplane publish refused: the caller's context is done", map[string]any{"topic": topic}, context.Cause(callerContext))
+    }
+
+    payload, marshalErr := json.Marshal(serverSentEventWireEvent{Origin: instance.origin, Topic: topic, Event: event})
+    if nil != marshalErr {
+        return exception.NewError("redis sse backplane could not encode the event", map[string]any{"topic": topic}, marshalErr)
+    }
+
+    callContext, cancel := context.WithTimeout(callerContext, instance.callTimeout)
+    defer cancel()
+
+    stopCancelOnClose := context.AfterFunc(instance.ctx, cancel)
+    defer stopCancelOnClose()
+
+    result := instance.client.Do(
+        callContext,
+        instance.client.B().Publish().Channel(instance.channel).Message(string(payload)).Build(),
+    )
+    if resultErr := result.Error(); nil != resultErr {
+        return exception.NewError("redis sse backplane publish failed", map[string]any{"topic": topic}, resultErr)
+    }
+
+    return nil
+}
+
+/* CloseWithContext clears this backplane from the hub, the broadcasts holding it waited for under the deadline, stops the listener and waits for it to leave under the same deadline; past it the listener is left to leave on its own and the deadline's error is answered. */
+func (instance *ServerSentEventBackplane) CloseWithContext(closeContext context.Context) error {
+    var closeErrs []error
+
+    if clearErr := instance.hub.ClearBackplane(closeContext); nil != clearErr {
+        closeErrs = append(closeErrs, clearErr)
+    }
+
+    instance.cancel()
+
+    select {
+    case <-instance.listenerDone:
+    case <-closeContext.Done():
+        /* a listener that left in the same instant as the deadline is answered as gone, since a select between two ready channels picks at random */
+        select {
+        case <-instance.listenerDone:
+        default:
+            closeErrs = append(closeErrs, exception.NewError("redis sse backplane listener did not stop before the close deadline", nil, closeContext.Err()))
+        }
+    }
+
+    return errors.Join(closeErrs...)
+}
+
+func (instance *ServerSentEventBackplane) listen() {
+    defer close(instance.listenerDone)
+
+    attempts := newReconnectAttempts(instance.reconnect)
+
+    for {
+        if nil != instance.ctx.Err() {
+            return
+        }
+
+        startedAt := time.Now()
+
+        receiveErr := instance.client.Receive(
+            instance.ctx,
+            instance.client.B().Subscribe().Channel(instance.channel).Build(),
+            instance.handle,
+        )
+        if nil != instance.ctx.Err() {
+            return
+        }
+
+        if nil != receiveErr {
+            instance.logError("redis sse backplane subscription lost, resubscribing", receiveErr)
+        }
+
+        wait, waits := attempts.afterSubscription(time.Since(startedAt))
+        if false == waits {
+            continue
+        }
+
+        select {
+        case <-time.After(wait):
+        case <-instance.ctx.Done():
+            return
+        }
+    }
+}
+
+func (instance *ServerSentEventBackplane) handle(message rueidis.PubSubMessage) {
+    wire := serverSentEventWireEvent{}
+    if unmarshalErr := json.Unmarshal([]byte(message.Message), &wire); nil != unmarshalErr {
+        instance.logError("redis sse backplane could not decode an event", unmarshalErr)
+
+        return
+    }
+
+    if wire.Origin == instance.origin {
+        return
+    }
+
+    instance.hub.DeliverLocal(wire.Topic, wire.Event)
+}
+
+func (instance *ServerSentEventBackplane) logError(message string, err error) {
+    if nil == instance.logger {
+        return
+    }
+
+    instance.logger.Error(message, exception.LogContext(err, exception.LogContextOptions{}))
+}
+
+func newBackplaneOrigin() string {
+    buffer := make([]byte, 16)
+
+    if _, readErr := rand.Read(buffer); nil != readErr {
+        exception.Panic(exception.NewError("could not generate a backplane origin", nil, readErr))
+    }
+
+    return hex.EncodeToString(buffer)
+}
+
+var _ melodyhttp.ServerSentEventBackplane = (*ServerSentEventBackplane)(nil)

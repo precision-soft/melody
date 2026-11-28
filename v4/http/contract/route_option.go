@@ -1,0 +1,72 @@
+package contract
+
+import (
+    "reflect"
+
+    "github.com/precision-soft/melody/v4/bound"
+)
+
+/* RouteOptions is what a route declares beyond its pattern and its handler. The zero value registers the route under no name, for every method, host and scheme, with no requirement, default, locale or attribute, at priority zero; the lists and the maps are copied at registration, so the value can be reused. */
+type RouteOptions struct {
+    /* Name is the route's name for the url generator and the manifest; "" leaves the route unnamed. */
+    Name string
+
+    /* Methods are the http methods the route answers; nil or empty answers every method. */
+    Methods []string
+
+    /* Host is the host the route is bound to; "" binds it to every host. */
+    Host string
+
+    /* Schemes are the schemes the route answers; nil or empty answers every scheme. */
+    Schemes []string
+
+    /* Requirements are the regular expressions a parameter must match whole, keyed by parameter name; an empty key or an empty pattern is skipped, an invalid pattern refused at registration. */
+    Requirements map[string]string
+
+    /* Defaults are the parameter values a generated url takes when the caller gives none. */
+    Defaults map[string]string
+
+    /* Locales is the whitelist the _locale parameter is checked against; nil or empty admits every locale. */
+    Locales []string
+
+    /* Priority decides among routes that all match a request, the higher first; equal priorities keep registration order. */
+    Priority int
+
+    /* Attributes travel with the match into the request; a key beginning with "_", the framework's prefix, is refused at registration. */
+    Attributes map[string]any
+
+    /* Protection changes protections of the framework for this route; the zero value keeps every one. */
+    Protection RouteProtectionConfig
+
+    /* RequestType is the body type the handler binds, whose validate tags the boot verifies against the application's validator; nil declares none, left to the first request. */
+    RequestType reflect.Type
+}
+
+/* RouteProtectionConfig is what a route changes of the framework's per-request protections; each field's zero value keeps its protection as the application set it. */
+type RouteProtectionConfig struct {
+    /* CsrfDisabled exempts the route from its firewall's cross-site request forgery check, for a handler that verifies the token itself; refused on a route that serves only safe methods, which the check never reads. */
+    CsrfDisabled bool
+
+    /* SecurityHeadersDisabled names the security headers this route's responses go without, in any case; a name the framework does not send, or one named twice, is refused at registration. */
+    SecurityHeadersDisabled []string
+
+    /* MaxBodyBytes is this route's request body cap, larger or smaller than the application's MELODY_HTTP_MAX_REQUEST_BODY_BYTES; absent keeps the application's, unlimited and a value below 1 are refused at registration. */
+    MaxBodyBytes bound.Count
+
+    /* HmacCheckOrder replaces, for this route, the order its HMAC firewall checks the body and the nonce in; left out, the source's; a value outside the three is refused at registration. */
+    HmacCheckOrder HmacCheckOrder
+}
+
+/* HmacCheckOrder is the order an HMAC firewall checks a request's body and its nonce in. */
+type HmacCheckOrder string
+
+const (
+    /* HmacCheckOrderInherited is the zero value: the source's own order. */
+    HmacCheckOrderInherited HmacCheckOrder = ""
+
+    /* HmacCheckOrderNonceFirst consumes the nonce before the body is read. */
+    HmacCheckOrderNonceFirst HmacCheckOrder = "nonce_first"
+
+    /* HmacCheckOrderBodyFirst verifies the body before the nonce is consumed. */
+    HmacCheckOrderBodyFirst HmacCheckOrder = "body_first"
+)

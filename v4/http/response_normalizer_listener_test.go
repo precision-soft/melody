@@ -1,0 +1,150 @@
+package http
+
+import (
+    "net/http"
+    "testing"
+    "time"
+
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    eventcontract "github.com/precision-soft/melody/v4/event/contract"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+)
+
+type capturingEventDispatcher struct {
+    eventName string
+    listener  eventcontract.EventListener
+    priority  int
+}
+
+func (instance *capturingEventDispatcher) AddListener(
+    eventName string,
+    listener eventcontract.EventListener,
+    config eventcontract.ListenerConfig,
+) eventcontract.ListenerRegistration {
+    instance.eventName = eventName
+    instance.listener = listener
+    instance.priority = config.Priority
+
+    return eventcontract.ListenerRegistration{EventName: eventName, ListenerId: 1}
+}
+
+func (instance *capturingEventDispatcher) InstallFloorListener(
+    eventName string,
+    listener eventcontract.EventListener,
+    config eventcontract.ListenerConfig,
+) (eventcontract.ListenerRegistration, bool) {
+    return eventcontract.ListenerRegistration{}, false
+}
+
+func (instance *capturingEventDispatcher) RegisteredEvents() []eventcontract.RegisteredEvent {
+    return nil
+}
+
+func (instance *capturingEventDispatcher) RemoveListener(registration eventcontract.ListenerRegistration) bool {
+    return false
+}
+
+func (instance *capturingEventDispatcher) DeclareEvent(eventName string, config eventcontract.EventConfig) {
+}
+
+func (instance *capturingEventDispatcher) AddSubscriber(subscriber eventcontract.EventSubscriber) eventcontract.SubscriberRegistration {
+    return eventcontract.SubscriberRegistration{}
+}
+
+func (instance *capturingEventDispatcher) RemoveSubscriber(registration eventcontract.SubscriberRegistration) int {
+    return 0
+}
+
+func (instance *capturingEventDispatcher) Dispatch(
+    runtimeInstance containercontract.Runtime,
+    event eventcontract.Event,
+) (eventcontract.Event, error) {
+    return event, nil
+}
+
+func (instance *capturingEventDispatcher) DispatchName(
+    runtimeInstance containercontract.Runtime,
+    eventName string,
+    payload any,
+) (eventcontract.Event, error) {
+    return nil, nil
+}
+
+type payloadEvent struct {
+    payload any
+}
+
+func (instance *payloadEvent) Name() string {
+    return kernelcontract.EventKernelResponse
+}
+
+func (instance *payloadEvent) Payload() any {
+    return instance.payload
+}
+
+func (instance *payloadEvent) Timestamp() time.Time {
+    return time.Time{}
+}
+
+func (instance *payloadEvent) StopPropagation() {
+}
+
+func (instance *payloadEvent) IsPropagationStopped() bool {
+    return false
+}
+
+func (instance *payloadEvent) PriorFailure() error {
+    return nil
+}
+
+func captureResponseNormalizerListener(t *testing.T) eventcontract.EventListener {
+    t.Helper()
+
+    dispatcher := &capturingEventDispatcher{}
+    RegisterKernelResponseNormalizerListener(dispatcher)
+
+    if kernelcontract.EventKernelResponse != dispatcher.eventName {
+        t.Fatalf("expected the normalizer to listen on %q, got %q", kernelcontract.EventKernelResponse, dispatcher.eventName)
+    }
+
+    if nil == dispatcher.listener {
+        t.Fatal("the normalizer registered no listener")
+    }
+
+    return dispatcher.listener
+}
+
+func TestKernelResponseNormalizerListener_LeavesANilResponseAlone(t *testing.T) {
+    listener := captureResponseNormalizerListener(t)
+
+    responseEvent := NewKernelResponseEvent(nil, nil)
+
+    listenerErr := listener(nil, &payloadEvent{payload: responseEvent})
+    if nil != listenerErr {
+        t.Fatalf("unexpected listener error: %v", listenerErr)
+    }
+
+    if nil != responseEvent.Response() {
+        t.Fatalf("expected the normalizer to leave a nil response alone, it synthesized %#v", responseEvent.Response())
+    }
+}
+
+func TestKernelResponseNormalizerListener_FillsTheStatusCodeAndHeaders(t *testing.T) {
+    listener := captureResponseNormalizerListener(t)
+
+    response := NewResponse(0, nil)
+    responseEvent := NewKernelResponseEvent(nil, response)
+
+    listenerErr := listener(nil, &payloadEvent{payload: responseEvent})
+    if nil != listenerErr {
+        t.Fatalf("unexpected listener error: %v", listenerErr)
+    }
+
+    if http.StatusOK != responseEvent.Response().StatusCode() {
+        t.Fatalf("expected an unset status code to become 200, got %d", responseEvent.Response().StatusCode())
+    }
+
+    if nil == responseEvent.Response().Headers() {
+        t.Fatal("expected the normalizer to install an empty header map")
+    }
+}

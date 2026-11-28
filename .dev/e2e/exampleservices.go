@@ -102,6 +102,81 @@ type exampleContainerDescription struct {
     TypeName string `json:"typeName"`
 }
 
+/* exampleProcessServiceInventoryOf answers the inventory one major's example is held to: the rows name their module path, and the fourth major adds the cipher of its integration module, the internal-auth signer, whose judged key id is kept under its lock, the catalogue schema it builds at boot, the prometheus registry the metrics module tears down and its four redis limiters and nonce guards */
+func exampleProcessServiceInventoryOf(major exampleMajor) map[string]processServiceClassification {
+    inventory := make(map[string]processServiceClassification, len(exampleProcessServiceInventory)+1)
+    for serviceName, classification := range exampleProcessServiceInventory {
+        inventory[exampleServiceNameOf(major, strings.Replace(serviceName, "/melody/v3/", "/melody/"+major.label+"/", 1))] = classification
+    }
+
+    if 4 == major.number {
+        inventory["service.encrypt.cipher"] = processServiceClassification{typeName: "*encrypt.aes256Cipher", category: processServiceStore}
+        inventory["service.example.internal_auth_signer"] = processServiceClassification{typeName: "*security.HmacEnvelopeSigner", category: processServiceStore}
+        inventory["service.example.catalog_schema"] = processServiceClassification{typeName: "*persistence.CatalogSchema", category: processServiceStateless}
+        inventory["service.opentelemetry.prometheus_metrics"] = processServiceClassification{typeName: "*opentelemetry.PrometheusMetrics", category: processServiceStore}
+        inventory["service.example.redis.catalog_write_limiter"] = processServiceClassification{typeName: "*rueidis.RateLimiter", category: processServiceStore}
+        inventory["service.example.redis.second_factor_budget_limiter"] = processServiceClassification{typeName: "*rueidis.RateLimiter", category: processServiceStore}
+        inventory["service.example.redis.second_factor_replay_guard"] = processServiceClassification{typeName: "*rueidis.NonceGuard", category: processServiceStore}
+        inventory["service.example.redis.internal_nonce_guard"] = processServiceClassification{typeName: "*rueidis.NonceGuard", category: processServiceStore}
+        inventory["service.amqp.connection"] = processServiceClassification{typeName: "*amqp.Connection", category: processServiceConnection}
+
+        /* the fourth major's collaborators take the connection, which holds the client, so no client is registered */
+        delete(inventory, "service.rueidis.client")
+    }
+
+    return inventory
+}
+
+/* fourthMajorServiceNameByThirdMajorName re-spells a row the third major's names for the fourth, whose service names follow one grammar, service.<module>.<snake_case_name> */
+var fourthMajorServiceNameByThirdMajorName = map[string]string{
+    "opentelemetry.otlp.tracer_provider":                "service.opentelemetry.otlp.tracer_provider",
+    "service-example-archive-database":                  "service.example.archive_database",
+    "service-example-category-service":                  "service.example.category_service",
+    "service-example-currency-service":                  "service.example.currency_service",
+    "service-example-database":                          "service.example.database",
+    "service-example-database-registry":                 "service.example.database_registry",
+    "service-example-product-service":                   "service.example.product_service",
+    "service-example-rate-refresh-service":              "service.example.rate_refresh_service",
+    "service-example-two-factor-store":                  "service.example.two_factor_store",
+    "service-example-user-service":                      "service.example.user_service",
+    "service.example.archive.locker":                    "service.example.archive_locker",
+    "service.example.archive.storage":                   "service.example.archive_storage",
+    "service.example.catalog.schema":                    "service.example.catalog_schema",
+    "service.example.catalog.journal.repository":        "service.example.catalog_journal_repository",
+    "service.example.catalog.journal.service":           "service.example.catalog_journal_service",
+    "service.example.catalog.notification.hub":          "service.example.catalog_notification_hub",
+    "service.example.catalog.reading.repository":        "service.example.catalog_reading_repository",
+    "service.example.catalog.storage":                   "service.example.catalog_storage",
+    "service.example.category.repository":               "service.example.category_repository",
+    "service.example.currency.repository":               "service.example.currency_repository",
+    "service.example.internal_auth.signer":              "service.example.internal_auth_signer",
+    "service.example.product.repository":                "service.example.product_repository",
+    "service.example.rates.http.client":                 "service.example.rates_http_client",
+    "service.example.report.export.http.client":         "service.example.report_export_http_client",
+    "service.example.reporting.catalog.journal.source":  "service.example.reporting_catalog_journal_source",
+    "service.example.security.token_namespace":          "service.example.security_token_namespace",
+    "service.example.seeder.category":                   "service.example.seeder_category",
+    "service.example.seeder.currency":                   "service.example.seeder_currency",
+    "service.example.seeder.product":                    "service.example.seeder_product",
+    "service.example.seeder.user":                       "service.example.seeder_user",
+    "service.example.user.repository":                   "service.example.user_repository",
+    "service.example.user.session.repository":           "service.example.user_session_repository",
+    "service.http.request.context":                      "service.http.request_context",
+    "service.http.route.registry":                       "service.http.route_registry",
+    "service.http.url.generator":                        "service.http.url_generator",
+}
+
+/* exampleServiceNameOf answers the name one major's example registers a service under */
+func exampleServiceNameOf(major exampleMajor, serviceName string) string {
+    if 4 <= major.number {
+        if renamed, found := fourthMajorServiceNameByThirdMajorName[serviceName]; true == found {
+            return renamed
+        }
+    }
+
+    return serviceName
+}
+
 /* exampleBootServiceNameList is the composition root's list of services built at boot rather than at first use (config.ResolveBootServices); the describing listing of a fresh console process, which builds nothing on its own, shows each one built */
 var exampleBootServiceNameList = []string{
     "service.example.catalog.notification.hub",
@@ -132,7 +207,7 @@ func runExampleCommandTolerantOfExit(major exampleMajor, workspace string, argum
 
 /* assertExampleProcessServicesAreClassified pins the form of the stateless-by-default class on the live composition root: the describing listing names every registration and its lifetime, the building sweep names the concrete type each process service resolves to, and each of them must be a row of the inventory above, with the type the row was measured on. A row that consumes no registration is dead and fails the same way a missing one does — a list of exceptions that tolerates dead entries grows into a list of excuses. */
 func assertExampleProcessServicesAreClassified(major exampleMajor, workspace string) {
-    describeOutput := runExampleCommand(major, workspace, "debug:container", "--limit=0", "--format=json")
+    describeOutput := runExampleCommand(major, workspace, "debug:container", "--format=json")
     describeEnvelope := struct {
         Data struct {
             Items []exampleContainerDescription `json:"items"`
@@ -146,14 +221,15 @@ func assertExampleProcessServicesAreClassified(major exampleMajor, workspace str
     for _, description := range describeEnvelope.Data.Items {
         builtByName[description.Name] = description.IsBuilt
     }
-    for _, serviceName := range exampleBootServiceNameList {
+    for _, thirdMajorServiceName := range exampleBootServiceNameList {
+        serviceName := exampleServiceNameOf(major, thirdMajorServiceName)
         if false == builtByName[serviceName] {
             fail("[%s] %s is not built at boot: the composition root resolves it before the first request, so its provider installs what it needs before a reader could reach it", major.label, serviceName)
         }
     }
     pass("[%s] the %d service(s) the composition root builds at boot are built before the first request", major.label, len(exampleBootServiceNameList))
 
-    buildOutput := runExampleCommandTolerantOfExit(major, workspace, "debug:container", "--build", "--limit=0", "--format=json")
+    buildOutput := runExampleCommandTolerantOfExit(major, workspace, "debug:container", "--build", "--format=json")
     buildEnvelope := struct {
         Data struct {
             Items []exampleContainerBuildItem `json:"items"`
@@ -168,7 +244,7 @@ func assertExampleProcessServicesAreClassified(major exampleMajor, workspace str
         concreteTypeByName[item.Name] = item.TypeName
     }
 
-    problems, processServices, scopedServices := exampleProcessServiceProblems(describeEnvelope.Data.Items, concreteTypeByName, exampleProcessServiceInventory)
+    problems, processServices, scopedServices := exampleProcessServiceProblems(describeEnvelope.Data.Items, concreteTypeByName, exampleProcessServiceInventoryOf(major))
 
     if 0 == processServices {
         fail("[%s] debug:container listed no process service, so the inventory pin below would be vacuous:\n%s", major.label, exampleTail(describeOutput, 20))

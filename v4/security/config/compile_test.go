@@ -1,0 +1,877 @@
+package config
+
+import (
+    "errors"
+    "strings"
+    "testing"
+    "time"
+
+    "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/http"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/security"
+    "github.com/precision-soft/melody/v4/security/accesscontrol"
+    securitycontract "github.com/precision-soft/melody/v4/security/contract"
+)
+
+func TestBuilder_GlobalAccessControlWithoutFirewallStillCompiles(t *testing.T) {
+    builder := NewBuilder()
+
+    globalAccessControl := security.NewAccessControl([]security.AccessControlRule{
+        accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
+        accesscontrol.NewSegmentPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}}),
+    })
+    builder.SetGlobal(
+        GlobalConfig{
+            AccessControl:         globalAccessControl,
+            AccessDecisionManager: security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{security.NewRoleVoter()}, security.AccessDecisionManagerConfig{}),
+        },
+    )
+
+    compiled := builder.BuildAndCompile()
+    if nil == compiled {
+        t.Fatalf("expected a global-only configuration to still compile and enforce, got nil")
+    }
+
+    if nil == compiled.GlobalAccessControl() {
+        t.Fatalf("expected the compiled configuration to carry the declared global access control")
+    }
+}
+
+func TestBuilder_NoFirewallAndNoGlobalCompilesToNil(t *testing.T) {
+    builder := NewBuilder()
+
+    if nil != builder.BuildAndCompile() {
+        t.Fatalf("expected no declared security to compile to nil")
+    }
+}
+func TestCompile_SourceIsNoneWhenDependencyAbsent(t *testing.T) {
+    builder := NewBuilder()
+
+    builder.AddFirewall(
+        "api",
+        security.NewPathPrefixMatcher("/"),
+        &anonymousTokenSource{},
+        openFirewallConfig(),
+    )
+
+    firewall := builder.BuildAndCompile().Firewalls()[0]
+
+    _, _, _, entryPointSource, deniedHandlerSource := firewall.Sources()
+    if security.SourceNone != entryPointSource {
+        t.Fatalf("expected an absent entry point to read SourceNone, got %q", entryPointSource)
+    }
+    if security.SourceNone != deniedHandlerSource {
+        t.Fatalf("expected an absent denied handler to read SourceNone, got %q", deniedHandlerSource)
+    }
+}
+
+func TestCompile_RefusesATypedNilOverrideDependency(t *testing.T) {
+    var typedNilDecisionManager securitycontract.AccessDecisionManager = (*security.AccessDecisionManager)(nil)
+    var typedNilEntryPoint securitycontract.EntryPoint = (*typedNilEntryPointProbe)(nil)
+    var typedNilDeniedHandler securitycontract.AccessDeniedHandler = (*typedNilDeniedHandlerProbe)(nil)
+
+    for _, testCase := range []struct {
+        name     string
+        override FirewallOverride
+        expected string
+    }{
+        {
+            "access decision manager",
+            FirewallOverride{AccessDecisionManager: typedNilDecisionManager},
+            "security firewall access decision manager is a typed nil",
+        },
+        {
+            "entry point",
+            FirewallOverride{EntryPoint: typedNilEntryPoint},
+            "security firewall entry point is a typed nil",
+        },
+        {
+            "access denied handler",
+            FirewallOverride{AccessDeniedHandler: typedNilDeniedHandler},
+            "security firewall access denied handler is a typed nil",
+        },
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            _, err := Compile(Configuration{
+                firewalls: []firewallDeclaration{
+                    {
+                        name:        "api",
+                        matcher:     security.NewPathPrefixMatcher("/"),
+                        tokenSource: &anonymousTokenSource{},
+                        config:      FirewallConfig{Override: testCase.override},
+                    },
+                },
+            })
+            if nil == err || false == strings.Contains(err.Error(), testCase.expected) {
+                t.Fatalf("expected %q, got %v", testCase.expected, err)
+            }
+        })
+    }
+}
+
+type typedNilEntryPointProbe struct {
+}
+
+func (instance *typedNilEntryPointProbe) Start(
+    runtimeInstance containercontract.Runtime,
+    request httpcontract.Request,
+) (httpcontract.Response, error) {
+    return nil, nil
+}
+
+type typedNilDeniedHandlerProbe struct {
+}
+
+func (instance *typedNilDeniedHandlerProbe) Handle(
+    runtimeInstance containercontract.Runtime,
+    request httpcontract.Request,
+    decisionErr error,
+) (httpcontract.Response, error) {
+    return nil, nil
+}
+
+func TestCompile_RefusesANilRule(t *testing.T) {
+    _, err := Compile(Configuration{
+        firewalls: []firewallDeclaration{
+            {
+                name:        "api",
+                matcher:     security.NewPathPrefixMatcher("/api"),
+                tokenSource: &anonymousTokenSource{},
+                config:      FirewallConfig{Rules: []securitycontract.Rule{nil}},
+            },
+        },
+    })
+    if nil == err || false == strings.Contains(err.Error(), "security firewall rule is nil") {
+        t.Fatalf("expected the nil rule refused, got %v", err)
+    }
+}
+
+func TestCompile_RefusesANameAlreadyDeclared(t *testing.T) {
+    firewall := firewallDeclaration{
+        name:        "api",
+        matcher:     security.NewPathPrefixMatcher("/api"),
+        tokenSource: &anonymousTokenSource{},
+        config:      openFirewallConfig(),
+    }
+
+    if _, err := Compile(Configuration{firewalls: []firewallDeclaration{firewall}}); nil != err {
+        t.Fatalf("expected one firewall of the name to compile, got %v", err)
+    }
+
+    _, err := Compile(Configuration{firewalls: []firewallDeclaration{firewall, firewall}})
+    if nil == err || false == strings.Contains(err.Error(), "security firewall name is already declared") {
+        t.Fatalf("expected the duplicate name refused, got %v", err)
+    }
+}
+
+func TestCompile_RefusesAPartialLoginConfiguration(t *testing.T) {
+    var typedNilLoginHandler *noopLoginHandler
+
+    for expected, config := range map[string]FirewallConfig{
+        "a security firewall door declares a handler": {Login: LoginConfig{Path: "/login", LimiterDisabled: true}},
+        "a security firewall door declares a path":    {Login: LoginConfig{Handler: typedNilLoginHandler, LimiterDisabled: true}},
+    } {
+        _, err := Compile(Configuration{
+            firewalls: []firewallDeclaration{
+                {
+                    name:        "main",
+                    matcher:     security.NewPathPrefixMatcher("/"),
+                    tokenSource: &anonymousTokenSource{},
+                    config:      config,
+                },
+            },
+        })
+        if nil == err || false == strings.Contains(err.Error(), expected) {
+            t.Fatalf("expected %q, got %v", expected, err)
+        }
+    }
+}
+
+func TestCompile_DescribesTheFrameworksPathPrefixMatcher(t *testing.T) {
+    compiledConfiguration := NewBuilder().AddFirewall(
+        "admin",
+        security.NewPathPrefixMatcher("/admin"),
+        &anonymousTokenSource{},
+        openFirewallConfig(),
+    ).BuildAndCompile()
+
+    if `path prefix "/admin"` != compiledConfiguration.Firewalls()[0].MatcherDescription() {
+        t.Fatalf("expected the matcher described, got %q", compiledConfiguration.Firewalls()[0].MatcherDescription())
+    }
+}
+
+func compileMergeStrategyFirewall(t *testing.T, mergeStrategy AccessControlMergeStrategy) *security.AccessControl {
+    t.Helper()
+
+    builder := NewBuilder()
+
+    builder.SetGlobal(
+        GlobalConfig{
+            AccessControl: security.NewAccessControl([]security.AccessControlRule{
+                accesscontrol.NewSegmentPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_GLOBAL"}}),
+                accesscontrol.NewSegmentPrefixRule("/reports", accesscontrol.RuleConfig{Attributes: []string{"ROLE_GLOBAL"}}),
+                accesscontrol.NewSegmentPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}}),
+            }),
+            AccessDecisionManager: roleDecisionManager(),
+        },
+    )
+
+    builder.AddFirewall(
+        "api",
+        security.NewPathPrefixMatcher("/"),
+        &anonymousTokenSource{},
+        FirewallConfig{
+            Override: FirewallOverride{
+                MergeStrategy: mergeStrategy,
+                AccessControl: security.NewAccessControl([]security.AccessControlRule{
+                    accesscontrol.NewSegmentPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
+                    accesscontrol.NewSegmentPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}}),
+                }),
+            },
+        },
+    )
+
+    return builder.BuildAndCompile().Firewalls()[0].AccessControl()
+}
+
+func assertMergedAccessControlAnswers(t *testing.T, accessControl *security.AccessControl, path string, expected string) {
+    t.Helper()
+
+    attributes, matched := accessControl.Match(path)
+    actual := strings.Join(attributes, ",")
+    if false == matched {
+        actual = "no rule"
+    }
+
+    if expected != actual {
+        t.Fatalf("expected %s to answer %s, got %s", path, expected, actual)
+    }
+}
+
+func TestCompile_TheLocalFirstStrategyPutsTheFirewallsRulesAheadOfTheGlobalOnes(t *testing.T) {
+    accessControl := compileMergeStrategyFirewall(t, AccessControlMergeLocalFirst)
+
+    assertMergedAccessControlAnswers(t, accessControl, "/admin", "ROLE_LOCAL")
+    assertMergedAccessControlAnswers(t, accessControl, "/reports", "ROLE_GLOBAL")
+}
+
+func TestCompile_TheGlobalFirstStrategyPutsTheGlobalRulesAheadOfTheFirewalls(t *testing.T) {
+    accessControl := compileMergeStrategyFirewall(t, AccessControlMergeGlobalFirst)
+
+    assertMergedAccessControlAnswers(t, accessControl, "/admin", "ROLE_GLOBAL")
+    assertMergedAccessControlAnswers(t, accessControl, "/reports", "ROLE_GLOBAL")
+}
+
+func TestCompile_TheOverrideOnlyStrategyIgnoresTheGlobalRules(t *testing.T) {
+    accessControl := compileMergeStrategyFirewall(t, AccessControlMergeOverrideOnly)
+
+    assertMergedAccessControlAnswers(t, accessControl, "/admin", "ROLE_LOCAL")
+    assertMergedAccessControlAnswers(t, accessControl, "/reports", securitycontract.AttributePublicAccess)
+}
+
+func impersonationSourceForCompile(hierarchy *security.RoleHierarchy) *security.ImpersonationTokenSource {
+    return security.NewImpersonationTokenSource(&anonymousTokenSource{}, impersonatedUserResolverStub{}, security.ImpersonationTokenSourceConfig{
+        RoleHierarchy: hierarchy,
+    })
+}
+
+type impersonatedUserResolverStub struct{}
+
+func (instance impersonatedUserResolverStub) ResolveImpersonatedUser(_ containercontract.Runtime, _ string) (securitycontract.Token, error) {
+    return nil, nil
+}
+
+func firewallConfigWithHierarchy(hierarchy *security.RoleHierarchy) FirewallConfig {
+    config := openFirewallConfig()
+    config.Override.RoleHierarchy = hierarchy
+
+    return config
+}
+
+type recordingBinderSource struct {
+    anonymousTokenSource
+    firewallNames []string
+    hierarchies   []securitycontract.RoleHierarchy
+    failure       error
+}
+
+func (instance *recordingBinderSource) BindRoleHierarchy(firewallName string, hierarchy securitycontract.RoleHierarchy) error {
+    instance.firewallNames = append(instance.firewallNames, firewallName)
+    instance.hierarchies = append(instance.hierarchies, hierarchy)
+
+    return instance.failure
+}
+
+func TestCompile_BindsTheEffectiveHierarchyOfEachFirewall(t *testing.T) {
+    overriding := security.NewRoleHierarchy(nil)
+    inherited := security.NewRoleHierarchy(nil)
+
+    source := &recordingBinderSource{}
+
+    builder := NewBuilder()
+    builder.SetGlobal(GlobalConfig{RoleHierarchy: inherited})
+    builder.AddFirewall("first", security.NewPathPrefixMatcher("/first"), source, firewallConfigWithHierarchy(overriding))
+    builder.AddFirewall("second", security.NewPathPrefixMatcher("/second"), source, openFirewallConfig())
+    builder.BuildAndCompile()
+
+    if 2 != len(source.firewallNames) || "first" != source.firewallNames[0] || "second" != source.firewallNames[1] {
+        t.Fatalf("expected one bind per firewall, got %v", source.firewallNames)
+    }
+
+    if securitycontract.RoleHierarchy(overriding) != source.hierarchies[0] || securitycontract.RoleHierarchy(inherited) != source.hierarchies[1] {
+        t.Fatalf("expected each firewall's effective hierarchy, got %v", source.hierarchies)
+    }
+}
+
+func TestCompile_AFirewallWithoutAHierarchyBindsAnUntypedNil(t *testing.T) {
+    source := &recordingBinderSource{}
+
+    builder := NewBuilder()
+    builder.AddFirewall("api", security.NewPathPrefixMatcher("/"), source, openFirewallConfig())
+    builder.BuildAndCompile()
+
+    if 1 != len(source.hierarchies) || nil != source.hierarchies[0] {
+        t.Fatalf("expected an untyped nil, got %#v", source.hierarchies)
+    }
+}
+
+func TestCompile_RefusesASourceOnFirewallsWithDifferentHierarchies(t *testing.T) {
+    const message = "the impersonation source is held by two firewalls with different role hierarchies; declare its RoleHierarchy"
+    const field = "ImpersonationTokenSourceConfig.RoleHierarchy"
+
+    for _, testCase := range []struct {
+        name   string
+        first  *security.RoleHierarchy
+        second *security.RoleHierarchy
+    }{
+        {name: "two hierarchies", first: security.NewRoleHierarchy(nil), second: security.NewRoleHierarchy(nil)},
+        {name: "none, then one", first: nil, second: security.NewRoleHierarchy(nil)},
+        {name: "one, then none", first: security.NewRoleHierarchy(nil), second: nil},
+    } {
+        source := impersonationSourceForCompile(nil)
+
+        builder := NewBuilder()
+        builder.AddFirewall("first", security.NewPathPrefixMatcher("/first"), source, firewallConfigWithHierarchy(testCase.first))
+        builder.AddFirewall("second", security.NewPathPrefixMatcher("/second"), source, firewallConfigWithHierarchy(testCase.second))
+
+        expectRefusalNamingField(t, message, field, func() {
+            builder.BuildAndCompile()
+        })
+    }
+}
+
+func TestCompile_AdmitsOneHierarchyOnTwoFirewallsAndAnExplicitSource(t *testing.T) {
+    hierarchy := security.NewRoleHierarchy(nil)
+
+    for _, testCase := range []struct {
+        name   string
+        source *security.ImpersonationTokenSource
+        first  *security.RoleHierarchy
+        second *security.RoleHierarchy
+    }{
+        {name: "one hierarchy", source: impersonationSourceForCompile(nil), first: hierarchy, second: hierarchy},
+        {name: "no hierarchy", source: impersonationSourceForCompile(nil), first: nil, second: nil},
+        {name: "explicit source", source: impersonationSourceForCompile(hierarchy), first: security.NewRoleHierarchy(nil), second: security.NewRoleHierarchy(nil)},
+    } {
+        builder := NewBuilder()
+        builder.AddFirewall("first", security.NewPathPrefixMatcher("/first"), testCase.source, firewallConfigWithHierarchy(testCase.first))
+        builder.AddFirewall("second", security.NewPathPrefixMatcher("/second"), testCase.source, firewallConfigWithHierarchy(testCase.second))
+
+        if 2 != len(builder.BuildAndCompile().Firewalls()) {
+            t.Fatalf("%s: expected both firewalls compiled", testCase.name)
+        }
+    }
+}
+
+func TestCompile_AnswersTheBinderRefusal(t *testing.T) {
+    source := &recordingBinderSource{failure: errors.New("the source refuses")}
+
+    _, compileErr := Compile(Configuration{
+        firewalls: []firewallDeclaration{
+            {name: "api", matcher: security.NewPathPrefixMatcher("/"), tokenSource: source, config: openFirewallConfig()},
+        },
+    })
+    if false == errors.Is(compileErr, source.failure) {
+        t.Fatalf("expected the binder refusal answered, got %v", compileErr)
+    }
+}
+
+func TestCompile_RefusesAFirewallAnEarlierOneShadows(t *testing.T) {
+    cases := []struct {
+        name     string
+        earlier  securitycontract.Matcher
+        later    securitycontract.Matcher
+        shadowed bool
+    }{
+        {"raw prefix over a longer raw prefix", security.NewPathPrefixMatcher("/api"), security.NewPathPrefixMatcher("/api-admin"), true},
+        {"raw prefix with its slash beside a longer spelling", security.NewPathPrefixMatcher("/reports/"), security.NewPathPrefixMatcher("/reportsarchive"), false},
+        {"narrower raw prefix declared first", security.NewPathPrefixMatcher("/api-admin"), security.NewPathPrefixMatcher("/api"), false},
+        {"empty raw prefix over every later one", security.NewPathPrefixMatcher(""), security.NewPathPrefixMatcher("/admin"), true},
+        {"segment over its subtree segment", security.NewSegmentPrefixMatcher("/api"), security.NewSegmentPrefixMatcher("/api/admin"), true},
+        {"segment over the same segment", security.NewSegmentPrefixMatcher("/api/"), security.NewSegmentPrefixMatcher("/api"), true},
+        {"segment beside a sibling segment", security.NewSegmentPrefixMatcher("/api"), security.NewSegmentPrefixMatcher("/api-admin"), false},
+        {"segment over a raw prefix inside the tree", security.NewSegmentPrefixMatcher("/api"), security.NewPathPrefixMatcher("/api/admin"), true},
+        {"segment beside a raw prefix of the same spelling", security.NewSegmentPrefixMatcher("/api"), security.NewPathPrefixMatcher("/api"), false},
+        {"catch-all segment over a raw prefix", security.NewSegmentPrefixMatcher("/"), security.NewPathPrefixMatcher("/api"), true},
+        {"raw prefix over a segment its string begins", security.NewPathPrefixMatcher("/ap"), security.NewSegmentPrefixMatcher("/api"), true},
+        {"raw prefix with its slash over the bare segment", security.NewPathPrefixMatcher("/api/"), security.NewSegmentPrefixMatcher("/api"), true},
+        {"raw prefix inside the later segment", security.NewPathPrefixMatcher("/api/admin"), security.NewSegmentPrefixMatcher("/api"), false},
+        {"empty raw prefix over the catch-all segment", security.NewPathPrefixMatcher(""), security.NewSegmentPrefixMatcher("/"), true},
+        {"root raw prefix over the empty raw prefix", security.NewPathPrefixMatcher("/"), security.NewPathPrefixMatcher(""), true},
+        {"root raw prefix over the catch-all segment", security.NewPathPrefixMatcher("/"), security.NewSegmentPrefixMatcher("/"), true},
+        {"segment over a raw prefix with its slash", security.NewSegmentPrefixMatcher("/api"), security.NewPathPrefixMatcher("/api/"), true},
+        {"raw prefix with its slash beside the bare raw prefix", security.NewPathPrefixMatcher("/api/"), security.NewPathPrefixMatcher("/api"), false},
+    }
+
+    for _, testCase := range cases {
+        _, compileErr := Compile(Configuration{
+            firewalls: []firewallDeclaration{
+                {name: "earlier", matcher: testCase.earlier, tokenSource: &anonymousTokenSource{}, config: openFirewallConfig()},
+                {name: "later", matcher: testCase.later, tokenSource: &anonymousTokenSource{}, config: openFirewallConfig()},
+            },
+        })
+
+        if false == testCase.shadowed {
+            if nil != compileErr {
+                t.Fatalf("%s: expected the pair admitted, got %v", testCase.name, compileErr)
+            }
+
+            continue
+        }
+
+        refusal, isRefusal := compileErr.(*exception.Error)
+        if false == isRefusal || false == strings.HasPrefix(refusal.Message(), "security firewall is never selected") {
+            t.Fatalf("%s: expected the shadowing refusal, got %v", testCase.name, compileErr)
+        }
+
+        if "later" != refusal.Context()["firewallName"] || "earlier" != refusal.Context()["shadowedBy"] {
+            t.Fatalf("%s: expected later shadowed by earlier, got %v", testCase.name, refusal.Context())
+        }
+    }
+}
+
+func TestBuilder_RefusesAFirewallAnEarlierOneShadowsAtBuildAndCompile(t *testing.T) {
+    builder := NewBuilder()
+    builder.SetGlobal(GlobalConfig{AccessControl: openAccessControl()})
+    builder.AddFirewall("api", security.NewPathPrefixMatcher("/api"), &anonymousTokenSource{}, FirewallConfig{})
+    builder.AddFirewall("apiAdmin", security.NewPathPrefixMatcher("/api-admin"), &anonymousTokenSource{}, FirewallConfig{})
+
+    defer func() {
+        refusal, isRefusal := recover().(*exception.Error)
+        if false == isRefusal || "apiAdmin" != refusal.Context()["firewallName"] || "/api-admin" != refusal.Context()["entry"] || "/api" != refusal.Context()["shadowedByPrefix"] {
+            t.Fatalf("expected apiAdmin refused as shadowed by /api, got %v", refusal)
+        }
+    }()
+
+    builder.BuildAndCompile()
+}
+
+func TestCompile_RefusesADeclaredPathThatCarriesAPercentEscape(t *testing.T) {
+    ruleAt := func(path string) *security.AccessControl {
+        return security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewExactRule(path, accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}), accesscontrol.NewSegmentPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}})})
+    }
+
+    cases := []struct {
+        name         string
+        global       *security.AccessControl
+        firewalls    []firewallDeclaration
+        field        string
+        firewallName string
+        entry        string
+    }{
+        {
+            name:   "a global rule with no firewall",
+            global: ruleAt("/caf%C3%A9"),
+            field:  "GlobalConfig.AccessControl",
+            entry:  "/caf%C3%A9",
+        },
+        {
+            name:      "a global rule beside a firewall",
+            global:    ruleAt("/caf%C3%A9"),
+            firewalls: []firewallDeclaration{{name: "files", matcher: security.NewPathPrefixMatcher("/files"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{}}},
+            field:     "GlobalConfig.AccessControl",
+            entry:     "/caf%C3%A9",
+        },
+        {
+            name:         "a firewall prefix",
+            firewalls:    []firewallDeclaration{{name: "files", matcher: security.NewPathPrefixMatcher("/files%41"), tokenSource: &anonymousTokenSource{}, config: openFirewallConfig()}},
+            field:        "matcher",
+            firewallName: "files",
+            entry:        "/files%41",
+        },
+        {
+            name:         "a segment firewall prefix",
+            firewalls:    []firewallDeclaration{{name: "files", matcher: security.NewSegmentPrefixMatcher("/files%41"), tokenSource: &anonymousTokenSource{}, config: openFirewallConfig()}},
+            field:        "matcher",
+            firewallName: "files",
+            entry:        "/files%41",
+        },
+        {
+            name:         "a firewall rule",
+            firewalls:    []firewallDeclaration{{name: "files", matcher: security.NewPathPrefixMatcher("/files"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: FirewallOverride{AccessControl: ruleAt("/files/a%20b"), AccessDecisionManager: roleDecisionManager()}}}},
+            field:        "FirewallConfig.Override.AccessControl",
+            firewallName: "files",
+            entry:        "/files/a%20b",
+        },
+    }
+
+    for _, testCase := range cases {
+        _, compileErr := Compile(Configuration{global: GlobalConfig{AccessControl: testCase.global, AccessDecisionManager: roleDecisionManager()}, firewalls: testCase.firewalls})
+
+        refusal, isRefusal := compileErr.(*exception.Error)
+        if false == isRefusal || false == strings.HasPrefix(refusal.Message(), "security declared path carries a percent escape") {
+            t.Fatalf("%s: expected the percent-escape refusal, got %v", testCase.name, compileErr)
+        }
+
+        if testCase.field != refusal.Context()["field"] || testCase.entry != refusal.Context()["entry"] {
+            t.Fatalf("%s: expected %s naming %s, got %v", testCase.name, testCase.field, testCase.entry, refusal.Context())
+        }
+
+        if firewallName, named := refusal.Context()["firewallName"]; ("" == testCase.firewallName) == named || ("" != testCase.firewallName && testCase.firewallName != firewallName) {
+            t.Fatalf("%s: expected the firewall name %q, got %v", testCase.name, testCase.firewallName, refusal.Context())
+        }
+    }
+
+    admitted := security.NewAccessControl([]security.AccessControlRule{
+        accesscontrol.NewExactRule("/files/a%2Fb", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
+        accesscontrol.NewExactRule("/files/100%", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
+        accesscontrol.NewRegexRule("^/files%41/x$", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
+        accesscontrol.NewRegexRule("^/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}}),
+    })
+
+    if _, compileErr := Compile(Configuration{
+        global: GlobalConfig{AccessDecisionManager: roleDecisionManager()},
+        firewalls: []firewallDeclaration{
+            {name: "files", matcher: security.NewPathPrefixMatcher("/files%2F"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: FirewallOverride{AccessControl: admitted}}},
+        },
+    }); nil != compileErr {
+        t.Fatalf("expected %%2F, a stray percent sign and a regex pattern admitted, got %v", compileErr)
+    }
+}
+
+const protectedRuleWithoutDecisionManagerRefusal = "security firewall access control holds a rule that is not PUBLIC_ACCESS and no access decision manager reaches the firewall, so every request the rule matches would be refused without a decision; declare GlobalConfig.AccessDecisionManager or FirewallConfig.Override.AccessDecisionManager"
+
+func TestCompile_RefusesAProtectedRuleNoDecisionManagerReaches(t *testing.T) {
+    publicRule := accesscontrol.NewExactRule("/open", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}})
+    protectedRule := accesscontrol.NewRegexRule("^/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})
+    fallbackRule := accesscontrol.NewRegexRule("^/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}})
+
+    for name, declaration := range map[string]struct {
+        global   GlobalConfig
+        override FirewallOverride
+    }{
+        "its own rule":       {override: FirewallOverride{AccessControl: security.NewAccessControl([]security.AccessControlRule{publicRule, protectedRule})}},
+        "an inherited rule":  {global: GlobalConfig{AccessControl: security.NewAccessControl([]security.AccessControlRule{publicRule, protectedRule})}},
+        "override-only rule": {global: GlobalConfig{AccessControl: openAccessControl()}, override: FirewallOverride{MergeStrategy: AccessControlMergeOverrideOnly, AccessControl: security.NewAccessControl([]security.AccessControlRule{publicRule, protectedRule})}},
+    } {
+        _, compileErr := Compile(Configuration{
+            global:    declaration.global,
+            firewalls: []firewallDeclaration{{name: "admin", matcher: security.NewPathPrefixMatcher("/"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: declaration.override}}},
+        })
+
+        refusal, isRefusal := compileErr.(*exception.Error)
+        if false == isRefusal || protectedRuleWithoutDecisionManagerRefusal != refusal.Message() {
+            t.Fatalf("%s: expected the missing-manager refusal, got %v", name, compileErr)
+        }
+
+        context := refusal.Context()
+        if "admin" != context["firewallName"] || 1 != context["ruleIndex"] || "^/admin" != context["rule"] || "ROLE_ADMIN" != context["attribute"] {
+            t.Fatalf("%s: expected the firewall, the rule and its attribute named, got %v", name, context)
+        }
+    }
+
+    for name, declaration := range map[string]struct {
+        global   GlobalConfig
+        override FirewallOverride
+    }{
+        "public rules only":      {override: FirewallOverride{AccessControl: security.NewAccessControl([]security.AccessControlRule{publicRule, fallbackRule})}},
+        "an empty control":       {override: FirewallOverride{AccessControl: openAccessControl()}},
+        "the global manager":     {global: GlobalConfig{AccessDecisionManager: roleDecisionManager()}, override: FirewallOverride{AccessControl: security.NewAccessControl([]security.AccessControlRule{protectedRule, fallbackRule})}},
+        "the firewall manager":   {override: FirewallOverride{AccessDecisionManager: roleDecisionManager(), AccessControl: security.NewAccessControl([]security.AccessControlRule{protectedRule, fallbackRule})}},
+        "a disabled global rule": {global: GlobalConfig{AccessControl: security.NewAccessControl([]security.AccessControlRule{protectedRule, fallbackRule})}, override: FirewallOverride{GlobalAccessControlDisabled: true, AccessControl: security.NewAccessControl([]security.AccessControlRule{publicRule, fallbackRule})}},
+    } {
+        if _, compileErr := Compile(Configuration{
+            global:    declaration.global,
+            firewalls: []firewallDeclaration{{name: "admin", matcher: security.NewPathPrefixMatcher("/"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: declaration.override}}},
+        }); nil != compileErr {
+            t.Fatalf("%s: expected the firewall admitted, got %v", name, compileErr)
+        }
+    }
+}
+
+func TestCompile_TheUnavailableRetryAfterIsInheritedOverriddenAndDefaulted(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        global   bound.Duration
+        override bound.Duration
+        expected time.Duration
+    }{
+        "both absent":        {expected: 5 * time.Second},
+        "the global":         {global: bound.Of(30 * time.Second), expected: 30 * time.Second},
+        "the override wins":  {global: bound.Of(30 * time.Second), override: bound.Of(10 * time.Second), expected: 10 * time.Second},
+        "an override alone":  {override: bound.Of(2 * time.Second), expected: 2 * time.Second},
+    } {
+        t.Run(name, func(t *testing.T) {
+            override := openFirewallConfig().Override
+            override.UnavailableRetryAfter = testCase.override
+
+            compiled, compileErr := Compile(Configuration{
+                global: GlobalConfig{UnavailableRetryAfter: testCase.global},
+                firewalls: []firewallDeclaration{
+                    {name: "api", matcher: security.NewPathPrefixMatcher("/"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: override}},
+                },
+            })
+            if nil != compileErr {
+                t.Fatalf("compile: %v", compileErr)
+            }
+
+            if actual := compiled.Firewalls()[0].UnavailableRetryAfter(); testCase.expected != actual {
+                t.Fatalf("expected %s, got %s", testCase.expected, actual)
+            }
+        })
+    }
+}
+
+type fixedVoteVoter struct {
+    attribute string
+    result    securitycontract.VoteResult
+}
+
+func (instance *fixedVoteVoter) Supports(attribute string, subject any) bool {
+    return instance.attribute == attribute
+}
+
+func (instance *fixedVoteVoter) Vote(runtimeInstance containercontract.Runtime, token securitycontract.Token, attribute string, subject any) (securitycontract.VoteResult, error) {
+    return instance.result, nil
+}
+
+func TestCompile_TheRoleHierarchyUpgradeKeepsTheManagersStrategyAndConfig(t *testing.T) {
+    hierarchy := security.NewRoleHierarchy(map[string][]string{"ROLE_ADMIN": {"ROLE_USER"}})
+
+    config := firewallConfigWithHierarchy(hierarchy)
+    config.Override.AccessDecisionManager = security.NewAccessDecisionManager(
+        securitycontract.DecisionStrategyConsensus,
+        []securitycontract.Voter{
+            security.NewRoleVoter(),
+            &fixedVoteVoter{attribute: "ROLE_USER", result: securitycontract.VoteDenied},
+        },
+        security.AccessDecisionManagerConfig{AllowIfTied: true},
+    )
+
+    builder := NewBuilder()
+    builder.AddFirewall("api", security.NewPathPrefixMatcher("/"), &anonymousTokenSource{}, config)
+
+    compiled, isConcrete := builder.BuildAndCompile().Firewalls()[0].AccessDecisionManager().(*security.AccessDecisionManager)
+    if false == isConcrete {
+        t.Fatalf("expected the compiled manager to stay the framework's")
+    }
+
+    if securitycontract.DecisionStrategyConsensus != compiled.Strategy() {
+        t.Fatalf("expected the upgrade to keep the consensus strategy, got %d", compiled.Strategy())
+    }
+
+    if _, isHierarchyVoter := compiled.Voters()[0].(*security.RoleHierarchyVoter); false == isHierarchyVoter {
+        t.Fatalf("expected the role voter to be the hierarchy one")
+    }
+
+    token := security.NewAuthenticatedToken("u", []string{"ROLE_ADMIN"}, nil)
+    if err := compiled.DecideAll(testRuntime(), token, []string{"ROLE_USER"}, nil); nil != err {
+        t.Fatalf("expected the upgraded manager to keep AllowIfTied and grant the 1-1 tie, got %v", err)
+    }
+}
+
+func TestCompile_Csrf_ZeroValue_IsOriginModeUnderTheDefaultNames(t *testing.T) {
+    firewall := compileOneCsrfFirewall(t, security.CsrfConfig{}, &anonymousTokenSource{}, FirewallCsrfConfig{})
+    csrf := firewall.Csrf()
+
+    if security.CsrfModeOrigin != csrf.Mode || http.DefaultCsrfHeaderName != csrf.HeaderName || http.DefaultCsrfFieldName != csrf.FieldName || 0 != len(csrf.TrustedOrigins) || true == firewall.CsrfExempt() {
+        t.Fatalf("expected the origin mode under the default names, got %+v exempt %v", csrf, firewall.CsrfExempt())
+    }
+}
+
+func TestCompile_Csrf_FirewallInheritsTheGlobalFieldByField(t *testing.T) {
+    global := security.CsrfConfig{Mode: security.CsrfModeToken, HeaderName: "X-Global", FieldName: "global", TrustedOrigins: []string{"https://global.example"}}
+
+    inherited := compileOneCsrfFirewall(t, global, &anonymousTokenSource{}, FirewallCsrfConfig{HeaderName: "X-Local"}).Csrf()
+    if security.CsrfModeToken != inherited.Mode || "X-Local" != inherited.HeaderName || "global" != inherited.FieldName || 1 != len(inherited.TrustedOrigins) {
+        t.Fatalf("expected every field but the header inherited, got %+v", inherited)
+    }
+
+    overridden := compileOneCsrfFirewall(t, global, &anonymousTokenSource{}, FirewallCsrfConfig{Mode: security.CsrfModeOrigin, FieldName: "local"}).Csrf()
+    if security.CsrfModeOrigin != overridden.Mode || "X-Global" != overridden.HeaderName || "local" != overridden.FieldName {
+        t.Fatalf("expected the mode and the field overridden, got %+v", overridden)
+    }
+}
+
+func TestCompile_Csrf_NilTrustedOriginsInherit_EmptyReplaces(t *testing.T) {
+    global := security.CsrfConfig{TrustedOrigins: []string{"https://global.example"}}
+
+    if origins := compileOneCsrfFirewall(t, global, &anonymousTokenSource{}, FirewallCsrfConfig{TrustedOrigins: nil}).Csrf().TrustedOrigins; 1 != len(origins) || "https://global.example" != origins[0] {
+        t.Fatalf("expected nil to inherit, got %v", origins)
+    }
+
+    if origins := compileOneCsrfFirewall(t, global, &anonymousTokenSource{}, FirewallCsrfConfig{TrustedOrigins: []string{}}).Csrf().TrustedOrigins; 0 != len(origins) {
+        t.Fatalf("expected an empty list to trust none, got %v", origins)
+    }
+
+    if origins := compileOneCsrfFirewall(t, global, &anonymousTokenSource{}, FirewallCsrfConfig{TrustedOrigins: []string{"https://local.example"}}).Csrf().TrustedOrigins; 1 != len(origins) || "https://local.example" != origins[0] {
+        t.Fatalf("expected a list to replace, got %v", origins)
+    }
+}
+
+func TestCompile_Csrf_TokenPathOnADisabledFirewall_Refused(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        global security.CsrfConfig
+        local  security.CsrfMode
+    }{
+        "firewall": {security.CsrfConfig{}, security.CsrfModeDisabled},
+        "global":   {security.CsrfConfig{Mode: security.CsrfModeDisabled}, ""},
+    } {
+        t.Run(name, func(t *testing.T) {
+            expectRefusalNamingField(t, "a security csrf token path is declared on a firewall that checks no request", "FirewallConfig.Csrf.TokenPath", func() {
+                compileOneCsrfFirewall(t, testCase.global, &anonymousTokenSource{}, FirewallCsrfConfig{Mode: testCase.local, TokenPath: "/csrf-token"})
+            })
+        })
+    }
+}
+
+func TestCompile_Csrf_TokenPathOnAStatelessFirewall_Refused(t *testing.T) {
+    defer func() {
+        refusal, isRefusal := recover().(*exception.Error)
+        if false == isRefusal || "stateless" != refusal.Context()["cause"] || "FirewallConfig.Csrf.TokenPath" != refusal.Context()["field"] {
+            t.Fatalf("expected the stateless cause named, got %v", refusal)
+        }
+    }()
+
+    compileOneCsrfFirewall(t, security.CsrfConfig{}, &statelessTokenSource{}, FirewallCsrfConfig{TokenPath: "/csrf-token"})
+}
+
+func TestCompile_Csrf_StatelessSourceExemptsTheFirewall(t *testing.T) {
+    if false == compileOneCsrfFirewall(t, security.CsrfConfig{}, &statelessTokenSource{}, FirewallCsrfConfig{}).CsrfExempt() {
+        t.Fatalf("expected a stateless source to exempt its firewall")
+    }
+
+    if false == compileOneCsrfFirewall(t, security.CsrfConfig{}, &anonymousTokenSource{}, FirewallCsrfConfig{Mode: security.CsrfModeDisabled}).CsrfExempt() {
+        t.Fatalf("expected the disabled mode to exempt its firewall")
+    }
+}
+
+func TestCompile_Csrf_TokenDoorListedAmongTheDoors(t *testing.T) {
+    doors := compileOneCsrfFirewall(t, security.CsrfConfig{}, &anonymousTokenSource{}, FirewallCsrfConfig{TokenPath: "/csrf-token"}).Doors()
+
+    if 2 != len(doors) || "/csrf-token" != doors[1].Path || "security.main.csrfToken" != doors[1].Name || 1 != len(doors[1].Methods) || "GET" != doors[1].Methods[0] {
+        t.Fatalf("expected the token door named after the firewall, got %+v", doors)
+    }
+
+    named := compileOneCsrfFirewall(t, security.CsrfConfig{}, &anonymousTokenSource{}, FirewallCsrfConfig{TokenPath: "/csrf-token", TokenName: "app.csrf"}).Doors()
+    if "app.csrf" != named[1].Name {
+        t.Fatalf("expected the declared name, got %+v", named)
+    }
+}
+
+const accessControlWithoutFallbackRefusal = "security access control holds no rule claiming every path, so a path no rule names would reach its handler undecided; declare the fallback, a segment prefix rule on \"/\" (PUBLIC_ACCESS to keep the rest open, a role to refuse it), the empty raw prefix, a last \"^/\" regex rule or, in a firewall, a prefix rule claiming the firewall's whole prefix"
+
+func TestCompile_RefusesAnAccessControlWithoutAFallbackRule(t *testing.T) {
+    adminRule := accesscontrol.NewSegmentPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})
+    exactRootRule := accesscontrol.NewExactRule("/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}})
+    regexRule := accesscontrol.NewRegexRule("^/api", accesscontrol.RuleConfig{Attributes: []string{"ROLE_API"}})
+    withoutFallback := security.NewAccessControl([]security.AccessControlRule{adminRule, exactRootRule})
+
+    for name, testCase := range map[string]struct {
+        configuration Configuration
+        firewallName  any
+        field         string
+    }{
+        "the global alone": {
+            configuration: Configuration{global: GlobalConfig{AccessControl: withoutFallback, AccessDecisionManager: roleDecisionManager()}},
+            firewallName:  nil,
+            field:         "GlobalConfig.AccessControl",
+        },
+        "an empty global alone": {
+            configuration: Configuration{global: GlobalConfig{AccessControl: security.NewAccessControl(nil)}},
+            firewallName:  nil,
+            field:         "GlobalConfig.AccessControl",
+        },
+        "a firewall's own": {
+            configuration: Configuration{global: GlobalConfig{AccessDecisionManager: roleDecisionManager()}, firewalls: []firewallDeclaration{{name: "admin", matcher: security.NewPathPrefixMatcher("/"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: FirewallOverride{AccessControl: withoutFallback}}}}},
+            firewallName:  "admin",
+            field:         "FirewallConfig.Override.AccessControl",
+        },
+        "a firewall's empty one": {
+            configuration: Configuration{firewalls: []firewallDeclaration{{name: "open", matcher: security.NewPathPrefixMatcher("/"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: FirewallOverride{AccessControl: security.NewAccessControl(nil)}}}}},
+            firewallName:  "open",
+            field:         "FirewallConfig.Override.AccessControl",
+        },
+        "a regex without the last catch-all": {
+            configuration: Configuration{global: GlobalConfig{AccessDecisionManager: roleDecisionManager()}, firewalls: []firewallDeclaration{{name: "api", matcher: security.NewPathPrefixMatcher("/"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: FirewallOverride{AccessControl: security.NewAccessControl([]security.AccessControlRule{regexRule})}}}}},
+            firewallName:  "api",
+            field:         "FirewallConfig.Override.AccessControl",
+        },
+        "a firewall rule claiming part of its prefix": {
+            configuration: Configuration{global: GlobalConfig{AccessDecisionManager: roleDecisionManager()}, firewalls: []firewallDeclaration{{name: "internal", matcher: security.NewSegmentPrefixMatcher("/internal"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: FirewallOverride{AccessControl: security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewSegmentPrefixRule("/internal/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})})}}}}},
+            firewallName:  "internal",
+            field:         "FirewallConfig.Override.AccessControl",
+        },
+        "the global beside firewalls that hold their own": {
+            configuration: Configuration{global: GlobalConfig{AccessControl: withoutFallback, AccessDecisionManager: roleDecisionManager()}, firewalls: []firewallDeclaration{{name: "admin", matcher: security.NewPathPrefixMatcher("/admin"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: FirewallOverride{MergeStrategy: AccessControlMergeOverrideOnly, AccessControl: openAccessControl()}}}}},
+            firewallName:  nil,
+            field:         "GlobalConfig.AccessControl",
+        },
+    } {
+        t.Run(name, func(t *testing.T) {
+            _, compileErr := Compile(testCase.configuration)
+
+            refusal, isRefusal := compileErr.(*exception.Error)
+            if false == isRefusal || accessControlWithoutFallbackRefusal != refusal.Message() {
+                t.Fatalf("expected the fallback refusal, got %v", compileErr)
+            }
+
+            if testCase.field != refusal.Context()["field"] || testCase.firewallName != refusal.Context()["firewallName"] {
+                t.Fatalf("expected the refusal to name %s of %v, got %v", testCase.field, testCase.firewallName, refusal.Context())
+            }
+        })
+    }
+}
+
+func TestCompile_AdmitsEveryFallbackForm(t *testing.T) {
+    adminRule := accesscontrol.NewSegmentPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})
+
+    for name, fallback := range map[string]security.AccessControlRule{
+        "a segment prefix on /":   accesscontrol.NewSegmentPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}}),
+        "a raw prefix on /":       accesscontrol.NewRawPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{"ROLE_USER"}}),
+        "the empty raw prefix":    accesscontrol.NewRawPrefixRule("", accesscontrol.RuleConfig{Attributes: []string{"ROLE_USER"}}),
+        "a last ^/ regex rule":    accesscontrol.NewRegexRule("^/", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}}),
+        "AllowAnonymous on /":     NewAccessControlBuilder().AllowAnonymous("/").Build().Rules()[0],
+    } {
+        t.Run(name, func(t *testing.T) {
+            withFallback := security.NewAccessControl([]security.AccessControlRule{adminRule, fallback})
+
+            if _, compileErr := Compile(Configuration{global: GlobalConfig{AccessControl: withFallback, AccessDecisionManager: roleDecisionManager()}}); nil != compileErr {
+                t.Fatalf("expected the global alone admitted, got %v", compileErr)
+            }
+
+            if _, compileErr := Compile(Configuration{global: GlobalConfig{AccessDecisionManager: roleDecisionManager()}, firewalls: []firewallDeclaration{{name: "admin", matcher: security.NewPathPrefixMatcher("/"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: FirewallOverride{AccessControl: withFallback}}}}}); nil != compileErr {
+                t.Fatalf("expected the firewall's own admitted, got %v", compileErr)
+            }
+        })
+    }
+
+    for name, firewall := range map[string]firewallDeclaration{
+        "a segment rule on the segment matcher's prefix": {name: "internal", matcher: security.NewSegmentPrefixMatcher("/internal"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: FirewallOverride{AccessControl: security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewSegmentPrefixRule("/internal", accesscontrol.RuleConfig{Attributes: []string{"ROLE_SERVICE"}})})}}},
+        "a raw rule on the path matcher's prefix":        {name: "api", matcher: security.NewPathPrefixMatcher("/api"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: FirewallOverride{AccessControl: security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewRawPrefixRule("/api", accesscontrol.RuleConfig{Attributes: []string{"ROLE_API"}})})}}},
+    } {
+        if _, compileErr := Compile(Configuration{global: GlobalConfig{AccessDecisionManager: roleDecisionManager()}, firewalls: []firewallDeclaration{firewall}}); nil != compileErr {
+            t.Fatalf("%s: expected the firewall admitted, got %v", name, compileErr)
+        }
+    }
+
+    inheritsTheGlobalFallback := Configuration{
+        global:    GlobalConfig{AccessControl: openAccessControl(), AccessDecisionManager: roleDecisionManager()},
+        firewalls: []firewallDeclaration{{name: "admin", matcher: security.NewPathPrefixMatcher("/"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: FirewallOverride{AccessControl: security.NewAccessControl([]security.AccessControlRule{adminRule})}}}},
+    }
+    if _, compileErr := Compile(inheritsTheGlobalFallback); nil != compileErr {
+        t.Fatalf("expected a firewall merging the global fallback admitted, got %v", compileErr)
+    }
+}

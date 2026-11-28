@@ -1,0 +1,725 @@
+package storage
+
+import (
+    "crypto/rand"
+    "crypto/sha256"
+    "encoding/hex"
+    "encoding/json"
+    "errors"
+    "io"
+    "math"
+    "os"
+    "path/filepath"
+    "strings"
+    "syscall"
+    "time"
+
+    "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/internal"
+    "github.com/precision-soft/melody/v4/internal/entitytag"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    storagecontract "github.com/precision-soft/melody/v4/storage/contract"
+)
+
+/* LocalStorageConfig configures the sweep of the temporary objects a crash mid-write leaves; the zero value is the framework's. */
+type LocalStorageConfig struct {
+    /* TemporaryStaleAge is the age past which a later Put of the same key sweeps a leftover temporary object; an in-flight Put refreshes its temporary's mtime with every write. 1h when left out, at least 1s, unlimited never sweeps. */
+    TemporaryStaleAge bound.Duration
+
+    /* SweepBatchSize is how many names of a key's directory the sweep reads at a time; 256 when left out, at least 1, unlimited refused since a batch is held in memory. */
+    SweepBatchSize bound.Count
+
+    /* FileMode is the creation mode of every object and its metadata object, which the process umask narrows: DefaultLocalStorageFileMode when left out; permission bits only, the owner's read and write required. */
+    FileMode os.FileMode
+
+    /* DirectoryMode is the creation mode of the base directory and every missing directory of a key, which the process umask narrows: DefaultLocalStorageDirectoryMode when left out; permission bits only, the owner's read, write and search required. */
+    DirectoryMode os.FileMode
+}
+
+const (
+    /* DefaultLocalStorageFileMode is the permission of a stored object when LocalStorageConfig.FileMode is left out. */
+    DefaultLocalStorageFileMode os.FileMode = 0o640
+    /* DefaultLocalStorageDirectoryMode is the permission of a created storage directory when LocalStorageConfig.DirectoryMode is left out. */
+    DefaultLocalStorageDirectoryMode os.FileMode = 0o750
+)
+
+var localStorageTemporaryStaleAgeRule = bound.Rule[time.Duration]{
+    Name:              "LocalStorageConfig.TemporaryStaleAge",
+    Default:           storageTemporaryStaleAge,
+    Minimum:           bound.TtlMinimum,
+    UnlimitedAdmitted: true,
+}
+
+var localStorageSweepBatchSizeRule = bound.Rule[int]{
+    Name:    "LocalStorageConfig.SweepBatchSize",
+    Default: storageSweepBatchSize,
+    Minimum: 1,
+}
+
+/* NewLocalStorage stores the objects under baseDirectory, which is required, refusing a config field outside its rule by name; the directory is created and opened once here, so a path that cannot hold the objects is refused at construction, and every operation then reopens it. */
+func NewLocalStorage(baseDirectory string, config LocalStorageConfig) *LocalStorage {
+    if "" == baseDirectory {
+        exception.Panic(exception.NewError("local storage base directory is empty", nil, nil))
+    }
+
+    temporaryStaleAge, temporaryStaleAgeErr := bound.Resolve(config.TemporaryStaleAge, localStorageTemporaryStaleAgeRule)
+    if nil != temporaryStaleAgeErr {
+        exception.Panic(exception.FromError(temporaryStaleAgeErr))
+    }
+
+    sweepBatchSize, sweepBatchSizeErr := bound.Resolve(config.SweepBatchSize, localStorageSweepBatchSizeRule)
+    if nil != sweepBatchSizeErr {
+        exception.Panic(exception.FromError(sweepBatchSizeErr))
+    }
+
+    fileMode, fileModeErr := internal.ResolveCreationMode(config.FileMode, DefaultLocalStorageFileMode, internal.JournalFileModeFloor, internal.FileModeRefusal, "LocalStorageConfig.FileMode")
+    if nil != fileModeErr {
+        exception.Panic(exception.FromError(fileModeErr))
+    }
+
+    directoryMode, directoryModeErr := internal.ResolveCreationMode(config.DirectoryMode, DefaultLocalStorageDirectoryMode, internal.JournalDirectoryModeFloor, internal.DirectoryModeRefusal, "LocalStorageConfig.DirectoryMode")
+    if nil != directoryModeErr {
+        exception.Panic(exception.FromError(directoryModeErr))
+    }
+
+    cleanBaseDirectory := filepath.Clean(baseDirectory)
+
+    if mkdirErr := os.MkdirAll(cleanBaseDirectory, directoryMode); nil != mkdirErr {
+        exception.Panic(
+            exception.NewError(
+                "could not create the storage base directory",
+                exceptioncontract.Context{"baseDirectory": cleanBaseDirectory},
+                mkdirErr,
+            ),
+        )
+    }
+
+    /* no root is kept: a held one would keep reading a directory replaced while the process runs */
+    root, rootErr := os.OpenRoot(cleanBaseDirectory)
+    if nil != rootErr {
+        exception.Panic(
+            exception.NewError(
+                "could not open the storage base directory",
+                exceptioncontract.Context{"baseDirectory": cleanBaseDirectory},
+                rootErr,
+            ),
+        )
+    }
+    _ = root.Close()
+
+    return &LocalStorage{
+        baseDirectory:     cleanBaseDirectory,
+        temporaryStaleAge: temporaryStaleAge,
+        sweepBatchSize:    sweepBatchSize.Value,
+        fileMode:          fileMode,
+        directoryMode:     directoryMode,
+    }
+}
+
+/* LocalStorage stores each object as a file under its base directory. It reads no context from the runtime it is handed, a local file operation taking none. The content type a Put declares is kept in a metadata object beside the file, so one whose metadata could pass 4096 bytes is refused naming PutOptions.ContentType. */
+type LocalStorage struct {
+    baseDirectory     string
+    temporaryStaleAge bound.Resolved[time.Duration]
+    sweepBatchSize    int
+    fileMode          os.FileMode
+    directoryMode     os.FileMode
+}
+
+func (instance *LocalStorage) Put(
+    runtimeInstance containercontract.Runtime,
+    key string,
+    reader io.Reader,
+    size int64,
+    options storagecontract.PutOptions,
+) error {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "storage.LocalStorage.Put"); nil != refuseErr {
+        return refuseErr
+    }
+
+    relativeKey, keyErr := storageRelativeKey(key)
+    if nil != keyErr {
+        return keyErr
+    }
+
+    /* refused before anything is created, so a nil reader leaves neither a temporary object nor a directory behind */
+    if nil == reader {
+        return exception.NewError("storage payload reader is nil", map[string]any{"key": key}, nil)
+    }
+
+    if contentTypeErr := refuseStorageContentTypeTooLong(key, options.ContentType); nil != contentTypeErr {
+        return contentTypeErr
+    }
+
+    /* the base directory is created again if it was removed after the construction; os.OpenRoot then confines every key operation to it, each path component checked against symlink escape */
+    if mkdirErr := os.MkdirAll(instance.baseDirectory, instance.directoryMode); nil != mkdirErr {
+        return exception.NewError("could not create the storage directory", map[string]any{"key": key}, mkdirErr)
+    }
+
+    root, rootErr := os.OpenRoot(instance.baseDirectory)
+    if nil != rootErr {
+        return exception.NewError("could not open the storage base directory", map[string]any{"key": key}, rootErr)
+    }
+    defer root.Close()
+
+    if directory := filepath.Dir(relativeKey); "." != directory {
+        if mkdirErr := root.MkdirAll(directory, instance.directoryMode); nil != mkdirErr {
+            return exception.NewError("could not create the storage object's directory", map[string]any{"key": key, "directory": directory}, mkdirErr)
+        }
+    }
+
+    /* a key whose leaf is an existing symlink is refused rather than replaced by the rename below */
+    if info, lstatErr := root.Lstat(relativeKey); nil == lstatErr && 0 != info.Mode()&os.ModeSymlink {
+        return exception.NewError("storage key resolves to a symlink", map[string]any{"key": key}, nil)
+    }
+
+    /* written to a temporary object and renamed over the key once flushed, so a failed write never destroys the stored object; the rename is atomic within the pinned root */
+    writeStartedAt := time.Now()
+
+    if info, statErr := root.Lstat(relativeKey); nil == statErr && true == info.IsDir() {
+        return exception.NewError("storage key resolves to a directory", map[string]any{"key": key}, storagecontract.ErrKeyIsDirectory)
+    }
+
+    temporaryKey, file, createErr := createStorageTemporaryFile(root, relativeKey, instance.fileMode)
+    if nil != createErr {
+        return exception.NewError("could not create the storage object", map[string]any{"key": key}, createErr)
+    }
+
+    /* a declared size bounds the copy at one byte past it, so a reader that runs longer is refused once that byte arrives instead of being read, and written to disk, to its end; the largest size admits no byte past it and is left unbounded */
+    source := reader
+    if 0 <= size && math.MaxInt64 > size {
+        source = io.LimitReader(reader, size+1)
+    }
+
+    written, copyErr := io.Copy(file, source)
+    if nil != copyErr {
+        _ = file.Close()
+        _ = root.Remove(temporaryKey)
+        /* "copy", not "write": io.Copy answers one error for both sides, and the cause names which */
+        return exception.NewError("could not copy the payload into the storage object", map[string]any{"key": key}, copyErr)
+    }
+
+    if 0 <= size && written != size {
+        _ = file.Close()
+        _ = root.Remove(temporaryKey)
+        return exception.NewError("storage object size does not match the declared size", map[string]any{"key": key, "declared": size, "written": written}, nil)
+    }
+
+    if syncErr := file.Sync(); nil != syncErr {
+        _ = file.Close()
+        _ = root.Remove(temporaryKey)
+        return exception.NewError("could not flush the storage object", map[string]any{"key": key}, syncErr)
+    }
+
+    /* read from the open file, so the content type is bound to the bytes this write flushed whatever happens to the name; the rename keeps the size and the modification time */
+    temporaryInfo, temporaryStatErr := file.Stat()
+    if nil != temporaryStatErr {
+        _ = file.Close()
+        _ = root.Remove(temporaryKey)
+        return exception.NewError("could not stat the storage object", map[string]any{"key": key}, temporaryStatErr)
+    }
+
+    if closeErr := file.Close(); nil != closeErr {
+        _ = root.Remove(temporaryKey)
+        return exception.NewError("could not close the storage object", map[string]any{"key": key}, closeErr)
+    }
+
+    if renameErr := root.Rename(temporaryKey, relativeKey); nil != renameErr {
+        _ = root.Remove(temporaryKey)
+
+        /* a temporary object gone before its rename, on a write that lasted longer than the stale age, was swept as stale by a concurrent Put of the same key; a shorter write lost it to something else, the temporary or its directory removed under it */
+        if true == os.IsNotExist(renameErr) && false == instance.temporaryStaleAge.Unlimited && instance.temporaryStaleAge.Value <= time.Since(writeStartedAt) {
+            return exception.NewError("could not store the storage object: its temp object was swept as stale while this write stalled", map[string]any{"key": key, "staleAge": instance.temporaryStaleAge.Value.String()}, renameErr)
+        }
+
+        return exception.NewError("could not store the storage object", map[string]any{"key": key}, renameErr)
+    }
+
+    /* the content type is stored after the object it describes, so a failed rename above leaves the previous object and its content type as they were; until it lands, the previous metadata describes another write and reads as none */
+    if "" == options.ContentType {
+        _ = root.Remove(storageMetadataKey(relativeKey))
+    } else if metadataErr := writeStorageMetadata(root, relativeKey, temporaryInfo, options.ContentType, instance.fileMode); nil != metadataErr {
+        return exception.NewError("could not store the storage object's content type", map[string]any{"key": key}, metadataErr)
+    }
+
+    if false == instance.temporaryStaleAge.Unlimited {
+        sweepStaleTemporaryObjects(root, relativeKey, instance.temporaryStaleAge.Value, instance.sweepBatchSize)
+    }
+
+    return nil
+}
+
+/* storageTemporaryStaleAge is the default of LocalStorageConfig.TemporaryStaleAge. */
+const storageTemporaryStaleAge = 1 * time.Hour
+
+/* storageTemporaryObjectSuffix closes the name of every temporary object; the random part sits between the reserved prefix and it. */
+const storageTemporaryObjectSuffix = ".tmp"
+
+/* storageTemporaryPrefix names the reserved namespace of a key's temporary objects: a hidden name carrying the digest of the key's leaf, so no ordinary key shares it by accident, and a leaf of any length leaves room for the random part within one path component. */
+func storageTemporaryPrefix(relativeKey string) string {
+    digest := sha256.Sum256([]byte(filepath.Base(relativeKey)))
+
+    return ".melody-storage-" + hex.EncodeToString(digest[:]) + "."
+}
+
+/* sweepStaleTemporaryObjects removes abandoned temporary objects for this key after a successful Put, best-effort: a failure is retried by the next Put. It costs one pass over the key's directory per Put, the price of cleaning up after a crash without a journal of the temporary objects. */
+func sweepStaleTemporaryObjects(root *os.Root, relativeKey string, staleAge time.Duration, batchSize int) {
+    directory := filepath.Dir(relativeKey)
+    prefix := storageTemporaryPrefix(relativeKey)
+
+    directoryFile, openErr := root.Open(directory)
+    if nil != openErr {
+        return
+    }
+    defer directoryFile.Close()
+
+    /* the directory is read in batches, each acted on before the next is read, so a directory of many objects costs one pass and no listing of it held in memory */
+    for {
+        names, readErr := directoryFile.Readdirnames(batchSize)
+
+        for _, name := range names {
+            if false == strings.HasPrefix(name, prefix) || false == strings.HasSuffix(name, storageTemporaryObjectSuffix) {
+                continue
+            }
+
+            if false == isStorageTemporaryRandomPart(strings.TrimSuffix(name[len(prefix):], storageTemporaryObjectSuffix)) {
+                continue
+            }
+
+            candidate := filepath.Join(directory, name)
+
+            info, statErr := root.Lstat(candidate)
+            if nil != statErr || false == info.Mode().IsRegular() {
+                continue
+            }
+
+            if staleAge > time.Since(info.ModTime()) {
+                continue
+            }
+
+            _ = root.Remove(candidate)
+        }
+
+        if nil != readErr || 0 == len(names) {
+            return
+        }
+    }
+}
+
+/* storageSweepBatchSize is the default of LocalStorageConfig.SweepBatchSize. */
+const storageSweepBatchSize = 256
+
+/* isStorageTemporaryRandomPart matches exactly the sixteen lowercase hex characters createStorageTemporaryFile generates. */
+func isStorageTemporaryRandomPart(randomPart string) bool {
+    if 16 != len(randomPart) {
+        return false
+    }
+
+    for _, character := range randomPart {
+        if ('0' > character || '9' < character) && ('a' > character || 'f' < character) {
+            return false
+        }
+    }
+
+    return true
+}
+
+/* createStorageTemporaryFile creates a uniquely named temporary object beside the target, so the rename stays within the pinned root; O_EXCL never clobbers another writer's temporary or the live key. */
+func createStorageTemporaryFile(root *os.Root, relativeKey string, fileMode os.FileMode) (string, *os.File, error) {
+    directory := filepath.Dir(relativeKey)
+    prefix := storageTemporaryPrefix(relativeKey)
+
+    for attempt := 0; attempt < 10; attempt++ {
+        suffix := make([]byte, 8)
+        if _, randErr := rand.Read(suffix); nil != randErr {
+            return "", nil, randErr
+        }
+
+        temporaryKey := filepath.Join(directory, prefix+hex.EncodeToString(suffix)+storageTemporaryObjectSuffix)
+
+        file, openErr := root.OpenFile(temporaryKey, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode)
+        if nil == openErr {
+            return temporaryKey, file, nil
+        }
+
+        if false == os.IsExist(openErr) {
+            return "", nil, openErr
+        }
+    }
+
+    return "", nil, exception.NewError("could not allocate a unique storage temp object", nil, nil)
+}
+
+func (instance *LocalStorage) Get(
+    runtimeInstance containercontract.Runtime,
+    key string,
+    options storagecontract.GetOptions,
+) (storagecontract.Object, error) {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "storage.LocalStorage.Get"); nil != refuseErr {
+        return storagecontract.Object{}, refuseErr
+    }
+
+    relativeKey, keyErr := storageRelativeKey(key)
+    if nil != keyErr {
+        return storagecontract.Object{}, keyErr
+    }
+
+    if negativeErr := storagecontract.RefuseNegativeByteRange(options.Range); nil != negativeErr {
+        return storagecontract.Object{}, negativeErr
+    }
+
+    root, rootErr := os.OpenRoot(instance.baseDirectory)
+    if nil != rootErr {
+        return storagecontract.Object{}, exception.NewError("could not open the storage object", map[string]any{"key": key}, storageAbsenceCause(rootErr))
+    }
+    defer root.Close()
+
+    /* opened non-blocking, so a named pipe or a device under the key answers at once and is refused below; a blocking open of a pipe waits for a writer forever */
+    file, openErr := root.OpenFile(relativeKey, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+    if nil != openErr {
+        return storagecontract.Object{}, exception.NewError("could not open the storage object", map[string]any{"key": key}, storageAbsenceCause(openErr))
+    }
+
+    fileInfo, statErr := file.Stat()
+    if nil != statErr {
+        _ = file.Close()
+        return storagecontract.Object{}, exception.NewError("could not open the storage object", map[string]any{"key": key}, statErr)
+    }
+
+    objectInfo, objectErr := localObjectInfo(root, relativeKey, key, fileInfo)
+    if nil != objectErr {
+        _ = file.Close()
+        return storagecontract.Object{}, objectErr
+    }
+
+    offset, length, rangeErr := storagecontract.ResolveByteRange(options.Range, objectInfo.Size)
+    if nil != rangeErr {
+        _ = file.Close()
+        return storagecontract.Object{}, rangeErr
+    }
+
+    if 0 == offset && objectInfo.Size == length {
+        return storagecontract.Object{Body: file, Info: objectInfo}, nil
+    }
+
+    if _, seekErr := file.Seek(offset, io.SeekStart); nil != seekErr {
+        _ = file.Close()
+        return storagecontract.Object{}, exception.NewError("could not open the storage object", map[string]any{"key": key}, seekErr)
+    }
+
+    return storagecontract.Object{Body: localRangeBody{Reader: io.LimitReader(file, length), Closer: file}, Info: objectInfo}, nil
+}
+
+/* localRangeBody reads the range asked and closes the whole file */
+type localRangeBody struct {
+    io.Reader
+    io.Closer
+}
+
+func (instance *LocalStorage) Stat(
+    runtimeInstance containercontract.Runtime,
+    key string,
+    _ storagecontract.StatOptions,
+) (storagecontract.ObjectInfo, error) {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "storage.LocalStorage.Stat"); nil != refuseErr {
+        return storagecontract.ObjectInfo{}, refuseErr
+    }
+
+    relativeKey, keyErr := storageRelativeKey(key)
+    if nil != keyErr {
+        return storagecontract.ObjectInfo{}, keyErr
+    }
+
+    root, rootErr := os.OpenRoot(instance.baseDirectory)
+    if nil != rootErr {
+        return storagecontract.ObjectInfo{}, exception.NewError("could not stat the storage object", map[string]any{"key": key}, storageAbsenceCause(rootErr))
+    }
+    defer root.Close()
+
+    /* followed only inside the root, as Get opens it; the file is not opened, so a pipe is judged without waiting for a writer */
+    fileInfo, statErr := root.Stat(relativeKey)
+    if nil != statErr {
+        return storagecontract.ObjectInfo{}, exception.NewError("could not stat the storage object", map[string]any{"key": key}, storageAbsenceCause(statErr))
+    }
+
+    return localObjectInfo(root, relativeKey, key, fileInfo)
+}
+
+/* localObjectInfo judges what Get and Stat found under the key, so the two doors cannot disagree on what an object is */
+func localObjectInfo(root *os.Root, relativeKey string, key string, fileInfo os.FileInfo) (storagecontract.ObjectInfo, error) {
+    if true == fileInfo.IsDir() {
+        return storagecontract.ObjectInfo{}, exception.NewError("storage key resolves to a directory", map[string]any{"key": key}, storagecontract.ErrKeyIsDirectory)
+    }
+
+    if false == fileInfo.Mode().IsRegular() {
+        return storagecontract.ObjectInfo{}, exception.NewError("storage key resolves to a file that is not a regular object", map[string]any{"key": key}, nil)
+    }
+
+    return storagecontract.ObjectInfo{
+        Size:        fileInfo.Size(),
+        ContentType: readStorageContentType(root, relativeKey, fileInfo),
+        ModifiedAt:  fileInfo.ModTime(),
+        EntityTag:   localEntityTag(fileInfo),
+        Key:         key,
+    }, nil
+}
+
+/* storageMetadataObjectSuffix closes the name of the metadata object that keeps a key's content type, in the reserved namespace of its temporary objects */
+const storageMetadataObjectSuffix = "metadata"
+
+/* storageMetadataMaximumBytes bounds what is read of a metadata object; one larger describes no write of this storage and reads as none */
+const storageMetadataMaximumBytes = 4096
+
+/* refuseStorageContentTypeTooLong refuses a content type whose metadata object could pass storageMetadataMaximumBytes, judged on the longest size and modification time an encoding can carry, so a content type admitted is always read back */
+func refuseStorageContentTypeTooLong(key string, contentType string) error {
+    encoded, encodeErr := json.Marshal(storageMetadata{ContentType: contentType, Size: math.MaxInt64, ModifiedAtUnixNano: math.MinInt64})
+    if nil != encodeErr || storageMetadataMaximumBytes < len(encoded) {
+        return exception.NewError(
+            "the storage content type is too long to be stored",
+            exceptioncontract.Context{
+                "key":          key,
+                "field":        "PutOptions.ContentType",
+                "length":       len(contentType),
+                "maximumBytes": storageMetadataMaximumBytes,
+            },
+            encodeErr,
+        )
+    }
+
+    return nil
+}
+
+type storageMetadata struct {
+    ContentType        string `json:"contentType"`
+    Size               int64  `json:"size"`
+    ModifiedAtUnixNano int64  `json:"modifiedAtUnixNano"`
+}
+
+func storageMetadataKey(relativeKey string) string {
+    return filepath.Join(filepath.Dir(relativeKey), storageTemporaryPrefix(relativeKey)+storageMetadataObjectSuffix)
+}
+
+/* writeStorageMetadata stores the content type bound to the size and the modification time of the object written, through a temporary of its own renamed over the metadata name */
+func writeStorageMetadata(root *os.Root, relativeKey string, temporaryInfo os.FileInfo, contentType string, fileMode os.FileMode) error {
+    encoded, encodeErr := json.Marshal(storageMetadata{ContentType: contentType, Size: temporaryInfo.Size(), ModifiedAtUnixNano: temporaryInfo.ModTime().UnixNano()})
+    if nil != encodeErr {
+        return encodeErr
+    }
+
+    metadataTemporaryKey, file, createErr := createStorageTemporaryFile(root, relativeKey, fileMode)
+    if nil != createErr {
+        return createErr
+    }
+
+    if _, writeErr := file.Write(encoded); nil != writeErr {
+        _ = file.Close()
+        _ = root.Remove(metadataTemporaryKey)
+        return writeErr
+    }
+
+    if syncErr := file.Sync(); nil != syncErr {
+        _ = file.Close()
+        _ = root.Remove(metadataTemporaryKey)
+        return syncErr
+    }
+
+    if closeErr := file.Close(); nil != closeErr {
+        _ = root.Remove(metadataTemporaryKey)
+        return closeErr
+    }
+
+    if renameErr := root.Rename(metadataTemporaryKey, storageMetadataKey(relativeKey)); nil != renameErr {
+        _ = root.Remove(metadataTemporaryKey)
+        return renameErr
+    }
+
+    return nil
+}
+
+/* readStorageContentType answers the content type the metadata object keeps for the object, honoured only when it was written for this object's size and modification time; a metadata object that is absent, unreadable, too large or of another write answers none, never an error */
+func readStorageContentType(root *os.Root, relativeKey string, fileInfo os.FileInfo) string {
+    file, openErr := root.OpenFile(storageMetadataKey(relativeKey), os.O_RDONLY|syscall.O_NONBLOCK, 0)
+    if nil != openErr {
+        return ""
+    }
+    defer file.Close()
+
+    metadataInfo, statErr := file.Stat()
+    if nil != statErr || false == metadataInfo.Mode().IsRegular() {
+        return ""
+    }
+
+    content, readErr := io.ReadAll(io.LimitReader(file, storageMetadataMaximumBytes+1))
+    if nil != readErr || storageMetadataMaximumBytes < len(content) {
+        return ""
+    }
+
+    var metadata storageMetadata
+    if decodeErr := json.Unmarshal(content, &metadata); nil != decodeErr {
+        return ""
+    }
+
+    if fileInfo.Size() != metadata.Size || fileInfo.ModTime().UnixNano() != metadata.ModifiedAtUnixNano {
+        return ""
+    }
+
+    return metadata.ContentType
+}
+
+/* localEntityTag is the tag the static file server gives a file of this size and modification time, without its quotes */
+func localEntityTag(fileInfo os.FileInfo) string {
+    return entitytag.OfSizeAndModificationTime(fileInfo.Size(), fileInfo.ModTime().UnixNano())
+}
+
+/* storageAbsenceCause carries ErrObjectNotFound beside an error that means the key names no object, and leaves every other error as it is */
+func storageAbsenceCause(err error) error {
+    if true == storageObjectAbsent(err) {
+        return errors.Join(storagecontract.ErrObjectNotFound, err)
+    }
+
+    return err
+}
+
+func (instance *LocalStorage) Delete(
+    runtimeInstance containercontract.Runtime,
+    key string,
+    _ storagecontract.DeleteOptions,
+) error {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "storage.LocalStorage.Delete"); nil != refuseErr {
+        return refuseErr
+    }
+
+    relativeKey, keyErr := storageRelativeKey(key)
+    if nil != keyErr {
+        return keyErr
+    }
+
+    root, rootErr := os.OpenRoot(instance.baseDirectory)
+    if nil != rootErr {
+        if true == os.IsNotExist(rootErr) {
+            return nil
+        }
+
+        return exception.NewError("could not delete the storage object", map[string]any{"key": key}, rootErr)
+    }
+    defer root.Close()
+
+    /* a directory is a prefix of other keys, not an object, so the key it names is refused and nothing is removed, as Get refuses it; the leaf is read without following a symlink, which Remove deletes itself */
+    if info, lstatErr := root.Lstat(relativeKey); nil == lstatErr && true == info.IsDir() {
+        return exception.NewError("could not delete the storage object", map[string]any{"key": key}, storagecontract.ErrKeyIsDirectory)
+    }
+
+    removeErr := root.Remove(relativeKey)
+    if nil != removeErr && false == storageObjectAbsent(removeErr) {
+        return exception.NewError("could not delete the storage object", map[string]any{"key": key}, removeErr)
+    }
+
+    _ = root.Remove(storageMetadataKey(relativeKey))
+
+    return nil
+}
+
+/* storageObjectAbsent reports an error that means the key names no object: nothing under that name, or a path that runs through a regular file, which locally cannot also be a prefix of other keys */
+func storageObjectAbsent(err error) bool {
+    return true == os.IsNotExist(err) || true == errors.Is(err, syscall.ENOTDIR)
+}
+
+func (instance *LocalStorage) PresignedUrl(
+    runtimeInstance containercontract.Runtime,
+    key string,
+    options storagecontract.PresignOptions,
+) (string, error) {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance, "storage.LocalStorage.PresignedUrl"); nil != refuseErr {
+        return "", refuseErr
+    }
+
+    return "", exception.NewError("presigned urls are not supported by local storage", map[string]any{"key": key}, storagecontract.ErrPresignUnsupported)
+}
+
+/* storageRelativeKey folds a key to the path it names under the base: a backslash reads as a separator, and "." and empty segments and a leading slash fold away. A ".." segment is refused by name rather than folded, since a fold would hand "tenant-b/../tenant-a/secret.txt" the object of "tenant-a/secret.txt" and an application that isolates its callers by key prefix would be crossed by it; the S3 backend refuses it the same way. */
+func storageRelativeKey(key string) (string, error) {
+    normalized := strings.ReplaceAll(key, "\\", "/")
+
+    if true == storageKeyCarriesParentSegment(normalized) {
+        return "", exception.NewError("storage key carries a \"..\" segment", map[string]any{"key": key}, nil)
+    }
+
+    cleaned := strings.TrimPrefix(filepath.Clean("/"+normalized), "/")
+
+    if "" == cleaned || "." == cleaned {
+        return "", exception.NewError("storage key is empty or invalid", map[string]any{"key": key}, nil)
+    }
+
+    /* every segment is judged, not only the leaf: a directory spelled like a reserved name would sit where another key's temporary or metadata object is written, and fail every write of that key */
+    for _, segment := range strings.Split(filepath.ToSlash(cleaned), "/") {
+        /* a key spelled exactly like a temporary object would be swept by a later Put of the key whose digest it carries, so the reserved namespace is refused at every door */
+        if true == isStorageTemporaryObjectName(segment) {
+            return "", exception.NewError("storage key names a temp object of the reserved .melody-storage- namespace", map[string]any{"key": key}, nil)
+        }
+
+        /* a key spelled like a metadata object would be read as the content type of another key, and replaced or removed by its writes */
+        if true == isStorageMetadataObjectName(segment) {
+            return "", exception.NewError("storage key names a metadata object of the reserved .melody-storage- namespace", map[string]any{"key": key}, nil)
+        }
+    }
+
+    return cleaned, nil
+}
+
+/* storageKeyCarriesParentSegment reports whether a key, its backslashes already read as separators, holds a ".." segment */
+func storageKeyCarriesParentSegment(normalizedKey string) bool {
+    for _, segment := range strings.Split(normalizedKey, "/") {
+        if ".." == segment {
+            return true
+        }
+    }
+
+    return false
+}
+
+/* isStorageTemporaryObjectName matches exactly the names createStorageTemporaryFile gives: the reserved prefix, a sha256 in lowercase hex, a dot, the random part and the suffix. */
+func isStorageTemporaryObjectName(name string) bool {
+    const reservedPrefix = ".melody-storage-"
+
+    if false == strings.HasPrefix(name, reservedPrefix) || false == strings.HasSuffix(name, storageTemporaryObjectSuffix) {
+        return false
+    }
+
+    body := strings.TrimSuffix(strings.TrimPrefix(name, reservedPrefix), storageTemporaryObjectSuffix)
+    if 64+1+16 != len(body) || '.' != body[64] {
+        return false
+    }
+
+    for _, character := range body[:64] {
+        if ('0' > character || '9' < character) && ('a' > character || 'f' < character) {
+            return false
+        }
+    }
+
+    return isStorageTemporaryRandomPart(body[65:])
+}
+
+/* isStorageMetadataObjectName matches exactly the names storageMetadataKey gives: the reserved prefix, a sha256 in lowercase hex, a dot and the metadata suffix. */
+func isStorageMetadataObjectName(name string) bool {
+    const reservedPrefix = ".melody-storage-"
+
+    if false == strings.HasPrefix(name, reservedPrefix) || false == strings.HasSuffix(name, "."+storageMetadataObjectSuffix) {
+        return false
+    }
+
+    digest := strings.TrimSuffix(strings.TrimPrefix(name, reservedPrefix), "."+storageMetadataObjectSuffix)
+    if 64 != len(digest) {
+        return false
+    }
+
+    for _, character := range digest {
+        if ('0' > character || '9' < character) && ('a' > character || 'f' < character) {
+            return false
+        }
+    }
+
+    return true
+}
+
+var _ storagecontract.Storage = (*LocalStorage)(nil)

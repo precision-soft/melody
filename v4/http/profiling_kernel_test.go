@@ -1,0 +1,183 @@
+package http
+
+import (
+    nethttp "net/http"
+    "testing"
+    "time"
+
+    "github.com/precision-soft/melody/v4/bag"
+
+    bagcontract "github.com/precision-soft/melody/v4/bag/contract"
+    "github.com/precision-soft/melody/v4/clock"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/event"
+    eventcontract "github.com/precision-soft/melody/v4/event/contract"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+)
+
+func TestKernelHttpProfilerListener_EmitsProfileWhenAttributesAreNil(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
+    runtimeInstance := newTestRuntime()
+
+    RegisterKernelHttpProfilerListener(dispatcher)
+
+    var capturedProfile *HttpRequestProfile
+    dispatcher.AddListener(
+        httpcontract.EventHttpRequestProfile,
+        func(_ containercontract.Runtime, eventValue eventcontract.Event) error {
+            capturedProfile, _ = eventValue.Payload().(*HttpRequestProfile)
+
+            return nil
+        },
+        eventcontract.ListenerConfig{},
+    )
+
+    request := &nilAttributesRequest{
+        requestContext: &staticRequestContext{
+            requestId: "request-123",
+            startedAt: time.Now(),
+        },
+    }
+
+    responseEvent := NewKernelResponseEvent(request, nil)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, responseEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if nil == capturedProfile {
+        t.Fatalf("expected a profile to be dispatched when Attributes() is nil but RequestContext() is set")
+    }
+
+    if "request-123" != capturedProfile.RequestId() {
+        t.Fatalf("expected request id request-123, got %q", capturedProfile.RequestId())
+    }
+}
+
+type nilAttributesRequest struct {
+    requestContext httpcontract.RequestContext
+}
+
+func (instance *nilAttributesRequest) HttpRequest() *nethttp.Request { return nil }
+
+func (instance *nilAttributesRequest) Parameter(name string) (string, bool) { return "", false }
+
+func (instance *nilAttributesRequest) Parameters() map[string]string { return nil }
+
+func (instance *nilAttributesRequest) Query() bagcontract.ParameterBag { return nil }
+
+func (instance *nilAttributesRequest) Post() (bagcontract.ParameterBag, error) { return nil, nil }
+
+func (instance *nilAttributesRequest) MaxBodyBytes() int { return 0 }
+
+func (instance *nilAttributesRequest) Attributes() bagcontract.ParameterBag { return nil }
+
+func (instance *nilAttributesRequest) Header(name string) string { return "" }
+
+func (instance *nilAttributesRequest) RouteName() string { return "" }
+
+func (instance *nilAttributesRequest) RoutePattern() string { return "" }
+
+func (instance *nilAttributesRequest) RuntimeInstance() containercontract.Runtime { return nil }
+
+func (instance *nilAttributesRequest) RequestContext() httpcontract.RequestContext {
+    return instance.requestContext
+}
+
+type staticRequestContext struct {
+    requestId string
+    startedAt time.Time
+}
+
+func (instance *staticRequestContext) RequestId() string { return instance.requestId }
+
+func (instance *staticRequestContext) StartedAt() time.Time { return instance.startedAt }
+
+func TestKernelHttpProfilerListener_EmitsProfileWhenAttributesAreATypedNil(t *testing.T) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clockInstance})
+    runtimeInstance := newTestRuntime()
+
+    RegisterKernelHttpProfilerListener(dispatcher)
+
+    var capturedProfile *HttpRequestProfile
+    dispatcher.AddListener(
+        httpcontract.EventHttpRequestProfile,
+        func(_ containercontract.Runtime, eventValue eventcontract.Event) error {
+            capturedProfile, _ = eventValue.Payload().(*HttpRequestProfile)
+
+            return nil
+        },
+        eventcontract.ListenerConfig{},
+    )
+
+    var unassignedAttributes *bag.ParameterBag
+
+    request := &typedNilAttributesRequest{
+        nilAttributesRequest: nilAttributesRequest{
+            requestContext: &staticRequestContext{
+                requestId: "request-typed-nil",
+                startedAt: time.Now(),
+            },
+        },
+        attributes: unassignedAttributes,
+    }
+
+    responseEvent := NewKernelResponseEvent(request, nil)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, responseEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if nil == capturedProfile {
+        t.Fatalf("expected a profile to be emitted for a typed nil attributes bag")
+    }
+
+    if "request-typed-nil" != capturedProfile.RequestId() {
+        t.Fatalf("unexpected request id: %q", capturedProfile.RequestId())
+    }
+}
+
+type typedNilAttributesRequest struct {
+    nilAttributesRequest
+    attributes bagcontract.ParameterBag
+}
+
+func (instance *typedNilAttributesRequest) Attributes() bagcontract.ParameterBag {
+    return instance.attributes
+}
+
+func TestKernelHttpProfilerListener_EmitsNoProfileForATypedNilRequest(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+    runtimeInstance := newTestRuntime()
+
+    RegisterKernelHttpProfilerListener(dispatcher)
+
+    profileCount := 0
+    dispatcher.AddListener(
+        httpcontract.EventHttpRequestProfile,
+        func(_ containercontract.Runtime, eventValue eventcontract.Event) error {
+            profileCount++
+
+            return nil
+        },
+        eventcontract.ListenerConfig{},
+    )
+
+    var unassignedRequest *Request
+
+    responseEvent := NewKernelResponseEvent(unassignedRequest, nil)
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelResponse, responseEvent)
+    if nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if 0 != profileCount {
+        t.Fatalf("expected no profile for a request the listener cannot read, got %d", profileCount)
+    }
+}

@@ -1,0 +1,908 @@
+package migrate
+
+import (
+    "bytes"
+    "encoding/json"
+    "errors"
+    "fmt"
+    "os"
+    "strings"
+    "sync"
+    "testing"
+    "time"
+    "unicode/utf8"
+
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/cli"
+    "github.com/precision-soft/melody/v4/cli/output"
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+)
+
+func newBufferedOutput(noColor bool) (*commandOutput, *bytes.Buffer) {
+    buffer := &bytes.Buffer{}
+    option := output.Options{}
+    option.NoColor = noColor
+
+    return newCommandOutput(buffer, nil, option), buffer
+}
+
+func TestCommandOutput_PrintSuccess(t *testing.T) {
+    colored, coloredBuffer := newBufferedOutput(false)
+    colored.printSuccess("done")
+
+    expectedColored := cli.AnsiGreen + "done" + cli.AnsiReset + "\n"
+    if expectedColored != coloredBuffer.String() {
+        t.Fatalf("colored success = %q, want %q", coloredBuffer.String(), expectedColored)
+    }
+
+    plain, plainBuffer := newBufferedOutput(true)
+    plain.printSuccess("done")
+
+    if "done\n" != plainBuffer.String() {
+        t.Fatalf("plain success = %q, want %q", plainBuffer.String(), "done\n")
+    }
+}
+
+func TestCommandOutput_PrintWarning(t *testing.T) {
+    colored, coloredBuffer := newBufferedOutput(false)
+    colored.printWarning("careful")
+
+    expectedColored := cli.AnsiYellow + cli.AnsiBold + "WARNING: careful" + cli.AnsiReset + "\n"
+    if expectedColored != coloredBuffer.String() {
+        t.Fatalf("colored warning = %q, want %q", coloredBuffer.String(), expectedColored)
+    }
+
+    plain, plainBuffer := newBufferedOutput(true)
+    plain.printWarning("careful")
+
+    if "WARNING: careful\n" != plainBuffer.String() {
+        t.Fatalf("plain warning = %q, want %q", plainBuffer.String(), "WARNING: careful\n")
+    }
+}
+
+func TestCommandOutput_PrintError(t *testing.T) {
+    silent, silentBuffer := newBufferedOutput(true)
+    silent.printError(nil)
+
+    if 0 != silentBuffer.Len() {
+        t.Fatalf("nil error produced output: %q", silentBuffer.String())
+    }
+
+    colored, coloredBuffer := newBufferedOutput(false)
+    colored.printError(errors.New("boom"))
+
+    expectedColored := cli.AnsiRed + cli.AnsiBold + "ERROR: boom" + cli.AnsiReset + "\n"
+    if expectedColored != coloredBuffer.String() {
+        t.Fatalf("colored error = %q, want %q", coloredBuffer.String(), expectedColored)
+    }
+
+    plain, plainBuffer := newBufferedOutput(true)
+    plain.printError(errors.New("boom"))
+
+    if "ERROR: boom\n" != plainBuffer.String() {
+        t.Fatalf("plain error = %q, want %q", plainBuffer.String(), "ERROR: boom\n")
+    }
+}
+
+func TestCommandOutput_PrintDatabaseBlockWithNullDatabase(t *testing.T) {
+    instance, buffer := newBufferedOutput(true)
+
+    instance.printDatabaseBlock(&databaseIdentity{
+        CurrentDatabase: nil,
+        Hostname:        "db.internal",
+        Port:            3306,
+        CurrentUser:     "app@%",
+        Version:         "8.0.36",
+    })
+
+    rendered := buffer.String()
+
+    if false == strings.Contains(rendered, "DATABASE") {
+        t.Fatalf("missing DATABASE header in %q", rendered)
+    }
+
+    if false == strings.Contains(rendered, "| database | <null>") {
+        t.Fatalf("nil current database not rendered as <null> in %q", rendered)
+    }
+
+    if false == strings.Contains(rendered, "| host     | db.internal") {
+        t.Fatalf("missing host row in %q", rendered)
+    }
+
+    if false == strings.Contains(rendered, "| port     | 3306") {
+        t.Fatalf("missing port row in %q", rendered)
+    }
+
+    if false == strings.Contains(rendered, "| user     | app@%") {
+        t.Fatalf("missing user row in %q", rendered)
+    }
+
+    if false == strings.Contains(rendered, "| version  | 8.0.36") {
+        t.Fatalf("missing version row in %q", rendered)
+    }
+}
+
+func TestCommandOutput_PrintDatabaseBlockPrintsLongValuesWhole(t *testing.T) {
+    instance, buffer := newBufferedOutput(true)
+
+    databaseName := "a_very_long_database_name_beyond_column"
+    instance.printDatabaseBlock(&databaseIdentity{
+        CurrentDatabase: &databaseName,
+        Hostname:        "an-extremely-long-hostname.example.com",
+        Port:            5432,
+        CurrentUser:     "user",
+        Version:         "16",
+    })
+
+    rendered := buffer.String()
+
+    if false == strings.Contains(rendered, "| database | a_very_long_database_name_beyond_column |") {
+        t.Fatalf("long database name not printed whole in %q", rendered)
+    }
+
+    if false == strings.Contains(rendered, "| host     | an-extremely-long-hostname.example.com  |") {
+        t.Fatalf("long hostname not printed whole in %q", rendered)
+    }
+}
+
+func TestCommandOutput_PrintDetailsBlockOrdersAndFiltersKeys(t *testing.T) {
+    instance, buffer := newBufferedOutput(true)
+
+    instance.printDetailsBlock(map[string]string{
+        "name":       "create_users",
+        "manager":    "<default>",
+        "status":     "1 pending",
+        "unexpected": "must not render",
+    })
+
+    rendered := buffer.String()
+
+    if false == strings.Contains(rendered, "DETAILS") {
+        t.Fatalf("missing DETAILS header in %q", rendered)
+    }
+
+    if true == strings.Contains(rendered, "unexpected") || true == strings.Contains(rendered, "must not render") {
+        t.Fatalf("unknown key rendered in %q", rendered)
+    }
+
+    managerIndex := strings.Index(rendered, "| manager |")
+    statusIndex := strings.Index(rendered, "| status  |")
+    nameIndex := strings.Index(rendered, "| name    |")
+
+    if 0 > managerIndex || 0 > statusIndex || 0 > nameIndex {
+        t.Fatalf("missing detail rows in %q", rendered)
+    }
+
+    if false == (managerIndex < statusIndex && statusIndex < nameIndex) {
+        t.Fatalf("detail rows are not rendered in the fixed key order: %q", rendered)
+    }
+
+    if true == strings.Contains(rendered, "| applied |") {
+        t.Fatalf("absent key rendered in %q", rendered)
+    }
+}
+
+func TestCommandOutput_PrintMigrationsBlock(t *testing.T) {
+    empty, emptyBuffer := newBufferedOutput(true)
+    empty.printMigrationsBlock("applied", "APPLIED", []string{})
+
+    if 0 != emptyBuffer.Len() {
+        t.Fatalf("empty migrations list produced output: %q", emptyBuffer.String())
+    }
+
+    instance, buffer := newBufferedOutput(true)
+    longName := strings.Repeat("m", 60)
+    instance.printMigrationsBlock("pending", "PENDING", []string{"20240101000000_create_users", longName})
+
+    rendered := buffer.String()
+
+    if false == strings.Contains(rendered, "PENDING") {
+        t.Fatalf("missing block title in %q", rendered)
+    }
+
+    if false == strings.Contains(rendered, "| 20240101000000_create_users") {
+        t.Fatalf("missing migration row in %q", rendered)
+    }
+
+    if false == strings.Contains(rendered, "| "+longName+" |") {
+        t.Fatalf("expected the long name printed whole, the column following it, in %q", rendered)
+    }
+}
+
+func TestCommandOutput_TwoNamesSharingTheirFirstRunesPrintApart(t *testing.T) {
+    instance, buffer := newBufferedOutput(true)
+    shared := strings.Repeat("m", 46)
+    instance.printMigrationsBlock("pending", "PENDING", []string{shared + "_create_users", shared + "_create_orders"})
+
+    rendered := buffer.String()
+    if false == strings.Contains(rendered, shared+"_create_users") || false == strings.Contains(rendered, shared+"_create_orders") {
+        t.Fatalf("expected both names printed apart in %q", rendered)
+    }
+}
+
+func TestCommandOutput_ANameWrapsWhereTheTableWouldPassItsMaximumWidth(t *testing.T) {
+    instance, buffer := newBufferedOutput(true)
+    instance.options.TableMaxWidth = bound.Of(30)
+    instance.printMigrationsBlock("pending", "PENDING", []string{strings.Repeat("m", 60)})
+
+    for _, line := range strings.Split(strings.TrimSpace(buffer.String()), "\n")[1:] {
+        if 30 < utf8.RuneCountInString(line) {
+            t.Fatalf("expected every row within 30 runes, got %q", line)
+        }
+    }
+
+    if 2 != strings.Count(buffer.String(), "| "+strings.Repeat("m", 26)+" |") || false == strings.Contains(buffer.String(), "| "+strings.Repeat("m", 8)+strings.Repeat(" ", 18)+" |") {
+        t.Fatalf("expected the name wrapped onto continuation rows at the table's width in %q", buffer.String())
+    }
+}
+
+func TestCommandOutput_PrintFilesBlock(t *testing.T) {
+    empty, emptyBuffer := newBufferedOutput(true)
+    empty.printFilesBlock([]string{})
+
+    if 0 != emptyBuffer.Len() {
+        t.Fatalf("empty files list produced output: %q", emptyBuffer.String())
+    }
+
+    instance, buffer := newBufferedOutput(true)
+    instance.printFilesBlock([]string{"/tmp/migrations/20240101000000_create_users.go"})
+
+    rendered := buffer.String()
+
+    if false == strings.Contains(rendered, "FILES") {
+        t.Fatalf("missing FILES header in %q", rendered)
+    }
+
+    if false == strings.Contains(rendered, "  /tmp/migrations/20240101000000_create_users.go\n") {
+        t.Fatalf("missing indented file line in %q", rendered)
+    }
+}
+
+func TestCommandOutput_Newline(t *testing.T) {
+    instance, buffer := newBufferedOutput(true)
+    instance.newline()
+
+    if "\n" != buffer.String() {
+        t.Fatalf("newline wrote %q, want %q", buffer.String(), "\n")
+    }
+}
+
+func TestCommandOutput_WantsDetailFollowsTheFormatNotTheVerbosity(t *testing.T) {
+    for _, testCase := range []struct {
+        format          output.Format
+        verbose         bool
+        expectedOutcome bool
+    }{
+        {output.FormatJson, false, true},
+        {output.FormatJson, true, true},
+        {output.FormatTable, false, false},
+        {output.FormatTable, true, true},
+    } {
+        option := output.Options{}
+        option.Format = testCase.format
+        option.Verbose = testCase.verbose
+
+        if testCase.expectedOutcome != newCommandOutput(&bytes.Buffer{}, nil, option).wantsDetail() {
+            t.Fatalf("format %s verbose %v: expected %v", testCase.format, testCase.verbose, testCase.expectedOutcome)
+        }
+    }
+}
+
+func TestCommandOutput_PrintMigrationsBlockKeysTheDocumentApartFromTheTitle(t *testing.T) {
+    jsonOption := output.Options{}
+    jsonOption.Format = output.FormatJson
+
+    jsonBuffer := &bytes.Buffer{}
+    jsonInstance := newCommandOutput(jsonBuffer, nil, jsonOption)
+    jsonInstance.printMigrationsBlock("applied", "APPLIED MIGRATIONS", []string{"20240101000000_create_users"})
+
+    if _, keyedOnTheKey := jsonInstance.migrations["applied"]; false == keyedOnTheKey {
+        t.Fatalf("expected the document to be keyed on the key, got %v", jsonInstance.migrations)
+    }
+
+    if _, keyedOnTheTitle := jsonInstance.migrations["APPLIED MIGRATIONS"]; true == keyedOnTheTitle {
+        t.Fatalf("expected the display title to stay out of the document, got %v", jsonInstance.migrations)
+    }
+
+    textInstance, textBuffer := newBufferedOutput(true)
+    textInstance.printMigrationsBlock("applied", "APPLIED MIGRATIONS", []string{"20240101000000_create_users"})
+
+    if false == strings.Contains(textBuffer.String(), "APPLIED MIGRATIONS") {
+        t.Fatalf("expected the display title in the text block, got %q", textBuffer.String())
+    }
+
+    if true == strings.Contains(textBuffer.String(), "applied\n") {
+        t.Fatalf("expected the document key to stay out of the text block, got %q", textBuffer.String())
+    }
+}
+
+func TestCommandOutput_TheAbsentDatabaseIsJsonNull(t *testing.T) {
+    jsonOption := output.Options{}
+    jsonOption.Format = output.FormatJson
+
+    buffer := &bytes.Buffer{}
+    instance := newCommandOutput(buffer, nil, jsonOption)
+    instance.printDatabaseBlock(&databaseIdentity{Hostname: "localhost", Port: 5432, CurrentUser: "app"})
+
+    if finishErr := instance.finish("db:status", time.Now(), nil); nil != finishErr {
+        t.Fatalf("unexpected error: %v", finishErr)
+    }
+
+    document := struct {
+        Data struct {
+            Database map[string]any `json:"database"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal(buffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v, got %q", decodeErr, buffer.String())
+    }
+
+    databaseValue, hasDatabaseKey := document.Data.Database["database"]
+    if false == hasDatabaseKey {
+        t.Fatalf("expected the database key to stay present, got %#v", document.Data.Database)
+    }
+
+    if nil != databaseValue {
+        t.Fatalf("expected the absent database to be json null, got %#v", databaseValue)
+    }
+
+    named := "orders"
+    namedBuffer := &bytes.Buffer{}
+    namedInstance := newCommandOutput(namedBuffer, nil, jsonOption)
+    namedInstance.printDatabaseBlock(&databaseIdentity{CurrentDatabase: &named})
+
+    if finishErr := namedInstance.finish("db:status", time.Now(), nil); nil != finishErr {
+        t.Fatalf("unexpected error: %v", finishErr)
+    }
+
+    namedDocument := struct {
+        Data struct {
+            Database map[string]any `json:"database"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal(namedBuffer.Bytes(), &namedDocument); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v, got %q", decodeErr, namedBuffer.String())
+    }
+
+    if "orders" != namedDocument.Data.Database["database"] {
+        t.Fatalf("expected the named database in the document, got %q", namedBuffer.String())
+    }
+}
+
+func TestCommandOutput_FinishCarriesTheFailureDetailsAndCause(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, nil, output.Options{Format: output.FormatJson})
+
+    runErr := exception.NewError(
+        "database connection failed",
+        exceptioncontract.Context{"host": "mysql", "port": "3306"},
+        exception.NewError(
+            "Error 1045 (28000): Access denied for user 'melody'",
+            nil,
+            errors.New("dial refused"),
+        ),
+    )
+
+    if finishErr := outputInstance.finish("db:migrate", time.Now(), runErr); nil == finishErr {
+        t.Fatal("expected the command's own failure to stay the verdict")
+    }
+
+    document := struct {
+        Error *struct {
+            Code    string         `json:"code"`
+            Message string         `json:"message"`
+            Details map[string]any `json:"details"`
+            Cause   *struct {
+                Message string              `json:"message"`
+                Details map[string][]string `json:"details"`
+            } `json:"cause"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal(buffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v; rendered %q", decodeErr, buffer.String())
+    }
+
+    if nil == document.Error {
+        t.Fatalf("expected the failure inside the envelope, got %q", buffer.String())
+    }
+
+    if "mysql" != document.Error.Details["host"] || "3306" != document.Error.Details["port"] {
+        t.Fatalf("expected the failure's own context in the details, got %#v", document.Error.Details)
+    }
+
+    if nil == document.Error.Cause {
+        t.Fatalf("expected the failure to carry its cause, got %q", buffer.String())
+    }
+
+    if false == strings.Contains(document.Error.Cause.Message, "Access denied") {
+        t.Fatalf("expected the cause to be the link under the failure, got %q", document.Error.Cause.Message)
+    }
+
+    if 2 > len(document.Error.Cause.Details["chain"]) {
+        t.Fatalf("expected the whole chain beneath the failure, got %#v", document.Error.Cause.Details)
+    }
+
+    if false == strings.Contains(strings.Join(document.Error.Cause.Details["chain"], " | "), "dial refused") {
+        t.Fatalf("expected the chain to reach the bottom, got %#v", document.Error.Cause.Details["chain"])
+    }
+}
+
+func TestCommandOutput_FinishKeepsTheDetailsAnObjectWithoutAContext(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, nil, output.Options{Format: output.FormatJson})
+
+    if finishErr := outputInstance.finish("db:migrate", time.Now(), errors.New("bare failure")); nil == finishErr {
+        t.Fatal("expected the command's own failure to stay the verdict")
+    }
+
+    document := struct {
+        Error *struct {
+            Details map[string]any `json:"details"`
+            Cause   *struct {
+                Message string `json:"message"`
+            } `json:"cause"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal(buffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v; rendered %q", decodeErr, buffer.String())
+    }
+
+    if nil == document.Error.Details {
+        t.Fatalf("expected an empty details object rather than null, got %q", buffer.String())
+    }
+
+    if 0 != len(document.Error.Details) {
+        t.Fatalf("expected the details to be empty for a bare failure, got %#v", document.Error.Details)
+    }
+
+    if nil != document.Error.Cause {
+        t.Fatalf("expected no cause for a failure that has none, got %#v", document.Error.Cause)
+    }
+}
+
+func TestCommandOutput_FinishSurvivesATypedNilContextProviderInTheChain(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, nil, output.Options{Format: output.FormatJson})
+
+    runErr := fmt.Errorf("20240101000000_create_users: up: %w", (*exception.Error)(nil))
+
+    var provider exceptioncontract.ContextProvider
+    if false == errors.As(runErr, &provider) {
+        t.Fatal("expected the typed-nil link to satisfy errors.As, otherwise this guard is aimed at nothing")
+    }
+    if nil == provider {
+        t.Fatal("expected the typed nil to pass a plain nil comparison, otherwise this guard is aimed at nothing")
+    }
+
+    if finishErr := outputInstance.finish("db:migrate", time.Now(), runErr); nil == finishErr {
+        t.Fatal("expected the command's own failure to stay the verdict")
+    }
+
+    document := struct {
+        Error *struct {
+            Message string         `json:"message"`
+            Details map[string]any `json:"details"`
+        } `json:"error"`
+    }{}
+    if decodeErr := json.Unmarshal(buffer.Bytes(), &document); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v; rendered %q", decodeErr, buffer.String())
+    }
+
+    if nil == document.Error {
+        t.Fatalf("expected the failure inside the envelope, got %q", buffer.String())
+    }
+
+    if false == strings.Contains(document.Error.Message, "20240101000000_create_users") {
+        t.Fatalf("expected the wrap's own sentence in the message, got %q", document.Error.Message)
+    }
+
+    if nil == document.Error.Details {
+        t.Fatalf("expected an empty details object rather than null, got %q", buffer.String())
+    }
+
+    if 0 != len(document.Error.Details) {
+        t.Fatalf("expected the typed-nil link to contribute no details, got %#v", document.Error.Details)
+    }
+}
+
+func TestCommandOutput_PrintErrorEscapesControlCharacters(t *testing.T) {
+    plain, plainBuffer := newBufferedOutput(true)
+    plain.printError(errors.New("boom\x1b[2J\rforged"))
+
+    if `ERROR: boom\x1b[2J\rforged`+"\n" != plainBuffer.String() {
+        t.Fatalf("expected the control characters escaped visibly, got %q", plainBuffer.String())
+    }
+}
+
+func TestCommandOutput_PrintDatabaseBlockEscapesBeforeMeasuringTheCell(t *testing.T) {
+    databaseName := "shop"
+    identity := &databaseIdentity{
+        CurrentDatabase: &databaseName,
+        Hostname:        "db-host",
+        Port:            3306,
+        CurrentUser:     "app@%",
+        Version:         "8.4\x1b[2J",
+    }
+
+    plain, plainBuffer := newBufferedOutput(true)
+    plain.printDatabaseBlock(identity)
+
+    rendered := plainBuffer.String()
+
+    expectedVersionRow := `| version  | 8.4\x1b[2J |`
+    if false == strings.Contains(rendered, expectedVersionRow) {
+        t.Fatalf("expected the version cell padded over its escaped spelling, got:\n%s", rendered)
+    }
+
+    if true == strings.Contains(rendered, "\x1b") {
+        t.Fatalf("a raw escape byte reached the terminal:\n%s", rendered)
+    }
+}
+
+func TestCommandOutput_PrintMigrationsBlockEscapesTheNames(t *testing.T) {
+    plain, plainBuffer := newBufferedOutput(true)
+    plain.printMigrationsBlock("applied", "APPLIED MIGRATIONS", []string{"20240101000000_create\rusers"})
+
+    rendered := plainBuffer.String()
+
+    if false == strings.Contains(rendered, `20240101000000_create\rusers`) {
+        t.Fatalf("expected the carriage return escaped visibly, got:\n%s", rendered)
+    }
+
+    if true == strings.Contains(rendered, "\r") {
+        t.Fatalf("a raw carriage return reached the terminal:\n%s", rendered)
+    }
+}
+
+func TestCommandOutput_FinishRunRendersAFailureDocumentForAPanickingRun(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, nil, mustNormalizeOptions(t, output.Options{Format: output.FormatJson}))
+
+    outputInstance.printSuccess("applied 2 migrations")
+
+    panicked := func() (didPanic bool) {
+        defer func() {
+            if nil != recover() {
+                didPanic = true
+            }
+        }()
+
+        _ = outputInstance.finishRun("db:migrate", time.Now(), nil, "the migration dereferenced a nil map")
+
+        return false
+    }()
+
+    if false == panicked {
+        t.Fatalf("expected the panic to be re-raised once the document said what happened")
+    }
+
+    rendered := buffer.String()
+
+    if true == strings.Contains(rendered, `"error":null`) {
+        t.Fatalf("a run that died reported success to the pipeline: %s", rendered)
+    }
+
+    if false == strings.Contains(rendered, "db:migrate panicked") {
+        t.Fatalf("expected the document to name the panic, got %s", rendered)
+    }
+
+    if false == strings.Contains(rendered, "the migration dereferenced a nil map") {
+        t.Fatalf("expected the panic value to reach the document, got %s", rendered)
+    }
+}
+
+func TestCommandOutput_FinishRunCarriesAnErrorShapedPanicAsTheCause(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, nil, mustNormalizeOptions(t, output.Options{Format: output.FormatJson}))
+
+    panicValue := exception.NewError(
+        "the migration lock table is missing",
+        map[string]any{"table": "bun_migration_locks"},
+        errors.New("Error 1146: Table 'melody.bun_migration_locks' doesn't exist"),
+    )
+
+    func() {
+        defer func() { _ = recover() }()
+
+        _ = outputInstance.finishRun("db:migrate", time.Now(), nil, panicValue)
+    }()
+
+    rendered := buffer.String()
+
+    if false == strings.Contains(rendered, "the migration lock table is missing") {
+        t.Fatalf("expected the error-shaped panic to reach the document, got %s", rendered)
+    }
+
+    if true == strings.Contains(rendered, `"cause":null`) {
+        t.Fatalf("expected the error-shaped panic to travel as the cause, got %s", rendered)
+    }
+
+    if false == strings.Contains(rendered, "Table 'melody.bun_migration_locks' doesn't exist") {
+        t.Fatalf("expected the cause chain beneath the panic to survive, got %s", rendered)
+    }
+}
+
+func TestCommandOutput_FinishRunKeepsTheRunsOwnFailureWhenAPanicFollowsIt(t *testing.T) {
+    buffer := &bytes.Buffer{}
+    outputInstance := newCommandOutput(buffer, nil, mustNormalizeOptions(t, output.Options{Format: output.FormatJson}))
+
+    runFailure := exception.NewError("the migration lock is held", nil, nil)
+
+    func() {
+        defer func() { _ = recover() }()
+
+        _ = outputInstance.finishRun("db:migrate", time.Now(), runFailure, "a later defer panicked")
+    }()
+
+    rendered := buffer.String()
+
+    if false == strings.Contains(rendered, "the migration lock is held") {
+        t.Fatalf("expected the run's own failure to stay the verdict, got %s", rendered)
+    }
+}
+
+func TestCommandOutput_FinishRunLeavesTheOrdinaryPathsUnchanged(t *testing.T) {
+    successBuffer := &bytes.Buffer{}
+    successOutput := newCommandOutput(successBuffer, nil, mustNormalizeOptions(t, output.Options{Format: output.FormatJson}))
+    successOutput.printSuccess("applied 2 migrations")
+
+    if runErr := successOutput.finishRun("db:migrate", time.Now(), nil, nil); nil != runErr {
+        t.Fatalf("a clean run must answer no error, got %v", runErr)
+    }
+    if false == strings.Contains(successBuffer.String(), `"error":null`) {
+        t.Fatalf("expected the clean run to render a success document, got %s", successBuffer.String())
+    }
+
+    failureBuffer := &bytes.Buffer{}
+    failureOutput := newCommandOutput(failureBuffer, nil, mustNormalizeOptions(t, output.Options{Format: output.FormatJson}))
+
+    runFailure := exception.NewError("the migration lock is held", nil, nil)
+    if runErr := failureOutput.finishRun("db:migrate", time.Now(), runFailure, nil); nil == runErr {
+        t.Fatalf("a failed run must still answer its failure")
+    }
+    if false == strings.Contains(failureBuffer.String(), "the migration lock is held") {
+        t.Fatalf("expected the failure document, got %s", failureBuffer.String())
+    }
+}
+
+/* recover() answers only when called directly by the deferred function, so the door takes the recovered value */
+func TestMigrateCommands_EveryCommandRunsInsideTheFrameThatPassesItsOwnRecover(t *testing.T) {
+    frame, frameReadErr := os.ReadFile("base_command.go")
+    if nil != frameReadErr {
+        t.Fatalf("read base_command.go: %v", frameReadErr)
+    }
+
+    if false == strings.Contains(string(frame), "finishRun(name, startedAt, runErr, recover())") {
+        t.Fatalf("the shared frame does not call recover() at its own defer; a run that died would be rendered as one that ended well")
+    }
+
+    commandFiles := []string{
+        "command_migrate.go",
+        "command_rollback.go",
+        "command_status.go",
+        "command_init.go",
+        "command_unlock.go",
+        "command_create.go",
+    }
+
+    for _, commandFile := range commandFiles {
+        source, readErr := os.ReadFile(commandFile)
+        if nil != readErr {
+            t.Fatalf("read %s: %v", commandFile, readErr)
+        }
+
+        if false == strings.Contains(string(source), "return instance.base.run(instance.Name(), runtimeInstance, commandContext, instance.run") {
+            t.Fatalf(
+                "%s does not run inside the shared frame; a command that renders its document any other way can report success for a run that died",
+                commandFile,
+            )
+        }
+
+        if true == strings.Contains(string(source), "finishRun(") {
+            t.Fatalf(
+                "%s renders its own document beside the frame; the recovered value is the frame's to read, and a second reader of it sees nil",
+                commandFile,
+            )
+        }
+    }
+}
+
+func TestCommandOutput_PrintWarningEscapesControlCharacters(t *testing.T) {
+    for _, noColor := range []bool{true, false} {
+        instance, buffer := newBufferedOutput(noColor)
+        instance.printWarning("closed\rby the wire\x1b[2J")
+
+        rendered := buffer.String()
+
+        if false == strings.Contains(rendered, `WARNING: closed\rby the wire\x1b[2J`) {
+            t.Fatalf("noColor=%v: expected the escaped spelling, got %q", noColor, rendered)
+        }
+
+        if true == strings.Contains(rendered, "\r") || true == strings.Contains(rendered, "\x1b[2J") {
+            t.Fatalf("noColor=%v: a control character of the data survived: %q", noColor, rendered)
+        }
+    }
+}
+
+func TestCommandOutput_PrintSuccessEscapesControlCharacters(t *testing.T) {
+    for _, noColor := range []bool{true, false} {
+        instance, buffer := newBufferedOutput(noColor)
+        instance.printSuccess("applied to ma\rnager")
+
+        rendered := buffer.String()
+
+        if false == strings.Contains(rendered, `applied to ma\rnager`) || true == strings.Contains(rendered, "\r") {
+            t.Fatalf("noColor=%v: expected the escaped spelling and no raw carriage return, got %q", noColor, rendered)
+        }
+    }
+}
+
+func TestCommandOutput_PrintFilesBlockEscapesControlCharacters(t *testing.T) {
+    instance, buffer := newBufferedOutput(true)
+    instance.printFilesBlock([]string{"migrations/20240101_a\rb.go"})
+
+    rendered := buffer.String()
+
+    if false == strings.Contains(rendered, `  migrations/20240101_a\rb.go`) || true == strings.Contains(rendered, "\r") {
+        t.Fatalf("expected the escaped path and no raw carriage return, got %q", rendered)
+    }
+}
+
+type refusingAfterSink struct {
+    mutex    sync.Mutex
+    accepted int
+}
+
+func (instance *refusingAfterSink) Write(payload []byte) (int, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if 0 < instance.accepted {
+        return 0, errors.New("sink refused")
+    }
+    instance.accepted++
+
+    return len(payload), nil
+}
+
+func TestErrorTrackingWriter_ConcurrentWritesKeepOneRememberedFailure(t *testing.T) {
+    writer := &errorTrackingWriter{writer: &refusingAfterSink{}}
+
+    var writers sync.WaitGroup
+    for index := 0; index < 8; index++ {
+        writers.Add(1)
+        go func() {
+            defer writers.Done()
+            for round := 0; round < 64; round++ {
+                if _, writeErr := writer.Write([]byte("line\n")); nil != writeErr {
+                    t.Errorf("the tracking writer must swallow the sink's refusal, got: %v", writeErr)
+                }
+            }
+        }()
+    }
+    writers.Wait()
+
+    if lostWrite := writer.lostWrite(); nil == lostWrite || "sink refused" != lostWrite.Error() {
+        t.Fatalf("expected the first refusal to be remembered, got: %v", lostWrite)
+    }
+}
+
+func TestIsNilInterface_AnswersTheNilInterfaceAndTheTypedNil(t *testing.T) {
+    if false == isNilInterface(nil) {
+        t.Fatalf("expected the nil interface to be read as nil")
+    }
+
+    var typedNil *testing.T
+    if false == isNilInterface(typedNil) {
+        t.Fatalf("expected a typed nil to be read as nil")
+    }
+
+    if true == isNilInterface(t) {
+        t.Fatalf("expected a live pointer to be read as present")
+    }
+}
+
+func mustNormalizeOptions(t *testing.T, options output.Options) output.Options {
+    t.Helper()
+
+    normalized, normalizeErr := output.NormalizeOptions(options)
+    if nil != normalizeErr {
+        t.Fatalf("expected the option admitted, got %v", normalizeErr)
+    }
+
+    return normalized
+}
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+func TestErrorDetailsOf_ReturnsOnACyclicChain(t *testing.T) {
+    assertReturnsOnACyclicChain(t, func() {
+        errorDetailsOf(newCyclicChainError())
+    })
+}
+
+func TestCommandOutput_PrintDetailsBlockWrapsALongNameUnderTheTableWidth(t *testing.T) {
+    instance, buffer := newBufferedOutput(true)
+    instance.options.TableMaxWidth = bound.Of(30)
+
+    instance.printDetailsBlock(map[string]string{"name": "20260907000001_create_a_very_long_table"})
+
+    rendered := buffer.String()
+    for _, line := range strings.Split(strings.TrimSpace(rendered), "\n")[1:] {
+        if 30 < utf8.RuneCountInString(line) {
+            t.Fatalf("expected every row within 30 runes, got %q", line)
+        }
+    }
+
+    for _, row := range []string{
+        "| name | 20260907000001_crea |\n",
+        "|      | te_a_very_long_tabl |\n",
+        "|      | e                   |\n",
+    } {
+        if false == strings.Contains(rendered, row) {
+            t.Fatalf("expected the row %q in:\n%s", row, rendered)
+        }
+    }
+}
+
+func TestCommandOutput_PrintDatabaseBlockKeepsTheHeaderWidthUnderATinyMaximum(t *testing.T) {
+    instance, buffer := newBufferedOutput(true)
+    instance.options.TableMaxWidth = bound.Of(1)
+
+    databaseName := "shop"
+    instance.printDatabaseBlock(&databaseIdentity{CurrentDatabase: &databaseName, Hostname: "db", Port: 3306, CurrentUser: "app", Version: "8.4"})
+
+    rendered := buffer.String()
+    for _, row := range []string{"| key      | value |\n", "| database | shop  |\n", "| port     | 3306  |\n"} {
+        if false == strings.Contains(rendered, row) {
+            t.Fatalf("expected the row %q in:\n%s", row, rendered)
+        }
+    }
+}
+
+func TestCommandOutput_PrintDatabaseBlockKeepsTheRowOfAnEmptyValue(t *testing.T) {
+    instance, buffer := newBufferedOutput(true)
+
+    instance.printDatabaseBlock(&databaseIdentity{Hostname: "h", Port: 3306})
+
+    for _, key := range []string{"| user     |", "| version  |"} {
+        if false == strings.Contains(buffer.String(), key) {
+            t.Fatalf("expected the row %q in:\n%s", key, buffer.String())
+        }
+    }
+}
+

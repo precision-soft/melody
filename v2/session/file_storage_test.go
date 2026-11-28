@@ -12,6 +12,9 @@ import (
     "time"
 )
 
+/* /dev/zero takes a write at offset 0, reports size 0 and refuses truncate and fsync; /dev/null accepts all three since Linux 7.0 */
+const refusingCharacterDevice = "/dev/zero"
+
 func TestFileStorage_Close_DoesNotCloseInjectedFile(t *testing.T) {
     fileInstance, err := os.CreateTemp("", "melody_session_injected_*.json")
     if nil != err {
@@ -1111,16 +1114,16 @@ func TestFileStorage_Save_RollsBackInMemoryEntryWhenFlushFails(t *testing.T) {
 }
 
 func TestFileStorage_Save_KeepsTheNewEntryWhenTheFlushFailsAfterThePersist(t *testing.T) {
-    devNull, openErr := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+    characterDevice, openErr := os.OpenFile(refusingCharacterDevice, os.O_RDWR, 0)
     if nil != openErr {
         t.Fatalf("unexpected open error: %s", openErr.Error())
     }
 
     defer func() {
-        _ = devNull.Close()
+        _ = characterDevice.Close()
     }()
 
-    storage, storageErr := NewFileStorageFromFile(devNull)
+    storage, storageErr := NewFileStorageFromFile(characterDevice)
     if nil != storageErr {
         t.Fatalf("unexpected storage error: %s", storageErr.Error())
     }
@@ -1145,16 +1148,16 @@ func TestFileStorage_Save_KeepsTheNewEntryWhenTheFlushFailsAfterThePersist(t *te
 }
 
 func TestFileStorage_Delete_KeepsTheEntryDeletedWhenTheFlushFailsAfterThePersist(t *testing.T) {
-    devNull, openErr := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+    characterDevice, openErr := os.OpenFile(refusingCharacterDevice, os.O_RDWR, 0)
     if nil != openErr {
         t.Fatalf("unexpected open error: %s", openErr.Error())
     }
 
     defer func() {
-        _ = devNull.Close()
+        _ = characterDevice.Close()
     }()
 
-    storage, storageErr := NewFileStorageFromFile(devNull)
+    storage, storageErr := NewFileStorageFromFile(characterDevice)
     if nil != storageErr {
         t.Fatalf("unexpected storage error: %s", storageErr.Error())
     }
@@ -1417,7 +1420,7 @@ func TestSyncSessionDirectory_AnswersTheDirectoryItCouldNotOpen(t *testing.T) {
 }
 
 func TestSyncSessionDirectory_MarksTheRefusedFlushAsPersisted(t *testing.T) {
-    syncErr := syncSessionDirectory(os.DevNull)
+    syncErr := syncSessionDirectory(refusingCharacterDevice)
     if nil == syncErr {
         t.Fatal("expected the character device to refuse the flush")
     }

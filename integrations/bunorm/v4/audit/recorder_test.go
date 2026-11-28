@@ -1,0 +1,522 @@
+package audit
+
+import (
+    "context"
+    "database/sql"
+    "errors"
+    "fmt"
+    "os"
+    "strings"
+    "sync"
+    "testing"
+
+    _ "github.com/go-sql-driver/mysql"
+    "github.com/uptrace/bun"
+    "github.com/uptrace/bun/dialect/mysqldialect"
+
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/exception"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+)
+
+type capturedSave struct {
+    table   string
+    entries []Entry
+}
+
+type fakeStorage struct {
+    saves    []capturedSave
+    failWith error
+}
+
+func (instance *fakeStorage) Save(ctx context.Context, table string, entries []Entry) error {
+    if nil != instance.failWith {
+        return instance.failWith
+    }
+
+    instance.saves = append(instance.saves, capturedSave{table: table, entries: entries})
+
+    return nil
+}
+
+type fakeLogger struct {
+    mutex         sync.Mutex
+    errorMessages []string
+    errorContexts []loggingcontract.Context
+}
+
+func (instance *fakeLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+}
+func (instance *fakeLogger) Debug(message string, context loggingcontract.Context)   {}
+func (instance *fakeLogger) Info(message string, context loggingcontract.Context)    {}
+func (instance *fakeLogger) Warning(message string, context loggingcontract.Context) {}
+func (instance *fakeLogger) Error(message string, context loggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.errorMessages = append(instance.errorMessages, message)
+    instance.errorContexts = append(instance.errorContexts, context)
+}
+func (instance *fakeLogger) Emergency(message string, context loggingcontract.Context) {}
+
+func (instance *fakeLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *fakeLogger) CauseChainDepth() int {
+    return 8
+}
+
+type parityAccount struct {
+    Id     int64  `bun:"id,pk"`
+    Email  string `bun:"email"`
+    Secret string `bun:"secret"`
+}
+
+func TestRecorder_RoutesPerEntityTableAndHonorsIgnoredFields(t *testing.T) {
+    storage := &fakeStorage{}
+    registry := NewRegistry(RegistryConfig{DefaultTable: "melody_audit", GlobalIgnoredFields: []string{"secret"}}).
+        Register("parityAccount", EntityOptions{Table: "account_audit"})
+    recorder := NewRecorder(storage, RecorderConfig{Registry: registry})
+
+    before := parityAccount{Id: 1, Email: "old@example.com", Secret: "a"}
+    after := parityAccount{Id: 1, Email: "new@example.com", Secret: "b"}
+
+    if recordErr := recorder.RecordUpdate(context.Background(), "parityAccount", "1", before, after); nil != recordErr {
+        t.Fatalf("record: %v", recordErr)
+    }
+
+    if 1 != len(storage.saves) {
+        t.Fatalf("expected one save, got %d", len(storage.saves))
+    }
+
+    if "account_audit" != storage.saves[0].table {
+        t.Fatalf("expected per-entity table routing, got %q", storage.saves[0].table)
+    }
+
+    changes := storage.saves[0].entries[0].Changes
+    if true == strings.Contains(changes, "secret") {
+        t.Fatalf("globally ignored field must not appear in changes: %s", changes)
+    }
+    if false == strings.Contains(changes, "email") {
+        t.Fatalf("expected the changed email field in changes: %s", changes)
+    }
+}
+
+func TestRecorder_EmptyChangeSetIsStoredAsAnEmptyArray(t *testing.T) {
+    storage := &fakeStorage{}
+    recorder := NewRecorder(storage, RecorderConfig{Registry: NewRegistry(RegistryConfig{DefaultTable: "melody_audit"})})
+
+    identical := parityAccount{Id: 1, Email: "same@example.com", Secret: "a"}
+
+    if recordErr := recorder.RecordUpdate(context.Background(), "parityAccount", "1", identical, identical); nil != recordErr {
+        t.Fatalf("record update: %v", recordErr)
+    }
+
+    if recordErr := recorder.RecordInsert(context.Background(), "parityAccount", "2", "not-a-model"); nil != recordErr {
+        t.Fatalf("record insert: %v", recordErr)
+    }
+
+    if 2 != len(storage.saves) {
+        t.Fatalf("expected two saves, got %d", len(storage.saves))
+    }
+
+    for _, save := range storage.saves {
+        if "[]" != save.entries[0].Changes {
+            t.Fatalf("expected an empty change-set to be stored as [], got %q for %s", save.entries[0].Changes, save.entries[0].Operation)
+        }
+    }
+}
+
+func TestRecorder_DeadLettersOnStorageFailure(t *testing.T) {
+    storage := &fakeStorage{failWith: context.DeadlineExceeded}
+    logger := &fakeLogger{}
+    recorder := NewRecorder(storage, RecorderConfig{Logger: logger})
+
+    saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "1", parityAccount{Id: 1, Email: "x@example.com"})
+    if nil == saveErr {
+        t.Fatalf("expected the storage error to propagate")
+    }
+
+    if 1 != len(logger.errorMessages) {
+        t.Fatalf("expected a dead-letter log on storage failure, got %d", len(logger.errorMessages))
+    }
+}
+
+func TestRecorder_DoesNotDeadLetterAgainAnEntryTheAsyncStorageAlreadyDeadLettered(t *testing.T) {
+    delegate := &recordingStorage{entered: make(chan struct{}), release: make(chan struct{})}
+    logger := &fakeLogger{}
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(1), Logger: logger})
+    recorder := NewRecorder(storage, RecorderConfig{Logger: logger})
+
+    if saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "1", parityAccount{Id: 1}); nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+
+    <-delegate.entered
+
+    if saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "2", parityAccount{Id: 2}); nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+
+    saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "3", parityAccount{Id: 3})
+    if false == errors.Is(saveErr, ErrAsyncStorageQueueFull) {
+        t.Fatalf("expected the refusal of a full queue to reach the caller, got %v", saveErr)
+    }
+
+    close(delegate.release)
+
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != len(logger.errorMessages) {
+        t.Fatalf("expected the dropped entry dead-lettered once, got %d records: %v", len(logger.errorMessages), logger.errorMessages)
+    }
+}
+
+func TestRecorder_DeadLettersAnEntryTheAsyncStorageJournaledElsewhere(t *testing.T) {
+    emergency := installDefaultAsyncStorageLogger(t)
+    delegate := &recordingStorage{entered: make(chan struct{}), release: make(chan struct{})}
+    storage := NewAsyncStorage(delegate, AsyncStorageConfig{BufferSize: bound.Of(1)})
+    application := &fakeLogger{}
+    recorder := NewRecorder(storage, RecorderConfig{Logger: application})
+
+    if saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "1", parityAccount{Id: 1}); nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+
+    <-delegate.entered
+
+    if saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "2", parityAccount{Id: 2}); nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+
+    saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "3", parityAccount{Id: 3})
+    if false == errors.Is(saveErr, ErrAsyncStorageQueueFull) {
+        t.Fatalf("expected the refusal of a full queue to reach the caller, got %v", saveErr)
+    }
+
+    close(delegate.release)
+
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != len(application.errorMessages) {
+        t.Fatalf("expected the application's journal to carry the dropped entry once, got %d records: %v", len(application.errorMessages), application.errorMessages)
+    }
+
+    if 1 != emergency.count() {
+        t.Fatalf("expected the storage's own journal to carry the dropped entry once, got %d", emergency.count())
+    }
+}
+
+func TestRecorder_DeadLettersAnEntryAForeignStorageRefusedWithTheSentinel(t *testing.T) {
+    storage := &sentinelReturningStorage{sentinel: ErrAsyncStorageClosed}
+    application := &fakeLogger{}
+    recorder := NewRecorder(storage, RecorderConfig{Logger: application})
+
+    saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "1", parityAccount{Id: 1})
+    if false == errors.Is(saveErr, ErrAsyncStorageClosed) {
+        t.Fatalf("expected the storage's refusal to reach the caller, got %v", saveErr)
+    }
+
+    if 1 != len(application.errorMessages) {
+        t.Fatalf("expected the refused entry dead-lettered once, got %d records: %v", len(application.errorMessages), application.errorMessages)
+    }
+}
+
+func TestRecorder_DoesNotDeadLetterAgainAnEntryTheClosedAsyncStorageAlreadyDeadLettered(t *testing.T) {
+    logger := &fakeLogger{}
+    storage := NewAsyncStorage(&recordingStorage{entered: make(chan struct{}, 1), release: make(chan struct{})}, AsyncStorageConfig{BufferSize: bound.Of(1), Logger: logger})
+    recorder := NewRecorder(storage, RecorderConfig{Logger: logger})
+
+    if closeErr := storage.CloseWithContext(t.Context()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    saveErr := recorder.RecordInsert(context.Background(), "parityAccount", "1", parityAccount{Id: 1})
+    if false == errors.Is(saveErr, ErrAsyncStorageClosed) {
+        t.Fatalf("expected the refusal of a closed storage to reach the caller, got %v", saveErr)
+    }
+
+    if 1 != len(logger.errorMessages) {
+        t.Fatalf("expected the refused entry dead-lettered once, got %d records: %v", len(logger.errorMessages), logger.errorMessages)
+    }
+}
+
+type sentinelReturningStorage struct {
+    sentinel error
+}
+
+func (instance *sentinelReturningStorage) Save(ctx context.Context, table string, entries []Entry) error {
+    return fmt.Errorf("foreign storage refused the entries: %w", instance.sentinel)
+}
+
+func TestNewRecorder_RefusesATypedNilLoggerNamingTheField(t *testing.T) {
+    defer func() {
+        recoveredErr, isError := recover().(error)
+        if false == isError {
+            t.Fatalf("expected the typed-nil logger to be refused at the door")
+        }
+
+        if "RecorderConfig.Logger" != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
+            t.Fatalf("expected the refusal to name RecorderConfig.Logger, got %v", recoveredErr)
+        }
+    }()
+
+    var logger *fakeLogger
+
+    NewRecorder(&fakeStorage{}, RecorderConfig{Logger: logger})
+}
+
+func TestRecorder_DeadLetterCarriesTheTableAndTheCauseChain(t *testing.T) {
+    driverErr := errors.New("driver: deadlock found when trying to get lock")
+    storage := &fakeStorage{failWith: exception.NewError("could not write the audit entries", map[string]any{"table": "account_audit"}, driverErr)}
+
+    logger := &fakeLogger{}
+    registry := NewRegistry(RegistryConfig{DefaultTable: "melody_audit"}).Register("parityAccount", EntityOptions{Table: "account_audit"})
+    recorder := NewRecorder(storage, RecorderConfig{Registry: registry, Logger: logger})
+
+    recordErr := recorder.RecordInsert(context.Background(), "parityAccount", "1", &parityAccount{Id: 1})
+    if nil == recordErr {
+        t.Fatalf("expected the failing storage to fail the record")
+    }
+
+    if 1 != len(logger.errorContexts) {
+        t.Fatalf("expected exactly one dead-letter record, got %d", len(logger.errorContexts))
+    }
+
+    deadLetterContext := logger.errorContexts[0]
+
+    if "account_audit" != deadLetterContext["table"] {
+        t.Fatalf("expected the dead-letter to name the table, got: %v", deadLetterContext["table"])
+    }
+
+    if false == strings.Contains(fmt.Sprintf("%v", deadLetterContext["cause"]), "deadlock") {
+        t.Fatalf("expected the dead-letter to carry the driver cause, got: %v", deadLetterContext["cause"])
+    }
+}
+
+func TestRecorder_CloseClosesAnOwnedStorageAndLeavesABorrowedOne(t *testing.T) {
+    owned := &closableStorage{}
+    if closeErr := NewRecorder(owned, RecorderConfig{OwnsStorage: true}).CloseWithContext(t.Context()); nil != closeErr {
+        t.Fatalf("owning close: %v", closeErr)
+    }
+    if false == owned.closed {
+        t.Fatalf("expected the owning recorder to close its storage")
+    }
+
+    borrowed := &closableStorage{}
+    if closeErr := NewRecorder(borrowed, RecorderConfig{}).CloseWithContext(t.Context()); nil != closeErr {
+        t.Fatalf("borrowing close: %v", closeErr)
+    }
+    if true == borrowed.closed {
+        t.Fatalf("expected the non-owning recorder to leave the storage to its own service registration")
+    }
+}
+
+type closableStorage struct {
+    fakeStorage
+    closed bool
+}
+
+func (instance *closableStorage) CloseWithContext(closeContext context.Context) error {
+    instance.closed = true
+
+    return nil
+}
+
+type widget struct {
+    Id       int64  `bun:"id,pk"`
+    Name     string `bun:"name"`
+    Quantity int    `bun:"quantity"`
+}
+
+func TestBunormAudit_RecordsFieldLevelChangeSet(t *testing.T) {
+    dsn := os.Getenv("MYSQL_DSN")
+    if "" == dsn {
+        t.Skip("MYSQL_DSN not set; skipping bunorm audit integration test")
+    }
+
+    ctx := context.Background()
+
+    sqlDb, openErr := sql.Open("mysql", dsn)
+    if nil != openErr {
+        t.Fatalf("open: %v", openErr)
+    }
+    defer sqlDb.Close()
+
+    auditDatabase := bun.NewDB(sqlDb, mysqldialect.New())
+
+    auditDatabase.ExecContext(ctx, "DROP TABLE IF EXISTS melody_audit")
+    if _, createErr := auditDatabase.NewCreateTable().Model((*Entry)(nil)).Exec(ctx); nil != createErr {
+        t.Fatalf("create melody_audit: %v", createErr)
+    }
+
+    recorder := NewRecorder(NewBunStorage(auditDatabase), RecorderConfig{Registry: NewRegistry(RegistryConfig{DefaultTable: "melody_audit"})})
+    actorCtx := WithActor(ctx, "alice")
+
+    before := widget{Id: 1, Name: "bolt", Quantity: 5}
+    after := widget{Id: 1, Name: "bolt", Quantity: 9}
+
+    if recordErr := recorder.RecordUpdate(actorCtx, "widget", "1", before, after); nil != recordErr {
+        t.Fatalf("record update: %v", recordErr)
+    }
+
+    var operation string
+    var actor string
+    var changes string
+    selectErr := sqlDb.QueryRowContext(ctx, "SELECT operation, actor, changes FROM melody_audit ORDER BY id DESC LIMIT 1").Scan(&operation, &actor, &changes)
+    if nil != selectErr {
+        t.Fatalf("audit select: %v", selectErr)
+    }
+
+    if "UPDATE" != operation {
+        t.Fatalf("expected UPDATE operation, got %q", operation)
+    }
+
+    if "alice" != actor {
+        t.Fatalf("expected actor alice, got %q", actor)
+    }
+
+    if false == strings.Contains(changes, "\"quantity\"") {
+        t.Fatalf("expected quantity in change-set, got %q", changes)
+    }
+
+    if false == strings.Contains(changes, "\"old\":5") || false == strings.Contains(changes, "\"new\":9") {
+        t.Fatalf("expected old/new values in change-set, got %q", changes)
+    }
+}
+
+func TestIsNilInterface_AnswersTheNilInterfaceAndTheTypedNil(t *testing.T) {
+    if false == isNilInterface(nil) {
+        t.Fatalf("expected the nil interface to be read as nil")
+    }
+
+    var typedNil *testing.T
+    if false == isNilInterface(typedNil) {
+        t.Fatalf("expected a typed nil to be read as nil")
+    }
+
+    if true == isNilInterface(t) {
+        t.Fatalf("expected a live pointer to be read as present")
+    }
+}
+
+type plainCloseStorage struct {
+    fakeStorage
+}
+
+func (instance *plainCloseStorage) Close() error {
+    return nil
+}
+
+func TestNewRecorder_AnOwnedStorageCarryingCloseAloneIsRefusedAndABorrowedOneAdmitted(t *testing.T) {
+    func() {
+        defer func() {
+            recoveredErr, isError := recover().(error)
+            if false == isError {
+                t.Fatalf("expected the owned plain-close storage refused at the door")
+            }
+
+            if "RecorderConfig.OwnsStorage" != exception.LogContext(recoveredErr, exception.LogContextOptions{})["field"] {
+                t.Fatalf("expected the refusal to name RecorderConfig.OwnsStorage, got %v", recoveredErr)
+            }
+        }()
+
+        NewRecorder(&plainCloseStorage{}, RecorderConfig{OwnsStorage: true})
+    }()
+
+    if nil == NewRecorder(&plainCloseStorage{}, RecorderConfig{}) {
+        t.Fatalf("expected a borrowed plain-close storage admitted")
+    }
+}
+
+func TestOptionalDependencies_NilIsTheDefaultAndATypedNilIsRefused(t *testing.T) {
+    var typedNil *fakeLogger
+
+    rows := []struct {
+        name    string
+        message string
+        field   string
+        build   func(logger loggingcontract.Logger) loggingcontract.Logger
+    }{
+        {"NewRecorder", "audit recorder logger is a typed nil", "RecorderConfig.Logger", func(logger loggingcontract.Logger) loggingcontract.Logger {
+            return NewRecorder(&fakeStorage{}, RecorderConfig{Logger: logger}).logger
+        }},
+        {"NewAsyncStorage", "async audit storage logger is a typed nil", "AsyncStorageConfig.Logger", func(logger loggingcontract.Logger) loggingcontract.Logger {
+            storage := NewAsyncStorage(newRecordingStorage(), AsyncStorageConfig{Logger: logger})
+            defer storage.CloseWithContext(context.Background())
+
+            return storage.logger
+        }},
+    }
+
+    for _, row := range rows {
+        t.Run(row.name, func(t *testing.T) {
+            if defaultAuditLogger() != row.build(nil) {
+                t.Fatalf("expected an absent logger to be the emergency default")
+            }
+
+            func() {
+                defer func() {
+                    var refusal *exception.Error
+                    recoveredErr, _ := recover().(error)
+                    if false == errors.As(recoveredErr, &refusal) || row.message != refusal.Message() || row.field != refusal.Context()["field"] {
+                        t.Fatalf("expected %q naming %s, got %v", row.message, row.field, recoveredErr)
+                    }
+                }()
+
+                row.build(typedNil)
+            }()
+        })
+    }
+}
+
+func TestRecorder_EncryptedColumnsUnmaskedRecordsThePlaintextAndTheTaggedFieldStaysMasked(t *testing.T) {
+    storage := &fakeStorage{}
+    recorder := NewRecorder(storage, RecorderConfig{Registry: NewRegistry(RegistryConfig{EncryptedColumnsUnmasked: true})})
+
+    before := account{Id: 1, ApiKey: "key-old", Password: "password-old", LookupEmail: "old@example.com"}
+    after := account{Id: 1, ApiKey: "key-new", Password: "password-new", LookupEmail: "new@example.com"}
+
+    if recordErr := recorder.RecordUpdate(context.Background(), "account", "1", before, after); nil != recordErr {
+        t.Fatalf("record: %v", recordErr)
+    }
+
+    changes := storage.saves[0].entries[0].Changes
+    for _, plaintext := range []string{"password-old", "password-new", "old@example.com", "new@example.com"} {
+        if false == strings.Contains(changes, plaintext) {
+            t.Fatalf("expected the unmasked registry to record %q, got %s", plaintext, changes)
+        }
+    }
+    for _, secret := range []string{"key-old", "key-new"} {
+        if true == strings.Contains(changes, secret) {
+            t.Fatalf("expected the audit:\"redact\" field masked under the unmasked registry, got %s", changes)
+        }
+    }
+}
+
+func TestRecorder_EncryptedColumnsStayMaskedByDefault(t *testing.T) {
+    storage := &fakeStorage{}
+    recorder := NewRecorder(storage, RecorderConfig{Registry: NewRegistry(RegistryConfig{})})
+
+    before := account{Id: 1, Password: "password-old", LookupEmail: "old@example.com"}
+    after := account{Id: 1, Password: "password-new", LookupEmail: "new@example.com"}
+
+    if recordErr := recorder.RecordUpdate(context.Background(), "account", "1", before, after); nil != recordErr {
+        t.Fatalf("record: %v", recordErr)
+    }
+
+    changes := storage.saves[0].entries[0].Changes
+    for _, plaintext := range []string{"password-old", "password-new", "old@example.com", "new@example.com"} {
+        if true == strings.Contains(changes, plaintext) {
+            t.Fatalf("expected the default registry to mask %q, got %s", plaintext, changes)
+        }
+    }
+    if 2 != strings.Count(changes, `"old":"\u003credacted\u003e"`) {
+        t.Fatalf("expected both encrypted columns masked, got %s", changes)
+    }
+}

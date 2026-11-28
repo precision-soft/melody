@@ -1,0 +1,599 @@
+package config
+
+import (
+    "context"
+    "errors"
+    nethttp "net/http"
+    "net/http/httptest"
+    "strings"
+    "testing"
+    "time"
+
+    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
+    "github.com/precision-soft/melody/v4/.example/entity"
+    "github.com/precision-soft/melody/v4/.example/persistence"
+    "github.com/precision-soft/melody/v4/.example/repository"
+    "github.com/precision-soft/melody/v4/.example/route"
+    "github.com/precision-soft/melody/v4/.example/security"
+    "github.com/precision-soft/melody/v4/bound"
+    melodyclock "github.com/precision-soft/melody/v4/clock"
+    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
+    melodyevent "github.com/precision-soft/melody/v4/event"
+    melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
+    melodykernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    melodylogging "github.com/precision-soft/melody/v4/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    melodysecurity "github.com/precision-soft/melody/v4/security"
+    melodysecurityconfig "github.com/precision-soft/melody/v4/security/config"
+    melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
+    melodysession "github.com/precision-soft/melody/v4/session"
+)
+
+func compiledSecurityModule(t *testing.T) *melodysecurityconfig.Builder {
+    t.Helper()
+
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.buildInternalAuth()
+    moduleInstance.buildTokenAuth()
+    moduleInstance.buildImpersonation()
+
+    builder := melodysecurityconfig.NewBuilder()
+    moduleInstance.RegisterSecurity(builder)
+
+    return builder
+}
+
+func TestRegisterSecurity_TheDoorsThatWriteIntoABackendCarryARole(t *testing.T) {
+    control := compiledSecurityModule(t).BuildAndCompile().GlobalAccessControl()
+
+    expectations := map[string]string{
+        "/storage/object":      entity.RoleEditor,
+        "/outbox/enqueue":      entity.RoleEditor,
+        "/outbox/relay":        entity.RoleEditor,
+        "/outbox/status":       entity.RoleEditor,
+        "/messagebus/dispatch": entity.RoleEditor,
+        "/platform/check":      entity.RoleUser,
+    }
+
+    for path, role := range expectations {
+        attributes, matched := control.Match(path)
+
+        if false == matched || 1 != len(attributes) || role != attributes[0] {
+            t.Fatalf("expected %s to require %s, got matched=%v attributes=%v", path, role, matched, attributes)
+        }
+    }
+}
+
+func TestRegisterSecurity_TheCurrencyWritesRequireTheEditor(t *testing.T) {
+    control := compiledSecurityModule(t).BuildAndCompile().GlobalAccessControl()
+
+    expectations := map[string]string{
+        "/currencies/api/create/":         entity.RoleEditor,
+        "/currencies/api/update/cur-eur/": entity.RoleEditor,
+        "/currencies/api/delete/cur-eur/": entity.RoleEditor,
+        "/currencies/api/read/":           entity.RoleUser,
+    }
+
+    for path, role := range expectations {
+        attributes, matched := control.Match(path)
+
+        if false == matched || 1 != len(attributes) || role != attributes[0] {
+            t.Fatalf("expected %s to require %s, got matched=%v attributes=%v", path, role, matched, attributes)
+        }
+    }
+}
+
+func TestAccessControl_CategoryWritesRequireTheEditor(t *testing.T) {
+    control := compiledSecurityModule(t).BuildAndCompile().GlobalAccessControl()
+
+    for _, path := range []string{"/categories/api/create/", "/categories/api/update/cat-1/", "/categories/api/delete/cat-1/"} {
+        attributes, matched := control.Match(path)
+
+        if false == matched || 1 != len(attributes) || entity.RoleEditor != attributes[0] {
+            t.Fatalf("expected %s to require %s, got matched=%v attributes=%v", path, entity.RoleEditor, matched, attributes)
+        }
+    }
+}
+
+func TestAccessControl_CategoryListingRequiresAUser(t *testing.T) {
+    control := compiledSecurityModule(t).BuildAndCompile().GlobalAccessControl()
+
+    attributes, matched := control.Match(route.CategoriesApiReadAllPattern)
+    if false == matched || 1 != len(attributes) || entity.RoleUser != attributes[0] {
+        t.Fatalf("expected %s to require %s, got matched=%v attributes=%v", route.CategoriesApiReadAllPattern, entity.RoleUser, matched, attributes)
+    }
+}
+
+func TestRegisterSecurity_ThePublicRulesAreTheClosedListTheReadmeStates(t *testing.T) {
+    control := compiledSecurityModule(t).BuildAndCompile().GlobalAccessControl()
+
+    var public []string
+    for _, rule := range control.Rules() {
+        for _, attribute := range rule.Attributes() {
+            if melodysecuritycontract.AttributePublicAccess == attribute {
+                public = append(public, rule.Pattern()+rule.PathPrefix())
+            }
+        }
+    }
+
+    expected := []string{"/", "/index.html", "/login", "/login/check", "/logout", "/routes", "^/assets", "^/favicon", "^/(en|ro|ro-RO)/i18n(/|$)", "/health", "/metrics", "/openapi.json", "/encrypt/roundtrip"}
+
+    if len(expected) != len(public) {
+        t.Fatalf("expected %d public rules, got %d: %s", len(expected), len(public), strings.Join(public, ", "))
+    }
+
+    for index, description := range expected {
+        if description != public[index] {
+            t.Fatalf("expected public rule %d to be %q, got %q", index, description, public[index])
+        }
+    }
+}
+
+func TestRegisterSecurity_TheGreetingIsPublicOnlyUnderItsServedLocales(t *testing.T) {
+    control := compiledSecurityModule(t).BuildAndCompile().GlobalAccessControl()
+
+    expectations := map[string]string{
+        "/en/i18n/greeting/":    melodysecuritycontract.AttributePublicAccess,
+        "/ro/i18n/greeting/":    melodysecuritycontract.AttributePublicAccess,
+        "/ro-RO/i18n/greeting/": melodysecuritycontract.AttributePublicAccess,
+        "/de/i18n/greeting/":    entity.RoleUser,
+        "/i18n/greeting/":       entity.RoleUser,
+        "/en/i18nx/greeting/":   entity.RoleUser,
+    }
+
+    for path, attribute := range expectations {
+        attributes, matched := control.Match(path)
+
+        if false == matched || 1 != len(attributes) || attribute != attributes[0] {
+            t.Fatalf("expected %s to require %s, got matched=%v attributes=%v", path, attribute, matched, attributes)
+        }
+    }
+}
+
+func TestRegisterSecurity_TheOnePathDoorsArePublicForTheirOwnSpellingOnly(t *testing.T) {
+    control := compiledSecurityModule(t).BuildAndCompile().GlobalAccessControl()
+
+    expectations := map[string]string{
+        "/health":              melodysecuritycontract.AttributePublicAccess,
+        "/health/":             melodysecuritycontract.AttributePublicAccess,
+        "/openapi.json":        melodysecuritycontract.AttributePublicAccess,
+        "/login/":              melodysecuritycontract.AttributePublicAccess,
+        "/healthz":             entity.RoleUser,
+        "/health/extra":        entity.RoleUser,
+        "/openapiXjson":        entity.RoleUser,
+        "/login-admin":         entity.RoleUser,
+        "/metrics2":            entity.RoleUser,
+        "/encrypt/roundtrip/x": entity.RoleUser,
+    }
+
+    for path, attribute := range expectations {
+        attributes, matched := control.Match(path)
+
+        if false == matched || 1 != len(attributes) || attribute != attributes[0] {
+            t.Fatalf("expected %s to require %s, got matched=%v attributes=%v", path, attribute, matched, attributes)
+        }
+    }
+}
+
+func TestRegisterSecurity_TheInternalFirewallCarriesItsOwnRuleAlone(t *testing.T) {
+    compiled := compiledSecurityModule(t).BuildAndCompile()
+
+    var internalFirewall *melodysecurity.CompiledFirewall
+    for _, firewall := range compiled.Firewalls() {
+        if "internal" == firewall.Name() {
+            internalFirewall = firewall
+        }
+    }
+
+    if nil == internalFirewall {
+        t.Fatal("expected the internal firewall to be compiled")
+    }
+
+    if 1 != len(internalFirewall.AccessControl().Rules()) {
+        t.Fatalf("expected the internal firewall to read its one rule alone, got %d rules", len(internalFirewall.AccessControl().Rules()))
+    }
+
+    for _, path := range []string{"/internal", "/internal/whoami/", "/internal/not-routed/"} {
+        attributes, matched := internalFirewall.AccessControl().Match(path)
+        if false == matched || 1 != len(attributes) || internalCallerRole != attributes[0] {
+            t.Fatalf("expected %s to require %s on the internal firewall, got matched=%v attributes=%v", path, internalCallerRole, matched, attributes)
+        }
+    }
+
+    attributes, _ := compiled.GlobalAccessControl().Match("/internal/whoami/")
+    if 1 != len(attributes) || entity.RoleUser != attributes[0] {
+        t.Fatalf("expected the global list to leave /internal to the catch-all, got %v", attributes)
+    }
+}
+
+func TestRegisterSecurity_TheMetricsTokenPutsTheExpositionBehindTheScraperRole(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.metricsToken = "scrape-secret"
+    moduleInstance.buildInternalAuth()
+    moduleInstance.buildTokenAuth()
+    moduleInstance.buildImpersonation()
+
+    builder := melodysecurityconfig.NewBuilder()
+    moduleInstance.RegisterSecurity(builder)
+    compiled := builder.BuildAndCompile()
+
+    attributes, _ := compiled.GlobalAccessControl().Match("/metrics")
+    if 1 != len(attributes) || metricsScraperRole != attributes[0] {
+        t.Fatalf("expected /metrics to require %s, got %v", metricsScraperRole, attributes)
+    }
+
+    var names []string
+    var metricsFirewall *melodysecurity.CompiledFirewall
+    for _, firewall := range compiled.Firewalls() {
+        names = append(names, firewall.Name())
+        if "metrics" == firewall.Name() {
+            metricsFirewall = firewall
+        }
+    }
+
+    if nil == metricsFirewall || "main" != names[len(names)-1] {
+        t.Fatalf("expected a metrics firewall registered ahead of main, got %v", names)
+    }
+
+    for credential, authenticated := range map[string]bool{"Bearer scrape-secret": true, "Bearer wrong": false, "scrape-secret": false} {
+        httpRequest := httptest.NewRequest(nethttp.MethodGet, "/metrics", nil)
+        httpRequest.Header.Set("Authorization", credential)
+        request := melodyhttp.NewRequest(httpRequest, nil, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("metrics-test", time.Now())})
+
+        containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+        melodycontainer.MustRegister[melodyeventcontract.EventDispatcher](
+            containerInstance,
+            melodyevent.ServiceEventDispatcher,
+            func(resolver melodycontainercontract.Resolver) (melodyeventcontract.EventDispatcher, error) {
+                return melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()}), nil
+            },
+            melodycontainer.RegisterOptions{},
+        )
+        melodycontainer.MustRegister[melodyloggingcontract.Logger](
+            containerInstance,
+            melodylogging.ServiceLogger,
+            func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+                return melodylogging.NewNopLogger(), nil
+            },
+            melodycontainer.RegisterOptions{},
+        )
+        runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
+
+        token, _ := metricsFirewall.TokenSource().Resolve(runtimeInstance, request)
+        if authenticated != (nil != token && true == token.IsAuthenticated()) {
+            t.Fatalf("expected %q authenticated=%v, got %v", credential, authenticated, token)
+        }
+    }
+}
+
+func TestRegisterSecurity_TheDeviceFirewallHonoursATokenOnlyWhileItsAccountExists(t *testing.T) {
+    for _, accountExists := range []bool{true, false} {
+        moduleInstance := moduleWithEnvironment(t, map[string]string{})
+        moduleInstance.buildInternalAuth()
+        moduleInstance.buildTokenAuth()
+        moduleInstance.buildImpersonation()
+
+        moduleInstance.opaqueTokenStore.Put(configTestRuntime(), "device-token", melodysecuritycontract.Claims{UserIdentifier: "user-2", DeviceIdentifier: "phone", Roles: []string{entity.RoleAdmin}}, bound.UnlimitedDuration())
+
+        builder := melodysecurityconfig.NewBuilder()
+        moduleInstance.RegisterSecurity(builder)
+
+        var deviceFirewall *melodysecurity.CompiledFirewall
+        for _, firewall := range builder.BuildAndCompile().Firewalls() {
+            if "deviceToken" == firewall.Name() {
+                deviceFirewall = firewall
+            }
+        }
+
+        if nil == deviceFirewall {
+            t.Fatal("expected the device firewall to be compiled")
+        }
+
+        storage := persistence.NewCatalogStorage(nil)
+        if true == accountExists {
+            storage = storage.WithAccountSeed()
+        }
+
+        userRepository, repositoryErr := repository.NewUserRepository(storage, &persistence.CatalogSchema{})
+        if nil != repositoryErr {
+            t.Fatalf("new user repository: %v", repositoryErr)
+        }
+
+        containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+        opaqueTokenStore := moduleInstance.opaqueTokenStore
+        melodycontainer.MustRegister[melodysecuritycontract.RevocableTokenStore](containerInstance, melodyrueidis.ServiceTokenStore, func(resolver melodycontainercontract.Resolver) (melodysecuritycontract.RevocableTokenStore, error) {
+            return opaqueTokenStore, nil
+        }, melodycontainer.RegisterOptions{})
+        melodycontainer.MustRegister[repository.UserRepository](containerInstance, repository.ServiceUserRepository, func(resolver melodycontainercontract.Resolver) (repository.UserRepository, error) {
+            return userRepository, nil
+        }, melodycontainer.RegisterOptions{})
+        melodycontainer.MustRegister[melodyeventcontract.EventDispatcher](containerInstance, melodyevent.ServiceEventDispatcher, func(resolver melodycontainercontract.Resolver) (melodyeventcontract.EventDispatcher, error) {
+            return melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()}), nil
+        }, melodycontainer.RegisterOptions{})
+        melodycontainer.MustRegister[melodyloggingcontract.Logger](containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return melodylogging.NewNopLogger(), nil
+        }, melodycontainer.RegisterOptions{})
+        runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
+
+        httpRequest := httptest.NewRequest(nethttp.MethodGet, route.DeviceIdentityPattern, nil)
+        httpRequest.Header.Set("Authorization", "Bearer device-token")
+        request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("device-test", time.Now())})
+
+        token, _ := deviceFirewall.TokenSource().Resolve(runtimeInstance, request)
+        authenticated := nil != token && true == token.IsAuthenticated()
+
+        if false == accountExists {
+            if true == authenticated {
+                t.Fatalf("expected the token of an absent account resolved as nobody, got %v", token.Roles())
+            }
+
+            continue
+        }
+
+        if false == authenticated || 1 != len(token.Roles()) || entity.RoleEditor != token.Roles()[0] {
+            t.Fatalf("expected the token authenticated with the account's current roles [%s], got %v", entity.RoleEditor, token)
+        }
+    }
+}
+
+type failingInternalNonceGuard struct{}
+
+func (instance *failingInternalNonceGuard) Remember(_ melodycontainercontract.Runtime, _ string, _ bound.Duration) (bool, error) {
+    return false, errors.New("redis is down")
+}
+
+type securityListenerKernel struct {
+    melodykernelcontract.Kernel
+    dispatcher melodyeventcontract.EventDispatcher
+}
+
+func (instance *securityListenerKernel) EventDispatcher() melodyeventcontract.EventDispatcher {
+    return instance.dispatcher
+}
+
+func TestRegisterSecurity_TheInternalFirewallAnswersAGuardOutageWith503AndRetryAfter(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.buildInternalAuth()
+    moduleInstance.buildTokenAuth()
+    moduleInstance.buildImpersonation()
+
+    builder := melodysecurityconfig.NewBuilder()
+    moduleInstance.RegisterSecurity(builder)
+
+    var internalFirewall *melodysecurity.CompiledFirewall
+    for _, firewall := range builder.BuildAndCompile().Firewalls() {
+        if "internal" == firewall.Name() {
+            internalFirewall = firewall
+        }
+    }
+    if nil == internalFirewall {
+        t.Fatal("expected the internal firewall compiled")
+    }
+
+    outageFirewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
+        Name:    internalFirewall.Name(),
+        Matcher: internalFirewall.Matcher(),
+        TokenSource: melodysecurity.NewHmacTokenSource(moduleInstance.hmacSecrets, moduleInstance.hmacApplications, melodysecurity.HmacTokenSourceConfig{
+            MaxFutureExpiry: bound.Of(internalEnvelopeMaxFutureExpiry),
+            NonceGuard:      &failingInternalNonceGuard{},
+        }),
+        AccessControl:         internalFirewall.AccessControl(),
+        AccessDecisionManager: internalFirewall.AccessDecisionManager(),
+        EntryPoint:            internalFirewall.EntryPoint(),
+        AccessDeniedHandler:   internalFirewall.AccessDeniedHandler(),
+        UnavailableRetryAfter: bound.Of(internalFirewall.UnavailableRetryAfter()),
+    })
+
+    signer := moduleInstance.internalAuthSigner(hmacTestRuntime(), bound.Duration{})
+    headerValue, signErr := signer.Sign(configTestRuntime(), nethttp.MethodGet, route.InternalWhoamiPattern, nil, melodysecurity.SignOptions{})
+    if nil != signErr {
+        t.Fatalf("sign: %v", signErr)
+    }
+
+    for name, testCase := range map[string]struct {
+        headers    map[string]string
+        status     int
+        retryAfter string
+    }{
+        "a signed envelope": {headers: map[string]string{signer.HeaderName(): headerValue}, status: nethttp.StatusServiceUnavailable, retryAfter: "5"},
+        "no envelope":       {headers: map[string]string{}, status: nethttp.StatusUnauthorized, retryAfter: ""},
+    } {
+        t.Run(name, func(t *testing.T) {
+            containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+            melodycontainer.MustRegister[melodyloggingcontract.Logger](containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+                return melodylogging.NewNopLogger(), nil
+            }, melodycontainer.RegisterOptions{})
+            runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
+
+            dispatcher := melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()})
+            kernel := &securityListenerKernel{dispatcher: dispatcher}
+            registry := melodysecurity.NewFirewallRegistry(melodysecurity.NewCompiledConfiguration([]*melodysecurity.CompiledFirewall{outageFirewall}, nil))
+            melodysecurity.RegisterKernelSecurityResolutionListener(kernel, registry)
+            melodysecurity.RegisterKernelAccessControlListener(kernel, registry)
+
+            httpRequest := httptest.NewRequest(nethttp.MethodGet, route.InternalWhoamiPattern, nil)
+            httpRequest.Header.Set("Accept", "application/json")
+            for headerName, headerValue := range testCase.headers {
+                httpRequest.Header.Set(headerName, headerValue)
+            }
+            request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("internal-outage", time.Now())})
+
+            requestEvent := melodyhttp.NewKernelRequestEvent(runtimeInstance, request)
+            if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, melodykernelcontract.EventKernelRequest, requestEvent); nil != dispatchErr {
+                t.Fatalf("dispatch: %v", dispatchErr)
+            }
+
+            response := requestEvent.Response()
+            if nil != requestEvent.Refusal() {
+                response = melodyhttp.RenderExceptionResponse(runtimeInstance, request, requestEvent.Refusal(), melodyhttp.ExceptionRenderOptions{})
+            }
+
+            if nil == response || testCase.status != response.StatusCode() || testCase.retryAfter != response.Headers().Get("Retry-After") {
+                t.Fatalf("expected %d with Retry-After %q, got %v", testCase.status, testCase.retryAfter, response)
+            }
+        })
+    }
+}
+
+func TestRegisterSecurity_DeclaresWhichFirewallsAreStateless(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.metricsToken = "scrape-secret"
+    moduleInstance.buildInternalAuth()
+    moduleInstance.buildTokenAuth()
+    moduleInstance.buildImpersonation()
+
+    builder := melodysecurityconfig.NewBuilder()
+    moduleInstance.RegisterSecurity(builder)
+
+    expected := map[string]bool{
+        "internal":    true,
+        "token":       true,
+        "deviceToken": true,
+        "metrics":     true,
+        "main":        false,
+    }
+
+    seen := map[string]bool{}
+    for _, firewall := range builder.BuildAndCompile().Firewalls() {
+        expectedStateless, known := expected[firewall.Name()]
+        if false == known {
+            t.Fatalf("firewall %q has no expected statelessness; name it here", firewall.Name())
+        }
+
+        if expectedStateless != firewall.TokenSource().Stateless() || expectedStateless != firewall.CsrfExempt() {
+            t.Fatalf("expected firewall %q to answer Stateless() and CsrfExempt() %v", firewall.Name(), expectedStateless)
+        }
+
+        seen[firewall.Name()] = true
+    }
+
+    if len(expected) != len(seen) {
+        t.Fatalf("expected the firewalls %v, saw %v", expected, seen)
+    }
+}
+
+func TestRegisterSecurity_TheMainFirewallAnswersAnAccountLookupOutageWith503AndRetryAfter(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.buildInternalAuth()
+    moduleInstance.buildTokenAuth()
+    moduleInstance.buildImpersonation()
+
+    builder := melodysecurityconfig.NewBuilder()
+    moduleInstance.RegisterSecurity(builder)
+
+    var mainFirewall *melodysecurity.CompiledFirewall
+    for _, firewall := range builder.BuildAndCompile().Firewalls() {
+        if "main" == firewall.Name() {
+            mainFirewall = firewall
+        }
+    }
+    if nil == mainFirewall {
+        t.Fatal("expected the main firewall compiled")
+    }
+
+    failingLookup := func(runtimeInstance melodycontainercontract.Runtime, userId string) (*entity.User, bool, error) {
+        return nil, false, errors.New("the account repository is unavailable")
+    }
+
+    outageFirewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
+        Name:                  mainFirewall.Name(),
+        Matcher:               mainFirewall.Matcher(),
+        TokenSource:           melodysecurity.NewResolverTokenSource(security.SessionTokenResolver(failingLookup), melodysecurity.ResolverTokenSourceConfig{}),
+        AccessControl:         mainFirewall.AccessControl(),
+        AccessDecisionManager: mainFirewall.AccessDecisionManager(),
+        EntryPoint:            mainFirewall.EntryPoint(),
+        AccessDeniedHandler:   mainFirewall.AccessDeniedHandler(),
+        UnavailableRetryAfter: bound.Of(mainFirewall.UnavailableRetryAfter()),
+    })
+
+    for name, testCase := range map[string]struct {
+        path    string
+        refused bool
+    }{
+        "a protected page": {path: "/products/", refused: true},
+        "a public page":    {path: "/health", refused: false},
+    } {
+        t.Run(name, func(t *testing.T) {
+            containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+            melodycontainer.MustRegister[melodyloggingcontract.Logger](containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+                return melodylogging.NewNopLogger(), nil
+            }, melodycontainer.RegisterOptions{})
+            runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
+
+            dispatcher := melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()})
+            kernel := &securityListenerKernel{dispatcher: dispatcher}
+            registry := melodysecurity.NewFirewallRegistry(melodysecurity.NewCompiledConfiguration([]*melodysecurity.CompiledFirewall{outageFirewall}, nil))
+            melodysecurity.RegisterKernelSecurityResolutionListener(kernel, registry)
+            melodysecurity.RegisterKernelAccessControlListener(kernel, registry)
+
+            manager := melodysession.NewManager(melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{}), melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
+            sessionInstance, sessionErr := manager.NewSession(runtimeInstance)
+            if nil != sessionErr {
+                t.Fatalf("session: %v", sessionErr)
+            }
+            sessionInstance.Set(security.SessionKeySecurityUserId, "user-1")
+            sessionInstance.Set(security.SessionKeySecurityRoles, []string{entity.RoleUser})
+            sessionInstance.Set(security.SessionKeySecurityCredentialVersion, security.SessionCredentialVersion("original-hash"))
+
+            httpRequest := httptest.NewRequest(nethttp.MethodGet, testCase.path, nil)
+            request := melodyhttp.NewRequest(httpRequest, runtimeInstance, melodyhttp.RequestConfig{RequestContext: melodyhttp.NewRequestContext("main-outage", time.Now())})
+            _ = melodyhttp.SetRequestSession(request, sessionInstance)
+
+            requestEvent := melodyhttp.NewKernelRequestEvent(runtimeInstance, request)
+            if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, melodykernelcontract.EventKernelRequest, requestEvent); nil != dispatchErr {
+                t.Fatalf("dispatch: %v", dispatchErr)
+            }
+
+            if false == testCase.refused {
+                if nil != requestEvent.Refusal() || nil != requestEvent.Response() {
+                    t.Fatalf("expected the public page served, got refusal %v and response %v", requestEvent.Refusal(), requestEvent.Response())
+                }
+
+                return
+            }
+
+            response := requestEvent.Response()
+            if nil != requestEvent.Refusal() {
+                response = melodyhttp.RenderExceptionResponse(runtimeInstance, request, requestEvent.Refusal(), melodyhttp.ExceptionRenderOptions{})
+            }
+
+            if nil == response || nethttp.StatusServiceUnavailable != response.StatusCode() || "" == response.Headers().Get("Retry-After") {
+                t.Fatalf("expected 503 with a Retry-After, got %v", response)
+            }
+        })
+    }
+}
+
+func TestRegisterSecurity_MainFirewall_CsrfOriginModeWithTheTokenRoute(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.metricsToken = "scrape-secret"
+    moduleInstance.buildInternalAuth()
+    moduleInstance.buildTokenAuth()
+    moduleInstance.buildImpersonation()
+
+    builder := melodysecurityconfig.NewBuilder()
+    moduleInstance.RegisterSecurity(builder)
+
+    for _, firewall := range builder.BuildAndCompile().Firewalls() {
+        if "main" != firewall.Name() {
+            continue
+        }
+
+        if melodysecurity.CsrfModeOrigin != firewall.Csrf().Mode || true == firewall.CsrfExempt() {
+            t.Fatalf("expected the main firewall checked in the origin mode, got %+v", firewall.Csrf())
+        }
+
+        for _, door := range firewall.Doors() {
+            if route.CsrfTokenName == door.Name && route.CsrfTokenPattern == door.Path {
+                return
+            }
+        }
+
+        t.Fatalf("expected the token route among the main firewall's doors, got %+v", firewall.Doors())
+    }
+
+    t.Fatal("expected the main firewall declared")
+}

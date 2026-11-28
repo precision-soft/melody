@@ -1,0 +1,7 @@
+# The failures of .dev/validate/defaults.sh the tree still carries, one line each.
+#
+#   kind ~ key ~ reason
+#
+# Read by .dev/validate/defaults.sh. A failure with no line fails the band, and a line whose failure no longer
+# occurs fails it just as loudly: the row it holds was repaired, so the line goes. No wildcards. The file empties
+# as the open rows are repaired; a line left at the freeze is a decision the owner took, with its reason.

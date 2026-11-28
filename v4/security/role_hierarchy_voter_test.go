@@ -1,0 +1,60 @@
+package security
+
+import (
+    "testing"
+
+    "github.com/precision-soft/melody/v4/internal/testhelper"
+    securitycontract "github.com/precision-soft/melody/v4/security/contract"
+)
+
+func TestRoleHierarchyVoter_PanicsOnANilRoleHierarchy(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        _ = NewRoleHierarchyVoter(nil, NewRoleVoter())
+    }, "the role hierarchy is nil for role hierarchy voter")
+}
+
+func TestRoleHierarchyVoter_PanicsOnANilDelegate(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        _ = NewRoleHierarchyVoter(NewRoleHierarchy(nil), nil)
+    }, "the delegate is nil for role hierarchy voter")
+}
+
+func TestRoleHierarchyVoter_ExpandsRolesBeforeVoting(t *testing.T) {
+    hierarchy := NewRoleHierarchy(
+        map[string][]string{
+            "ROLE_ADMIN": {"ROLE_USER"},
+        },
+    )
+
+    delegate := NewRoleVoter()
+    voter := NewRoleHierarchyVoter(hierarchy, delegate)
+
+    token := NewAuthenticatedToken("u1", []string{"ROLE_ADMIN"}, nil)
+
+    result, _ := voter.Vote(nil, token, "ROLE_USER", nil)
+    if securitycontract.VoteGranted != result {
+        t.Fatalf("expected granted")
+    }
+}
+
+func TestRoleHierarchyVoter_DeniesWhenTokenNotAuthenticated(t *testing.T) {
+    hierarchy := NewRoleHierarchy(map[string][]string{"ROLE_ADMIN": {"ROLE_USER"}})
+    voter := NewRoleHierarchyVoter(hierarchy, NewRoleVoter())
+
+    result, _ := voter.Vote(nil, &unauthenticatedRoledToken{roles: []string{"ROLE_ADMIN"}}, "ROLE_USER", nil)
+
+    if securitycontract.VoteDenied != result {
+        t.Fatalf("expected an unauthenticated token carrying the role to be denied, got %v", result)
+    }
+}
+
+func TestRoleHierarchyVoter_DeniesATypedNilToken(t *testing.T) {
+    voter := NewRoleHierarchyVoter(NewRoleHierarchy(map[string][]string{"ROLE_ADMIN": {"ROLE_USER"}}), NewRoleVoter())
+
+    var unassignedToken *AuthenticatedToken
+
+    result, _ := voter.Vote(nil, unassignedToken, "ROLE_USER", nil)
+    if securitycontract.VoteDenied != result {
+        t.Fatalf("expected a typed nil token to be denied, got %v", result)
+    }
+}

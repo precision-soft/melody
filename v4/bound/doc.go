@@ -1,0 +1,2 @@
+/* Package bound provides the three-state limit melody uses for every limit and timeout: absent, a value, or unlimited. A field left out of a configuration struct is absent and takes the framework's bounded default, Of sets a value, and UnlimitedDuration or UnlimitedCount lifts the limit on a field that admits it. Resolve decides a field against its Rule and refuses, naming the field, a value below the minimum or an unlimited the field does not admit. */
+package bound

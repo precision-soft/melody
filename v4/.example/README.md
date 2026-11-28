@@ -1,0 +1,755 @@
+# Melody Example Application (`.example`)
+
+The `.example` directory contains a small **product catalog** application built as a **feature showcase** for the Melody framework.
+
+It is **not** a full production product. Its purpose is to demonstrate how Melody is intended to be used in userland, with realistic wiring and clear architectural boundaries: routing, HTTP handlers, dependency injection, structured logging, sessions and authentication, security access control, caching, events, and CLI commands.
+
+This README is the whole of the application's documentation. It keeps no changelog, because it has no history to keep: an example is not a project with a past, it has one state — the present one — and this document describes that state. A database left in an older shape is brought to it by `example:db:reset` rather than by a record of how it got there.
+
+---
+
+## What it represents
+
+Conceptually, the example models a minimal admin-style catalog application:
+
+- Product listing and detail pages
+- Login / logout flow based on sessions
+- A simple role system (`ROLE_USER`, `ROLE_EDITOR`, `ROLE_ADMIN`) ordered by a role hierarchy: the admin is above the editor, the editor above the user
+- HTML pages backed by JSON endpoints (consumed via jQuery)
+- CLI commands that demonstrate Melody’s CLI conventions and container/runtime usage
+- Prices quoted in one currency and readable in another, against exchange rates fetched from an outside provider
+
+---
+
+Sign-in and every signed-in request read the account from the repository, past the cached user records: a role granted or taken away applies on the next request, and a deleted account or a changed password ends the sessions opened before it, since a session carries a version of the password hash it was opened under. When the repository cannot be read, the sign-in's login handler answers the failure marked as an outage, which the sign-in door answers `503` with `Retry-After`, and so does the token resolver, which the firewall reads as the unavailable token, the session kept for the next one: a protected page answers `503` with `Retry-After`, a public one is served as to a signed-out visitor. A session store that cannot be read is answered the same way, and the sign-in and sign-out doors refuse it `503` before any credential is checked. With `HttpKernel.SessionPolicy.EmptyOnOutage` on in the application's Go a page that reads the session is served an empty one instead, saved nowhere and with no cookie written; the token resolver reads it as the outage, so a protected page still answers `503`, and so do the two doors. The example leaves the field off and the key `MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE` empty; the key only turns the field off. The admin update and delete doors read the account from the repository as well, under the row's lock: an update writes only the fields its body names, so a password or a role list it leaves out keeps what the directory holds at that instant, and a grant landing beside it is never written back over; and the refusal of a peer administrator is decided on the account the write changes, never on a cached copy.
+
+The `main` firewall serves the sign-in and the sign-out itself, on `kernel.request`, ahead of access control: the page is `GET /login/`, it posts json to the door `POST /login/check/`, and the sign-out is `POST /logout/`. A route on either door's path fails the boot, and a `GET` there answers 404. The door's `Authenticator` is [`security/login_door_authenticator.go`](security/login_door_authenticator.go), its `Handler` [`security/session_login_handler.go`](security/session_login_handler.go), and it spends the same per-address budget as the catalogue's writes.
+
+An account sets up its second factor on the page `GET /twofactor/` (the catalogue links it as "Second factor"): `POST /twofactor/enroll` answers a new secret, its otpauth URI, which the page draws as a QR code, and ten recovery codes, shown once, and keeps them as a PENDING enrollment that is no factor yet; `POST /twofactor/enroll/confirm` with a code of that secret on `X-2FA-Code` makes it the account's factor, replacing the active one if any, `401` on a wrong or replayed code with the pending enrollment kept, `409` when nothing is pending within the set-up's fifteen minutes, when `X-2FA-Pending`, the `pendingId` the enrollment answered, names a set-up a later enroll replaced, or when a factor became active after a set-up started without presenting one, since only a set-up that presented the active factor replaces it; it spends the same budget as the sign-in, and its code is spent for the sign-in too. `GET /twofactor/status` answers `enrolled` and `pending`. An account with a confirmed factor signs in with it: the login door authenticates through the framework's `AuthenticatorManager` over a `TotpSecondFactorAuthenticator`, whose first factor is the password. The password alone is answered `401` with `{"factor":"totp"}` in the payload and raises no login failure, since nothing was refused; the form then reveals a code field and posts the code on `X-2FA-Code`, or a single-use recovery code on `X-2FA-Recovery-Code`. A wrong, spent or replayed code is refused as a wrong password is, `invalid credentials` and one `security.login.failure`. An accepted code is burned in one memory the login door and `POST /twofactor/verify` share, in redis when the example has one, so a code is spent once across both. The authenticator locks an account after five refused factors in five minutes, answered `429` with the window's remainder as `Retry-After`; in front of it the example's own budget lets an account whose password was accepted present five codes in fifteen minutes before even a right one is refused `429`, a budget `POST /twofactor/verify` and a `POST /twofactor/enroll` that replaces an enrollment spend as well, so a signed-in session cannot walk the codes there either; a caller without the password spends nothing of it, and an accepted code gives it back. A sign-in that cannot reach the account store, the second-factor store or the budget is answered `503 service unavailable` with `Retry-After: 5` and raises no login failure: an outage is no wrong password. An account with no enrollment signs in on its password, as before.
+
+## Seeded credentials
+
+In development (`MELODY_ENV=dev`, what `.env` ships) an empty user directory starts from three accounts:
+
+- `user` / `user` — `ROLE_USER`
+- `editor` / `editor` — `ROLE_EDITOR`
+- `admin` / `admin` — `ROLE_ADMIN`
+
+Each account holds the one role that names its position; the role hierarchy of [`config/security.go`](./config/security.go) is what lets the admin edit and the editor read, so a role added later is one line of the hierarchy rather than an edit of every account. Their passwords are in this README, so they exist in development only: in any other environment the directory starts empty, and its first account is created from the console (see below).
+
+The nomenclature is not held to development: an empty catalogue starts from the example's categories, currencies and products in every environment, since none of it opens a door, and the currencies' rates carry the seed's instant until the first `example:currency:refresh-rates`. `APP_CATALOGUE_SEED=false` leaves an empty catalogue empty in any environment, for a deployment that brings its own; empty or `true` seeds, and any other value refuses the boot. A catalogue that holds rows is never seeded over, and `example:db:reset` reads the same switch, so a reset of an unseeded catalogue leaves it empty. The switch does not touch the accounts.
+
+## Before production
+
+Every credential this example needs is configuration, and `.env` commits a development value for each so a checkout boots as it is. Those values are public — anyone who read this repository holds them — so outside development (`MELODY_ENV` other than `dev`) the boot refuses a blank value or the committed one, naming the key and never the value, `APP_METRICS_TOKEN` excepted for a blank value:
+
+- `APP_JWT_SECRET` — the HS256 secret the `/secure` api verifies bearer tokens with (and `auth:token` signs them with). Signed with the committed value, a token carrying `scope: {roles: ["ROLE_ADMIN"]}` would be accepted anywhere that value is;
+- `APP_INTERNAL_AUTH_SECRET` — the shared secret of the HMAC envelopes the `/internal` firewall authenticates as `ROLE_SERVICE`, under the key id `APP_INTERNAL_AUTH_KEY_ID` for the caller `APP_INTERNAL_AUTH_APP` (those two name the caller and grant nothing; blank takes `wms-key-1` and `wms-service`);
+- `APP_ENCRYPT_KEYS` — the keys the two-factor columns are encrypted under; without a list the development key is the one key in development only, and outside it a list holding either committed key is refused, naming the entry's position;
+- `APP_METRICS_TOKEN` — the bearer token the scraper presents on `/metrics`. Its rule is its own: an empty value leaves `/metrics` public in every environment, outside development with the boot warning `example.metrics.public` (`config.MetricsPublicBootWarningName`), which a process may list in `MELODY_BOOT_WARNINGS_IGNORED`; the committed value is refused outside development, and a value is read trimmed.
+
+Leave the `main` firewall's forgery check in its default mode: a page served from another origin of the deployment, a sibling subdomain or a proxy that rewrites `Host`, is refused `403` until its origin is listed in `FirewallConfig.Csrf.TrustedOrigins` of [`config/security.go`](./config/security.go); never turn the check off to make such a page work.
+
+The seed accounts follow the same rule. Outside development the user directory starts empty, and an operator creates the first administrator from the console, the password read from standard input and never from an argument, where the shell history and the process list would keep it:
+
+```bash
+printf '%s\n' "$ADMIN_PASSWORD" | ./app example:user:create --role ROLE_ADMIN ada
+```
+
+`example:user:create` writes through the user service, so the account has its insert entry in the audit trail and the created event runs its listeners, as the admin create door's account does. It needs the catalogue database (`MYSQL_*`) and refuses without one, naming it: without a database the directory is each process's own memory, and an account written from the console would end with the command instead of reaching the server.
+
+This release amends the catalogue's one schema migration (the archive set carries its own) — the currency code held unique, a product's currency and category held by foreign keys, the folded username in a column of its own, the identifier sequence and the session index — so a volume built by an earlier checkout is refused by its fingerprint, by name, until `example:db:reset --force` rebuilds it.
+
+---
+
+## Structure overview
+
+The example lives entirely under the [`./.example/`](./) directory and follows a **flat layout**: each concern lives in its own top-level package, with no `domain/` / `infra/` umbrella layers. All paths below are **relative to `.example/`**.
+
+```
+.example/
+├── assets/           # frontend sources (TypeScript), built into public/, and the route manifest the usage sample reads (generated, git-ignored)
+├── cache/            # the gob cache serializer, decoding into the entity a read names
+├── cli/              # the application's own CLI commands (app:info, product:list, catalog:report:refresh, messagebus:dispatch, auth:token, internal:sign, totp:code, mailer:send, example:currency:refresh-rates, example:grant:role, example:user:create, example:twofactor:reset, example:exclusive:tick, example:db:reset, example:cache:clear)
+├── config/           # application wiring; one file per module hook
+├── entity/           # domain entities (Category, Currency, Product, User)
+├── event/            # domain event types
+├── generated/        # generated service wiring (git-ignored, written by go generate ./generated)
+├── generated_conf/   # generated deployment files (the crontab)
+├── handler/          # HTTP handlers (pages + JSON APIs), with category/, currency/, product/, user/ subpackages
+├── journal/          # the logger a handler or service writes to, the request's when there is one
+├── message/          # message-bus messages (notifications, the outbox notice, the welcome email)
+├── messagehandler/   # message-bus handlers
+├── migration/        # the schema migrations
+├── page/             # HTML page templates
+├── persistence/      # the catalogue and archive storages the repositories write through
+├── presenter/        # HTTP error / response presenters
+├── reporting/        # the catalogue reading and its export
+├── repository/       # repository interfaces, their in-memory implementations and the bun-backed ones the shipped .env selects
+├── route/            # named route constants and patterns
+├── security/         # session auth wiring (the firewall doors' authenticator and handlers, entry point, token resolver, password hasher)
+├── service/          # application services (CategoryService, CurrencyService, ProductService, UserService)
+├── subscriber/       # event subscribers
+├── twofactor/        # the TOTP enrollment store, encrypted at rest
+├── url/              # route registry adapters: the route manifest every page is given
+├── validation/       # the example's own constraints (the currency code)
+├── wiring/           # the bind set melody:wiring:generate scans with, and the generator that writes generated/ without the application
+├── public/           # static assets (CSS / JS)
+├── var/              # runtime cache and logs (the journal created 0640 under 0750 directories, MELODY_LOG_FILE_MODE / MELODY_LOG_DIRECTORY_MODE; the cache 0750, MELODY_CACHE_DIRECTORY_MODE)
+├── embedded_*.go     # build-tag–controlled embedding for env and static assets
+├── main.go           # application entry point
+├── go.mod / go.sum   # standalone module manifest
+├── .env              # example env defaults
+└── .gitignore
+```
+
+### [`config/`](./config/) — application wiring
+
+The [`config/`](./config/) package keeps [`main.go`](./main.go) small by grouping all setup and integration logic in a single place, with each module hook in its own file:
+
+- [`configure.go`](./config/configure.go) — entry point invoked by `main.go`: registers the example module and the integration module facades (observability, otlp, encrypt, outbox, migrate, cron, websocket, aws.s3, rueidis); otlp, outbox, aws.s3 and rueidis are gated on the configuration that enables them, the others are registered unconditionally
+- [`module.go`](./config/module.go) — `Module` struct + `Name()` + `Description()` + the `Module` interface assertion; each hook's assertion sits in the file that implements it (`cli.go`, `event.go`, `http.go`, `middleware.go`, `security.go`, `service.go`)
+- [`security.go`](./config/security.go) — `RegisterSecurity`: access-control rules, role hierarchy, decision manager, firewall
+- [`http.go`](./config/http.go) — `RegisterHttpRoutes`: named-route registration for pages and JSON APIs
+- [`cli.go`](./config/cli.go) — `RegisterCliCommands`: the application's own CLI commands, the framework's wiring generate command and the exclusive-lock wrapping of `example:exclusive:tick`; `melody:cron:generate` comes from the cron module registered in [`configure.go`](./config/configure.go)
+- [`event.go`](./config/event.go) — `RegisterEventSubscribers`: wires the example's domain event subscribers
+- [`environment_key.go`](./config/environment_key.go) — `EnvironmentKeys`: declares every `.env` key the example owns, each feeding one `app.*` parameter with its default, rule and secret mark, and `ParameterOverrides`, which points `kernel.http_address` at `APP_HTTP_ADDRESS`; `main.go` hands both to `ApplicationConfig`, and the cron module declares its `MELODY_CRON_*` keys itself
+- [`service.go`](./config/service.go) — `RegisterServices`: container wiring for repositories, services, and the cache serializer
+- [`middleware.go`](./config/middleware.go) — example-specific HTTP middleware (`NewTimingMiddleware`)
+
+### Cron integration
+
+The example demonstrates Melody's [`integrations/cron`](../../integrations/cron/v4/) package. Commands stay plain Melody CLI commands — there is no `cron.Metadata` interface to implement. Schedules are declared separately in [`config/cron.go`](./config/cron.go) through a `cron.Configuration` registry:
+
+```go
+cronConfiguration := cron.NewConfiguration().
+    InTimezone("Europe/Bucharest").
+    Schedule(cron.CommandName(cli.NewCatalogReportRefreshCommand), &cron.EntryConfig{
+        Schedule: &cron.Schedule{Minute: "0", Hour: "*"},
+        User:     productUser,
+    }).
+    Schedule(cron.CommandName(cli.NewProductListCommand), &cron.EntryConfig{
+        Schedule:  &cron.Schedule{Minute: "0", Hour: "*/6"},
+        User:      productUser,
+        Arguments: []string{"--limit=2"},
+    }).
+    Schedule(cron.CommandName(cli.NewCurrencyRefreshRatesCommand), &cron.EntryConfig{
+        Schedule: &cron.Schedule{Minute: "*/30", Hour: "*"},
+        User:     productUser,
+        Timeout:  5 * time.Minute,
+    }).
+    Schedule(cron.CommandName(cli.NewApplicationInformationCommand), &cron.EntryConfig{
+        Schedule:  &cron.Schedule{Minute: "*", Hour: "*"},
+        TickDedup: cron.EntryTickDedupConfig{Disabled: true},
+    })
+```
+
+The schedules are evaluated in `Europe/Bucharest`, the catalogue's business day, so the hourly reading fires on the Bucharest hour whatever zone the process runs in; the in-process runner stamps the minute it evaluates in that zone, and the generated manifests, run by a scheduler that owns its zone, carry nothing for it. The rates refresh is bounded at five minutes under the in-process runner, so a provider that hangs cannot hold the run into the next half hour. `app:info` runs every minute as the worker's heartbeat: every evaluated minute dispatches at least one run, whose output record the journal keeps under the run's id. That heartbeat belongs to the in-process runner. The same `Configuration` also feeds the generated crontab, where the entry appends about 600 bytes a run, some 0.86 MB a day, to `<logs-directory>/app-info.log`, and nothing rotates that file. A deployment of the manifest has its own heartbeat, the `heartbeat.crontab` touch described below, so drop the `app:info` line from
+the installed crontab or put its log under logrotate. `LogDisabled` is no remedy: the manifest sets no `MAILTO`, so cron would mail the output every minute instead.
+
+On several workers the in-process runner deduplicates ticks through the registered `service.lock.locker`: each tick of an entry runs on one worker, the others listing it under `skipped` in that minute's document. With Redis configured that is the rueidis locker, shared by every worker; under the in-memory fallback the locker lives in one process, so there is nothing to deduplicate against and every process runs every tick. Without Redis, `melody:cron:run` therefore writes the warning `cron.tickDedup.lockerNotSharedLease` once per run, every invocation under `--once`, naming the mysql, pgsql or in-memory locker it found: the line is expected there and says the dedup holds inside one process, or pins one connection per held tick; the example silences nothing, and `MELODY_BOOT_WARNINGS_IGNORED` may list the code where that is the choice. `app:info` opts out with `EntryConfig.TickDedup.Disabled`, since it is a per-worker heartbeat: deduplicated, one worker would beat for all and a stalled one would go unseen.
+
+`cron.CommandName` is a generic helper that instantiates a constructor and returns the command name, so the schedule references commands by constructor instead of hardcoded strings.
+
+Cron defaults (user, logs directory, destination file, template, heartbeat, the k8s image, namespace and restart policy) come from the `MELODY_CRON_*` keys the cron module declares, with the module's own defaults where [`.env`](./.env) sets none. The user is sourced from `MELODY_CRON_USER`, and the heartbeat is enabled via the `MELODY_CRON_HEARTBEAT_ENABLED` opt-in (which auto-derives `<logs-directory>/heartbeat.crontab` from `melody.cron.logs_directory`); a value the key's rule refuses fails the boot naming the key. [`config/cron.go`](./config/cron.go) reads `app.cron.product_user` (backed by `APP_CRON_PRODUCT_USER`) at registration time and applies it as the per-command user on the `catalog:report:refresh`, `product:list` and `example:currency:refresh-rates` schedules, demonstrating how the parameter cascade feeds custom values into `cron.Configuration` entries. The fourth entry, `app:info`, declares no user and falls back to `melody.cron.user`.
+
+### [`main.go`](./main.go) (why it stays small)
+
+`main.go` intentionally contains minimal logic.
+
+It only:
+
+- declares the application's version to every command document and to `--version` (`ApplicationConfig.Version`)
+- constructs the Melody application using:
+    - `embeddedEnvironmentFiles` (from `embedded_env_*`)
+    - `embeddedPublicFiles` (from `embedded_static_*`)
+- calls `config.Configure(ctx, app, applicationVersion)`
+- boots the application, which builds the services registered `BuiltAtBoot` under the boot runtime, each stating its mode: the catalogue notification hub, the internal auth signer and, with a database declared, the database registry, which judges its definitions and opens nothing, fail the boot on a refusal (`BootFailureFailsBoot`); the catalogue schema, with `AMQP_DSN` set the amqp connection and, with S3 configured, the storage with its bucket check warn (`BootFailureWarns`), so an http process prepares the catalogue and checks the bucket at boot when they answer and boots with the `application.service.builtAtBootFailed` warning when they do not, the first request after they are back building them, while a command builds them at the first use; the boot refuses a declared teardown dependency that names no service, since the teardown closes in waves
+- runs the application
+
+All wiring and integration logic lives outside `main.go`.
+
+---
+
+## Running locally
+
+The example is a standalone Go module (`v4/.example/go.mod`) that depends on Melody and its platform integrations (see [Platform integrations](#platform-integrations-optional-env-gated) below). Its service wiring, `generated/wiring_gen.go`, is **generated, not committed**, and the application does not compile without it: the dev container writes it at startup through [`.dev/generate.sh`](../../.dev/generate.sh), and a bare host run writes it first with `go generate ./generated`, which runs the generator under [`wiring/generate`](./wiring/generate/main.go) — the application's own `melody:wiring:generate` renders the same file, but it is compiled into the application that imports it. From the repository root:
+
+```bash
+cd v4/.example
+go generate ./generated
+go run .
+```
+
+For a fully self-contained binary that embeds the committed `.env` (never `.env.local`) and the `public/` assets into the executable:
+
+```bash
+cd v4/.example
+go run -tags "melody_env_embedded melody_static_embedded" .
+```
+
+Tags can be combined independently — use only `melody_env_embedded` to embed env files, only `melody_static_embedded` to embed static assets, or both.
+
+Once started, open the application in your browser:
+
+- http://localhost:8080
+
+The application also answers `GET /health` without a session, which is the route a monitoring system or a container orchestrator probes. Its payload carries `status`, `time` and `version`, the version the build stamped through `-ldflags "-X main.applicationVersion=<version>"` (`dev` when it stamped none), so a rollout reads which build answers. It is public on purpose, so a probe that had to authenticate is not answered with a `401` (or, for a client whose `Accept` prefers HTML, a redirect to the login page) instead of the readiness of the process. The other public rules of [`config/security.go`](./config/security.go) are the login and logout doors, the frontend bundle (`/`, `/index.html`, `/assets`, `/favicon`, `/routes`), the greeting under the locales it is served in (`/en/i18n`, `/ro/i18n`, `/ro-RO/i18n`), `/openapi.json` and the cipher round-trip probe, which reads nothing from the caller. A door that is one path is opened by an exact rule, which speaks for that spelling and
+nothing beneath or beside it: `/health` is public and `/healthz` is not. `/metrics` answers only the scraper presenting `Authorization: Bearer <APP_METRICS_TOKEN>`, which the development prometheus carries; an empty token leaves it public, outside development with a boot warning (see "Before production"). The `metrics`, `internal`, `token` and `deviceToken` firewalls declare their token sources stateless, since each reads a header the caller writes on every request; `main` reads the session and does not. Every other route carries a role — a door that writes through the example into a backend (the object storage, the outbox, the message bus) carries the write role the catalogue writes carry, and what no rule names falls under the `^/` catch-all, which requires a signed-in user.
+
+[`main_test.go`](./main_test.go) serves the application under a server of its own: it asks the handler of `Application.HttpHandler`, serves it through `httptest.NewServer`, reads `GET /health`, then calls `BeginHttpShutdown` before the server stops and `CloseWithContext` after it, the stop an application served by another server makes (see [Serving under another server](../.documentation/package/APPLICATION.md#serving-under-another-server)).
+
+The serving settings the [`.env`](./.env) carries:
+
+- a signed-in session is kept in `var/session/session.json` (`APP_SESSION_FILE`), so a browser stays signed in across the restart the development supervisor does on every saved change, and it expires a day after the last request that wrote to it, a sign-in or a change of what it holds, since a request that only reads it does not extend it (`MELODY_HTTP_SESSION_TTL=24h`). One account holds at most five live sessions: a session that ended elsewhere — expired, or cleared because the account changed — has its row dropped by the next sign-in before it counts, while a sign-in's row counts as live for its first minute whatever the storage answers, since the session is stored only once the response is written, so concurrent sign-ins cannot pass the cap; without a database the index is kept in memory and counts again from zero at each restart, while the sessions the file keeps stay valid; the sign-in past them ends the account's oldest, through the session index the schema holds, since the file
+  storage rewrites every live session on each save and the number it pays for would otherwise grow with every sign-in an address can make; a sign-out frees its place;
+- a request body past 64 KiB is answered 413 by the read that passes it (`MELODY_HTTP_MAX_REQUEST_BODY_BYTES`); the object storage upload carries its own 1 MiB cap on its route (`RouteProtectionConfig.MaxBodyBytes`), so raising it raises no other door;
+- the bundle's assets are cached for an hour and revalidated by ETag and Last-Modified (`MELODY_STATIC_CACHE_DISABLED=false`, the default hour of `MELODY_STATIC_CACHE_MAX_AGE`); a developer who wants every save fetched afresh sets `MELODY_STATIC_CACHE_DISABLED=true` in `.env.dev.local`, which wins over `.env`, and the switch wins over a max age set beside it, which the boot names in the `http.static.cacheMaxAgeIgnored` warning;
+- the prefixes of the application's own doors, one per first segment of the route table and one per locale of the localized greeting, are never served from `public/` (`MELODY_STATIC_EXCLUDED_PATHS`): the file server answers ahead of routing and the router takes a door with or without its trailing slash, so a file dropped there would otherwise be served to a signed-in caller in place of the door; a door added under a new first segment needs its entry, and the stack checks hold the list against `debug:router`;
+- the sign-in submit, and the doors that spend a backend this process does not own (`/messagebus/dispatch`, `/outbox/enqueue`, `/outbox/relay`, `POST /storage/object`, `/events/publish`), spend the same per-address write budget as the catalogue's writes, thirty a minute, counted in redis and, without redis, in the process itself, where the write budget, the hourly request budget and the second factor's per-account budget each track at most 10,000 keys: past that an unseen key takes the slot of the key whose last request is the oldest, which comes back with a full budget, and redis has no such table;
+- the listings travel gzip-compressed to a client that accepts it;
+- behind a proxy that terminates tls, the scheme it forwards (`X-Forwarded-Proto`) is believed from the private ranges and loopback, so the session cookie is marked `Secure`; behind one that terminates tls from outside those ranges, the framework key `MELODY_HTTP_SESSION_COOKIE_SECURE=always` marks it `Secure` on every response (empty keeps the scheme's answer; any value but `always` refuses the boot); the not found page and the forwarded-headers list reach the kernel through `ApplicationConfig.HttpKernel` (`config/http_kernel.go`); the rate limit's client address, which decides whose budget a request spends, is believed from the balancer alone (`APP_TRUSTED_PROXY_LIST`).
+
+The greeting is served at `/:_locale/i18n/greeting/` for `en`, `ro` and `ro-RO`, the last answered from the `ro` catalogue; another locale matches no route. Its `?count=` drives the cart line through the ICU plural of each catalogue: English has `one` and `other`, and Romanian reads `few` apart from `other` — `2 produse`, `20 de produse`, `101 produse`. A message no catalogue carries is shown as its id, and any other translation error answers 500 rather than a half-rendered greeting. The catalogues stay in Go: `JsonDirectoryLoader` reads a directory on disk, and this example also ships as a single embedded binary. The `/internal` firewall carries its own authorization and reads nothing of the global rules, and it refuses an envelope whose expiry sits more than five minutes ahead; `internal:sign --ttl` mints one for a chosen lifetime, uncapped, so an operator can see that refusal.
+
+> The committed [`.env`](./.env) points the integration endpoints at the dev compose service names (`redis:6379`, `mysql`, …), so the fully-wired experience is [`./dc up:all --build`](#running-fully-against-containers), which runs this same app inside the dev container where those names resolve. A bare host `go run .` needs those services reachable (override the endpoints to the mapped host ports, [see below](#running-the-binary-directly-against-mapped-ports)) — or remove their lines from `.env` to boot with the in-process fallbacks and zero infrastructure.
+
+### Frontend bundle
+
+The pages are server-rendered HTML driven by a small TypeScript bundle: every link to a routed page, form action and `fetch` target is built from a **route name** rather than a hardcoded path (the static index and the links to it are outside the manifest, and two clicks fall back to a path when the manifest lacks their route: the header's logout to a POST on `/logout/`, and the sign-in to `/catalogue/` when the door answers no landing), against the route manifest — the same document [`melody:routes:manifest`](#cli-mode) exports, injected into each page as `window.melodyRoutes`.
+
+**Every write carries the session's csrf token.** The `main` firewall checks every unsafe request riding the session for forgery in the framework's default origin mode. [`page.Html`](./page/page.go) replaces `{{csrf_token}}` with [`http.CsrfToken`](../http/csrf.go) on a page that carries it: each session page renders it into `<meta name="csrf-token">`, which [`assets/app.ts`](./assets/app.ts) sends as `X-CSRF-Token` on every request but `GET` and `HEAD`, and each sign-out form posts it as the hidden `_csrf_token` field. The login page carries none, so it writes no secret into an anonymous session. A client that renders no page reads the token from `GET /csrf/token/`, the firewall's opt-in token route (`example.csrf.token`).
+
+**Every page is sent under a content security policy.** [`main.go`](./main.go) hands the application [`config.SecurityHeaders()`](./config/http.go), the framework's default headers with [`page.ContentSecurityPolicy`](./page/page.go): scripts from the application and `cdn.jsdelivr.net`, stylesheets from those and `cdnjs.cloudflare.com`, fonts from `cdnjs.cloudflare.com`, images from the application and `data:`, connections to the application and its websocket, no frame ancestor, no plugin, forms posting to the application alone. It keeps `'unsafe-inline'` for scripts and styles because the pages carry inline `style` attributes and inline scripts holding templated data (`window.melodyRoutes`, `window.melodyViewer`); a page pin checks every external asset's origin against the policy.
+
+**Every account lands on a page its role opens.** The login door answers the page to go to by role, through the role hierarchy: an editor or an admin lands on the product list, and an account holding `ROLE_USER` alone on the catalogue (`GET /catalogue/`, the categories and currencies it may read, where a holder of `ROLE_EDITOR` also adds, renames and deletes a category, a refusal shown on the card), since the product pages ask for `ROLE_EDITOR` and the user pages for `ROLE_ADMIN`. Each page also carries the viewer's roles, expanded through the same hierarchy, as `window.melodyViewer`, and a link marked `data-requires-role` is hidden from a viewer without that role — the Users link from an editor, Products and Users from a user. The marking decides what a page offers and nothing the server allows: every door it hides keeps its own access rule, and a browser that reaches one anyway is answered by a `403` page that says the account's role does not open it and offers Back, Home and Log out, rather than a bare refusal with no way to sign in as someone else.
+
+Everything a browser needs beyond the HTML is **generated, not committed**. The dev container produces it at startup, so `./dc up:all --build` needs nothing extra; a bare host run needs one command:
+
+```bash
+cd v4/.example/assets
+npm ci
+npm run build
+```
+
+That command does two things:
+
+- `sync-icons.mjs` copies the shared icons — `favicon.ico`, `assets/favicon.svg`, `assets/logo.png`, `assets/apple-touch-icon.png` — out of `<repository root>/.assets`, which is the **single place** they exist in the tree;
+- esbuild bundles `assets/app.ts` into `public/assets/app.js`.
+
+The bundle carries one runtime dependency, [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) by Kazuhiko Arase, MIT licence, pinned at `2.0.4` in `assets/package.json`: the second-factor page draws the otpauth URI with it on a canvas, from the module matrix, so no markup is built from the secret.
+
+Both destinations are git-ignored, so a checkout carries no copy of either and neither can go stale. Without this step the pages still load and every JSON endpoint still answers, but `public/assets/app.js` and the four icons are 404s and the browser interface does nothing: logging in, listing, editing and deleting all go through `window.melodyExample.*`, which the bundle is what installs.
+
+While iterating on the TypeScript, `npm run build:watch` rebuilds on save, `npm run typecheck` runs `tsc --noEmit` over the sources after writing the route manifest the usage sample `assets/routes-usage.ts` imports, `assets/routes.json`, through `go generate` (generated, so git-ignored), and `npm run sync-icons` re-copies the icons alone after a change in `.assets`.
+
+### CLI mode
+
+The example also wires CLI commands. List them:
+
+```bash
+cd v4/.example
+go run . -h
+```
+
+Among the commands you will find `melody:cron:generate` from the cron integration. To generate a crontab fragment from the `cron.Configuration` declared in [`config/cron.go`](./config/cron.go):
+
+```bash
+cd v4/.example
+go run . melody:cron:generate --out ./generated_conf/cron/crontab
+```
+
+The example schedules four commands in [`config/cron.go`](./config/cron.go) (`catalog:report:refresh` hourly, `product:list` every 6 hours with `--limit=2`, `example:currency:refresh-rates` on the half hour, `app:info` every minute as the heartbeat) plus a heartbeat enabled via `MELODY_CRON_HEARTBEAT_ENABLED=true` in [`.env`](./.env) (the path is auto-derived from `melody.cron.logs_directory`), so the generated crontab is not empty.
+
+The same `cron.Configuration` also drives an **in-process scheduler** for single-binary deployments with no external crontab. `melody:cron:run` ticks in-process and invokes each scheduled command when it is due; `--once` evaluates every schedule against the current time, runs the due commands and exits:
+
+```bash
+cd v4/.example
+go run . melody:cron:run --once      # kick whatever is due now, then exit
+go run . melody:cron:run             # run the scheduler loop until interrupted
+```
+
+The runner dispatches each scheduled command with its declared flags, so declared defaults are honored on a scheduled tick exactly as under the cli entry point: `product:list` declares `--limit` with a default of `5` and prints the value it read beside the views window: `product list: limit=5 views_window=24h0m0s` when invoked directly, `product list: limit=2 views_window=24h0m0s` under the runner, which hands it the arguments its entry declares.
+
+`messagebus:dispatch` dispatches three welcome emails onto the async transport, each stamped with a message id of its run (`<run id>-<index>`, the run id 16 random bytes in hex), then consumes until those three are handled and prints `consumed own messages: 3 of 3`. Beside another consumer of the same queue it counts only its own: another producer's message it takes is handled and acked as any consumer of the queue would, and named on a line of its own. `--timeout` bounds the wait (a go duration, `30s` by default, at least `1s`); at the timeout it prints how many of its own it consumed, the rest taken by another consumer or still queued, and exits with an error. A message its handler refuses is nacked without requeue, so a broker queue dead-letters it, and the run ends with the handler's error. `--no-consume` dispatches and returns, leaving the messages to the queue's consumers:
+
+```bash
+cd v4/.example
+go run . messagebus:dispatch --timeout 5s
+go run . messagebus:dispatch --no-consume
+```
+
+`example:grant:role` shows that an application command may declare its own `--role` flag: the runtime's `--role`/`--mode` are recognized only before the command name, so the command receives its flag intact. The flag is required, so the framework refuses an invocation without it before the command runs, naming the flag, and `-r` is its short spelling; the account is the command's one argument. It also holds the example's user service through a `container.Lazy` handle built at command-registration time — the service is resolved at the command's first run, not during the boot phase. The flag is trimmed and has to name one of the three roles the application knows (`ROLE_USER`, `ROLE_EDITOR`, `ROLE_ADMIN`) — the voter compares a role's spelling exactly, so any other spelling would be stored and grant nothing — and the grant goes through the repository's atomic door, which reads and widens the account's set under one lock, so a grant that runs beside an admin update of the same account
+cannot lose the other's write; an account that already holds the role is a no-op, not a second entry:
+
+```bash
+go run . example:grant:role --role ROLE_ADMIN ada    # the command's own --role, required, -r for short; the user is the argument
+go run . --role worker app:info                        # the runtime process role
+```
+
+`example:user:create` creates the account named as its argument, holding the `--role` it is given (required, one of the three roles, `-r` for short, as `example:grant:role` spells it); the password is the first line of standard input, and a second argument is refused before anything is written. On a terminal the command asks for the password on standard error and reads it with the echo off, and an interrupt ends the wait at once, piped or typed. `example:twofactor:reset <username>` removes an account's second factor, secret and recovery codes together: the enrollment door replaces a factor only for a request that presents a current one, so an account that lost its authenticator and spent its last recovery code comes back through an operator, signs in on its password and enrolls again.
+
+`totp:code` prints the current code of a second factor's secret, standing in for the authenticator app; the secret is the first line of standard input, as the password of `example:user:create` is, never an argument, read the same way on a terminal (asked for on standard error, the echo off, an interrupt ending the wait), and the code is generated at the container clock's instant:
+
+```bash
+printf '%s' "$SECRET" | ./app totp:code
+```
+
+`internal:sign` mints the HMAC envelope the `/internal` firewall authenticates; with `--actor <user id>` it propagates an originating actor holding the roles of `--actor-roles` (comma-separated, `ROLE_BUYER` when left out) and the attributes of `--actor-attributes` (comma-separated `key=value` pairs, the key and the value trimmed, `tenant=acme` when left out); an explicitly empty value is an actor with no role or no attribute. An empty element, a role with whitespace, a control character in a role, a key or a value, an attribute without a value, a role or a key named twice, and either flag without `--actor` refuse the run.
+
+`auth:token` mints the HS256 token the `/secure` api reads, signed with `APP_JWT_SECRET`: `--role` writes the roles claim (`ROLE_USER` when neither flag is given), and `--scope-role` writes the grant into the `scope` claim the way an OAuth-style issuer carries it, read by the firewall's scope enricher; a token minted with `--scope-role` alone carries an empty roles claim, so the role it holds on the route is the scope's.
+
+A token holding `ROLE_ALLOWED_TO_SWITCH`, which only `auth:token --role ROLE_ALLOWED_TO_SWITCH` mints (no directory account holds the role), acts as another account on the `/secure` api by sending `X-Switch-User: <account id>`, the identifier `/secure/me/` prints: the resolver (`config/impersonation.go`) reads that account from the user directory the sign-in reads, so the request runs under its id and its stored roles while the caller stays readable as the impersonator. An unknown id, an account its own session would not honour (no role), an administrator and an account that could itself switch, read through the role hierarchy, are denied, and a directory that cannot answer fails closed. With the seed, `X-Switch-User: user-1` or `user-2` switches; `user-3`, the administrator, is refused.
+
+The application declares its own version to every command document, to `debug:version` and to the root's `--version` through `ApplicationConfig.Version`, from `main.applicationVersion`, which a build sets with `go build -ldflags "-X main.applicationVersion=<version>"`; a build that sets nothing reports `dev`.
+
+A console run has no signed-in user, so the audit trail and the catalogue journal name the run itself as the actor of the grant, `process:<id>`, the process id every journal record of that run carries; a signed-in request names its user, and an unauthenticated one the system.
+
+---
+
+## Platform integrations (optional, env-gated)
+
+The example wires **every v4 platform integration**. Each backend that needs external infrastructure is **gated on an environment variable**: when the variable is unset the application boots with an in-process fallback (remove the integration lines from [`.env`](./.env) and the example runs with zero infrastructure), and when it is set the matching integration is activated and resolved through the same core service constant, so the rest of the app is unchanged. The committed `.env` sets these variables to the dev compose service endpoints so `./dc up:all` wires everything out of the box.
+
+| Integration                                                                                                                                      | Activated by                                      | Falls back to            | Reached at                                    |
+|--------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------|--------------------------|-----------------------------------------------|
+| [`opentelemetry`](../../integrations/opentelemetry/v4/) — Prometheus metrics middleware and lifecycle handler decorator                          | always on                                         | —                        | `GET /metrics`                                |
+| [`websocket`](../../integrations/websocket/v4/) — the module, its stream's hub provider resolving the SSE hub per connection                     | always on                                         | —                        | `GET /ws` (and `GET /events/stream` for SSE)  |
+| `encrypt` ([`bunorm/v4/encrypt`](../../integrations/bunorm/v4/encrypt/)) — AES-256-GCM cipher                                                    | always on                                         | —                        | `GET /encrypt/roundtrip`                      |
+| [`amqp`](../../integrations/amqp/v4/) — durable message-bus transport                                                                            | `AMQP_DSN`                                        | 503 at the two doors     | `POST /messagebus/dispatch`                   |
+| [`aws.s3`](../../integrations/aws/s3/v4/) — S3 object storage (`storage.ServiceStorage`)                                                         | `S3_ENDPOINT` (`S3_INSECURE=true` for plain http) | local filesystem storage | `GET /platform/check`                         |
+| [`rueidis`](../../integrations/rueidis/v4/) — Redis cache backend, distributed lock (`lock.ServiceLocker`), revocable token store, SSE backplane | `REDIS_ADDRESS`                                   | in-memory cache/lock     | `POST /access-token/issue/`                   |
+| [`bunorm/mysql`](../../integrations/bunorm/mysql/v4/) — MySQL `GET_LOCK` distributed lock                                                        | `MYSQL_HOST` (when `REDIS_ADDRESS` is unset)      | in-memory lock           | `GET /platform/check`                         |
+| [`bunorm`](../../integrations/bunorm/v4/) — bun ORM `*bun.DB`, transparent column encryption, field-level audit trail                            | `MYSQL_HOST`                                      | —                        | every catalogue write: audited and journalled |
+| [`bunorm/migrate`](../../integrations/bunorm/migrate/v4/) — the `db:*` migration command family                                                  | always on (fails at `Run` without a database)     | —                        | `db:migrate`, `db:status`, `db:rollback`      |
+| [`bunorm/pgsql`](../../integrations/bunorm/pgsql/v4/) — the reading archive's PostgreSQL database and its advisory lock                          | `PGSQL_HOST`                                      | in-memory archive/lock   | `GET /reports/api/history/`                   |
+
+The local filesystem storage writes under `APP_LOCAL_STORAGE_DIRECTORY`, relative to the project, or the system's temporary directory under `melody-example-storage` when the key is empty.
+
+`GET /metrics` carries one request histogram per seam, in seconds, built on one meter. The metrics middleware times the requests the pipeline handles, labelled by route (`http_server_request_duration_seconds`, its `_count` the request count); the handler decorator of [`opentelemetry.NewHandlerDecorator`](../../integrations/opentelemetry/v4/handler_decorator.go), which wraps the whole kernel handler, times every request by method and status (`melody_http_server_lifecycle_duration_seconds`), the ones the firewall refuses before any middleware runs included. A 401 the firewall answers therefore shows in the lifecycle family only. Both families carry `url_scheme`: the middleware's is the scheme the kernel resolved under the forwarded-headers policy, `https` behind a trusted TLS-terminating proxy, the decorator's the connection's own, read before the kernel resolves one. The decorator's tracer is a no-op: the spans are the otlp module's tracing middleware's, and the decorator keeps the caller's trace context so that span stays under it.
+
+The lock service follows a single priority: Redis if configured, otherwise MySQL, otherwise in-memory. `GET /platform/check` takes it through `lock.RunExclusive`, its storage round trip under the lock, answering `409` "busy" while another holder owns it; the lock is released on a runtime the request's cancellation does not reach, so a client that hung up leaves nothing held until the ttl. Transparent encryption-at-rest is shown where the application uses it, beside the public cipher probe `GET /encrypt/roundtrip`, which seals and opens a fixed value and reads nothing of the caller: the two-factor enrollment table stores the shared secret and the recovery codes as `encrypt.EncryptedStringFor` columns, each seal bound to its own column and refusing an unbound value (`ModuleConfig.SealBindings`, declared by `twofactor.SealBindings`), so `POST /twofactor/enroll` writes ciphertext MySQL holds, in the pending table `melody_example_v4_two_factor_pending` under its own two bound columns, `POST /twofactor/enroll/confirm` moves it into the active table in one transaction, and `POST /twofactor/verify` reads it back to recompute a code. All three act on the caller's own account — the identifier comes from the authenticated token rather than from the request. Enrolling while a factor is active prepares its replacement, which takes over at the confirmation, so it asks for a factor of the one it replaces: a TOTP code on `X-2FA-Code` or a recovery code on `X-2FA-Recovery-Code`, spent as the verification door spends them; on the session alone it answers `401` with `{"factor":"totp"}`, since a stolen session must not become the thief's second factor. An account that lost both its authenticator and its codes is reset from the console (`example:twofactor:reset`). An enrollment written before the two columns were bound is refused on read, since neither admits an unbound value: reset it with `example:twofactor:reset <username>`, or rebuild the database with `example:db:reset --force`. The
+enrollment goes with the account: the schema cascades the row on the deletion of its user, the authoritative release, and a subscriber also deletes it on the deletion event, journaling a store it cannot reach rather than failing the deletion. The account's tokens go first: the token release outranks every other listener of the deletion — the dispatch ends at the first listener that fails, and the deletion event declares the tags that still run after one (`release`, `cache`, in `event.UserDeletedEventConfig`), which the token release, the two-factor release and the cache listener carry: no outage of one skips the others; an outage of the token store itself fails the deletion with the account already gone, and the device firewall refuses the tokens it left — and it both deletes the device tokens the store holds and publishes an account-wide revocation at the deletion's instant, which refuses the bearer tokens no store holds. A device token issued while its account was being deleted is taken back by the issue door, which reads the account again after storing it, and the device firewall honours a token only while the account it names exists, with that account's
+current roles. `GET /encrypt/roundtrip` reports the ciphertext beside the value that came back, which is the half a stored column cannot show.
+
+Several wirings deliberately defer their resolution to first use instead of the composition root:
+
+- `example:exclusive:tick` is wrapped in `lock.NewExclusiveCommand` over `lock.NewLazyLocker`, which resolves the registered locker at the lock's first `Acquire`, under that run's context — with a distributed locker configured (Redis or MySQL), run it from two shells at once and exactly one executes while the other exits zero. Under the in-memory fallback the exclusivity is per-process, so two separate shells both execute.
+- The in-process cache fallback is per process too, and that bounds what a console writer can promise: the entities are cached for at most ten minutes and cleared by name by listeners subscribed to the write events, which run in the process that DISPATCHED. With Redis the cache is shared and `example:grant:role`, `example:currency:refresh-rates`, `example:db:reset`, `example:cache:clear` or `example:user:create` reach the running server; without it they reach their own process, and a server started beside them keeps what it cached until it restarts — each of the five says so on its output when that is the wiring it ran under. `example:cache:clear` is the door that empties this application's namespace and nothing else: a row changed through no door of this application — edited by hand, restored from a backup — dispatches no write event, so its cached entity is served until something clears it, and the command does that without the reset's two databases.
+- The cache keys carry, inside the `melody-example-v4:cache:` namespace, a token computed from the layout of the cached types ([`cache.LayoutToken`](./cache/gob_serializer.go)): gob decodes by field name and stays silent about a field the payload does not carry, so a build that added a field over a live Redis read every entry with that field at zero — a currency with no rate, refused by every conversion — until something dropped the keys. Under the token a build reads only what a build of the same layout wrote. What an older build left stands orphaned in Redis, outside the reach of `example:db:reset` and `example:cache:clear` (which clear the current layout's namespace); after a deploy that changed a cached type, drop the old prefix once — `redis-cli --scan --pattern 'melody-example-v4:cache:*'` lists both. Every read names the entity it expects, through `cache.Get[T]` and `cache.Remember[T]`, and the gob serializer refuses a payload of another type, which a read answers as a miss to recompute.
+- The transactional-outbox module ([`config/outbox.go`](./config/outbox.go)) is registered with its `Store` and `Relay` providers: the store is built at boot (`StoreBuiltAtBoot` with `BootFailureWarns`, as the catalogue schema), ensuring the `melody_outbox` schema under the boot runtime, so a database that does not answer is a boot warning and the first resolution tries again; the relay (which opens the transport) is built from the container at first use, and the module contributes the `melody:outbox:relay` command over the same lazily-resolved relay. `POST /outbox/enqueue` hands the notice the id the kernel minted for the request as its `request-id` header, stored with the row and published as a `messagebus.HeadersStamp`, so a consumer's record follows back to the request's journal line; `GET /outbox/status` counts the rows of the store's table. Endpoints: `POST /outbox/enqueue`, `POST /outbox/relay`, `GET /outbox/status`.
+- The encrypt module resolves the shared `*bun.DB` through a `DatabaseFactory` evaluated at the first `melody:encrypt:database` run, so http- and worker-mode processes register the command without touching the database. The cipher encrypts under `APP_ENCRYPT_CURRENT_KEY` and decrypts under every key `APP_ENCRYPT_KEYS` lists (`id:key`, comma separated, secret-marked; without a list, the development key — in development only, see [Before production](#before-production)): a key is retired by listing the next, making it current, running `melody:encrypt:database --mode reencrypt --target-key <next>` over the encrypted columns and only then removing the old one. A malformed list stops the boot naming the entry's position — and its id only when the entry was written `id:key`, since an entry without the separator may be the key itself — never the key.
+- The application namespace is `MELODY_NAMESPACE=melody-example-v4` in [`.env`](./.env), handed to the rueidis and amqp providers: every redis key, the server-sent event channel and exchange and the framework's lock names open with it, so the example applications sharing one redis and one broker never read each other's names. The rate limiters, the internal nonce guard and the outbox relay take the defaults the namespace derives; the token store prefix, which the token namespace shares, the cache prefix with its layout token and the second factor's replay guard are written out from it ([`config/redis.go`](./config/redis.go)).
+- The outbox relay drains under the application's locker (`melody-example-v4:outbox:relay`, the relay's default under the namespace), so replicas running `melody:outbox:relay` from cron drain from one at a time; the batch claim alone already keeps two from publishing one row.
+- The internal firewall remembers the nonces of accepted envelopes in Redis under `melody-example-v4:nonce` when Redis is wired, so an envelope accepted by one replica is refused by every other; without Redis it keeps its in-process guard.
+- Redis is opened inside `Boot`, under the boot runtime, by the rueidis module's connection factory, and an unreachable store fails the boot as the database does; the wiring only reads whether `REDIS_ADDRESS` is set. The write budget, the second factor's budget and replay guard and the internal nonce guard are container services over that connection, which what was built while wiring reaches through each request's runtime, and the hub's provider, which builds the hub with the application's logger, installs the SSE backplane on it over the connection it resolves.
+- Deleting an account releases its device tokens: a listener on the deletion event deletes every token the account holds from the token store, so a deleted account keeps no api access until its tokens expire.
+- A device identifier is 1 to `APP_DEVICE_IDENTIFIER_MAX_BYTES` bytes (64 when empty, 1 to 255, any other value refuses the boot) of letters, digits, dot, underscore or hyphen, at the issue door, since it becomes a claim and part of the revocation key; the revoke-device door holds it to the same alphabet and to 255 bytes, so a token issued before the bound was lowered stays revocable per device. The revoke-user door refuses an identifier no account can hold. Both revoke doors publish the boundary over a runtime detached from the request's cancellation, as the withdraw does, so a client that hangs up cannot leave the revocation it asked for undone. When a token's read-back after the write fails or finds nothing, the door deletes the token before it answers; a delete the store cannot answer is journaled at error and the door still answers the read-back's failure, the token lapsing with its hour.
+- The user entries of the cache hold an account's id, name and roles (`entity.UserProfile`), never its password digest, which the sign-in and every credential check read from the directory. The user service drops an account's three entries itself once a write committed and before its event runs, so a listener that fails leaves no stale entry, apart from a read in flight that loaded the row before the commit and writes it back after the drop, which serves the old profile for up to the ten-minute ttl on the admin list and read views alone (the sign-in, the session resolver, impersonation and the token enricher read the directory); the failure is still answered. Entries a build of the previous layout wrote hold the digest: they stand under their own layout token and lapse with their ttl, and a deployment that wants them gone sooner drops the old prefix as described above.
+- With `SMTP_ADDRESS` set the mailer delivers through that relay; `SMTP_USERNAME` makes it authenticate with `SMTP_PASSWORD` (secret-marked, and refused at boot without a username), the transport upgrades with STARTTLS or fails unless `SMTP_ALLOW_PLAINTEXT=true` (the development mailpit offers no STARTTLS, so `.env` opens it), and `SMTP_IMPLICIT_TLS=true` dials tls from the first byte, each switch empty or `false` for off and any other value refusing the boot. A username without a password, a password without a username, both switches `true` (under implicit tls nothing is sent in clear) and any of the four keys set while `SMTP_ADDRESS` is empty (the log transport would drop it) refuse the boot, naming the key.
+- The pages load bootstrap, jquery and font-awesome from their CDNs pinned by version and by a sha384 `integrity` digest with `crossorigin="anonymous"`, so a CDN that served other bytes is refused by the browser; the font files font-awesome's stylesheet loads are outside what the attribute covers.
+- A product read counts itself twice on the cache backend's own increment and answers both counts: `views` in all (`example-product-views-<id>`, no expiry) and `dailyViews` in the current window (`example-product-daily-views-<id>`), with the window's span in `viewsWindowSeconds`. The window is fixed: the read that creates its counter writes the counter's expiry, `APP_PRODUCT_VIEWS_WINDOW` after it (24h by default, at least 1s), and the later reads never move it, so the first read after it lapsed opens the next window. The product page shows both, `product:list` prints them in its `VIEWS` and `VIEWS_WINDOW` columns, read through `cache.Bound.GetCounter` without counting, and deleting a product drops both counters. They are a hint rather than a ledger — a cache failure leaves the three keys out of the answer, or prints dashes in the listing, and is journaled, and emptying the cache namespace resets them.
+- `GET /storage/object?key=` answers a stored object inline with its `contentType` and `size`, read once from the object store: an absent object is a `404`, and one the store declares past 8 MiB is a `422` before a byte of it is read.
+- `GET /storage/object/link?key=&ttl=` answers a presigned download link to a stored object, so a client reads the bytes straight from the object store; the link lives `ttl` seconds (five minutes by default, an hour at most), and an absent object is a `404`.
+- The message-bus transport ([`config/messagebus.go`](./config/messagebus.go)) is handed `amqp.FromDialer(provider.Dialer(dsn))`, the rule its outbox twin states in the same words: the transport owns and closes each connection it dials and redials after a loss, so one opened in the composition root would be owned by nobody. The transports dial nothing at boot — a command that never publishes never opens a connection, and `db:migrate --help` no longer pays a full amqp handshake before printing its usage; an http process dials once, the module's connection below. An `AMQP_DSN` this application cannot reach therefore does not stop the boot: it surfaces at the first publish, through the transport's own retry loop, which is where a broker that is merely down already surfaced. Beside `AMQP_DSN` the amqp module ([`config/amqp.go`](./config/amqp.go)) registers the connection alone, `ConnectionBuiltAtBoot` with `BootFailureWarns`, as the boot's check of the broker: an http process dials it under the boot runtime, a broker that refuses being the `application.service.builtAtBootFailed` warning and one that does not answer at all holding the boot for `ProviderConfig.DialTimeout`, 30s, before that warning; nothing resolves the connection after the boot, so the warning is written once and a broker lost later is the transports' to redial; the transports keep their dialers; the transports and that connection share one provider, so `amqp.plaintextDsn` names the host once, and beside `AMQP_DSN` `MELODY_BOOT_WARNINGS_IGNORED` may name the code; without it no module declares the code and the key refuses it.
+
+### Exchange rates — the outbound half
+
+The catalogue quotes every product in one currency, so a reader who wants another one needs a rate. That is
+what the currency nomenclature carries beside the code, and it is the only thing in this repository that
+calls [`httpclient`](../httpclient): the package has no other consumer on any major, so before this the whole
+of it was proven by compilation.
+
+- `example:currency:refresh-rates` reads the provider named by `RATES_BASE_URL` and writes the quotes it
+  recognises. It runs on the half hour from [`config/cron.go`](./config/cron.go) and exits **non-zero** when
+  the provider could not be read — a schedule that swallowed that would leave the catalogue quoting stale
+  rates in silence. With the key blank the command is a no-op that says so and exits zero, the same switch
+  every optional door here carries.
+- Every rate of the catalogue is quoted against ONE base, named by `RATES_BASE_CURRENCY` (`EUR` by default,
+  the seed's base): a conversion cancels the base by dividing one rate by another, which is arithmetic only
+  while every rate shares it. The refresh therefore judges the provider's document whole before it writes a
+  quote, and refuses it — nothing written, exit non-zero, both bases named — when it is quoted against another
+  base, carries no `asOf`, is stamped after the provider answered with it, or quotes one currency under
+  several spellings, every spelling named. Codes are matched folded, so a provider writing `usd` quotes the seed's `USD`; two spellings
+  means two keys that fold onto one code — a key repeated letter for letter is collapsed by the JSON decoder
+  before the refresh sees it, the last value winning, which is the decoder's rule and not the refresh's. A
+  base that is configured EMPTY (`RATES_BASE_CURRENCY=` present in `.env`, where an absent key falls back to
+  `EUR`) refuses every document. The instant is held at the microsecond the column holds.
+- A reading carries its instant in two reference frames. `asOf` is stamped on the PROVIDER's clock, and the
+  catalogue orders readings on THIS one: a provider whose clock ran ahead and was then set back would otherwise
+  have every honest reading after the correction judged older than the one stamped before it. The answer's
+  `Date` — plus the `Age` a cache in front of the provider adds — is the provider's clock at the moment it
+  answered, so the refresh measures the offset between the two clocks on every answer, to within the second the
+  date is read to (two with an `Age`) and half the round trip, and stores the reading twice: `provider_rate_as_of`, the stamp as it
+  came, which names the reading, and `rate_as_of`, the same instant moved onto this clock, on which every order
+  is judged. A clock set back moves the stamp and the answer together, so the reading after it is newer here; a
+  replay keeps an old stamp under an answer given now, so it is older here — when the replay carries a current `Date`. The offset is trusted within five
+  minutes, in either direction: from one answer, a provider whose clock runs late cannot be told from a verbatim
+  replay of an old answer that kept its `Date` and dropped its `Age`, which an offset of any size would lift over
+  the newer reading it replays, so an answer measured further off is refused, naming the offset, the `Date` and
+  the `Age`. The last column of the table, `PROVIDER_CLOCK`, prints the offset measured (`+0s` for a provider
+  that agrees with this clock to within what one answer can tell), or `unmeasured` for an answer without a
+  readable date or with an `Age` at or above the largest a cache may send — its stamps are then taken as they came, no
+  later than the moment the answer arrived, and one more than five minutes ahead of this clock is refused. What
+  the five minutes admit is stated, not hidden: a replay that kept its `Date`, or a dateless replay of a reading
+  stamped ahead of its arrival, cannot be told from a provider whose clock moved, and is written over a newer
+  reading; it is at most five minutes old, and the next honest reading replaces it.
+- What the refresh did is printed under one heading per currency: `UPDATED` (written), `SKIPPED` (not quoted
+  by the provider, or deleted inside the run), `UNCHANGED` (the reading the catalogue already held — the
+  same provider stamp at the same rate, however this clock measured it on arrival — nothing written, no event, the
+  currency's cache entries dropped where they are not the row), `STALE`
+  (older than the reading stored — a replay, kept out) and `REFUSED` (a quote the write door would not take:
+  zero, negative, infinite or outside `[1e-6, 1e9]`). One refused quote does not stop the sweep: the currencies
+  after it are written on the same run, and the exit code names the currencies refused. A backend failure does stop
+  it, and the line names what the door did before it failed: a quote written whose listeners were not told is
+  counted `UPDATED` and said to be written, with its cache entries standing until the next tick; an unchanged
+  quote whose cache drop failed is counted `UNCHANGED` and the drop is named — neither reads as a quote that
+  could not be written.
+- `RATES_API_KEY` is the provider's api key, sent as `x-api-key` on every rates request; the development provider refuses a request without it, and the key is marked secret, so `debug:parameters` redacts it. The client journals no request header.
+- `GET /products/api/read/:id/?currency=USD` answers the product with its price restated in the currency the
+  caller named, stamped with the instant of the quote it used. Without the parameter the answer carries no
+  conversion at all; a code the catalogue does not carry is a `400`, while a product quoted in a currency the
+  catalogue lost, or against a rate that is not a usable price, is the catalogue's fault and a `500` with the
+  cause journaled.
+- The nomenclature is written through three doors that require `ROLE_EDITOR`, as the product writes do, while
+  the listing `GET /currencies/api/read/` keeps `ROLE_USER`: `POST /currencies/api/create/` takes an `id`
+  (minted when absent), a three-letter upper-case `code` — judged by the application's own `currencyCode` rule,
+  registered on the validator the container serves ([`validation/currency_code.go`](./validation/currency_code.go)),
+  on the create and on the update — a `name` and the first `rate`, stamped with the
+  instant of the create and refused with a `400` when it is not a usable price, while an `id` another currency
+  holds is a `409`, as it is on the product create, and so is a `code` another currency holds — the conversion
+  finds a currency by its code, so the code is the currency's identity and the schema holds it unique;
+  `PUT /currencies/api/update/:id/` renames the code and the name and never writes the rate, which only the
+  refresh quotes, and answers the same `409` for a code another currency holds; `DELETE
+  /currencies/api/delete/:id/` removes the row, and answers `409` while a product is priced in it — the product
+  table's foreign key holds that on the database, and without one a catalogue lock holds the check and the delete
+  together against a concurrent product write, so the conversion of a product never loses its currency to a
+  delete. A missing currency is a `404` on both. A product write naming a category or a currency that does not
+  exist is the caller's `400`. The currencies are not audited. The write doors validate the body in the
+  spelling they store, trimmed: a name of one character padded with a space is refused, not stored.
+- The categories are written through three doors that require `ROLE_EDITOR`, while the listing `GET
+  /categories/api/read/` keeps `ROLE_USER` and is answered from the cache the writes drop: `POST
+  /categories/api/create/` takes an `id` (minted when absent, at most 60 characters and no whitespace) and a
+  `name` (2 to 120 characters) and answers `201`, an `id` another category holds a `409` and one whose number is
+  at the identifier's ceiling a `400`; `PUT /categories/api/update/:id/` renames the category; `DELETE
+  /categories/api/delete/:id/` removes it and answers `409` while a product sits in it. A missing category is a
+  `404` on both. The writes run under the catalogue's write budget, are journaled under the signed-in actor and
+  notify every open page; the bodies are validated trimmed, as the currency bodies are.
+- `catalog:report:refresh` pushes its reading to `APP_REPORTING_EXPORT_ENDPOINT` when one is configured, and
+  takes the command's exit code with it if the sink refuses.
+
+The two endpoints are the two SHAPES the client supports, and they are not interchangeable. `RATES_BASE_URL`
+is a **base** and carries its trailing slash: the client resolves every target against it by RFC 3986, so the
+slash is what keeps `/v1` a prefix instead of a segment the merge cuts, and a base written without one is
+refused when the client is built, at its first resolution, since its provider runs lazily. The shipped value is plain `http://` only because it names the
+stack's own balancer, which answers a fixed document inside the compose network; point it at a real provider
+over `https://`, since whoever can rewrite the provider's answer sets every price the catalogue converts. A
+based client also refuses a target that resolves off its origin,
+which is why the export endpoint — a whole url an operator may point at any host — travels through a second
+client that carries no base at all. Both are registered by NAME and not by type: they are the same concrete
+type, so a resolution by type could only answer with whichever landed first, and the boot refuses the second
+registration outright.
+
+A provider behind a private certificate authority keeps these clients: the authority goes into the client's
+transport in Go, and certificate verification stays on.
+
+```go
+pool := x509.NewCertPool()
+pool.AppendCertsFromPEM(authorityPem)
+
+config.Transport.TlsConfig = &tls.Config{RootCAs: pool}
+```
+
+The rate is quoted against a base — one unit of that base costs `rate` units of the currency — so a
+conversion between two currencies cancels it and the catalogue never has to know what the base was. The
+instant stored is the PROVIDER's rather than the moment the refresh ran, because a reader deciding whether a
+price is stale needs the age of the reading. In development the provider is a vhost of the compose load
+balancer at `rates.melody.localhost.precision-soft.com`, which also serves the failure arms the bands drive.
+
+### The migration set
+
+The schema is owned by one migration set in [`migration/`](./migration/) — a single MySQL DDL migration holding the nine tables this example owns and the table it records its own fingerprint in, every constraint declared with its table: the four catalogue tables, the session index, the identifier sequence, the journal and the two two-factor tables, the enrollment and its pending set-up, neither frozen major carries. The constraints are the unique key on the currency code, which the conversion finds a currency by; the two foreign keys a product holds on its currency and its category, which refuse a delete from under it and a reference that names nothing; and the unique key on `username_normalized`, the name as the application folds it in Go and writes beside the name as spelt — the identity the cache keys and the listeners share, which MySQL's `LOWER()` does not reproduce for every script — which is what holds a name against two callers that pass the repository's read-then-write check at the same moment. The identifier
+sequence keeps, per prefix, the highest identifier ever stored: a create mints past it, so a deleted entity's identifier is never handed to the next one, with the history and the references that still name it. The set is one migration because this application has no history — an example has one state, the present one, so its schema is the statement of that state rather than the record of how it got there, and a database left in an older shape is answered by `example:db:reset` rather than by a step that repairs its past. Until it is, it is refused by name: the set is recorded as applied by name and its tables are created `IF NOT EXISTS`, so it passes such a volume untouched, and the first resolution compares every table the set's own statements create with the table the volume holds — a missing column or one no statement declares refuses the volume with the table, the columns and `run example:db:reset --force`, where the first request reading the column used to answer 500. The columns
+alone do not show a type, a collation, a key or a constraint changed under the same names, so the set also records, in `melody_example_v4_schema_fingerprint`, a hash of every statement it built the volume with, and the first resolution refuses a volume whose hash is another — or that holds none, having been built before the set recorded one — the same way. A fingerprint vouches only for tables the set built: a volume that holds the set's tables without recording the set — provisioned before it, or with its bookkeeping lost — would have every `CREATE ... IF NOT EXISTS` pass over it and the hash written over tables built from anything, so the set refuses before its first statement, naming the tables it found and `example:db:reset --force`. What tells that volume from one the set itself began and did not finish is the set's own row: it is written as `building` before the first statement and sealed as `built` after the last, so a run interrupted halfway — a database that dropped mid-set —
+is finished by the next run under the same code, while a volume holding the tables with no row of the set's, or a row still building under another code's hash, is refused; the first resolution vouches only for a row sealed `built`. This is the catalogue's set, on the catalogue's connection; the reading archive has a set and a command family of its own, described below. Two doors run the set, so neither can drift from the other:
+
+- the **catalogue schema** calls `migration.EnsureMigrated`, then creates the audit trail's tables and seeds the nomenclatures, under the runtime of whoever resolves it: an http process at boot, a command at its first read of the catalogue. Every repository constructor takes the schema and performs no query, and the provider of the two-factor store resolves it too, at the first request that needs one — which is what keeps a freshly recreated volume usable with no operator step, and what lets a refusal heal: the store used to be built once at boot, so a database briefly down, or a volume a reset had yet to bring here, left `/twofactor/*` unregistered until the process restarted; resolved per request, a refused store answers 503 and the next request asks again, and a user deletion that cannot reach the store journals it and goes on, the cascade on the account having released the row. It is also why every `CREATE TABLE` carries `IF NOT EXISTS`: several processes of the example may apply the set at the same time, serialized by bun's migration lock with a bounded retry that names `db:unlock` when it gives up — the retry also outlives a refusal a retry can
+  heal, a lock wait timeout, a deadlock or a dropped connection, while a refusal no wait heals, a missing grant, is answered at once;
+- the **`db:*` command family** (`db:init`, `db:migrate`, `db:rollback`, `db:status`, `db:unlock`, `db:create`) runs the same set from the operator's side. It comes from the [`integrations/bunorm/migrate`](../../integrations/bunorm/migrate/v4/) module facade registered in [`config/configure.go`](./config/configure.go), pinned to the example's own manager registry service.
+
+`example:db:reset` is the third door, and the only one that goes backwards. It drops the tables the set owns, drops and recreates the bun bookkeeping with them, applies the schema again and reseeds every nomenclature in one pass. The audit trail is emptied and then receives the reseed as ONE audit transaction: the products and users seeded, each with its insert entry, under a transaction row naming the run (`process:<id>`) and the command. It exists because this application has no history: a database left in an older shape — carrying bookkeeping rows that name migrations this schema no longer has, or identifier columns created under the collation the tables had before they compared identifiers byte for byte, or a two-factor table created before its rows were tied to their account by a foreign key — is brought to the present state here, by a command an operator runs deliberately, rather than by code every process pays for at boot. The accounts go with their table through no door that
+publishes a deletion, and the reseed hands their identifiers out again, so with Redis the reset also empties the token store's namespace — every device token and revocation epoch — right after the drop; without Redis the device tokens live in the running server's own memory, out of a console command's reach, and the plan says so. It refuses to act without `--force`, printing what it would drop and exiting zero, and it is a command of the application rather than of the migration module: dropping an application's whole schema is not an operator door a published module should grow. The audit trail is emptied with the rest, though its table is not dropped: the schema belongs to the module that opens it, the rows belong to this application, and a trail carried across a reset would name entities that no longer exist, over identifiers the reset hands out again with the sequence it dropped.
+
+The connection itself is declared in a `bunorm.ManagerRegistry` ([`config/database.go`](./config/database.go)) rather than opened directly: the registry is the one door the commands resolve, and the `*bun.DB` the rest of the application holds is its default manager. Closing the registry is what closes the pool — and what puts it in reach of the ordered teardown is that the catalogue storage RESOLVES the handle rather than holding the one the composition root built, because the container records a dependency at the moment one provider resolves another. The registry itself is built inside its provider, on the application's journal, which that provider resolves, so the pool's reporting and bun's diagnostics reach the journal from the first open, and it is built at boot, so a definition it refuses, a declared host without its database, fails the boot; each handle is opened under the runtime of the resolution that publishes it, and ends when that caller ends or the registry closes, a waiter coalesced behind a caller who left building it again; in an http process the catalogue schema opens the catalogue at boot, under the boot runtime, whose context is the process's, so there the signal ends an open in flight.
+
+The module is registered whether or not a database is configured, so the command surface does not change between environments; without one every `db:*` command fails at `Run` with the container refusal naming the registry service.
+
+The framework's own tables are not in the set: the outbox store and the audit registry each open their schema through the module that owns it, and a set belonging to the application would claim tables it does not own.
+
+The set lives in a database of this major's own — `melody_example_v4`, named in [`.env`](./.env). The three example applications share the development MySQL and not a database in it: the bun bookkeeping tables (`bun_migrations`, `bun_migration_locks`) keep their default names, and bun matches an applied migration by name, so on one shared database the three sets would share one bookkeeping table and the first to land would answer for the others.
+
+### The reading archive — the second database
+
+This example holds **two** databases: the catalogue on MySQL and an archive of catalogue readings on PostgreSQL. They are two independent switches — `MYSQL_HOST` and `PGSQL_HOST`, each empty-means-unwired — so all four combinations boot: both live, either one alone, or neither.
+
+The archive is what the scheduled report leaves behind. `catalog:report:refresh` takes a reading of the catalogue, leaves it in the cache, records it — one row per reading, so `GET /reports/api/history/` can answer how the catalogue has moved, beside the current reading it serves from the cache, held for the refresh interval and at least the hour and five minutes of the schedule — and then pushes it to the export endpoint: the archive is the durable half and depends on nothing the sink does, so a sink that refuses takes the exit code after the row is there rather than leaving a hole in the history. The archive is opened when the refresh acquires its archive lock, whose resolution opens the PostgreSQL handle, or when the history door resolves its repository — never at boot: a process that takes no reading never dials PostgreSQL, and the open is bounded by a budget of its own, three attempts inside a second, under the process's signal context. The listing requires `ROLE_USER`, the role
+the category and currency listings carry — a reading is the catalogue counted, so whoever may not read the nomenclature may not read its history either; the detailed product listing requires `ROLE_EDITOR` — and takes a `limit` the door caps, because the archive grows for the life of a volume.
+
+Three things about it are worth reading rather than inferring:
+
+- **A reading's identity is the instant it was taken at, to the second.** That is the resolution the reading already states about itself: its payload writes `recorded_at` as RFC3339, which carries no fraction, so a key kept finer would disagree with the very value it keys. The instant is the table's primary key, so two refreshes inside one second are the same reading — and the second one is told it did not write rather than being failed.
+- **The archive is written by the SCHEDULE, not by a request.** A reading is taken on the request path too, whenever a caller finds a cold cache; archiving there would put a write to a second database on a read, make a read door fail when PostgreSQL is down, and fill the archive with rows nobody scheduled.
+- **The write is taken under a PostgreSQL advisory lock** ([`pgsql.NewLocker`](../../integrations/bunorm/pgsql/v4/lock.go)), registered under a name of its own rather than the framework's locker service — that one is Redis when Redis is configured, and the archive is not on Redis. A lock held in the very database being written is exclusion that cannot disagree with the write it guards, and a session advisory lock is released when its connection drops, so a process that dies mid-refresh leaves nothing to clean up. The lock is taken around the whole run — the reading, the row, the export — so processes that OVERLAP on one schedule record one reading between them: the loser takes no reading at all and says so. Two runs that do not overlap, one host's tick a second after another's, are two readings keyed on the instant each took; the identity of a reading is the second it was taken at, and the lock does not change that. Without PostgreSQL the locker under that name is the in-process one,
+  over the in-process archive — which is a repository of ONE process: the refresh command records into its own process's archive and exits, and the http server's history door reads its own, which nothing writes, so without PostgreSQL the history door answers an empty list. The in-process archive exists so the command has a producer to run against, not so the server has something to show; the same topology holds for the cache's in-process fallback, described above.
+
+The archive's schema is a set of its own, in the same package, and it has to be: `bun_migrations` is per database, so two databases need two sets and one set could never span them. It is exposed as a migration **context** of the `bunorm/migrate` module, which gives it the `db:archive:*` command family (`db:archive:migrate`, `db:archive:status`, `db:archive:rollback`, `db:archive:unlock`, …) pinned to its own manager — so `db:archive:migrate` defaults to PostgreSQL, and only an explicit `--manager` sends it elsewhere. The base `db:*` family is pinned to the catalogue's manager for the same reason, and that pin is not symmetry: unpinned it takes the registry's default, and in an environment that wired the archive alone an unqualified `db:migrate` would aim the catalogue's MySQL DDL at PostgreSQL.
+
+`GET /reports/api/export/?limit=` answers the same readings as a `text/csv` attachment named `catalog-readings-<date>.csv`, for a spreadsheet; a cell that would read as a formula (`=`, `+`, `-`, `@`, a tab or a carriage return first) is prefixed with an apostrophe.
+
+`example:db:reset` covers both databases, and names both in the plan it prints before it destroys anything. An environment that wired no archive is not told its reset failed over a database it never asked for: that half is skipped, and the plan stays silent about it.
+
+The archive database is this major's own too — `melody_example_v1` and `melody_example_v4` are created on the development PostgreSQL by [`init.sql`](../../.dev/docker/postgres/init.sql) on a fresh volume, and idempotently by the e2e harness for a volume that predates it. `melody_test` stays behind for the live integration suites.
+
+### Running fully against containers
+
+The dev [`docker-compose.yml`](../../.dev/docker/docker-compose.yml) provides the whole backing stack — RabbitMQ, Redis, MySQL, PostgreSQL, LocalStack (S3), Mailpit (SMTP), Prometheus, and an OpenTelemetry collector. The one-command way to run the entire showcase is the [`./dc`](../../dc) wrapper:
+
+```bash
+# from the repository root — build the dev image and start the example + every backend
+./dc up:all --build
+```
+
+This brings up the backing services **and** the example itself: the `dev-v4` container builds the frontend bundle and runs the app under a hot-reload + restart supervisor. The example reads its integration endpoints from [`.env`](./.env), which points at the compose service names (`REDIS_ADDRESS=redis:6379`, `MYSQL_HOST=mysql`, `AMQP_DSN=amqp://…@rabbitmq:5672/`, `S3_ENDPOINT=localstack:4566`, `SMTP_ADDRESS=mailpit:1025`, `OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317`), so no manual configuration is needed. Open it on the mapped host port:
+
+- `v4-example.melody.localhost.precision-soft.com` through the load balancer, on `LOAD_BALANCER_HTTP_HOST_PORT` (`80` by default); the `dev` container on `DEV_HTTP_HOST_PORT` serves the third major's example
+
+Notes:
+
+- **`--build` rebuilds the dev image** — use it after changing dependencies or the container [`entrypoint.sh`](../../.dev/docker/entrypoint.sh). For day-to-day Go/HTML/asset edits `./dc up:all` (without `--build`) is enough; reflex hot-reloads them.
+- **Always `up:all`, not plain `up`.** The backends live on the compose `all` profile, so `./dc up` / `./dc up:minimal` start only the dev containers (`dev`, `dev-v1`, `dev-v2`, `dev-v4`) and the load balancer — the example would then have no Redis/MySQL to reach. Use `./dc up:all` whenever you want the live integrations.
+- **Cold-start is self-healing.** If a backend is not ready yet — or you start it afterwards — the MySQL/Redis providers retry the initial connection with backoff and the entrypoint supervisor restarts the process, so the app comes up on its own without a manual restart.
+- **A proxy in front has to forward the host the browser asked for.** The websocket stream handler is configured with no origin patterns, so the library's same-origin default is what stops a foreign page from riding a signed-in visitor's session cookie onto the feed — and that default compares the browser's Origin header with the Host the application was handed. An nginx that forwards the server name rather than the raw Host strips the port, so on any published port but 80 the two disagree and every upgrade is refused with 403, which reads exactly like the refusal a foreign origin gets. The dev load balancer forwards the raw Host; a deployment behind a different proxy has to do the same, or name its own allowed origins.
+
+The endpoints listed above then work through that host, e.g. `curl -H 'Host: v4-example.melody.localhost.precision-soft.com' localhost/platform/check`, `curl -H 'Host: v4-example.melody.localhost.precision-soft.com' localhost/encrypt/roundtrip`.
+
+#### Running the binary directly against mapped ports
+
+To run `go run .` on the host (outside the dev container) instead, point the integrations at the **mapped host ports**. Melody reads configuration from the `.env` artifacts alone — a process environment variable is ignored, and each one that matches a resolved parameter with a different value is named by the boot warning `application.environment.processVariableIgnored` — so the override goes into `.env.local` (git-ignored, loaded after `.env` and winning over it):
+
+```bash
+cd v4/.example
+cat > .env.local <<'ENV'
+AMQP_DSN=amqp://guest:guest@localhost:5673/
+REDIS_ADDRESS=localhost:6380
+S3_ENDPOINT=localhost:4566
+S3_ACCESS_KEY=test
+S3_SECRET_KEY=test
+S3_BUCKET=melody-example
+MYSQL_HOST=localhost
+MYSQL_PORT=3307
+MYSQL_DATABASE=melody_example_v4
+MYSQL_USER=melody
+MYSQL_PASSWORD=melody
+PGSQL_HOST=localhost
+PGSQL_PORT=5433
+SMTP_ADDRESS=localhost:1026
+OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
+ENV
+go run .
+```
+
+---
+
+## API response envelope
+
+The application's json doors answer a json client through one envelope, built in [`presenter/error_presenter.go`](./presenter/error_presenter.go):
+
+- `success` — a boolean, so a caller branches on the envelope rather than on the status code
+- `payload` — the answer itself; `null` on a failure, except the second-factor challenge — the login door's, and the enrollment door's when an enrolled account enrolls again — a `401` whose payload is `{"factor": "totp"}` so the client knows to ask for the code
+- `errors` — a list of messages, empty on success rather than absent. A validation refusal carries **one entry per violated field**, each spelled `field: message` (`presenter.ApiRefusal`), so a client attaches every message to the input that earned it
+- `context` — always present on a failure (time, status code, method, path, route name and pattern, request id, route parameters); its `error` entry — the cause's message and type — only when the kernel environment enables debug material
+- `trace` — only when the kernel environment enables debug material
+
+A refusal that carries a `Retry-After` delay, the firewall's `503` for a credential its store could not check included, keeps it as the header on the envelope.
+
+The frontend reads exactly these fields (`assets/app.ts` checks `success` and shows `errors[0]`). Four showcase doors answer their success with a json body of their own, shaped for what they demonstrate, and keep the envelope for their refusals: the access-token doors (`/access-token/*`), the welcome-email dispatch (`POST /messagebus/dispatch`), `GET /encrypt/roundtrip`, and `GET /platform/check`, whose `409` "busy" is its own body too. A refusal the framework answers before any handler runs — the firewall's `401` to an anonymous caller, its `403` to a role the access control refuses — is the framework's own error envelope, `{"status": …, "time": …, "error": {"message": …}}`, not this one. A `text/plain` client's refusal is written as lines instead, as described below.
+
+A refusal of the server's own class — a `500` a handler answers as a response, with the cause it holds — is
+JOURNALED by the presenter, at error, with the cause, the status, the public message and the route as the
+router matched it: the kernel journals a handler's failure only when the failure is RETURNED, so a door that
+answered it as a response reached the terminate listener alone, one info line and no cause, and outside
+development the reason a door answered `500` existed nowhere. A client's own refusal, below `500`, is not
+journaled; its cause travels in the body's debug-gated context under the development environment alone.
+
+The hub carries two topics, each read behind the role its content is written behind: `default`, the catalogue's products, categories and currencies, behind `ROLE_EDITOR`, and `user-directory`, the accounts, behind `ROLE_ADMIN`. A stream names its topic in the query, `GET /events/stream/?topic=user-directory` or `GET /ws?topic=user-directory` (the users page opens the latter), the catalogue's when it names none; a caller without the topic's role is refused `403` before anything is committed, on `/ws` by a middleware in front of the integration's handler and ahead of the slot count, so a refused topic takes no slot. `POST /events/publish/?topic=` takes the same gate: an editor publishes onto the catalogue's topic and any topic the application does not carry, never onto the administrators'.
+
+A stream holds no longer than the authority it was opened on: the account it was signed in as, its roles and its password, and its session. Both doors open that authority from the request's token and session, so a request without a signed-in session is refused `401`, and re-read it every `APP_EVENT_STREAM_REVISION_INTERVAL` (15s by default, at least 1s), straight from the directory and the session storage: a stream whose account's roles or password changed, whose account was deleted or whose session was signed out ends, as does one whose account cannot be re-read, journaled as a warning; a re-read cut by the client leaving is no outage and is not journaled. On `/ws` the re-read runs on a goroutine of the middleware's, so a panic inside it is journaled as an error and ends that connection alone. The event stream sends a last `closed: <reason>` comment (`revision-changed`, `account-absent`, `session-ended`, `account-unreadable`); `/ws` is closed by its integration once a middleware after the slot count cancels the connection's context. The re-read has no env switch: `StreamRevisionConfig{Disabled: true}` in `config/server_sent_event.go` turns it off.
+
+One account holds at most four streams open at once and the process 256, counted across the event stream and the `/ws` websocket route: past either, the next one is refused with `429` before anything is committed — the websocket route through a middleware in front of the integration's handler, which accepts the upgrade itself — and a stream that closes frees its place.
+
+The event stream (`GET /events/stream/`) re-arms the server's write deadline before every frame and sends a
+keepalive comment every half of it, so a stream that outlives the server's `WriteTimeout` keeps delivering —
+`net/http` arms that deadline once, from the request line, and the first event published after it used to be
+the one lost, on a connection the client still believed open. A write that fails while the client is still
+there is journaled as a frame lost; a client that left is the ordinary end of a stream and journals nothing.
+
+A refusal for a client that asks for `text/plain` is written as lines rather than handed to the plain-text serializer, which would print the envelope's fields bare: the status and the public errors first, then the request id, the time and the rest of the context in key order, and under the development environment the cause's trace one frame per line. A success keeps the serializer's rendering.
+
+---
+
+## Build modes: embedded vs filesystem
+
+The example supports **two independent resource families**, each of which can be used either from the filesystem or embedded into the binary:
+
+1. Environment configuration (`.env`-style files)
+2. Static assets (`public/`)
+
+They are controlled independently via build tags.
+
+---
+
+## 1) Environment configuration (`.env`)
+
+**Relevant files (paths relative to `.example/`):**
+
+- `embedded_env_local.go`
+- `embedded_env_embedded.go`
+
+**Build tag:**
+
+- `melody_env_embedded`
+
+### Behavior
+
+- **Without** `melody_env_embedded`\
+  Environment configuration is read from filesystem `.env` files.\
+  A built binary reads the directory it sits in; under `go run` the working directory (or the module root above it) is read instead, so for local development place `.env` there.
+
+- **With** `melody_env_embedded`\
+  Environment configuration is embedded into the binary at build time.\
+  The resulting binary can start without any external `.env` file.
+
+### Declared keys
+
+Every key outside `MELODY_` is declared in [`config/environment_key.go`](./config/environment_key.go) and handed to `ApplicationConfig.EnvironmentKeys`; the example reads the parameter each key feeds, never the key. A key absent from every `.env` file takes its declared default, and a key with a rule takes it on a blank line too. The example serves on `APP_HTTP_ADDRESS`: `ApplicationConfig.ParameterOverrides` rewrites `kernel.http_address` to `%env(APP_HTTP_ADDRESS)%`, so a `.env` line that still sets `MELODY_HTTP_ADDRESS` refuses the boot.
+
+---
+
+## 2) Static assets (`public/`)
+
+**Relevant files (paths relative to `.example/`):**
+
+- `embedded_static_local.go`
+- `embedded_static_embedded.go`
+
+**Build tag:**
+
+- `melody_static_embedded`
+
+### Behavior
+
+- **Without** `melody_static_embedded`\
+  Static assets are served from the filesystem `public/` directory.
+
+- **With** `melody_static_embedded`\
+  Static assets are embedded into the binary.\
+  No `public/` directory is required at runtime.
+
+---
+
+## Production packaging matrix
+
+Depending on how you build the binary, you must ship different artifacts.
+
+> **Run `cd assets && npm ci && npm run build` first.** Neither the frontend bundle nor the four shared icons is committed — they are produced by that one command, into a git-ignored `public/` (see [Frontend bundle](#frontend-bundle)). Under `melody_static_embedded` the `public/` directory is frozen into the binary at compile time (`//go:embed all:public`), so a binary built before that step carries neither and cannot gain them afterwards; under the filesystem modes the shipped `public/` is missing them just the same.
+
+### A) Fully embedded “black-box” binary (recommended for a self-contained handout)
+
+Build:
+
+```bash
+go build -tags "melody_env_embedded melody_static_embedded" -o example-app .
+```
+
+Ship:
+
+- `example-app` binary
+
+Required at runtime:
+
+- nothing else — the binary carries the `.env` file and every asset that was in `public/` **at the moment `go build` ran**, which is why the frontend build above has to come first
+
+---
+
+### B) External configuration, embedded static assets
+
+Build:
+
+```bash
+go build -tags "melody_static_embedded" -o example-app .
+```
+
+Ship:
+
+- `example-app` binary
+- `.env` file (s)
+
+Required at runtime:
+
+- `.env` file (s)
+
+Not required:
+
+- [`public/`](./public/) directory
+
+---
+
+### C) Embedded configuration, filesystem static assets
+
+Build:
+
+```bash
+go build -tags "melody_env_embedded" -o example-app .
+```
+
+Ship:
+
+- `example-app` binary
+- [`public/`](./public/) directory
+
+Required at runtime:
+
+- [`public/`](./public/)
+
+Not required:
+
+- `.env`
+
+---
+
+### D) Filesystem configuration + filesystem static assets
+
+Build:
+
+```bash
+go build -o example-app .
+```
+
+Ship:
+
+- `example-app` binary
+- `.env` file (s)
+- [`public/`](./public/) directory
+
+Required at runtime:
+
+- `.env`
+- [`public/`](./public/)
+
+---
+
+## Notes
+
+- This example is intentionally compact and optimized for readability.
+- Treat it as a **reference implementation** for Melody wiring patterns, not as a stable API contract.
+- The framework APIs demonstrated here are authoritative; the example itself may evolve freely.

@@ -1,0 +1,256 @@
+package service
+
+import (
+    "context"
+    "errors"
+    "strings"
+    "testing"
+
+    "github.com/precision-soft/melody/v4/.example/entity"
+    "github.com/precision-soft/melody/v4/.example/event"
+    "github.com/precision-soft/melody/v4/.example/persistence"
+    "github.com/precision-soft/melody/v4/.example/repository"
+    melodyclock "github.com/precision-soft/melody/v4/clock"
+    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
+    melodyevent "github.com/precision-soft/melody/v4/event"
+    melodylogging "github.com/precision-soft/melody/v4/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    melodysecurity "github.com/precision-soft/melody/v4/security"
+)
+
+type paddingCategoryRepository struct {
+    repository.CategoryRepository
+}
+
+func (instance *paddingCategoryRepository) FindById(ctx context.Context, id string) (*entity.Category, bool, error) {
+    return instance.CategoryRepository.FindById(ctx, strings.TrimRight(id, " "))
+}
+
+func TestCategoryService_FindByIdAnswersAPaddedIdentifierAsAbsentAndCachesNothingUnderIt(t *testing.T) {
+    categoryRepository, categoryErr := repository.NewCategoryRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
+    if nil != categoryErr {
+        t.Fatalf("build the category repository: %v", categoryErr)
+    }
+
+    cacheInstance := newTtlRecordingCache()
+    categoryService := NewCategoryService(&paddingCategoryRepository{CategoryRepository: categoryRepository}, newInMemoryProductRepositoryForTest(t), cacheInstance, nil)
+
+    assertPaddedIdentifierAnsweredAbsent(t, cacheInstance, CacheKeyCategoryById, func(id string) (bool, error) {
+        _, found, findErr := categoryService.FindById(exampleTestRuntime(), id)
+
+        return found, findErr
+    }, "cat-1")
+}
+
+func TestCategoryService_RefusesToDeleteACategoryAProductSitsIn(t *testing.T) {
+    _, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
+
+    categoryRepository, categoryErr := repository.NewCategoryRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
+    if nil != categoryErr {
+        t.Fatalf("build the category repository: %v", categoryErr)
+    }
+
+    if createErr := categoryRepository.Create(context.Background(), entity.NewCategory("cat-empty", "Empty")); nil != createErr {
+        t.Fatalf("create the empty category: %v", createErr)
+    }
+
+    categoryService := NewCategoryService(categoryRepository, newInMemoryProductRepositoryForTest(t), newTtlRecordingCache(), dispatcher.dispatcher)
+
+    if deleted, deleteErr := categoryService.DeleteById(runtimeInstance, "cat-1"); true == deleted || false == errors.Is(deleteErr, repository.ErrCategoryInUse) {
+        t.Fatalf("the delete of a used category answered deleted=%v err=%v", deleted, deleteErr)
+    }
+
+    if _, found, _ := categoryRepository.FindById(context.Background(), "cat-1"); false == found {
+        t.Fatalf("a refused delete removed the category")
+    }
+
+    if deleted, deleteErr := categoryService.DeleteById(runtimeInstance, "cat-empty"); false == deleted || nil != deleteErr {
+        t.Fatalf("the delete of an unused category answered deleted=%v err=%v", deleted, deleteErr)
+    }
+}
+
+func TestCategoryService_RefusesToDeleteAPaddedIdentifierOfACategoryAProductSitsIn(t *testing.T) {
+    _, dispatcher, runtimeInstance := currencyServiceUnderTest(t)
+
+    categoryRepository, categoryErr := repository.NewCategoryRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
+    if nil != categoryErr {
+        t.Fatalf("build the category repository: %v", categoryErr)
+    }
+
+    categoryService := NewCategoryService(categoryRepository, newInMemoryProductRepositoryForTest(t), newTtlRecordingCache(), dispatcher.dispatcher)
+
+    if deleted, deleteErr := categoryService.DeleteById(runtimeInstance, " cat-1 "); true == deleted || false == errors.Is(deleteErr, repository.ErrCategoryInUse) {
+        t.Fatalf("the delete of a padded used category answered deleted=%v err=%v", deleted, deleteErr)
+    }
+
+    if _, found, _ := categoryRepository.FindById(context.Background(), "cat-1"); false == found {
+        t.Fatalf("a refused delete removed the category")
+    }
+}
+
+func TestCategoryService_AnswersTheCommittedRowWhenADispatchFails(t *testing.T) {
+    catalogue := newCatalogueUnderTest(t, true)
+    catalogue.prime(t, CacheKeyCategoryList, CacheKeyCategoryById("cat-committed"))
+
+    category, createErr := catalogue.category.Create(catalogue.runtime, "cat-committed", "Probe")
+    if nil != createErr || nil == category {
+        t.Fatalf("expected the created category answered, got %+v, %v", category, createErr)
+    }
+    catalogue.assertCommittedDispatchFailure(t, event.EventCategoryCreated, "cat-committed", CacheKeyCategoryList, CacheKeyCategoryById("cat-committed"))
+
+    catalogue.logger.records = nil
+    catalogue.prime(t, CacheKeyCategoryList, CacheKeyCategoryById("cat-committed"))
+    updated, found, updateErr := catalogue.category.Update(catalogue.runtime, "cat-committed", "Renamed")
+    if nil != updateErr || false == found || nil == updated {
+        t.Fatalf("expected the updated category answered, got %+v, %t, %v", updated, found, updateErr)
+    }
+    catalogue.assertCommittedDispatchFailure(t, event.EventCategoryUpdated, "cat-committed", CacheKeyCategoryList, CacheKeyCategoryById("cat-committed"))
+
+    catalogue.logger.records = nil
+    catalogue.prime(t, CacheKeyCategoryList, CacheKeyCategoryById("cat-committed"))
+    deleted, deleteErr := catalogue.category.DeleteById(catalogue.runtime, "cat-committed")
+    if nil != deleteErr || false == deleted {
+        t.Fatalf("expected the delete answered, got %t, %v", deleted, deleteErr)
+    }
+    catalogue.assertCommittedDispatchFailure(t, event.EventCategoryDeleted, "cat-committed", CacheKeyCategoryList, CacheKeyCategoryById("cat-committed"))
+}
+
+type refusingUpdateCategoryRepository struct {
+    repository.CategoryRepository
+}
+
+func (instance *refusingUpdateCategoryRepository) Update(ctx context.Context, category *entity.Category) (bool, error) {
+    return false, errors.New("the database refused the update")
+}
+
+func TestCategoryService_ARefusedUpdateLeavesTheStoredEntityUntouched(t *testing.T) {
+    catalogue := newCatalogueUnderTest(t, false)
+    storage := persistence.NewCatalogStorage(nil)
+
+    categoryRepository, categoryRepositoryErr := repository.NewCategoryRepository(storage, &persistence.CatalogSchema{})
+    if nil != categoryRepositoryErr {
+        t.Fatalf("build the category repository: %v", categoryRepositoryErr)
+    }
+
+    productRepository, productRepositoryErr := repository.NewProductRepository(storage, &persistence.CatalogSchema{})
+    if nil != productRepositoryErr {
+        t.Fatalf("build the product repository: %v", productRepositoryErr)
+    }
+
+    categoryService := NewCategoryService(&refusingUpdateCategoryRepository{CategoryRepository: categoryRepository}, productRepository, catalogue.cache, melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()}))
+
+    before, _, _ := categoryRepository.FindById(context.Background(), "cat-1")
+    name := before.Name
+
+    if _, _, updateErr := categoryService.Update(catalogue.runtime, "cat-1", "Renamed"); nil == updateErr {
+        t.Fatalf("expected the refused update answered")
+    }
+
+    stored, _, _ := categoryRepository.FindById(context.Background(), "cat-1")
+    if name != stored.Name {
+        t.Fatalf("expected the stored category untouched by the refused update, got %q", stored.Name)
+    }
+}
+
+type slowCategoryRepository struct {
+    repository.CategoryRepository
+}
+
+func (instance *slowCategoryRepository) All(ctx context.Context) ([]*entity.Category, error) {
+    return nil, waitForTheCallerContext(ctx)
+}
+
+func (instance *slowCategoryRepository) FindById(ctx context.Context, id string) (*entity.Category, bool, error) {
+    return nil, false, waitForTheCallerContext(ctx)
+}
+
+func TestCategoryService_TheReadDoorsEndOnTheCallersContext(t *testing.T) {
+    categoryService := NewCategoryService(&slowCategoryRepository{}, nil, newTtlRecordingCache(), nil)
+
+    assertACanceledContextEndsTheRead(t, "List", func(ctx context.Context) error {
+        _, listErr := categoryService.List(exampleTestRuntimeUnder(ctx))
+
+        return listErr
+    })
+    assertACanceledContextEndsTheRead(t, "FindById", func(ctx context.Context) error {
+        _, _, findErr := categoryService.FindById(exampleTestRuntimeUnder(ctx), "cat-1")
+
+        return findErr
+    })
+}
+
+type actorRecordingCategoryRepository struct {
+    repository.CategoryRepository
+    actorList []string
+}
+
+func (instance *actorRecordingCategoryRepository) Create(ctx context.Context, category *entity.Category) error {
+    instance.actorList = append(instance.actorList, persistence.ActorFromContext(ctx))
+
+    return instance.CategoryRepository.Create(ctx, category)
+}
+
+func (instance *actorRecordingCategoryRepository) Update(ctx context.Context, category *entity.Category) (bool, error) {
+    instance.actorList = append(instance.actorList, persistence.ActorFromContext(ctx))
+
+    return instance.CategoryRepository.Update(ctx, category)
+}
+
+func (instance *actorRecordingCategoryRepository) DeleteById(ctx context.Context, id string) (bool, error) {
+    instance.actorList = append(instance.actorList, persistence.ActorFromContext(ctx))
+
+    return instance.CategoryRepository.DeleteById(ctx, id)
+}
+
+func TestCategoryService_WritesUnderTheWriteContext(t *testing.T) {
+    categoryRepository, categoryErr := repository.NewCategoryRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
+    if nil != categoryErr {
+        t.Fatalf("build the category repository: %v", categoryErr)
+    }
+
+    recording := &actorRecordingCategoryRepository{CategoryRepository: categoryRepository}
+
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
+    melodycontainer.MustRegister(
+        containerInstance,
+        melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return melodylogging.NewNopLogger(), nil
+        },
+        melodycontainer.RegisterOptions{},
+    )
+
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
+    melodysecurity.SecurityContextSetOnRuntime(
+        runtimeInstance,
+        melodysecurity.NewSecurityContext(
+            melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{Name: "main", Matcher: melodysecurity.NewPathPrefixMatcher("/"), MatcherDescription: "prefix /"}),
+            melodysecurity.NewAuthenticatedToken("editor-7", []string{entity.RoleEditor}, nil),
+        ),
+    )
+
+    categoryService := NewCategoryService(recording, newInMemoryProductRepositoryForTest(t), newTtlRecordingCache(), melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: melodyclock.NewSystemClock()}))
+
+    if _, createErr := categoryService.Create(runtimeInstance, "cat-actor", "Actor"); nil != createErr {
+        t.Fatalf("create: %v", createErr)
+    }
+    if _, _, updateErr := categoryService.Update(runtimeInstance, "cat-actor", "Renamed"); nil != updateErr {
+        t.Fatalf("update: %v", updateErr)
+    }
+    if _, deleteErr := categoryService.DeleteById(runtimeInstance, "cat-actor"); nil != deleteErr {
+        t.Fatalf("delete: %v", deleteErr)
+    }
+
+    if 3 != len(recording.actorList) {
+        t.Fatalf("expected the three writes recorded, got %v", recording.actorList)
+    }
+
+    for index, actor := range recording.actorList {
+        if "editor-7" != actor {
+            t.Fatalf("expected write %d under the signed-in actor, got %q", index, actor)
+        }
+    }
+}

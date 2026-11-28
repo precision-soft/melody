@@ -1,0 +1,297 @@
+package logging
+
+import (
+    "context"
+    "errors"
+    "fmt"
+    "os"
+    "os/signal"
+    "path/filepath"
+    "sync"
+
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    "github.com/precision-soft/melody/v4/internal"
+)
+
+/* ErrRotatedDescriptorNotClosed marks the failure Reopen reports after the rotation happened: the fresh descriptor takes the writes, and only the replaced one refused to close. A caller reading it must not report a failed rotation. */
+var ErrRotatedDescriptorNotClosed = errors.New("the descriptor replaced by the rotation could not be closed")
+
+const (
+    /* DefaultLogFileMode is the permission a journal file is created with when ReopenableFileWriterConfig.FileMode is left out. */
+    DefaultLogFileMode os.FileMode = 0o640
+    /* DefaultLogDirectoryMode is the permission a missing journal directory is created with when ReopenableFileWriterConfig.DirectoryMode is left out. */
+    DefaultLogDirectoryMode os.FileMode = 0o750
+)
+
+/* ReopenableFileWriterConfig is what a reopenable file writer is built from beside its path. Both modes are creation modes: the process umask still narrows them, and a file or directory that already exists keeps its own. */
+type ReopenableFileWriterConfig struct {
+    /* FileMode is the permission the file is created with, on the first open and on every reopen that finds no file: DefaultLogFileMode when left out; permission bits only, the owner's read and write required. */
+    FileMode os.FileMode
+    /* DirectoryMode is the permission every missing directory of the path is created with, on the first open and on every reopen: DefaultLogDirectoryMode when left out; permission bits only, the owner's read, write and search required. */
+    DirectoryMode os.FileMode
+}
+
+/* NewReopenableFileWriter creates the missing directories of the path, opens the file for appending and answers a writer that can reopen it under the same path, which rename-based rotation needs. Every write, the reopen and the close serialize on one lock, so a record is never torn across the swap nor written to a closed descriptor. */
+func NewReopenableFileWriter(path string, config ReopenableFileWriterConfig) (*ReopenableFileWriter, error) {
+    fileMode, fileModeErr := internal.ResolveCreationMode(config.FileMode, DefaultLogFileMode, internal.JournalFileModeFloor, internal.JournalFileModeRefusal, "ReopenableFileWriterConfig.FileMode")
+    if nil != fileModeErr {
+        return nil, fileModeErr
+    }
+
+    directoryMode, directoryModeErr := internal.ResolveCreationMode(config.DirectoryMode, DefaultLogDirectoryMode, internal.JournalDirectoryModeFloor, internal.JournalDirectoryModeRefusal, "ReopenableFileWriterConfig.DirectoryMode")
+    if nil != directoryModeErr {
+        return nil, directoryModeErr
+    }
+
+    file, openErr := openReopenableFile(path, fileMode, directoryMode)
+    if nil != openErr {
+        return nil, openErr
+    }
+
+    return &ReopenableFileWriter{
+        path:          path,
+        fileMode:      fileMode,
+        directoryMode: directoryMode,
+        file:          file,
+    }, nil
+}
+
+type ReopenableFileWriter struct {
+    mutex         sync.Mutex
+    path          string
+    fileMode      os.FileMode
+    directoryMode os.FileMode
+    file          *os.File
+    closed        bool
+
+    watcherArmed  bool
+    signalChannel chan os.Signal
+    stopChannel   chan struct{}
+    doneChannel   chan struct{}
+    stopOnce      sync.Once
+}
+
+func (instance *ReopenableFileWriter) Write(payload []byte) (int, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if true == instance.closed {
+        return 0, exception.NewError(
+            "reopenable file writer is closed",
+            map[string]any{
+                "path": instance.path,
+            },
+            nil,
+        )
+    }
+
+    return instance.file.Write(payload)
+}
+
+/* Reopen opens the path fresh, recreating a missing directory and file at the configured modes, swaps the descriptor and closes the one it replaces. A path that cannot be opened keeps the current descriptor and reports the failure, meaning no rotation; a replaced descriptor that refuses to close after the swap reports ErrRotatedDescriptorNotClosed, meaning the rotation happened. */
+func (instance *ReopenableFileWriter) Reopen() error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if true == instance.closed {
+        return exception.NewError(
+            "reopenable file writer is closed",
+            map[string]any{
+                "path": instance.path,
+            },
+            nil,
+        )
+    }
+
+    freshFile, openErr := openReopenableFile(instance.path, instance.fileMode, instance.directoryMode)
+    if nil != openErr {
+        return openErr
+    }
+
+    previousFile := instance.file
+    instance.file = freshFile
+
+    closeErr := previousFile.Close()
+    if nil != closeErr {
+        /* the swap is committed and not rolled back: the fresh descriptor is the one the writer holds */
+        return exception.NewError(
+            "failed to close the descriptor replaced by the log rotation",
+            map[string]any{
+                "path": instance.path,
+            },
+            errors.Join(closeErr, ErrRotatedDescriptorNotClosed),
+        )
+    }
+
+    return nil
+}
+
+/* ArmReopenOnSignal reopens the file each time one of the signals arrives; SIGHUP is the one logrotate sends. A failed reopen is reported on stderr, since this writer is usually the journal, and the descriptor in use keeps writing; ErrRotatedDescriptorNotClosed is announced apart. Close unregisters the signals and joins the watcher, and arming twice is refused, since two watchers would race each other's reopen. */
+func (instance *ReopenableFileWriter) ArmReopenOnSignal(signals []os.Signal) error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if true == instance.closed {
+        return exception.NewError(
+            "reopenable file writer is closed",
+            map[string]any{
+                "path": instance.path,
+            },
+            nil,
+        )
+    }
+
+    if true == instance.watcherArmed {
+        return exception.NewError(
+            "reopen signal watcher is already armed",
+            map[string]any{
+                "path": instance.path,
+            },
+            nil,
+        )
+    }
+
+    if 0 == len(signals) {
+        return exception.NewError(
+            "reopen signal watcher needs at least one signal",
+            map[string]any{
+                "path": instance.path,
+            },
+            nil,
+        )
+    }
+
+    instance.watcherArmed = true
+    instance.signalChannel = make(chan os.Signal, 1)
+    instance.stopChannel = make(chan struct{})
+    instance.doneChannel = make(chan struct{})
+
+    signal.Notify(instance.signalChannel, signals...)
+
+    go instance.watchReopenSignals()
+
+    return nil
+}
+
+func (instance *ReopenableFileWriter) watchReopenSignals() {
+    defer close(instance.doneChannel)
+
+    for {
+        select {
+        case <-instance.stopChannel:
+            return
+
+        case _, open := <-instance.signalChannel:
+            if false == open {
+                return
+            }
+
+            reopenErr := instance.Reopen()
+            if nil != reopenErr {
+                if true == errors.Is(reopenErr, ErrRotatedDescriptorNotClosed) {
+                    fmt.Fprintf(os.Stderr, "melody: the log journal rotated, and the descriptor it replaced could not be closed: %v\n", reopenErr)
+                } else {
+                    fmt.Fprintf(os.Stderr, "melody: the log journal could not be reopened after a rotation signal: %v\n", reopenErr)
+                }
+            }
+        }
+    }
+}
+
+/* CloseWithContext disarms the signal watcher before it surrenders the descriptor, in that order, so no signal reopens a file nobody owns, and is safe to call more than once. The disarm waits for the watcher, which may be inside a reopen on a stuck filesystem: the call stops waiting when the context ends first, answering the context's error, and the close goes on finishing in the background. */
+func (instance *ReopenableFileWriter) CloseWithContext(closeContext context.Context) error {
+    if true == internal.IsNilInterface(closeContext) {
+        return exception.NewError("the close context is nil", exceptioncontract.Context{"door": "ReopenableFileWriter.CloseWithContext"}, nil)
+    }
+
+    closed := make(chan error, 1)
+    go func() {
+        closed <- instance.disarmThenSurrender()
+    }()
+
+    select {
+    case closeErr := <-closed:
+        return closeErr
+    case <-closeContext.Done():
+        return closeContext.Err()
+    }
+}
+
+func (instance *ReopenableFileWriter) disarmThenSurrender() error {
+    instance.mutex.Lock()
+    alreadyClosed := instance.closed
+    watcherArmed := instance.watcherArmed
+    instance.mutex.Unlock()
+
+    if true == alreadyClosed {
+        return nil
+    }
+
+    if true == watcherArmed {
+        instance.disarmReopenWatcher()
+    }
+
+    instance.mutex.Lock()
+
+    if true == instance.closed {
+        instance.mutex.Unlock()
+        return nil
+    }
+
+    instance.closed = true
+    /* a watcher armed between the first look and this lock would outlive the writer, so the check is repeated under the lock Arm takes */
+    watcherArmed = instance.watcherArmed
+    file := instance.file
+
+    instance.mutex.Unlock()
+
+    if true == watcherArmed {
+        instance.disarmReopenWatcher()
+    }
+
+    return file.Close()
+}
+
+func (instance *ReopenableFileWriter) disarmReopenWatcher() {
+    instance.stopOnce.Do(
+        func() {
+            signal.Stop(instance.signalChannel)
+            close(instance.stopChannel)
+        },
+    )
+    <-instance.doneChannel
+}
+
+func openReopenableFile(path string, fileMode os.FileMode, directoryMode os.FileMode) (*os.File, error) {
+    directory := filepath.Dir(path)
+
+    mkdirErr := os.MkdirAll(directory, directoryMode)
+    if nil != mkdirErr {
+        return nil, exception.NewError(
+            "failed to create the log directory",
+            map[string]any{
+                "path":      path,
+                "directory": directory,
+            },
+            mkdirErr,
+        )
+    }
+
+    file, openErr := os.OpenFile(
+        path,
+        os.O_CREATE|os.O_APPEND|os.O_WRONLY,
+        fileMode,
+    )
+    if nil != openErr {
+        return nil, exception.NewError(
+            "failed to open log file",
+            map[string]any{
+                "path": path,
+            },
+            openErr,
+        )
+    }
+
+    return file, nil
+}

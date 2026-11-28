@@ -1,0 +1,448 @@
+package debug
+
+import (
+    "fmt"
+    "sort"
+    "strings"
+    "time"
+
+    clicontract "github.com/precision-soft/melody/v4/cli/contract"
+    "github.com/precision-soft/melody/v4/cli/output"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/event"
+    eventcontract "github.com/precision-soft/melody/v4/event/contract"
+)
+
+/* DeferredListener declares a listener the serving process wires and this process does not, so the listing names it instead of reporting an absence. */
+type DeferredListener struct {
+    EventName    string `json:"eventName"`
+    Priority     int    `json:"priority"`
+    ListenerName string `json:"listenerName"`
+    Note         string `json:"note"`
+}
+
+type DeferredListenerProvider func() []DeferredListener
+
+/* NewEventCommand builds the command with its deferred-listener declaration; the zero value declares nothing. */
+func NewEventCommand(deferredListenerProvider DeferredListenerProvider) *EventCommand {
+    return &EventCommand{
+        deferredListenerProvider: deferredListenerProvider,
+    }
+}
+
+type EventCommand struct {
+    deferredListenerProvider DeferredListenerProvider
+}
+
+func (instance *EventCommand) Name() string {
+    return "debug:events"
+}
+
+func (instance *EventCommand) Description() string {
+    return "List registered events and listeners"
+}
+
+func (instance *EventCommand) Flags() []clicontract.Flag {
+    return output.DebugFlags()
+}
+
+func (instance *EventCommand) Run(
+    runtimeInstance containercontract.Runtime,
+    commandContext *clicontract.CommandContext,
+) error {
+    startedAt := time.Now()
+
+    option, normalizeOptionErr := output.NormalizeOptions(output.ParseOptionsFromCommand(commandContext))
+    if nil != normalizeOptionErr {
+        return normalizeOptionErr
+    }
+
+    meta := output.NewMeta(
+        instance.Name(),
+        output.MetaConfig{
+            Arguments: commandContext.Args().Slice(),
+            Options:    option,
+            StartedAt: startedAt,
+        },
+    )
+
+    envelope := output.NewEnvelope(meta)
+
+    dispatcher := event.EventDispatcherMustFromRuntime(runtimeInstance)
+
+    registeredEvents := dispatcher.RegisteredEvents()
+
+    items := make([]eventListItem, 0, len(registeredEvents))
+
+    listenerTotal := 0
+    fromSubscriberTotal := 0
+
+    /* the total counts distinct subscriber types across the dispatcher, not installations and not per event */
+    subscriberOwnerGlobalSet := make(map[string]struct{})
+
+    for _, registeredEvent := range registeredEvents {
+        listenerTotal = listenerTotal + len(registeredEvent.Listeners)
+
+        priorities := make([]string, 0, len(registeredEvent.Listeners))
+
+        fromSubscriberCount := 0
+        subscriberOwnerSet := make(map[string]struct{})
+
+        for _, listener := range registeredEvent.Listeners {
+            priorities = append(priorities, fmt.Sprintf("%d", listener.Config.Priority))
+
+            if eventcontract.RegisteredListenerSourceSubscriber == listener.Source {
+                fromSubscriberCount = fromSubscriberCount + 1
+
+                if "-" != listener.Owner && "" != listener.Owner {
+                    subscriberOwnerSet[listener.Owner] = struct{}{}
+                    subscriberOwnerGlobalSet[listener.Owner] = struct{}{}
+                }
+            }
+        }
+
+        subscriberOwnerCount := len(subscriberOwnerSet)
+
+        fromSubscriberTotal = fromSubscriberTotal + fromSubscriberCount
+
+        items = append(
+            items,
+            eventListItem{
+                EventName:            registeredEvent.EventName,
+                ListenerCount:        len(registeredEvent.Listeners),
+                FromSubscriberCount:  fromSubscriberCount,
+                SubscriberOwnerCount: subscriberOwnerCount,
+                Priorities:           strings.Join(priorities, ","),
+            },
+        )
+    }
+
+    sort.Slice(
+        items,
+        func(leftIndex int, rightIndex int) bool {
+            return items[leftIndex].EventName < items[rightIndex].EventName
+        },
+    )
+
+    output.ApplySortOrder(items, option.Order)
+
+    total := len(items)
+    windowed, windowItemsErr := output.WindowItems(items, option.Limit, option.Offset)
+    if nil != windowItemsErr {
+        return windowItemsErr
+    }
+
+    items = windowed
+
+    if output.FormatTable == option.Format {
+        builder := output.NewTableBuilder()
+
+        summary := fmt.Sprintf(
+            "EVENTS: %d total | LISTENERS: %d total | FROM SUBSCRIBERS: %d total | SUBSCRIBERS: %d total",
+            total,
+            listenerTotal,
+            fromSubscriberTotal,
+            len(subscriberOwnerGlobalSet),
+        )
+
+        if len(items) != total {
+            summary = fmt.Sprintf(
+                "%s | %d shown",
+                summary,
+                len(items),
+            )
+        }
+
+        builder.AddSummaryLine(summary)
+
+        block := builder.AddBlock(
+            "EVENTS",
+            []string{"event", "listeners", "from subscribers", "subscriber types", "priorities"},
+        )
+
+        for _, item := range items {
+            block.AddRow([]string{
+                item.EventName,
+                fmt.Sprintf("%d", item.ListenerCount),
+                fmt.Sprintf("%d", item.FromSubscriberCount),
+                fmt.Sprintf("%d", item.SubscriberOwnerCount),
+                item.Priorities,
+            })
+        }
+
+        if true == option.Verbose {
+            verboseBlock := builder.AddBlock(
+                "LISTENERS",
+                []string{"event", "order", "priority", "required", "tags", "after failure", "source", "owner", "listener"},
+            )
+
+            for _, registeredEvent := range selectSortedRegisteredEvents(registeredEvents, items, option.Order) {
+                verboseBlock.AddRow([]string{output.TableRowSeparatorToken})
+
+                /* the rows keep the dispatcher's slice order, which is the dispatch order */
+                for index, listener := range registeredEvent.Listeners {
+                    eventCell := ""
+                    if 0 == index {
+                        eventCell = registeredEvent.EventName
+                    }
+
+                    verboseBlock.AddRow([]string{
+                        eventCell,
+                        fmt.Sprintf("%d", index+1),
+                        fmt.Sprintf("%d", listener.Config.Priority),
+                        renderRequiredListenerMark(listener),
+                        renderListenerTags(listener.Config.Tags),
+                        renderRunsAfterFailureMark(listener),
+                        listener.Source,
+                        listener.Owner,
+                        listener.ListenerName,
+                    })
+                }
+
+                verboseBlock.AddRow([]string{output.TableRowSeparatorToken})
+            }
+
+            /* a declaration is listed on its own, so one made for an event no listener carries yet stays visible */
+            declarationItems := collectDeclarationListItems(registeredEvents, items, option.Order)
+            if 0 < len(declarationItems) {
+                declarationBlock := builder.AddBlock(
+                    "DECLARED EVENTS",
+                    []string{"event", "tags to run after failure"},
+                )
+
+                for _, declarationItem := range declarationItems {
+                    declarationBlock.AddRow([]string{
+                        declarationItem.EventName,
+                        renderListenerTags(declarationItem.Config.TagsToRunAfterFailure),
+                    })
+                }
+            }
+        }
+
+        renderDeferredListenerBlock(builder, instance.deferredListeners())
+
+        envelope.Table = builder.Build()
+    } else {
+        eventsPayload := output.NewListPayload(
+            items,
+            output.ListPayloadConfig{
+                Total:  total,
+                Limit:  option.Limit,
+                Offset: option.Offset,
+            },
+        )
+
+        if true == option.Verbose {
+            /* the listener detail, with its required and may-skip marks, is carried in the json document too */
+            envelope.Data = eventListVerbosePayload{
+                Events:                  eventsPayload,
+                Listeners:               collectListenerListItems(registeredEvents, items, option.Order),
+                Declarations:            collectDeclarationListItems(registeredEvents, items, option.Order),
+                ServingProcessListeners: instance.deferredListeners(),
+            }
+        } else {
+            envelope.Data = eventListPayload{
+                ListPayload:             eventsPayload,
+                ServingProcessListeners: instance.deferredListeners(),
+            }
+        }
+    }
+
+    envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
+
+    return output.Render(commandContext.Writer, envelope, option)
+}
+
+/* selectSortedRegisteredEvents windows the listener detail like the event listing and orders it by event name in the requested direction. The direction applies to the events; inside one event the rows keep the dispatch order. */
+func selectSortedRegisteredEvents(
+    registeredEvents []eventcontract.RegisteredEvent,
+    items []eventListItem,
+    order output.SortOrder,
+) []eventcontract.RegisteredEvent {
+    selectedEventNames := make(map[string]struct{}, len(items))
+    for _, item := range items {
+        selectedEventNames[item.EventName] = struct{}{}
+    }
+
+    sortedRegisteredEvents := make([]eventcontract.RegisteredEvent, 0, len(selectedEventNames))
+    for _, registeredEvent := range registeredEvents {
+        _, isSelected := selectedEventNames[registeredEvent.EventName]
+        if false == isSelected {
+            continue
+        }
+
+        sortedRegisteredEvents = append(sortedRegisteredEvents, registeredEvent)
+    }
+
+    sort.Slice(
+        sortedRegisteredEvents,
+        func(leftIndex int, rightIndex int) bool {
+            return sortedRegisteredEvents[leftIndex].EventName < sortedRegisteredEvents[rightIndex].EventName
+        },
+    )
+
+    output.ApplySortOrder(sortedRegisteredEvents, order)
+
+    return sortedRegisteredEvents
+}
+
+func collectListenerListItems(
+    registeredEvents []eventcontract.RegisteredEvent,
+    items []eventListItem,
+    order output.SortOrder,
+) []eventListenerListItem {
+    listenerItems := make([]eventListenerListItem, 0, len(items))
+
+    for _, registeredEvent := range selectSortedRegisteredEvents(registeredEvents, items, order) {
+        for index, listener := range registeredEvent.Listeners {
+            listenerItems = append(
+                listenerItems,
+                eventListenerListItem{
+                    EventName:        registeredEvent.EventName,
+                    Order:            index + 1,
+                    Source:           listener.Source,
+                    Owner:            listener.Owner,
+                    ListenerName:     listener.ListenerName,
+                    RunsAfterFailure: listener.RunsAfterFailure,
+                    Config:           listedListenerConfig(listener.Config),
+                },
+            )
+        }
+    }
+
+    return listenerItems
+}
+
+/* collectDeclarationListItems answers the declared events of the window, in the listing's order. */
+func collectDeclarationListItems(
+    registeredEvents []eventcontract.RegisteredEvent,
+    items []eventListItem,
+    order output.SortOrder,
+) []eventDeclarationListItem {
+    declarationItems := make([]eventDeclarationListItem, 0)
+
+    for _, registeredEvent := range selectSortedRegisteredEvents(registeredEvents, items, order) {
+        if false == registeredEvent.Declared {
+            continue
+        }
+
+        declarationItems = append(
+            declarationItems,
+            eventDeclarationListItem{
+                EventName: registeredEvent.EventName,
+                Config:    eventcontract.EventConfig{TagsToRunAfterFailure: append(make([]string, 0, len(registeredEvent.Config.TagsToRunAfterFailure)), registeredEvent.Config.TagsToRunAfterFailure...)},
+            },
+        )
+    }
+
+    return declarationItems
+}
+
+func renderListenerTags(tags []string) string {
+    if 0 == len(tags) {
+        return "-"
+    }
+
+    return strings.Join(tags, ",")
+}
+
+func renderRunsAfterFailureMark(listener eventcontract.RegisteredListener) string {
+    if true == listener.RunsAfterFailure {
+        if true == listener.Config.Failure.ReplacesResponseAfterFailure {
+            return "yes (may replace)"
+        }
+
+        return "yes"
+    }
+
+    return "-"
+}
+
+func renderRequiredListenerMark(listener eventcontract.RegisteredListener) string {
+    if true == listener.Config.Failure.Required {
+        if true == listener.Config.Failure.MaySkipRequiredListeners {
+            return "yes (may skip)"
+        }
+
+        return "yes"
+    }
+
+    if true == listener.Config.Failure.MaySkipRequiredListeners {
+        return "may skip"
+    }
+
+    return "no"
+}
+
+type eventListItem struct {
+    EventName            string `json:"eventName"`
+    ListenerCount        int    `json:"listenerCount"`
+    FromSubscriberCount  int    `json:"fromSubscriberCount"`
+    SubscriberOwnerCount int    `json:"subscriberOwnerCount"`
+    Priorities           string `json:"priorities"`
+}
+
+type eventListenerListItem struct {
+    EventName        string                       `json:"eventName"`
+    Order            int                          `json:"order"`
+    Source           string                       `json:"source"`
+    Owner            string                       `json:"owner"`
+    ListenerName     string                       `json:"listenerName"`
+    RunsAfterFailure bool                         `json:"runsAfterFailure"`
+    Config           eventcontract.ListenerConfig `json:"config"`
+}
+
+type eventDeclarationListItem struct {
+    EventName string                    `json:"eventName"`
+    Config    eventcontract.EventConfig `json:"config"`
+}
+
+/* listedListenerConfig answers the config a listing carries, its tags a copy that is never nil, so json reads an empty list */
+func listedListenerConfig(config eventcontract.ListenerConfig) eventcontract.ListenerConfig {
+    config.Tags = append(make([]string, 0, len(config.Tags)), config.Tags...)
+
+    return config
+}
+
+type eventListVerbosePayload struct {
+    Events                  output.ListPayload[eventListItem] `json:"events"`
+    Listeners               []eventListenerListItem           `json:"listeners"`
+    Declarations            []eventDeclarationListItem        `json:"declarations"`
+    ServingProcessListeners []DeferredListener                `json:"servingProcessListeners,omitempty"`
+}
+
+/* eventListPayload is the default-verbosity json document: the listing embedded, so data.items keeps its place, with the deferred-listener declaration beside it at every verbosity. */
+type eventListPayload struct {
+    output.ListPayload[eventListItem]
+    ServingProcessListeners []DeferredListener `json:"servingProcessListeners,omitempty"`
+}
+
+func renderDeferredListenerBlock(builder *output.TableBuilder, deferredListeners []DeferredListener) {
+    if 0 == len(deferredListeners) {
+        return
+    }
+
+    deferredBlock := builder.AddBlock(
+        "SERVING-PROCESS LISTENERS",
+        []string{"event", "priority", "listener", "note"},
+    )
+
+    for _, deferredListener := range deferredListeners {
+        deferredBlock.AddRow([]string{
+            deferredListener.EventName,
+            fmt.Sprintf("%d", deferredListener.Priority),
+            deferredListener.ListenerName,
+            deferredListener.Note,
+        })
+    }
+}
+
+func (instance *EventCommand) deferredListeners() []DeferredListener {
+    if nil == instance.deferredListenerProvider {
+        return nil
+    }
+
+    return instance.deferredListenerProvider()
+}
+
+var _ clicontract.Command = (*EventCommand)(nil)

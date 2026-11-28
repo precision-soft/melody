@@ -1,0 +1,777 @@
+package output
+
+import (
+    "bytes"
+    "errors"
+    "io"
+    "strings"
+    "testing"
+    "time"
+    "unicode/utf8"
+
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/internal"
+)
+
+func TestTablePrinter_WrapsMultibyteRunesWithoutSplitting(t *testing.T) {
+    printer := NewTablePrinter(TablePrinterConfig{})
+
+    /* "ăăăăă" is 5 runes but 10 bytes; at width 3 a byte slice cuts a codepoint in half */
+    lines := printer.wrapCellValue("ăăăăă", 3)
+
+    if 0 == len(lines) {
+        t.Fatal("expected wrapped lines")
+    }
+
+    rebuilt := strings.Join(lines, "")
+    if "ăăăăă" != rebuilt {
+        t.Fatalf("wrapped lines must reconstruct the original value, got %q", rebuilt)
+    }
+
+    for index, line := range lines {
+        if false == utf8.ValidString(line) {
+            t.Fatalf("line %d is not valid UTF-8: %q (% x)", index, line, line)
+        }
+        if utf8.RuneCountInString(line) > 3 {
+            t.Fatalf("line %d exceeds the column width in runes: %q", index, line)
+        }
+    }
+}
+
+func TestTablePrinter_PadsMultibyteCellsByRune(t *testing.T) {
+    printer := NewTablePrinter(TablePrinterConfig{})
+
+    envelope := Envelope{
+        Table: &TableData{
+            Blocks: []TableBlock{
+                {
+                    Columns: []string{"key", "value"},
+                    Rows: [][]string{
+                        {"k", "ăăă"},
+                    },
+                },
+            },
+        },
+    }
+
+    buffer := &bytes.Buffer{}
+    if err := printer.Print(buffer, envelope, Options{Quiet: true}); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if false == utf8.ValidString(buffer.String()) {
+        t.Fatalf("rendered table is not valid UTF-8: % x", buffer.String())
+    }
+
+    widthByRune := -1
+    for _, line := range strings.Split(buffer.String(), "\n") {
+        if false == strings.HasPrefix(line, "|") {
+            continue
+        }
+
+        runeWidth := utf8.RuneCountInString(line)
+        if -1 == widthByRune {
+            widthByRune = runeWidth
+            continue
+        }
+        if widthByRune != runeWidth {
+            t.Fatalf("table rows are misaligned by rune width: %q has %d runes, expected %d", line, runeWidth, widthByRune)
+        }
+    }
+}
+
+func TestTablePrinter_RendersTheEnvelopeErrorUnderQuiet(t *testing.T) {
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
+    envelope.SetError(
+        "cmd.failed",
+        "the command failed",
+        ErrorConfig{
+            Details: map[string]any{
+                "subject": "order",
+            },
+            Cause: NewErrorCause("the backend refused", map[string]any{"status": 503}),
+        },
+    )
+
+    buffer := &bytes.Buffer{}
+
+    option := Options{}
+    option.Quiet = true
+
+    printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, option)
+    if nil != printErr {
+        t.Fatalf("expected no error, got %v", printErr)
+    }
+
+    written := buffer.String()
+    for _, expected := range []string{"ERROR: the command failed", "code: cmd.failed", "subject: order", "cause: the backend refused", "status: 503"} {
+        if false == strings.Contains(written, expected) {
+            t.Fatalf("expected %q in the rendered error, got %q", expected, written)
+        }
+    }
+}
+
+func TestTablePrinter_RendersTheWarningsUnderQuiet(t *testing.T) {
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
+    envelope.AddWarning("cmd.checksum", "checksum mismatch", map[string]any{"file": "a.txt"})
+
+    buffer := &bytes.Buffer{}
+
+    option := Options{}
+    option.Quiet = true
+
+    printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, option)
+    if nil != printErr {
+        t.Fatalf("expected no error, got %v", printErr)
+    }
+
+    written := buffer.String()
+    if false == strings.Contains(written, "checksum mismatch") {
+        t.Fatalf("expected the warning message under quiet, got %q", written)
+    }
+    if true == strings.Contains(written, "a.txt") {
+        t.Fatalf("expected the warning details to stay behind the verbose flag, got %q", written)
+    }
+    if true == strings.Contains(written, "COMMAND:") {
+        t.Fatalf("expected quiet to keep suppressing the headers, got %q", written)
+    }
+}
+
+func TestNewTablePrinter_TheWidthFieldSelectsTodaysThreePrinters(t *testing.T) {
+    if defaultTableMaxWidth != NewTablePrinter(TablePrinterConfig{}).tableMaxWidth {
+        t.Fatalf("expected a width left out to cap the table at %d", defaultTableMaxWidth)
+    }
+
+    if 0 != NewTablePrinter(TablePrinterConfig{MaxWidth: bound.UnlimitedCount()}).tableMaxWidth {
+        t.Fatalf("expected an unlimited width to leave the table uncapped")
+    }
+
+    if 40 != NewTablePrinter(TablePrinterConfig{MaxWidth: bound.Of(40)}).tableMaxWidth {
+        t.Fatalf("expected an explicit width to be kept")
+    }
+
+    for _, requestedWidth := range []int{0, -1} {
+        func() {
+            defer func() {
+                recovered := recover()
+                recoveredErr, isError := recovered.(error)
+                if false == isError {
+                    t.Fatalf("expected width %d to be refused, got %v", requestedWidth, recovered)
+                }
+
+                assertRefusedOptionField(t, recoveredErr, "TablePrinterConfig.MaxWidth")
+            }()
+
+            NewTablePrinter(TablePrinterConfig{MaxWidth: bound.Of(requestedWidth)})
+        }()
+    }
+}
+
+func TestTablePrinter_RendersTheWarningDetailsSortedUnderVerbose(t *testing.T) {
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
+    envelope.AddWarning(
+        "cmd.checksum",
+        "checksum mismatch",
+        map[string]any{
+            "zone": "eu",
+            "file": "a.txt",
+            "size": 12,
+        },
+    )
+
+    buffer := &bytes.Buffer{}
+
+    option := Options{}
+    option.Verbose = true
+
+    printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, option)
+    if nil != printErr {
+        t.Fatalf("expected no error, got %v", printErr)
+    }
+
+    written := buffer.String()
+
+    fileIndex := strings.Index(written, "file: a.txt")
+    sizeIndex := strings.Index(written, "size: 12")
+    zoneIndex := strings.Index(written, "zone: eu")
+
+    if -1 == fileIndex || -1 == sizeIndex || -1 == zoneIndex {
+        t.Fatalf("expected every warning detail under verbose, got %q", written)
+    }
+    if false == (fileIndex < sizeIndex && sizeIndex < zoneIndex) {
+        t.Fatalf("expected the warning details in key order, got %q", written)
+    }
+}
+
+func TestTablePrinter_SkipsAnUnnamedErrorDetail(t *testing.T) {
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
+    envelope.SetError(
+        "cmd.failed",
+        "the command failed",
+        ErrorConfig{
+            Details: map[string]any{
+                "":        "filed under no name",
+                "subject": "order",
+            },
+        },
+    )
+
+    buffer := &bytes.Buffer{}
+
+    printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, Options{})
+    if nil != printErr {
+        t.Fatalf("expected no error, got %v", printErr)
+    }
+
+    written := buffer.String()
+    if true == strings.Contains(written, "filed under no name") {
+        t.Fatalf("expected the unnamed detail to be skipped, got %q", written)
+    }
+    if false == strings.Contains(written, "subject: order") {
+        t.Fatalf("expected the named detail to be rendered, got %q", written)
+    }
+}
+
+func TestTablePrinter_MeasuresARowShorterThanTheColumns(t *testing.T) {
+    printer := NewTablePrinter(TablePrinterConfig{})
+
+    block := TableBlock{
+        Columns: []string{"name", "description"},
+        Rows: [][]string{
+            {"only-one-cell"},
+        },
+    }
+
+    widths := printer.calculateColumnWidthsWithMaxWidth(block, defaultTableMaxWidth)
+
+    if 2 != len(widths) {
+        t.Fatalf("expected one width per declared column, got %d", len(widths))
+    }
+    if 13 != widths[0] {
+        t.Fatalf("expected the first column to be sized by its only cell, got %d", widths[0])
+    }
+    if 11 != widths[1] {
+        t.Fatalf("expected the second column to keep its header width, got %d", widths[1])
+    }
+}
+
+func TestTablePrinter_ShrinksTheWidestColumnAndWrapsTheSurplus(t *testing.T) {
+    const tableMaxWidth = 30
+
+    printer := NewTablePrinter(TablePrinterConfig{MaxWidth: bound.Of(tableMaxWidth)})
+
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
+    envelope.Table = &TableData{
+        Blocks: []TableBlock{
+            {
+                Columns: []string{"name", "description"},
+                Rows: [][]string{
+                    {"a", "a description far wider than the budget allows"},
+                },
+            },
+        },
+    }
+
+    buffer := &bytes.Buffer{}
+
+    option := Options{}
+    option.Quiet = true
+
+    printErr := printer.Print(buffer, envelope, option)
+    if nil != printErr {
+        t.Fatalf("expected no error, got %v", printErr)
+    }
+
+    written := buffer.String()
+
+    renderedLineCount := 0
+    for _, line := range strings.Split(written, "\n") {
+        if false == strings.HasPrefix(line, "|") {
+            continue
+        }
+
+        renderedLineCount = renderedLineCount + 1
+
+        if utf8.RuneCountInString(line) > tableMaxWidth {
+            t.Fatalf("expected every line within %d runes, got %d in %q", tableMaxWidth, utf8.RuneCountInString(line), line)
+        }
+    }
+
+    if 4 > renderedLineCount {
+        t.Fatalf("expected the oversized row to wrap onto more than one line, got %d rendered lines in %q", renderedLineCount, written)
+    }
+
+    widths := printer.calculateColumnWidthsWithMaxWidth(envelope.Table.Blocks[0], tableMaxWidth)
+
+    if 4 != widths[0] {
+        t.Fatalf("expected the narrow column to stay at its header width, got %d", widths[0])
+    }
+    if 19 != widths[1] {
+        t.Fatalf("expected the widest column to be shrunk to the remaining budget, got %d", widths[1])
+    }
+}
+
+func TestTablePrinter_StopsShrinkingWhenEveryColumnIsAtItsMinimum(t *testing.T) {
+    printer := NewTablePrinter(TablePrinterConfig{MaxWidth: bound.Of(1)})
+
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
+    envelope.Table = &TableData{
+        Blocks: []TableBlock{
+            {
+                Columns: []string{"id", "name"},
+                Rows: [][]string{
+                    {"1", "first"},
+                },
+            },
+        },
+    }
+
+    buffer := &bytes.Buffer{}
+
+    option := Options{}
+    option.Quiet = true
+
+    done := make(chan error, 1)
+    go func() {
+        done <- printer.Print(buffer, envelope, option)
+    }()
+
+    select {
+    case printErr := <-done:
+        if nil != printErr {
+            t.Fatalf("expected no error, got %v", printErr)
+        }
+    case <-time.After(5 * time.Second):
+        t.Fatalf("expected the shrink loop to stop when no column can give anything up")
+    }
+
+    widths := printer.calculateColumnWidthsWithMaxWidth(envelope.Table.Blocks[0], 1)
+
+    if 2 != len(widths) || defaultTableMinColumnWidth != widths[0] || defaultTableMinColumnWidth != widths[1] {
+        t.Fatalf("expected every column at the minimum width, got %v", widths)
+    }
+
+    if false == strings.Contains(buffer.String(), "firs") {
+        t.Fatalf("expected the row to be rendered at the minimum widths, got %q", buffer.String())
+    }
+}
+
+func TestTablePrinter_ShrinkPassFloors(t *testing.T) {
+    printer := NewTablePrinter(TablePrinterConfig{})
+
+    emptyWidths := []int{}
+    printer.shrinkWidthsToFitMaxWidth(TableBlock{}, emptyWidths, defaultTableMaxWidth)
+    if 0 != len(emptyWidths) {
+        t.Fatalf("expected a block with no columns to be left alone, got %v", emptyWidths)
+    }
+
+    widths := []int{40}
+    block := TableBlock{Columns: []string{"name"}}
+
+    printer.shrinkWidthsToFitMaxWidth(block, widths, 0)
+    if 40 != widths[0] {
+        t.Fatalf("expected a width below one to leave the columns untouched, got %v", widths)
+    }
+
+    printer.shrinkWidthsToFitMaxWidth(block, widths, -10)
+    if 40 != widths[0] {
+        t.Fatalf("expected a negative width to leave the columns untouched, got %v", widths)
+    }
+}
+
+func TestTablePrinter_AnswersTheCellWholeWhenThereIsNoRoomToWrap(t *testing.T) {
+    printer := NewTablePrinter(TablePrinterConfig{})
+
+    for _, width := range []int{1, 0, -1} {
+        lines := printer.wrapCellValue("value", width)
+
+        if 1 != len(lines) || "value" != lines[0] {
+            t.Fatalf("expected the value answered whole at width %d, got %#v", width, lines)
+        }
+    }
+}
+
+func TestTablePrinter_KeepsTheBlankLinesInsideAMultiLineCell(t *testing.T) {
+    printer := NewTablePrinter(TablePrinterConfig{})
+
+    lines := printer.wrapCellValue("first\n\nthird", 10)
+
+    if 3 != len(lines) {
+        t.Fatalf("expected three lines, got %#v", lines)
+    }
+    if "first" != lines[0] || "" != lines[1] || "third" != lines[2] {
+        t.Fatalf("expected the blank line to be kept in place, got %#v", lines)
+    }
+}
+
+func TestTablePrinter_NormalizesTheLineEndingsAndAlwaysAnswersALine(t *testing.T) {
+    printer := NewTablePrinter(TablePrinterConfig{})
+
+    for _, value := range []string{"first\r\nsecond", "first\rsecond"} {
+        lines := printer.wrapCellValue(value, 10)
+
+        if 2 != len(lines) || "first" != lines[0] || "second" != lines[1] {
+            t.Fatalf("expected %q to split into two lines, got %#v", value, lines)
+        }
+    }
+
+    for _, value := range []string{"", "\n", "\n\n", "x"} {
+        if 0 == len(printer.wrapCellValue(value, 10)) {
+            t.Fatalf("expected at least one line for %q", value)
+        }
+    }
+}
+
+type failingTableWriter struct {
+    failAfter int
+    writes    int
+}
+
+func (instance *failingTableWriter) Write(payload []byte) (int, error) {
+    instance.writes = instance.writes + 1
+    if instance.writes > instance.failAfter {
+        return 0, errors.New("no space left on device")
+    }
+
+    return len(payload), nil
+}
+
+type shortTableWriter struct {
+    dropped int
+}
+
+func (instance *shortTableWriter) Write(payload []byte) (int, error) {
+    if 0 == len(payload) {
+        return 0, nil
+    }
+
+    instance.dropped = instance.dropped + 1
+
+    return len(payload) - 1, nil
+}
+
+func TestTablePrinter_ReportsAShortWriteAsAFailure(t *testing.T) {
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
+
+    builder := NewTableBuilder()
+    builder.AddBlock("BLOCK", []string{"name"}).AddRow([]string{"value"})
+    envelope.Table = builder.Build()
+
+    writer := &shortTableWriter{}
+
+    printErr := NewTablePrinter(TablePrinterConfig{}).Print(writer, envelope, Options{})
+    if nil == printErr {
+        t.Fatalf("expected the short write to be reported after %d truncated writes", writer.dropped)
+    }
+    if false == errors.Is(printErr, io.ErrShortWrite) {
+        t.Fatalf("expected io.ErrShortWrite, got %v", printErr)
+    }
+}
+
+func TestTablePrinter_ReturnsTheFirstWriteFailure(t *testing.T) {
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
+
+    builder := NewTableBuilder()
+    builder.AddBlock("BLOCK", []string{"name"}).AddRow([]string{"value"})
+    envelope.Table = builder.Build()
+
+    printErr := NewTablePrinter(TablePrinterConfig{}).Print(&failingTableWriter{failAfter: 1}, envelope, Options{})
+    if nil == printErr {
+        t.Fatalf("expected the write failure to be returned")
+    }
+    if "no space left on device" != printErr.Error() {
+        t.Fatalf("expected the first write failure, got %v", printErr)
+    }
+}
+
+func TestTablePrinter_EscapesControlCharactersInTheTextChannels(t *testing.T) {
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
+    envelope.SetError(
+        "cmd.failed",
+        "open failed: file\rERROR: disk gone\x1b[2J",
+        ErrorConfig{},
+    )
+    envelope.AddWarning("warning.code", "careful\x1b]0;pwned\x07", nil)
+    envelope.Table = &TableData{
+        SummaryLines: []string{"listing\rforged"},
+    }
+
+    buffer := &bytes.Buffer{}
+
+    printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, Options{})
+    if nil != printErr {
+        t.Fatalf("expected no error, got %v", printErr)
+    }
+
+    written := buffer.String()
+
+    for _, forbidden := range []string{"\x1b", "\r", "\x07"} {
+        if true == strings.Contains(written, forbidden) {
+            t.Fatalf("expected no raw control character in the output, found %q in %q", forbidden, written)
+        }
+    }
+
+    for _, expected := range []string{`file\rERROR: disk gone\x1b[2J`, `careful\x1b]0;pwned\x07`, `listing\rforged`} {
+        if false == strings.Contains(written, expected) {
+            t.Fatalf("expected the escaped spelling %q in %q", expected, written)
+        }
+    }
+}
+
+func TestTablePrinter_EscapedCellsStayAligned(t *testing.T) {
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
+    envelope.Table = &TableData{
+        Blocks: []TableBlock{
+            {
+                Columns: []string{"NAME", "NOTE"},
+                Rows: [][]string{
+                    {"widget\x1b[31m", "plain"},
+                    {"other", "row"},
+                },
+            },
+        },
+    }
+
+    buffer := &bytes.Buffer{}
+
+    option := Options{}
+    option.Quiet = true
+
+    printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, option)
+    if nil != printErr {
+        t.Fatalf("expected no error, got %v", printErr)
+    }
+
+    written := buffer.String()
+
+    if true == strings.Contains(written, "\x1b") {
+        t.Fatalf("expected no raw escape byte in the table, got %q", written)
+    }
+    if false == strings.Contains(written, `widget\x1b[31m`) {
+        t.Fatalf("expected the escaped cell spelling, got %q", written)
+    }
+
+    rowWidth := -1
+    for _, line := range strings.Split(written, "\n") {
+        if false == strings.HasPrefix(line, "|") {
+            continue
+        }
+
+        lineWidth := utf8.RuneCountInString(line)
+        if -1 == rowWidth {
+            rowWidth = lineWidth
+
+            continue
+        }
+
+        if rowWidth != lineWidth {
+            t.Fatalf("expected every table row to hold the same width, got %d and %d in %q", rowWidth, lineWidth, written)
+        }
+    }
+}
+
+/* the alignment oracle is display cells, not runes: a CJK ideogram occupies two cells */
+func TestTablePrinter_CjkCellsStayAlignedInDisplayCells(t *testing.T) {
+    envelope := NewEnvelope(NewMeta("cmd", MetaConfig{StartedAt: time.Now()}))
+    envelope.Table = &TableData{
+        Blocks: []TableBlock{
+            {
+                Columns: []string{"NAME", "NOTE"},
+                Rows: [][]string{
+                    {"世界", "cjk"},
+                    {"plain", "row"},
+                },
+            },
+        },
+    }
+
+    buffer := &bytes.Buffer{}
+
+    option := Options{}
+    option.Quiet = true
+
+    printErr := NewTablePrinter(TablePrinterConfig{}).Print(buffer, envelope, option)
+    if nil != printErr {
+        t.Fatalf("expected no error, got %v", printErr)
+    }
+
+    rowWidth := -1
+    for _, line := range strings.Split(buffer.String(), "\n") {
+        if false == strings.HasPrefix(line, "|") {
+            continue
+        }
+
+        lineWidth := internal.DisplayWidth(line)
+        if -1 == rowWidth {
+            rowWidth = lineWidth
+
+            continue
+        }
+
+        if rowWidth != lineWidth {
+            t.Fatalf("expected every table row to render the same display width, got %d and %d in %q", rowWidth, lineWidth, buffer.String())
+        }
+    }
+    if -1 == rowWidth {
+        t.Fatalf("expected table rows in the output, got %q", buffer.String())
+    }
+}
+
+func TestTablePrinter_WrapsByDisplayCellsNotRunes(t *testing.T) {
+    printer := NewTablePrinter(TablePrinterConfig{})
+
+    lines := printer.wrapCellValue("世界世", 4)
+
+    if 2 != len(lines) {
+        t.Fatalf("expected two lines, got %#v", lines)
+    }
+    if "世界" != lines[0] || "世" != lines[1] {
+        t.Fatalf("expected the ideograms sliced two cells each, got %#v", lines)
+    }
+}
+
+func TestTablePrinter_MeasuresAMultiLineCellByItsWidestLine(t *testing.T) {
+    printer := NewTablePrinter(TablePrinterConfig{})
+
+    envelope := Envelope{
+        Table: &TableData{
+            Blocks: []TableBlock{
+                {
+                    Columns: []string{"trace", "note"},
+                    Rows: [][]string{
+                        {"12345\n67890", "ok"},
+                    },
+                },
+            },
+        },
+    }
+
+    buffer := &bytes.Buffer{}
+    if err := printer.Print(buffer, envelope, Options{Quiet: true}); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    separator := ""
+    for _, line := range strings.Split(buffer.String(), "\n") {
+        if true == strings.HasPrefix(line, "| -") {
+            separator = line
+        }
+    }
+    if "" == separator {
+        t.Fatalf("expected a separator row in the output, got %q", buffer.String())
+    }
+
+    if "| ----- | ---- |" != separator {
+        t.Fatalf("expected the multi-line cell measured by its widest line (5), got %q", separator)
+    }
+}
+
+func TestTablePrinter_DoesNotShrinkASiblingColumnForAMultiLineCellsPhantomWidth(t *testing.T) {
+    printer := NewTablePrinter(TablePrinterConfig{MaxWidth: bound.Of(30)})
+
+    tallCell := strings.TrimSuffix(strings.Repeat("abc\n", 10), "\n")
+
+    envelope := Envelope{
+        Table: &TableData{
+            Blocks: []TableBlock{
+                {
+                    Columns: []string{"trace", "description"},
+                    Rows: [][]string{
+                        {tallCell, "abcdefghijklmno"},
+                    },
+                },
+            },
+        },
+    }
+
+    buffer := &bytes.Buffer{}
+    if err := printer.Print(buffer, envelope, Options{Quiet: true}); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    separator := ""
+    for _, line := range strings.Split(buffer.String(), "\n") {
+        if true == strings.HasPrefix(line, "| -") {
+            separator = line
+        }
+    }
+    if "" == separator {
+        t.Fatalf("expected a separator row in the output, got %q", buffer.String())
+    }
+
+    /* ten lines of three cells measure three, not thirty-nine */
+    if "| ----- | --------------- |" != separator {
+        t.Fatalf("expected both columns at their measured widths, got %q", separator)
+    }
+
+    if false == strings.Contains(buffer.String(), "abcdefghijklmno") {
+        t.Fatalf("expected the sibling cell to render unwrapped, got %q", buffer.String())
+    }
+}
+
+func TestCellDisplayWidth_AnswersTheWidestLine(t *testing.T) {
+    if 5 != cellDisplayWidth("12345\n67890") {
+        t.Fatalf("expected the widest line of two equal lines, got %d", cellDisplayWidth("12345\n67890"))
+    }
+
+    if 7 != cellDisplayWidth("ab\nabcdefg\nabc") {
+        t.Fatalf("expected the widest of three unequal lines, got %d", cellDisplayWidth("ab\nabcdefg\nabc"))
+    }
+
+    if 4 != cellDisplayWidth("世界") {
+        t.Fatalf("expected a single line measured in display cells, got %d", cellDisplayWidth("世界"))
+    }
+
+    if 0 != cellDisplayWidth("") {
+        t.Fatalf("expected an empty cell to measure nothing, got %d", cellDisplayWidth(""))
+    }
+
+    if 0 != cellDisplayWidth("\n\n") {
+        t.Fatalf("expected empty lines to measure nothing, got %d", cellDisplayWidth("\n\n"))
+    }
+}
+
+func TestTablePrinter_MeasuresAMultiLineColumnHeaderByItsWidestLine(t *testing.T) {
+    printer := NewTablePrinter(TablePrinterConfig{})
+
+    envelope := Envelope{
+        Table: &TableData{
+            Blocks: []TableBlock{
+                {
+                    Columns: []string{"abcde\nfg", "note"},
+                    Rows: [][]string{
+                        {"x", "ok"},
+                    },
+                },
+            },
+        },
+    }
+
+    buffer := &bytes.Buffer{}
+    if err := printer.Print(buffer, envelope, Options{Quiet: true}); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    separator := ""
+    for _, line := range strings.Split(buffer.String(), "\n") {
+        if true == strings.HasPrefix(line, "| -") {
+            separator = line
+        }
+    }
+    if "" == separator {
+        t.Fatalf("expected a separator row in the output, got %q", buffer.String())
+    }
+
+    /* the header's widest line is five cells; taken whole it reads eight */
+    if "| ----- | ---- |" != separator {
+        t.Fatalf("expected the multi-line header measured by its widest line (5), got %q", separator)
+    }
+}
+
+func TestTablePrinter_ACellOfOneColumnWidthStillBreaksAtItsNewlines(t *testing.T) {
+    lines := (&TablePrinter{}).wrapCellValue("1\r\n2\n3", 1)
+
+    if 3 != len(lines) || "1" != lines[0] || "2" != lines[1] || "3" != lines[2] {
+        t.Fatalf("expected one line per newline, got %q", lines)
+    }
+}

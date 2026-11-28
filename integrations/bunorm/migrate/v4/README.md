@@ -1,0 +1,168 @@
+# Melody Bun ORM migration commands (v4)
+
+This module exposes Bun migrations as Melody v4 CLI commands ([`clicontract.Command`](../../../../v4/cli/contract/command.go)).
+
+Import path: `github.com/precision-soft/melody/integrations/bunorm/migrate/v4`
+
+It intentionally contains only:
+
+- command construction and flag wiring (see [`RegisterCommands`](./register.go))
+- Bun migrate execution per command
+
+Your application is responsible for:
+
+- registering a `*bunorm.ManagerRegistry` service and choosing the default manager (see the [bunorm README](../../v4/README.md))
+- providing a `*migrate.Migrations` collection (your app-owned migrations package)
+- choosing the migrations directory layout
+
+## Install
+
+```bash
+go get github.com/precision-soft/melody/integrations/bunorm/migrate/v4@latest
+```
+
+## Usage
+
+### 1) Define your migrations collection
+
+```go
+package migrations
+
+import "github.com/uptrace/bun/migrate"
+
+var Migrations = migrate.NewMigrations()
+```
+
+### 2) Register commands from a CliModule
+
+Register the commands from a module that implements [`application/contract.CliModule`](../../../../v4/application/contract/cli_module.go):
+
+```go
+package main
+
+import (
+    "your/module/database"
+    "your/module/database/migrations"
+
+    bunormmigrate "github.com/precision-soft/melody/integrations/bunorm/migrate/v4"
+    clicontract "github.com/precision-soft/melody/v4/cli/contract"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+)
+
+func (instance *YourModule) RegisterCliCommands(kernelInstance kernelcontract.Kernel) []clicontract.Command {
+    return bunormmigrate.RegisterCommands(
+        migrations.Migrations,
+        bunormmigrate.CommandConfig{
+            CommandPrefix:            "db",
+            ManagerFlagName:          "manager",
+            ManagerRegistryServiceId: database.ServiceManagerRegistryId,
+        },
+    )
+}
+```
+
+Or bundle it as a self-registering application module, so a single `RegisterModule` call contributes the commands instead of hand-writing `RegisterCliCommands`:
+
+```go
+app.RegisterModule(bunormmigrate.NewModule(bunormmigrate.ModuleConfig{
+    Migrations: migrations.Migrations,
+    Command:    bunormmigrate.CommandConfig{CommandPrefix: "db"},
+}))
+```
+
+`NewModule` is available for the v1, v2, v3 and v4 bindings.
+
+## Multiple database contexts
+
+A binary with several databases declares one context per database and registers the module once; each context gets its own command family pinned to its manager in the shared registry:
+
+```go
+app.RegisterModule(bunormmigrate.NewModule(bunormmigrate.ModuleConfig{
+    Contexts: []bunormmigrate.ContextConfig{
+        {Name: "platform", Migrations: platformmigrations.Migrations},
+        {Name: "payment", Migrations: paymentmigrations.Migrations},
+    },
+}))
+```
+
+This generates `db:platform:init|migrate|rollback|status|unlock|create` and the same family under `db:payment:*`. By convention a context's pinned manager name equals the context name (override with `Command.ManagerName`) and its prefix derives from the base prefix (`db:<name>`, override with `Command.CommandPrefix`); every context resolves against the one shared `*bunorm.ManagerRegistry`, so no `TypeRegistrationDisabled` juggling is needed. The pin only replaces the registry-default fallback — an explicit `--manager` flag still wins. `Contexts` composes with the legacy single-set `Migrations` field, which keeps its unprefixed commands. For hand-wired setups, `RegisterContextCommands(contexts, baseConfig)` returns the same commands without the module wrapper.
+
+If you deliberately keep separate registries per context, set each context's `ManagerRegistryServiceId`; note that registering a second `*bunorm.ManagerRegistry` service needs `container.RegisterOptions{TypeRegistrationRelaxed: true}` (appended; by-type resolution then refuses the type as ambiguous) or `container.RegisterOptions{TypeRegistrationDisabled: true}` because the strict default refuses a duplicate service type.
+
+## Command config
+
+`RegisterCommands` and every command constructor accept a [`CommandConfig`](./option.go) value; a field left out takes its default, the three strings exported as `DefaultCommandPrefix`, `DefaultManagerFlagName` and `DefaultManagerRegistryServiceId`. A host that registers the registry under the default id reads the constant.
+
+- `CommandPrefix` (default `db`) controls the command namespace (`db:init`, `db:migrate`, …).
+- `ManagerFlagName` (default `manager`) controls the manager-selection flag (`--manager`).
+- `ManagerRegistryServiceId` (default `service.bunorm.manager_registry`) is the container service id of the `*bunorm.ManagerRegistry`. It selects which registry **instance** these commands resolve, not which implementation: they resolve the concrete `*bunorm.ManagerRegistry`, because `bunorm` publishes no registry contract for them to depend on instead. Point it at a second registry to give a context its own set of managers; there is no door here for substituting a registry of your own.
+- `ManagerName` (default empty) pins the manager used when the `--manager` flag is absent; empty falls back to the registry default.
+- `UnlockTimeout` (a `bound.Duration`, 5s when left out, at least 1ms, unlimited refused) bounds the release of the migration lock after `db:migrate` and `db:rollback`, and the write of the marker of a migration that ran but was not recorded. Both run detached from the command's context, so an interrupted run still frees the lock row and still leaves its marker, and the exit waits on it, which is why it cannot be unlimited. A value outside the rule panics at registration naming `CommandConfig.UnlockTimeout`; a migration context inherits the base config's value unless its own `Command` sets one.
+
+## Table names
+
+The two tables bun keeps, the applied migrations and the migration lock, are named by two `.env` keys the module declares, one pair for every command of the process, every migration context included:
+
+| key | parameter | default |
+|---|---|---|
+| `MELODY_BUNORM_MIGRATE_MIGRATIONS_TABLE` | `melody.bunorm.migrate.migrations_table` | `bun_migrations` |
+| `MELODY_BUNORM_MIGRATE_LOCKS_TABLE` | `melody.bunorm.migrate.locks_table` | `bun_migration_locks` |
+
+The defaults are bun's own names, not `melody_*`, on purpose: a renamed default would make `db:migrate` on an existing database see no history and replay every migration. The two keys are the door for an application that wants the prefix.
+
+The keys are the one source of the names: `ModuleConfig.KeyDefaults{MigrationsTable, LocksTable}` sets only what a key reads when no `.env` file sets it, an empty field taking bun's name. A value that is not a plain identifier, `[A-Za-z_][A-Za-z0-9_]*` of at most 64 bytes, fails the boot with `a module's environment key is refused`, the error's context naming the key; `NewModule` refuses such a default, and two defaults naming one table, naming the field. Two keys naming one table, letter case aside, are refused at the command's run, before the database is opened. A host that builds the commands without the module declares the keys through `EnvironmentKeys(defaults)` from its own module; commands driven outside an application, with no configuration service, act on bun's names. Every message that names a table, the held lock, the failed release and a migration that ran but was not recorded, names the configured one.
+
+`RegisterCommands` refuses a `nil` migration set rather than answering with no commands: the silence left a
+caller believing it had registered the family and finding out at invocation time, as "unknown command".
+`NewModule` gates its own optional set before calling, so a binary that registers only `Contexts` never
+reaches the refusal — and a `ModuleConfig` carrying neither `Migrations` nor `Contexts` is itself refused by
+name at registration.
+
+## Commands
+
+All commands accept the standard Melody output flags. Under `--format=json` a command accumulates its output
+and renders one machine-readable json envelope on a single line — the failure included — instead of the
+plain-text output; `--format=json-pretty` renders the same document indented for reading by hand, and
+`--verbose` and `--no-color` shape the plain-text output alone. The per-query lines a migration prints through `RunQueries` (or `Up` / `Down`) follow the same flags: the command hands its posture to the migrations through the context the migrator passes them, so **pass the context you are given** on to `RunQueries` itself: the skeleton `db:create` writes is bun's default template, since the command passes no `WithGoTemplate` option, and it runs no query and prints its own line to standard output. The `RunnerOptions` it takes is the migration's own say: `RunnerOptions{}` prints as the command prints, a `Writer` replaces the command's, and `NoColor: true` prints plain under a colour posture, while nothing turns colour on under `--no-color`. A migration that drops the context prints to standard output, and under `--format=json` those lines land in the middle of the document, so a migration that runs under the command passes its context on.
+
+The json document therefore carries every block the command produces at any verbosity: `--verbose` never
+shapes it. Its keys are stable — `data.details`, `data.migrations.applied`, `data.migrations.pending`,
+`data.migrations.rolledBack`, `data.migrations.ranNotRecorded`, `data.database`, `data.files`, `data.messages` — and are not the headings the
+text blocks print. `data.database.database` is json `null` when the connection reports no current database,
+where the text block renders `<null>`. One consequence is worth knowing: a json run performs the
+database-identity query a text run only performs under `--verbose`.
+
+The plain-text rendering escapes every control character visibly — the named C0 ones as `\n`, `\r`, `\t`, every
+other C0 one, DEL and the C1 block as `\xNN`, and the Unicode line and paragraph separators as `\uNNNN` —
+in every string the commands did not write themselves — the error text off the wire, the failed statement,
+the query names, the identity block the server answers and the migration names — and it does so before the
+table cells are measured, so the alignment counts the escaped spelling. The failed statement alone keeps its
+real line breaks. A byte that is not valid UTF-8 is rendered as `\xNN` of that byte, so a raw C1 introducer off the wire is shown rather than passed through or replaced by U+FFFD. The json rendering is the framework printer's, which spells the C1 block the encoder leaves raw as `\u00NN` escapes; a byte that is not valid UTF-8 reaches the document as U+FFFD, the encoder's documented answer.
+
+The verbose `DATABASE` block is answered for MySQL and for PostgreSQL. Over a unix socket — the connection a
+local migration is most likely to take — PostgreSQL reports no server address, so the host reads
+`<local socket>`.
+
+All six commands run on the migration connection the registry's provider opens through
+`bunorm.Provider.OpenForMigration`, handed the run's runtime, so a run cancelled before it reaches the database
+refuses before the dial: the request pool carries driver deadlines sized for requests, and a DDL statement that
+legitimately runs past them is cut mid-statement. The manager label says so — `(dedicated migration connection)`.
+
+The manager can be selected with `--<managerFlagName>`. Without the flag the `ManagerName` pin from the
+registration options is used, and only an empty pin falls back to the registry default — which is the point
+of pinning one manager per command set, so a multi-context binary cannot migrate the wrong database by
+omitting the flag.
+
+With the default prefix (`db`):
+
+- `db:init` — initializes the migrations tables.
+- `db:migrate` — applies pending migrations. A migration whose `Up` ran and whose mark in the migrations table failed is reported under `data.migrations.ranNotRecorded`, and the run writes a marker for it, a row `ranNotRecorded:<migrations table>:<name>` of the locks table beside bun's lock row; while a marker stands, the next `db:migrate` is refused before any `Up`, naming the migrations and the `--force` flag (`migrate.MigrateForceFlagName`), since running it again is what the report forbids. Insert its row in the migrations table or roll its change back by hand, then run with `--force`, which deletes the markers and migrates. The marker is written detached from the command's context, under `UnlockTimeout`, so a stop that cancels the run between the `Up` and the mark still leaves it. A marker the failed run could not write, the connection having died with the mark, is said in a warning, and the next run does not refuse: no process can write it then.
+- `db:rollback` — rolls back the last migration group.
+- `db:status` — shows applied and pending migrations.
+- `db:unlock` — unlocks the migrations table. It clears the lock whatever holds it, so it is run only once no migration is running against the database: a lock a live run holds, cleared, lets a second run apply the same set beside it. The failure of a run that could not release its lock names the table and this command.
+- `db:create <migration-name>` — creates a Go migrations file.
+
+Every command that reaches the database — `db:create` writes its file from the migrations collection alone and opens nothing — runs on the registry's DEDICATED migration connection — with the `mysql` and `pgsql` providers a pool with the driver's read and write deadlines lifted, so a DDL statement that legitimately runs for minutes is not cut mid-statement — and releases its hold on the way out through the registry's `CloseMigrationDatabase`. That connection recycles nothing by design, so leaving it memoized meant a migration run at the boot of a process that goes on to serve requests kept a deadline-less connection open for the life of that process. A provider whose migration door answers the very pool the registry holds for the name shares that pool, which belongs to the application: the release leaves it untouched.
+
+`db:create` finishes bun's write ATOMICALLY. Bun creates the file with a single `os.WriteFile` straight onto the destination, so a crash, a full disk or a killed process partway through leaves a truncated Go file in the migrations directory — one that does not compile, under a timestamped name whose place in the sequence looks entirely legitimate. Taking the write away from bun is not possible, since the directory it writes into is unexported; what the command does instead is write the same content into a temporary neighbour named `.melody-migrate-*.tmp`, which fits one path component whatever the migration's name, fsync it, rename it over the destination and fsync the DIRECTORY, so a command that reports success has left a whole and durable file behind. A failure before the rename removes that temporary neighbour and nothing else; a crash before that point leaves bun's partial file — and no success report, which is the answer a failed create has always given. The rewrite keeps the
+mode the destination carries — bun's 0644 as narrowed by the process umask — rather than stamping 0644 over it. When the rename landed and only the directory fsync failed, the command succeeds with a warning naming the file and that its entry may not survive a crash: a failure verdict would send the operator to run it again and create a second migration beside a whole first one. The name itself is held to `^[0-9a-z_-]+$` before it reaches bun, so a path separator or a parent reference never touches the filesystem.

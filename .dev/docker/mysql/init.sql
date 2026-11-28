@@ -20,8 +20,10 @@ CREATE
 DATABASE IF NOT EXISTS `melody_example_v2` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 CREATE
 DATABASE IF NOT EXISTS `melody_example_v3` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE
+DATABASE IF NOT EXISTS `melody_example_v4` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 
--- the wildcard covers the three above in one statement and any later major without another grant
+-- the wildcard covers the four above in one statement and any later major without another grant
 GRANT ALL PRIVILEGES ON `melody\_example\_%`.* TO
 'melody'@'%';
 FLUSH

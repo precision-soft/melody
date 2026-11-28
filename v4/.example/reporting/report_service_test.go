@@ -1,0 +1,921 @@
+package reporting
+
+import (
+    "context"
+    "errors"
+    "fmt"
+    melodycache "github.com/precision-soft/melody/v4/cache"
+    "reflect"
+    "testing"
+    "time"
+
+    "github.com/precision-soft/melody/v4/.example/entity"
+    "github.com/precision-soft/melody/v4/.example/repository"
+    "github.com/precision-soft/melody/v4/.example/service"
+    melodybound "github.com/precision-soft/melody/v4/bound"
+    melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
+    melodyclock "github.com/precision-soft/melody/v4/clock"
+    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
+)
+
+type stubJournalRepository struct {
+    batches   [][]*repository.CatalogJournalEntry
+    appendErr error
+}
+
+func (instance *stubJournalRepository) Append(ctx context.Context, entry *repository.CatalogJournalEntry) (*repository.CatalogJournalEntry, error) {
+    return entry, instance.appendErr
+}
+
+func (instance *stubJournalRepository) AppendBatch(ctx context.Context, entryList []*repository.CatalogJournalEntry) error {
+    if nil != instance.appendErr {
+        return instance.appendErr
+    }
+
+    copied := make([]*repository.CatalogJournalEntry, len(entryList))
+    copy(copied, entryList)
+    instance.batches = append(instance.batches, copied)
+
+    return nil
+}
+
+func (instance *stubJournalRepository) Latest(ctx context.Context, limit int) ([]*repository.CatalogJournalEntry, error) {
+    return nil, nil
+}
+
+func (instance *stubJournalRepository) Count(ctx context.Context) (int, error) {
+    return 0, nil
+}
+
+var _ repository.CatalogJournalRepository = (*stubJournalRepository)(nil)
+
+func newTestTrail(journalRepository repository.CatalogJournalRepository, requestId string) *RequestReportTrail {
+    trail, buildErr := NewRequestReportTrail(
+        melodyhttp.NewRequestContext(requestId, time.Unix(0, 0)),
+        NewReportFormatter(),
+        func(ctx context.Context) (repository.CatalogJournalRepository, error) { return journalRepository, nil },
+        melodyclock.NewFrozenClock(time.Unix(1700000000, 0).UTC()),
+    )
+    if nil != buildErr {
+        panic(buildErr)
+    }
+
+    return trail
+}
+
+func TestRequestReportTrailWritesNothingBeforeFlush(t *testing.T) {
+    journalRepository := &stubJournalRepository{}
+    trail := newTestTrail(journalRepository, "request-1")
+
+    trail.Record("editor", repository.CatalogJournalActionCreated, "product", "prod-1")
+    trail.Record("editor", repository.CatalogJournalActionUpdated, "product", "prod-2")
+
+    if 0 != len(journalRepository.batches) {
+        t.Fatalf("expected nothing written before the flush, got %d batch(es)", len(journalRepository.batches))
+    }
+
+    if 2 != len(trail.Entries()) {
+        t.Fatalf("expected the trail to hold the two recorded changes, got %v", trail.Entries())
+    }
+}
+
+func TestRequestReportTrailFlushesOneBatchStampedWithTheRequest(t *testing.T) {
+    journalRepository := &stubJournalRepository{}
+    trail := newTestTrail(journalRepository, "request-7")
+
+    trail.Record("editor", repository.CatalogJournalActionCreated, "product", "prod-1")
+    trail.Record("editor", repository.CatalogJournalActionDeleted, "product", "prod-2")
+
+    if flushErr := trail.Flush(context.Background()); nil != flushErr {
+        t.Fatalf("flush: %v", flushErr)
+    }
+
+    if 1 != len(journalRepository.batches) {
+        t.Fatalf("expected exactly one batch, got %d", len(journalRepository.batches))
+    }
+
+    batch := journalRepository.batches[0]
+    if 2 != len(batch) {
+        t.Fatalf("expected both changes in the one batch, got %d", len(batch))
+    }
+
+    for index, entry := range batch {
+        if "request-7" != entry.RequestId {
+            t.Fatalf("entry %d carries request id %q, wanted the trail's own %q", index, entry.RequestId, "request-7")
+        }
+
+        if true == entry.RecordedAt.IsZero() {
+            t.Fatalf("entry %d was not stamped by the injected clock", index)
+        }
+    }
+}
+
+func TestRequestReportTrailFlushIsIdempotent(t *testing.T) {
+    journalRepository := &stubJournalRepository{}
+    trail := newTestTrail(journalRepository, "request-2")
+
+    trail.Record("editor", repository.CatalogJournalActionCreated, "product", "prod-1")
+
+    if flushErr := trail.Flush(context.Background()); nil != flushErr {
+        t.Fatalf("first flush: %v", flushErr)
+    }
+    if flushErr := trail.Flush(context.Background()); nil != flushErr {
+        t.Fatalf("second flush: %v", flushErr)
+    }
+    if closeErr := trail.CloseWithContext(t.Context()); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if 1 != len(journalRepository.batches) {
+        t.Fatalf("expected the changes to be written once, got %d batches", len(journalRepository.batches))
+    }
+}
+
+func TestRequestReportTrailFlushOfAnEmptyTrailTouchesNothing(t *testing.T) {
+    journalRepository := &stubJournalRepository{}
+    trail := newTestTrail(journalRepository, "request-3")
+
+    if flushErr := trail.Flush(context.Background()); nil != flushErr {
+        t.Fatalf("flush: %v", flushErr)
+    }
+
+    if 0 != len(journalRepository.batches) {
+        t.Fatalf("expected an empty trail to write nothing, got %d batch(es)", len(journalRepository.batches))
+    }
+}
+
+func TestRequestReportTrailKeepsEntriesStagedWhenTheFlushFails(t *testing.T) {
+    journalRepository := &stubJournalRepository{appendErr: fmt.Errorf("database is gone")}
+    trail := newTestTrail(journalRepository, "request-4")
+
+    trail.Record("editor", repository.CatalogJournalActionCreated, "product", "prod-1")
+
+    if flushErr := trail.Flush(context.Background()); nil == flushErr {
+        t.Fatalf("expected the flush to report the failure")
+    }
+
+    if 1 != len(trail.Entries()) {
+        t.Fatalf("expected the change to stay staged after a failed flush, got %v", trail.Entries())
+    }
+
+    journalRepository.appendErr = nil
+
+    if closeErr := trail.CloseWithContext(t.Context()); nil != closeErr {
+        t.Fatalf("close after the failure recovered: %v", closeErr)
+    }
+
+    if 1 != len(journalRepository.batches) {
+        t.Fatalf("expected Close to write what the failed flush left staged, got %d batch(es)", len(journalRepository.batches))
+    }
+}
+
+func TestRequestReportTrailSummaryNamesItsOwnRequest(t *testing.T) {
+    trail := newTestTrail(&stubJournalRepository{}, "request-5")
+
+    trail.Record("editor", repository.CatalogJournalActionCreated, "product", "prod-1")
+
+    if "request-5" != trail.RequestId() {
+        t.Fatalf("the trail reports request id %q, wanted %q", trail.RequestId(), "request-5")
+    }
+
+    if "request-5: 1 entries" != trail.Summary() {
+        t.Fatalf("the trail summarised as %q, wanted the formatter's rendering of its own request", trail.Summary())
+    }
+}
+
+type readingCache struct {
+    values map[string]any
+    ttls   map[string]melodybound.Duration
+}
+
+func (instance *readingCache) Get(runtimeInstance melodycontainercontract.Runtime, key string, target any) (bool, error) {
+    value, exists := instance.values[key]
+    if false == exists {
+        return false, nil
+    }
+
+    if assignErr := assignCachedTestValue(key, target, value); nil != assignErr {
+        return false, assignErr
+    }
+
+    return true, nil
+}
+
+func (instance *readingCache) Set(runtimeInstance melodycontainercontract.Runtime, key string, value any, ttl melodybound.Duration, _ melodycachecontract.SetOptions) error {
+    instance.values[key] = value
+
+    if nil == instance.ttls {
+        instance.ttls = map[string]melodybound.Duration{}
+    }
+    instance.ttls[key] = ttl
+
+    return nil
+}
+
+func (instance *readingCache) Delete(runtimeInstance melodycontainercontract.Runtime, key string) error {
+    delete(instance.values, key)
+
+    return nil
+}
+
+func (instance *readingCache) Has(runtimeInstance melodycontainercontract.Runtime, key string) (bool, error) {
+    _, exists := instance.values[key]
+
+    return exists, nil
+}
+
+func (instance *readingCache) Clear(runtimeInstance melodycontainercontract.Runtime) error {
+    instance.values = map[string]any{}
+
+    return nil
+}
+
+func (instance *readingCache) Many(runtimeInstance melodycontainercontract.Runtime, keys []string, target any) error {
+    return assignCachedTestValues(keys, target, instance.values)
+}
+
+/* this fake holds values, not payloads, so its copy is the value itself */
+func (instance *readingCache) RoundTrip(value any, target any) error {
+    return assignCachedTestValue("", target, value)
+}
+
+func (instance *readingCache) SetMultiple(runtimeInstance melodycontainercontract.Runtime, items map[string]any, ttl melodybound.Duration, _ melodycachecontract.SetOptions) error {
+    for key, value := range items {
+        instance.values[key] = value
+    }
+
+    return nil
+}
+
+func (instance *readingCache) DeleteMultiple(runtimeInstance melodycontainercontract.Runtime, keys []string) error {
+    for _, key := range keys {
+        delete(instance.values, key)
+    }
+
+    return nil
+}
+
+func (instance *readingCache) Increment(runtimeInstance melodycontainercontract.Runtime, key string, delta int64, options melodycachecontract.CounterOptions) (int64, error) {
+    return 0, nil
+}
+
+func (instance *readingCache) GetCounter(runtimeInstance melodycontainercontract.Runtime, key string) (int64, bool, error) {
+    return 0, false, nil
+}
+
+func (instance *readingCache) Decrement(runtimeInstance melodycontainercontract.Runtime, key string, delta int64, options melodycachecontract.CounterOptions) (int64, error) {
+    return 0, nil
+}
+
+func (instance *readingCache) CloseWithContext(closeContext context.Context) error {
+    return nil
+}
+
+var _ melodycachecontract.Cache = (*readingCache)(nil)
+
+func assignCachedTestValue(key string, target any, value any) error {
+    targetValue := reflect.ValueOf(target)
+    if reflect.Pointer != targetValue.Kind() || true == targetValue.IsNil() {
+        return fmt.Errorf("cache read target %T is not a non-nil pointer", target)
+    }
+
+    /* a nil pointer is a remembered absence, which gob reads back as the zero value */
+    valueOf := reflect.ValueOf(value)
+    if nil == value || (reflect.Pointer == valueOf.Kind() && true == valueOf.IsNil()) {
+        targetValue.Elem().SetZero()
+
+        return nil
+    }
+
+    if false == valueOf.Type().AssignableTo(targetValue.Elem().Type()) {
+        return melodycache.NewDeserializationError([]string{key}, fmt.Errorf("the cached %T cannot be held by a %s target", value, targetValue.Elem().Type()))
+    }
+
+    targetValue.Elem().Set(valueOf)
+
+    return nil
+}
+
+func assignCachedTestValues(keys []string, target any, values map[string]any) error {
+    targetValue := reflect.ValueOf(target)
+    if reflect.Pointer != targetValue.Kind() || true == targetValue.IsNil() || reflect.Map != targetValue.Elem().Kind() {
+        return fmt.Errorf("cache batch read target %T is not a pointer to a map", target)
+    }
+
+    mapType := targetValue.Elem().Type()
+    result := reflect.MakeMap(mapType)
+    corruptKeys := make([]string, 0)
+    var firstCauseErr error
+    for _, key := range keys {
+        value, exists := values[key]
+        if false == exists {
+            continue
+        }
+
+        element := reflect.New(mapType.Elem())
+        if assignErr := assignCachedTestValue(key, element.Interface(), value); nil != assignErr {
+            corruptKeys = append(corruptKeys, key)
+            if nil == firstCauseErr {
+                firstCauseErr = assignErr
+            }
+            continue
+        }
+
+        result.SetMapIndex(reflect.ValueOf(key), element.Elem())
+    }
+
+    targetValue.Elem().Set(result)
+
+    if 0 < len(corruptKeys) {
+        return melodycache.NewDeserializationError(corruptKeys, firstCauseErr)
+    }
+
+    return nil
+}
+
+type emptyProductRepository struct{}
+
+func (instance *emptyProductRepository) All(ctx context.Context) ([]*entity.Product, error) {
+    return []*entity.Product{}, nil
+}
+
+func (instance *emptyProductRepository) FindById(ctx context.Context, id string) (*entity.Product, bool, error) {
+    return nil, false, nil
+}
+
+func (instance *emptyProductRepository) Create(ctx context.Context, product *entity.Product) error {
+    return nil
+}
+
+func (instance *emptyProductRepository) Update(ctx context.Context, product *entity.Product) (bool, error) {
+    return false, nil
+}
+
+func (instance *emptyProductRepository) DeleteById(ctx context.Context, id string) (bool, error) {
+    return false, nil
+}
+
+func (instance *emptyProductRepository) CategorizedIn(ctx context.Context, categoryId string) (bool, error) {
+    return false, nil
+}
+
+func (instance *emptyProductRepository) HoldingReferences(action func() error) error {
+    return action()
+}
+
+func (instance *emptyProductRepository) PricedIn(ctx context.Context, currencyId string) (bool, error) {
+    return false, nil
+}
+
+var _ repository.ProductRepository = (*emptyProductRepository)(nil)
+
+func newReportServiceUnderTest(t *testing.T, clockInstance *melodyclock.FrozenClock, cacheInstance melodycachecontract.Cache) *CatalogReportService {
+    t.Helper()
+
+    reportService, _ := newReportServiceWithArchive(t, clockInstance, cacheInstance, newRecordingReadingRepository())
+
+    return reportService
+}
+
+func newReportServiceWithArchive(
+    t *testing.T,
+    clockInstance *melodyclock.FrozenClock,
+    cacheInstance melodycachecontract.Cache,
+    readingRepository repository.CatalogReadingRepository,
+) (*CatalogReportService, melodycontainercontract.Runtime) {
+    t.Helper()
+
+    reportService, buildErr := NewCatalogReportService(
+        NewReportFormatter(),
+        service.NewProductService(&emptyProductRepository{}, nil, nil, cacheInstance, nil, clockInstance, time.Hour),
+        &stubJournalRepository{},
+        cacheInstance,
+        clockInstance,
+        "catalog",
+        10,
+        time.Minute,
+    )
+    if nil != buildErr {
+        t.Fatalf("new report service: %v", buildErr)
+    }
+
+    return reportService, newArchiveRuntime(readingRepository)
+}
+
+func newArchiveRuntime(readingRepository repository.CatalogReadingRepository) melodycontainercontract.Runtime {
+    serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+
+    if nil != readingRepository {
+        melodycontainer.MustRegister(
+            serviceContainer,
+            repository.ServiceCatalogReadingRepository,
+            func(resolver melodycontainercontract.Resolver) (repository.CatalogReadingRepository, error) {
+                return readingRepository, nil
+            },
+            melodycontainer.RegisterOptions{},
+        )
+    }
+
+    return melodyruntime.NewRun(context.Background(), serviceContainer.NewScope())
+}
+
+func newRecordingReadingRepository() *recordingReadingRepository {
+    return &recordingReadingRepository{}
+}
+
+type recordingReadingRepository struct {
+    appended  []*repository.CatalogReadingRecord
+    failWith  error
+    countFail error
+}
+
+func (instance *recordingReadingRepository) Append(ctx context.Context, reading *repository.CatalogReadingRecord) error {
+    if nil != instance.failWith {
+        return instance.failWith
+    }
+
+    for _, existing := range instance.appended {
+        if true == existing.TakenAt.Equal(reading.TakenAt) {
+            return fmt.Errorf("archive: %w", repository.ErrReadingAlreadyRecorded)
+        }
+    }
+
+    stored := *reading
+    instance.appended = append(instance.appended, &stored)
+
+    return nil
+}
+
+func (instance *recordingReadingRepository) Recent(ctx context.Context, limit int) ([]*repository.CatalogReadingRecord, error) {
+    if 0 >= limit {
+        return []*repository.CatalogReadingRecord{}, nil
+    }
+
+    reversed := make([]*repository.CatalogReadingRecord, 0, len(instance.appended))
+    for index := len(instance.appended) - 1; 0 <= index; index-- {
+        reversed = append(reversed, instance.appended[index])
+    }
+
+    if limit < len(reversed) {
+        reversed = reversed[:limit]
+    }
+
+    return reversed, nil
+}
+
+func (instance *recordingReadingRepository) Count(ctx context.Context) (int, error) {
+    if nil != instance.countFail {
+        return 0, instance.countFail
+    }
+
+    return len(instance.appended), nil
+}
+
+var _ repository.CatalogReadingRepository = (*recordingReadingRepository)(nil)
+
+func TestCatalogReadingFromTheCacheKeepsTheInstantItWasTakenAt(t *testing.T) {
+    takenAt := time.Date(2026, time.September, 6, 10, 0, 0, 0, time.UTC)
+    clockInstance := melodyclock.NewFrozenClock(takenAt)
+    cacheInstance := &readingCache{values: map[string]any{}}
+
+    reportService := newReportServiceUnderTest(t, clockInstance, cacheInstance)
+
+    if _, refreshErr := reportService.Refresh(exampleTestRuntime()); nil != refreshErr {
+        t.Fatalf("refresh: %v", refreshErr)
+    }
+
+    clockInstance.Advance(90 * time.Second)
+
+    reading, readingErr := reportService.Reading(exampleTestRuntime())
+    if nil != readingErr {
+        t.Fatalf("reading: %v", readingErr)
+    }
+
+    if false == reading.FromCache {
+        t.Fatalf("expected the reading to come from the cache")
+    }
+
+    if false == reading.RecordedAt.Equal(takenAt) {
+        t.Fatalf("expected the instant the reading was taken at (%s), got %s", takenAt.Format(time.RFC3339), reading.RecordedAt.Format(time.RFC3339))
+    }
+}
+
+func TestCatalogReadingTakesAFreshReadingWhenTheCachedPayloadCarriesNoInstant(t *testing.T) {
+    servedAt := time.Date(2026, time.September, 6, 11, 0, 0, 0, time.UTC)
+    clockInstance := melodyclock.NewFrozenClock(servedAt)
+    cacheInstance := &readingCache{values: map[string]any{catalogReadingCacheKey: "products=1 journal=2"}}
+
+    reportService := newReportServiceUnderTest(t, clockInstance, cacheInstance)
+
+    reading, readingErr := reportService.Reading(exampleTestRuntime())
+    if nil != readingErr {
+        t.Fatalf("reading: %v", readingErr)
+    }
+
+    if true == reading.FromCache {
+        t.Fatalf("expected a fresh reading, got one served from the cache")
+    }
+
+    if false == reading.RecordedAt.Equal(servedAt) {
+        t.Fatalf("expected the fresh reading to carry the current instant, got %s", reading.RecordedAt.Format(time.RFC3339))
+    }
+}
+
+func TestArchiveRecordsTheReadingUnderTheInstantItStatesAboutItself(t *testing.T) {
+    takenAt := time.Date(2026, time.September, 7, 10, 0, 0, 987654321, time.UTC)
+    clockInstance := melodyclock.NewFrozenClock(takenAt)
+    cacheInstance := &readingCache{values: map[string]any{}}
+    archive := newRecordingReadingRepository()
+
+    reportService, runtimeInstance := newReportServiceWithArchive(t, clockInstance, cacheInstance, archive)
+
+    reading, refreshErr := reportService.Refresh(exampleTestRuntime())
+    if nil != refreshErr {
+        t.Fatalf("refresh: %v", refreshErr)
+    }
+
+    recorded, archiveErr := reportService.Archive(runtimeInstance, reading)
+    if nil != archiveErr {
+        t.Fatalf("archive: %v", archiveErr)
+    }
+
+    if false == recorded {
+        t.Fatal("expected the first archive of a reading to report that it wrote")
+    }
+
+    if 1 != len(archive.appended) {
+        t.Fatalf("expected exactly one row, got %d", len(archive.appended))
+    }
+
+    wanted := time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC)
+    if false == archive.appended[0].TakenAt.Equal(wanted) {
+        t.Fatalf("expected the instant truncated to the second (%s), got %s", wanted, archive.appended[0].TakenAt)
+    }
+
+    if archive.appended[0].Payload != reading.Payload {
+        t.Fatalf("the archived payload is not the reading's: %q against %q", archive.appended[0].Payload, reading.Payload)
+    }
+}
+
+func TestArchiveTreatsAReadingAlreadyRecordedAsNotWrittenRatherThanAsAFailure(t *testing.T) {
+    takenAt := time.Date(2026, time.September, 7, 10, 0, 0, 100000000, time.UTC)
+    clockInstance := melodyclock.NewFrozenClock(takenAt)
+    cacheInstance := &readingCache{values: map[string]any{}}
+    archive := newRecordingReadingRepository()
+
+    reportService, runtimeInstance := newReportServiceWithArchive(t, clockInstance, cacheInstance, archive)
+
+    first, _ := reportService.Refresh(exampleTestRuntime())
+    if recorded, _ := reportService.Archive(runtimeInstance, first); false == recorded {
+        t.Fatal("expected the first archive to write")
+    }
+
+    second := &CatalogReading{
+        RecordedAt: takenAt.Add(300 * time.Millisecond),
+        Headline:   first.Headline,
+        Payload:    first.Payload,
+    }
+
+    recorded, archiveErr := reportService.Archive(runtimeInstance, second)
+    if nil != archiveErr {
+        t.Fatalf("expected a reading already recorded to be tolerated, got %v", archiveErr)
+    }
+
+    if true == recorded {
+        t.Fatal("expected the second archive inside the same second to report that it did not write")
+    }
+
+    if 1 != len(archive.appended) {
+        t.Fatalf("expected the archive to still hold one row, got %d", len(archive.appended))
+    }
+}
+
+func TestArchiveHandsBackAFailureThatIsNotADuplicate(t *testing.T) {
+    clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC))
+    cacheInstance := &readingCache{values: map[string]any{}}
+    archive := newRecordingReadingRepository()
+    archive.failWith = fmt.Errorf("dial postgres: connection refused")
+
+    reportService, runtimeInstance := newReportServiceWithArchive(t, clockInstance, cacheInstance, archive)
+
+    reading, _ := reportService.Refresh(exampleTestRuntime())
+
+    recorded, archiveErr := reportService.Archive(runtimeInstance, reading)
+    if nil == archiveErr {
+        t.Fatal("expected an unreachable archive to be reported")
+    }
+
+    if true == recorded {
+        t.Fatal("expected a failed archive to report that it did not write")
+    }
+}
+
+func TestArchivedInstantOfTruncatesToTheSecondInUtc(t *testing.T) {
+    eastern := time.FixedZone("east", 3*60*60)
+
+    fractional := time.Date(2026, time.September, 7, 13, 0, 0, 999999999, eastern)
+    archived := ArchivedInstantOf(fractional)
+
+    if 0 != archived.Nanosecond() {
+        t.Fatalf("expected the fraction to be dropped, got %s", archived)
+    }
+
+    if time.UTC != archived.Location() {
+        t.Fatalf("expected UTC, got %s", archived.Location())
+    }
+
+    if false == archived.Equal(time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC)) {
+        t.Fatalf("expected the same instant in UTC, got %s", archived)
+    }
+}
+
+func TestRecentReadingsAnswersTheArchive(t *testing.T) {
+    takenAt := time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC)
+    clockInstance := melodyclock.NewFrozenClock(takenAt)
+    cacheInstance := &readingCache{values: map[string]any{}}
+    archive := newRecordingReadingRepository()
+
+    reportService, runtimeInstance := newReportServiceWithArchive(t, clockInstance, cacheInstance, archive)
+
+    for index := 0; 3 > index; index++ {
+        _ = archive.Append(context.Background(), &repository.CatalogReadingRecord{
+            TakenAt:  takenAt.Add(time.Duration(index) * time.Second),
+            Headline: "catalog",
+            Payload:  "products=1",
+        })
+    }
+
+    readingList, readErr := reportService.RecentReadings(runtimeInstance, 2)
+    if nil != readErr {
+        t.Fatalf("recent readings: %v", readErr)
+    }
+
+    if 2 != len(readingList) {
+        t.Fatalf("expected two readings, got %d", len(readingList))
+    }
+
+    if false == readingList[0].TakenAt.Equal(takenAt.Add(2*time.Second)) {
+        t.Fatalf("expected the newest reading first, got %s", readingList[0].TakenAt)
+    }
+}
+
+func TestArchiveCarriesTheCountsTheReadingStatesRatherThanASecondObservation(t *testing.T) {
+    takenAt := time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC)
+    clockInstance := melodyclock.NewFrozenClock(takenAt)
+    cacheInstance := &readingCache{values: map[string]any{}}
+    archive := newRecordingReadingRepository()
+
+    reportService, runtimeInstance := newReportServiceWithArchive(t, clockInstance, cacheInstance, archive)
+
+    reading := &CatalogReading{
+        RecordedAt: takenAt,
+        Headline:   "catalog",
+        Payload:    "products=3 journal=7 recorded_at=" + takenAt.Format(time.RFC3339),
+    }
+
+    if recorded, archiveErr := reportService.Archive(runtimeInstance, reading); nil != archiveErr || false == recorded {
+        t.Fatalf("expected the reading to be archived, got recorded=%v err=%v", recorded, archiveErr)
+    }
+
+    if 3 != archive.appended[0].ProductCount || 7 != archive.appended[0].JournalCount {
+        t.Fatalf("expected the row to carry the payload's counts 3/7, got %d/%d", archive.appended[0].ProductCount, archive.appended[0].JournalCount)
+    }
+
+    if "catalog" != archive.appended[0].Headline {
+        t.Fatalf("expected the row to carry the reading's headline, got %q", archive.appended[0].Headline)
+    }
+}
+
+func TestArchiveRefusesAPayloadThatCarriesNoCounts(t *testing.T) {
+    clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC))
+    archive := newRecordingReadingRepository()
+
+    reportService, runtimeInstance := newReportServiceWithArchive(t, clockInstance, &readingCache{values: map[string]any{}}, archive)
+
+    recorded, archiveErr := reportService.Archive(runtimeInstance, &CatalogReading{RecordedAt: clockInstance.Now(), Headline: "catalog", Payload: "recorded_at=2026-09-07T10:00:00Z"})
+    if nil == archiveErr || true == recorded {
+        t.Fatalf("expected a payload without counts to be refused, got recorded=%v err=%v", recorded, archiveErr)
+    }
+
+    if 0 != len(archive.appended) {
+        t.Fatalf("expected nothing appended, got %d rows", len(archive.appended))
+    }
+}
+
+func TestArchiveResolvesTheRepositoryAtTheCallAndNotAtConstruction(t *testing.T) {
+    clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 7, 10, 0, 0, 0, time.UTC))
+    cacheInstance := &readingCache{values: map[string]any{}}
+
+    reportService, _ := newReportServiceWithArchive(t, clockInstance, cacheInstance, nil)
+
+    reading, refreshErr := reportService.Refresh(exampleTestRuntime())
+    if nil != refreshErr {
+        t.Fatalf("expected the reading to be taken without an archive on the container, got %v", refreshErr)
+    }
+
+    if _, archiveErr := reportService.Archive(newArchiveRuntime(nil), reading); nil == archiveErr {
+        t.Fatalf("expected the archive door to fail over a container without the repository")
+    }
+
+    if _, readErr := reportService.RecentReadings(newArchiveRuntime(nil), 1); nil == readErr {
+        t.Fatalf("expected the history door to fail over a container without the repository")
+    }
+}
+
+func TestCatalogReadingTakesAFreshReadingWhenTheCachedInstantDoesNotParse(t *testing.T) {
+    servedAt := time.Date(2026, time.September, 6, 11, 0, 0, 0, time.UTC)
+    clockInstance := melodyclock.NewFrozenClock(servedAt)
+    cacheInstance := &readingCache{values: map[string]any{catalogReadingCacheKey: "products=1 journal=2 recorded_at=garbage"}}
+
+    reportService := newReportServiceUnderTest(t, clockInstance, cacheInstance)
+
+    reading, readingErr := reportService.Reading(exampleTestRuntime())
+    if nil != readingErr {
+        t.Fatalf("reading: %v", readingErr)
+    }
+
+    if true == reading.FromCache || false == reading.RecordedAt.Equal(servedAt) {
+        t.Fatalf("expected a fresh reading at %s, got FromCache=%v at %s", servedAt.Format(time.RFC3339), reading.FromCache, reading.RecordedAt.Format(time.RFC3339))
+    }
+}
+
+func TestCatalogReadingTakesAFreshReadingOverAnEntryOfAnotherType(t *testing.T) {
+    servedAt := time.Date(2026, time.September, 6, 11, 0, 0, 0, time.UTC)
+    clockInstance := melodyclock.NewFrozenClock(servedAt)
+    cacheInstance := &readingCache{values: map[string]any{catalogReadingCacheKey: 42}}
+
+    reportService := newReportServiceUnderTest(t, clockInstance, cacheInstance)
+
+    reading, readingErr := reportService.Reading(exampleTestRuntime())
+    if nil != readingErr {
+        t.Fatalf("reading: %v", readingErr)
+    }
+
+    if true == reading.FromCache || false == reading.RecordedAt.Equal(servedAt) {
+        t.Fatalf("expected a fresh reading at %s, got FromCache=%v", servedAt.Format(time.RFC3339), reading.FromCache)
+    }
+
+    if _, isText := cacheInstance.values[catalogReadingCacheKey].(string); false == isText {
+        t.Fatalf("expected the entry overwritten by the fresh reading, got %#v", cacheInstance.values[catalogReadingCacheKey])
+    }
+}
+
+func TestCatalogRefreshCachesTheReadingPastTheHourlySchedule(t *testing.T) {
+    clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 6, 10, 0, 0, 0, time.UTC))
+    cacheInstance := &readingCache{values: map[string]any{}}
+
+    reportService := newReportServiceUnderTest(t, clockInstance, cacheInstance)
+
+    if _, refreshErr := reportService.Refresh(exampleTestRuntime()); nil != refreshErr {
+        t.Fatalf("refresh: %v", refreshErr)
+    }
+
+    if ttl, cached := cacheInstance.ttls[catalogReadingCacheKey]; false == cached || melodybound.Of(time.Hour+5*time.Minute) != ttl {
+        t.Fatalf("expected the one-minute interval held for the hour and its margin, got %s (cached %v)", ttl, cached)
+    }
+}
+
+func TestCatalogReadingLifetime_KeepsAnIntervalLongerThanTheSchedule(t *testing.T) {
+    for configured, expected := range map[time.Duration]time.Duration{
+        time.Minute:               time.Hour + 5*time.Minute,
+        time.Hour + 5*time.Minute: time.Hour + 5*time.Minute,
+        2 * time.Hour:             2 * time.Hour,
+    } {
+        if lifetime := catalogReadingLifetime(configured); expected != lifetime {
+            t.Fatalf("interval %s: expected %s, got %s", configured, expected, lifetime)
+        }
+    }
+}
+
+func TestRequestReportTrail_FlushWithNoEntriesResolvesNothing(t *testing.T) {
+    resolutions := 0
+    trail, buildErr := NewRequestReportTrail(
+        melodyhttp.NewRequestContext("request-empty", time.Unix(0, 0)),
+        NewReportFormatter(),
+        func(ctx context.Context) (repository.CatalogJournalRepository, error) {
+            resolutions++
+
+            return nil, errors.New("the journal cannot be built")
+        },
+        melodyclock.NewFrozenClock(time.Unix(1700000000, 0).UTC()),
+    )
+    if nil != buildErr {
+        t.Fatalf("build the trail: %v", buildErr)
+    }
+
+    if flushErr := trail.Flush(context.Background()); nil != flushErr || 0 != resolutions {
+        t.Fatalf("expected an empty trail to resolve nothing, got %v after %d resolutions", flushErr, resolutions)
+    }
+
+    trail.Record("editor", repository.CatalogJournalActionCreated, "product", "prod-1")
+    if flushErr := trail.Flush(context.Background()); nil == flushErr || 1 != resolutions {
+        t.Fatalf("expected a trail holding an entry to resolve the journal once and answer its failure, got %v after %d", flushErr, resolutions)
+    }
+}
+
+func TestNewRequestReportTrail_RefusesAMissingJournalSource(t *testing.T) {
+    if _, buildErr := NewRequestReportTrail(melodyhttp.NewRequestContext("request", time.Unix(0, 0)), NewReportFormatter(), nil, melodyclock.NewFrozenClock(time.Unix(0, 0))); nil == buildErr {
+        t.Fatalf("expected a trail without a journal source refused")
+    }
+}
+
+type stalledProductRepository struct {
+    emptyProductRepository
+}
+
+func (instance *stalledProductRepository) All(ctx context.Context) ([]*entity.Product, error) {
+    select {
+    case <-ctx.Done():
+        return nil, ctx.Err()
+    case <-time.After(5 * time.Second):
+        return []*entity.Product{}, nil
+    }
+}
+
+func TestCatalogReportServiceRefresh_ListsTheProductsThroughItsContext(t *testing.T) {
+    clockInstance := melodyclock.NewFrozenClock(time.Unix(1700000000, 0).UTC())
+    cacheInstance := &readingCache{values: map[string]any{}}
+
+    reportService, buildErr := NewCatalogReportService(
+        NewReportFormatter(),
+        service.NewProductService(&stalledProductRepository{}, nil, nil, cacheInstance, nil, clockInstance, time.Hour),
+        &stubJournalRepository{},
+        cacheInstance,
+        clockInstance,
+        "catalog",
+        10,
+        time.Minute,
+    )
+    if nil != buildErr {
+        t.Fatalf("new report service: %v", buildErr)
+    }
+
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if _, refreshErr := reportService.Refresh(exampleTestRuntimeUnder(ctx)); false == errors.Is(refreshErr, context.Canceled) {
+        t.Fatalf("expected the reading to end on its caller's context, got %v", refreshErr)
+    }
+}
+
+func TestCatalogReadingHeadlineCountsTheProductsTheReadingCounted(t *testing.T) {
+    clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 6, 10, 0, 0, 0, time.UTC))
+    cacheInstance := &readingCache{values: map[string]any{}}
+    reportService := newReportServiceUnderTest(t, clockInstance, cacheInstance)
+
+    fresh, refreshErr := reportService.Refresh(exampleTestRuntime())
+    if nil != refreshErr || "catalog: 0 entries" != fresh.Headline {
+        t.Fatalf("expected the fresh reading to count its products, got %v %v", fresh, refreshErr)
+    }
+
+    cached, readErr := reportService.Reading(exampleTestRuntime())
+    if nil != readErr || false == cached.FromCache || "catalog: 0 entries" != cached.Headline {
+        t.Fatalf("expected the cached reading to keep the count it was taken with, got %+v %v", cached, readErr)
+    }
+
+    if 10 != reportService.PageSize() {
+        t.Fatalf("expected the page size the service was built with, got %d", reportService.PageSize())
+    }
+}
+
+type countedProductRepository struct {
+    emptyProductRepository
+    count int
+}
+
+func (instance *countedProductRepository) All(ctx context.Context) ([]*entity.Product, error) {
+    products := make([]*entity.Product, 0, instance.count)
+    for index := 0; index < instance.count; index++ {
+        products = append(products, &entity.Product{})
+    }
+
+    return products, nil
+}
+
+func TestCatalogReadingHeadlineCountsTheProductsNotTheJournal(t *testing.T) {
+    clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 6, 10, 0, 0, 0, time.UTC))
+    cacheInstance := &readingCache{values: map[string]any{}}
+
+    reportService, buildErr := NewCatalogReportService(NewReportFormatter(), service.NewProductService(&countedProductRepository{count: 3}, nil, nil, cacheInstance, nil, clockInstance, time.Hour), &stubJournalRepository{}, cacheInstance, clockInstance, "catalog", 10, time.Minute)
+    if nil != buildErr {
+        t.Fatalf("new report service: %v", buildErr)
+    }
+
+    fresh, _ := reportService.Refresh(exampleTestRuntime())
+    cached, _ := reportService.Reading(exampleTestRuntime())
+    if "catalog: 3 entries" != fresh.Headline || "catalog: 3 entries" != cached.Headline || false == cached.FromCache {
+        t.Fatalf("expected both readings to count three products, got %q and %q", fresh.Headline, cached.Headline)
+    }
+}
+
+func TestNewCatalogReportService_RefusesAPageSizeBelowOne(t *testing.T) {
+    for _, pageSize := range []int{0, -5} {
+        if _, buildErr := NewCatalogReportService(NewReportFormatter(), nil, nil, nil, nil, "catalog", pageSize, time.Minute); nil == buildErr {
+            t.Fatalf("%d: expected the page size refused", pageSize)
+        }
+    }
+}
+

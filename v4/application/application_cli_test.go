@@ -1,0 +1,614 @@
+package application
+
+import (
+    "bytes"
+    "context"
+    "errors"
+    "os"
+    "reflect"
+    "strings"
+    "sync"
+    "testing"
+    "time"
+
+    urfavecli "github.com/urfave/cli/v3"
+
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/cli"
+    clicontract "github.com/precision-soft/melody/v4/cli/contract"
+    "github.com/precision-soft/melody/v4/cli/output"
+    "github.com/precision-soft/melody/v4/clock"
+    "github.com/precision-soft/melody/v4/config"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
+    "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/internal/testhelper"
+    "github.com/precision-soft/melody/v4/logging"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    "github.com/precision-soft/melody/v4/messagebus"
+)
+
+type exitCodedProbeApplicationCommand struct{}
+
+func (instance *exitCodedProbeApplicationCommand) Name() string {
+    return "probe:exit"
+}
+
+func (instance *exitCodedProbeApplicationCommand) Description() string {
+    return "returns an exit-coded error"
+}
+
+func (instance *exitCodedProbeApplicationCommand) Flags() []clicontract.Flag {
+    return []clicontract.Flag{}
+}
+
+func (instance *exitCodedProbeApplicationCommand) Run(
+    runtimeInstance containercontract.Runtime,
+    commandContext *clicontract.CommandContext,
+) error {
+    return exception.NewExitError(7, exception.NewError("command asked for an exit code", nil, nil))
+}
+
+func TestRunCli_InstallsTheExitErrHandlerOnTheRootCommand(t *testing.T) {
+    exitedWith := -1
+    originalExiter := urfavecli.OsExiter
+    urfavecli.OsExiter = func(code int) { exitedWith = code }
+    defer func() { urfavecli.OsExiter = originalExiter }()
+
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+
+    applicationInstance.RegisterCliCommand(&exitCodedProbeApplicationCommand{})
+
+    applicationInstance.Boot()
+
+    originalArguments := os.Args
+    os.Args = []string{"probe", "probe:exit"}
+    defer func() { os.Args = originalArguments }()
+
+    runErr := applicationInstance.runCli()
+
+    if -1 != exitedWith {
+        t.Fatalf("expected runCli to keep the cli library from exiting the process, got an exit with code %d", exitedWith)
+    }
+
+    var exitError *exception.ExitError
+    if false == errors.As(runErr, &exitError) {
+        t.Fatalf("expected the exit-coded error to travel back out of runCli, got %v", runErr)
+    }
+
+    if 7 != exitError.ExitCode() {
+        t.Fatalf("expected the exit code to survive, got %d", exitError.ExitCode())
+    }
+}
+
+func TestRegisterCliCommand_JudgesTheNameTrimmed(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    applicationInstance.RegisterCliCommand(&namedTestCommand{name: "app:padded"})
+    applicationInstance.RegisterCliCommand(&namedTestCommand{name: "app:padded "})
+
+    if 1 != len(applicationInstance.bootCollisions) {
+        t.Fatalf("expected the padded duplicate to be recorded as a collision, got %d", len(applicationInstance.bootCollisions))
+    }
+
+    reversedApplication := newCollisionTestApplication(t)
+
+    reversedApplication.RegisterCliCommand(&namedTestCommand{name: "app:reversed "})
+    reversedApplication.RegisterCliCommand(&namedTestCommand{name: "app:reversed"})
+
+    if 1 != len(reversedApplication.bootCollisions) {
+        t.Fatalf("expected the reversed padded duplicate to be recorded as a collision, got %d", len(reversedApplication.bootCollisions))
+    }
+
+    testhelper.AssertPanicsWithError(t, func() {
+        applicationInstance.RegisterCliCommand(&namedTestCommand{name: "   "})
+    }, "cli command name may not be empty")
+}
+
+func TestRunCli_DispatchesACommandWhoseNameCarriesPadding(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+
+    probe := &servingProbeApplicationCommand{}
+    paddedProbe := &paddedNameProbeCommand{inner: probe}
+    applicationInstance.RegisterCliCommand(paddedProbe)
+
+    applicationInstance.Boot()
+
+    originalArguments := os.Args
+    os.Args = []string{"probe", "probe:serving"}
+    defer func() { os.Args = originalArguments }()
+
+    runErr := applicationInstance.runCli()
+    if nil != runErr {
+        t.Fatalf("expected the padded command to be dispatchable, got: %v", runErr)
+    }
+
+    if false == probe.ran {
+        t.Fatalf("expected the padded command to have run")
+    }
+}
+
+type paddedNameProbeCommand struct {
+    inner clicontract.Command
+}
+
+func (instance *paddedNameProbeCommand) Name() string {
+    return " " + instance.inner.Name() + " "
+}
+
+func (instance *paddedNameProbeCommand) Description() string {
+    return instance.inner.Description()
+}
+
+func (instance *paddedNameProbeCommand) Flags() []clicontract.Flag {
+    return instance.inner.Flags()
+}
+
+func (instance *paddedNameProbeCommand) Run(
+    runtimeInstance containercontract.Runtime,
+    commandContext *clicontract.CommandContext,
+) error {
+    return instance.inner.Run(runtimeInstance, commandContext)
+}
+
+func TestSuggestCliCommand_ReturnsTheRefusalUnmarked(t *testing.T) {
+    suggestErr := suggestCliCommand(
+        []string{"app", "product"},
+        []commandSuggestion{
+            {Name: "example:product", Description: "lists the products"},
+        },
+        clock.NewSystemClock(),
+    )
+    if nil == suggestErr {
+        t.Fatalf("expected the suggestion refusal")
+    }
+
+    var exitError *exception.ExitError
+    if false == errors.As(suggestErr, &exitError) {
+        t.Fatalf("expected an ExitError, got %v", suggestErr)
+    }
+    if 2 != exitError.ExitCode() {
+        t.Fatalf("expected exit code 2, got %d", exitError.ExitCode())
+    }
+    if true == exitError.ErrorValue().AlreadyLogged() {
+        t.Fatalf("expected the refusal to travel unmarked so the exit path logs it")
+    }
+}
+
+func TestSuggestCliCommand_ReturnsTheZeroMatchRefusalUnmarked(t *testing.T) {
+    suggestErr := suggestCliCommand(
+        []string{"app", "nosuchthing"},
+        []commandSuggestion{
+            {Name: "example:product", Description: "lists the products"},
+        },
+        clock.NewSystemClock(),
+    )
+    if nil == suggestErr {
+        t.Fatalf("expected the refusal")
+    }
+
+    var exitError *exception.ExitError
+    if false == errors.As(suggestErr, &exitError) {
+        t.Fatalf("expected an ExitError, got %v", suggestErr)
+    }
+    if true == exitError.ErrorValue().AlreadyLogged() {
+        t.Fatalf("expected the refusal to travel unmarked")
+    }
+}
+
+func TestPrintCliCommandNotFoundHeader_EscapesTheArgvDerivedName(t *testing.T) {
+    buffer := &bytes.Buffer{}
+
+    printCliCommandNotFoundHeader(buffer, "bad\rname\x1b[2K", time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
+
+    written := buffer.String()
+    if true == strings.Contains(written, "\r") || true == strings.Contains(written, "\x1b") {
+        t.Fatalf("expected no raw control byte in the header, got %q", written)
+    }
+    if false == strings.Contains(written, `bad\rname\x1b[2K`) {
+        t.Fatalf("expected the escaped spelling kept in place, got %q", written)
+    }
+    if false == strings.Contains(written, "[command not found]") {
+        t.Fatalf("expected the header verdict kept, got %q", written)
+    }
+}
+
+type typedNilProbeCommand struct{}
+
+func (instance *typedNilProbeCommand) Name() string {
+    return "typed:nil:probe"
+}
+
+func (instance *typedNilProbeCommand) Description() string {
+    return "typed nil probe"
+}
+
+func (instance *typedNilProbeCommand) Flags() []clicontract.Flag {
+    return nil
+}
+
+func (instance *typedNilProbeCommand) Run(
+    runtimeInstance containercontract.Runtime,
+    commandContext *clicontract.CommandContext,
+) error {
+    return nil
+}
+
+func TestApplicationRegisterCliCommand_RefusesATypedNilCommand(t *testing.T) {
+    applicationInstance := &Application{}
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            applicationInstance.RegisterCliCommand((*typedNilProbeCommand)(nil))
+        },
+        "cli command may not be nil",
+    )
+}
+
+type processContextProbeCliCommand struct {
+    seenProcessId   string
+    seenStartedAt   time.Time
+    accessorAnswers bool
+}
+
+func (instance *processContextProbeCliCommand) Name() string {
+    return "probe:process-context"
+}
+
+func (instance *processContextProbeCliCommand) Description() string {
+    return "captures the process context the run scope carries"
+}
+
+func (instance *processContextProbeCliCommand) Flags() []clicontract.Flag {
+    return nil
+}
+
+func (instance *processContextProbeCliCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
+    processContext := ProcessContextMustFromRuntime(runtimeInstance)
+
+    instance.seenProcessId = processContext.ProcessId()
+    instance.seenStartedAt = processContext.StartedAt()
+    tolerantAnswer, tolerantErr := ProcessContextFromRuntime(runtimeInstance)
+    instance.accessorAnswers = nil == tolerantErr && nil != tolerantAnswer
+
+    return nil
+}
+
+func TestRunCli_InstallsTheProcessContextIntoTheRunScope(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+
+    probeCommand := &processContextProbeCliCommand{}
+    applicationInstance.RegisterCliCommand(probeCommand)
+
+    applicationInstance.Boot()
+
+    originalArguments := os.Args
+    os.Args = []string{"probe", "probe:process-context"}
+    defer func() { os.Args = originalArguments }()
+
+    if runErr := applicationInstance.runCli(); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    if "" == probeCommand.seenProcessId {
+        t.Fatalf("expected the run scope to carry a process context with a generated id")
+    }
+
+    if true == probeCommand.seenStartedAt.IsZero() {
+        t.Fatalf("expected the process context to carry the run's start moment")
+    }
+
+    if false == probeCommand.accessorAnswers {
+        t.Fatalf("expected the tolerant accessor to answer the installed context")
+    }
+}
+
+type contextCapturingCliLogger struct {
+    mutex    sync.Mutex
+    contexts []map[string]any
+    messages []string
+}
+
+func (instance *contextCapturingCliLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.messages = append(instance.messages, message)
+    instance.contexts = append(instance.contexts, context)
+}
+
+func (instance *contextCapturingCliLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelDebug, message, context)
+}
+
+func (instance *contextCapturingCliLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelInfo, message, context)
+}
+
+func (instance *contextCapturingCliLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelWarning, message, context)
+}
+
+func (instance *contextCapturingCliLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelError, message, context)
+}
+
+func (instance *contextCapturingCliLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelEmergency, message, context)
+}
+
+func (instance *contextCapturingCliLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *contextCapturingCliLogger) CauseChainDepth() int {
+    return 8
+}
+
+func (instance *contextCapturingCliLogger) contextOfMessage(message string) (map[string]any, bool) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    for index, recordedMessage := range instance.messages {
+        if message == recordedMessage {
+            return instance.contexts[index], true
+        }
+    }
+
+    return nil, false
+}
+
+type providedKeyProbeCliCommand struct{}
+
+func (instance *providedKeyProbeCliCommand) Name() string {
+    return "probe:provided-key"
+}
+
+func (instance *providedKeyProbeCliCommand) Description() string {
+    return "logs its own value under the correlation key"
+}
+
+func (instance *providedKeyProbeCliCommand) Flags() []clicontract.Flag {
+    return nil
+}
+
+func (instance *providedKeyProbeCliCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
+    logger := logging.LoggerMustFromRuntime(runtimeInstance)
+
+    logger.Info("probe record with a caller process id", loggingcontract.Context{"processId": "caller-owned"})
+
+    return nil
+}
+
+func TestRunCli_TheRunLoggerPreservesACallerProcessIdUnderProvided(t *testing.T) {
+    baseLogger := &contextCapturingCliLogger{}
+
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+
+    applicationInstance.RegisterService(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return baseLogger, nil
+        },
+        containercontract.RegisterOptions{},
+    )
+
+    applicationInstance.RegisterCliCommand(&providedKeyProbeCliCommand{})
+
+    applicationInstance.Boot()
+
+    originalArguments := os.Args
+    os.Args = []string{"probe", "probe:provided-key"}
+    defer func() { os.Args = originalArguments }()
+
+    if runErr := applicationInstance.runCli(); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    recordContext, recorded := baseLogger.contextOfMessage("probe record with a caller process id")
+    if false == recorded {
+        t.Fatalf("expected the probe record to reach the base logger")
+    }
+
+    generatedId, hasGeneratedId := recordContext["processId"].(string)
+    if false == hasGeneratedId || "" == generatedId || "caller-owned" == generatedId {
+        t.Fatalf("expected the generated id to win the correlation key, got %v", recordContext["processId"])
+    }
+
+    if "caller-owned" != recordContext["processIdProvided"] {
+        t.Fatalf("expected the caller's value verbatim under the provided key, got %v", recordContext["processIdProvided"])
+    }
+
+    if _, hasClaim := recordContext["processIdClaimed"]; true == hasClaim {
+        t.Fatalf("expected the console path to write no claimed key, got %v", recordContext["processIdClaimed"])
+    }
+}
+
+type versionProbeCliCommand struct {
+    optionVersion string
+    metaVersion   string
+}
+
+func (instance *versionProbeCliCommand) Name() string {
+    return "probe:version"
+}
+
+func (instance *versionProbeCliCommand) Description() string {
+    return "records the application version its output reads"
+}
+
+func (instance *versionProbeCliCommand) Flags() []clicontract.Flag {
+    return nil
+}
+
+func (instance *versionProbeCliCommand) Run(
+    runtimeInstance containercontract.Runtime,
+    commandContext *clicontract.CommandContext,
+) error {
+    option := output.ParseOptionsFromCommand(commandContext)
+    instance.optionVersion = option.ApplicationVersion
+    instance.metaVersion = output.NewMeta(instance.Name(), output.MetaConfig{Options: option, StartedAt: time.Now()}).Version.Application
+
+    return nil
+}
+
+func runVersionProbe(t *testing.T, version string) *versionProbeCliCommand {
+    t.Helper()
+
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{Version: version, EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+
+    probeCommand := &versionProbeCliCommand{}
+    applicationInstance.RegisterCliCommand(probeCommand)
+
+    applicationInstance.Boot()
+
+    originalArguments := os.Args
+    os.Args = []string{"probe", "probe:version"}
+    defer func() { os.Args = originalArguments }()
+
+    if runErr := applicationInstance.runCli(); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    return probeCommand
+}
+
+func TestRunCli_EachApplicationCarriesItsOwnVersion(t *testing.T) {
+    first := runVersionProbe(t, "1.0.0-first")
+    second := runVersionProbe(t, "2.0.0-second")
+    undeclared := runVersionProbe(t, "")
+
+    if "1.0.0-first" != first.optionVersion || "1.0.0-first" != first.metaVersion {
+        t.Fatalf("expected the first application's version, got option %q meta %q", first.optionVersion, first.metaVersion)
+    }
+
+    if "2.0.0-second" != second.optionVersion || "2.0.0-second" != second.metaVersion {
+        t.Fatalf("expected the second application's version, got option %q meta %q", second.optionVersion, second.metaVersion)
+    }
+
+    if "" != undeclared.optionVersion || "" != undeclared.metaVersion {
+        t.Fatalf("expected an undeclared version to read empty, got option %q meta %q", undeclared.optionVersion, undeclared.metaVersion)
+    }
+}
+
+func bootCliCommandNames(t *testing.T, environmentName string) map[string]bool {
+    t.Helper()
+
+    return bootCliCommandNamesUnder(t, environmentName, ApplicationConfig{})
+}
+
+func bootCliCommandNamesUnder(t *testing.T, environmentName string, applicationConfig ApplicationConfig) map[string]bool {
+    t.Helper()
+
+    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvironmentNameKey: environmentName})
+    applicationInstance.applicationConfig = applicationConfig
+
+    applicationInstance.bootCli()
+
+    names := make(map[string]bool, len(applicationInstance.cliCommands))
+    for _, command := range applicationInstance.cliCommands {
+        names[command.Name()] = true
+    }
+
+    return names
+}
+
+func TestBootCli_RegistersTheDebugFamilyOnlyInDevelopment(t *testing.T) {
+    developmentNames := bootCliCommandNames(t, config.EnvironmentDevelopment)
+    productionNames := bootCliCommandNames(t, config.EnvironmentProduction)
+
+    for _, name := range []string{"debug:container", "debug:parameters", "debug:events", "debug:middleware", "debug:version"} {
+        if false == developmentNames[name] {
+            t.Fatalf("expected %s registered in development, got %v", name, developmentNames)
+        }
+
+        if true == productionNames[name] {
+            t.Fatalf("expected %s absent in production, got %v", name, productionNames)
+        }
+    }
+
+    if false == productionNames["debug:router"] {
+        t.Fatalf("expected debug:router registered in production too, got %v", productionNames)
+    }
+}
+
+func TestBootCli_DebugCommandsEnabledRegistersTheDebugFamilyInEveryEnvironment(t *testing.T) {
+    for _, environmentName := range []string{config.EnvironmentProduction, config.EnvironmentDevelopment} {
+        names := bootCliCommandNamesUnder(t, environmentName, ApplicationConfig{DebugCommandsEnabled: true})
+
+        for _, name := range []string{"debug:router", "debug:container", "debug:parameters", "debug:events", "debug:middleware", "debug:version"} {
+            if false == names[name] {
+                t.Fatalf("%s: expected %s registered under DebugCommandsEnabled, got %v", environmentName, name, names)
+            }
+        }
+    }
+}
+
+func TestBootCli_TheRegisteredContainerCommandDescribesTheApplicationsContainer(t *testing.T) {
+    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment})
+
+    applicationInstance.bootCli()
+
+    var containerCommand clicontract.Command
+    for _, command := range applicationInstance.cliCommands {
+        if "debug:container" == command.Name() {
+            containerCommand = command
+        }
+    }
+
+    if nil == containerCommand {
+        t.Fatalf("expected debug:container registered in development")
+    }
+
+    serviceContainer := applicationInstance.kernel.ServiceContainer()
+    serviceContainer.MustRegister(
+        "test.described.probe",
+        func(resolver containercontract.Resolver) (string, error) {
+            return "probe", nil
+        },
+        containercontract.RegisterOptions{},
+    )
+    scope := serviceContainer.NewScope()
+    defer func() { _ = scope.CloseWithContext(context.Background()) }()
+
+    buffer := &bytes.Buffer{}
+    dispatchErr := cli.DispatchCommand(
+        context.Background(),
+        containerCommand,
+        runtime.NewRun(context.Background(), scope),
+        []string{"debug:container", "--format=json"},
+        buffer,
+        cli.DispatchOptions{},
+    )
+    if nil != dispatchErr {
+        t.Fatalf("expected the registered command to run, got %v", dispatchErr)
+    }
+
+    if false == strings.Contains(buffer.String(), "test.described.probe") {
+        t.Fatalf("expected the application's services listed, got %s", buffer.String())
+    }
+}
+
+func TestNewApplication_HandsTheMessageBusRetryToTheConsumeCommandItRegisters(t *testing.T) {
+    retry := messagebus.RetryPolicy{MaxRetries: bound.Of(7), Backoff: bound.Backoff{Initial: bound.Of(time.Millisecond)}}
+
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), MessageBus: MessageBusConfig{Retry: retry}})
+
+    if false == reflect.DeepEqual(messagebus.NewConsumeCommand(messagebus.ConsumeCommandConfig{Retry: retry}), applicationInstance.consumeCommand) {
+        t.Fatalf("expected the consume command built over the application's retry policy")
+    }
+
+    if true == reflect.DeepEqual(messagebus.NewConsumeCommand(messagebus.ConsumeCommandConfig{}), applicationInstance.consumeCommand) {
+        t.Fatalf("expected the application's retry policy, not the framework's default")
+    }
+}
+
+func TestApplication_CliRootConfigCarriesTheCauseChainDepthField(t *testing.T) {
+    applicationInstance := &Application{applicationConfig: ApplicationConfig{Version: "1.2.3", CliErrorCauseChainDepth: bound.Of(3)}}
+
+    rootConfig := applicationInstance.cliRootConfig()
+    if bound.Of(3) != rootConfig.ErrorCauseChainDepth || "1.2.3" != rootConfig.Version || os.Stderr != rootConfig.ErrorWriter {
+        t.Fatalf("expected the tree built with the application's version, depth and streams, got %+v", rootConfig)
+    }
+}

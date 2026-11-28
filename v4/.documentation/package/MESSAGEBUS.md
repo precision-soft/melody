@@ -1,0 +1,219 @@
+# MESSAGEBUS
+
+The [`messagebus`](../../messagebus) package provides Melody's transport-agnostic message bus: messages wrapped in envelopes with stamps, a configurable middleware stack, typed handler registration, pluggable transports, and a long-running consumer command. It is the asynchronous, durable counterpart to the in-process [`event`](EVENT.md) dispatcher.
+
+## Scope
+
+The message bus is opt-in. Unlike core services, it is not wired by the application container; userland builds the bus, registers handlers, and exposes it through its own module (see the example application). Dispatch and consumption both require a runtime instance for execution context and logging.
+
+## Subpackages
+
+- [`messagebus/contract`](../../messagebus/contract)\
+  Public contracts for envelopes, stamps, handlers, the bus, middleware, the handler locator, and transports.
+
+## Responsibilities
+
+- Wrap messages and carry metadata:
+    - [`Envelope`](../../messagebus/contract/envelope.go)
+    - [`Stamp`](../../messagebus/contract/envelope.go)
+    - [`NewEnvelope`](../../messagebus/envelope.go)
+    - [`EnsureEnvelope`](../../messagebus/envelope.go)
+    - built-in stamps [`BusNameStamp`](../../messagebus/stamp.go), [`SentStamp`](../../messagebus/stamp.go), [`ReceivedStamp`](../../messagebus/stamp.go), [`HandledStamp`](../../messagebus/stamp.go)
+    - [`LastStampOfType`](../../messagebus/stamp.go)
+- Dispatch through a middleware stack:
+    - [`Bus`](../../messagebus/contract/bus.go)
+    - [`Manager`](../../messagebus/manager.go)
+    - [`NewManager`](../../messagebus/manager.go)
+    - [`Middleware`](../../messagebus/contract/middleware.go) / [`StackNext`](../../messagebus/contract/middleware.go)
+- Locate and run handlers:
+    - [`MessageHandler`](../../messagebus/contract/handler.go)
+    - [`HandlerLocator`](../../messagebus/contract/locator.go)
+    - [`NewHandlerLocator`](../../messagebus/locator.go)
+    - [`RegisterHandler`](../../messagebus/locator.go)
+    - [`NewHandleMessageMiddleware`](../../messagebus/middleware_handle.go)
+- Route messages to transports:
+    - [`Transport`](../../messagebus/contract/transport.go)
+    - [`NewSendMessageMiddleware`](../../messagebus/middleware_send.go)
+    - [`InMemoryTransport`](../../messagebus/transport_in_memory.go)
+- Consume asynchronously:
+    - [`ConsumeCommand`](../../messagebus/consume_command.go)
+    - [`NewConsumeCommand`](../../messagebus/consume_command.go)
+- Provide container resolver helpers:
+    - [`ServiceBus`](../../messagebus/service_resolver.go)
+    - [`ServiceHandlerLocator`](../../messagebus/service_resolver.go)
+    - [`BusMustFromResolver`](../../messagebus/service_resolver.go)
+
+## How dispatch flows
+
+A bus is a [`Manager`](../../messagebus/manager.go) holding an ordered middleware stack. `Dispatch` wraps the message in an envelope, stamps it with the bus name, and runs the stack. Each [`Middleware`](../../messagebus/contract/middleware.go) may inspect or replace the envelope and decides whether to call `next`.
+
+The two built-in middlewares compose the common pattern:
+
+- [`NewSendMessageMiddleware`](../../messagebus/middleware_send.go) routes a message to a transport by its Go type. If a route matches and the envelope was not already received from a transport, it sends and stops the stack (asynchronous handling). Otherwise it calls `next`.
+- [`NewHandleMessageMiddleware`](../../messagebus/middleware_handle.go) runs every handler registered for the message type and stamps the envelope as handled.
+
+A dispatch bus typically uses `send` then `handle`: routed messages go to the transport, unrouted messages are handled inline (synchronous). A consume bus uses `handle` only, because the consumer feeds it envelopes already received from a transport.
+
+## Container integration
+
+The package defines the service names:
+
+- [`ServiceBus`](../../messagebus/service_resolver.go) (`"service.messagebus.bus"`)
+- [`ServiceHandlerLocator`](../../messagebus/service_resolver.go) (`"service.messagebus.handler_locator"`)
+
+These are not registered by the framework. Userland registers `ServiceBus` to its dispatch bus once, so that HTTP handlers, services, or commands can resolve and dispatch:
+
+```go
+registrar.RegisterService(
+    messagebus.ServiceBus,
+    func(resolver containercontract.Resolver) (messagebuscontract.Bus, error) {
+        return dispatchBus, nil
+    },
+    container.RegisterOptions{},
+)
+```
+
+Any service, handler, or command then resolves the same bus and dispatches:
+
+```go
+bus := messagebus.BusMustFromRuntime(runtimeInstance)
+bus.Dispatch(runtimeInstance, WelcomeEmail{UserId: 1}, messagebuscontract.DispatchOptions{})
+```
+
+`BusMustFromRuntime` resolves through the runtime's scope; a provider, which holds a resolver, writes `messagebus.BusMustFromResolver(resolver.Runtime().Context(), resolver)`. The factory result is cached, so every resolver shares the one configured bus — configure it once, dispatch from many places. The example application wires this end-to-end: the bus is registered in [`.example/config/service.go`](../../.example/config/service.go) and resolved in the [`/messagebus/dispatch`](../../.example/handler/welcome_email_dispatch_handler.go) HTTP handler. Set `AMQP_DSN` before launching the example to route the bus over RabbitMQ via the [`amqp`](../../../integrations/amqp/v4) integration instead of the in-process transport: without a broker the HTTP dispatch door answers `503` naming `AMQP_DSN`, since nothing in the process would consume what it accepted, while the `messagebus:dispatch` console command dispatches over the in-process transport.
+
+## Usage
+
+Building a bus, registering a typed handler, and dispatching:
+
+```go
+package main
+
+import (
+
+    melodymessagebus "github.com/precision-soft/melody/v4/messagebus"
+    melodymessagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+)
+
+type WelcomeEmail struct {
+    UserId  int
+    Address string
+}
+
+func buildBus() (*melodymessagebus.Manager, *melodymessagebus.InMemoryTransport) {
+    transport := melodymessagebus.NewInMemoryTransport(melodymessagebus.InMemoryTransportConfig{})
+
+    locator := melodymessagebus.NewHandlerLocator()
+    melodymessagebus.RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message WelcomeEmail, envelope melodymessagebuscontract.Envelope) error {
+        return nil
+    })
+
+    routing := melodymessagebus.NewRouting()
+    melodymessagebus.RouteType[WelcomeEmail](routing, "async", transport)
+
+    bus := melodymessagebus.NewManager(
+        "default",
+        []melodymessagebuscontract.Middleware{
+            melodymessagebus.NewSendMessageMiddleware(routing),
+            melodymessagebus.NewHandleMessageMiddleware(locator, melodymessagebus.HandleMiddlewareConfig{}),
+        },
+    )
+
+    return bus, transport
+}
+```
+
+The routing is built with [`NewRouting`](../../messagebus/routing.go) and [`RouteType[T]`](../../messagebus/routing.go) and handed to [`NewSendMessageMiddleware`](../../messagebus/middleware_send.go), which copies it. A handler receives the envelope beside the typed message, so it reads the message id and the redelivery count of the delivery it handles (`messagebus.MessageId(envelope)`).
+
+Consuming asynchronously is done with the [`ConsumeCommand`](../../messagebus/consume_command.go), registered as a CLI command:
+
+```bash
+app melody:messagebus:consume --transport=async
+app melody:messagebus:consume --transport=async --limit=100
+app melody:messagebus:consume --transport=async --concurrency=8
+```
+
+The consumer loops over the transport's subscription, dispatches each received envelope to a handle-only bus, and acknowledges on success or negatively acknowledges (with requeue) on failure. It shuts down cooperatively on `SIGINT`/`SIGTERM` or when the runtime context is cancelled. The transport's lifecycle is owned by the container's ordered teardown, not the consumer — the consumer does **not** call `CloseWithContext` on exit, so a transport shared between the dispatcher and the consumer in the same process keeps working after the consume command returns; `RegisterTransports` registers a `TransportsCloser` beside the map, resolved as a dependency of it, so the teardown closes every registered transport after everything that depends on the map, in deterministic name order. If the delivery channel closes without a cancelled context (for example a lost broker connection), the consumer returns an error rather than reporting a clean exit, so a supervisor can tell a crash from a graceful stop. A subscription that ends without the stop answers its `Err()` as the cause of `transport delivery channel closed`, and `transport delivery channel closed unexpectedly` when it gives no reason.
+
+By default the consumer handles one message at a time (so the broker's prefetch only buffers). Pass `--concurrency=N` to run N worker goroutines reading the same transport; per-transport `Ack`/`Nack` stay serialized, so this is safe. On shutdown the consumer waits a bounded grace period (30s when `ConsumeCommandConfig.ShutdownTimeout` is left out) for in-flight handlers to drain, then returns even if a handler is still running — handlers are not context-aware, so this stops a wedged handler from blocking shutdown forever. Messages already received but not yet acked are redelivered on the next run (at-least-once), so handlers must be idempotent.
+
+Poison messages (a delivery that can never decode) are nacked without requeue. With a durable transport this lands them in the dead-letter queue the AMQP transport declares by default; **without** a DLQ (`DeadLetterDisabled` on the AMQP transport) the broker discards them, so keep it in production, where an undecodable message is retained for inspection rather than dropped.
+
+A message that exhausts `RetryPolicy.MaxRetries` is routed to the transport `RetryPolicy.FailureTransportName` names. The framework's consume command takes its policy from `ApplicationConfig.MessageBus.Retry` and resolves the name from the transports registered with `RegisterTransports` when it runs, so the failure transport is a container service like any other and its teardown closes it; a name no registered transport carries refuses the run, naming `RetryPolicy.FailureTransportName`. A policy registered in the container under `service.messagebus.retry_policy` is read by nothing and named in the `messagebus.retryPolicyServiceIgnored` boot warning. A consumer reading the failure transport itself does not send an exhausted message back to it, where it would be received exhausted again without end: it warns and nacks without requeue, as a consumer with no failure transport does, so draining a failure transport takes a retry policy of its own. When the failure transport itself rejects it, the message is requeued to its source after `RetryPolicy.FailureRequeueDelay` and retried, until `RetryPolicy.MaxDeadLetterAttempts` failed dead-letter routings, five by default (`bound.UnlimitedCount()` keeps requeuing until the failure transport recovers): at that many failed dead-letter routings — counted by the [`DeadLetterAttemptStamp`](../../messagebus/stamp.go) carried across requeues — the consumer gives up and nacks without requeue, so a transport-native dead-letter (for example the AMQP DLX) can claim the message instead of it looping forever while both the handler and the failure transport are down. A requeued message carries one stamp of each counter — the redelivery, the delay and the dead-letter attempt — each requeue replacing the previous one on the bus's own envelope (a userland `Envelope` implementation receives the stamp appended), so a message requeued for ever does not
+grow.
+
+A runnable end-to-end demonstration lives in the example application: [`messagebus:dispatch`](../../.example/cli/messagebus_dispatch_command.go), wired in [`.example/config/messagebus.go`](../../.example/config/messagebus.go): it stamps each message with a `MessageIdStamp` of its run and counts only the envelopes carrying those ids, so beside another consumer of the queue it handles and acks another producer's message without counting it, and it ends at its `--timeout`.
+
+## Footguns & caveats
+
+- The bus is opt-in and userland-wired. The framework does not register a default bus, transport, or handler locator.
+- [`InMemoryTransport`](../../messagebus/transport_in_memory.go) answers each `Receive` a subscription of its own over the one queue: its stream closes when the runtime handed to `Receive` ends or the transport closes, the queue staying open for the other subscriptions, and a delivery the stopped subscription took goes back to the queue.
+- [`InMemoryTransport`](../../messagebus/transport_in_memory.go) is process-local: a message dispatched in one process is not visible to a consumer in another process. Use it for tests and single-process demos; use a durable transport (for example AMQP) across processes. Behind a load balancer this is mandatory — every instance must publish to and consume from the same broker. Multiple consumer instances on one queue are competing consumers (the broker delivers each message to one of them), which is the intended scale-out pattern; combined with at-least-once redelivery it means a message may be processed on a different instance than first received it, so handler idempotency must not rely on instance-local state.
+- [`RegisterHandler`](../../messagebus/locator.go) keys handlers by the exact Go type of the message, including pointer vs value. Dispatch the same type you registered.
+- [`NewSendMessageMiddleware`](../../messagebus/middleware_send.go) stops the stack after a successful send, so handle middleware placed after it does not run for routed messages. This is the intended synchronous/asynchronous split.
+- The consumer dispatches one message at a time by default; pass `--concurrency=N` or run several consumers for parallelism.
+- Retries are **at-least-once**: a durable transport that carries the redelivery count by re-publishing (the AMQP binding) can, on a crash between the re-publish and the original's ack, redeliver the original alongside the re-published copy. Handlers must be idempotent. A retry also runs every handler of the message's type again, the ones that succeeded before a later one failed included. A transport's `Receive` adds [`ReceivedStamp`](../../messagebus/stamp.go) to what it hands over, which is what keeps the send middleware of a shared bus from routing a received message back out. The redelivery count stamped on an exhausted/dead-lettered message is the number of *redeliveries*, which is one less than the number of handler *attempts*.
+- Across a process boundary two stamps cross every transport: a `HeadersStamp` and the `MessageIdStamp`; every other stamp is process-local unless the transport documents otherwise (the AMQP binding carries its retry counters). [`InMemoryTransport`](../../messagebus/transport_in_memory.go) hands the envelope itself over, so every stamp crosses it, but it refuses headers above `InMemoryTransportConfig.Headers` at `Send` as a broker transport does, so a test meets the refusal production would.
+- The retry backoff is capped and overflow-safe. [`InMemoryTransport`](../../messagebus/transport_in_memory.go) honors a `DelayStamp` by re-pushing after the delay (it no longer hot-retries), and drops a requeue if its buffer is full or the transport is closed — acceptable for a dev transport, but another reason to use a durable transport in production. A delayed requeue that gets dropped is logged through the logger of the runtime the `Nack` was called with, so the loss has a record even though the `Nack` already answered success before the delay elapsed.
+
+## Userland API
+
+### Contracts (`messagebus/contract`)
+
+- [`type Stamp`](../../messagebus/contract/envelope.go)
+- [`type Envelope`](../../messagebus/contract/envelope.go)
+- [`type MessageHandler`](../../messagebus/contract/handler.go)
+- [`type HandlerLocator`](../../messagebus/contract/locator.go)
+- [`type StackNext`](../../messagebus/contract/middleware.go)
+- [`type Middleware`](../../messagebus/contract/middleware.go)
+- [`type Bus`](../../messagebus/contract/bus.go)
+- [`type Transport`](../../messagebus/contract/transport.go) — `Receive(runtime)` answers a `Subscription`, `Nack(runtime, envelope, NackOptions)`
+- [`type Subscription`](../../messagebus/contract/transport.go) — `Envelopes()` closed when the stream ends, `Err()` then why, nil for an end through the runtime's context or the transport's close
+- [`type NackOptions`](../../messagebus/contract/transport.go) — `Requeue`, the zero value refusing without a requeue
+
+### Implementations (`messagebus`)
+
+- [`NewEnvelope(message any, stamps []messagebuscontract.Stamp) messagebuscontract.Envelope`](../../messagebus/envelope.go) — the stamps are copied, nil is none; `Envelope.WithStamps(stamps)` adds them, in order
+- [`EnsureEnvelope(message any) messagebuscontract.Envelope`](../../messagebus/envelope.go)
+- [`type BusNameStamp`](../../messagebus/stamp.go), [`type SentStamp`](../../messagebus/stamp.go), [`type ReceivedStamp`](../../messagebus/stamp.go), [`type HandledStamp`](../../messagebus/stamp.go)
+- [`type RedeliveryStamp`](../../messagebus/stamp.go), [`type DelayStamp`](../../messagebus/stamp.go) — retry metadata carried on a requeued envelope
+- [`type DeadLetterAttemptStamp`](../../messagebus/stamp.go) — retry metadata counting failed dead-letter routings of an exhausted envelope (see `RetryPolicy.MaxDeadLetterAttempts`)
+- [`type MessageIdStamp`](../../messagebus/stamp.go) — a stable, producer-assigned message id, so a transport can publish it (the AMQP transport round-trips it as the AMQP message id) and a consumer can deduplicate redeliveries; the outbox relay stamps a deterministic id per logical message
+- [`LastStampOfType[T messagebuscontract.Stamp](envelope) (T, bool)`](../../messagebus/stamp.go)
+- [`RedeliveryCount(envelope messagebuscontract.Envelope) int`](../../messagebus/stamp.go) — the number of redeliveries so far, for a handler inspecting retry attempts
+- [`DeadLetterAttemptCount(envelope messagebuscontract.Envelope) int`](../../messagebus/stamp.go) — the number of failed dead-letter routings so far
+- [`MessageId(envelope messagebuscontract.Envelope) (string, bool)`](../../messagebus/stamp.go) — the producer-assigned message id stamped on the envelope, if any
+- [`type HeadersStamp`](../../messagebus/stamp.go) (`Headers map[string]string`, name `StampNameHeaders`) — the application's string metadata, a correlation id, a trace context, a tenant: the one stamp every transport serializes, beside the message id
+- [`Headers(envelope messagebuscontract.Envelope) map[string]string`](../../messagebus/stamp.go) — every `HeadersStamp` merged in order, a later stamp winning a name; a fresh map, empty when there is none
+- [`type HeaderLimitsConfig`](../../messagebus/headers.go) (`MaxCount`, 32 by default, at least 1; `MaxBytes`, the names and values together, 8 KiB by default, at least 64; `MaxNameLength`, the longest name, `DefaultHeaderMaxNameLength` (64) by default, 1 to `HeaderNameMaximumLength` (255), an amqp field-table key being a short string, a transport writing the name behind a prefix refusing above its own lower ceiling (the amqp transport's `HeaderNameMaximumLength`, 239); unlimited refused for the three) and [`ResolveHeaderLimits(config, field) (HeaderLimits, error)`](../../messagebus/headers.go), which names `<field>.MaxCount` / `<field>.MaxBytes` / `<field>.MaxNameLength` in a refusal; the zero `HeaderLimits` is the defaults
+- [`ValidateHeaders(headers, limits) error`](../../messagebus/headers.go) — the rule a transport or a store applies before it writes, each refusal caused by [`ErrHeadersRefused`](../../messagebus/headers.go): a name of 1 to `MaxNameLength` characters of letters, digits, `.`, `_` and `-`, beginning with a letter or a digit, carried verbatim, a longer one refused naming `<field>.MaxNameLength`; a value of valid UTF-8 with no control character, CR and LF included; the count and the bytes within the limits. A refusal names the header, never its value; headers are refused, never truncated, and never bounded where they are read
+- [`IsWritableHeader(name, value string) bool`](../../messagebus/headers.go) — whether one header meets `ValidateHeaders`' name and value rule, a name up to `HeaderNameMaximumLength`, so a transport skips on receive what no limits could write back
+- [`type HandlerLocator`](../../messagebus/locator.go)
+    - [`NewHandlerLocator() *HandlerLocator`](../../messagebus/locator.go)
+    - [`RegisterHandler[T any](locator *HandlerLocator, handle func(containercontract.Runtime, T) error)`](../../messagebus/locator.go)
+- [`type Manager`](../../messagebus/manager.go)
+    - [`NewManager(name string, middlewares []messagebuscontract.Middleware) *Manager`](../../messagebus/manager.go) — nil is a bus with no middleware, a nil middleware is refused by its index; `Dispatch(runtimeInstance, message, options)` adds the stamps of its [`messagebuscontract.DispatchOptions`](../../messagebus/contract/bus.go) (`Stamps []Stamp`, in order, nil for none)
+- [`NewHandleMessageMiddleware(locator messagebuscontract.HandlerLocator, config HandleMiddlewareConfig) messagebuscontract.Middleware`](../../messagebus/middleware_handle.go) — a nil locator is refused
+- [`type HandleMiddlewareConfig`](../../messagebus/middleware_handle.go) (`AllowMissingHandler bool`) — the default REFUSES a message with no registered handler — an envelope already carrying a `HandledStamp` passes, since it was handled upstream —, because on the consume path a pass-through is immediately Acked and the queue drains; `AllowMissingHandler: true` restores the pass-through with a warning
+- [`NewSendMessageMiddleware(routing *Routing) messagebuscontract.Middleware`](../../messagebus/middleware_send.go) — a nil routing is refused
+- [`type Routing`](../../messagebus/routing.go) — type-safe routing builder
+    - [`NewRouting() *Routing`](../../messagebus/routing.go)
+    - [`RouteType[T any](routing *Routing, name string, transport messagebuscontract.Transport) *Routing`](../../messagebus/routing.go)
+- [`type InMemoryTransport`](../../messagebus/transport_in_memory.go)
+    - [`NewInMemoryTransport(config InMemoryTransportConfig) *InMemoryTransport`](../../messagebus/transport_in_memory.go)
+- [`type InMemoryTransportConfig`](../../messagebus/transport_in_memory.go) (`BufferSize bound.Count`, `Logger loggingcontract.Logger`) — `BufferSize` 64 when left out, 0 an unbuffered queue where a send waits for a receiver and a requeue waits for the next receive on a goroutine of its own, or for the close, which journals the drop; unlimited refused; `Logger` journals that drop when the runtime carries no logger, a typed nil refused
+- [`type ConsumeCommand`](../../messagebus/consume_command.go)
+    - [`NewConsumeCommand(config ConsumeCommandConfig) *ConsumeCommand`](../../messagebus/consume_command.go) — resolves the bus and the transports from the run's scope at run time; the config's `Retry` is the retry policy's one source, the framework's own command taking `ApplicationConfig.MessageBus.Retry`
+- [`type ConsumeCommandConfig`](../../messagebus/consume_command.go) (`Retry RetryPolicy`, `ShutdownTimeout bound.Duration`) — `ShutdownTimeout` 30s when left out, at least 1ms, unlimited refused
+- [`type RetryPolicy`](../../messagebus/consume_command.go) (`MaxRetries bound.Count`, `Backoff bound.Backoff`, `FailureTransportName string`, `FailureRequeueDelay bound.Duration`, `MaxDeadLetterAttempts bound.Count`) — every field left out takes its default: `MaxRetries` 3 (`bound.Of(0)` for no retry, unlimited refused), `Backoff` 1s doubling to 1h (`Initial`, `Max`, `Factor` 2) and `FailureRequeueDelay` 5s (each duration at least 1ms), `MaxDeadLetterAttempts` 5, the message nacked without requeue at the fifth failed dead-letter routing (at least 1, `bound.UnlimitedCount()` to requeue until the failure transport recovers); a `FailureTransportName` with surrounding whitespace and a field outside its rule are refused by name, and a `FailureTransportName` no registered transport carries refuses the run. The delay before retry n is `Backoff.Initial × Backoff.Factor^(n-1)`, capped at `Backoff.Max` (1s, 2s, 4s… by default; a `Factor` of 1 is a constant delay); a message the failure transport rejected is requeued to its source after `FailureRequeueDelay`
+
+### Container helpers (`messagebus`)
+
+- [`const ServiceBus`](../../messagebus/service_resolver.go)
+- [`const ServiceHandlerLocator`](../../messagebus/service_resolver.go)
+- [`BusMustFromRuntime(containercontract.Runtime) messagebuscontract.Bus`](../../messagebus/service_resolver.go)
+- [`BusMustFromResolver(context.Context, containercontract.Resolver) messagebuscontract.Bus`](../../messagebus/service_resolver.go)
+- [`HandlerLocatorMustFromResolver(context.Context, containercontract.Resolver) messagebuscontract.HandlerLocator`](../../messagebus/service_resolver.go)
+- [`const ServiceTransportsCloser`](../../messagebus/service_resolver.go)
+- [`type TransportsCloser`](../../messagebus/service_resolver.go) — owns the shutdown of every transport `RegisterTransports` registered; its `CloseWithContext(context.Context) error` is what the container's ordered teardown reaches, under the teardown's budget, closing the transports in name order and joining failures with the transport named in each. The application builds it at boot and declares it a teardown dependency of the buses registered under `ServiceBus` and `ServiceConsumeBus`, so every service that publishes through a bus closes before the bus, and the bus before the transports it routes to, under the waves and the sequential teardown alike: a bus routes through transport values its module captured, which no resolution records, and nothing has to be declared by hand

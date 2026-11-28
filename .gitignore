@@ -26,3 +26,6 @@ zz_*_test.go
 AGENTS.md
 # the bytecode cache python writes beside a tool it runs, such as the changelog inventory
 __pycache__/
+
+# the lock the heavy runs take at the root, never part of a tree
+/.heavy.lock

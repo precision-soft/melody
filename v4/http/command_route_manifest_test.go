@@ -1,0 +1,211 @@
+package http
+
+import (
+    "bytes"
+    "context"
+    "encoding/json"
+    nethttp "net/http"
+    "os"
+    "path/filepath"
+    "strings"
+    "testing"
+
+    melodycli "github.com/precision-soft/melody/v4/cli"
+    "github.com/precision-soft/melody/v4/config"
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
+)
+
+type manifestCommandEmptyEnvironmentSource struct {
+}
+
+func (instance *manifestCommandEmptyEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
+    return map[string]string{}, nil
+}
+
+func newManifestCommandRuntime(t *testing.T, projectDirectory string) containercontract.Runtime {
+    t.Helper()
+
+    router := NewRouter()
+    router.Handle(
+        "/products",
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return nil, nil
+        },
+        RouteOptions{Name: "products.list", Methods: []string{nethttp.MethodGet}, Attributes: ExposedRouteAttributes(RouteZoneFrontend)},
+    )
+
+    environment, environmentErr := config.NewEnvironment(context.Background(), &manifestCommandEmptyEnvironmentSource{})
+    if nil != environmentErr {
+        t.Fatalf("new environment: %v", environmentErr)
+    }
+
+    configuration, configurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{})
+    if nil != configurationErr {
+        t.Fatalf("new configuration: %v", configurationErr)
+    }
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+
+    container.MustRegister[httpcontract.Router](
+        serviceContainer,
+        ServiceRouter,
+        func(resolver containercontract.Resolver) (httpcontract.Router, error) {
+            return router, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    container.MustRegister[configcontract.Configuration](
+        serviceContainer,
+        config.ServiceConfig,
+        func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+            return configuration, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    return runtime.NewRequest(context.Background(), serviceContainer.NewScope())
+}
+
+func runRouteManifestCommand(
+    t *testing.T,
+    runtimeInstance containercontract.Runtime,
+    arguments ...string,
+) (string, error) {
+    t.Helper()
+
+    command := NewRouteManifestCommand()
+    output := &bytes.Buffer{}
+
+    runErr := melodycli.DispatchCommand(
+        context.Background(),
+        command,
+        runtimeInstance,
+        append([]string{command.Name()}, arguments...),
+        output,
+        melodycli.DispatchOptions{},
+    )
+
+    return output.String(), runErr
+}
+
+func TestRouteManifestCommand_AnchorsARelativeOutAtTheProjectDirectory(t *testing.T) {
+    projectDirectory := t.TempDir()
+    runtimeInstance := newManifestCommandRuntime(t, projectDirectory)
+
+    output, runErr := runRouteManifestCommand(t, runtimeInstance, "--out", "public/routes.json")
+    if nil != runErr {
+        t.Fatalf("run: %v", runErr)
+    }
+
+    written, readErr := os.ReadFile(filepath.Join(projectDirectory, "public", "routes.json"))
+    if nil != readErr {
+        t.Fatalf("expected the manifest under the project directory: %v", readErr)
+    }
+
+    var manifest RouteManifest
+    if unmarshalErr := json.Unmarshal(written, &manifest); nil != unmarshalErr {
+        t.Fatalf("unmarshal: %v", unmarshalErr)
+    }
+
+    if 1 != len(manifest.Routes) || "products.list" != manifest.Routes[0].Name {
+        t.Fatalf("unexpected manifest: %+v", manifest.Routes)
+    }
+
+    if false == strings.Contains(output, "wrote route manifest to") {
+        t.Fatalf("expected the confirmation on the command writer, got %q", output)
+    }
+}
+
+func TestRouteManifestCommand_RefusesToOverwriteAForeignFile(t *testing.T) {
+    projectDirectory := t.TempDir()
+    runtimeInstance := newManifestCommandRuntime(t, projectDirectory)
+
+    foreignPath := filepath.Join(projectDirectory, "main.go")
+    if writeErr := os.WriteFile(foreignPath, []byte("package main\n"), 0o644); nil != writeErr {
+        t.Fatalf("seed: %v", writeErr)
+    }
+
+    _, runErr := runRouteManifestCommand(t, runtimeInstance, "--out", "main.go")
+    if nil == runErr {
+        t.Fatalf("expected the foreign target to be refused")
+    }
+
+    survived, readErr := os.ReadFile(foreignPath)
+    if nil != readErr {
+        t.Fatalf("read back: %v", readErr)
+    }
+
+    if "package main\n" != string(survived) {
+        t.Fatalf("the foreign file was overwritten: %q", string(survived))
+    }
+}
+
+func TestRouteManifestCommand_RefusesAZoneThatIsNotDeclared(t *testing.T) {
+    projectDirectory := t.TempDir()
+    runtimeInstance := newManifestCommandRuntime(t, projectDirectory)
+
+    outputPath := filepath.Join(projectDirectory, "routes.json")
+    if writeErr := os.WriteFile(outputPath, []byte(`{"routes":[{"name":"kept"}]}`), 0o644); nil != writeErr {
+        t.Fatalf("seed: %v", writeErr)
+    }
+
+    _, runErr := runRouteManifestCommand(t, runtimeInstance, "--zone", "frontent", "--out", "routes.json")
+    if nil == runErr {
+        t.Fatalf("expected the misspelled zone to be refused")
+    }
+
+    survived, readErr := os.ReadFile(outputPath)
+    if nil != readErr {
+        t.Fatalf("read back: %v", readErr)
+    }
+
+    if false == strings.Contains(string(survived), "kept") {
+        t.Fatalf("the previous manifest was replaced by an empty one: %q", string(survived))
+    }
+}
+
+func TestRouteManifestCommand_ReadsAZoneMadeOnlyOfSpaceTheWayTheDoorDoes(t *testing.T) {
+    projectDirectory := t.TempDir()
+    runtimeInstance := newManifestCommandRuntime(t, projectDirectory)
+
+    outputPath := filepath.Join(projectDirectory, "routes.json")
+    if writeErr := os.WriteFile(outputPath, []byte(`{"routes":[{"name":"kept"}]}`), 0o644); nil != writeErr {
+        t.Fatalf("seed: %v", writeErr)
+    }
+
+    _, runErr := runRouteManifestCommand(t, runtimeInstance, "--zone", "   ", "--out", "routes.json")
+    if nil == runErr {
+        t.Fatalf("expected a zone made only of space to be refused, the way the door refuses it")
+    }
+
+    survived, readErr := os.ReadFile(outputPath)
+    if nil != readErr {
+        t.Fatalf("read back: %v", readErr)
+    }
+
+    if false == strings.Contains(string(survived), "kept") {
+        t.Fatalf("the previous manifest was replaced: %q", string(survived))
+    }
+
+    if _, spacedErr := runRouteManifestCommand(t, runtimeInstance, "--zone", " public ", "--out", "routes.json"); nil != spacedErr {
+        t.Fatalf("expected a declared zone surrounded by space to be that zone, got: %v", spacedErr)
+    }
+}
+
+func TestRouteManifestCommand_PrintsTheManifestToTheCommandWriterWhenOutIsEmpty(t *testing.T) {
+    runtimeInstance := newManifestCommandRuntime(t, t.TempDir())
+
+    output, runErr := runRouteManifestCommand(t, runtimeInstance)
+    if nil != runErr {
+        t.Fatalf("run: %v", runErr)
+    }
+
+    if false == strings.Contains(output, `"products.list"`) {
+        t.Fatalf("expected the manifest on the command writer, got %q", output)
+    }
+}

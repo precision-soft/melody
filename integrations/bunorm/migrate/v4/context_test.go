@@ -1,0 +1,162 @@
+package migrate
+
+import (
+    "testing"
+    "time"
+
+    "github.com/uptrace/bun/migrate"
+
+    "github.com/precision-soft/melody/v4/bound"
+)
+
+func assertPanics(t *testing.T, callback func()) {
+    t.Helper()
+
+    defer func() {
+        if recovered := recover(); nil == recovered {
+            t.Fatalf("expected a panic")
+        }
+    }()
+
+    callback()
+}
+
+func TestEffectiveOptions_DerivesPrefixAndManagerFromTheContextName(t *testing.T) {
+    resolved := effectiveConfig(ContextConfig{Name: "payment"}, CommandConfig{})
+
+    if "db:payment" != resolved.CommandPrefix {
+        t.Fatalf("expected the derived prefix, got: %s", resolved.CommandPrefix)
+    }
+
+    if "payment" != resolved.ManagerName {
+        t.Fatalf("expected the manager to default to the context name, got: %s", resolved.ManagerName)
+    }
+
+    defaults := resolvedDefaultOptions
+    if defaults.ManagerRegistryServiceId != resolved.ManagerRegistryServiceId {
+        t.Fatalf("expected the default registry service id, got: %s", resolved.ManagerRegistryServiceId)
+    }
+
+    if defaults.ManagerFlagName != resolved.ManagerFlagName {
+        t.Fatalf("expected the default manager flag name, got: %s", resolved.ManagerFlagName)
+    }
+}
+
+func TestEffectiveOptions_InheritsFromBaseOptions(t *testing.T) {
+    base := CommandConfig{
+        ManagerRegistryServiceId: "service.database.registry.custom",
+        ManagerFlagName:          "database",
+        CommandPrefix:            "orm",
+    }
+
+    resolved := effectiveConfig(ContextConfig{Name: "apiaccess"}, base)
+
+    if "service.database.registry.custom" != resolved.ManagerRegistryServiceId {
+        t.Fatalf("expected the base registry service id, got: %s", resolved.ManagerRegistryServiceId)
+    }
+
+    if "database" != resolved.ManagerFlagName {
+        t.Fatalf("expected the base manager flag name, got: %s", resolved.ManagerFlagName)
+    }
+
+    if "orm:apiaccess" != resolved.CommandPrefix {
+        t.Fatalf("expected the base-derived prefix, got: %s", resolved.CommandPrefix)
+    }
+}
+
+func TestEffectiveOptions_ExplicitContextOptionsWin(t *testing.T) {
+    contextConfig := ContextConfig{
+        Name: "platform",
+        Command: CommandConfig{
+            ManagerRegistryServiceId: "service.database.registry.platform",
+            CommandPrefix:            "platform-db",
+            ManagerName:              "platform-primary",
+        },
+    }
+
+    resolved := effectiveConfig(contextConfig, CommandConfig{CommandPrefix: "orm"})
+
+    if "service.database.registry.platform" != resolved.ManagerRegistryServiceId {
+        t.Fatalf("expected the explicit registry service id, got: %s", resolved.ManagerRegistryServiceId)
+    }
+
+    if "platform-db" != resolved.CommandPrefix {
+        t.Fatalf("expected the explicit prefix, got: %s", resolved.CommandPrefix)
+    }
+
+    if "platform-primary" != resolved.ManagerName {
+        t.Fatalf("expected the explicit manager name, got: %s", resolved.ManagerName)
+    }
+}
+
+func TestValidateContexts_PanicsOnEmptyName(t *testing.T) {
+    assertPanics(t, func() {
+        validateContexts([]ContextConfig{{Name: "", Migrations: migrate.NewMigrations()}})
+    })
+}
+
+func TestValidateContexts_PanicsOnNilMigrations(t *testing.T) {
+    assertPanics(t, func() {
+        validateContexts([]ContextConfig{{Name: "payment"}})
+    })
+}
+
+func TestValidateContexts_PanicsOnDuplicateName(t *testing.T) {
+    assertPanics(t, func() {
+        validateContexts([]ContextConfig{
+            {Name: "payment", Migrations: migrate.NewMigrations()},
+            {Name: "payment", Migrations: migrate.NewMigrations()},
+        })
+    })
+}
+
+func TestValidateContexts_AcceptsDistinctContexts(t *testing.T) {
+    validateContexts([]ContextConfig{
+        {Name: "platform", Migrations: migrate.NewMigrations()},
+        {Name: "payment", Migrations: migrate.NewMigrations()},
+    })
+}
+
+func TestEffectiveOptions_ManagerNameDoesNotInheritTheBasePin(t *testing.T) {
+    resolved := effectiveConfig(
+        ContextConfig{Name: "analytics"},
+        CommandConfig{ManagerName: "main"},
+    )
+
+    if "analytics" != resolved.ManagerName {
+        t.Fatalf("expected the context name (not the inherited base pin), got %q", resolved.ManagerName)
+    }
+}
+
+func TestEffectiveOptions_ManagerNameFallsBackToTheContextName(t *testing.T) {
+    resolved := effectiveConfig(ContextConfig{Name: "reporting"}, CommandConfig{})
+
+    if "reporting" != resolved.ManagerName {
+        t.Fatalf("expected the context name as the default manager, got %q", resolved.ManagerName)
+    }
+}
+
+func TestEffectiveOptions_ContextManagerNameBeatsTheBasePin(t *testing.T) {
+    resolved := effectiveConfig(
+        ContextConfig{Name: "erp", Command: CommandConfig{ManagerName: "erp_database"}},
+        CommandConfig{ManagerName: "primary"},
+    )
+
+    if "erp_database" != resolved.ManagerName {
+        t.Fatalf("expected the per-context pin to win, got %q", resolved.ManagerName)
+    }
+}
+
+func TestEffectiveOptions_TheUnlockTimeoutInheritsFromTheBaseUnlessTheContextSetsIt(t *testing.T) {
+    baseConfig := CommandConfig{UnlockTimeout: bound.Of(2 * time.Second)}
+
+    inherited := effectiveConfig(ContextConfig{Name: "billing", Migrations: migrate.NewMigrations()}, baseConfig)
+    if bound.Of(2*time.Second) != inherited.UnlockTimeout {
+        t.Fatalf("expected the base unlock timeout inherited, got %s", inherited.UnlockTimeout)
+    }
+
+    own := effectiveConfig(ContextConfig{Name: "billing", Migrations: migrate.NewMigrations(), Command: CommandConfig{UnlockTimeout: bound.Of(3 * time.Second)}}, baseConfig)
+    if bound.Of(3*time.Second) != own.UnlockTimeout {
+        t.Fatalf("expected the context's own unlock timeout to win, got %s", own.UnlockTimeout)
+    }
+}

@@ -1,0 +1,177 @@
+package output
+
+import (
+    "testing"
+
+    "github.com/precision-soft/melody/v4/bound"
+)
+
+func TestNormalizeOption_ImpliesNoColorForTheJsonFormat(t *testing.T) {
+    normalized, normalizeErr := NormalizeOptions(
+        Options{
+            Format:  FormatJson,
+            NoColor: false,
+        },
+    )
+    if nil != normalizeErr {
+        t.Fatalf("expected the option admitted, got %v", normalizeErr)
+    }
+
+    if false == normalized.NoColor {
+        t.Fatalf("expected the json format to imply no color")
+    }
+}
+
+func TestNormalizeOption_KeepsColorForTheTableFormat(t *testing.T) {
+    normalized, normalizeErr := NormalizeOptions(
+        Options{
+            Format:  FormatTable,
+            NoColor: false,
+        },
+    )
+    if nil != normalizeErr {
+        t.Fatalf("expected the option admitted, got %v", normalizeErr)
+    }
+
+    if true == normalized.NoColor {
+        t.Fatalf("expected the table format to keep color enabled")
+    }
+}
+
+func TestNormalizeOption_DefaultsAnEmptyFormatAndOrder(t *testing.T) {
+    normalized, normalizeErr := NormalizeOptions(Options{})
+    if nil != normalizeErr {
+        t.Fatalf("expected the zero option admitted, got %v", normalizeErr)
+    }
+
+    if FormatTable != normalized.Format {
+        t.Fatalf("expected %q, got %q", FormatTable, normalized.Format)
+    }
+    if SortOrderAscending != normalized.Order {
+        t.Fatalf("expected %q, got %q", SortOrderAscending, normalized.Order)
+    }
+}
+
+func TestNormalizeOption_RefusesACountItsRuleDoesNotAdmit(t *testing.T) {
+    cases := []struct {
+        name   string
+        options Options
+        field  string
+    }{
+        {"negativeLimit", Options{Limit: bound.Of(-1)}, "Options.Limit"},
+        {"negativeOffset", Options{Offset: bound.Of(-1)}, "Options.Offset"},
+        {"unlimitedOffset", Options{Offset: bound.UnlimitedCount()}, "Options.Offset"},
+        {"zeroTableMaxWidth", Options{TableMaxWidth: bound.Of(0)}, "Options.TableMaxWidth"},
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            _, normalizeErr := NormalizeOptions(testCase.options)
+            assertRefusedOptionField(t, normalizeErr, testCase.field)
+        })
+    }
+}
+
+func TestNormalizeOption_AdmitsAZeroLimitAndTheUnlimitedCounts(t *testing.T) {
+    for _, option := range []Options{
+        {Limit: bound.Of(0)},
+        {Limit: bound.UnlimitedCount()},
+        {Offset: bound.Of(0)},
+        {TableMaxWidth: bound.Of(1)},
+        {TableMaxWidth: bound.UnlimitedCount()},
+    } {
+        if _, normalizeErr := NormalizeOptions(option); nil != normalizeErr {
+            t.Fatalf("expected %#v admitted, got %v", option, normalizeErr)
+        }
+    }
+}
+
+func TestParseOptionFromCommand_ReadsTheStandardFlags(t *testing.T) {
+    parsedCommand, runErr := runStandardFlags(
+        t,
+        "--format=json",
+        "--no-color",
+        "--verbosity=2",
+        "--quiet=false",
+        "--order=desc",
+        "--limit=7",
+        "--offset=3",
+        "--table-width=90",
+    )
+    if nil != runErr {
+        t.Fatalf("expected the command line to parse, got %v", runErr)
+    }
+
+    parsed := ParseOptionsFromCommand(parsedCommand)
+
+    if FormatJson != parsed.Format {
+        t.Fatalf("expected format %q, got %q", FormatJson, parsed.Format)
+    }
+    if false == parsed.NoColor {
+        t.Fatalf("expected no-color to be read")
+    }
+    if SortOrderDescending != parsed.Order {
+        t.Fatalf("expected order %q, got %q", SortOrderDescending, parsed.Order)
+    }
+    if bound.Of(7) != parsed.Limit {
+        t.Fatalf("expected limit 7, got %v", parsed.Limit)
+    }
+    if bound.Of(3) != parsed.Offset {
+        t.Fatalf("expected offset 3, got %v", parsed.Offset)
+    }
+    if 2 != parsed.VerbosityLevel {
+        t.Fatalf("expected verbosity 2, got %d", parsed.VerbosityLevel)
+    }
+    if false == parsed.Verbose {
+        t.Fatalf("expected a verbosity level to imply verbose")
+    }
+    if true == parsed.Quiet {
+        t.Fatalf("expected quiet=false to be read")
+    }
+    if bound.Of(90) != parsed.TableMaxWidth {
+        t.Fatalf("expected table width 90, got %v", parsed.TableMaxWidth)
+    }
+}
+
+func TestParseOptionFromCommand_LeavesAnUnsetCountAbsent(t *testing.T) {
+    parsedCommand, runErr := runStandardFlags(t)
+    if nil != runErr {
+        t.Fatalf("expected the command line to parse, got %v", runErr)
+    }
+
+    parsed := ParseOptionsFromCommand(parsedCommand)
+
+    if false == parsed.Limit.IsAbsent() || false == parsed.Offset.IsAbsent() || false == parsed.TableMaxWidth.IsAbsent() {
+        t.Fatalf("expected the counts left out to stay absent, got %#v", parsed)
+    }
+}
+
+func TestParseOptionFromCommand_ReadsAZeroLimitAsAValue(t *testing.T) {
+    parsedCommand, runErr := runStandardFlags(t, "--limit=0")
+    if nil != runErr {
+        t.Fatalf("expected the command line to parse, got %v", runErr)
+    }
+
+    if bound.Of(0) != ParseOptionsFromCommand(parsedCommand).Limit {
+        t.Fatalf("expected --limit=0 to be the value 0")
+    }
+}
+
+func TestParseOptionFromCommand_ReturnsTheDefaultsForANilCommand(t *testing.T) {
+    parsed := ParseOptionsFromCommand(nil)
+
+    if (Options{}) != parsed {
+        t.Fatalf("expected the zero option, which reads as the default, got %#v", parsed)
+    }
+}
+
+func TestNormalizeOption_ClampsANegativeVerbosityLevel(t *testing.T) {
+    normalized, normalizeErr := NormalizeOptions(Options{Format: FormatTable, Order: SortOrderAscending, VerbosityLevel: -5})
+    if nil != normalizeErr {
+        t.Fatalf("expected the option admitted, got %v", normalizeErr)
+    }
+
+    if 0 != normalized.VerbosityLevel {
+        t.Fatalf("expected the negative verbosity level clamped to 0, got %d", normalized.VerbosityLevel)
+    }
+}

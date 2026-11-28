@@ -1,0 +1,1708 @@
+package application
+
+import (
+    "context"
+    "errors"
+    nethttp "net/http"
+    "os"
+    "os/exec"
+    "path/filepath"
+    "strings"
+    "sync/atomic"
+    "syscall"
+    "testing"
+    "testing/fstest"
+    "time"
+
+    "github.com/precision-soft/melody/v4/bound"
+    clicontract "github.com/precision-soft/melody/v4/cli/contract"
+    "github.com/precision-soft/melody/v4/config"
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/internal/openapiseam"
+    "github.com/precision-soft/melody/v4/internal/testhelper"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    "github.com/precision-soft/melody/v4/lock"
+    "github.com/precision-soft/melody/v4/logging"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    "github.com/precision-soft/melody/v4/openapi"
+)
+
+func TestAssertPanics_UsesRecover(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        exception.Panic(exception.NewError("test", nil, nil))
+    }, "test")
+}
+
+func applicationBootRouteHandler() httpcontract.Handler {
+    return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return nil, nil
+    }
+}
+
+/* dynamicRouteModule registers a parameterized route that would shadow the root's static one if it registered first */
+type dynamicRouteModule struct {
+    fakeModule
+}
+
+func (instance dynamicRouteModule) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
+    kernelInstance.HttpRouter().Handle("/users/:id", applicationBootRouteHandler(), httpcontract.RouteOptions{Methods: []string{nethttp.MethodGet}})
+}
+
+func TestBoot_TheRootsRoutesRegisterBeforeAnyModules(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+
+    applicationInstance.RegisterHttpRoute("/users/me", applicationBootRouteHandler(), httpcontract.RouteOptions{Methods: []string{nethttp.MethodGet}})
+    applicationInstance.RegisterModule(dynamicRouteModule{fakeModule{name: "dynamic-route"}})
+
+    kernelInstance := applicationInstance.Boot()
+
+    matchResult, matched := kernelInstance.HttpRouter().Match(nethttp.MethodGet, "/users/me", "", "")
+    if false == matched {
+        t.Fatal("expected /users/me to match a route")
+    }
+
+    if identifier, hasIdentifier := matchResult.Parameters["id"]; true == hasIdentifier {
+        t.Fatalf("expected the root's static route to win the dispatch, but the module's /users/:id matched with id=%q", identifier)
+    }
+}
+
+type servingProbeApplicationCommand struct {
+    ran        bool
+    resolveErr error
+}
+
+func (instance *servingProbeApplicationCommand) Name() string {
+    return "probe:serving"
+}
+
+func (instance *servingProbeApplicationCommand) Description() string {
+    return "reports whether the configuration refuses a resolve while the command runs"
+}
+
+func (instance *servingProbeApplicationCommand) Flags() []clicontract.Flag {
+    return []clicontract.Flag{}
+}
+
+func (instance *servingProbeApplicationCommand) Run(
+    runtimeInstance containercontract.Runtime,
+    commandContext *clicontract.CommandContext,
+) error {
+    instance.ran = true
+
+    configuration := config.ConfigMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+    instance.resolveErr = configuration.Resolve()
+
+    return nil
+}
+
+func TestRun_MarksTheConfigurationServingBeforeItDispatches(t *testing.T) {
+    originalArguments := os.Args
+    os.Args = []string{"probe", "probe:serving"}
+    defer func() { os.Args = originalArguments }()
+
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+
+    probe := &servingProbeApplicationCommand{}
+    applicationInstance.RegisterCliCommand(probe)
+
+    applicationInstance.Run()
+
+    if false == probe.ran {
+        t.Fatal("the probe command never ran, so the assertion below would be vacuous")
+    }
+
+    if nil == probe.resolveErr {
+        t.Fatal("expected the configuration to refuse a resolve while the command runs, which means Run never marked it serving")
+    }
+
+    if false == strings.Contains(probe.resolveErr.Error(), "begun serving") {
+        t.Fatalf("expected the refusal to name the serving phase, got %q", probe.resolveErr.Error())
+    }
+}
+
+type openApiRegistryServingProbe struct {
+    marked bool
+}
+
+func (instance *openApiRegistryServingProbe) MarkServing(token openapiseam.Token) {
+    instance.marked = true
+}
+
+type openApiServingProbeApplicationCommand struct {
+    ran         bool
+    markedAtRun bool
+}
+
+func (instance *openApiServingProbeApplicationCommand) Name() string {
+    return "probe:openapi-serving"
+}
+
+func (instance *openApiServingProbeApplicationCommand) Description() string {
+    return "reports whether the openapi registry was marked serving before the command ran"
+}
+
+func (instance *openApiServingProbeApplicationCommand) Flags() []clicontract.Flag {
+    return []clicontract.Flag{}
+}
+
+func (instance *openApiServingProbeApplicationCommand) Run(
+    runtimeInstance containercontract.Runtime,
+    commandContext *clicontract.CommandContext,
+) error {
+    instance.ran = true
+
+    registry, getErr := runtimeInstance.Scope().Get(runtimeInstance.Context(), openapi.ServiceOpenApiRegistry)
+    if nil != getErr {
+        return getErr
+    }
+
+    instance.markedAtRun = registry.(*openApiRegistryServingProbe).marked
+
+    return nil
+}
+
+func TestRun_MarksTheOpenApiRegistryServingBeforeItDispatches(t *testing.T) {
+    originalArguments := os.Args
+    os.Args = []string{"probe", "probe:openapi-serving"}
+    defer func() { os.Args = originalArguments }()
+
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+
+    registryProbe := &openApiRegistryServingProbe{}
+    applicationInstance.RegisterService(
+        openapi.ServiceOpenApiRegistry,
+        func(resolver containercontract.Resolver) (*openApiRegistryServingProbe, error) {
+            return registryProbe, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    probe := &openApiServingProbeApplicationCommand{}
+    applicationInstance.RegisterCliCommand(probe)
+
+    applicationInstance.Run()
+
+    if false == probe.ran {
+        t.Fatal("the probe command never ran, so the assertion below would be vacuous")
+    }
+
+    if false == probe.markedAtRun {
+        t.Fatal("expected the openapi registry to have been marked serving before the command ran, which means Run never marked it")
+    }
+}
+
+type openApiRegistryWithoutMarker struct{}
+
+func TestRun_LeavesARegistryWithoutTheMarkerAloneAndDispatches(t *testing.T) {
+    originalArguments := os.Args
+    os.Args = []string{"probe", "probe:serving"}
+    defer func() { os.Args = originalArguments }()
+
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+
+    applicationInstance.RegisterService(
+        openapi.ServiceOpenApiRegistry,
+        func(resolver containercontract.Resolver) (*openApiRegistryWithoutMarker, error) {
+            return &openApiRegistryWithoutMarker{}, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    probe := &servingProbeApplicationCommand{}
+    applicationInstance.RegisterCliCommand(probe)
+
+    applicationInstance.Run()
+
+    if false == probe.ran {
+        t.Fatal("expected the command to run beside a registry that carries no marker")
+    }
+}
+
+func TestRun_LeavesARegistryWhoseProviderFailsAloneAndDispatches(t *testing.T) {
+    originalArguments := os.Args
+    os.Args = []string{"probe", "probe:serving"}
+    defer func() { os.Args = originalArguments }()
+
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+
+    applicationInstance.RegisterService(
+        openapi.ServiceOpenApiRegistry,
+        func(resolver containercontract.Resolver) (*openApiRegistryServingProbe, error) {
+            return nil, exception.NewError("the probe registry refuses to build", nil, nil)
+        },
+        container.RegisterOptions{},
+    )
+
+    probe := &servingProbeApplicationCommand{}
+    applicationInstance.RegisterCliCommand(probe)
+
+    applicationInstance.Run()
+
+    if false == probe.ran {
+        t.Fatal("expected the command to run beside a registry whose provider failed")
+    }
+}
+
+type failingCloser struct{}
+
+func (instance *failingCloser) CloseWithContext(closeContext context.Context) error {
+    return exception.NewError("the probe service refuses to close", nil, nil)
+}
+
+func newFailingCloseApplication(t *testing.T) *Application {
+    t.Helper()
+
+    applicationInstance := newCollisionTestApplication(t)
+
+    applicationInstance.RegisterService(
+        "service.test.failing.closer",
+        func(resolver containercontract.Resolver) (*failingCloser, error) {
+            return &failingCloser{}, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    /* resolving builds the instance, so the teardown has something whose Close fails */
+    container.MustFromResolver[*failingCloser](t.Context(), applicationInstance.kernel.ServiceContainer(), "service.test.failing.closer")
+
+    return applicationInstance
+}
+
+func TestClose_DoesNotRereportAFailureSomebodyElseDiscovered(t *testing.T) {
+    applicationInstance := newFailingCloseApplication(t)
+
+    firstCloseErr := applicationInstance.kernel.ServiceContainer().CloseWithContext(context.Background())
+    if nil == firstCloseErr {
+        t.Fatalf("expected the discovering close to report the failure")
+    }
+
+    if closeErr := applicationInstance.close(context.Background()); nil != closeErr {
+        t.Fatalf("expected the repeated close not to re-report the memoized failure, got: %v", closeErr)
+    }
+}
+
+func TestClose_ReportsTheFailureItDiscoveredItself(t *testing.T) {
+    applicationInstance := newFailingCloseApplication(t)
+
+    closeErr := applicationInstance.close(context.Background())
+    if nil == closeErr {
+        t.Fatalf("expected the discovering close to report the teardown failure")
+    }
+
+    if false == strings.Contains(closeErr.Error(), "failed to close container services") {
+        t.Fatalf("expected the container teardown failure, got: %v", closeErr)
+    }
+}
+
+func TestCloseAndExitOnFailure_ExitsNonZeroOnATeardownFailureItDiscovered(t *testing.T) {
+    exitedWith := -1
+    originalExit := applicationExit
+    applicationExit = func(code int) { exitedWith = code }
+    defer func() { applicationExit = originalExit }()
+
+    applicationInstance := newFailingCloseApplication(t)
+
+    applicationInstance.closeAndExitOnFailure()
+
+    if 1 != exitedWith {
+        t.Fatalf("expected exit code 1 on a discovered teardown failure, got %d", exitedWith)
+    }
+}
+
+func TestCloseAndExitOnFailure_StaysSilentOnACleanTeardown(t *testing.T) {
+    exitedWith := -1
+    originalExit := applicationExit
+    applicationExit = func(code int) { exitedWith = code }
+    defer func() { applicationExit = originalExit }()
+
+    applicationInstance := newCollisionTestApplication(t)
+
+    applicationInstance.closeAndExitOnFailure()
+
+    if -1 != exitedWith {
+        t.Fatalf("expected no exit on a clean teardown, got code %d", exitedWith)
+    }
+}
+
+func TestResolveExitLogger_PrefersTheContainerLoggerWhileItWrites(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    logFile, createErr := os.CreateTemp(t.TempDir(), "melody-exit-logger-*.log")
+    if nil != createErr {
+        t.Fatalf("unexpected temp file error: %v", createErr)
+    }
+
+    fileLogger := logging.NewJsonLogger(logFile, logging.JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo})
+
+    applicationInstance.RegisterService(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return fileLogger, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    if fileLogger != applicationInstance.resolveExitLogger() {
+        t.Fatalf("expected the live container logger to carry the final record")
+    }
+}
+
+func TestResolveExitLogger_FallsBackWhenTheContainerLoggerIsClosed(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    logFile, createErr := os.CreateTemp(t.TempDir(), "melody-exit-logger-*.log")
+    if nil != createErr {
+        t.Fatalf("unexpected temp file error: %v", createErr)
+    }
+
+    fileLogger := logging.NewJsonLogger(logFile, logging.JsonLoggerConfig{MinLevel: loggingcontract.LevelInfo})
+
+    applicationInstance.RegisterService(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return fileLogger, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    if fileLogger != applicationInstance.resolveExitLogger() {
+        t.Fatalf("the container logger must be preferred before the teardown, or the fallback assertion below is vacuous")
+    }
+
+    if closeErr := applicationInstance.kernel.ServiceContainer().CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected container close error: %v", closeErr)
+    }
+
+    if fileLogger == applicationInstance.resolveExitLogger() {
+        t.Fatalf("expected the closed container logger to be refused for the final record")
+    }
+}
+
+func TestResolveExitLogger_SurvivesANilKernel(t *testing.T) {
+    applicationInstance := &Application{}
+
+    if nil == applicationInstance.resolveExitLogger() {
+        t.Fatalf("expected the emergency logger for a nil kernel")
+    }
+}
+
+func TestRegisterSecretParameter_MarksTheRegistrationAsHoldingACredential(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    applicationInstance.RegisterSecretParameter("app.token", "sk_live_51H")
+    applicationInstance.RegisterParameter("app.pool", 12)
+
+    secretParameter := applicationInstance.configuration.Get("app.token")
+    if nil == secretParameter {
+        t.Fatalf("expected the secret parameter to be registered")
+    }
+    if false == secretParameter.IsSecret() {
+        t.Fatalf("expected the parameter registered through the secret door to be marked secret")
+    }
+    if "sk_live_51H" != secretParameter.String() {
+        t.Fatalf("expected the value to be registered like any other, got %q", secretParameter.String())
+    }
+
+    ordinaryParameter := applicationInstance.configuration.Get("app.pool")
+    if nil == ordinaryParameter {
+        t.Fatalf("expected the ordinary parameter to be registered")
+    }
+    if true == ordinaryParameter.IsSecret() {
+        t.Fatalf("expected the ordinary door to leave the parameter unmarked")
+    }
+}
+
+func TestMarkParameterSecret_MarksWhatExistsAndQueuesWhatDoesNot(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    applicationInstance.RegisterParameter("app.token", "sk_live_51H")
+
+    applicationInstance.MarkParameterSecret("app.token")
+    applicationInstance.MarkParameterSecret("app.absent")
+
+    parameter := applicationInstance.configuration.Get("app.token")
+    if nil == parameter || false == parameter.IsSecret() {
+        t.Fatalf("expected the existing parameter to be marked at once")
+    }
+
+    if 1 != len(applicationInstance.unappliedSecretMarks) || "app.absent" != applicationInstance.unappliedSecretMarks[0] {
+        t.Fatalf("expected the unmatched name to be queued for the retry, got %#v", applicationInstance.unappliedSecretMarks)
+    }
+}
+
+func TestMarkParameterSecret_RefusesAfterBoot(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+    applicationInstance.booted = true
+
+    testhelper.AssertPanicsWithError(t, func() {
+        applicationInstance.MarkParameterSecret("app.token")
+    }, "cannot mark a parameter secret after application boot")
+}
+
+func TestApplyUnappliedSecretMarks_AppliesWhatALaterRegistrationMadeReal(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    applicationInstance.MarkParameterSecret("app.late")
+    applicationInstance.MarkParameterSecret("app.never")
+
+    if 2 != len(applicationInstance.unappliedSecretMarks) {
+        t.Fatalf("expected both markings to be queued, got %#v", applicationInstance.unappliedSecretMarks)
+    }
+
+    applicationInstance.RegisterParameter("app.late", "sk_live_51H")
+
+    applicationInstance.applyUnappliedSecretMarks()
+
+    parameter := applicationInstance.configuration.Get("app.late")
+    if nil == parameter || false == parameter.IsSecret() {
+        t.Fatalf("expected the retry to mark the parameter its own registration arrived late for")
+    }
+
+    if 1 != len(applicationInstance.unappliedSecretMarks) || "app.never" != applicationInstance.unappliedSecretMarks[0] {
+        t.Fatalf("expected the still-unmatched name to stay queued, got %#v", applicationInstance.unappliedSecretMarks)
+    }
+}
+
+func TestRefuseUnappliedSecretMarks_RefusesOnlyWhatStillMatchesNothingAndIsNotOptional(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    applicationInstance.MarkParameterSecret("app.misspelled")
+    applicationInstance.MarkParameterSecret("app.registered.last")
+    applicationInstance.MarkParameterSecretOptional("app.absent.here")
+    applicationInstance.MarkParameterSecretOptional("app.optional.last")
+
+    applicationInstance.RegisterParameter("app.registered.last", "sk_live_51H")
+    applicationInstance.RegisterParameter("app.optional.last", "sk_live_52H")
+
+    refusal := refusalOf(t, applicationInstance.refuseUnappliedSecretMarks)
+    if nil == refusal || secretMarkUnmatchedMessage != refusal.Message() {
+        t.Fatalf("expected the unmatched mark refused, got %v", refusal)
+    }
+
+    if names, isList := refusal.Context()["parameterNames"].([]string); false == isList || 1 != len(names) || "app.misspelled" != names[0] {
+        t.Fatalf("expected the refusal to name only the mandatory mark that matched nothing, got %v", refusal.Context())
+    }
+
+    for _, name := range []string{"app.registered.last", "app.optional.last"} {
+        if parameter := applicationInstance.configuration.Get(name); nil == parameter || false == parameter.IsSecret() {
+            t.Fatalf("expected %s, made real by a late phase, marked", name)
+        }
+    }
+
+    if 0 != len(applicationInstance.unappliedSecretMarks) || 0 != len(applicationInstance.optionalSecretMarks) {
+        t.Fatalf("expected both queues emptied, got %#v and %#v", applicationInstance.unappliedSecretMarks, applicationInstance.optionalSecretMarks)
+    }
+
+    if 0 != len(applicationInstance.bootWarnings) {
+        t.Fatalf("expected no boot warning, got %+v", applicationInstance.bootWarnings)
+    }
+}
+
+func TestRefuseUnappliedSecretMarks_AdmitsOptionalMarksThatMatchNothing(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    applicationInstance.MarkParameterSecretOptional("app.absent.here")
+
+    if refusal := refusalOf(t, applicationInstance.refuseUnappliedSecretMarks); nil != refusal {
+        t.Fatalf("expected an optional mark that matched nothing admitted, got %v", refusal)
+    }
+}
+
+func TestMarkParameterSecretOptional_MarksWhatExistsRetriesBeforeTheResolveAndRefusesAfterBoot(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    applicationInstance.RegisterParameter("app.token", "sk_live_51H")
+    applicationInstance.MarkParameterSecretOptional("app.token")
+    applicationInstance.MarkParameterSecretOptional("app.late")
+
+    if parameter := applicationInstance.configuration.Get("app.token"); nil == parameter || false == parameter.IsSecret() {
+        t.Fatalf("expected the existing parameter marked at once")
+    }
+
+    if 1 != len(applicationInstance.optionalSecretMarks) || 0 != len(applicationInstance.unappliedSecretMarks) {
+        t.Fatalf("expected the unmatched optional name queued apart, got %#v and %#v", applicationInstance.optionalSecretMarks, applicationInstance.unappliedSecretMarks)
+    }
+
+    applicationInstance.RegisterParameter("app.late", "sk_live_52H")
+    applicationInstance.applyUnappliedSecretMarks()
+
+    if parameter := applicationInstance.configuration.Get("app.late"); nil == parameter || false == parameter.IsSecret() || 0 != len(applicationInstance.optionalSecretMarks) {
+        t.Fatalf("expected the retry before the resolve to mark the optional name, queue %#v", applicationInstance.optionalSecretMarks)
+    }
+
+    applicationInstance.booted = true
+    testhelper.AssertPanicsWithError(t, func() {
+        applicationInstance.MarkParameterSecretOptional("app.token")
+    }, "cannot mark a parameter secret after application boot")
+}
+
+const unmatchedSecretMarkBootChildVariable = "MELODY_TEST_UNMATCHED_SECRET_MARK_BOOT_CHILD"
+
+/* Boot exits the process at the refusal, so it runs in a child of the test binary */
+func TestBoot_RefusesAnUnmatchedSecretMark(t *testing.T) {
+    if "" != os.Getenv(unmatchedSecretMarkBootChildVariable) {
+        applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+        applicationInstance.MarkParameterSecret("app.misspelled")
+
+        applicationInstance.Boot()
+
+        return
+    }
+
+    command := exec.Command(os.Args[0], "-test.run=^TestBoot_RefusesAnUnmatchedSecretMark$")
+    command.Env = append(os.Environ(), unmatchedSecretMarkBootChildVariable+"=1")
+
+    output, runErr := command.CombinedOutput()
+    if text := string(output); nil == runErr || false == strings.Contains(text, "after unrecovered error: "+secretMarkUnmatchedMessage) {
+        t.Fatalf("expected the boot refused over the unmatched mark, got %v: %s", runErr, text[max(0, len(text)-1500):])
+    }
+}
+
+func TestProcessRole_AnswersTheResolvedRole(t *testing.T) {
+    applicationInstance := &Application{
+        runtimeFlags: NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli, Role: config.RoleWorker}),
+    }
+
+    if config.RoleWorker != applicationInstance.ProcessRole() {
+        t.Fatalf("expected the explicit role, got %q", applicationInstance.ProcessRole())
+    }
+
+    defaultRoleApplication := &Application{
+        runtimeFlags: NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli}),
+    }
+
+    if config.RoleAll != defaultRoleApplication.ProcessRole() {
+        t.Fatalf("expected an unset role to widen to all, got %q", defaultRoleApplication.ProcessRole())
+    }
+}
+
+func newEnvironmentRefusalApplication(t *testing.T, mode string, environmentValues map[string]string) *Application {
+    t.Helper()
+
+    environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: environmentValues})
+    if nil != environmentErr {
+        t.Fatalf("unexpected environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    return &Application{
+        ctx:                  context.Background(),
+        configuration:        configuration,
+        runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: mode}),
+        kernel:               newTestKernel(),
+        moduleConfigurations: make(map[string]any),
+    }
+}
+
+func TestRefuseHttpBootWithoutEnvironment_RefusesAnHttpBootOnZeroKeys(t *testing.T) {
+    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeHttp, map[string]string{})
+
+    testhelper.AssertPanicsWithError(t, func() {
+        applicationInstance.refuseHttpBootWithoutEnvironment()
+    }, "no environment keys were loaded")
+}
+
+func TestRefuseHttpBootWithoutEnvironment_AcceptsAnHttpBootWithAnyKey(t *testing.T) {
+    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeHttp, map[string]string{config.EnvironmentNameKey: "dev"})
+
+    applicationInstance.refuseHttpBootWithoutEnvironment()
+}
+
+func TestRefuseHttpBootWithoutEnvironment_LeavesTheCliToTheDefaultedEnvironmentRefusal(t *testing.T) {
+    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{})
+
+    applicationInstance.refuseHttpBootWithoutEnvironment()
+}
+
+func TestRefuseBootWithDefaultedEnvironment_RefusesEveryModeNamingTheKey(t *testing.T) {
+    for _, mode := range []string{config.ModeHttp, config.ModeCli} {
+        applicationInstance := newEnvironmentRefusalApplication(t, mode, map[string]string{"APP_NAME": "shop"})
+
+        var refusal *exception.Error
+        func() {
+            defer func() {
+                refusal, _ = recover().(*exception.Error)
+            }()
+
+            applicationInstance.refuseBootWithDefaultedEnvironment()
+        }()
+
+        if nil == refusal || false == strings.Contains(refusal.Message(), "MELODY_ENV is not set in the .env artifacts") {
+            t.Fatalf("expected the %s boot refused on the defaulted name, got %v", mode, refusal)
+        }
+
+        if config.EnvironmentNameKey != refusal.Context()["environmentKey"] {
+            t.Fatalf("expected the %s refusal to name %s, got %v", mode, config.EnvironmentNameKey, refusal.Context())
+        }
+    }
+}
+
+func TestRefuseBootWithDefaultedEnvironment_AdmitsAnExplicitDevInEveryMode(t *testing.T) {
+    for _, mode := range []string{config.ModeHttp, config.ModeCli} {
+        applicationInstance := newEnvironmentRefusalApplication(t, mode, map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment})
+
+        applicationInstance.refuseBootWithDefaultedEnvironment()
+    }
+}
+
+func TestRefuseBootWithDefaultedEnvironment_AdmitsANameSetByTheDevelopmentFile(t *testing.T) {
+    source := config.NewEnvironmentSource(config.EnvironmentSourceConfig{FileSystem: fstest.MapFS{
+        ".env":     &fstest.MapFile{Data: []byte("APP_NAME=shop\n")},
+        ".env.dev": &fstest.MapFile{Data: []byte("MELODY_ENV=dev\n")},
+    }})
+
+    environment, environmentErr := config.NewEnvironment(context.Background(), source)
+    if nil != environmentErr {
+        t.Fatalf("unexpected environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    applicationInstance := &Application{configuration: configuration, runtimeFlags: NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})}
+
+    applicationInstance.refuseBootWithDefaultedEnvironment()
+}
+
+const bootEnvironmentProbeMarker = "MELODY_TEST_BOOT_ENVIRONMENT_PROBE"
+
+/* Boot exits the process on a refusal, so each probe boots in a child of the test binary */
+func TestBoot_RefusesTheDefaultedEnvironmentNameAfterTheZeroKeyRefusal(t *testing.T) {
+    if probe := os.Getenv(bootEnvironmentProbeMarker); "" != probe {
+        values := map[string]string{}
+        mode := config.ModeHttp
+        if "httpWithoutKeys" != probe {
+            values["APP_NAME"] = "shop"
+        }
+        if "cliWithKeys" == probe {
+            mode = config.ModeCli
+        }
+
+        environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: values})
+        if nil != environmentErr {
+            os.Exit(91)
+        }
+
+        configuration, configurationErr := config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
+        if nil != configurationErr {
+            os.Exit(92)
+        }
+
+        applicationInstance := &Application{
+            ctx:                  context.Background(),
+            configuration:        configuration,
+            runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: mode}),
+            kernel:               newTestKernel(),
+            cliCommands:          make([]clicontract.Command, 0),
+            moduleConfigurations: make(map[string]any),
+        }
+
+        applicationInstance.Boot()
+
+        os.Exit(93)
+    }
+
+    for probe, expected := range map[string]struct {
+        output string
+        absent string
+    }{
+        "httpWithoutKeys": {"no environment keys were loaded", "MELODY_ENV is not set"},
+        "cliWithKeys":     {"MELODY_ENV is not set in the .env artifacts", "no environment keys were loaded"},
+        "httpWithKeys":    {"MELODY_ENV is not set in the .env artifacts", "no environment keys were loaded"},
+    } {
+        child := exec.Command(os.Args[0], "-test.run=^TestBoot_RefusesTheDefaultedEnvironmentNameAfterTheZeroKeyRefusal$")
+        child.Env = append(os.Environ(), bootEnvironmentProbeMarker+"="+probe)
+
+        output, runErr := child.CombinedOutput()
+
+        exitError, isExitError := runErr.(*exec.ExitError)
+        if false == isExitError || 1 != exitError.ExitCode() {
+            t.Fatalf("%s: expected the boot to exit 1, got err %v with output: %s", probe, runErr, string(output))
+        }
+
+        if false == strings.Contains(string(output), expected.output) || true == strings.Contains(string(output), expected.absent) {
+            t.Fatalf("%s: expected %q and not %q, got: %s", probe, expected.output, expected.absent, string(output))
+        }
+    }
+}
+
+func TestRegisterConfiguration_RefusesANameNothingConsumes(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    testhelper.AssertPanicsWithError(t, func() {
+        applicationInstance.RegisterConfiguration("Logging", "misspelled")
+    }, "unknown configuration name")
+}
+
+/* the marker tells a re-executed test binary that it is the child that must take the fatal exit rather than the parent that watches it; its value is the project directory whose log file the parent reads back */
+const runPanicPathProbeMarker = "MELODY_TEST_RUN_PANIC_PATH_PROBE"
+
+type panickingProbeApplicationCommand struct{}
+
+func (instance *panickingProbeApplicationCommand) Name() string {
+    return "probe:panic"
+}
+
+func (instance *panickingProbeApplicationCommand) Description() string {
+    return "panics to drive the process-boundary handler"
+}
+
+func (instance *panickingProbeApplicationCommand) Flags() []clicontract.Flag {
+    return []clicontract.Flag{}
+}
+
+func (instance *panickingProbeApplicationCommand) Run(
+    runtimeInstance containercontract.Runtime,
+    commandContext *clicontract.CommandContext,
+) error {
+    exception.Panic(exception.NewError("the probe command exploded", nil, nil))
+
+    return nil
+}
+
+func TestRun_PanicPathWritesTheFatalRecordThroughTheLiveLoggerBeforeTeardown(t *testing.T) {
+    projectDirectory := os.Getenv(runPanicPathProbeMarker)
+
+    if "" != projectDirectory {
+        environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment}})
+        if nil != environmentErr {
+            os.Exit(91)
+        }
+
+        configuration, configurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{})
+        if nil != configurationErr {
+            os.Exit(92)
+        }
+
+        applicationInstance := &Application{
+            ctx:                  context.Background(),
+            configuration:        configuration,
+            runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli}),
+            kernel:               newTestKernel(),
+            cliCommands:          make([]clicontract.Command, 0),
+            moduleConfigurations: make(map[string]any),
+        }
+
+        applicationInstance.RegisterCliCommand(&panickingProbeApplicationCommand{})
+
+        os.Args = []string{"probe", "probe:panic"}
+
+        applicationInstance.Run()
+
+        os.Exit(93)
+    }
+
+    childProjectDirectory := t.TempDir()
+
+    child := exec.Command(os.Args[0], "-test.run=TestRun_PanicPathWritesTheFatalRecordThroughTheLiveLoggerBeforeTeardown$")
+    child.Env = append(os.Environ(), runPanicPathProbeMarker+"="+childProjectDirectory)
+
+    output, runErr := child.CombinedOutput()
+
+    exitError, isExitError := runErr.(*exec.ExitError)
+    if false == isExitError {
+        t.Fatalf("expected the child to exit non-zero, got err %v with output: %s", runErr, string(output))
+    }
+
+    if 1 != exitError.ExitCode() {
+        t.Fatalf("expected exit code 1, got %d with output: %s", exitError.ExitCode(), string(output))
+    }
+
+    logPath := filepath.Join(childProjectDirectory, "var", "log", config.EnvironmentDevelopment+".log")
+
+    logContent, readErr := os.ReadFile(logPath)
+    if nil != readErr {
+        t.Fatalf("expected the configured log file to exist at %s: %v; child output: %s", logPath, readErr, string(output))
+    }
+
+    if false == strings.Contains(string(logContent), "the probe command exploded") {
+        t.Fatalf("expected the fatal record in the configured log file, got: %s; child output: %s", string(logContent), string(output))
+    }
+
+    if false == strings.Contains(string(output), "the probe command exploded") {
+        t.Fatalf("expected the stderr echo to name the failure, got: %s", string(output))
+    }
+}
+
+type typedNilProbeExitLogger struct {
+    closedFlag bool
+}
+
+func (instance *typedNilProbeExitLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+}
+
+func (instance *typedNilProbeExitLogger) Debug(message string, context loggingcontract.Context) {}
+
+func (instance *typedNilProbeExitLogger) Info(message string, context loggingcontract.Context) {}
+
+func (instance *typedNilProbeExitLogger) Warning(message string, context loggingcontract.Context) {
+}
+
+func (instance *typedNilProbeExitLogger) Error(message string, context loggingcontract.Context) {}
+
+func (instance *typedNilProbeExitLogger) Emergency(message string, context loggingcontract.Context) {
+}
+
+func (instance *typedNilProbeExitLogger) Enabled(level loggingcontract.Level) bool {
+    return true
+}
+
+func (instance *typedNilProbeExitLogger) CauseChainDepth() int {
+    return 8
+}
+
+func (instance *typedNilProbeExitLogger) Closed() bool {
+    return instance.closedFlag
+}
+
+func TestResolveExitLogger_RefusesATypedNilContainerLogger(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    applicationInstance.RegisterService(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return (*typedNilProbeExitLogger)(nil), nil
+        },
+        container.RegisterOptions{},
+    )
+
+    resolvedLogger := applicationInstance.resolveExitLogger()
+
+    if typedLogger, isTypedProbe := resolvedLogger.(*typedNilProbeExitLogger); true == isTypedProbe && nil == typedLogger {
+        t.Fatalf("expected the typed-nil container logger to be refused for the final record")
+    }
+
+    if nil == resolvedLogger {
+        t.Fatalf("expected the emergency logger, got nil")
+    }
+}
+
+func TestClose_SurvivesANilKernel(t *testing.T) {
+    applicationInstance := &Application{}
+
+    applicationInstance.CloseWithContext(context.Background())
+}
+
+/* the marker tells a re-executed test binary that it is the child whose Boot must die and take the teardown hook with it rather than the parent that watches */
+const bootPanicTeardownProbeMarker = "MELODY_TEST_BOOT_PANIC_TEARDOWN_PROBE"
+
+func TestBoot_PanicPathRunsTheTeardownHook(t *testing.T) {
+    projectDirectory := os.Getenv(bootPanicTeardownProbeMarker)
+
+    if "" != projectDirectory {
+        environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment}})
+        if nil != environmentErr {
+            os.Exit(91)
+        }
+
+        configuration, configurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{})
+        if nil != configurationErr {
+            os.Exit(92)
+        }
+
+        applicationInstance := &Application{
+            ctx:                  context.Background(),
+            configuration:        configuration,
+            runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli}),
+            kernel:               newTestKernel(),
+            cliCommands:          make([]clicontract.Command, 0),
+            moduleConfigurations: make(map[string]any),
+        }
+
+        applicationInstance.RegisterService(
+            "service.test.failing.closer",
+            func(resolver containercontract.Resolver) (*failingCloser, error) {
+                return &failingCloser{}, nil
+            },
+            container.RegisterOptions{},
+        )
+
+        container.MustFromResolver[*failingCloser](t.Context(), applicationInstance.kernel.ServiceContainer(), "service.test.failing.closer")
+
+        applicationInstance.RegisterCliCommand(&panickingProbeApplicationCommand{})
+        applicationInstance.RegisterCliCommand(&panickingProbeApplicationCommand{})
+
+        applicationInstance.Boot()
+
+        os.Exit(93)
+    }
+
+    childProjectDirectory := t.TempDir()
+
+    child := exec.Command(os.Args[0], "-test.run=TestBoot_PanicPathRunsTheTeardownHook$")
+    child.Env = append(os.Environ(), bootPanicTeardownProbeMarker+"="+childProjectDirectory)
+
+    output, runErr := child.CombinedOutput()
+
+    exitError, isExitError := runErr.(*exec.ExitError)
+    if false == isExitError {
+        t.Fatalf("expected the child to exit non-zero, got err %v with output: %s", runErr, string(output))
+    }
+
+    if 1 != exitError.ExitCode() {
+        t.Fatalf("expected exit code 1, got %d with output: %s", exitError.ExitCode(), string(output))
+    }
+
+    if false == strings.Contains(string(output), "failed to close service container") {
+        t.Fatalf("expected the teardown hook to run and report the failing container close, got: %s", string(output))
+    }
+
+    if false == strings.Contains(string(output), "melody: exiting with code 1") {
+        t.Fatalf("expected the stderr echo after the teardown, got: %s", string(output))
+    }
+}
+
+/* the marker tells a re-executed test binary that it is the child whose Boot must refuse a declared teardown dependency naming no service */
+const bootDanglingDeclarationProbeMarker = "MELODY_TEST_BOOT_DANGLING_DECLARATION_PROBE"
+
+func TestBoot_RefusesADeclaredTeardownDependencyNamingNoService(t *testing.T) {
+    projectDirectory := os.Getenv(bootDanglingDeclarationProbeMarker)
+
+    if "" != projectDirectory {
+        environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment}})
+        if nil != environmentErr {
+            os.Exit(91)
+        }
+
+        configuration, configurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{})
+        if nil != configurationErr {
+            os.Exit(92)
+        }
+
+        applicationInstance := &Application{
+            ctx:                  context.Background(),
+            configuration:        configuration,
+            runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli}),
+            kernel:               newTestKernel(),
+            cliCommands:          make([]clicontract.Command, 0),
+            moduleConfigurations: make(map[string]any),
+        }
+
+        applicationInstance.RegisterService(
+            "service.test.reporter",
+            func(resolver containercontract.Resolver) (*failingCloser, error) {
+                return &failingCloser{}, nil
+            },
+            container.RegisterOptions{TeardownDependencyNames: []string{"service.test.misspelled"}},
+        )
+
+        applicationInstance.Boot()
+
+        os.Exit(93)
+    }
+
+    child := exec.Command(os.Args[0], "-test.run=TestBoot_RefusesADeclaredTeardownDependencyNamingNoService$")
+    child.Env = append(os.Environ(), bootDanglingDeclarationProbeMarker+"="+t.TempDir())
+
+    output, runErr := child.CombinedOutput()
+
+    exitError, isExitError := runErr.(*exec.ExitError)
+    if false == isExitError || 1 != exitError.ExitCode() {
+        t.Fatalf("expected the boot to exit 1, got err %v with output: %s", runErr, string(output))
+    }
+
+    if false == strings.Contains(string(output), "a declared teardown dependency does not name one container service") || false == strings.Contains(string(output), "service.test.misspelled") {
+        t.Fatalf("expected the refusal to name the declaration, got: %s", string(output))
+    }
+}
+
+const bootDanglingLazyHandleProbeMarker = "MELODY_TEST_BOOT_DANGLING_LAZY_HANDLE_PROBE"
+
+func TestBoot_RefusesALazyLockerOverAContainerWithNoLocker(t *testing.T) {
+    projectDirectory := os.Getenv(bootDanglingLazyHandleProbeMarker)
+
+    if "" != projectDirectory {
+        environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment}})
+        if nil != environmentErr {
+            os.Exit(91)
+        }
+
+        configuration, configurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{})
+        if nil != configurationErr {
+            os.Exit(92)
+        }
+
+        applicationInstance := &Application{
+            ctx:                  context.Background(),
+            configuration:        configuration,
+            runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli}),
+            kernel:               newTestKernel(),
+            cliCommands:          make([]clicontract.Command, 0),
+            moduleConfigurations: make(map[string]any),
+        }
+
+        lock.NewLazyLocker(applicationInstance.kernel.ServiceContainer())
+
+        applicationInstance.Boot()
+
+        os.Exit(93)
+    }
+
+    childProjectDirectory := t.TempDir()
+    child := exec.Command(os.Args[0], "-test.run=TestBoot_RefusesALazyLockerOverAContainerWithNoLocker$")
+    child.Env = append(os.Environ(), bootDanglingLazyHandleProbeMarker+"="+childProjectDirectory)
+
+    output, runErr := child.CombinedOutput()
+
+    exitError, isExitError := runErr.(*exec.ExitError)
+    if false == isExitError || 1 != exitError.ExitCode() {
+        t.Fatalf("expected the boot to exit 1, got err %v with output: %s", runErr, string(output))
+    }
+
+    if false == strings.Contains(string(output), "a container.Lazy handle names no container service") {
+        t.Fatalf("expected the exit line to name the refusal, got: %s", string(output))
+    }
+
+    journal, readErr := os.ReadFile(filepath.Join(childProjectDirectory, "var", "log", "dev.log"))
+    if nil != readErr {
+        t.Fatalf("expected the child's journal: %v", readErr)
+    }
+
+    for _, expected := range []string{`"serviceName":"` + lock.ServiceLocker + `"`, `lock/lazy_locker.go:`, `application/application_test.go:`} {
+        if false == strings.Contains(string(journal), expected) {
+            t.Fatalf("expected the journal to carry %q, got: %s", expected, string(journal))
+        }
+    }
+}
+
+const bootHttpRefusalProbeMarker = "MELODY_TEST_BOOT_HTTP_REFUSAL_PROBE"
+
+func bootHttpRefusalChildValues() map[string]map[string]string {
+    return map[string]map[string]string{
+        "sessionPair":  {config.HttpSessionTtlKey: "unlimited", config.HttpSessionMaxSessionsKey: "unlimited"},
+        "retiredCliKey": {"MELODY_CLI_BOOT_WARNINGS_DISABLED": "true"},
+    }
+}
+
+func TestBoot_RefusesAnHttpBootOverAnUnboundedSessionPairOrARetiredCliBootWarningKey(t *testing.T) {
+    if probe := os.Getenv(bootHttpRefusalProbeMarker); "" != probe {
+        values := map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment, config.HttpAddressKey: freeLoopbackAddress(t)}
+        for key, value := range bootHttpRefusalChildValues()[probe] {
+            values[key] = value
+        }
+
+        environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: values})
+        if nil != environmentErr {
+            os.Exit(91)
+        }
+
+        configuration, configurationErr := config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
+        if nil != configurationErr {
+            os.Exit(92)
+        }
+
+        applicationInstance := &Application{
+            ctx:                  context.Background(),
+            configuration:        configuration,
+            runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
+            kernel:               newTestKernel(),
+            httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration)),
+            cliCommands:          make([]clicontract.Command, 0),
+            moduleConfigurations: make(map[string]any),
+        }
+
+        applicationInstance.Boot()
+
+        os.Exit(93)
+    }
+
+    for probe, expected := range map[string]string{
+        "sessionPair":  "an unbounded session ttl and an unbounded session count",
+        "retiredCliKey": "the environment key MELODY_CLI_BOOT_WARNINGS_DISABLED is retired: rename it to MELODY_BOOT_WARNINGS_IGNORED",
+    } {
+        child := exec.Command(os.Args[0], "-test.run=^TestBoot_RefusesAnHttpBootOverAnUnboundedSessionPairOrARetiredCliBootWarningKey$")
+        child.Env = append(os.Environ(), bootHttpRefusalProbeMarker+"="+probe)
+
+        output, runErr := child.CombinedOutput()
+
+        exitError, isExitError := runErr.(*exec.ExitError)
+        if false == isExitError || 1 != exitError.ExitCode() {
+            t.Fatalf("%s: expected the boot to exit 1, got err %v with output: %s", probe, runErr, string(output))
+        }
+
+        if false == strings.Contains(string(output), expected) {
+            t.Fatalf("%s: expected the refusal %q, got: %s", probe, expected, string(output))
+        }
+    }
+}
+
+type chainedError struct {
+    cause error
+}
+
+func (instance *chainedError) Error() string {
+    return "chained"
+}
+
+func (instance *chainedError) Unwrap() error {
+    return instance.cause
+}
+
+func TestResolveCliExitError_AnswersTheExitErrorTheChainCarries(t *testing.T) {
+    exitError := exception.NewExitError(3, exception.NewError("command failed", nil, nil))
+
+    resolved, isExitRequested := resolveCliExitError(&chainedError{cause: exitError})
+    if false == isExitRequested {
+        t.Fatalf("expected the wrapped exit error to be recognised")
+    }
+
+    if exitError != resolved {
+        t.Fatalf("expected the wrapped exit error to be answered, got %v", resolved)
+    }
+}
+
+func TestResolveCliExitError_AnswersNothingForAChainWithoutOne(t *testing.T) {
+    if _, isExitRequested := resolveCliExitError(exception.NewError("command failed", nil, nil)); true == isExitRequested {
+        t.Fatalf("expected no exit error")
+    }
+}
+
+/* errors.As matches *ExitError on a typed-nil link and reports success */
+func TestResolveCliExitError_AnswersNothingForATypedNilLink(t *testing.T) {
+    var typedNilExitError *exception.ExitError
+    var cause error = typedNilExitError
+
+    if _, isExitRequested := resolveCliExitError(&chainedError{cause: cause}); true == isExitRequested {
+        t.Fatalf("expected a typed-nil link to answer no exit error")
+    }
+}
+
+/* resolveExitLogger is evaluated as an argument, before the exit handler's own per-step shield begins */
+func TestResolveExitLogger_AnswersTheEmergencyLoggerForATypedNilKernel(t *testing.T) {
+    applicationInstance := &Application{
+        kernel:       (*testKernel)(nil),
+        runtimeFlags: NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli}),
+    }
+
+    if nil == applicationInstance.resolveExitLogger() {
+        t.Fatalf("expected a logger for a typed-nil kernel")
+    }
+}
+
+func TestResolveExitLogger_FallsBackToTheConfiguredDestinationWhenTheContainerCannotAnswer(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+
+    /* deliberately unbooted: the logger service does not exist yet, which is the window every boot failure dies in */
+    logger := applicationInstance.resolveExitLogger()
+
+    if logging.EmergencyLogger() == logger {
+        t.Fatalf("expected the configured-destination fallback, not the emergency logger")
+    }
+
+    marker := "exit fallback probe " + t.Name()
+    logger.Emergency(marker, nil)
+
+    logPath := resolveRuntimePath(
+        applicationInstance.configuration.Kernel().ProjectDirectory(),
+        applicationInstance.configuration.Kernel().LogPath(),
+    )
+
+    content, readErr := os.ReadFile(logPath)
+    if nil != readErr {
+        t.Fatalf("expected the configured log destination to exist, got %v", readErr)
+    }
+
+    if false == strings.Contains(string(content), marker) {
+        t.Fatalf("expected the record on the configured destination %s", logPath)
+    }
+}
+
+func TestResolveExitLogger_AnswersTheEmergencyLoggerWhenNothingIsConfigured(t *testing.T) {
+    applicationInstance := &Application{}
+
+    logger := applicationInstance.resolveExitLogger()
+
+    if logging.EmergencyLogger() != logger {
+        t.Fatalf("expected the emergency logger for an application holding no configuration, got %T", logger)
+    }
+}
+
+func TestBoot_RegistersTheKernelListenersInEveryProcessShape(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+
+    applicationInstance.Boot()
+
+    inspector := applicationInstance.kernel.EventDispatcher()
+
+    listenerCountByEvent := map[string]int{}
+    for _, registeredEvent := range inspector.RegisteredEvents() {
+        listenerCountByEvent[registeredEvent.EventName] = len(registeredEvent.Listeners)
+    }
+
+    if 0 != listenerCountByEvent[kernelcontract.EventKernelException] {
+        t.Fatal("expected the built-in exception listener to wait for the http kernel, not for boot")
+    }
+
+    if 0 == listenerCountByEvent[kernelcontract.EventKernelResponse] {
+        t.Fatal("expected the response normalizer after boot")
+    }
+
+    if 0 == listenerCountByEvent[kernelcontract.EventKernelTerminate] {
+        t.Fatal("expected the access-log listener after boot")
+    }
+}
+
+func TestCloseAndExitOnFailure_AnAbandonedTeardownExitsNonZero(t *testing.T) {
+    originalStep := shieldedCloseStep
+    originalExit := applicationExit
+    defer func() {
+        shieldedCloseStep = originalStep
+        applicationExit = originalExit
+    }()
+
+    stepRan := false
+    shieldedCloseStep = func(stepName string, options logging.ShieldedStepOptions, step func(stepContext context.Context)) bool {
+        stepRan = true
+
+        return false
+    }
+
+    exitCode := 0
+    applicationExit = func(code int) {
+        exitCode = code
+    }
+
+    instance := &Application{}
+    instance.closeAndExitOnFailure()
+
+    if false == stepRan {
+        t.Fatalf("expected the teardown to run through the shield")
+    }
+
+    if 1 != exitCode {
+        t.Fatalf("expected an abandoned teardown to exit non-zero, got %d", exitCode)
+    }
+}
+
+func TestCloseAndExitOnFailure_ACompletedTeardownExitsZero(t *testing.T) {
+    originalStep := shieldedCloseStep
+    originalExit := applicationExit
+    defer func() {
+        shieldedCloseStep = originalStep
+        applicationExit = originalExit
+    }()
+
+    shieldedCloseStep = func(stepName string, options logging.ShieldedStepOptions, step func(stepContext context.Context)) bool {
+        step(context.Background())
+
+        return true
+    }
+
+    exited := false
+    applicationExit = func(code int) {
+        exited = true
+    }
+
+    instance := &Application{}
+    instance.closeAndExitOnFailure()
+
+    if true == exited {
+        t.Fatalf("expected a clean teardown to leave the exit code alone")
+    }
+}
+
+func TestCloseAndExitOnFailure_HandsTheShieldTheDeclaredTeardownBudget(t *testing.T) {
+    originalStep := shieldedCloseStep
+    originalExit := applicationExit
+    defer func() {
+        shieldedCloseStep = originalStep
+        applicationExit = originalExit
+    }()
+
+    receivedBudget := bound.Duration{}
+    shieldedCloseStep = func(stepName string, options logging.ShieldedStepOptions, step func(stepContext context.Context)) bool {
+        receivedBudget = options.Budget
+
+        return true
+    }
+
+    applicationExit = func(code int) {}
+
+    instance := newTeardownTimeoutTestApplication(t, "42s")
+    instance.closeAndExitOnFailure()
+
+    if budget, isValue := receivedBudget.Value(); false == isValue || 42*time.Second != budget {
+        t.Fatalf("expected the declared teardown budget to reach the shield, got %s", receivedBudget)
+    }
+}
+
+func TestCloseAndExitOnFailure_WithoutAConfigurationTheShieldGetsTheDefaultBudget(t *testing.T) {
+    originalStep := shieldedCloseStep
+    originalExit := applicationExit
+    defer func() {
+        shieldedCloseStep = originalStep
+        applicationExit = originalExit
+    }()
+
+    receivedBudget := bound.Duration{}
+    shieldedCloseStep = func(stepName string, options logging.ShieldedStepOptions, step func(stepContext context.Context)) bool {
+        receivedBudget = options.Budget
+
+        return true
+    }
+
+    applicationExit = func(code int) {}
+
+    instance := &Application{}
+    instance.closeAndExitOnFailure()
+
+    if budget, isValue := receivedBudget.Value(); false == isValue || config.DefaultTeardownTimeout != budget {
+        t.Fatalf("expected the default teardown budget without a configuration, got %s", receivedBudget)
+    }
+}
+
+func TestCloseAndExitOnFailure_AnUnlimitedBudgetReachesTheShieldAsNoDeadline(t *testing.T) {
+    originalStep := shieldedCloseStep
+    originalExit := applicationExit
+    defer func() {
+        shieldedCloseStep = originalStep
+        applicationExit = originalExit
+    }()
+
+    shieldRan := false
+    receivedBudget := bound.Duration{}
+    shieldedCloseStep = func(stepName string, options logging.ShieldedStepOptions, step func(stepContext context.Context)) bool {
+        shieldRan = true
+        receivedBudget = options.Budget
+
+        return true
+    }
+
+    applicationExit = func(code int) {}
+
+    instance := newTeardownTimeoutTestApplication(t, "unlimited")
+    instance.closeAndExitOnFailure()
+
+    if false == shieldRan {
+        t.Fatalf("expected the teardown to run through the shield")
+    }
+
+    if false == receivedBudget.IsUnlimited() {
+        t.Fatalf("expected an unlimited budget to reach the shield as no deadline, got %s", receivedBudget)
+    }
+}
+
+func newTeardownTimeoutTestApplication(t *testing.T, teardownTimeout string) *Application {
+    t.Helper()
+
+    environment, environmentErr := config.NewEnvironment(context.Background(), 
+        &mapEnvironmentSource{
+            values: map[string]string{
+                config.TeardownTimeoutKey: teardownTimeout,
+            },
+        },
+    )
+    if nil != environmentErr {
+        t.Fatalf("unexpected environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    return &Application{
+        ctx:           context.Background(),
+        configuration: configuration,
+        runtimeFlags:  NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
+    }
+}
+
+func TestCloseAndExitOnFailure_AnOverrunAloneExitsZero(t *testing.T) {
+    originalStep := shieldedCloseStep
+    originalExit := applicationExit
+    defer func() {
+        shieldedCloseStep = originalStep
+        applicationExit = originalExit
+    }()
+
+    shieldedCloseStep = func(stepName string, options logging.ShieldedStepOptions, step func(stepContext context.Context)) bool {
+        stepContext, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+        defer cancel()
+
+        step(stepContext)
+
+        return true
+    }
+
+    exitedWith := -1
+    applicationExit = func(code int) {
+        exitedWith = code
+    }
+
+    kernelInstance := newTestKernel()
+    applicationInstance := newScopedServiceApplication(kernelInstance)
+
+    serviceContainer := kernelInstance.ServiceContainer()
+
+    if registerErr := serviceContainer.Register(
+        "app.eater",
+        func(_ containercontract.Resolver) (*overrunSleeper, error) { return &overrunSleeper{sleep: 80 * time.Millisecond}, nil },
+        container.RegisterOptions{},
+    ); nil != registerErr {
+        t.Fatalf("unexpected register error: %v", registerErr)
+    }
+
+    if _, getErr := serviceContainer.Get(t.Context(), "app.eater"); nil != getErr {
+        t.Fatalf("unexpected get error: %v", getErr)
+    }
+
+    written := captureEmergencyLogger(t, func() {
+        applicationInstance.closeAndExitOnFailure()
+    })
+
+    if -1 != exitedWith {
+        t.Fatalf("expected an overrun alone to leave the exit code alone, got %d", exitedWith)
+    }
+
+    if false == strings.Contains(written, "overran its deadline") {
+        t.Fatalf("expected the overrun in the journal, got %q", written)
+    }
+}
+
+type contextClosingApplicationProbe struct {
+    close func(closeContext context.Context) error
+}
+
+func (instance *contextClosingApplicationProbe) CloseWithContext(closeContext context.Context) error {
+    return instance.close(closeContext)
+}
+
+func TestRun_ClosesIndependentDependentsTogetherUnderTheConfiguredBudget(t *testing.T) {
+    originalArguments := os.Args
+    os.Args = []string{"probe", "probe:serving"}
+    t.Cleanup(func() { os.Args = originalArguments })
+
+    originalExit := applicationExit
+    var exitCode atomic.Int32
+    applicationExit = func(code int) { exitCode.Store(int32(code)) }
+    t.Cleanup(func() { applicationExit = originalExit })
+
+    directory := t.TempDir()
+    environment := []byte("MELODY_ENV=dev\nMELODY_TEARDOWN_TIMEOUT=3s\n")
+    writeErr := os.WriteFile(filepath.Join(directory, ".env"), environment, 0o600)
+    if nil != writeErr {
+        t.Fatalf("write .env: %v", writeErr)
+    }
+    previousDirectory, getwdErr := os.Getwd()
+    if nil != getwdErr {
+        t.Fatalf("getwd: %v", getwdErr)
+    }
+    chdirErr := os.Chdir(directory)
+    if nil != chdirErr {
+        t.Fatalf("chdir: %v", chdirErr)
+    }
+    t.Cleanup(func() { _ = os.Chdir(previousDirectory) })
+
+    app := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: fstest.MapFS{".env": &fstest.MapFile{Data: environment}}, PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    command := &servingProbeApplicationCommand{}
+    app.RegisterCliCommand(command)
+
+    entered := make(chan context.Context, 2)
+    release := make(chan struct{})
+    var completed atomic.Int32
+    var dependencyClosed atomic.Bool
+
+    dependency := &contextClosingApplicationProbe{close: func(closeContext context.Context) error {
+        if 2 != completed.Load() {
+            return errors.New("the dependency closed before its dependents finished")
+        }
+        dependencyClosed.Store(true)
+
+        return nil
+    }}
+    app.RegisterService("probe.dependency", func(containercontract.Resolver) (*contextClosingApplicationProbe, error) {
+        return dependency, nil
+    }, container.RegisterOptions{TypeRegistrationDisabled: true})
+
+    for _, name := range []string{"probe.first", "probe.second"} {
+        dependent := &contextClosingApplicationProbe{close: func(closeContext context.Context) error {
+            entered <- closeContext
+            select {
+            case <-release:
+                completed.Add(1)
+
+                return nil
+            case <-closeContext.Done():
+                return closeContext.Err()
+            }
+        }}
+        app.RegisterService(name, func(containercontract.Resolver) (*contextClosingApplicationProbe, error) {
+            return dependent, nil
+        }, container.RegisterOptions{TypeRegistrationDisabled: true, TeardownDependencyNames: []string{"probe.dependency"}})
+    }
+
+    serviceContainer := app.Boot().ServiceContainer()
+    for _, name := range []string{"probe.dependency", "probe.first", "probe.second"} {
+        _, resolveErr := serviceContainer.Get(t.Context(), name)
+        if nil != resolveErr {
+            t.Fatalf("resolve %s: %v", name, resolveErr)
+        }
+    }
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        app.Run()
+    }()
+
+    timer := time.NewTimer(5 * time.Second)
+    defer timer.Stop()
+
+    contexts := make([]context.Context, 0, 2)
+    for 2 > len(contexts) {
+        select {
+        case closeContext := <-entered:
+            contexts = append(contexts, closeContext)
+        case <-timer.C:
+            close(release)
+            <-done
+            t.Fatalf("expected both independent dependents to start closing before either was released")
+        }
+    }
+    close(release)
+
+    select {
+    case <-done:
+    case <-timer.C:
+        t.Fatalf("expected the application teardown to finish")
+    }
+
+    if false == command.ran || 0 != exitCode.Load() || false == dependencyClosed.Load() {
+        t.Fatalf("expected the command to run, exit 0 and the dependency to close last, got ran=%v exit=%d dependencyClosed=%v", command.ran, exitCode.Load(), dependencyClosed.Load())
+    }
+
+    firstDeadline, firstHasDeadline := contexts[0].Deadline()
+    secondDeadline, secondHasDeadline := contexts[1].Deadline()
+    if false == firstHasDeadline || false == secondHasDeadline || false == firstDeadline.Equal(secondDeadline) {
+        t.Fatalf("expected the two dependents to share one deadline, got %v/%v and %v/%v", firstDeadline, firstHasDeadline, secondDeadline, secondHasDeadline)
+    }
+    if remaining := time.Until(firstDeadline); 0 >= remaining || 3*time.Second < remaining {
+        t.Fatalf("expected a deadline inside the configured three-second budget, got %v", remaining)
+    }
+}
+
+type deadlineRecordingCloser struct {
+    hasDeadline bool
+}
+
+func (instance *deadlineRecordingCloser) CloseWithContext(closeContext context.Context) error {
+    _, instance.hasDeadline = closeContext.Deadline()
+
+    return nil
+}
+
+func TestCloseWithContext_HandsTheCallersDeadlineToTheTeardown(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    applicationInstance.RegisterService(
+        "service.test.deadline.closer",
+        func(resolver containercontract.Resolver) (*deadlineRecordingCloser, error) {
+            return &deadlineRecordingCloser{}, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    closer := container.MustFromResolver[*deadlineRecordingCloser](t.Context(), applicationInstance.kernel.ServiceContainer(), "service.test.deadline.closer")
+
+    closeContext, cancel := context.WithTimeout(context.Background(), time.Minute)
+    defer cancel()
+
+    if closeErr := applicationInstance.CloseWithContext(closeContext); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if false == closer.hasDeadline {
+        t.Fatalf("expected the teardown to hand the service the caller's deadline")
+    }
+}
+
+func TestCloseWithContext_ReportsTheFailureItDiscovered(t *testing.T) {
+    applicationInstance := newFailingCloseApplication(t)
+
+    if closeErr := applicationInstance.CloseWithContext(context.Background()); nil == closeErr {
+        t.Fatalf("expected the teardown failure returned")
+    }
+}
+
+func TestCloseWithContext_RefusesANilContextAndLeavesTheTeardownToALaterCall(t *testing.T) {
+    applicationInstance := newFailingCloseApplication(t)
+
+    //nolint:staticcheck // the nil context is the input under test
+    if closeErr := applicationInstance.CloseWithContext(nil); nil == closeErr || "the close context is nil" != closeErr.Error() {
+        t.Fatalf("expected the nil context refused, got %v", closeErr)
+    }
+
+    if closeErr := applicationInstance.CloseWithContext(context.Background()); nil == closeErr {
+        t.Fatalf("expected the later call to run the teardown and report its failure")
+    }
+}
+
+func TestRun_ASecondRunIsRefusedBeforeAnythingIsTouched(t *testing.T) {
+    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment})
+
+    originalArguments := os.Args
+    os.Args = []string{"application", "--version"}
+    defer func() {
+        os.Args = originalArguments
+    }()
+
+    applicationInstance.Run()
+
+    testhelper.AssertPanicsWithError(t, func() {
+        applicationInstance.Run()
+    }, "application run called twice")
+}
+
+func TestApplicationEnsureRuntimeDirectories_TheLogsDirectoryTakesTheKernelMode(t *testing.T) {
+    previousUmask := syscall.Umask(0)
+    defer syscall.Umask(previousUmask)
+
+    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvironmentNameKey: "dev", config.LogDirectoryModeKey: "0710"})
+    applicationInstance.ensureRuntimeDirectories()
+
+    logsDirectory := resolveRuntimePath(applicationInstance.configuration.Kernel().ProjectDirectory(), applicationInstance.configuration.Kernel().LogsDirectory())
+
+    information, statErr := os.Stat(logsDirectory)
+    if nil != statErr {
+        t.Fatalf("unexpected stat error: %v", statErr)
+    }
+
+    if os.FileMode(0o710) != information.Mode().Perm() {
+        t.Fatalf("expected the logs directory at 0710, got %o", information.Mode().Perm())
+    }
+}
+
+func TestApplicationEnsureRuntimeDirectories_TheCacheDirectoryTakesTheKernelMode(t *testing.T) {
+    previousUmask := syscall.Umask(0)
+    defer syscall.Umask(previousUmask)
+
+    for value, expected := range map[string]os.FileMode{"": 0o750, "0770": 0o770} {
+        environment := map[string]string{config.EnvironmentNameKey: "dev"}
+        if "" != value {
+            environment[config.CacheDirectoryModeKey] = value
+        }
+
+        applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, environment)
+        applicationInstance.ensureRuntimeDirectories()
+
+        cacheDirectory := resolveRuntimePath(applicationInstance.configuration.Kernel().ProjectDirectory(), applicationInstance.configuration.Kernel().CacheDirectory())
+
+        information, statErr := os.Stat(cacheDirectory)
+        if nil != statErr {
+            t.Fatalf("unexpected stat error: %v", statErr)
+        }
+
+        if expected != information.Mode().Perm() {
+            t.Fatalf("%q: expected the cache directory at %o, got %o", value, expected, information.Mode().Perm())
+        }
+    }
+}

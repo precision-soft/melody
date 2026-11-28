@@ -1,0 +1,458 @@
+package application
+
+import (
+    "context"
+    "errors"
+    "strings"
+    "testing"
+
+    applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    "github.com/precision-soft/melody/v4/config"
+    "github.com/precision-soft/melody/v4/exception"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/http/middleware"
+    middlewarepipeline "github.com/precision-soft/melody/v4/http/middleware/pipeline"
+    "github.com/precision-soft/melody/v4/internal"
+    "github.com/precision-soft/melody/v4/internal/testhelper"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+)
+
+func newHttpMiddlewareUnderTest(t *testing.T) *HttpMiddleware {
+    t.Helper()
+
+    configuration := newCollisionTestConfiguration(t)
+
+    return NewHttpMiddleware(
+        newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration),
+    )
+}
+
+func TestHttpMiddlewareAll_RefusesAFactoryThatYieldsNil(t *testing.T) {
+    middleware := newHttpMiddlewareUnderTest(t)
+
+    middleware.Use(applicationcontract.MiddlewareRegistration{Factories: []middlewarepipeline.MiddlewareFactory{func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
+        return nil, nil
+    }}})
+
+    testhelper.AssertPanicsWithError(t, func() {
+        middleware.all(newTestKernel())
+    }, "failed to build middleware pipeline")
+}
+
+func TestHttpMiddlewareAll_RefusesAFactoryThatYieldsATypedNil(t *testing.T) {
+    middleware := newHttpMiddlewareUnderTest(t)
+
+    middleware.Use(applicationcontract.MiddlewareRegistration{Factories: []middlewarepipeline.MiddlewareFactory{func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
+        var typedNil httpcontract.Middleware
+        return typedNil, nil
+    }}})
+
+    testhelper.AssertPanicsWithError(t, func() {
+        middleware.all(newTestKernel())
+    }, "failed to build middleware pipeline")
+}
+
+func TestHttpMiddlewareUse_RefusesATypedNilMiddleware(t *testing.T) {
+    middleware := newHttpMiddlewareUnderTest(t)
+
+    var nilFunction func(next httpcontract.Handler) httpcontract.Handler
+
+    testhelper.AssertPanicsWithError(t, func() {
+        middleware.Use(applicationcontract.MiddlewareRegistration{Middlewares: []httpcontract.Middleware{nilFunction}})
+    }, "middleware is nil in a middleware registration")
+}
+
+func TestHttpMiddlewareAll_BuildsWithAHealthyFactory(t *testing.T) {
+    middleware := newHttpMiddlewareUnderTest(t)
+
+    middleware.Use(applicationcontract.MiddlewareRegistration{Factories: []middlewarepipeline.MiddlewareFactory{func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
+        return func(next httpcontract.Handler) httpcontract.Handler {
+            return next
+        }, nil
+    }}})
+
+    middlewares := middleware.all(newTestKernel())
+
+    if 2 > len(middlewares) {
+        t.Fatalf("expected the static middleware and the factory's middleware in the chain, got %d", len(middlewares))
+    }
+
+    if false == strings.Contains(strings.Join(middleware.LastBuildReport().SelectedNames(), ","), "factory.1.0") {
+        t.Fatalf("expected the factory's definition among the selected names, got %v", middleware.LastBuildReport().SelectedNames())
+    }
+}
+
+func TestHttpMiddlewareDescribe_NamesAMiddlewareRegisteredAsAValue(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+
+    applicationInstance.RegisterHttpMiddlewares([]httpcontract.Middleware{namedProbeMiddleware})
+
+    applicationInstance.Boot()
+
+    descriptions, _, describeErr := applicationInstance.httpMiddlewares.describe(applicationInstance.kernel)
+    if nil != describeErr {
+        t.Fatalf("expected no error, got %v", describeErr)
+    }
+
+    valueMiddlewareNamed := false
+    for _, description := range descriptions {
+        if true == strings.Contains(description.FunctionName, "namedProbeMiddleware") {
+            valueMiddlewareNamed = true
+        }
+    }
+
+    if false == valueMiddlewareNamed {
+        t.Fatalf("expected the registered middleware to be named in the description, got %v", descriptions)
+    }
+}
+
+func namedProbeMiddleware(next httpcontract.Handler) httpcontract.Handler {
+    return next
+}
+
+func TestHttpMiddlewareDescribe_RunsNoFactoryAndNamesTheRegisteredFunction(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+
+    factoryRuns := 0
+
+    applicationInstance.RegisterHttpMiddlewareFactories([]middlewarepipeline.MiddlewareFactory{func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
+        factoryRuns = factoryRuns + 1
+
+        return func(next httpcontract.Handler) httpcontract.Handler {
+            return next
+        }, nil
+    }})
+
+    applicationInstance.Boot()
+
+    reportBefore := applicationInstance.httpMiddlewares.lastBuildReport
+
+    descriptions, _, describeErr := applicationInstance.httpMiddlewares.describe(applicationInstance.kernel)
+    if nil != describeErr {
+        t.Fatalf("expected no error, got %v", describeErr)
+    }
+
+    if 0 != factoryRuns {
+        t.Fatalf("expected the description to run no factory, ran %d times", factoryRuns)
+    }
+
+    if reportBefore != applicationInstance.httpMiddlewares.lastBuildReport {
+        t.Fatal("expected the description to leave the last build report alone")
+    }
+
+    if 3 != len(descriptions) {
+        t.Fatalf("expected the security headers, the static middleware and the factory described, got %d", len(descriptions))
+    }
+
+    factoryFunctionNamed := false
+    for _, description := range descriptions {
+        if "" != description.FunctionName && true == strings.Contains(description.FunctionName, "TestHttpMiddlewareDescribe_RunsNoFactoryAndNamesTheRegisteredFunction") {
+            factoryFunctionNamed = true
+        }
+    }
+
+    if false == factoryFunctionNamed {
+        t.Fatalf("expected the registered factory's function name on its description, got %+v", descriptions)
+    }
+}
+
+func passThroughMiddleware(next httpcontract.Handler) httpcontract.Handler {
+    return next
+}
+
+func passThroughFactory(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
+    return passThroughMiddleware, nil
+}
+
+func TestHttpMiddlewareUse_TheZeroRegistrationInstallsNothing(t *testing.T) {
+    middleware := newHttpMiddlewareUnderTest(t)
+
+    middleware.Use(applicationcontract.MiddlewareRegistration{})
+
+    middleware.all(newTestKernel())
+
+    if selectedNames := middleware.LastBuildReport().SelectedNames(); 1 != len(selectedNames) || MiddlewareNameStatic != selectedNames[0] {
+        t.Fatalf("expected only the static definition, got %v", selectedNames)
+    }
+}
+
+func TestHttpMiddlewareUse_InstallsTheMiddlewaresThenTheFactoriesInTheOrderGiven(t *testing.T) {
+    middleware := newHttpMiddlewareUnderTest(t)
+
+    wrapped := make([]string, 0, 4)
+    labelled := func(label string) httpcontract.Middleware {
+        return func(next httpcontract.Handler) httpcontract.Handler {
+            wrapped = append(wrapped, label)
+
+            return next
+        }
+    }
+    labelledFactory := func(label string) middlewarepipeline.MiddlewareFactory {
+        return func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
+            return labelled(label), nil
+        }
+    }
+
+    middleware.Use(applicationcontract.MiddlewareRegistration{
+        Middlewares: []httpcontract.Middleware{labelled("first"), labelled("second")},
+        Factories:   []middlewarepipeline.MiddlewareFactory{labelledFactory("third"), labelledFactory("fourth")},
+    })
+
+    chain := middleware.all(newTestKernel())
+
+    if selectedNames := strings.Join(middleware.LastBuildReport().SelectedNames(), ","); "static,middleware.1.0,middleware.2.0,factory.3.0,factory.4.0" != selectedNames {
+        t.Fatalf("expected the middlewares then the factories with consecutive indexes, got %s", selectedNames)
+    }
+
+    for _, chainMiddleware := range chain {
+        chainMiddleware(nil)
+    }
+
+    if "first,second,third,fourth" != strings.Join(wrapped, ",") {
+        t.Fatalf("expected the chain to carry the values in the order given, got %v", wrapped)
+    }
+}
+
+func TestHttpMiddlewareUse_ANilEntryPanicsNamingTheFieldAndTheIndex(t *testing.T) {
+    for _, testCase := range []struct {
+        name         string
+        registration applicationcontract.MiddlewareRegistration
+        field        string
+    }{
+        {name: "middleware", registration: applicationcontract.MiddlewareRegistration{Middlewares: []httpcontract.Middleware{passThroughMiddleware, nil}}, field: "MiddlewareRegistration.Middlewares"},
+        {name: "factory", registration: applicationcontract.MiddlewareRegistration{Factories: []middlewarepipeline.MiddlewareFactory{passThroughFactory, nil}}, field: "MiddlewareRegistration.Factories"},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            middleware := newHttpMiddlewareUnderTest(t)
+
+            defer func() {
+                var refusal *exception.Error
+                recoveredErr, isError := recover().(error)
+                if false == isError || false == errors.As(recoveredErr, &refusal) {
+                    t.Fatalf("expected an error panic, got %v", recoveredErr)
+                }
+
+                if testCase.field != refusal.Context()["field"] || 1 != refusal.Context()["index"] {
+                    t.Fatalf("expected the refusal to name %s at index 1, got %v", testCase.field, refusal.Context())
+                }
+            }()
+
+            middleware.Use(testCase.registration)
+        })
+    }
+}
+
+func TestHttpMiddlewareUse_APriorityBelowTheStaticOneWrapsOutsideIt(t *testing.T) {
+    middleware := newHttpMiddlewareUnderTest(t)
+
+    middleware.Use(applicationcontract.MiddlewareRegistration{Priority: -2000, Middlewares: []httpcontract.Middleware{passThroughMiddleware}})
+    middleware.Use(applicationcontract.MiddlewareRegistration{Middlewares: []httpcontract.Middleware{passThroughMiddleware}})
+
+    middleware.all(newTestKernel())
+
+    if selectedNames := strings.Join(middleware.LastBuildReport().SelectedNames(), ","); "middleware.1.-2000,static,middleware.2.0" != selectedNames {
+        t.Fatalf("expected the lower priority outside the static server and the default inside it, got %s", selectedNames)
+    }
+}
+
+func TestHttpMiddlewareUse_RefusesANilFactory(t *testing.T) {
+    middleware := newHttpMiddlewareUnderTest(t)
+
+    testhelper.AssertPanicsWithError(t, func() {
+        middleware.Use(applicationcontract.MiddlewareRegistration{Factories: []middlewarepipeline.MiddlewareFactory{nil}})
+    }, "middleware factory is nil in a middleware registration")
+}
+
+func TestHttpMiddlewareRegistrar_AModuleRegistersAFactoryThroughTheContract(t *testing.T) {
+    middleware := newHttpMiddlewareUnderTest(t)
+
+    var builtAgainst kernelcontract.Kernel
+
+    var registrar applicationcontract.HttpMiddlewareRegistrar = middleware
+    registrar.Use(applicationcontract.MiddlewareRegistration{Factories: []middlewarepipeline.MiddlewareFactory{func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
+        builtAgainst = kernelInstance
+
+        return passThroughMiddleware, nil
+    }}})
+
+    kernelInstance := newTestKernel()
+    middleware.all(kernelInstance)
+
+    if builtAgainst != kernelInstance {
+        t.Fatalf("expected the factory built against the kernel the pipeline was built with")
+    }
+}
+
+func TestHttpMiddlewareUse_AFactoryTakesThePriorityOfItsRegistration(t *testing.T) {
+    middleware := newHttpMiddlewareUnderTest(t)
+
+    middleware.Use(applicationcontract.MiddlewareRegistration{Priority: -2000, Factories: []middlewarepipeline.MiddlewareFactory{passThroughFactory}})
+
+    middleware.all(newTestKernel())
+
+    if selectedNames := strings.Join(middleware.LastBuildReport().SelectedNames(), ","); "factory.1.-2000,static" != selectedNames {
+        t.Fatalf("expected the factory outside the static server, got %s", selectedNames)
+    }
+}
+
+func TestHttpMiddlewareBuild_AFactoryErrorRefusesTheBuildCarryingIt(t *testing.T) {
+    middleware := newHttpMiddlewareUnderTest(t)
+    factoryFailure := errors.New("the factory cannot reach its store")
+
+    middleware.Use(applicationcontract.MiddlewareRegistration{Factories: []middlewarepipeline.MiddlewareFactory{func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
+        return nil, factoryFailure
+    }}})
+
+    _, buildErr := middleware.buildForInspection(newTestKernel())
+    if false == exception.ChainIs(buildErr, factoryFailure) {
+        t.Fatalf("expected the factory's failure to refuse the build, got %v", buildErr)
+    }
+}
+
+var errModuleNameTestFactory = errors.New("the factory could not reach its backend")
+
+func moduleNameTestFailingFactory(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
+    return nil, errModuleNameTestFactory
+}
+
+func buildRefusalOf(t *testing.T, err error) *exception.Error {
+    t.Helper()
+
+    for current := err; nil != current; current = errors.Unwrap(current) {
+        exceptionErr, isException := current.(*exception.Error)
+        if true == isException && "could not build middleware" == exceptionErr.Message() {
+            return exceptionErr
+        }
+    }
+
+    t.Fatalf("expected the build refusal in the chain, got %v", err)
+
+    return nil
+}
+
+type failingFactoryModule struct {
+    fakeModule
+}
+
+func (instance *failingFactoryModule) RegisterHttpMiddlewares(kernelInstance kernelcontract.Kernel, registrar applicationcontract.HttpMiddlewareRegistrar) {
+    registrar.Use(applicationcontract.MiddlewareRegistration{
+        Factories: []middlewarepipeline.MiddlewareFactory{moduleNameTestFailingFactory},
+    })
+}
+
+func TestBoot_AModulesFailingMiddlewareFactoryIsRefusedNamingTheModule(t *testing.T) {
+    applicationInstance := newEnvironmentKeyBootApplication(t, nil)
+    applicationInstance.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli})
+    applicationInstance.httpMiddlewares = NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), applicationInstance.configuration))
+
+    applicationInstance.RegisterModule(&failingFactoryModule{fakeModule: fakeModule{name: "billing"}})
+
+    applicationInstance.Boot()
+
+    _, buildErr := applicationInstance.httpMiddlewares.buildForInspection(applicationInstance.kernel)
+
+    refusal := buildRefusalOf(t, buildErr)
+
+    if "billing" != refusal.Context()["moduleName"] {
+        t.Fatalf("expected the refusal to name the module, got %v", refusal.Context())
+    }
+
+    if middlewareName, _ := refusal.Context()["middlewareName"].(string); "" == middlewareName {
+        t.Fatalf("expected the refusal to name the middleware, got %v", refusal.Context())
+    }
+
+    if false == errors.Is(buildErr, errModuleNameTestFactory) {
+        t.Fatalf("expected the factory's error reachable, got %v", buildErr)
+    }
+}
+
+func TestHttpMiddleware_AnApplicationFactoryIsRefusedNamingTheApplication(t *testing.T) {
+    applicationInstance := newEnvironmentKeyBootApplication(t, nil)
+    applicationInstance.httpMiddlewares = NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), applicationInstance.configuration))
+
+    applicationInstance.RegisterHttpMiddlewareFactories([]middlewarepipeline.MiddlewareFactory{moduleNameTestFailingFactory})
+
+    _, buildErr := applicationInstance.httpMiddlewares.buildForInspection(newTestKernel())
+
+    if internal.EnvironmentKeyOwnerApplication != buildRefusalOf(t, buildErr).Context()["moduleName"] {
+        t.Fatalf("expected the refusal to name the application, got %v", buildErr)
+    }
+}
+
+func TestHttpMiddleware_ARegistrationRefusalNamesTheModuleOnlyWhenOneRegisters(t *testing.T) {
+    middleware := newHttpMiddlewareUnderTest(t)
+
+    refusalContext := func(registrar applicationcontract.HttpMiddlewareRegistrar) map[string]any {
+        var recovered any
+        func() {
+            defer func() { recovered = recover() }()
+
+            registrar.Use(applicationcontract.MiddlewareRegistration{Factories: []middlewarepipeline.MiddlewareFactory{nil}})
+        }()
+
+        var exceptionErr *exception.Error
+        recoveredErr, isError := recovered.(error)
+        if false == isError || false == errors.As(recoveredErr, &exceptionErr) {
+            t.Fatalf("expected the nil factory refused, got %v", recovered)
+        }
+
+        return exceptionErr.Context()
+    }
+
+    if "billing" != refusalContext(middleware.forModule("billing"))["moduleName"] {
+        t.Fatalf("expected the module named in the registration refusal")
+    }
+
+    if _, present := refusalContext(middleware)["moduleName"]; true == present {
+        t.Fatalf("expected no module key when no module registers")
+    }
+}
+
+func TestHttpMiddleware_AFactoryYieldingNilIsRefusedNamingTheModule(t *testing.T) {
+    middleware := newHttpMiddlewareUnderTest(t)
+
+    middleware.forModule("billing").Use(applicationcontract.MiddlewareRegistration{Factories: []middlewarepipeline.MiddlewareFactory{func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
+        return nil, nil
+    }}})
+
+    _, buildErr := middleware.buildForInspection(newTestKernel())
+
+    var nilRefusal *exception.Error
+    for current := buildErr; nil != current; current = errors.Unwrap(current) {
+        exceptionErr, isException := current.(*exception.Error)
+        if true == isException && "middleware factory returned nil" == exceptionErr.Message() {
+            nilRefusal = exceptionErr
+        }
+    }
+
+    if nil == nilRefusal || "billing" != nilRefusal.Context()["moduleName"] || "billing" != buildRefusalOf(t, buildErr).Context()["moduleName"] {
+        t.Fatalf("expected both refusals to name the module, got %v", buildErr)
+    }
+}
+
+func TestDefaultDefinitions_SecurityHeadersOutsideStatic(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+
+    definitions := applicationInstance.httpMiddlewares.defaultDefinitions(applicationInstance.kernel)
+    if 2 != len(definitions) || MiddlewareNameSecurityHeaders != definitions[0].Name || MiddlewareNameStatic != definitions[1].Name {
+        t.Fatalf("expected the security headers then the static file server, got %+v", definitions)
+    }
+
+    if MiddlewarePrioritySecurityHeaders != definitions[0].Priority || definitions[0].Priority >= definitions[1].Priority {
+        t.Fatalf("expected the security headers below the static priority, got %d and %d", definitions[0].Priority, definitions[1].Priority)
+    }
+
+    descriptions, _, describeErr := applicationInstance.httpMiddlewares.describe(applicationInstance.kernel)
+    if nil != describeErr || 2 != len(descriptions) || MiddlewareNameSecurityHeaders != descriptions[0].Name {
+        t.Fatalf("expected the security headers listed first, got %+v %v", descriptions, describeErr)
+    }
+}
+
+func TestDefaultDefinitions_Disabled_OnlyStatic(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), SecurityHeaders: middleware.SecurityHeadersConfig{Disabled: true}})
+
+    definitions := applicationInstance.httpMiddlewares.defaultDefinitions(applicationInstance.kernel)
+    if 1 != len(definitions) || MiddlewareNameStatic != definitions[0].Name {
+        t.Fatalf("expected the static file server alone, got %+v", definitions)
+    }
+}

@@ -1,0 +1,740 @@
+package cron
+
+import (
+    "bytes"
+    "context"
+    "errors"
+    "fmt"
+    "os"
+    "sort"
+    "sync"
+    "sync/atomic"
+    "testing"
+    "time"
+
+    "io"
+
+    "github.com/precision-soft/melody/v4/bound"
+    melodycli "github.com/precision-soft/melody/v4/cli"
+    clicontract "github.com/precision-soft/melody/v4/cli/contract"
+    melodyconfig "github.com/precision-soft/melody/v4/config"
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    "github.com/precision-soft/melody/v4/lock"
+    lockcontract "github.com/precision-soft/melody/v4/lock/contract"
+    "github.com/precision-soft/melody/v4/logging"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+)
+
+type fakePlainCommand struct {
+    commandName string
+}
+
+func newFakePlainCommand(name string) *fakePlainCommand {
+    return &fakePlainCommand{commandName: name}
+}
+
+func (instance *fakePlainCommand) Name() string {
+    return instance.commandName
+}
+
+func (instance *fakePlainCommand) Description() string {
+    return "fake plain command"
+}
+
+func (instance *fakePlainCommand) Flags() []clicontract.Flag {
+    return nil
+}
+
+func (instance *fakePlainCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
+    return nil
+}
+
+type fakeCommandWithSchedule struct {
+    fakePlainCommand
+    config *EntryConfig
+}
+
+type testSchedule struct {
+    Minute          string
+    Hour            string
+    DayOfMonth      string
+    Month           string
+    DayOfWeek       string
+    User            string
+    LogFileName     string
+    LogFileNameRaw  bool
+    LogDisabled     bool
+    DestinationFile string
+    Command         []string
+    Instances       int
+}
+
+func (instance *testSchedule) toEntryConfig() *EntryConfig {
+    if nil == instance {
+        return nil
+    }
+
+    instances := bound.Count{}
+    if 0 != instance.Instances {
+        instances = bound.Of(instance.Instances)
+    }
+
+    return &EntryConfig{
+        Schedule: &Schedule{
+            Minute:     instance.Minute,
+            Hour:       instance.Hour,
+            DayOfMonth: instance.DayOfMonth,
+            Month:      instance.Month,
+            DayOfWeek:  instance.DayOfWeek,
+        },
+        User:            instance.User,
+        LogFileName:     instance.LogFileName,
+        LogFileNameRaw:  instance.LogFileNameRaw,
+        LogDisabled:     instance.LogDisabled,
+        DestinationFile: instance.DestinationFile,
+        Command:         instance.Command,
+        Instances:       instances,
+    }
+}
+
+func newFakeCommandWithSchedule(name string, schedule *testSchedule) *fakeCommandWithSchedule {
+    return &fakeCommandWithSchedule{
+        fakePlainCommand: fakePlainCommand{commandName: name},
+        config:           schedule.toEntryConfig(),
+    }
+}
+
+func newFakeCommandWithConfig(name string, config EntryConfig) *fakeCommandWithSchedule {
+    return &fakeCommandWithSchedule{
+        fakePlainCommand: fakePlainCommand{commandName: name},
+        config:           &config,
+    }
+}
+
+func buildConfigurationFromFakeCommands(commands []clicontract.Command) *Configuration {
+    configuration := NewConfiguration()
+
+    for _, command := range commands {
+        scheduled, ok := command.(*fakeCommandWithSchedule)
+        if false == ok {
+            continue
+        }
+
+        if nil == scheduled.config {
+            continue
+        }
+
+        configuration.Schedule(scheduled.Name(), *scheduled.config)
+    }
+
+    return configuration
+}
+
+func runGenerateCommand(t *testing.T, providedCommands []clicontract.Command, extraArgs []string) (string, error) {
+    t.Helper()
+
+    return runGenerateCommandWithConfiguration(t, providedCommands, extraArgs, nil)
+}
+
+func runGenerateCommandWithRegistrar(
+    t *testing.T,
+    providedCommands []clicontract.Command,
+    extraArgs []string,
+    registrar func(*GenerateCommand),
+) (string, error) {
+    t.Helper()
+
+    generateCommand := newGenerateCommandForTest(buildConfigurationFromFakeCommands(providedCommands))
+
+    if nil != registrar {
+        registrar(generateCommand)
+    }
+
+    return dispatchGenerateCommand(generateCommand, nil, extraArgs)
+}
+
+func runGenerateCommandWithConfiguration(
+    t *testing.T,
+    providedCommands []clicontract.Command,
+    extraArgs []string,
+    configuration configcontract.Configuration,
+) (string, error) {
+    t.Helper()
+
+    generateCommand := newGenerateCommandForTest(buildConfigurationFromFakeCommands(providedCommands))
+
+    return dispatchGenerateCommand(generateCommand, configuration, extraArgs)
+}
+
+func runWithInjectedConfiguration(
+    generateCommand *GenerateCommand,
+    commandContext *clicontract.CommandContext,
+    configuration configcontract.Configuration,
+) error {
+    if nil == configuration {
+        configuration = newStubConfiguration(nil)
+    }
+
+    return generateCommand.runWithConfiguration(commandContext, configuration)
+}
+
+const stubApplicationName = "melody-cron-test"
+
+type stubCliConfiguration struct {
+    name string
+}
+
+func (instance *stubCliConfiguration) Name() string {
+    return instance.name
+}
+
+func (instance *stubCliConfiguration) Description() string {
+    return "cron test application"
+}
+
+type stubConfiguration struct {
+    parameters map[string]configcontract.Parameter
+    cli        configcontract.CliConfiguration
+}
+
+func newStubConfiguration(values map[string]string) *stubConfiguration {
+    return newStubConfigurationNamed(values, stubApplicationName)
+}
+
+func newStubConfigurationNamed(values map[string]string, applicationName string) *stubConfiguration {
+    configuration := &stubConfiguration{parameters: registeredParameters(values)}
+    if "" != applicationName {
+        configuration.cli = &stubCliConfiguration{name: applicationName}
+    }
+
+    return configuration
+}
+
+func registeredParameters(values map[string]string) map[string]configcontract.Parameter {
+    environment, environmentErr := melodyconfig.NewEnvironment(context.Background(), &stubEnvironmentSource{values: map[string]string{}})
+    if nil != environmentErr {
+        panic(environmentErr)
+    }
+
+    configuration, configurationErr := melodyconfig.NewConfiguration(environment, os.TempDir(), melodyconfig.ConfigurationConfig{})
+    if nil != configurationErr {
+        panic(configurationErr)
+    }
+
+    parameters := make(map[string]configcontract.Parameter, len(values))
+    for name, value := range values {
+        configuration.RegisterRuntime(name, value)
+        parameters[name] = configuration.Get(name)
+    }
+
+    return parameters
+}
+
+func (instance *stubConfiguration) Get(name string) configcontract.Parameter {
+    return instance.parameters[name]
+}
+
+func (instance *stubConfiguration) MustGet(name string) configcontract.Parameter {
+    return instance.parameters[name]
+}
+
+func (instance *stubConfiguration) RegisterRuntime(name string, value any) {}
+
+func (instance *stubConfiguration) RegisterRuntimeSecret(name string, value any) {
+}
+
+func (instance *stubConfiguration) MarkSecret(name string) bool {
+    return false
+}
+
+func (instance *stubConfiguration) Resolve() error {
+    return nil
+}
+
+func (instance *stubConfiguration) Cli() configcontract.CliConfiguration {
+    return instance.cli
+}
+
+func (instance *stubConfiguration) Kernel() configcontract.KernelConfiguration {
+    return nil
+}
+
+func (instance *stubConfiguration) Http() configcontract.HttpConfiguration {
+    return nil
+}
+
+func (instance *stubConfiguration) Names() []string {
+    return nil
+}
+
+type stubKernelConfiguration struct {
+    projectDirectory    string
+    bootWarningsIgnored []string
+    namespace string
+}
+
+func (instance *stubKernelConfiguration) DefaultMode() string {
+    return "http"
+}
+
+func (instance *stubKernelConfiguration) ProcessRole() string {
+    return ""
+}
+
+func (instance *stubKernelConfiguration) Environment() string {
+    return "dev"
+}
+
+func (instance *stubKernelConfiguration) ProjectDirectory() string {
+    return instance.projectDirectory
+}
+
+func (instance *stubKernelConfiguration) LogsDirectory() string {
+    return ""
+}
+
+func (instance *stubKernelConfiguration) CacheDirectory() string {
+    return ""
+}
+
+func (instance *stubKernelConfiguration) LogPath() string {
+    return ""
+}
+
+func (instance *stubKernelConfiguration) LogLevel() loggingcontract.Level {
+    return loggingcontract.LevelInfo
+}
+
+func (instance *stubKernelConfiguration) LogFileMode() os.FileMode {
+    return 0o640
+}
+
+func (instance *stubKernelConfiguration) LogDirectoryMode() os.FileMode {
+    return 0o750
+}
+
+func (instance *stubKernelConfiguration) CacheDirectoryMode() os.FileMode {
+    return 0o750
+}
+
+func (instance *stubKernelConfiguration) BootWarningsIgnored() []string {
+    return instance.bootWarningsIgnored
+}
+
+func (instance *stubKernelConfiguration) TeardownTimeout() bound.Duration {
+    return bound.Duration{}
+}
+
+func (instance *stubKernelConfiguration) ScopeTeardownTimeout() bound.Duration {
+    return bound.Duration{}
+}
+
+func (instance *stubKernelConfiguration) ContainerCreationWaiters() bound.Count {
+    return bound.Count{}
+}
+
+func (instance *stubKernelConfiguration) ContainerTeardownSequential() configcontract.Switch {
+    return configcontract.Switch{}
+}
+
+func (instance *stubKernelConfiguration) Namespace() string {
+    if "" == instance.namespace {
+        return "melody"
+    }
+
+    return instance.namespace
+}
+
+type stubConfigurationWithKernel struct {
+    *stubConfiguration
+    kernel configcontract.KernelConfiguration
+}
+
+func (instance *stubConfigurationWithKernel) Kernel() configcontract.KernelConfiguration {
+    return instance.kernel
+}
+
+func newStubConfigurationWithProjectDirectory(values map[string]string, projectDirectory string) *stubConfigurationWithKernel {
+    return &stubConfigurationWithKernel{
+        stubConfiguration: newStubConfiguration(values),
+        kernel:            &stubKernelConfiguration{projectDirectory: projectDirectory},
+    }
+}
+
+type configuredGenerateCommand struct {
+    *GenerateCommand
+    configuration configcontract.Configuration
+}
+
+var _ clicontract.Command = (*configuredGenerateCommand)(nil)
+
+func (instance *configuredGenerateCommand) Run(
+    runtimeInstance containercontract.Runtime,
+    commandContext *clicontract.CommandContext,
+) error {
+    return runWithInjectedConfiguration(instance.GenerateCommand, commandContext, instance.configuration)
+}
+
+func dispatchGenerateCommand(
+    generateCommand *GenerateCommand,
+    configuration configcontract.Configuration,
+    extraArgs []string,
+) (string, error) {
+    var stdout bytes.Buffer
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
+
+    dispatched := &configuredGenerateCommand{
+        GenerateCommand: generateCommand,
+        configuration:   configuration,
+    }
+
+    runErr := melodycli.DispatchCommand(
+        context.Background(),
+        dispatched,
+        runtimeInstance,
+        append([]string{generateCommand.Name()}, extraArgs...),
+        &stdout,
+        melodycli.DispatchOptions{},
+    )
+
+    return stdout.String(), runErr
+}
+
+type runnerDispatch struct {
+    runner          *RunnerCommand
+    runtimeInstance containercontract.Runtime
+    writer          io.Writer
+}
+
+func newRunnerDispatch(
+    runner *RunnerCommand,
+    runtimeInstance containercontract.Runtime,
+    writer io.Writer,
+) *runnerDispatch {
+    return &runnerDispatch{
+        runner:          runner,
+        runtimeInstance: runtimeInstance,
+        writer:          writer,
+    }
+}
+
+func (instance *runnerDispatch) Run(ctx context.Context, arguments []string) error {
+    runtimeInstance := instance.runtimeInstance
+    if nil == runtimeInstance {
+        runtimeInstance = newRunnerTestRuntime(ctx)
+    }
+
+    return melodycli.DispatchCommand(ctx, instance.runner, runtimeInstance, arguments, instance.writer, melodycli.DispatchOptions{})
+}
+
+type parsedContextValues struct {
+    StringValues      map[string]string
+    BoolValues        map[string]bool
+    IntValues         map[string]int
+    StringSliceValues map[string][]string
+    ArgumentValues    []string
+    WriterValue       io.Writer
+}
+
+func (instance parsedContextValues) parse() *clicontract.CommandContext {
+    flags := make([]clicontract.Flag, 0)
+    arguments := []string{"test"}
+
+    for _, flagName := range sortedKeys(instance.StringValues) {
+        flags = append(flags, &clicontract.StringFlag{Name: flagName})
+        arguments = append(arguments, "--"+flagName, instance.StringValues[flagName])
+    }
+
+    for _, flagName := range sortedKeys(instance.BoolValues) {
+        flags = append(flags, &clicontract.BoolFlag{Name: flagName})
+        arguments = append(arguments, fmt.Sprintf("--%s=%t", flagName, instance.BoolValues[flagName]))
+    }
+
+    for _, flagName := range sortedKeys(instance.IntValues) {
+        flags = append(flags, &clicontract.IntFlag{Name: flagName})
+        arguments = append(arguments, fmt.Sprintf("--%s=%d", flagName, instance.IntValues[flagName]))
+    }
+
+    for _, flagName := range sortedKeys(instance.StringSliceValues) {
+        flags = append(flags, &clicontract.StringSliceFlag{Name: flagName})
+        for _, value := range instance.StringSliceValues[flagName] {
+            arguments = append(arguments, "--"+flagName, value)
+        }
+    }
+
+    arguments = append(arguments, "--")
+    arguments = append(arguments, instance.ArgumentValues...)
+
+    writer := instance.WriterValue
+    if nil == writer {
+        writer = io.Discard
+    }
+
+    commandContext := &clicontract.CommandContext{
+        Name:            "test",
+        Flags:           flags,
+        Writer:          writer,
+        ErrWriter:       writer,
+        HideHelpCommand: true,
+        Action: func(ctx context.Context, actionCommand *clicontract.CommandContext) error {
+            return nil
+        },
+    }
+
+    if runErr := commandContext.Run(context.Background(), arguments); nil != runErr {
+        panic(runErr)
+    }
+
+    return commandContext
+}
+
+func sortedKeys[V any](values map[string]V) []string {
+    keys := make([]string, 0, len(values))
+    for key := range values {
+        keys = append(keys, key)
+    }
+
+    sort.Strings(keys)
+
+    return keys
+}
+
+/* the suite runs as root in the dev container and as a plain user elsewhere, so tests read a plain user unless they set one */
+func TestMain(main *testing.M) {
+    logDirectoryEffectiveUserId = func() int { return 1000 }
+
+    os.Exit(main.Run())
+}
+
+func defaultResolvedGenerator() resolvedGenerator {
+    generator, _ := resolveGeneratorConfig(GeneratorConfig{})
+
+    return generator
+}
+
+func newGenerateCommandForTest(configuration *Configuration) *GenerateCommand {
+    return newGenerateCommand(configuration, nil, defaultResolvedGenerator())
+}
+
+func staticConfiguration(configuration *Configuration) func(kernelInstance kernelcontract.Kernel) *Configuration {
+    return func(kernelInstance kernelcontract.Kernel) *Configuration {
+        return configuration
+    }
+}
+
+type recordingTickLocker struct {
+    inner lockcontract.Locker
+    /* holds every acquire open, so two acquires of one minute overlap */
+    acquireDelay time.Duration
+    mutex    sync.Mutex
+    names    []string
+    ttls     []bound.Duration
+    releases atomic.Int32
+}
+
+func (instance *recordingTickLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
+    instance.mutex.Lock()
+    instance.names = append(instance.names, name)
+    instance.ttls = append(instance.ttls, options.Ttl)
+    instance.mutex.Unlock()
+
+    innerLock, createErr := instance.inner.CreateLock(name, options)
+    if nil != createErr {
+        return nil, createErr
+    }
+
+    return &recordingTickLock{inner: innerLock, owner: instance}, nil
+}
+
+func (instance *recordingTickLocker) recordedNames() []string {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]string{}, instance.names...)
+}
+
+func (instance *recordingTickLocker) recordedTtls() []bound.Duration {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]bound.Duration{}, instance.ttls...)
+}
+
+type recordingTickLock struct {
+    inner lockcontract.Lock
+    owner *recordingTickLocker
+}
+
+func (instance *recordingTickLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
+    time.Sleep(instance.owner.acquireDelay)
+
+    return instance.inner.Acquire(runtimeInstance)
+}
+
+func (instance *recordingTickLock) Release(runtimeInstance containercontract.Runtime) error {
+    instance.owner.releases.Add(1)
+
+    return instance.inner.Release(runtimeInstance)
+}
+
+func (instance *recordingTickLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
+    return instance.inner.Refresh(runtimeInstance, options)
+}
+
+const (
+    failingTickLockerAnswersAnError    = "error"
+    failingTickLockerBlocks            = "block"
+    failingTickLockerPanics            = "panic"
+    failingTickLockerRefusesCreateLock = "create"
+)
+
+type failingTickLocker struct {
+    mode string
+    err  error
+}
+
+func (instance *failingTickLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
+    if failingTickLockerRefusesCreateLock == instance.mode {
+        return nil, instance.err
+    }
+
+    return &failingTickLock{owner: instance}, nil
+}
+
+type failingTickLock struct {
+    owner *failingTickLocker
+}
+
+func (instance *failingTickLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
+    switch instance.owner.mode {
+    case failingTickLockerBlocks:
+        <-runtimeInstance.Context().Done()
+
+        return false, runtimeInstance.Context().Err()
+    case failingTickLockerPanics:
+        panic("the tick locker panicked on purpose")
+    }
+
+    return false, instance.owner.err
+}
+
+func (instance *failingTickLock) Release(runtimeInstance containercontract.Runtime) error {
+    return nil
+}
+
+func (instance *failingTickLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
+    return nil
+}
+
+type sessionTickLocker struct {
+    mutex sync.Mutex
+    held  map[string]bool
+}
+
+func newSessionTickLocker() *sessionTickLocker {
+    return &sessionTickLocker{held: make(map[string]bool)}
+}
+
+func (instance *sessionTickLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
+    return &sessionTickLock{owner: instance, name: name}, nil
+}
+
+func (instance *sessionTickLocker) heldCount() int {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return len(instance.held)
+}
+
+type sessionTickLock struct {
+    owner *sessionTickLocker
+    name  string
+}
+
+func (instance *sessionTickLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
+    instance.owner.mutex.Lock()
+    defer instance.owner.mutex.Unlock()
+
+    if true == instance.owner.held[instance.name] {
+        return false, nil
+    }
+
+    instance.owner.held[instance.name] = true
+
+    return true, nil
+}
+
+func (instance *sessionTickLock) Release(runtimeInstance containercontract.Runtime) error {
+    instance.owner.mutex.Lock()
+    defer instance.owner.mutex.Unlock()
+
+    delete(instance.owner.held, instance.name)
+
+    return nil
+}
+
+func (instance *sessionTickLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
+    return nil
+}
+
+type sharedLeaseTickLocker struct {
+    recordingTickLocker
+    shared bool
+    err    error
+    panics bool
+    failedAsks int64
+    asks       atomic.Int64
+}
+
+func (instance *sharedLeaseTickLocker) LeasesAcrossReplicas(runtimeInstance containercontract.Runtime) (bool, error) {
+    if asked := instance.asks.Add(1); asked <= instance.failedAsks {
+        return false, errors.New("the locker's store is not up yet")
+    }
+
+    if true == instance.panics {
+        panic("the shared lease ask panicked")
+    }
+
+    return instance.shared, instance.err
+}
+
+func newTickDedupWarningRuntime(logger loggingcontract.Logger, registeredLocker lockcontract.Locker, bootWarningsIgnored []string) containercontract.Runtime {
+    configuration := &stubConfigurationWithKernel{
+        stubConfiguration: newStubConfiguration(nil),
+        kernel:            &stubKernelConfiguration{bootWarningsIgnored: bootWarningsIgnored},
+    }
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    serviceContainer.MustRegister(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return logger, nil
+        },
+        container.RegisterOptions{},
+    )
+    serviceContainer.MustRegister(
+        melodyconfig.ServiceConfig,
+        func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+            return configuration, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    if nil != registeredLocker {
+        serviceContainer.MustRegister(
+            lock.ServiceLocker,
+            func(resolver containercontract.Resolver) (lockcontract.Locker, error) {
+                return registeredLocker, nil
+            },
+            container.RegisterOptions{},
+        )
+    }
+
+    return runtime.NewRun(context.Background(), serviceContainer.NewScope())
+}

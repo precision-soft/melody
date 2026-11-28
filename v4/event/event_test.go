@@ -1,0 +1,118 @@
+package event
+
+import (
+    "context"
+    "testing"
+    "time"
+
+    "github.com/precision-soft/melody/v4/clock"
+    clockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
+    "github.com/precision-soft/melody/v4/internal/testhelper"
+    "github.com/precision-soft/melody/v4/logging"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+)
+
+func testNewEventDispatcher() (*EventDispatcher, clockcontract.Clock) {
+    clockInstance := clock.NewSystemClock()
+    dispatcher := NewEventDispatcher(EventDispatcherConfig{Clock: clockInstance})
+
+    return dispatcher, clockInstance
+}
+
+func newEventDispatcherAdapterTestRuntime(t *testing.T) containercontract.Runtime {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    scope := serviceContainer.NewScope()
+
+    err := serviceContainer.Register(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return logging.NewNopLogger(), nil
+        },
+        container.RegisterOptions{},
+    )
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    return runtime.NewRun(context.Background(), scope)
+}
+
+func TestEvent_StopPropagation(t *testing.T) {
+    eventInstance := NewEvent("e", nil, clock.NewSystemClock().Now())
+
+    if true == eventInstance.IsPropagationStopped() {
+        t.Fatalf("expected propagation not stopped initially")
+    }
+
+    eventInstance.StopPropagation()
+
+    if false == eventInstance.IsPropagationStopped() {
+        t.Fatalf("expected propagation stopped")
+    }
+}
+
+func TestEvent_Constructors(t *testing.T) {
+    timestamp := time.Unix(123, 0)
+
+    original := NewEvent("e", "p", timestamp)
+    copied := NewEventFromEvent(original)
+
+    if "e" != copied.Name() {
+        t.Fatalf("unexpected name")
+    }
+    if "p" != copied.Payload().(string) {
+        t.Fatalf("unexpected payload")
+    }
+    if timestamp != copied.Timestamp() {
+        t.Fatalf("unexpected timestamp")
+    }
+}
+
+func TestEvent_Constructors_PanicOnEmptyName(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        NewEvent("", nil, clock.NewSystemClock().Now())
+    }, "event name may not be empty")
+
+    testhelper.AssertPanicsWithError(t, func() {
+        NewEvent("", nil, time.Now())
+    }, "event name may not be empty")
+
+    /* the zero value, because NewEvent("", ...) would panic while the argument is evaluated, before NewEventFromEvent is entered */
+    testhelper.AssertPanicsWithError(t, func() {
+        NewEventFromEvent(&Event{})
+    }, "event name may not be empty")
+}
+
+func TestEvent_Constructors_PanicOnNilEvent(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        NewEventFromEvent(nil)
+    }, "event value may not be nil")
+
+    testhelper.AssertPanicsWithError(t, func() {
+        NewEventFromEvent((*Event)(nil))
+    }, "event value may not be nil")
+}
+
+func TestNewEventFromEvent_CarriesTheStoppedPropagation(t *testing.T) {
+    original := NewEvent("e", nil, time.Unix(123, 0))
+    original.StopPropagation()
+
+    copied := NewEventFromEvent(original)
+
+    if false == copied.IsPropagationStopped() {
+        t.Fatalf("expected the copy to carry the stopped propagation")
+    }
+}
+
+func TestNewEventFromEvent_KeepsALivePropagationLive(t *testing.T) {
+    original := NewEvent("e", nil, time.Unix(123, 0))
+
+    copied := NewEventFromEvent(original)
+
+    if true == copied.IsPropagationStopped() {
+        t.Fatalf("expected the copy to keep the propagation live")
+    }
+}

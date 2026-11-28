@@ -120,6 +120,15 @@ go vet -tags "melody_env_embedded melody_static_embedded" ./...
 )
 ```
 
+### Memory limits
+
+Go has no hard per-process memory limit (`GOMEMLIMIT` only steers the garbage collector), so the dev stack sets two of its own, both overridable in `.dev/docker/.env.local`:
+
+- every `go test` binary in a `dev*` container runs under [`.dev/test-exec.sh`](./.dev/test-exec.sh), set through `GOFLAGS=-exec=…`, and is killed with `memory limit exceeded: <package>` above `MELODY_TEST_MEMORY_LIMIT` resident (default `6G`, `0` turns the watch off). This is the equivalent of PHP's `memory_limit`;
+- each `dev*` container is capped at `DEV_MEMORY_LIMIT` (default `40g`), so a whole run that grows past it is killed inside the container before the host's desktop session.
+
+A test that hits the limit is a defect, typically an unbounded recursion or an unmarked visited set. Raising the limit does not fix it.
+
 ## Development shell aliases
 
 The repository includes a Docker-focused development shell profile at [`./.dev/docker/.profile`](./.dev/docker/.profile).

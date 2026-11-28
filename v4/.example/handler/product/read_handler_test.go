@@ -1,0 +1,357 @@
+package product
+
+import (
+    "context"
+    "errors"
+    nethttp "net/http"
+    "net/http/httptest"
+    "strings"
+    "testing"
+    "time"
+
+    "github.com/precision-soft/melody/v4/.example/entity"
+    "github.com/precision-soft/melody/v4/.example/repository"
+    "github.com/precision-soft/melody/v4/.example/service"
+    melodybound "github.com/precision-soft/melody/v4/bound"
+    melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
+    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
+    melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+)
+
+var conversionQuoteInstant = time.Date(2026, time.September, 7, 9, 0, 0, 0, time.UTC)
+
+func conversionCatalogue() []*entity.Currency {
+    return []*entity.Currency{
+        entity.NewCurrency("cur-eur", "EUR", "Euro", 1, conversionQuoteInstant),
+        entity.NewCurrency("cur-usd", "USD", "US Dollar", 1.0842, conversionQuoteInstant),
+        entity.NewCurrency("cur-ron", "RON", "Romanian Leu", 4.9761, conversionQuoteInstant),
+    }
+}
+
+func conversionProduct() *entity.Product {
+    return entity.NewProduct("prod-1", "probe", "probe", "cat-1", 149.99, "cur-eur", 1, conversionQuoteInstant, conversionQuoteInstant)
+}
+
+func conversionRequest(t *testing.T, target string) melodyhttpcontract.Request {
+    t.Helper()
+
+    return melodyhttp.NewRequest(
+        httptest.NewRequest(nethttp.MethodGet, target, nil),
+        nil,
+        melodyhttp.RequestConfig{
+            RouteParameters: map[string]string{"id": "prod-1"},
+            RequestContext:  melodyhttp.NewRequestContext("conversion-door-test", conversionQuoteInstant),
+        },
+    )
+}
+
+func TestConvertedPriceFor_AnswersNothingWhenTheCallerAskedForNoConversion(t *testing.T) {
+    for _, target := range []string{
+        "/products/api/read/prod-1/",
+        "/products/api/read/prod-1/?currency=",
+        "/products/api/read/prod-1/?currency=%20%20",
+        "/products/api/read/prod-1/?other=USD",
+    } {
+        converted, err := convertedPriceFor(conversionRequest(t, target), conversionProduct(), conversionCatalogue())
+        if nil != err {
+            t.Fatalf("%s: the door failed: %v", target, err)
+        }
+
+        if nil != converted {
+            t.Errorf("%s: the door converted into %+v without being asked", target, converted)
+        }
+    }
+}
+
+func TestConvertedPriceFor_RestatesThePriceInTheCurrencyTheCallerNamed(t *testing.T) {
+    converted, err := convertedPriceFor(
+        conversionRequest(t, "/products/api/read/prod-1/?currency=USD"),
+        conversionProduct(),
+        conversionCatalogue(),
+    )
+    if nil != err {
+        t.Fatalf("the door failed: %v", err)
+    }
+
+    if nil == converted {
+        t.Fatal("the door answered no conversion")
+    }
+
+    if 162.62 != converted.Price {
+        t.Errorf("149.99 EUR came back as %v, wanted 162.62", converted.Price)
+    }
+
+    if "cur-usd" != converted.CurrencyId || "USD" != converted.Code {
+        t.Errorf("the conversion names %q/%q, wanted cur-usd/USD", converted.CurrencyId, converted.Code)
+    }
+
+    if "2026-09-07T09:00:00Z" != converted.RateAsOf {
+        t.Errorf("the conversion is stamped %q, wanted the instant of the quote it used", converted.RateAsOf)
+    }
+}
+
+func TestConvertedPriceFor_StampsTheOlderOfTheTwoQuotes(t *testing.T) {
+    olderInstant := conversionQuoteInstant.Add(-3 * time.Hour)
+    newerInstant := conversionQuoteInstant.Add(2 * time.Hour)
+
+    for _, testCase := range []struct {
+        sourceAsOf time.Time
+        targetAsOf time.Time
+    }{
+        {olderInstant, newerInstant},
+        {newerInstant, olderInstant},
+    } {
+        catalogue := []*entity.Currency{
+            entity.NewCurrency("cur-eur", "EUR", "Euro", 1, testCase.sourceAsOf),
+            entity.NewCurrency("cur-usd", "USD", "US Dollar", 1.0842, testCase.targetAsOf),
+        }
+
+        converted, err := convertedPriceFor(conversionRequest(t, "/products/api/read/prod-1/?currency=USD"), conversionProduct(), catalogue)
+        if nil != err || nil == converted {
+            t.Fatalf("the door failed: %v", err)
+        }
+
+        if olderInstant.Format(time.RFC3339) != converted.RateAsOf {
+            t.Errorf("source %s, target %s: the conversion is stamped %q, wanted the older quote %s", testCase.sourceAsOf, testCase.targetAsOf, converted.RateAsOf, olderInstant.Format(time.RFC3339))
+        }
+    }
+}
+
+func TestConvertedPriceFor_TakesTheFirstValueOfARepeatedParameter(t *testing.T) {
+    converted, err := convertedPriceFor(
+        conversionRequest(t, "/products/api/read/prod-1/?currency=USD&currency=RON"),
+        conversionProduct(),
+        conversionCatalogue(),
+    )
+    if nil != err {
+        t.Fatalf("a repeated parameter failed the door: %v", err)
+    }
+
+    if nil == converted {
+        t.Fatal("a repeated parameter produced no conversion")
+    }
+
+    if "USD" != converted.Code {
+        t.Errorf("the door converted into %q, wanted the first value, USD", converted.Code)
+    }
+}
+
+func TestConvertedPriceFor_RefusesACurrencyTheCatalogueDoesNotCarry(t *testing.T) {
+    converted, err := convertedPriceFor(
+        conversionRequest(t, "/products/api/read/prod-1/?currency=XXX"),
+        conversionProduct(),
+        conversionCatalogue(),
+    )
+    if nil == err {
+        t.Fatalf("an unknown code was converted into %+v", converted)
+    }
+
+    if false == strings.Contains(err.Error(), "XXX") {
+        t.Errorf("the refusal reads %q and does not name the code that was refused", err.Error())
+    }
+
+    var serverRefusal *conversionRefusal
+    if true == errors.As(err, &serverRefusal) {
+        t.Errorf("an unknown code was marked as the server's refusal")
+    }
+}
+
+func TestConvertedPriceFor_RefusesWhenTheProductsOwnCurrencyIsMissing(t *testing.T) {
+    catalogue := []*entity.Currency{
+        entity.NewCurrency("cur-usd", "USD", "US Dollar", 1.0842, conversionQuoteInstant),
+    }
+
+    converted, err := convertedPriceFor(
+        conversionRequest(t, "/products/api/read/prod-1/?currency=USD"),
+        conversionProduct(),
+        catalogue,
+    )
+    if nil == err {
+        t.Fatalf("a product quoted in a missing currency was converted into %+v", converted)
+    }
+
+    var serverRefusal *conversionRefusal
+    if false == errors.As(err, &serverRefusal) {
+        t.Errorf("a product quoted in a missing currency was refused as the caller's mistake: %v", err)
+    }
+}
+
+func TestConvertedPriceFor_MarksAnUnusableStoredRateAsTheServersRefusal(t *testing.T) {
+    catalogue := []*entity.Currency{
+        entity.NewCurrency("cur-eur", "EUR", "Euro", 0, conversionQuoteInstant),
+        entity.NewCurrency("cur-usd", "USD", "US Dollar", 1.0842, conversionQuoteInstant),
+    }
+
+    _, err := convertedPriceFor(
+        conversionRequest(t, "/products/api/read/prod-1/?currency=USD"),
+        conversionProduct(),
+        catalogue,
+    )
+    if nil == err {
+        t.Fatal("a product priced against a zero rate was converted")
+    }
+
+    var serverRefusal *conversionRefusal
+    if false == errors.As(err, &serverRefusal) {
+        t.Errorf("a zero stored rate was refused as the caller's mistake: %v", err)
+    }
+}
+
+type stubViewRecorder struct {
+    views     service.ProductViews
+    window    time.Duration
+    recordErr error
+    recorded  []string
+    contexts  []context.Context
+}
+
+func (instance *stubViewRecorder) RecordView(runtimeInstance melodycontainercontract.Runtime, id string) (service.ProductViews, error) {
+    instance.recorded = append(instance.recorded, id)
+    instance.contexts = append(instance.contexts, runtimeInstance.Context())
+
+    return instance.views, instance.recordErr
+}
+
+func (instance *stubViewRecorder) ViewsWindow() time.Duration {
+    return instance.window
+}
+
+func TestRecordedViews_AnswersBothCounts(t *testing.T) {
+    recorder := &stubViewRecorder{views: service.ProductViews{Total: 7, Daily: 3}, window: 90 * time.Minute}
+    runtimeInstance := newViewRecorderRuntime()
+
+    views, dailyViews, windowSeconds := recordedViews(runtimeInstance, recorder, "prod-1")
+    if nil == views || 7 != *views || nil == dailyViews || 3 != *dailyViews || nil == windowSeconds || 5400 != *windowSeconds {
+        t.Fatalf("expected 7 views, 3 in a window of 5400s, got %v %v %v", views, dailyViews, windowSeconds)
+    }
+
+    if 1 != len(recorder.recorded) || "prod-1" != recorder.recorded[0] {
+        t.Fatalf("expected one view recorded for prod-1, got %q", recorder.recorded)
+    }
+
+    if runtimeInstance.Context() != recorder.contexts[0] {
+        t.Fatalf("expected the view counted under the request's context")
+    }
+}
+
+type viewRecorderContextKey struct{}
+
+func newViewRecorderRuntime() melodycontainercontract.Runtime {
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+
+    return melodyruntime.NewRequest(context.WithValue(context.Background(), viewRecorderContextKey{}, "request"), containerInstance.NewScope())
+}
+
+func TestRecordedViews_LeavesBothOutWhenTheCacheRefused(t *testing.T) {
+    views, dailyViews, windowSeconds := recordedViews(newViewRecorderRuntime(), &stubViewRecorder{views: service.ProductViews{Total: 7, Daily: 3}, window: time.Hour, recordErr: errors.New("cache down")}, "prod-1")
+    if nil != views || nil != dailyViews || nil != windowSeconds {
+        t.Fatalf("expected no count when a counter could not be written, got %v %v %v", views, dailyViews, windowSeconds)
+    }
+}
+
+func TestApiReadDoor_AnswersAMissingProductCurrencyAs500WithoutTheCause(t *testing.T) {
+    fixture := newProductDoorFixture(t)
+
+    orphan := entity.NewProduct("prod-orphan", "Probe", "probe", "cat-1", 10, "cur-missing", 1, time.Now(), time.Now())
+    if createErr := fixture.productRepository.Create(context.Background(), orphan); nil != createErr {
+        t.Fatalf("store the orphan: %v", createErr)
+    }
+
+    status, body := fixture.callAt(t, ApiReadHandler(), nethttp.MethodGet, "/products/api/read/prod-orphan/?currency=USD", "", map[string]string{"id": "prod-orphan"})
+    if nethttp.StatusInternalServerError != status || false == strings.Contains(body, "the price could not be converted") || true == strings.Contains(body, "cur-missing") {
+        t.Fatalf("expected 500 without the missing currency named, got %d %s", status, body)
+    }
+
+    status, body = fixture.callAt(t, ApiReadHandler(), nethttp.MethodGet, "/products/api/read/prod-1/?currency=XXX", "", map[string]string{"id": "prod-1"})
+    if nethttp.StatusBadRequest != status {
+        t.Fatalf("expected a code the catalogue does not carry answered 400, got %d %s", status, body)
+    }
+}
+
+func TestApiReadDoorsEndWithTheRequest(t *testing.T) {
+    t.Run("the product list", func(t *testing.T) {
+        fixture := newProductDoorFixtureOver(t, func(stores productDoorStores) productDoorStores {
+            stores.products = &stalledProductRepository{ProductRepository: stores.products}
+
+            return stores
+        })
+        fixture.requestContext = endedRequestContext()
+
+        if status, body := fixture.call(t, ApiReadAllHandler(), nethttp.MethodGet, "", nil); nethttp.StatusInternalServerError != status {
+            t.Fatalf("the list answered %d for a request that had ended: %s", status, body)
+        }
+    })
+
+    t.Run("the product", func(t *testing.T) {
+        fixture := newProductDoorFixtureOver(t, func(stores productDoorStores) productDoorStores {
+            stores.products = &stalledProductRepository{ProductRepository: stores.products}
+
+            return stores
+        })
+        fixture.requestContext = endedRequestContext()
+
+        if status, body := fixture.callAt(t, ApiReadHandler(), nethttp.MethodGet, "/products/api/read/prod-1/", "", map[string]string{"id": "prod-1"}); nethttp.StatusInternalServerError != status {
+            t.Fatalf("the read answered %d for a request that had ended: %s", status, body)
+        }
+    })
+
+    t.Run("the categories beside it", func(t *testing.T) {
+        var currencies repository.CurrencyRepository
+        fixture := newProductDoorFixtureOver(t, func(stores productDoorStores) productDoorStores {
+            currencies = stores.currencies
+            stores.categories = &stalledCategoryRepository{CategoryRepository: stores.categories}
+
+            return stores
+        })
+        primeProduct(t, fixture, "prod-1")
+
+        /* primed, so the currency read cannot answer the cancellation the categories are pinned on */
+        currencyList, currencyListErr := currencies.All(context.Background())
+        if nil != currencyListErr {
+            t.Fatalf("read the currencies: %v", currencyListErr)
+        }
+        if setErr := fixture.cache.Set(exampleTestRuntime(), service.CacheKeyCurrencyList, currencyList, melodybound.UnlimitedDuration(), melodycachecontract.SetOptions{}); nil != setErr {
+            t.Fatalf("prime the currencies: %v", setErr)
+        }
+        fixture.requestContext = endedRequestContext()
+
+        if status, body := fixture.callAt(t, ApiReadHandler(), nethttp.MethodGet, "/products/api/read/prod-1/", "", map[string]string{"id": "prod-1"}); nethttp.StatusInternalServerError != status {
+            t.Fatalf("the read answered %d for a request that had ended over the categories: %s", status, body)
+        }
+    })
+
+    t.Run("the currencies beside it", func(t *testing.T) {
+        var categories repository.CategoryRepository
+        fixture := newProductDoorFixtureOver(t, func(stores productDoorStores) productDoorStores {
+            categories = stores.categories
+            stores.currencies = &stalledCurrencyRepository{CurrencyRepository: stores.currencies}
+
+            return stores
+        })
+        primeProduct(t, fixture, "prod-1")
+
+        categoryList, categoryListErr := categories.All(context.Background())
+        if nil != categoryListErr {
+            t.Fatalf("read the categories: %v", categoryListErr)
+        }
+        if setErr := fixture.cache.Set(exampleTestRuntime(), service.CacheKeyCategoryList, categoryList, melodybound.UnlimitedDuration(), melodycachecontract.SetOptions{}); nil != setErr {
+            t.Fatalf("prime the categories: %v", setErr)
+        }
+        fixture.requestContext = endedRequestContext()
+
+        if status, body := fixture.callAt(t, ApiReadHandler(), nethttp.MethodGet, "/products/api/read/prod-1/", "", map[string]string{"id": "prod-1"}); nethttp.StatusInternalServerError != status {
+            t.Fatalf("the read answered %d for a request that had ended over the currencies: %s", status, body)
+        }
+    })
+}
+
+func TestApiReadDoor_FindsTheProductUnderAPaddedIdentifierAsTheDeleteDoorDoes(t *testing.T) {
+    fixture := newProductDoorFixture(t)
+
+    if status, body := fixture.callAt(t, ApiReadHandler(), nethttp.MethodGet, "/products/api/read/%20prod-1%20/", "", map[string]string{"id": " prod-1 "}); nethttp.StatusOK != status {
+        t.Fatalf("expected the padded identifier found, got %d %s", status, body)
+    }
+}

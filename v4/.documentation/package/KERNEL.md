@@ -1,0 +1,37 @@
+# KERNEL
+
+The [`kernel`](../../kernel) package provides Melody’s framework kernel: a framework-internal orchestration object that wires and exposes core runtime infrastructure (configuration, container, HTTP router/kernel, event dispatcher, clock) to other framework subsystems.
+
+## Scope
+
+This is an internal integration package. Userland code should not construct a kernel directly; it should integrate through the application and runtime APIs.
+
+## Subpackages
+
+- [`kernel/contract`](../../kernel/contract)\
+  Public kernel contracts used across framework packages.
+
+## Responsibilities
+
+- Construct a kernel instance and validate constructor invariants: `kernel.NewKernel` takes a token only the framework can build and refuses any other, so the application builds its kernel and userland never does
+- Expose core infrastructure to framework subsystems through the `kernelcontract.Kernel` interface:
+    - configuration access
+    - container access
+    - HTTP router and HTTP kernel access
+    - event dispatcher access
+    - clock access
+
+## Exported API
+
+### Contracts (`kernel/contract`)
+
+- [`type Kernel`](../../kernel/contract/kernel.go)
+- Kernel HTTP event name constants:
+    - [`EventKernelRequest`](../../kernel/contract/event.go)
+    - [`EventKernelController`](../../kernel/contract/event.go)
+    - [`EventKernelResponse`](../../kernel/contract/event.go)
+    - [`EventKernelTerminate`](../../kernel/contract/event.go)
+    - [`EventKernelException`](../../kernel/contract/event.go)
+    - [`ListenerTagKernelAccessLog`](../../kernel/contract/event.go), [`ListenerTagKernelCors`](../../kernel/contract/event.go), [`ListenerTagKernelSecurityHeaders`](../../kernel/contract/event.go) — the tags the access log, the cors response listener and the security headers listener carry, which the application declares on `kernel.terminate` and `kernel.response`
+
+`Kernel.BootRuntime()` answers the runtime of the application's boot, installed by `Boot` before its first step: a module hook resolves and calls its doors under it. Once `Boot` returned its context is done with `containercontract.ErrBootFinished` as its cause and its scope is closed; before `Boot` it is nil.

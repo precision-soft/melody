@@ -1,0 +1,121 @@
+package contract
+
+import (
+    "errors"
+    "testing"
+    "time"
+
+    "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
+)
+
+func TestResolveLeaseTtl_AnAbsentTtlHoldsForThirtySeconds(t *testing.T) {
+    ttl, err := ResolveLeaseTtl(bound.Duration{})
+    if nil != err || 30*time.Second != ttl {
+        t.Fatalf("expected an absent ttl to hold for 30s, got %s and %v", ttl, err)
+    }
+}
+
+func TestResolveLeaseTtl_AnswersTheMinimumAsItIs(t *testing.T) {
+    ttl, err := ResolveLeaseTtl(bound.Of(time.Millisecond))
+    if nil != err || time.Millisecond != ttl {
+        t.Fatalf("expected the 1ms minimum to be applied as it is, got %s and %v", ttl, err)
+    }
+}
+
+func TestResolveLeaseTtl_RefusesAnUnlimitedTtlAndOneBelowTheMinimumNamingIt(t *testing.T) {
+    for _, refusedTtl := range []bound.Duration{bound.UnlimitedDuration(), bound.Of(time.Duration(0)), bound.Of(-time.Second), bound.Of(time.Millisecond - time.Nanosecond)} {
+        ttl, err := ResolveLeaseTtl(refusedTtl)
+        if nil == err {
+            t.Fatalf("expected the ttl %s to be refused, got %s", refusedTtl, ttl)
+        }
+
+        if "CreateLockOptions.Ttl" != exception.LogContext(err, exception.LogContextOptions{})["field"] {
+            t.Fatalf("expected the refusal of %s to name the ttl, got %v", refusedTtl, exception.LogContext(err, exception.LogContextOptions{}))
+        }
+    }
+}
+
+func TestLockTtlRule_AdmitsUnlimitedForTheSessionLockers(t *testing.T) {
+    resolved, err := bound.Resolve(bound.UnlimitedDuration(), LockTtlRule())
+    if nil != err || false == resolved.Unlimited {
+        t.Fatalf("expected the rule to admit unlimited, got %+v and %v", resolved, err)
+    }
+}
+
+func TestResolveLeaseRefreshTtl_RefusesNamingTheRefreshTtl(t *testing.T) {
+    for _, refusedTtl := range []bound.Duration{bound.UnlimitedDuration(), bound.Of(time.Duration(0))} {
+        _, err := ResolveLeaseRefreshTtl(refusedTtl)
+        if nil == err || "RefreshOptions.Ttl" != exception.LogContext(err, exception.LogContextOptions{})["field"] {
+            t.Fatalf("expected the refresh ttl %s to be refused naming RefreshOptions.Ttl, got %v", refusedTtl, err)
+        }
+    }
+
+    if ttl, err := ResolveLeaseRefreshTtl(bound.Duration{}); nil != err || 30*time.Second != ttl {
+        t.Fatalf("expected an absent refresh ttl to hold for 30s, got %s and %v", ttl, err)
+    }
+}
+
+func TestResolveLeaseTtl_AnUnlimitedTtlIsRefusedWithItsCause(t *testing.T) {
+    for name, resolve := range map[string]func(bound.Duration) (time.Duration, error){"acquire": ResolveLeaseTtl, "refresh": ResolveLeaseRefreshTtl} {
+        if _, refusedErr := resolve(bound.UnlimitedDuration()); false == errors.Is(refusedErr, ErrUnlimitedTtlRefused) {
+            t.Fatalf("%s: expected ErrUnlimitedTtlRefused, got %v", name, refusedErr)
+        }
+    }
+}
+
+type unmarkedLocker struct{}
+
+func (instance *unmarkedLocker) CreateLock(name string, options CreateLockOptions) (Lock, error) {
+    return nil, nil
+}
+
+type markedLocker struct {
+    unmarkedLocker
+    shared   bool
+    err      error
+    received containercontract.Runtime
+}
+
+func (instance *markedLocker) LeasesAcrossReplicas(runtimeInstance containercontract.Runtime) (bool, error) {
+    instance.received = runtimeInstance
+
+    return instance.shared, instance.err
+}
+
+type identityRuntime struct {
+    containercontract.Runtime
+}
+
+func TestLeasesAcrossReplicas_AnswersFalseForALockerWithoutTheMark(t *testing.T) {
+    var typedNilLocker *markedLocker
+
+    for name, locker := range map[string]Locker{"unmarked": &unmarkedLocker{}, "nil": nil, "typed nil": typedNilLocker} {
+        shared, err := LeasesAcrossReplicas(&identityRuntime{}, locker)
+        if nil != err || true == shared {
+            t.Fatalf("expected the %s locker to answer false without an error, got %v and %v", name, shared, err)
+        }
+    }
+}
+
+func TestLeasesAcrossReplicas_AnswersWhatTheLockerAnswersUnderTheRuntimeHanded(t *testing.T) {
+    askErr := errors.New("the wrapped locker cannot be reached")
+
+    for _, testCase := range []struct {
+        shared bool
+        err    error
+    }{{true, nil}, {false, nil}, {false, askErr}} {
+        locker := &markedLocker{shared: testCase.shared, err: testCase.err}
+        runtimeInstance := &identityRuntime{}
+
+        shared, err := LeasesAcrossReplicas(runtimeInstance, locker)
+        if testCase.shared != shared || testCase.err != err {
+            t.Fatalf("expected %v and %v, got %v and %v", testCase.shared, testCase.err, shared, err)
+        }
+
+        if runtimeInstance != locker.received {
+            t.Fatalf("expected the locker to be asked under the runtime handed")
+        }
+    }
+}

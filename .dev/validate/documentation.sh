@@ -76,10 +76,24 @@ cd "${REPOSITORY_ROOT_DIRECTORY_STRING}"
 # everything a commit would carry, tracked or not. The integration half below enumerates from this rather
 # than from `find`, for the two reasons the neighbouring bands were repaired for: a walk of the tree
 # descends into the module cache under `.dev-data`, which holds released copies of melody itself, and a
-# walk of the index alone cannot see a document the session ADDS.
+# walk of the index alone cannot see a document the session ADDS, and a file the session deleted is not carried.
 list_repository_path() {
-    git ls-files --cached --others --exclude-standard -- "$@" | sort -u
+    comm -23 \
+        <(git ls-files --cached --others --exclude-standard -- "$@" | sort -u) \
+        <(git ls-files --deleted -- "$@" | sort -u)
 }
+
+# a listed file the readers below cannot open fails only inside a process substitution, so it is refused here
+UNREADABLE_PATH_STRING_LIST=()
+while IFS= read -r LISTED_PATH_STRING; do
+    if [[ ! -f "${LISTED_PATH_STRING}" || ! -r "${LISTED_PATH_STRING}" ]]; then
+        UNREADABLE_PATH_STRING_LIST+=("${LISTED_PATH_STRING}")
+    fi
+done < <(list_repository_path '*.go' '*.md' '*go.mod')
+
+if [[ 0 -lt ${#UNREADABLE_PATH_STRING_LIST[@]} ]]; then
+    fail "the corpus lists ${#UNREADABLE_PATH_STRING_LIST[@]} file(s) the band cannot read: $(printf '%s ' "${UNREADABLE_PATH_STRING_LIST[@]}")"
+fi
 
 MAJOR_DIRECTORY_STRING_LIST=(
     "."
@@ -1559,16 +1573,16 @@ while IFS= read -r COMMENT_FILE_STRING; do
     if [[ -f "${COMMENT_FILE_STRING}" ]]; then
         COMMENT_FILE_STRING_LIST+=("${COMMENT_FILE_STRING}")
     fi
-done < <(list_repository_path 'v3/*.go' 'integrations/*/v3/*.go')
+done < <(list_repository_path 'v3/*.go' 'integrations/*/v3/*.go' 'v4/*.go' 'integrations/*/v4/*.go')
 
-check_comment_baseline "${COMMENT_BASELINE_PATH_STRING}" "the third major" "${COMMENT_FILE_STRING_LIST[@]}"
+check_comment_baseline "${COMMENT_BASELINE_PATH_STRING}" "the third and fourth majors" "${COMMENT_FILE_STRING_LIST[@]}"
 
 # the first and second majors, their integrations and their example applications: every Go file outside the
 # third major and outside .dev.
 COMMENT_FROZEN_FILE_STRING_LIST=()
 while IFS= read -r COMMENT_FILE_STRING; do
     case "${COMMENT_FILE_STRING}" in
-        v3/* | integrations/*/v3/* | .dev/*) continue ;;
+        v3/* | integrations/*/v3/* | v4/* | integrations/*/v4/* | .dev/*) continue ;;
     esac
 
     if [[ -f "${COMMENT_FILE_STRING}" ]]; then

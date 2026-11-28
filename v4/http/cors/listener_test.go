@@ -1,0 +1,499 @@
+package cors
+
+import (
+    "context"
+    nethttp "net/http"
+    "net/http/httptest"
+    "testing"
+    "time"
+
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/clock"
+    clockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    "github.com/precision-soft/melody/v4/config"
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
+    "github.com/precision-soft/melody/v4/event"
+    eventcontract "github.com/precision-soft/melody/v4/event/contract"
+    "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/http"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/internal/testhelper"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    "github.com/precision-soft/melody/v4/logging"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    "github.com/precision-soft/melody/v4/security"
+    "github.com/precision-soft/melody/v4/security/accesscontrol"
+    "github.com/precision-soft/melody/v4/session"
+    sessioncontract "github.com/precision-soft/melody/v4/session/contract"
+)
+
+func newTestRuntime() containercontract.Runtime {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    scope := serviceContainer.NewScope()
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
+    return runtime.NewRequest(context.Background(), scope)
+}
+
+func TestRegisterResponseListener_AppliesHeadersToErrorResponse(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+
+    RegisterResponseListener(dispatcher, NewService(Config{AllowOrigins: []string{AllowOriginAll}}))
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+    request.Header.Set("Origin", "https://example.com")
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    errorResponse := http.EmptyResponse(nethttp.StatusInternalServerError)
+    payload := http.NewKernelResponseEvent(melodyRequest, errorResponse)
+
+    _, err := dispatcher.DispatchName(newTestRuntime(), kernelcontract.EventKernelResponse, payload)
+    if nil != err {
+        t.Fatalf("unexpected dispatch error: %v", err)
+    }
+
+    if "" == errorResponse.Headers().Get("Access-Control-Allow-Origin") {
+        t.Fatalf("expected CORS headers applied to error response by listener")
+    }
+
+    if 1 != len(errorResponse.Headers().Values("Vary")) {
+        t.Fatalf("expected a single Vary header, got: %v", errorResponse.Headers().Values("Vary"))
+    }
+}
+
+func TestRegisterResponseListener_SkipsWhenOriginMissing(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+
+    RegisterResponseListener(dispatcher, NewService(Config{AllowOrigins: []string{AllowOriginAll}}))
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    response := http.EmptyResponse(200)
+    payload := http.NewKernelResponseEvent(melodyRequest, response)
+
+    _, err := dispatcher.DispatchName(newTestRuntime(), kernelcontract.EventKernelResponse, payload)
+    if nil != err {
+        t.Fatalf("unexpected dispatch error: %v", err)
+    }
+
+    if "" != response.Headers().Get("Access-Control-Allow-Origin") {
+        t.Fatalf("expected no CORS headers when Origin absent")
+    }
+
+    if "Origin" != response.Headers().Get("Vary") {
+        t.Fatalf("expected Vary: Origin when Origin absent, got: %q", response.Headers().Get("Vary"))
+    }
+}
+
+func TestRegisterResponseListener_SkipsDisallowedOrigin(t *testing.T) {
+    service := NewService(Config{AllowOrigins: []string{"https://allowed.example.com"}})
+
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+    RegisterResponseListener(dispatcher, service)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+    request.Header.Set("Origin", "https://blocked.example.com")
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    response := http.EmptyResponse(200)
+    payload := http.NewKernelResponseEvent(melodyRequest, response)
+
+    _, err := dispatcher.DispatchName(newTestRuntime(), kernelcontract.EventKernelResponse, payload)
+    if nil != err {
+        t.Fatalf("unexpected dispatch error: %v", err)
+    }
+
+    if "" != response.Headers().Get("Access-Control-Allow-Origin") {
+        t.Fatalf("expected no CORS headers for disallowed origin")
+    }
+
+    if "Origin" != response.Headers().Get("Vary") {
+        t.Fatalf("expected Vary: Origin for disallowed origin, got: %q", response.Headers().Get("Vary"))
+    }
+}
+
+func newPreflightTestRequest(path string) *nethttp.Request {
+    request := httptest.NewRequest(nethttp.MethodOptions, path, nil)
+    request.Header.Set("Origin", "https://app.example.com")
+    request.Header.Set("Access-Control-Request-Method", nethttp.MethodPost)
+
+    return request
+}
+
+func TestRegisterRequestListener_AnswersAWellFormedPreflightFromAnAllowedOrigin(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+
+    RegisterRequestListener(dispatcher, RestrictiveService([]string{"https://app.example.com"}))
+
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(newPreflightTestRequest("/api/item"))
+    requestEvent := http.NewKernelRequestEvent(newTestRuntime(), melodyRequest)
+
+    _, err := dispatcher.DispatchName(newTestRuntime(), kernelcontract.EventKernelRequest, requestEvent)
+    if nil != err {
+        t.Fatalf("unexpected dispatch error: %v", err)
+    }
+
+    response := requestEvent.Response()
+    if nil == response || nethttp.StatusNoContent != response.StatusCode() {
+        t.Fatalf("expected the preflight to be answered 204, got %#v", response)
+    }
+
+    if "" == response.Headers().Get("Access-Control-Allow-Methods") {
+        t.Fatalf("expected the preflight answer to carry the allow-methods header")
+    }
+}
+
+func TestRegisterRequestListener_FallsThroughForADisallowedOrigin(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+
+    RegisterRequestListener(dispatcher, RestrictiveService([]string{"https://app.example.com"}))
+
+    request := newPreflightTestRequest("/api/item")
+    request.Header.Set("Origin", "https://evil.example.com")
+
+    requestEvent := http.NewKernelRequestEvent(newTestRuntime(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+
+    _, err := dispatcher.DispatchName(newTestRuntime(), kernelcontract.EventKernelRequest, requestEvent)
+    if nil != err {
+        t.Fatalf("unexpected dispatch error: %v", err)
+    }
+
+    if nil != requestEvent.Response() {
+        t.Fatalf("expected a disallowed origin to fall through to security, got %#v", requestEvent.Response())
+    }
+}
+
+func TestRegisterRequestListener_FallsThroughForAnOptionsRequestWithoutARequestedMethod(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+
+    RegisterRequestListener(dispatcher, RestrictiveService([]string{"https://app.example.com"}))
+
+    request := httptest.NewRequest(nethttp.MethodOptions, "/api/item", nil)
+    request.Header.Set("Origin", "https://app.example.com")
+
+    requestEvent := http.NewKernelRequestEvent(newTestRuntime(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+
+    _, err := dispatcher.DispatchName(newTestRuntime(), kernelcontract.EventKernelRequest, requestEvent)
+    if nil != err {
+        t.Fatalf("unexpected dispatch error: %v", err)
+    }
+
+    if nil != requestEvent.Response() {
+        t.Fatalf("expected an OPTIONS request that is not a preflight to fall through, got %#v", requestEvent.Response())
+    }
+}
+
+func TestRegisterResponseListener_DecoratesAPreflightAnEarlierListenerAnswered(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+
+    RegisterResponseListener(dispatcher, RestrictiveService([]string{"https://app.example.com"}))
+
+    alreadySetResponse := http.JsonErrorResponse(nethttp.StatusTooManyRequests, "rate limited")
+    payload := http.NewKernelResponseEvent(testhelper.NewHttpTestRequestFromHttpRequest(newPreflightTestRequest("/api/item")), alreadySetResponse)
+
+    _, err := dispatcher.DispatchName(newTestRuntime(), kernelcontract.EventKernelResponse, payload)
+    if nil != err {
+        t.Fatalf("unexpected dispatch error: %v", err)
+    }
+
+    if alreadySetResponse != payload.Response() || nethttp.StatusTooManyRequests != payload.Response().StatusCode() {
+        t.Fatalf("expected the earlier listener's 429 to stand, got %#v", payload.Response())
+    }
+
+    if "" == alreadySetResponse.Headers().Get("Access-Control-Allow-Methods") || "" == alreadySetResponse.Headers().Get("Access-Control-Allow-Origin") {
+        t.Fatalf("expected the answered preflight decorated with the preflight headers, got %v", alreadySetResponse.Headers())
+    }
+}
+
+func TestRegisterResponseListener_DoesNotAddPreflightHeadersToAnOrdinaryRequest(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+
+    RegisterResponseListener(dispatcher, RestrictiveService([]string{"https://app.example.com"}))
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/api/item", nil)
+    request.Header.Set("Origin", "https://app.example.com")
+    response := http.EmptyResponse(nethttp.StatusOK)
+    payload := http.NewKernelResponseEvent(testhelper.NewHttpTestRequestFromHttpRequest(request), response)
+
+    if _, err := dispatcher.DispatchName(newTestRuntime(), kernelcontract.EventKernelResponse, payload); nil != err {
+        t.Fatalf("unexpected dispatch error: %v", err)
+    }
+
+    if "" != response.Headers().Get("Access-Control-Allow-Methods") || "" == response.Headers().Get("Access-Control-Allow-Origin") {
+        t.Fatalf("expected the response headers alone on an ordinary request, got %v", response.Headers())
+    }
+}
+
+type corsListenerTestEnvironmentSource struct {
+    values map[string]string
+}
+
+func (instance *corsListenerTestEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
+    return instance.values, nil
+}
+
+func newCorsListenerTestContainer() containercontract.Container {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+
+    serviceContainer.MustRegister(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return logging.NewNopLogger(), nil
+        },
+        container.RegisterOptions{},
+    )
+
+    serviceContainer.MustRegister(
+        config.ServiceConfig,
+        func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+            environment, err := config.NewEnvironment(context.Background(), 
+                &corsListenerTestEnvironmentSource{
+                    values: map[string]string{
+                        config.EnvironmentNameKey: config.EnvironmentDevelopment,
+                    },
+                },
+            )
+            if nil != err {
+                return nil, err
+            }
+
+            return config.NewConfiguration(environment, "/tmp/melody", config.ConfigurationConfig{})
+        },
+        container.RegisterOptions{},
+    )
+
+    serviceContainer.MustRegister(
+        session.ServiceSessionManager,
+        func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
+            return session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{Ttl: bound.Of(30 * time.Minute)}), nil
+        },
+        container.RegisterOptions{},
+    )
+
+    serviceContainer.MustRegister(
+        event.ServiceEventDispatcher,
+        func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
+            return event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()}), nil
+        },
+        container.RegisterOptions{},
+    )
+
+    return serviceContainer
+}
+
+type corsListenerTestKernel struct {
+    eventDispatcher eventcontract.EventDispatcher
+}
+
+func (instance *corsListenerTestKernel) Environment() string { return "test" }
+
+func (instance *corsListenerTestKernel) DebugMode() bool { return true }
+
+func (instance *corsListenerTestKernel) ServiceContainer() containercontract.Container { return nil }
+
+func (instance *corsListenerTestKernel) EventDispatcher() eventcontract.EventDispatcher {
+    return instance.eventDispatcher
+}
+
+func (instance *corsListenerTestKernel) Config() configcontract.Configuration { return nil }
+
+func (instance *corsListenerTestKernel) BootRuntime() containercontract.Runtime { return nil }
+
+func (instance *corsListenerTestKernel) HttpRouter() httpcontract.Router { return nil }
+
+func (instance *corsListenerTestKernel) Clock() clockcontract.Clock { return nil }
+
+var _ kernelcontract.Kernel = (*corsListenerTestKernel)(nil)
+
+func newAccessControlledCorsKernel(registerListenerDoors bool) nethttp.Handler {
+    serviceContainer := newCorsListenerTestContainer()
+
+    router := http.NewRouter()
+    router.Handle(
+        "/api/item",
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return http.TextResponse(nethttp.StatusCreated, "created"), nil
+        },
+        http.RouteOptions{Methods: []string{nethttp.MethodPost}},
+    )
+
+    dispatcher := event.EventDispatcherMustFromResolver(context.Background(), serviceContainer)
+
+    registry := security.NewFirewallRegistry(
+        security.NewCompiledConfiguration(
+            nil,
+            security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewRawPrefixRule("/api", accesscontrol.RuleConfig{Attributes: []string{"ROLE_USER"}})}),
+        ),
+    )
+    security.RegisterKernelAccessControlListener(&corsListenerTestKernel{eventDispatcher: dispatcher}, registry)
+
+    service := RestrictiveService([]string{"https://app.example.com"})
+
+    if true == registerListenerDoors {
+        RegisterListeners(dispatcher, service)
+    }
+
+    kernelInstance := http.NewKernel(router, http.KernelConfig{Middlewares: []httpcontract.Middleware{Middleware(service)}})
+
+    return kernelInstance.ServeHttp(serviceContainer)
+}
+
+func TestRegisterListeners_AnswersThePreflightTheAccessControlWouldOtherwiseRefuse(t *testing.T) {
+    withoutListenerDoors := newAccessControlledCorsKernel(false)
+
+    refusedRecorder := httptest.NewRecorder()
+    withoutListenerDoors.ServeHTTP(refusedRecorder, newPreflightTestRequest("/api/item"))
+
+    if nethttp.StatusUnauthorized != refusedRecorder.Code {
+        t.Fatalf("expected the middleware door alone to leave the preflight refused 401, got %d", refusedRecorder.Code)
+    }
+
+    withListenerDoors := newAccessControlledCorsKernel(true)
+
+    answeredRecorder := httptest.NewRecorder()
+    withListenerDoors.ServeHTTP(answeredRecorder, newPreflightTestRequest("/api/item"))
+
+    if nethttp.StatusNoContent != answeredRecorder.Code {
+        t.Fatalf("expected the request listener to answer the preflight ahead of access control, got %d", answeredRecorder.Code)
+    }
+
+    if "" == answeredRecorder.Header().Get("Access-Control-Allow-Methods") {
+        t.Fatalf("expected the preflight answer to carry the allow-methods header")
+    }
+}
+
+func TestRegisterListeners_WiresTheResponseDoorToo(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+
+    RegisterListeners(dispatcher, RestrictiveService([]string{"https://app.example.com"}))
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
+    request.Header.Set("Origin", "https://app.example.com")
+    melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
+
+    errorResponse := http.EmptyResponse(nethttp.StatusInternalServerError)
+    responseEvent := http.NewKernelResponseEvent(melodyRequest, errorResponse)
+
+    _, err := dispatcher.DispatchName(newTestRuntime(), kernelcontract.EventKernelResponse, responseEvent)
+    if nil != err {
+        t.Fatalf("unexpected dispatch error: %v", err)
+    }
+
+    if "https://app.example.com" != errorResponse.Headers().Get("Access-Control-Allow-Origin") {
+        t.Fatalf("expected the response door to decorate the error response, got %q", errorResponse.Headers().Get("Access-Control-Allow-Origin"))
+    }
+}
+
+func TestRegisterRequestListener_ATypedNilRequestIsLeftAlone(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+
+    RegisterRequestListener(dispatcher, NewService(Config{AllowOrigins: []string{AllowOriginAll}}))
+
+    var unassignedRequest *testhelper.HttpTestRequest
+
+    requestEvent := http.NewKernelRequestEvent(newTestRuntime(), unassignedRequest)
+
+    _, err := dispatcher.DispatchName(newTestRuntime(), kernelcontract.EventKernelRequest, requestEvent)
+    if nil != err {
+        t.Fatalf("unexpected dispatch error: %v", err)
+    }
+
+    if nil != requestEvent.Response() {
+        t.Fatalf("expected no response for a request the listener cannot read")
+    }
+}
+
+func TestRegisterListeners_RefuseANilService(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+
+    assertPanicsWithContext(t, func() { RegisterListeners(dispatcher, nil) }, "the cors service is nil", "door", "cors.RegisterListeners")
+    assertPanicsWithContext(t, func() { RegisterRequestListener(dispatcher, nil) }, "the cors service is nil", "door", "cors.RegisterRequestListener")
+    assertPanicsWithContext(t, func() { RegisterResponseListener(dispatcher, nil) }, "the cors service is nil", "door", "cors.RegisterResponseListener")
+}
+
+func TestRegisterRequestListener_LeavesARefusedPreflightToTheKernel(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+
+    RegisterRequestListener(dispatcher, RestrictiveService([]string{"https://app.example.com"}))
+
+    requestEvent := http.NewKernelRequestEvent(newTestRuntime(), testhelper.NewHttpTestRequestFromHttpRequest(newPreflightTestRequest("/api/item")))
+    requestEvent.Refuse(exception.TooManyRequests("slow down"))
+
+    if _, err := dispatcher.DispatchName(newTestRuntime(), kernelcontract.EventKernelRequest, requestEvent); nil != err {
+        t.Fatalf("expected the refused preflight left alone, got %v", err)
+    }
+
+    if nil != requestEvent.Response() {
+        t.Fatalf("expected no response on a refused preflight, got %#v", requestEvent.Response())
+    }
+}
+
+func pathRecordingService(paths *[]string) *Service {
+    return NewService(Config{AllowOrigin: func(request httpcontract.Request, origin string) bool {
+        *paths = append(*paths, request.HttpRequest().URL.Path)
+
+        return true
+    }})
+}
+
+func TestMiddleware_And_Listener_PassTheRequestOfTheCall(t *testing.T) {
+    var paths []string
+    service := pathRecordingService(&paths)
+
+    next := func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return http.EmptyResponse(nethttp.StatusOK), nil
+    }
+    handler := Middleware(service)(next)
+
+    if _, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(newPreflightTestRequest("/middleware/preflight"))); nil != err {
+        t.Fatalf("middleware preflight: %v", err)
+    }
+
+    simple := httptest.NewRequest(nethttp.MethodGet, "/middleware/simple", nil)
+    simple.Header.Set("Origin", "https://app.example.com")
+    if _, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(simple)); nil != err {
+        t.Fatalf("middleware simple: %v", err)
+    }
+
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+    RegisterRequestListener(dispatcher, service)
+    RegisterResponseListener(dispatcher, service)
+
+    requestEvent := http.NewKernelRequestEvent(newTestRuntime(), testhelper.NewHttpTestRequestFromHttpRequest(newPreflightTestRequest("/listener/preflight")))
+    if _, err := dispatcher.DispatchName(newTestRuntime(), kernelcontract.EventKernelRequest, requestEvent); nil != err {
+        t.Fatalf("request listener: %v", err)
+    }
+
+    served := httptest.NewRequest(nethttp.MethodGet, "/listener/response", nil)
+    served.Header.Set("Origin", "https://app.example.com")
+    responseEvent := http.NewKernelResponseEvent(testhelper.NewHttpTestRequestFromHttpRequest(served), http.EmptyResponse(nethttp.StatusOK))
+    if _, err := dispatcher.DispatchName(newTestRuntime(), kernelcontract.EventKernelResponse, responseEvent); nil != err {
+        t.Fatalf("response listener: %v", err)
+    }
+
+    for _, expected := range []string{"/middleware/preflight", "/middleware/simple", "/listener/preflight", "/listener/response"} {
+        found := false
+        for _, path := range paths {
+            if expected == path {
+                found = true
+            }
+        }
+
+        if false == found {
+            t.Fatalf("expected the function handed the request served at %s, saw %v", expected, paths)
+        }
+    }
+}
+
+func TestRegisterRequestListener_MaySkipTheRequiredListeners(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(event.EventDispatcherConfig{Clock: clock.NewSystemClock()})
+    RegisterRequestListener(dispatcher, NewService(Config{AllowOrigins: []string{AllowOriginAll}}))
+
+    registeredEvents := dispatcher.RegisteredEvents()
+    if 1 != len(registeredEvents) || 1 != len(registeredEvents[0].Listeners) || false == registeredEvents[0].Listeners[0].Config.Failure.MaySkipRequiredListeners {
+        t.Fatalf("expected the preflight listener to declare it may skip, got %+v", registeredEvents)
+    }
+}

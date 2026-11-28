@@ -1,0 +1,62 @@
+package logging
+
+import (
+    "context"
+
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    "github.com/precision-soft/melody/v4/internal"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+)
+
+const (
+    ServiceLogger = "service.logger"
+)
+
+func LoggerMustFromRuntime(runtimeInstance containercontract.Runtime) loggingcontract.Logger {
+    return runtime.MustFromRuntime[loggingcontract.Logger](runtimeInstance, ServiceLogger)
+}
+
+/* LoggerFromRuntime resolves the logger and answers nil when it cannot, recording the failure through the emergency logger. A typed nil, which the container refuses today, is answered nil too, since it would panic on the first call. */
+func LoggerFromRuntime(runtimeInstance containercontract.Runtime) loggingcontract.Logger {
+    loggerInstance, err := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, ServiceLogger)
+    if nil != err {
+        EmergencyLogger().Emergency(
+            "could not get the logger from runtime",
+            exception.LogContext(
+                err,
+                exception.LogContextOptions{
+                    Extra: exceptioncontract.Context{
+                        "service": ServiceLogger,
+                    },
+                },
+            ),
+        )
+
+        return nil
+    }
+
+    if true == internal.IsNilInterface(loggerInstance) {
+        EmergencyLogger().Emergency(
+            "the logger resolved from runtime is nil",
+            exceptioncontract.Context{
+                "service": ServiceLogger,
+            },
+        )
+
+        return nil
+    }
+
+    return loggerInstance
+}
+
+func LoggerMustFromResolver(ctx context.Context, resolver containercontract.Resolver) loggingcontract.Logger {
+    return container.MustFromResolver[loggingcontract.Logger](ctx, resolver, ServiceLogger)
+}
+
+func LoggerFromResolver(ctx context.Context, resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+    return container.FromResolver[loggingcontract.Logger](ctx, resolver, ServiceLogger)
+}

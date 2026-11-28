@@ -1,0 +1,175 @@
+package cli
+
+import (
+    "bytes"
+    "context"
+    "errors"
+    nethttp "net/http"
+    "net/http/httptest"
+    "strings"
+    "testing"
+    "time"
+
+    examplecache "github.com/precision-soft/melody/v4/.example/cache"
+    "github.com/precision-soft/melody/v4/.example/entity"
+    "github.com/precision-soft/melody/v4/.example/persistence"
+    "github.com/precision-soft/melody/v4/.example/repository"
+    "github.com/precision-soft/melody/v4/.example/service"
+    "github.com/precision-soft/melody/v4/bound"
+    melodycache "github.com/precision-soft/melody/v4/cache"
+    melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
+    melodyclock "github.com/precision-soft/melody/v4/clock"
+    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
+    melodyevent "github.com/precision-soft/melody/v4/event"
+    melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
+    "github.com/precision-soft/melody/v4/httpclient"
+    melodylogging "github.com/precision-soft/melody/v4/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+)
+
+func rateRefreshCommandRuntime(t *testing.T, document string, dispatcherOf func(melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher, cacheOf func(melodycachecontract.Cache) melodycachecontract.Cache) melodycontainercontract.Runtime {
+    t.Helper()
+
+    provider := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        writer.Header().Set("Content-Type", "application/json")
+        _, _ = writer.Write([]byte(document))
+    }))
+    t.Cleanup(provider.Close)
+
+    currencyRepository, repositoryErr := repository.NewCurrencyRepository(persistence.NewCatalogStorage(nil), &persistence.CatalogSchema{})
+    if nil != repositoryErr {
+        t.Fatalf("build the currency repository: %v", repositoryErr)
+    }
+
+    clockInstance := melodyclock.NewSystemClock()
+    var dispatcher melodyeventcontract.EventDispatcher = melodyevent.NewEventDispatcher(melodyevent.EventDispatcherConfig{Clock: clockInstance})
+    if nil != dispatcherOf {
+        dispatcher = dispatcherOf(dispatcher)
+    }
+
+    cacheBackend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: bound.Of(128), CleanupInterval: bound.Of(time.Minute), Clock: clockInstance})
+    cacheInstance := melodycache.NewManager(cacheBackend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
+    t.Cleanup(func() { _ = cacheInstance.CloseWithContext(context.Background()) })
+    var cache melodycachecontract.Cache = cacheInstance
+    if nil != cacheOf {
+        cache = cacheOf(cache)
+    }
+
+    currencyService := service.NewCurrencyService(currencyRepository, mustProductRepository(t), cache, dispatcher, clockInstance)
+    refreshService := service.NewRateRefreshService(currencyService, clockInstance, provider.URL+"/v1/", "EUR")
+
+    client, clientErr := httpclient.NewHttpClient(httpclient.HttpClientConfig{BaseUrl: provider.URL + "/v1/", Timeout: bound.Of(2 * time.Second)})
+    if nil != clientErr {
+        t.Fatalf("unexpected error: %v", clientErr)
+    }
+    t.Cleanup(func() { _ = client.CloseWithContext(context.Background()) })
+
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
+
+    melodycontainer.MustRegister(containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+        return melodylogging.NewNopLogger(), nil
+    }, melodycontainer.RegisterOptions{})
+    melodycontainer.MustRegister(containerInstance, service.ServiceRatesHttpClient, func(resolver melodycontainercontract.Resolver) (*httpclient.HttpClient, error) {
+        return client, nil
+    }, melodycontainer.RegisterOptions{})
+    melodycontainer.MustRegister(containerInstance, service.ServiceRateRefreshService, func(resolver melodycontainercontract.Resolver) (*service.RateRefreshService, error) {
+        return refreshService, nil
+    }, melodycontainer.RegisterOptions{})
+
+    return melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
+}
+
+func tableCellsOf(t *testing.T, rendered string) []string {
+    t.Helper()
+
+    for _, line := range strings.Split(rendered, "\n") {
+        if false == strings.HasPrefix(line, "2026-") {
+            continue
+        }
+
+        cells := strings.Split(line, "|")
+        for index := range cells {
+            cells[index] = strings.TrimSpace(cells[index])
+        }
+
+        return cells
+    }
+
+    t.Fatalf("no data row in %q", rendered)
+
+    return nil
+}
+
+func TestCurrencyRefreshRatesCommandPrintsTheTableBeforeHandingBackARefusedQuote(t *testing.T) {
+    runtimeInstance := rateRefreshCommandRuntime(t, `{"base":"EUR","asOf":"2026-09-08T09:00:00Z","rates":{"EUR":1,"USD":1.0842,"RON":0}}`, nil, nil)
+
+    buffer := &bytes.Buffer{}
+    runErr := NewCurrencyRefreshRatesCommand().Run(runtimeInstance, newBoolFlagContext("unused", false, buffer))
+    if nil == runErr || false == strings.Contains(runErr.Error(), "RON") {
+        t.Fatalf("expected the refused quote to take the exit code naming RON, got %v", runErr)
+    }
+
+    if cells := tableCellsOf(t, buffer.String()); "2" != cells[2] || "1" != cells[6] {
+        t.Fatalf("expected the table with two updated and one refused before the refusal, got %v", cells)
+    }
+}
+
+func TestCurrencyRefreshRatesCommandPrintsTheTableBeforeHandingBackABackendFailure(t *testing.T) {
+    runtimeInstance := rateRefreshCommandRuntime(t, `{"base":"EUR","asOf":"2026-09-08T09:00:00Z","rates":{"EUR":1,"USD":1.0842,"RON":4.9761}}`, func(dispatcher melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher {
+        return &refusingDispatcher{EventDispatcher: dispatcher}
+    }, nil)
+
+    buffer := &bytes.Buffer{}
+    runErr := NewCurrencyRefreshRatesCommand().Run(runtimeInstance, newBoolFlagContext("unused", false, buffer))
+    if nil == runErr || true == strings.Contains(runErr.Error(), "the catalogue refused") || true == strings.Contains(runErr.Error(), "could not be written") || false == strings.Contains(runErr.Error(), "the quote was written, but the listeners that drop its cache entries were not told") {
+        t.Fatalf("expected the backend failure to take the exit code as itself, naming the quote as written, got %v", runErr)
+    }
+
+    if cells := tableCellsOf(t, buffer.String()); "1" != cells[2] || "0" != cells[6] {
+        t.Fatalf("expected the table with the one quote written before the backend failed and none refused, got %v", cells)
+    }
+}
+
+type refusingRateCache struct {
+    melodycachecontract.Cache
+}
+
+func (instance *refusingRateCache) Delete(runtimeInstance melodycontainercontract.Runtime, key string) error {
+    return errors.New("redis: connection refused")
+}
+
+func TestCurrencyRefreshRatesCommandNamesTheCacheDropThatFailedOverAnUnchangedQuote(t *testing.T) {
+    runtimeInstance := rateRefreshCommandRuntime(t, `{"base":"EUR","asOf":"2026-01-01T00:00:00Z","rates":{"EUR":1,"USD":1.1,"RON":5.05}}`, nil, func(cache melodycachecontract.Cache) melodycachecontract.Cache {
+        for _, currencyId := range []string{"cur-eur", "cur-usd", "cur-ron"} {
+            stale := entity.NewCurrency(currencyId, "", "", 9.9, time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC))
+            if setErr := cache.Set(exampleTestRuntime(), service.CacheKeyCurrencyById(currencyId), stale, bound.Of(time.Hour), melodycachecontract.SetOptions{}); nil != setErr {
+                t.Fatalf("planting the stale entry of %s failed: %v", currencyId, setErr)
+            }
+        }
+
+        return &refusingRateCache{Cache: cache}
+    })
+
+    buffer := &bytes.Buffer{}
+    runErr := NewCurrencyRefreshRatesCommand().Run(runtimeInstance, newBoolFlagContext("unused", false, buffer))
+    if nil == runErr || true == strings.Contains(runErr.Error(), "could not be written") || false == strings.Contains(runErr.Error(), "the cache entries of an unchanged quote could not be dropped") {
+        t.Fatalf("expected the failed cache drop to take the exit code naming the unchanged quote, got %v", runErr)
+    }
+
+    if cells := tableCellsOf(t, buffer.String()); "0" != cells[2] || "1" != cells[4] {
+        t.Fatalf("expected the table with none written and the one unchanged quote before the cache drop failed, got %v", cells)
+    }
+}
+
+func TestCurrencyRefreshRatesCommandHandsBackATableTheWriterRefused(t *testing.T) {
+    runtimeInstance := rateRefreshCommandRuntime(t, `{"base":"EUR","asOf":"2026-09-08T09:00:00Z","rates":{"EUR":1,"USD":1.0842,"RON":4.9761}}`, nil, nil)
+    writeRefusal := errors.New("the pipe was closed")
+
+    runErr := NewCurrencyRefreshRatesCommand().Run(runtimeInstance, newBoolFlagContext("unused", false, &refusingWriter{refusal: writeRefusal}))
+    if false == errors.Is(runErr, writeRefusal) {
+        t.Fatalf("expected the refused table to take the exit code, got %v", runErr)
+    }
+}

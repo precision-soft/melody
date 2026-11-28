@@ -1,0 +1,74 @@
+package mailer
+
+import (
+    "sync"
+    "testing"
+
+    mailercontract "github.com/precision-soft/melody/v4/mailer/contract"
+)
+
+func TestInMemoryTransport_KeepsWhatItWasSentInOrder(t *testing.T) {
+    transport := NewInMemoryTransport()
+
+    if 0 != len(transport.Sent()) {
+        t.Fatalf("expected a fresh transport to have sent nothing, got %v", transport.Sent())
+    }
+
+    if _, sendErr := transport.Send(nil, mailercontract.Message{Subject: "first"}); nil != sendErr {
+        t.Fatalf("unexpected send error: %v", sendErr)
+    }
+
+    if _, sendErr := transport.Send(nil, mailercontract.Message{Subject: "second"}); nil != sendErr {
+        t.Fatalf("unexpected send error: %v", sendErr)
+    }
+
+    sent := transport.Sent()
+    if 2 != len(sent) || "first" != sent[0].Subject || "second" != sent[1].Subject {
+        t.Fatalf("expected both messages in the order they were sent, got %v", sent)
+    }
+}
+
+func TestInMemoryTransport_SentHandsOutACopy(t *testing.T) {
+    transport := NewInMemoryTransport()
+    _, _ = transport.Send(nil, mailercontract.Message{Subject: "first"})
+
+    read := transport.Sent()
+    read[0].Subject = "rewritten"
+
+    if "first" != transport.Sent()[0].Subject {
+        t.Fatalf("expected the transport to keep its own copy, got %q", transport.Sent()[0].Subject)
+    }
+
+    _, _ = transport.Send(nil, mailercontract.Message{Subject: "second"})
+
+    if 1 != len(read) {
+        t.Fatalf("expected the earlier read to stay the length it was, got %v", read)
+    }
+}
+
+func TestInMemoryTransport_IsSafeUnderConcurrentSendAndRead(t *testing.T) {
+    transport := NewInMemoryTransport()
+
+    var waitGroup sync.WaitGroup
+    for index := 0; index < 8; index++ {
+        waitGroup.Add(2)
+
+        go func() {
+            defer waitGroup.Done()
+
+            _, _ = transport.Send(nil, mailercontract.Message{Subject: "concurrent"})
+        }()
+
+        go func() {
+            defer waitGroup.Done()
+
+            _ = transport.Sent()
+        }()
+    }
+
+    waitGroup.Wait()
+
+    if 8 != len(transport.Sent()) {
+        t.Fatalf("expected every concurrent send to be recorded, got %d", len(transport.Sent()))
+    }
+}

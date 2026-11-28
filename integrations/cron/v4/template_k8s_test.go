@@ -1,0 +1,447 @@
+package cron
+
+import (
+    "errors"
+    "strings"
+    "testing"
+)
+
+func k8sSampleEntry(name string) Entry {
+    return Entry{
+        Name:      name,
+        User:      "www-data",
+        Arguments: []string{name},
+        Schedule:  &Schedule{
+            Minute: "0",
+            Hour:   "*/6",
+        },
+    }
+}
+
+func TestK8sRenderEmitsCronJobManifest(t *testing.T) {
+    entries := []Entry{k8sSampleEntry("product:list")}
+
+    content, err := defaultK8sTemplate.Render(entries, RenderOptions{
+        Image:     "registry/curatorium:latest",
+        Namespace: "curatorium",
+    })
+    if nil != err {
+        t.Fatalf("Render returned unexpected error: %v", err)
+    }
+
+    expectedFragments := []string{
+        "apiVersion: batch/v1",
+        "kind: CronJob",
+        "name: \"product-list\"",
+        "namespace: \"curatorium\"",
+        "schedule: \"0 */6 * * *\"",
+        "image: \"registry/curatorium:latest\"",
+        "restartPolicy: \"OnFailure\"",
+        "args:",
+        "- \"product:list\"",
+    }
+
+    for _, fragment := range expectedFragments {
+        if false == strings.Contains(content, fragment) {
+            t.Fatalf("expected manifest to contain %q, got:\n%s", fragment, content)
+        }
+    }
+
+    for _, forbidden := range []string{"env:", "MELODY_CLI"} {
+        if true == strings.Contains(content, forbidden) {
+            t.Fatalf("expected manifest to omit %q, got:\n%s", forbidden, content)
+        }
+    }
+}
+
+func TestK8sRenderSanitizesCommandNameToDnsLabel(t *testing.T) {
+    entries := []Entry{k8sSampleEntry("Outbox:Dispatch_Now")}
+
+    content, err := defaultK8sTemplate.Render(entries, RenderOptions{Image: "img"})
+    if nil != err {
+        t.Fatalf("Render returned unexpected error: %v", err)
+    }
+
+    if false == strings.Contains(content, "name: \"outbox-dispatch-now\"") {
+        t.Fatalf("expected sanitized DNS-label name, got:\n%s", content)
+    }
+}
+
+func TestK8sRenderSeparatesMultipleEntriesWithDocumentMarker(t *testing.T) {
+    entries := []Entry{
+        k8sSampleEntry("machine:liveness"),
+        k8sSampleEntry("reconcile:run"),
+    }
+
+    content, err := defaultK8sTemplate.Render(entries, RenderOptions{Image: "img"})
+    if nil != err {
+        t.Fatalf("Render returned unexpected error: %v", err)
+    }
+
+    if 1 != strings.Count(content, "---\n") {
+        t.Fatalf("expected exactly one document separator between two manifests, got:\n%s", content)
+    }
+
+    if 2 != strings.Count(content, "kind: CronJob") {
+        t.Fatalf("expected two CronJob documents, got:\n%s", content)
+    }
+}
+
+func TestK8sRenderDefaultsRestartPolicyToOnFailure(t *testing.T) {
+    content, err := defaultK8sTemplate.Render([]Entry{k8sSampleEntry("app:info")}, RenderOptions{Image: "img"})
+    if nil != err {
+        t.Fatalf("Render returned unexpected error: %v", err)
+    }
+
+    if false == strings.Contains(content, "restartPolicy: \"OnFailure\"") {
+        t.Fatalf("expected default restartPolicy OnFailure, got:\n%s", content)
+    }
+}
+
+func TestK8sRenderHonorsCustomRestartPolicy(t *testing.T) {
+    content, err := defaultK8sTemplate.Render([]Entry{k8sSampleEntry("app:info")}, RenderOptions{
+        Image:         "img",
+        RestartPolicy: "Never",
+    })
+    if nil != err {
+        t.Fatalf("Render returned unexpected error: %v", err)
+    }
+
+    if false == strings.Contains(content, "restartPolicy: \"Never\"") {
+        t.Fatalf("expected custom restartPolicy Never, got:\n%s", content)
+    }
+}
+
+func TestK8sRenderRejectsInvalidRestartPolicy(t *testing.T) {
+    _, err := defaultK8sTemplate.Render([]Entry{k8sSampleEntry("app:info")}, RenderOptions{
+        Image:         "img",
+        RestartPolicy: "Always",
+    })
+    if nil == err {
+        t.Fatalf("expected error for a restartPolicy outside {OnFailure, Never}, got nil")
+    }
+
+    if false == errors.Is(err, ErrK8sInvalidRestartPolicy) {
+        t.Fatalf("expected ErrK8sInvalidRestartPolicy, got: %v", err)
+    }
+}
+
+func TestK8sRenderOmitsNamespaceWhenEmpty(t *testing.T) {
+    content, err := defaultK8sTemplate.Render([]Entry{k8sSampleEntry("app:info")}, RenderOptions{Image: "img"})
+    if nil != err {
+        t.Fatalf("Render returned unexpected error: %v", err)
+    }
+
+    if true == strings.Contains(content, "namespace:") {
+        t.Fatalf("expected no namespace line when namespace is empty, got:\n%s", content)
+    }
+}
+
+func TestK8sRenderUsesCommandFieldForCommandOverride(t *testing.T) {
+    entries := []Entry{
+        {
+            Name:     "wrapped",
+            User:     "www-data",
+            Schedule: &Schedule{Minute: "0"},
+            Command:  []string{"/opt/melody/app", "wrapped"},
+        },
+    }
+
+    content, err := defaultK8sTemplate.Render(entries, RenderOptions{Image: "img"})
+    if nil != err {
+        t.Fatalf("Render returned unexpected error: %v", err)
+    }
+
+    if false == strings.Contains(content, "command:") {
+        t.Fatalf("expected a command override to render the k8s command field, got:\n%s", content)
+    }
+
+    if false == strings.Contains(content, "- \"/opt/melody/app\"") || false == strings.Contains(content, "- \"wrapped\"") {
+        t.Fatalf("expected command override tokens, got:\n%s", content)
+    }
+}
+
+func TestK8sRenderReturnsErrorWhenImageMissing(t *testing.T) {
+    _, err := defaultK8sTemplate.Render([]Entry{k8sSampleEntry("app:info")}, RenderOptions{})
+    if nil == err {
+        t.Fatalf("expected error when image is empty, got nil")
+    }
+
+    if false == strings.Contains(err.Error(), "image") {
+        t.Fatalf("expected error to mention the missing image, got: %v", err)
+    }
+}
+
+func TestK8sRenderReturnsErrorWhenNameSanitizesToEmpty(t *testing.T) {
+    _, err := defaultK8sTemplate.Render([]Entry{k8sSampleEntry(":::")}, RenderOptions{Image: "img"})
+    if nil == err {
+        t.Fatalf("expected error when command name yields no usable k8s name, got nil")
+    }
+}
+
+func TestK8sRenderRejectsCollidingResourceNames(t *testing.T) {
+    entries := []Entry{
+        k8sSampleEntry("outbox:dispatch"),
+        k8sSampleEntry("outbox-dispatch"),
+    }
+
+    _, err := defaultK8sTemplate.Render(entries, RenderOptions{Image: "img"})
+    if nil == err {
+        t.Fatalf("expected error when two commands map to the same k8s resource name, got nil")
+    }
+
+    if false == errors.Is(err, ErrK8sDuplicateName) {
+        t.Fatalf("expected ErrK8sDuplicateName, got: %v", err)
+    }
+
+    if false == strings.Contains(err.Error(), "outbox-dispatch") {
+        t.Fatalf("expected error to mention the colliding resource name, got: %v", err)
+    }
+}
+
+func TestK8sRenderSuffixesNamesForMultiInstanceCommand(t *testing.T) {
+    entries := []Entry{
+        {Name: "outbox:dispatch", User: "www-data", Arguments: []string{"outbox:dispatch", "--instance-index=1"}, Schedule: &Schedule{Minute: "0"}, InstanceIndex: 1, InstanceCount: 2},
+        {Name: "outbox:dispatch", User: "www-data", Arguments: []string{"outbox:dispatch", "--instance-index=2"}, Schedule: &Schedule{Minute: "0"}, InstanceIndex: 2, InstanceCount: 2},
+    }
+
+    content, err := defaultK8sTemplate.Render(entries, RenderOptions{Image: "img"})
+    if nil != err {
+        t.Fatalf("Render returned unexpected error for a multi-instance command: %v", err)
+    }
+
+    for _, fragment := range []string{"name: \"outbox-dispatch-1\"", "name: \"outbox-dispatch-2\""} {
+        if false == strings.Contains(content, fragment) {
+            t.Fatalf("expected per-instance suffixed name %q, got:\n%s", fragment, content)
+        }
+    }
+
+    if 2 != strings.Count(content, "kind: CronJob") {
+        t.Fatalf("expected two CronJob documents for a two-instance command, got:\n%s", content)
+    }
+}
+
+func TestK8sRenderDoesNotSuffixSingleInstanceName(t *testing.T) {
+    for _, instanceCount := range []int{0, 1} {
+        entry := Entry{Name: "app:info", User: "www-data", Arguments: []string{"app:info"}, Schedule: &Schedule{Minute: "0"}, InstanceIndex: 1, InstanceCount: instanceCount}
+
+        content, err := defaultK8sTemplate.Render([]Entry{entry}, RenderOptions{Image: "img"})
+        if nil != err {
+            t.Fatalf("Render returned unexpected error (InstanceCount=%d): %v", instanceCount, err)
+        }
+
+        if false == strings.Contains(content, "name: \"app-info\"") {
+            t.Fatalf("expected unsuffixed name for single instance (InstanceCount=%d), got:\n%s", instanceCount, content)
+        }
+
+        if true == strings.Contains(content, "app-info-1") {
+            t.Fatalf("single-instance command must not be suffixed (InstanceCount=%d), got:\n%s", instanceCount, content)
+        }
+    }
+}
+
+func TestK8sRenderRejectsNewlineInImage(t *testing.T) {
+    _, err := defaultK8sTemplate.Render([]Entry{k8sSampleEntry("app:info")}, RenderOptions{Image: "img\nmalicious: true"})
+    if nil == err {
+        t.Fatalf("expected error when image contains a newline, got nil")
+    }
+}
+
+func TestK8sRenderRejectsWhitespaceInScheduleField(t *testing.T) {
+    entries := []Entry{
+        {
+            Name:      "app:info",
+            User:      "www-data",
+            Arguments: []string{"app:info"},
+            Schedule:  &Schedule{Minute: "0 30", Hour: "*"},
+        },
+    }
+
+    _, err := defaultK8sTemplate.Render(entries, RenderOptions{Image: "img"})
+    if nil == err {
+        t.Fatalf("expected error when a schedule field contains whitespace, got nil")
+    }
+
+    if false == strings.Contains(err.Error(), "Schedule.Minute") {
+        t.Fatalf("expected error to mention the offending field, got: %v", err)
+    }
+}
+
+func TestK8sRenderRejectsPercentInScheduleField(t *testing.T) {
+    entries := []Entry{
+        {
+            Name:      "app:info",
+            User:      "www-data",
+            Arguments: []string{"app:info"},
+            Schedule:  &Schedule{Minute: "0%5", Hour: "*"},
+        },
+    }
+
+    _, err := defaultK8sTemplate.Render(entries, RenderOptions{Image: "img"})
+    if nil == err {
+        t.Fatalf("expected error when a schedule field contains %%, got nil")
+    }
+
+    if false == errors.Is(err, ErrForbiddenCharacter) {
+        t.Fatalf("expected ErrForbiddenCharacter, got: %v", err)
+    }
+
+    if true == strings.Contains(err.Error(), "crontab") {
+        t.Fatalf("k8s schedule error must not mention crontab, got: %v", err)
+    }
+}
+
+func TestK8sRenderQuotesScheduleAndPreservesExpression(t *testing.T) {
+    entries := []Entry{
+        {
+            Name:      "app:info",
+            User:      "www-data",
+            Arguments: []string{"app:info"},
+            Schedule:  &Schedule{Minute: "*/15", Hour: "9-17", DayOfWeek: "mon-fri"},
+        },
+    }
+
+    content, err := defaultK8sTemplate.Render(entries, RenderOptions{Image: "img"})
+    if nil != err {
+        t.Fatalf("Render returned unexpected error: %v", err)
+    }
+
+    if false == strings.Contains(content, "schedule: \"*/15 9-17 * * mon-fri\"") {
+        t.Fatalf("expected quoted schedule preserving the cron expression, got:\n%s", content)
+    }
+}
+
+func TestYamlQuoteEscapesSpecialAndControlCharacters(t *testing.T) {
+    cases := []struct {
+        name  string
+        value string
+        want  string
+    }{
+        {"backslash", "a\\b", "\"a\\\\b\""},
+        {"doubleQuote", "a\"b", "\"a\\\"b\""},
+        {"tab", "a\tb", "\"a\\tb\""},
+        {"null", "a\x00b", "\"a\\0b\""},
+        {"lowControl", "a\x01b", "\"a\\x01b\""},
+        {"delete", "a\x7fb", "\"a\\x7Fb\""},
+        {"c1Control", "ab", "\"a\\x85b\""},
+        {"lineSeparator", "a b", "\"a\\u2028b\""},
+        {"paragraphSeparator", "a b", "\"a\\u2029b\""},
+        {"printableUtf8", "café */5", "\"café */5\""},
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            if got := yamlQuote(testCase.value); testCase.want != got {
+                t.Fatalf("yamlQuote(%q) = %q, want %q", testCase.value, got, testCase.want)
+            }
+        })
+    }
+}
+
+func TestK8sRenderEscapesControlCharacterInImage(t *testing.T) {
+    /* a tab is not a line terminator, so it passes the forbidden-char gate; the manifest must escape it rather than emit a raw control byte inside the scalar */
+    content, err := defaultK8sTemplate.Render([]Entry{k8sSampleEntry("app:info")}, RenderOptions{Image: "img\tlatest"})
+    if nil != err {
+        t.Fatalf("Render returned unexpected error: %v", err)
+    }
+
+    if false == strings.Contains(content, "image: \"img\\tlatest\"") {
+        t.Fatalf("expected the tab in the image to be escaped, got:\n%s", content)
+    }
+
+    if true == strings.Contains(content, "img\tlatest") {
+        t.Fatalf("expected no raw tab byte in the manifest, got:\n%s", content)
+    }
+}
+
+func TestK8sRenderWithoutEntriesCarriesTheMarkerAndNeedsNoImage(t *testing.T) {
+    rendered, renderErr := defaultK8sTemplate.Render(nil, RenderOptions{})
+    if nil != renderErr {
+        t.Fatalf("expected the empty render to succeed without an image, got: %v", renderErr)
+    }
+
+    if false == strings.Contains(rendered, CrontabOwnershipMarker) {
+        t.Fatalf("expected the empty manifest to carry the ownership marker, got: %s", rendered)
+    }
+
+    if true == strings.Contains(rendered, "apiVersion") {
+        t.Fatalf("expected no CronJob document in the empty render, got: %s", rendered)
+    }
+}
+
+func TestK8sRenderRefusesANamespaceThatIsNotAnRfc1123Label(t *testing.T) {
+    entries := []Entry{k8sSampleEntry("product:list")}
+
+    for _, namespace := range []string{"Production", "team.billing", "-leading", "trailing-", strings.Repeat("a", 64)} {
+        _, renderErr := defaultK8sTemplate.Render(entries, RenderOptions{Image: "img", Namespace: namespace})
+        if nil == renderErr {
+            t.Fatalf("expected the namespace %q to be refused", namespace)
+        }
+
+        if false == errors.Is(renderErr, ErrK8sInvalidNamespace) {
+            t.Fatalf("expected ErrK8sInvalidNamespace for %q, got: %v", namespace, renderErr)
+        }
+    }
+
+    if _, renderErr := defaultK8sTemplate.Render(entries, RenderOptions{Image: "img", Namespace: "team-billing-2"}); nil != renderErr {
+        t.Fatalf("expected a valid label to render, got: %v", renderErr)
+    }
+}
+
+func TestK8sRenderRefusesEmptyInvocationTokens(t *testing.T) {
+    withEmptyCommandToken := k8sSampleEntry("product:list")
+    withEmptyCommandToken.Command = []string{"", "run"}
+
+    if _, renderErr := defaultK8sTemplate.Render([]Entry{withEmptyCommandToken}, RenderOptions{Image: "img"}); nil == renderErr {
+        t.Fatalf("expected the empty Command token to be refused")
+    }
+
+    withEmptyArgumentToken := k8sSampleEntry("product:list")
+    withEmptyArgumentToken.Arguments = []string{"product:list", ""}
+
+    _, argumentsErr := defaultK8sTemplate.Render([]Entry{withEmptyArgumentToken}, RenderOptions{Image: "img"})
+    if nil == argumentsErr {
+        t.Fatalf("expected the empty Arguments token to be refused")
+    }
+
+    if false == strings.Contains(argumentsErr.Error(), "an empty Arguments token at position 1") {
+        t.Fatalf("expected the refusal to name the Arguments field and the position, got %q", argumentsErr.Error())
+    }
+}
+
+func TestK8sRenderRefusesInvalidUtf8(t *testing.T) {
+    entries := []Entry{k8sSampleEntry("product:list")}
+
+    if _, renderErr := defaultK8sTemplate.Render(entries, RenderOptions{Image: "registry/app:\xff"}); nil == renderErr {
+        t.Fatalf("expected the invalid UTF-8 image to be refused")
+    }
+
+    withInvalidToken := k8sSampleEntry("product:list")
+    withInvalidToken.Arguments = []string{"--flag=\xff"}
+
+    if _, renderErr := defaultK8sTemplate.Render([]Entry{withInvalidToken}, RenderOptions{Image: "img"}); nil == renderErr {
+        t.Fatalf("expected the invalid UTF-8 token to be refused")
+    }
+}
+
+func TestK8sRenderFilesAnInvalidUtf8TokenUnderTheForbiddenCharacterClass(t *testing.T) {
+    withInvalidToken := k8sSampleEntry("product:list")
+    withInvalidToken.Arguments = []string{"--flag=\xff"}
+
+    _, renderErr := defaultK8sTemplate.Render([]Entry{withInvalidToken}, RenderOptions{Image: "img"})
+    if false == errors.Is(renderErr, ErrForbiddenCharacter) || true == errors.Is(renderErr, ErrEntryEmptyCommand) {
+        t.Fatalf("expected the refusal filed under ErrForbiddenCharacter alone, got %v", renderErr)
+    }
+}
+
+func TestK8sRenderRefusesAnApplicationNameCarryingALineBreak(t *testing.T) {
+    options := RenderOptions{ApplicationName: "app\nkind: Secret"}
+
+    if content, renderErr := defaultK8sTemplate.Render(nil, options); false == errors.Is(renderErr, ErrInvalidApplicationName) || "" != content {
+        t.Fatalf("expected the empty render to refuse the name, got %q, %v", content, renderErr)
+    }
+
+    if _, renderErr := defaultK8sTemplate.Render([]Entry{k8sSampleEntry("reports:daily")}, options); false == errors.Is(renderErr, ErrInvalidApplicationName) {
+        t.Fatalf("expected the render to refuse the name, got %v", renderErr)
+    }
+}

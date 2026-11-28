@@ -109,7 +109,7 @@ case "${1:-}" in
         ;;
     up:minimal)
         shift
-        docker_compose up -d dev dev-v1 dev-v2 load-balancer "$@"
+        docker_compose up -d dev dev-v1 dev-v2 dev-v4 load-balancer "$@"
         ;;
     up:all)
         shift

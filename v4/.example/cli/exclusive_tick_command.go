@@ -1,0 +1,64 @@
+package cli
+
+import (
+    "fmt"
+    "time"
+
+    melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+)
+
+const (
+    exclusiveTickFlagHold    = "hold"
+    exclusiveTickDefaultHold = 2 * time.Second
+)
+
+/* ExclusiveTickCommand simulates a job whose runs must never overlap across instances: config/cli.go wraps it in lock.NewExclusiveCommand over lock.NewLazyLocker, which resolves the registered locker (redis when configured) at the first Acquire rather than at boot, so launching it from two shells at once runs the body once while the other exits zero with a "skipped" log line. */
+type ExclusiveTickCommand struct{}
+
+func NewExclusiveTickCommand() *ExclusiveTickCommand {
+    return &ExclusiveTickCommand{}
+}
+
+func (instance *ExclusiveTickCommand) Name() string {
+    return "example:exclusive:tick"
+}
+
+func (instance *ExclusiveTickCommand) Description() string {
+    return "holds the shared lock for --hold and prints the tick; wrapped as an exclusive command over the lazily-resolved locker"
+}
+
+func (instance *ExclusiveTickCommand) Flags() []melodyclicontract.Flag {
+    return []melodyclicontract.Flag{
+        &melodyclicontract.DurationFlag{
+            Name:  exclusiveTickFlagHold,
+            Usage: "how long the tick holds the lock (Go duration)",
+            Value: exclusiveTickDefaultHold,
+        },
+    }
+}
+
+func (instance *ExclusiveTickCommand) Run(
+    runtimeInstance melodycontainercontract.Runtime,
+    commandContext *melodyclicontract.CommandContext,
+) error {
+    hold := commandContext.Duration(exclusiveTickFlagHold)
+
+    writer := commandContext.Writer
+
+    fmt.Fprintln(writer, "exclusive tick: started, holding the lock for", hold)
+
+    timer := time.NewTimer(hold)
+    defer timer.Stop()
+
+    select {
+    case <-runtimeInstance.Context().Done():
+        fmt.Fprintln(writer, "exclusive tick: interrupted")
+    case <-timer.C:
+        fmt.Fprintln(writer, "exclusive tick: done")
+    }
+
+    return nil
+}
+
+var _ melodyclicontract.Command = (*ExclusiveTickCommand)(nil)

@@ -1,0 +1,84 @@
+# The fields of a configuration .dev/validate/defaults.sh reads as door candidates that turn nothing off.
+#
+#   <package path>.<Type>.<Field> ~ reason
+#
+# Read by .dev/validate/defaults.sh. Every exported bool, every field typed by an enumeration of the line's own,
+# every *Disabled field and every bound limit of a configuration struct is a door candidate: a row names it, or
+# a line here says why it loosens nothing. A line naming no candidate, or a field a row names, fails the band.
+#
+#   env:<KEY> ~ reason
+#
+# Every env key the framework or a module declares is a door of some value: a row cites it as env:<KEY>, or a
+# line here says why it sets nothing a row tracks. A line naming no declared key, or a key a row cites, fails.
+
+integrations/amqp/v4.ModuleConfig.ConnectionBootFailure ~ hardens only: the zero value warns, the other mode fails the boot
+integrations/amqp/v4.ModuleConfig.ConnectionBuiltAtBoot ~ moves the dial into Boot; off dials at first use, nothing guarded
+integrations/aws/s3/v4.BucketCheckConfig.BootFailure ~ hardens only: the zero value warns, the other mode fails the boot
+integrations/aws/s3/v4.BucketCheckConfig.Enabled ~ turns an extra boot check on; off checks nothing the default checked
+integrations/bunorm/migrate/v4.RunnerOptions.NoColor ~ colour of the per-query lines, nothing guarded
+integrations/bunorm/v4.ProviderDefinition.IsDefault ~ selects the default connection among the registered ones
+integrations/bunorm/v4/audit.EntityOptions.CaptureDeleteBeforeImage ~ widens the trail: the delete is recorded either way, on it carries the row's values too
+integrations/bunorm/v4/audit.RecorderConfig.OwnsStorage ~ ownership of a close: who closes the storage, nothing guarded
+integrations/cron/v4.EntryConfig.LogFileNameRaw ~ the spelling of a derived log file name; the name is confined to the logs directory either way
+integrations/cron/v4.RunnerConfig.Dialect ~ selects which scheduler's day-field grammar the schedule follows; neither runs more than it reads
+integrations/outbox/v4.ModuleConfig.StoreBootFailure ~ hardens only: the zero value warns, the other mode fails the boot
+integrations/outbox/v4.ModuleConfig.StoreBuiltAtBoot ~ moves the build into Boot; off builds at first use, nothing guarded
+integrations/rueidis/v4.ClientConfig.ClientSideCacheEnabled ~ a performance feature of the client library; off caches nothing
+integrations/rueidis/v4.ModuleConfig.ConnectionBootFailure ~ hardens only: the zero value warns, the other mode fails the boot
+integrations/rueidis/v4.ModuleConfig.ConnectionBuiltAtBoot ~ moves the dial into Boot; off dials at first use, nothing guarded
+integrations/websocket/v4.StreamHandlerConfig.BinaryWrites ~ the frame type of a write, text or binary
+v4/application.ApplicationConfig.ContainerTeardownSequential ~ the order of the teardown, waves or one by one; every service is closed either way
+v4/cache.ManagerConfig.OwnsBackend ~ ownership of a close: who closes the backend, nothing guarded
+v4/cache/contract.CounterOptions.RefreshTtl ~ the expiry policy of a counter the caller asks for, fixed or sliding
+v4/cli/output.Options.Format ~ the rendering of a command's output, chosen per run
+v4/cli/output.Options.NoColor ~ colour of the output, nothing guarded
+v4/cli/output.Options.Order ~ the order of a listing, chosen per run
+v4/cli/output.Options.Quiet ~ the detail of the output, nothing guarded
+v4/cli/output.Options.Verbose ~ the detail of the output, nothing guarded
+v4/container.ContainerConfig.TeardownSequential ~ the order of the teardown, waves or one by one; every service is closed either way
+v4/container/contract.OverrideOptions.ClosedWithScope ~ ownership of a close: the scope closes the installed value, the root refuses it
+v4/container/contract.RegisterOptions.BootFailure ~ hardens only: the zero value warns, the other mode fails the boot
+v4/container/contract.RegisterOptions.BuiltAtBoot ~ moves the build into Boot; off builds at first use, nothing guarded
+v4/exception.FromErrorOptions.Level ~ the journal level of a record
+v4/http/middleware/pipeline.HttpMiddlewareDefinition.ReplaceExisting ~ replaces a definition the same deployment declared, refused beside AllowDuplicates; no framework middleware is removed by it
+v4/http/static.Config.Mode ~ selects the file system, a directory or an embedded tree; both are confined the same way
+v4/http/static.Config.WeakEtag ~ the form of the validator, weak or strong
+v4/internal/plaintext.Options.LabelKeys ~ the spelling of the keys of a rendered body
+v4/logging.JsonLoggerConfig.MinLevel ~ the lowest level written; redaction applies at every level
+v4/logging.RecoverOptions.PanicAgain ~ what the deferred recovery does with a panic it logged, chosen per call: nothing is guarded either way
+v4/mailer.SmtpConfig.ImplicitTls ~ selects TLS from the first byte in place of STARTTLS; neither form is plaintext, AllowPlaintext is the door
+v4/mailer.SmtpConfig.RequireAuthentication ~ hardens only: on refuses a send without a username, off is the default
+v4/messagebus/contract.NackOptions.Requeue ~ the outcome of one negative acknowledgement, chosen per call
+v4/security.CompiledFirewallConfig.AccessControlSource ~ the diagnostic of where a compiled firewall's access control came from
+v4/security.CompiledFirewallConfig.AccessDecisionManagerSource ~ the diagnostic of where a compiled firewall's decision manager came from
+v4/security.CompiledFirewallConfig.AccessDeniedHandlerSource ~ the diagnostic of where a compiled firewall's denied handler came from
+v4/security.CompiledFirewallConfig.EntryPointSource ~ the diagnostic of where a compiled firewall's entry point came from
+v4/security.CompiledFirewallConfig.RoleHierarchySource ~ the diagnostic of where a compiled firewall's role hierarchy came from
+v4/security/config.FirewallOverride.MergeStrategy ~ orders the access rules the deployment writes itself, global and local; every rule it keeps is the deployment's own
+v4/session.ManagerConfig.OwnsStorage ~ ownership of a close: who closes the storage, nothing guarded
+env:MELODY_BUNORM_MIGRATE_LOCKS_TABLE ~ names the table bun keeps its migration lock in; a plain identifier, refused otherwise, and the lock is taken the same in any table
+env:MELODY_BUNORM_MIGRATE_MIGRATIONS_TABLE ~ names the table bun records applied migrations in; a plain identifier, refused otherwise, guarding nothing
+env:MELODY_CLI_DESCRIPTION ~ the text the console prints under its name
+env:MELODY_CLI_NAME ~ the name the console prints and its usage lines show
+env:MELODY_CONTAINER_TEARDOWN_SEQUENTIAL ~ orders the teardown one service after another instead of in dependency waves; every service still closes under the same budget
+env:MELODY_CRON_BINARY ~ the path of the binary the generated entries run
+env:MELODY_CRON_DESTINATION_FILE ~ where the generator writes the crontab; its mode and the logs directory are judged wherever it lands
+env:MELODY_CRON_HEARTBEAT_ENABLED ~ turns the generated heartbeat entry on; off writes one entry fewer and guards nothing
+env:MELODY_CRON_HEARTBEAT_PATH ~ the file the heartbeat entry touches
+env:MELODY_CRON_K8S_IMAGE ~ the image a generated CronJob runs
+env:MELODY_CRON_K8S_NAMESPACE ~ the namespace a generated CronJob is written into
+env:MELODY_CRON_K8S_RESTART_POLICY ~ the restart policy of a generated CronJob, from the values Kubernetes admits
+env:MELODY_CRON_LOGS_DIRECTORY ~ the directory the entries log into; the generator judges it writable for the entries' users wherever it is
+env:MELODY_CRON_TEMPLATE ~ selects the output the generator writes, a crontab or a CronJob
+env:MELODY_CRON_USER ~ the account the generated entries run as, the default of an entry naming none; it names who runs, the entries run the same commands either way
+env:MELODY_DEFAULT_LOCALE ~ the locale a request without one is answered in
+env:MELODY_DEFAULT_MODE ~ selects whether a run without arguments serves http or runs the console
+env:MELODY_HTTP_ADDRESS ~ the address the server listens on
+env:MELODY_HTTP_PUBLIC_URL ~ the base an absolute url is generated behind, validated as an http or https url with a host and no user info
+env:MELODY_LOG_LEVEL ~ the least level the journal writes; a redaction applies at every level
+env:MELODY_LOG_PATH ~ where the journal is written; its file mode is the logging rows' own
+env:MELODY_NAMESPACE ~ the application's namespace, prefixing its queues, keys and exchanges, validated by config.ValidateNamespace
+env:MELODY_PROCESS_ROLE ~ selects which of the serving process's parts this process runs
+env:MELODY_PUBLIC_DIRECTORY ~ the directory static files are served from; the static guards, dot-prefixed elements and symlinks out of it, hold wherever it is
+env:MELODY_STATIC_EXCLUDED_PATHS ~ paths static serving leaves out; it narrows what is served and never widens it
+env:MELODY_STATIC_INDEX_FILE ~ the file a directory request is answered with

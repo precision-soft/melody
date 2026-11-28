@@ -1,0 +1,168 @@
+package application
+
+import (
+    nethttp "net/http"
+    "time"
+
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/config"
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
+    "github.com/precision-soft/melody/v4/container"
+    "github.com/precision-soft/melody/v4/exception"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    "github.com/precision-soft/melody/v4/logging"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+)
+
+type httpServerLimits struct {
+    readTimeout       time.Duration
+    readHeaderTimeout time.Duration
+    writeTimeout      time.Duration
+    idleTimeout       time.Duration
+    maxHeaderBytes    int
+}
+
+/* the key a deployment set wins, then the application's field, then the rule's default */
+func resolveHttpServerLimits(configuration configcontract.Configuration, applicationConfig ApplicationConfig) (httpServerLimits, error) {
+    httpConfiguration := configuration.Http()
+
+    readTimeout, readTimeoutErr := resolveApplicationLimit(httpConfiguration.ReadTimeout(), applicationConfig.HttpServer.ReadTimeout, config.HttpReadTimeoutRule())
+    if nil != readTimeoutErr {
+        return httpServerLimits{}, readTimeoutErr
+    }
+
+    readHeaderTimeout, readHeaderTimeoutErr := resolveApplicationLimit(httpConfiguration.ReadHeaderTimeout(), applicationConfig.HttpServer.ReadHeaderTimeout, config.HttpReadHeaderTimeoutRule())
+    if nil != readHeaderTimeoutErr {
+        return httpServerLimits{}, readHeaderTimeoutErr
+    }
+
+    writeTimeout, writeTimeoutErr := resolveApplicationLimit(httpConfiguration.WriteTimeout(), applicationConfig.HttpServer.WriteTimeout, config.HttpWriteTimeoutRule())
+    if nil != writeTimeoutErr {
+        return httpServerLimits{}, writeTimeoutErr
+    }
+
+    idleTimeout, idleTimeoutErr := resolveApplicationLimit(httpConfiguration.IdleTimeout(), applicationConfig.HttpServer.IdleTimeout, config.HttpIdleTimeoutRule())
+    if nil != idleTimeoutErr {
+        return httpServerLimits{}, idleTimeoutErr
+    }
+
+    maxHeaderBytes, maxHeaderBytesErr := resolveApplicationLimit(httpConfiguration.MaxHeaderBytes(), applicationConfig.HttpServer.MaxHeaderBytes, config.HttpMaxHeaderBytesRule())
+    if nil != maxHeaderBytesErr {
+        return httpServerLimits{}, maxHeaderBytesErr
+    }
+
+    return httpServerLimits{
+        readTimeout:       readTimeout.Value,
+        readHeaderTimeout: readHeaderTimeout.Value,
+        writeTimeout:      writeTimeout.Value,
+        idleTimeout:       idleTimeout.Value,
+        maxHeaderBytes:    maxHeaderBytes.Value,
+    }, nil
+}
+
+/* resolveHttpShutdownTimeout answers the key when the deployment set it, the application's field otherwise and the rule's default without either. */
+func resolveHttpShutdownTimeout(configuration configcontract.Configuration, applicationConfig ApplicationConfig) (bound.Resolved[time.Duration], error) {
+    return resolveApplicationLimit(configuration.Http().ShutdownTimeout(), applicationConfig.HttpServer.ShutdownTimeout, config.ShutdownTimeoutRule())
+}
+
+func resolveContainerCreationWaiters(configuration configcontract.Configuration, applicationConfig ApplicationConfig) (bound.Resolved[int], error) {
+    return resolveApplicationLimit(configuration.Kernel().ContainerCreationWaiters(), applicationConfig.ContainerCreationWaiters, container.CreationWaitersRule())
+}
+
+/* resolveContainerTeardownSequential answers the key when the deployment set it and the application's field otherwise. */
+func resolveContainerTeardownSequential(configuration configcontract.Configuration, applicationConfig ApplicationConfig) bool {
+    keySwitch := configuration.Kernel().ContainerTeardownSequential()
+    if true == keySwitch.IsSet {
+        return keySwitch.Value
+    }
+
+    return applicationConfig.ContainerTeardownSequential
+}
+
+/* resolveSessionEmptyOnOutage answers off when the deployment set the key and the application's field otherwise; the key only hardens, the configuration refused true naming the key */
+func resolveSessionEmptyOnOutage(configuration configcontract.Configuration, applicationConfig ApplicationConfig) bool {
+    keySwitch := configuration.Http().SessionEmptyOnOutage()
+    if true == keySwitch.IsSet {
+        return keySwitch.Value
+    }
+
+    return applicationConfig.HttpKernel.SessionPolicy.EmptyOnOutage
+}
+
+/* resolveSessionCookieSecure answers always when the deployment set the key and the application's field otherwise; the key only hardens, the configuration refused any other value naming the key */
+func resolveSessionCookieSecure(configuration configcontract.Configuration, applicationConfig ApplicationConfig) httpcontract.SessionCookieSecurePolicy {
+    if config.HttpSessionCookieSecureAlways == configuration.Http().SessionCookieSecure() {
+        return httpcontract.SessionCookieSecureAlways
+    }
+
+    return applicationConfig.HttpKernel.SessionCookiePolicy.Secure
+}
+
+func resolveTeardownTimeout(configuration configcontract.Configuration, applicationConfig ApplicationConfig) (bound.Resolved[time.Duration], error) {
+    return resolveApplicationLimit(configuration.Kernel().TeardownTimeout(), applicationConfig.TeardownTimeout, config.TeardownTimeoutRule())
+}
+
+func resolveScopeTeardownTimeout(configuration configcontract.Configuration, applicationConfig ApplicationConfig) (bound.Resolved[time.Duration], error) {
+    return resolveApplicationLimit(configuration.Kernel().ScopeTeardownTimeout(), applicationConfig.ScopeTeardownTimeout, container.ScopeTeardownTimeoutRule())
+}
+
+/* resolveUnavailableRetryAfter answers the delay the key sets, then the application's field, then the default, a refusal naming the field as its siblings do; the configuration already refused a bad key naming the key */
+func resolveUnavailableRetryAfter(configuration configcontract.Configuration, applicationConfig ApplicationConfig) (time.Duration, error) {
+    limit := applicationConfig.HttpKernel.UnavailableRetryAfter
+    if keyLimit := configuration.Http().UnavailableRetryAfter(); false == keyLimit.IsAbsent() {
+        limit = keyLimit
+    }
+
+    return config.ResolveUnavailableRetryAfter(limit, config.UnavailableRetryAfterRule().Name)
+}
+
+/* refuseScopeTeardownOutlastingHttpShutdown fails an http boot whose request scope may still be closing when the shutdown's wait ends, which every stop catching a slow close would report as a scope left open and exit non-zero on. */
+func refuseScopeTeardownOutlastingHttpShutdown(configuration configcontract.Configuration, applicationConfig ApplicationConfig) error {
+    scopeTeardownTimeout, scopeTeardownTimeoutErr := resolveScopeTeardownTimeout(configuration, applicationConfig)
+    if nil != scopeTeardownTimeoutErr {
+        return scopeTeardownTimeoutErr
+    }
+
+    httpShutdownTimeout, httpShutdownTimeoutErr := resolveHttpShutdownTimeout(configuration, applicationConfig)
+    if nil != httpShutdownTimeoutErr {
+        return httpShutdownTimeoutErr
+    }
+
+    if false == scopeTeardownTimeout.Unlimited && scopeTeardownTimeout.Value < httpShutdownTimeout.Value {
+        return nil
+    }
+
+    return exception.NewError(
+        "the scope teardown timeout must stay under the http shutdown timeout",
+        exceptioncontract.Context{
+            "scopeTeardownKey":     config.ScopeTeardownTimeoutKey,
+            "scopeTeardownTimeout": scopeTeardownTimeout.Limit().String(),
+            "httpShutdownKey":      config.HttpShutdownTimeoutKey,
+            "httpShutdownTimeout":  httpShutdownTimeout.Value.String(),
+        },
+        nil,
+    )
+}
+
+func resolveApplicationLimit[T bound.Unit](keyLimit bound.Limit[T], fieldLimit bound.Limit[T], rule bound.Rule[T]) (bound.Resolved[T], error) {
+    if false == keyLimit.IsAbsent() {
+        return bound.Resolve(keyLimit, rule)
+    }
+
+    return bound.Resolve(fieldLimit, rule)
+}
+
+/* net/http arms the write timeout once, from the request line, so a streaming handler re-arms it per frame through the event-stream writer's write budget, and a client that stops reading then holds its connection until the socket buffers fill unless the handler bounds the stream */
+func applyHttpServerTimeouts(httpServer *nethttp.Server, limits httpServerLimits) {
+    httpServer.ReadTimeout = limits.readTimeout
+    httpServer.ReadHeaderTimeout = limits.readHeaderTimeout
+    httpServer.WriteTimeout = limits.writeTimeout
+    httpServer.IdleTimeout = limits.idleTimeout
+    httpServer.MaxHeaderBytes = limits.maxHeaderBytes
+}
+
+/* applyHttpServerErrorLog routes what net/http reports on its own, a connection failing before a request exists or a request rejected before any handler, into the application's journal instead of unstructured stderr. */
+func applyHttpServerErrorLog(httpServer *nethttp.Server, logger loggingcontract.Logger) {
+    httpServer.ErrorLog = logging.NewStandardErrorLogger(logger, "http server error")
+}

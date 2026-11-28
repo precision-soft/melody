@@ -1,0 +1,1783 @@
+package awss3
+
+import (
+    "context"
+    "errors"
+    "io"
+    "net/http"
+    "net/http/httptest"
+    "net/url"
+    "os"
+    "reflect"
+    "strconv"
+    "strings"
+    "sync"
+    "sync/atomic"
+    "testing"
+
+    "time"
+
+    "github.com/precision-soft/melody/v4/exception"
+
+    "github.com/minio/minio-go/v7"
+
+    "github.com/precision-soft/melody/v4/bound"
+
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
+    melodystorage "github.com/precision-soft/melody/v4/storage"
+    storagecontract "github.com/precision-soft/melody/v4/storage/contract"
+)
+
+func newRuntime() containercontract.Runtime {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    return runtime.NewRun(context.Background(), serviceContainer.NewScope())
+}
+
+func TestObjectStorage_PutGetExistsPresignDelete(t *testing.T) {
+    endpoint := os.Getenv("MINIO_ENDPOINT")
+    if "" == endpoint {
+        t.Skip("MINIO_ENDPOINT not set; skipping object storage integration test")
+    }
+
+    client, clientErr := NewClient(endpoint, Config{
+        AccessKey: os.Getenv("MINIO_ACCESS_KEY"),
+        SecretKey: os.Getenv("MINIO_SECRET_KEY"),
+        Insecure:  true,
+    })
+    if nil != clientErr {
+        t.Fatalf("client: %v", clientErr)
+    }
+
+    bucket := "melody-test"
+    if ensureErr := EnsureBucket(bucketTestRuntime(), client, bucket, EnsureBucketOptions{}); nil != ensureErr {
+        t.Fatalf("ensure bucket: %v", ensureErr)
+    }
+
+    store := NewStorage(client, bucket, StorageConfig{})
+    runtimeInstance := newRuntime()
+
+    key := "labels/awb-123.txt"
+    content := "shipping label body"
+
+    putErr := store.Put(runtimeInstance, key, strings.NewReader(content), int64(len(content)), storagecontract.PutOptions{ContentType: "text/plain"})
+    if nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    exists, existsErr := melodystorage.Exists(melodystorage.For(runtimeInstance, store), key)
+    if nil != existsErr || false == exists {
+        t.Fatalf("expected object to exist: %v %v", exists, existsErr)
+    }
+
+    object, getErr := store.Get(runtimeInstance, key, storagecontract.GetOptions{})
+    if nil != getErr {
+        t.Fatalf("get: %v", getErr)
+    }
+    loaded, _ := io.ReadAll(object.Body)
+    object.Body.Close()
+    if content != string(loaded) {
+        t.Fatalf("content mismatch: %q", string(loaded))
+    }
+
+    if "text/plain" != object.Info.ContentType || int64(len(content)) != object.Info.Size || key != object.Info.Key || "" == object.Info.EntityTag || true == object.Info.ModifiedAt.IsZero() {
+        t.Fatalf("expected the info the put declared, got %+v", object.Info)
+    }
+
+    if objectInfo, statErr := store.Stat(runtimeInstance, key, storagecontract.StatOptions{}); nil != statErr || object.Info != objectInfo {
+        t.Fatalf("expected Stat to answer the info Get answered, %+v, got %+v (%v)", object.Info, objectInfo, statErr)
+    }
+
+    presigned, presignErr := store.PresignedUrl(runtimeInstance, key, storagecontract.PresignOptions{Expiry: bound.Of(5 * time.Minute)})
+    if nil != presignErr || false == strings.Contains(presigned, key) {
+        t.Fatalf("unexpected presigned url: %q %v", presigned, presignErr)
+    }
+
+    uploadUrl, uploadPresignErr := store.PresignedUrl(runtimeInstance, key, storagecontract.PresignOptions{Method: http.MethodPut})
+    if nil != uploadPresignErr {
+        t.Fatalf("presign upload: %v", uploadPresignErr)
+    }
+
+    uploadRequest, requestErr := http.NewRequest(http.MethodPut, uploadUrl, strings.NewReader("uploaded through the link"))
+    if nil != requestErr {
+        t.Fatalf("upload request: %v", requestErr)
+    }
+
+    uploadResponse, uploadErr := http.DefaultClient.Do(uploadRequest)
+    if nil != uploadErr || http.StatusOK != uploadResponse.StatusCode {
+        t.Fatalf("expected the presigned upload accepted, got %v %v", uploadResponse, uploadErr)
+    }
+    _ = uploadResponse.Body.Close()
+
+    uploaded, uploadedGetErr := store.Get(runtimeInstance, key, storagecontract.GetOptions{})
+    if nil != uploadedGetErr {
+        t.Fatalf("get after upload: %v", uploadedGetErr)
+    }
+    uploadedContent, _ := io.ReadAll(uploaded.Body)
+    uploaded.Body.Close()
+    if "uploaded through the link" != string(uploadedContent) {
+        t.Fatalf("expected the uploaded body read back, got %q", string(uploadedContent))
+    }
+
+    if deleteErr := store.Delete(runtimeInstance, key, storagecontract.DeleteOptions{}); nil != deleteErr {
+        t.Fatalf("delete: %v", deleteErr)
+    }
+
+    existsAfter, _ := melodystorage.Exists(melodystorage.For(runtimeInstance, store), key)
+    if true == existsAfter {
+        t.Fatalf("expected object to be gone after delete")
+    }
+}
+
+func TestNormalizeObjectKey_MatchesLocalStorageContract(t *testing.T) {
+    cases := []struct {
+        input    string
+        expected string
+    }{
+        {input: "report.txt", expected: "report.txt"},
+        {input: "/report.txt", expected: "report.txt"},
+        {input: "a\\b.txt", expected: "a/b.txt"},
+        {input: "uploads/./f.txt", expected: "uploads/f.txt"},
+        {input: "uploads//f.txt", expected: "uploads/f.txt"},
+        {input: "nested/dir/file.bin", expected: "nested/dir/file.bin"},
+    }
+
+    for _, testCase := range cases {
+        normalized, err := normalizeObjectKey(testCase.input)
+        if nil != err {
+            t.Fatalf("key %q: unexpected error %s", testCase.input, err.Error())
+        }
+        if testCase.expected != normalized {
+            t.Fatalf("key %q: expected %q, got %q", testCase.input, testCase.expected, normalized)
+        }
+    }
+}
+
+func TestNormalizeObjectKey_RejectsEmptyAndDotKeys(t *testing.T) {
+    for _, input := range []string{"", "/", ".", "uploads/.."} {
+        if _, err := normalizeObjectKey(input); nil == err {
+            t.Fatalf("expected key %q to be rejected as empty or invalid", input)
+        }
+    }
+}
+
+func TestNormalizeObjectKey_RefusesAParentSegmentByName(t *testing.T) {
+    for _, input := range []string{"..", "../f.txt", "uploads/../f.txt", "tenant-b/../tenant-a/secret.txt", "tenant-b\\..\\tenant-a\\secret.txt", "a/b/.."} {
+        _, err := normalizeObjectKey(input)
+        if nil == err {
+            t.Fatalf("expected key %q to be refused", input)
+        }
+
+        if false == strings.Contains(err.Error(), `".." segment`) {
+            t.Fatalf("expected key %q to be refused by name, got %q", input, err.Error())
+        }
+    }
+
+    for _, input := range []string{"a..b/f.txt", "reports/..hidden", "f.txt.."} {
+        if _, err := normalizeObjectKey(input); nil != err {
+            t.Fatalf("expected key %q, whose dots are inside a segment, to be accepted, got %v", input, err)
+        }
+    }
+}
+
+func TestBoundedPutReader_StripsReaderAtAndCapsWhatMinioCanStore(t *testing.T) {
+    exactBody := "exactly-sized-body"
+    original := strings.NewReader(exactBody)
+    putReader := boundedPutReader(original, int64(len(exactBody)))
+
+    if _, isReaderAt := putReader.(io.ReaderAt); true == isReaderAt {
+        t.Fatalf("the reader handed to minio must not be an io.ReaderAt, or minio uploads it through a SectionReader in one shot")
+    }
+    if _, isSeeker := putReader.(io.Seeker); true == isSeeker {
+        t.Fatalf("the reader handed to minio must not be an io.Seeker, or minio takes the SectionReader optimization")
+    }
+
+    consumed, _ := io.Copy(io.Discard, putReader)
+    if int64(len(exactBody)) != consumed {
+        t.Fatalf("expected minio to read exactly %d bytes through the bounded reader, got %d", len(exactBody), consumed)
+    }
+
+    longerBody := "declared-short-but-body-is-actually-longer"
+    declared := int64(9)
+    overConsumed, _ := io.Copy(io.Discard, boundedPutReader(strings.NewReader(longerBody), declared))
+    if declared != overConsumed {
+        t.Fatalf("expected the bounded reader to cap minio's read at the declared %d bytes, got %d", declared, overConsumed)
+    }
+
+    streamed := strings.NewReader("whole")
+    if streamed != boundedPutReader(streamed, -1) {
+        t.Fatalf("expected a negative size to stream the original reader unwrapped")
+    }
+}
+
+func TestSizeCheckedReader_StopsShortOfTheDeclaredSizeWhenTheBodyIsLonger(t *testing.T) {
+    declared := int64(16)
+    checked := newSizeCheckedReader(context.Background(), "invoices/2026-07.pdf", &sequentialReader{reader: strings.NewReader(strings.Repeat("b", 64))}, declared)
+
+    yielded, readErr := io.Copy(io.Discard, checked)
+    if nil == readErr {
+        t.Fatalf("expected a body longer than the declared size to be rejected")
+    }
+    if "storage object size does not match the declared size" != readErr.Error() {
+        t.Fatalf("expected a declared size mismatch, got %q", readErr.Error())
+    }
+    if false == checked.rejected.Load() {
+        t.Fatalf("the reader must report that it rejected the body, so Put can name the size mismatch instead of the transport failure")
+    }
+    if declared <= yielded {
+        t.Fatalf("expected fewer than the declared %d bytes to reach minio so the upload stays incomplete, got %d", declared, yielded)
+    }
+}
+
+func TestSizeCheckedReader_RejectionIsReadFromAnotherGoroutineThanTheDrain(t *testing.T) {
+    checked := newSizeCheckedReader(context.Background(), "invoices/2026-07.pdf", &sequentialReader{reader: strings.NewReader(strings.Repeat("b", 64))}, 16)
+    release := make(chan struct{})
+
+    var ready sync.WaitGroup
+    var done sync.WaitGroup
+
+    ready.Add(2)
+    done.Add(2)
+
+    go func() {
+        defer done.Done()
+
+        ready.Done()
+        <-release
+
+        _, _ = io.Copy(io.Discard, checked)
+    }()
+
+    go func() {
+        defer done.Done()
+
+        ready.Done()
+        <-release
+
+        for false == checked.rejected.Load() {
+        }
+    }()
+
+    ready.Wait()
+    close(release)
+    done.Wait()
+}
+
+func TestSizeCheckedReader_YieldsAnExactlySizedBodyWhole(t *testing.T) {
+    body := strings.Repeat("b", 64)
+
+    for _, testCase := range []struct {
+        name   string
+        reader io.Reader
+    }{
+        {name: "non-seekable", reader: &sequentialReader{reader: strings.NewReader(body)}},
+        {name: "non-seekable with zero length reads", reader: &stutteringReader{remaining: body}},
+    } {
+        checked := newSizeCheckedReader(context.Background(), "invoices/2026-07.pdf", testCase.reader, int64(len(body)))
+
+        loaded, readErr := io.ReadAll(checked)
+        if nil != readErr {
+            t.Fatalf("%s: unexpected error: %s", testCase.name, readErr.Error())
+        }
+        if body != string(loaded) {
+            t.Fatalf("%s: expected the whole body, got %d bytes", testCase.name, len(loaded))
+        }
+    }
+}
+
+func TestSizeCheckedReader_StopsWhenTheContextIsDone(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    checked := newSizeCheckedReader(ctx, "invoices/2026-07.pdf", &sequentialReader{reader: strings.NewReader("an invoice body")}, 15)
+
+    if _, readErr := io.Copy(io.Discard, checked); nil == readErr {
+        t.Fatalf("expected a cancelled context to stop the body")
+    }
+}
+
+func TestSizeCheckedReader_RejectsADeclaredZeroSizeWithABodyBehindIt(t *testing.T) {
+    checked := newSizeCheckedReader(context.Background(), "invoices/2026-07.pdf", &sequentialReader{reader: strings.NewReader("x")}, 0)
+
+    if _, readErr := io.Copy(io.Discard, checked); nil == readErr {
+        t.Fatalf("expected a body behind a zero declared size to be rejected")
+    }
+}
+
+type recordedObjectRequest struct {
+    method string
+    path   string
+    body   string
+}
+
+type recordingObjectServer struct {
+    server      *httptest.Server
+    mutex       sync.Mutex
+    requestList []recordedObjectRequest
+}
+
+func newRecordingObjectServer(t *testing.T) *recordingObjectServer {
+    recorder := &recordingObjectServer{}
+
+    recorder.server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        body, _ := io.ReadAll(request.Body)
+
+        recordedBody := string(body)
+        if true == strings.HasPrefix(request.Header.Get("X-Amz-Content-Sha256"), "STREAMING-") {
+            recordedBody = decodeChunkedPutBody(recordedBody)
+        }
+
+        recorder.mutex.Lock()
+        recorder.requestList = append(recorder.requestList, recordedObjectRequest{
+            method: request.Method,
+            path:   request.URL.Path,
+            body:   recordedBody,
+        })
+        recorder.mutex.Unlock()
+
+        writer.Header().Set("ETag", "\"9a0364b9e99bb480dd25e1f0284c8555\"")
+        writer.WriteHeader(http.StatusOK)
+    }))
+
+    t.Cleanup(recorder.server.Close)
+
+    return recorder
+}
+
+func (instance *recordingObjectServer) newStorage(t *testing.T) *Storage {
+    client, clientErr := NewClient(strings.TrimPrefix(instance.server.URL, "http://"), Config{
+        AccessKey: "test",
+        SecretKey: "test",
+        Insecure:  true,
+        Region:    "us-east-1",
+    })
+    if nil != clientErr {
+        t.Fatalf("client: %s", clientErr.Error())
+    }
+
+    return NewStorage(client, "melody-test", StorageConfig{})
+}
+
+func (instance *recordingObjectServer) recorded() []recordedObjectRequest {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]recordedObjectRequest(nil), instance.requestList...)
+}
+
+/* minio signs an unencrypted put with the streaming signature, so the recorded body arrives in aws-chunked framing */
+func decodeChunkedPutBody(body string) string {
+    var payload strings.Builder
+
+    remaining := body
+
+    for {
+        headerEnd := strings.Index(remaining, "\r\n")
+        if 0 > headerEnd {
+            return payload.String()
+        }
+
+        header := remaining[:headerEnd]
+        remaining = remaining[headerEnd+2:]
+
+        sizeText := header
+        if separatorIndex := strings.Index(header, ";"); 0 <= separatorIndex {
+            sizeText = header[:separatorIndex]
+        }
+
+        chunkSize, parseErr := strconv.ParseInt(sizeText, 16, 64)
+        if nil != parseErr || 0 >= chunkSize || int64(len(remaining)) < chunkSize {
+            return payload.String()
+        }
+
+        payload.WriteString(remaining[:chunkSize])
+        remaining = remaining[chunkSize:]
+
+        if true == strings.HasPrefix(remaining, "\r\n") {
+            remaining = remaining[2:]
+        }
+    }
+}
+
+type sequentialReader struct {
+    reader io.Reader
+}
+
+func (instance *sequentialReader) Read(buffer []byte) (int, error) {
+    return instance.reader.Read(buffer)
+}
+
+type stutteringReader struct {
+    remaining string
+    stutter   bool
+}
+
+func (instance *stutteringReader) Read(buffer []byte) (int, error) {
+    if 0 == len(buffer) {
+        return 0, nil
+    }
+
+    if false == instance.stutter {
+        instance.stutter = true
+
+        return 0, nil
+    }
+
+    instance.stutter = false
+
+    if "" == instance.remaining {
+        return 0, io.EOF
+    }
+
+    buffer[0] = instance.remaining[0]
+    instance.remaining = instance.remaining[1:]
+
+    return 1, nil
+}
+
+func TestPut_RejectsADeclaredSizeShorterThanTheBodyBeforeTouchingTheBucket(t *testing.T) {
+    body := "an invoice body that is a lot longer than the declared size"
+
+    cases := []struct {
+        name   string
+        reader io.Reader
+    }{
+        {name: "seekable", reader: strings.NewReader(body)},
+        {name: "non-seekable", reader: &sequentialReader{reader: strings.NewReader(body)}},
+        {name: "non-seekable with zero length reads", reader: &stutteringReader{remaining: body}},
+    }
+
+    for _, testCase := range cases {
+        recorder := newRecordingObjectServer(t)
+        store := recorder.newStorage(t)
+
+        putErr := store.Put(
+            newRuntime(),
+            "invoices/2026-07.pdf",
+            testCase.reader,
+            12,
+            storagecontract.PutOptions{ContentType: "application/pdf"},
+        )
+        if nil == putErr {
+            t.Fatalf("%s: expected a body longer than the declared size to be rejected", testCase.name)
+        }
+        if "storage object size does not match the declared size" != putErr.Error() {
+            t.Fatalf("%s: expected a declared size mismatch, got %q", testCase.name, putErr.Error())
+        }
+
+        if recordedList := recorder.recorded(); 0 != len(recordedList) {
+            t.Fatalf("%s: a rejected put must not reach the bucket, got %v", testCase.name, recordedList)
+        }
+    }
+}
+
+func TestPut_UploadsTheWholeBodyWhenTheDeclaredSizeMatches(t *testing.T) {
+    body := "exactly-sized-invoice-body"
+
+    cases := []struct {
+        name   string
+        reader io.Reader
+    }{
+        {name: "seekable", reader: strings.NewReader(body)},
+        {name: "non-seekable", reader: &sequentialReader{reader: strings.NewReader(body)}},
+        {name: "non-seekable with zero length reads", reader: &stutteringReader{remaining: body}},
+    }
+
+    for _, testCase := range cases {
+        recorder := newRecordingObjectServer(t)
+        store := recorder.newStorage(t)
+
+        putErr := store.Put(
+            newRuntime(),
+            "/invoices/./2026-07.pdf",
+            testCase.reader,
+            int64(len(body)),
+            storagecontract.PutOptions{ContentType: "application/pdf"},
+        )
+        if nil != putErr {
+            t.Fatalf("%s: put: %s", testCase.name, putErr.Error())
+        }
+
+        recordedList := recorder.recorded()
+        if 1 != len(recordedList) {
+            t.Fatalf("%s: expected exactly one request, got %v", testCase.name, recordedList)
+        }
+        if "PUT" != recordedList[0].method || "/melody-test/invoices/2026-07.pdf" != recordedList[0].path {
+            t.Fatalf("%s: unexpected request %v", testCase.name, recordedList[0])
+        }
+        if body != recordedList[0].body {
+            t.Fatalf("%s: expected the whole body to be stored, got %q", testCase.name, recordedList[0].body)
+        }
+    }
+}
+
+func TestPut_HandlesABodyShorterThanItsDeclaredSizeAndAnEmptyBody(t *testing.T) {
+    shortRecorder := newRecordingObjectServer(t)
+    shortStore := shortRecorder.newStorage(t)
+
+    shortErr := shortStore.Put(newRuntime(), "invoices/2026-07.pdf", &sequentialReader{reader: strings.NewReader("short")}, 4096, storagecontract.PutOptions{ContentType: "application/pdf"})
+    if nil == shortErr {
+        t.Fatalf("expected a body shorter than the declared size to be refused")
+    }
+    if "object storage put failed" != shortErr.Error() {
+        t.Fatalf("expected minio to refuse the short body, got %q", shortErr.Error())
+    }
+
+    for _, testCase := range []struct {
+        name   string
+        reader io.Reader
+    }{
+        {name: "seekable", reader: strings.NewReader("")},
+        {name: "non-seekable", reader: &sequentialReader{reader: strings.NewReader("")}},
+    } {
+        recorder := newRecordingObjectServer(t)
+        store := recorder.newStorage(t)
+
+        emptyErr := store.Put(newRuntime(), "invoices/empty.pdf", testCase.reader, 0, storagecontract.PutOptions{ContentType: "application/pdf"})
+        if nil != emptyErr {
+            t.Fatalf("%s: an empty body declared as zero bytes must be stored: %s", testCase.name, emptyErr.Error())
+        }
+
+        recordedList := recorder.recorded()
+        if 1 != len(recordedList) || "" != recordedList[0].body {
+            t.Fatalf("%s: expected one empty put, got %v", testCase.name, recordedList)
+        }
+    }
+}
+
+func TestValidatedPutBody_StreamsASeekableBodyAndSpoolsOnlyWhatASmallNonSeekableOneYields(t *testing.T) {
+    body := "exactly-sized-invoice-body"
+
+    seekable := strings.NewReader(body)
+    streamed, _, streamedErr := validatedPutBody(context.Background(), "invoices/2026-07.pdf", seekable, int64(len(body)), int64(putSpoolLimitRule.Default))
+    if nil != streamedErr {
+        t.Fatalf("unexpected error: %s", streamedErr.Error())
+    }
+    if seekable != streamed {
+        t.Fatalf("a seekable body must be streamed straight to minio, not buffered")
+    }
+
+    spooled, _, spooledErr := validatedPutBody(context.Background(), "invoices/2026-07.pdf", &sequentialReader{reader: strings.NewReader("tiny")}, int64(putSpoolLimitRule.Default), int64(putSpoolLimitRule.Default))
+    if nil != spooledErr {
+        t.Fatalf("unexpected error: %s", spooledErr.Error())
+    }
+    loaded, _ := io.ReadAll(spooled)
+    if "tiny" != string(loaded) {
+        t.Fatalf("expected the spooled body to be preserved, got %q", string(loaded))
+    }
+
+    unknown := &sequentialReader{reader: strings.NewReader(body)}
+    unvalidated, _, unvalidatedErr := validatedPutBody(context.Background(), "invoices/2026-07.pdf", unknown, -1, int64(putSpoolLimitRule.Default))
+    if nil != unvalidatedErr {
+        t.Fatalf("unexpected error: %s", unvalidatedErr.Error())
+    }
+    if unknown != unvalidated {
+        t.Fatalf("an unknown length body must be streamed unvalidated")
+    }
+}
+
+func TestValidatedPutBody_LooksPastAZeroLengthRead(t *testing.T) {
+    _, _, trailingErr := validatedPutBody(context.Background(), "invoices/2026-07.pdf", &stutteringReader{remaining: "abcd"}, 3, int64(putSpoolLimitRule.Default))
+    if nil == trailingErr {
+        t.Fatalf("a zero length read must not be taken for the end of the body")
+    }
+    if "storage object size does not match the declared size" != trailingErr.Error() {
+        t.Fatalf("expected a declared size mismatch, got %q", trailingErr.Error())
+    }
+
+    exhausted, _, exhaustedErr := validatedPutBody(context.Background(), "invoices/2026-07.pdf", &stutteringReader{remaining: "abc"}, 3, int64(putSpoolLimitRule.Default))
+    if nil != exhaustedErr {
+        t.Fatalf("unexpected error: %s", exhaustedErr.Error())
+    }
+    loaded, _ := io.ReadAll(exhausted)
+    if "abc" != string(loaded) {
+        t.Fatalf("expected an exhausted stuttering body to be preserved, got %q", string(loaded))
+    }
+}
+
+type generatedBodyReader struct {
+    remaining int64
+    filler    byte
+    consumed  int64
+}
+
+func (instance *generatedBodyReader) Read(buffer []byte) (int, error) {
+    if 0 == instance.remaining {
+        return 0, io.EOF
+    }
+
+    limit := int64(len(buffer))
+    if instance.remaining < limit {
+        limit = instance.remaining
+    }
+
+    for index := int64(0); index < limit; index++ {
+        buffer[index] = instance.filler
+    }
+
+    instance.remaining -= limit
+    instance.consumed += limit
+
+    return int(limit), nil
+}
+
+type stalledBodyReader struct{}
+
+func (instance *stalledBodyReader) Read(buffer []byte) (int, error) {
+    return 0, nil
+}
+
+func TestValidatedPutBody_StreamsABodyAboveTheSpoolLimitInsteadOfHoldingItInMemory(t *testing.T) {
+    declared := int64(4 * putSpoolLimitRule.Default)
+    body := &generatedBodyReader{remaining: declared}
+
+    _, streaming, bodyErr := validatedPutBody(context.Background(), "uploads/big.bin", body, declared, int64(putSpoolLimitRule.Default))
+    if nil != bodyErr {
+        t.Fatalf("unexpected error: %s", bodyErr.Error())
+    }
+    if nil == streaming {
+        t.Fatalf("a body above the spool limit must be handed to minio as a size-checked stream, not as a spooled buffer")
+    }
+
+    if int64(putSpoolLimitRule.Default) < body.consumed {
+        t.Fatalf("a body of %d bytes must stream, %d bytes of it were drained into memory before the upload started", declared, body.consumed)
+    }
+}
+
+func TestValidatedPutBody_GivesUpOnABodyThatNeverYieldsAndNeverFails(t *testing.T) {
+    settled := make(chan error, 1)
+
+    go func() {
+        _, _, bodyErr := validatedPutBody(context.Background(), "uploads/stalled.bin", &stalledBodyReader{}, 32, int64(putSpoolLimitRule.Default))
+        settled <- bodyErr
+    }()
+
+    select {
+    case bodyErr := <-settled:
+        if nil == bodyErr {
+            t.Fatalf("expected a body that never yields and never fails to be rejected")
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("a body that legally returns (0, nil) forever was never given up on: it spins a core with no bound and no deadline")
+    }
+}
+
+func TestObjectStorage_RejectedPutPreservesTheStoredObject(t *testing.T) {
+    endpoint := os.Getenv("MINIO_ENDPOINT")
+    if "" == endpoint {
+        t.Skip("MINIO_ENDPOINT not set; skipping object storage integration test")
+    }
+
+    client, clientErr := NewClient(endpoint, Config{
+        AccessKey: os.Getenv("MINIO_ACCESS_KEY"),
+        SecretKey: os.Getenv("MINIO_SECRET_KEY"),
+        Insecure:  true,
+    })
+    if nil != clientErr {
+        t.Fatalf("client: %v", clientErr)
+    }
+
+    bucket := "melody-test"
+    if ensureErr := EnsureBucket(bucketTestRuntime(), client, bucket, EnsureBucketOptions{}); nil != ensureErr {
+        t.Fatalf("ensure bucket: %v", ensureErr)
+    }
+
+    store := NewStorage(client, bucket, StorageConfig{})
+    runtimeInstance := newRuntime()
+
+    key := "invoices/2026-07.pdf"
+    stored := strings.Repeat("original-invoice-body ", 256)
+
+    putErr := store.Put(runtimeInstance, key, strings.NewReader(stored), int64(len(stored)), storagecontract.PutOptions{ContentType: "application/pdf"})
+    if nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    replacement := strings.Repeat("replacement-body ", 64)
+
+    cases := []struct {
+        name   string
+        reader io.Reader
+    }{
+        {name: "seekable", reader: strings.NewReader(replacement)},
+        {name: "non-seekable", reader: &sequentialReader{reader: strings.NewReader(replacement)}},
+        {name: "non-seekable with zero length reads", reader: &stutteringReader{remaining: replacement}},
+    }
+
+    for _, testCase := range cases {
+        rejectedErr := store.Put(runtimeInstance, key, testCase.reader, 17, storagecontract.PutOptions{ContentType: "application/pdf"})
+        if nil == rejectedErr {
+            t.Fatalf("%s: expected a body longer than the declared size to be rejected", testCase.name)
+        }
+
+        exists, existsErr := melodystorage.Exists(melodystorage.For(runtimeInstance, store), key)
+        if nil != existsErr || false == exists {
+            t.Fatalf("%s: the stored object must survive a rejected put: %v %v", testCase.name, exists, existsErr)
+        }
+
+        object, getErr := store.Get(runtimeInstance, key, storagecontract.GetOptions{})
+        if nil != getErr {
+            t.Fatalf("%s: the stored object must survive a rejected put: %v", testCase.name, getErr)
+        }
+        loaded, _ := io.ReadAll(object.Body)
+        object.Body.Close()
+
+        if stored != string(loaded) {
+            t.Fatalf("%s: the rejected put replaced the stored object: %d bytes instead of %d", testCase.name, len(loaded), len(stored))
+        }
+    }
+
+    if deleteErr := store.Delete(runtimeInstance, key, storagecontract.DeleteOptions{}); nil != deleteErr {
+        t.Fatalf("delete: %v", deleteErr)
+    }
+}
+
+func TestObjectStorage_StreamedPutAboveTheSpoolLimitIsAllOrNothing(t *testing.T) {
+    endpoint := os.Getenv("MINIO_ENDPOINT")
+    if "" == endpoint {
+        t.Skip("MINIO_ENDPOINT not set; skipping object storage integration test")
+    }
+
+    client, clientErr := NewClient(endpoint, Config{
+        AccessKey: os.Getenv("MINIO_ACCESS_KEY"),
+        SecretKey: os.Getenv("MINIO_SECRET_KEY"),
+        Insecure:  true,
+    })
+    if nil != clientErr {
+        t.Fatalf("client: %v", clientErr)
+    }
+
+    bucket := "melody-test"
+    if ensureErr := EnsureBucket(bucketTestRuntime(), client, bucket, EnsureBucketOptions{}); nil != ensureErr {
+        t.Fatalf("ensure bucket: %v", ensureErr)
+    }
+
+    store := NewStorage(client, bucket, StorageConfig{})
+    runtimeInstance := newRuntime()
+
+    key := "uploads/large.bin"
+
+    cases := []struct {
+        name     string
+        declared int64
+    }{
+        {name: "last part shorter than the part size", declared: minioPartSize + 1024},
+        {name: "declared size on a part boundary", declared: 2 * minioPartSize},
+    }
+
+    for _, testCase := range cases {
+        putErr := store.Put(runtimeInstance, key, &generatedBodyReader{remaining: testCase.declared, filler: 'p'}, testCase.declared, storagecontract.PutOptions{ContentType: "application/octet-stream"})
+        if nil != putErr {
+            t.Fatalf("%s: put: %v", testCase.name, putErr)
+        }
+
+        if storedSize, storedFiller := storedObjectShape(t, store, runtimeInstance, key); testCase.declared != storedSize || 'p' != storedFiller {
+            t.Fatalf("%s: expected the whole %d byte streamed body to be stored, got %d bytes of %q", testCase.name, testCase.declared, storedSize, string(storedFiller))
+        }
+
+        rejectedErr := store.Put(runtimeInstance, key, &generatedBodyReader{remaining: testCase.declared + 4096, filler: 'r'}, testCase.declared, storagecontract.PutOptions{ContentType: "application/octet-stream"})
+        if nil == rejectedErr {
+            t.Fatalf("%s: expected a streamed body longer than the declared size to be rejected", testCase.name)
+        }
+        if "storage object size does not match the declared size" != rejectedErr.Error() {
+            t.Fatalf("%s: expected a declared size mismatch, got %q", testCase.name, rejectedErr.Error())
+        }
+
+        survivedSize, survivedFiller := storedObjectShape(t, store, runtimeInstance, key)
+        if testCase.declared != survivedSize || 'p' != survivedFiller {
+            t.Fatalf("%s: the rejected streamed put replaced the stored object: %d bytes of %q instead of %d bytes of \"p\"", testCase.name, survivedSize, string(survivedFiller), testCase.declared)
+        }
+    }
+
+    if deleteErr := store.Delete(runtimeInstance, key, storagecontract.DeleteOptions{}); nil != deleteErr {
+        t.Fatalf("delete: %v", deleteErr)
+    }
+}
+
+func storedObjectShape(t *testing.T, store *Storage, runtimeInstance containercontract.Runtime, key string) (int64, byte) {
+    object, getErr := store.Get(runtimeInstance, key, storagecontract.GetOptions{})
+    if nil != getErr {
+        t.Fatalf("get: %v", getErr)
+    }
+    defer object.Body.Close()
+
+    head := make([]byte, 1)
+    if _, headErr := io.ReadFull(object.Body, head); nil != headErr {
+        t.Fatalf("read stored object: %v", headErr)
+    }
+
+    tail, copyErr := io.Copy(io.Discard, object.Body)
+    if nil != copyErr {
+        t.Fatalf("read stored object: %v", copyErr)
+    }
+
+    return tail + 1, head[0]
+}
+
+type disconnectingBodyReader struct {
+    remaining   int64
+    filler      byte
+    cancelAfter int64
+    delivered   int64
+    cancel      context.CancelFunc
+}
+
+func (instance *disconnectingBodyReader) Read(buffer []byte) (int, error) {
+    if 0 == instance.remaining {
+        return 0, io.EOF
+    }
+
+    if instance.cancelAfter <= instance.delivered {
+        instance.cancel()
+
+        return 0, context.Canceled
+    }
+
+    limit := int64(len(buffer))
+    if instance.remaining < limit {
+        limit = instance.remaining
+    }
+
+    if remainingBeforeCancel := instance.cancelAfter - instance.delivered; remainingBeforeCancel < limit {
+        limit = remainingBeforeCancel
+    }
+
+    for index := int64(0); index < limit; index++ {
+        buffer[index] = instance.filler
+    }
+
+    instance.remaining -= limit
+    instance.delivered += limit
+
+    return int(limit), nil
+}
+
+func newMultipartAbortServer(t *testing.T, uploadKey string, uploadId string) *multipartAbortServer {
+    recorder := &multipartAbortServer{}
+
+    recorder.server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        query := request.URL.Query()
+
+        if http.MethodDelete == request.Method && "" != query.Get("uploadId") {
+            recorder.mutex.Lock()
+            recorder.deletedUploadIdList = append(recorder.deletedUploadIdList, query.Get("uploadId"))
+            recorder.mutex.Unlock()
+
+            writer.WriteHeader(http.StatusNoContent)
+
+            return
+        }
+
+        if _, listsUploads := query["uploads"]; true == listsUploads {
+            writer.Header().Set("Content-Type", "application/xml")
+            writer.WriteHeader(http.StatusOK)
+            _, _ = io.WriteString(writer, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"+
+                "<ListMultipartUploadsResult><Bucket>melody-test</Bucket><IsTruncated>false</IsTruncated>"+
+                "<Upload><Key>"+uploadKey+"</Key><UploadId>"+uploadId+"</UploadId></Upload>"+
+                "</ListMultipartUploadsResult>")
+
+            return
+        }
+
+        writer.WriteHeader(http.StatusOK)
+    }))
+
+    t.Cleanup(recorder.server.Close)
+
+    return recorder
+}
+
+type multipartAbortServer struct {
+    server              *httptest.Server
+    mutex               sync.Mutex
+    deletedUploadIdList []string
+}
+
+func (instance *multipartAbortServer) newStorage(t *testing.T) *Storage {
+    client, clientErr := NewClient(strings.TrimPrefix(instance.server.URL, "http://"), Config{
+        AccessKey: "test",
+        SecretKey: "test",
+        Insecure:  true,
+        Region:    "us-east-1",
+    })
+    if nil != clientErr {
+        t.Fatalf("client: %s", clientErr.Error())
+    }
+
+    return NewStorage(client, "melody-test", StorageConfig{})
+}
+
+func (instance *multipartAbortServer) deletedUploadIds() []string {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]string(nil), instance.deletedUploadIdList...)
+}
+
+func TestAbortOrphanedMultipartUpload_LeavesEvenWhenTheRequestContextIsAlreadyCancelled(t *testing.T) {
+    server := newMultipartAbortServer(t, "uploads/large.bin", "upload-id-42")
+    store := server.newStorage(t)
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    store.abortOrphanedMultipartUpload(cancelledContext, "uploads/large.bin", 40*1024*1024)
+
+    deleted := server.deletedUploadIds()
+    if 1 != len(deleted) || "upload-id-42" != deleted[0] {
+        t.Fatalf("expected the abort of upload-id-42 to reach the bucket on a cancelled request context, got %v", deleted)
+    }
+}
+
+func TestAbortOrphanedMultipartUpload_StaysQuietWhenThereIsNothingToSweep(t *testing.T) {
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    cases := []struct {
+        name string
+        ctx  context.Context
+        size int64
+    }{
+        {name: "live request context", ctx: context.Background(), size: 40 * 1024 * 1024},
+        {name: "declared size on the single-shot path", ctx: cancelledContext, size: minioPartSize},
+        {name: "empty body", ctx: cancelledContext, size: 0},
+    }
+
+    for _, testCase := range cases {
+        server := newMultipartAbortServer(t, "uploads/large.bin", "upload-id-42")
+        store := server.newStorage(t)
+
+        store.abortOrphanedMultipartUpload(testCase.ctx, "uploads/large.bin", testCase.size)
+
+        if deleted := server.deletedUploadIds(); 0 != len(deleted) {
+            t.Fatalf("%s: expected no abort request, got %v", testCase.name, deleted)
+        }
+    }
+}
+
+func TestObjectStorage_CancelledMultipartPutLeavesNoIncompleteUpload(t *testing.T) {
+    endpoint := os.Getenv("MINIO_ENDPOINT")
+    if "" == endpoint {
+        t.Skip("MINIO_ENDPOINT not set; skipping object storage integration test")
+    }
+
+    client, clientErr := NewClient(endpoint, Config{
+        AccessKey: os.Getenv("MINIO_ACCESS_KEY"),
+        SecretKey: os.Getenv("MINIO_SECRET_KEY"),
+        Insecure:  true,
+    })
+    if nil != clientErr {
+        t.Fatalf("client: %v", clientErr)
+    }
+
+    bucket := "melody-test"
+    if ensureErr := EnsureBucket(bucketTestRuntime(), client, bucket, EnsureBucketOptions{}); nil != ensureErr {
+        t.Fatalf("ensure bucket: %v", ensureErr)
+    }
+
+    store := NewStorage(client, bucket, StorageConfig{})
+
+    key := "uploads/disconnected.bin"
+
+    if removeErr := client.RemoveIncompleteUpload(context.Background(), bucket, key); nil != removeErr {
+        t.Fatalf("clear incomplete uploads: %v", removeErr)
+    }
+
+    if before := countIncompleteUploads(t, client, bucket, key); 0 != before {
+        t.Fatalf("precondition: expected no incomplete upload for %q, found %d", key, before)
+    }
+
+    declared := int64(40 * 1024 * 1024)
+
+    requestContext, cancelRequest := context.WithCancel(context.Background())
+    defer cancelRequest()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.NewRun(requestContext, serviceContainer.NewScope())
+
+    body := &disconnectingBodyReader{
+        remaining:   declared,
+        filler:      'd',
+        cancelAfter: declared / 2,
+        cancel:      cancelRequest,
+    }
+
+    putErr := store.Put(runtimeInstance, key, body, declared, storagecontract.PutOptions{ContentType: "application/octet-stream"})
+    if nil == putErr {
+        t.Fatalf("expected a put whose client disconnected mid-body to fail")
+    }
+
+    if after := countIncompleteUploads(t, client, bucket, key); 0 != after {
+        t.Fatalf("expected the cancelled multipart put to leave no incomplete upload, found %d", after)
+    }
+}
+
+func countIncompleteUploads(t *testing.T, client *minio.Client, bucket string, key string) int {
+    t.Helper()
+
+    listContext, cancelList := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancelList()
+
+    count := 0
+    for upload := range client.ListIncompleteUploads(listContext, bucket, key, true) {
+        if nil != upload.Err {
+            t.Fatalf("list incomplete uploads: %v", upload.Err)
+        }
+
+        if key == upload.Key {
+            count++
+        }
+    }
+
+    return count
+}
+
+type faultAfterPayloadReader struct {
+    payload  []byte
+    position int
+    fault    error
+}
+
+func (instance *faultAfterPayloadReader) Read(buffer []byte) (int, error) {
+    if instance.position >= len(instance.payload) {
+        return 0, instance.fault
+    }
+
+    copied := copy(buffer, instance.payload[instance.position:])
+    instance.position += copied
+
+    return copied, nil
+}
+
+func TestSizeCheckedReader_SurfacesAProbeFailureAtTheBoundaryInsteadOfFabricatingAnExactMatch(t *testing.T) {
+    fault := errors.New("transport broke at the boundary")
+    reader := newSizeCheckedReader(context.Background(), "key", &faultAfterPayloadReader{payload: []byte("abcd"), fault: fault}, 4)
+
+    payload, readErr := io.ReadAll(reader)
+
+    if "abcd" != string(payload) {
+        t.Fatalf("expected the declared bytes through, got %q", payload)
+    }
+
+    if nil == readErr || false == errors.Is(readErr, fault) {
+        t.Fatalf("expected the boundary probe failure to surface rather than read as a clean end, got %v", readErr)
+    }
+}
+
+func TestStorage_RefusesAParentSegmentAtEveryDoorBeforeTouchingTheBucket(t *testing.T) {
+    recorder := newRecordingObjectServer(t)
+    store := recorder.newStorage(t)
+    runtimeInstance := newRuntime()
+
+    key := "tenant-b/../tenant-a/secret.txt"
+
+    _, getErr := store.Get(runtimeInstance, key, storagecontract.GetOptions{})
+    _, statErr := store.Stat(runtimeInstance, key, storagecontract.StatOptions{})
+    putErr := store.Put(runtimeInstance, key, strings.NewReader("B"), 1, storagecontract.PutOptions{})
+    deleteErr := store.Delete(runtimeInstance, key, storagecontract.DeleteOptions{})
+    _, existsErr := melodystorage.Exists(melodystorage.For(runtimeInstance, store), key)
+    _, presignErr := store.PresignedUrl(runtimeInstance, key, storagecontract.PresignOptions{Expiry: bound.Of(time.Minute)})
+    _, unsupportedPresignErr := store.PresignedUrl(runtimeInstance, key, storagecontract.PresignOptions{Method: http.MethodDelete, Expiry: bound.UnlimitedDuration()})
+
+    for door, doorErr := range map[string]error{"Get": getErr, "Stat": statErr, "Put": putErr, "Delete": deleteErr, "Exists": existsErr, "PresignedUrl": presignErr, "PresignedUrl of a refused config": unsupportedPresignErr} {
+        if nil == doorErr || false == strings.Contains(doorErr.Error(), `".." segment`) {
+            t.Fatalf("expected %s of %q to be refused by name, got %v", door, key, doorErr)
+        }
+    }
+
+    if recordedList := recorder.recorded(); 0 != len(recordedList) {
+        t.Fatalf("a refused key must not reach the bucket, got %v", recordedList)
+    }
+}
+
+type erroringBodyReader struct{}
+
+func (instance erroringBodyReader) Read(buffer []byte) (int, error) {
+    return 0, errors.New("the body broke")
+}
+
+func TestValidatedPutBody_ABodyThatBreaksWhileSpooledIsRefusedAsSuch(t *testing.T) {
+    _, _, bodyErr := validatedPutBody(context.Background(), "k", erroringBodyReader{}, 3, int64(putSpoolLimitRule.Default))
+
+    var melodyErr *exception.Error
+    if false == errors.As(bodyErr, &melodyErr) || "object storage put body could not be spooled" != melodyErr.Message() {
+        t.Fatalf("expected the spool failure named, got %v", bodyErr)
+    }
+}
+
+func TestResolveStorageConfig_AnEmptyConfigTakesEveryDefault(t *testing.T) {
+    resolved, resolveErr := resolveStorageConfig(StorageConfig{})
+    if nil != resolveErr {
+        t.Fatalf("unexpected error: %v", resolveErr)
+    }
+
+    if 16*1024*1024 != resolved.putSpoolLimit || 10*time.Second != resolved.multipartAbortTimeout {
+        t.Fatalf("expected 16 MiB and 10s, got %+v", resolved)
+    }
+}
+
+func TestNewStorage_RefusesALimitOutsideItsRuleNamingTheField(t *testing.T) {
+    testCases := []struct {
+        config StorageConfig
+        field  string
+    }{
+        {StorageConfig{PutSpoolLimit: bound.Of(0)}, "StorageConfig.PutSpoolLimit"},
+        {StorageConfig{PutSpoolLimit: bound.UnlimitedCount()}, "StorageConfig.PutSpoolLimit"},
+        {StorageConfig{MultipartAbortTimeout: bound.Of(time.Duration(0))}, "StorageConfig.MultipartAbortTimeout"},
+        {StorageConfig{MultipartAbortTimeout: bound.UnlimitedDuration()}, "StorageConfig.MultipartAbortTimeout"},
+    }
+
+    for _, testCase := range testCases {
+        func() {
+            defer func() {
+                recovered := recover()
+
+                var refusal *exception.Error
+                recoveredErr, isError := recovered.(error)
+                if false == isError || false == errors.As(recoveredErr, &refusal) || testCase.field != refusal.Context()["field"] {
+                    t.Fatalf("expected a refusal naming %s, got %v", testCase.field, recovered)
+                }
+            }()
+
+            NewStorage(&minio.Client{}, "bucket", testCase.config)
+        }()
+    }
+}
+
+func TestValidatedPutBody_TheSpoolLimitDecidesBetweenSpoolingAndStreaming(t *testing.T) {
+    _, spooled, spooledErr := validatedPutBody(context.Background(), "uploads/at-limit.bin", &sequentialReader{reader: strings.NewReader(strings.Repeat("a", 1024))}, 1024, 1024)
+    if nil != spooledErr || nil != spooled {
+        t.Fatalf("expected a body at the limit to be spooled, got stream %v, error %v", spooled, spooledErr)
+    }
+
+    _, streamed, streamedErr := validatedPutBody(context.Background(), "uploads/above-limit.bin", &sequentialReader{reader: strings.NewReader(strings.Repeat("a", 1025))}, 1025, 1024)
+    if nil != streamedErr || nil == streamed {
+        t.Fatalf("expected a body above the limit to stream, got stream %v, error %v", streamed, streamedErr)
+    }
+}
+
+func TestStorage_TheMultipartAbortTimeoutBoundsTheDetachedAbort(t *testing.T) {
+    release := make(chan struct{})
+    defer close(release)
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        select {
+        case <-release:
+        case <-request.Context().Done():
+        }
+    }))
+    defer server.Close()
+
+    client, clientErr := NewClient(strings.TrimPrefix(server.URL, "http://"), Config{AccessKey: "access", SecretKey: "secret", Insecure: true, Region: "us-east-1"})
+    if nil != clientErr {
+        t.Fatalf("could not build the client: %v", clientErr)
+    }
+
+    storage := NewStorage(client, "bucket", StorageConfig{MultipartAbortTimeout: bound.Of(50 * time.Millisecond)})
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    started := time.Now()
+    storage.abortOrphanedMultipartUpload(cancelledContext, "uploads/orphan.bin", -1)
+
+    if elapsed := time.Since(started); elapsed > 2*time.Second {
+        t.Fatalf("expected the abort bounded by the 50ms window, it took %v", elapsed)
+    }
+}
+
+func TestObjectStorage_AStreamedSingleShotPutThatOverReadsLeavesTheObjectUntouched(t *testing.T) {
+    endpoint := os.Getenv("MINIO_ENDPOINT")
+    if "" == endpoint {
+        t.Skip("MINIO_ENDPOINT not set; skipping object storage integration test")
+    }
+
+    client, clientErr := NewClient(endpoint, Config{AccessKey: os.Getenv("MINIO_ACCESS_KEY"), SecretKey: os.Getenv("MINIO_SECRET_KEY"), Insecure: true})
+    if nil != clientErr {
+        t.Fatalf("client: %v", clientErr)
+    }
+
+    bucket := "melody-test"
+    if ensureErr := EnsureBucket(bucketTestRuntime(), client, bucket, EnsureBucketOptions{}); nil != ensureErr {
+        t.Fatalf("ensure bucket: %v", ensureErr)
+    }
+
+    store := NewStorage(client, bucket, StorageConfig{PutSpoolLimit: bound.Of(1024)})
+    runtimeInstance := newRuntime()
+    key := "uploads/streamed-single-shot.bin"
+    defer func() { _ = store.Delete(runtimeInstance, key, storagecontract.DeleteOptions{}) }()
+
+    original := strings.Repeat("o", 2000)
+    if putErr := store.Put(runtimeInstance, key, strings.NewReader(original), int64(len(original)), storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("seed put: %v", putErr)
+    }
+
+    if putErr := store.Put(runtimeInstance, key, &sequentialReader{reader: strings.NewReader(strings.Repeat("x", 4096))}, 3000, storagecontract.PutOptions{}); nil == putErr {
+        t.Fatal("expected a body longer than declared to fail the put")
+    }
+
+    object, getErr := store.Get(runtimeInstance, key, storagecontract.GetOptions{})
+    if nil != getErr {
+        t.Fatalf("get: %v", getErr)
+    }
+    content, _ := io.ReadAll(object.Body)
+    _ = object.Body.Close()
+
+    if original != string(content) {
+        t.Fatalf("expected the object at the key untouched, got %d bytes", len(content))
+    }
+
+    if putErr := store.Put(runtimeInstance, key, &sequentialReader{reader: strings.NewReader(strings.Repeat("y", 3000))}, 3000, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("expected the exact streamed body to go up, got %v", putErr)
+    }
+}
+
+func TestStorage_TheDetachedAbortFollowsMinioPartSizeWhateverTheSpoolLimit(t *testing.T) {
+    var requests atomic.Int64
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        requests.Add(1)
+        writer.WriteHeader(http.StatusOK)
+        _, _ = writer.Write([]byte(`<ListMultipartUploadsResult></ListMultipartUploadsResult>`))
+    }))
+    defer server.Close()
+
+    client, clientErr := NewClient(strings.TrimPrefix(server.URL, "http://"), Config{AccessKey: "access", SecretKey: "secret", Insecure: true, Region: "us-east-1"})
+    if nil != clientErr {
+        t.Fatalf("could not build the client: %v", clientErr)
+    }
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    NewStorage(client, "bucket", StorageConfig{PutSpoolLimit: bound.Of(64 << 20)}).abortOrphanedMultipartUpload(cancelledContext, "uploads/large.bin", 32<<20)
+    if 0 == requests.Load() {
+        t.Fatal("expected a cancelled put above minio's part size to be aborted although it is below the spool limit")
+    }
+
+    requests.Store(0)
+
+    NewStorage(client, "bucket", StorageConfig{PutSpoolLimit: bound.Of(1024)}).abortOrphanedMultipartUpload(cancelledContext, "uploads/small.bin", 2048)
+    if 0 != requests.Load() {
+        t.Fatalf("expected a cancelled single-request put to ask nothing of the bucket, got %d requests", requests.Load())
+    }
+}
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+type cyclicReader struct{}
+
+func (instance *cyclicReader) Read(buffer []byte) (int, error) {
+    return 0, newCyclicChainError()
+}
+
+func TestSizeCheckedReader_ReturnsOnACyclicChainFromTheBody(t *testing.T) {
+    checked := newSizeCheckedReader(context.Background(), "invoices/2026-07.pdf", &cyclicReader{}, 0)
+
+    assertReturnsOnACyclicChain(t, func() {
+        if nil == checked.endOfBody() {
+            t.Error("expected the body's failure")
+        }
+    })
+}
+
+func TestPutObjectOptions_NamesThePartSizeOfABodyOfUnknownSize(t *testing.T) {
+    if unknown := putObjectOptions(-1, "text/plain"); minioPartSize != unknown.PartSize || "text/plain" != unknown.ContentType {
+        t.Fatalf("expected a body of unknown size put in parts of %d, got %d (%q)", minioPartSize, unknown.PartSize, unknown.ContentType)
+    }
+
+    for _, size := range []int64{0, 1, minioPartSize, 10 * minioPartSize} {
+        if known := putObjectOptions(size, ""); 0 != known.PartSize {
+            t.Fatalf("expected the part size of a body of %d bytes left to minio, got %d", size, known.PartSize)
+        }
+    }
+}
+
+type scriptedObjectRequest struct {
+    method      string
+    path        string
+    rangeHeader string
+}
+
+type scriptedObjectServer struct {
+    server        *httptest.Server
+    mutex         sync.Mutex
+    requestList   []scriptedObjectRequest
+    bucketStatus  int
+    noContentType bool
+}
+
+const scriptedLastModified = "Mon, 05 Oct 2026 10:00:00 GMT"
+
+func newScriptedObjectServer(t *testing.T, headStatus int, getStatus int, body string) *scriptedObjectServer {
+    recorder := &scriptedObjectServer{}
+
+    recorder.server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        recorder.mutex.Lock()
+        recorder.requestList = append(recorder.requestList, scriptedObjectRequest{method: request.Method, path: request.URL.Path, rangeHeader: request.Header.Get("Range")})
+        bucketStatus := recorder.bucketStatus
+        noContentType := recorder.noContentType
+        recorder.mutex.Unlock()
+
+        if "/melody-test" == strings.TrimSuffix(request.URL.Path, "/") {
+            if 0 == bucketStatus {
+                bucketStatus = http.StatusOK
+            }
+            writer.WriteHeader(bucketStatus)
+
+            return
+        }
+
+        status := getStatus
+        if http.MethodHead == request.Method {
+            status = headStatus
+        }
+
+        served := body
+        if http.MethodGet == request.Method && "" != request.Header.Get("Range") {
+            offset, _ := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(request.Header.Get("Range"), "bytes="), "-"))
+            served = body[min(offset, len(body)):]
+            if http.StatusOK == status {
+                status = http.StatusPartialContent
+            }
+        }
+
+        writer.Header().Set("ETag", "\"9a0364b9e99bb480dd25e1f0284c8555\"")
+        writer.Header().Set("Last-Modified", scriptedLastModified)
+        writer.Header().Set("Content-Type", "application/pdf")
+        if true == noContentType {
+            /* a nil value keeps net/http from sniffing one */
+            writer.Header()["Content-Type"] = nil
+        }
+        if http.StatusOK == status || http.StatusPartialContent == status {
+            writer.Header().Set("Content-Length", strconv.Itoa(len(served)))
+        }
+        writer.WriteHeader(status)
+
+        if http.MethodGet == request.Method && (http.StatusOK == status || http.StatusPartialContent == status) {
+            _, _ = writer.Write([]byte(served))
+        }
+    }))
+
+    t.Cleanup(recorder.server.Close)
+
+    return recorder
+}
+
+func (instance *scriptedObjectServer) newStorage(t *testing.T) *Storage {
+    client, clientErr := NewClient(strings.TrimPrefix(instance.server.URL, "http://"), Config{
+        AccessKey: "test",
+        SecretKey: "test",
+        Insecure:  true,
+        Region:    "us-east-1",
+    })
+    if nil != clientErr {
+        t.Fatalf("client: %s", clientErr.Error())
+    }
+
+    return NewStorage(client, "melody-test", StorageConfig{})
+}
+
+func (instance *scriptedObjectServer) methods() []string {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    methodList := []string{}
+    for _, recorded := range instance.requestList {
+        methodList = append(methodList, recorded.method)
+    }
+
+    return methodList
+}
+
+func (instance *scriptedObjectServer) paths() []string {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    pathList := []string{}
+    for _, recorded := range instance.requestList {
+        pathList = append(pathList, recorded.method+" "+recorded.path)
+    }
+
+    return pathList
+}
+
+func scriptedObjectInfo(t *testing.T, key string, size int64) storagecontract.ObjectInfo {
+    modifiedAt, parseErr := time.Parse(http.TimeFormat, scriptedLastModified)
+    if nil != parseErr {
+        t.Fatalf("parse: %v", parseErr)
+    }
+
+    return storagecontract.ObjectInfo{
+        Size:        size,
+        ContentType: "application/pdf",
+        ModifiedAt:  modifiedAt,
+        EntityTag:   "9a0364b9e99bb480dd25e1f0284c8555",
+        Key:         key,
+    }
+}
+
+func TestStorage_GetAnswersTheInfoTheBucketDeclares(t *testing.T) {
+    recorder := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "%PDF-1.7 body")
+    store := recorder.newStorage(t)
+
+    object, getErr := store.Get(newRuntime(), "\\reports/report.pdf", storagecontract.GetOptions{})
+    if nil != getErr {
+        t.Fatalf("get: %v", getErr)
+    }
+
+    content, _ := io.ReadAll(object.Body)
+    _ = object.Body.Close()
+
+    if "%PDF-1.7 body" != string(content) {
+        t.Fatalf("expected the body read whole, got %q", string(content))
+    }
+
+    expected := scriptedObjectInfo(t, "\\reports/report.pdf", 13)
+    if false == expected.ModifiedAt.Equal(object.Info.ModifiedAt) {
+        t.Fatalf("expected the modification time the bucket declared, got %v", object.Info.ModifiedAt)
+    }
+    object.Info.ModifiedAt = expected.ModifiedAt
+
+    if expected != object.Info {
+        t.Fatalf("expected the info the bucket declared, %+v, got %+v", expected, object.Info)
+    }
+
+    if methodList := recorder.methods(); false == reflect.DeepEqual([]string{http.MethodHead, http.MethodGet}, methodList) {
+        t.Fatalf("expected one HEAD then one GET, got %v", methodList)
+    }
+}
+
+func TestStorage_StatSendsOneHeadAndAnswersItsHeaders(t *testing.T) {
+    recorder := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "%PDF-1.7 body")
+    store := recorder.newStorage(t)
+
+    objectInfo, statErr := store.Stat(newRuntime(), "reports/report.pdf", storagecontract.StatOptions{})
+    if nil != statErr {
+        t.Fatalf("stat: %v", statErr)
+    }
+
+    expected := scriptedObjectInfo(t, "reports/report.pdf", 13)
+    if false == expected.ModifiedAt.Equal(objectInfo.ModifiedAt) {
+        t.Fatalf("expected the modification time the bucket declared, got %v", objectInfo.ModifiedAt)
+    }
+    objectInfo.ModifiedAt = expected.ModifiedAt
+
+    if expected != objectInfo {
+        t.Fatalf("expected the info the bucket declared, %+v, got %+v", expected, objectInfo)
+    }
+
+    if methodList := recorder.methods(); false == reflect.DeepEqual([]string{http.MethodHead}, methodList) {
+        t.Fatalf("expected one HEAD and no GET, got %v", methodList)
+    }
+}
+
+func TestStorage_AnAbsentKeyAnswersObjectNotFoundAtGetAndStat(t *testing.T) {
+    recorder := newScriptedObjectServer(t, http.StatusNotFound, http.StatusOK, "")
+    store := recorder.newStorage(t)
+
+    object, getErr := store.Get(newRuntime(), "absent.pdf", storagecontract.GetOptions{})
+    if false == exception.ChainIs(getErr, storagecontract.ErrObjectNotFound) || nil != object.Body {
+        t.Fatalf("expected Get to answer ErrObjectNotFound and no body, got %v", getErr)
+    }
+
+    if _, statErr := store.Stat(newRuntime(), "absent.pdf", storagecontract.StatOptions{}); false == exception.ChainIs(statErr, storagecontract.ErrObjectNotFound) {
+        t.Fatalf("expected Stat to answer ErrObjectNotFound, got %v", statErr)
+    }
+
+    if pathList := recorder.paths(); false == reflect.DeepEqual([]string{"HEAD /melody-test/absent.pdf", "HEAD /melody-test/", "HEAD /melody-test/absent.pdf", "HEAD /melody-test/"}, pathList) {
+        t.Fatalf("expected the HEAD of the key, then one HEAD of the bucket, at each door, got %v", pathList)
+    }
+}
+
+/* a HEAD carries no body, so a 404 of a missing bucket reads as NoSuchKey to minio; the bucket asked after it tells the two apart */
+func TestStorage_AMissingBucketIsNotObjectNotFound(t *testing.T) {
+    recorder := newScriptedObjectServer(t, http.StatusNotFound, http.StatusOK, "")
+    recorder.bucketStatus = http.StatusNotFound
+    store := recorder.newStorage(t)
+
+    object, getErr := store.Get(newRuntime(), "absent.pdf", storagecontract.GetOptions{})
+    if nil == getErr || true == exception.ChainIs(getErr, storagecontract.ErrObjectNotFound) || nil != object.Body || false == strings.Contains(getErr.Error(), "bucket does not exist") {
+        t.Fatalf("expected Get refused naming the bucket, without ErrObjectNotFound, got %v", getErr)
+    }
+
+    if _, statErr := store.Stat(newRuntime(), "absent.pdf", storagecontract.StatOptions{}); nil == statErr || true == exception.ChainIs(statErr, storagecontract.ErrObjectNotFound) || false == strings.Contains(statErr.Error(), "bucket does not exist") {
+        t.Fatalf("expected Stat refused naming the bucket, without ErrObjectNotFound, got %v", statErr)
+    }
+
+    unaskable := newScriptedObjectServer(t, http.StatusNotFound, http.StatusOK, "")
+    unaskable.bucketStatus = http.StatusForbidden
+    if _, statErr := unaskable.newStorage(t).Stat(newRuntime(), "absent.pdf", storagecontract.StatOptions{}); nil == statErr || true == exception.ChainIs(statErr, storagecontract.ErrObjectNotFound) {
+        t.Fatalf("expected a bucket that cannot be asked to answer a failure, got %v", statErr)
+    }
+}
+
+func TestStorage_TheBucketIsAskedOnlyAfterANotFound(t *testing.T) {
+    for _, headStatus := range []int{http.StatusOK, http.StatusForbidden} {
+        recorder := newScriptedObjectServer(t, headStatus, http.StatusOK, "%PDF-1.7 body")
+        _, _ = recorder.newStorage(t).Stat(newRuntime(), "reports/report.pdf", storagecontract.StatOptions{})
+
+        if pathList := recorder.paths(); false == reflect.DeepEqual([]string{"HEAD /melody-test/reports/report.pdf"}, pathList) {
+            t.Fatalf("%d: expected one HEAD of the key and none of the bucket, got %v", headStatus, pathList)
+        }
+    }
+}
+
+func TestStorage_AnObjectStoredWithoutAContentTypeReadsTheStoreDefault(t *testing.T) {
+    recorder := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "%PDF-1.7 body")
+    recorder.noContentType = true
+
+    objectInfo, statErr := recorder.newStorage(t).Stat(newRuntime(), "reports/report.pdf", storagecontract.StatOptions{})
+    if nil != statErr || "application/octet-stream" != objectInfo.ContentType {
+        t.Fatalf("expected application/octet-stream, got %q (%v)", objectInfo.ContentType, statErr)
+    }
+}
+
+/* a 5xx is retried by minio for seconds, so the refusals that are no absence are read on two statuses it answers at once */
+func TestStorage_AnOutageIsNotObjectNotFound(t *testing.T) {
+    for _, headStatus := range []int{http.StatusForbidden, http.StatusBadRequest} {
+        store := newScriptedObjectServer(t, headStatus, http.StatusOK, "").newStorage(t)
+
+        object, getErr := store.Get(newRuntime(), "object.pdf", storagecontract.GetOptions{})
+        if nil == getErr || true == exception.ChainIs(getErr, storagecontract.ErrObjectNotFound) || nil != object.Body {
+            t.Fatalf("%d: expected Get refused without ErrObjectNotFound, got %v", headStatus, getErr)
+        }
+
+        if _, statErr := store.Stat(newRuntime(), "object.pdf", storagecontract.StatOptions{}); nil == statErr || true == exception.ChainIs(statErr, storagecontract.ErrObjectNotFound) {
+            t.Fatalf("%d: expected Stat refused without ErrObjectNotFound, got %v", headStatus, statErr)
+        }
+    }
+}
+
+func TestStorage_DeleteOfAnAbsentKeyAnswersNil(t *testing.T) {
+    store := newScriptedObjectServer(t, http.StatusNotFound, http.StatusNoContent, "").newStorage(t)
+
+    if deleteErr := store.Delete(newRuntime(), "absent.pdf", storagecontract.DeleteOptions{}); nil != deleteErr {
+        t.Fatalf("expected nil, got %v", deleteErr)
+    }
+}
+
+func presignedQuery(t *testing.T, presigned string) url.Values {
+    parsed, parseErr := url.Parse(presigned)
+    if nil != parseErr {
+        t.Fatalf("parse %q: %v", presigned, parseErr)
+    }
+
+    return parsed.Query()
+}
+
+func TestStorage_PresignedUrlSignsTheExpiryAsked(t *testing.T) {
+    recorder := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "")
+    store := recorder.newStorage(t)
+
+    for expected, config := range map[string]storagecontract.PresignOptions{
+        "900": {},
+        "60":  {Expiry: bound.Of(time.Minute)},
+    } {
+        presigned, presignErr := store.PresignedUrl(newRuntime(), "reports/report.pdf", config)
+        if nil != presignErr || expected != presignedQuery(t, presigned).Get("X-Amz-Expires") {
+            t.Fatalf("expected X-Amz-Expires=%s, got %q (%v)", expected, presigned, presignErr)
+        }
+    }
+
+    if methodList := recorder.methods(); 0 != len(methodList) {
+        t.Fatalf("expected signing to send no request, got %v", methodList)
+    }
+}
+
+/* minio takes no clock, so the method is read through the signature: two urls of one key and one expiry signed in one second differ only by it */
+func TestStorage_PresignedUrlSignsTheMethodAsked(t *testing.T) {
+    store := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "").newStorage(t)
+
+    for attempt := 0; attempt < 3; attempt = attempt + 1 {
+        download, downloadErr := store.PresignedUrl(newRuntime(), "reports/report.pdf", storagecontract.PresignOptions{Method: http.MethodGet})
+        upload, uploadErr := store.PresignedUrl(newRuntime(), "reports/report.pdf", storagecontract.PresignOptions{Method: http.MethodPut})
+        if nil != downloadErr || nil != uploadErr {
+            t.Fatalf("presign: %v %v", downloadErr, uploadErr)
+        }
+
+        downloadQuery := presignedQuery(t, download)
+        uploadQuery := presignedQuery(t, upload)
+        if downloadQuery.Get("X-Amz-Date") != uploadQuery.Get("X-Amz-Date") {
+            continue
+        }
+
+        if downloadQuery.Get("X-Amz-Signature") == uploadQuery.Get("X-Amz-Signature") {
+            t.Fatalf("expected the upload signed for another method than the download")
+        }
+
+        downloadQuery.Del("X-Amz-Signature")
+        uploadQuery.Del("X-Amz-Signature")
+        if false == reflect.DeepEqual(downloadQuery, uploadQuery) {
+            t.Fatalf("expected the two urls to differ by the signature only, got %v and %v", downloadQuery, uploadQuery)
+        }
+
+        return
+    }
+
+    t.Fatalf("could not sign the pair within one second")
+}
+
+func TestStorage_PresignedUrlRefusesBeforeSigning(t *testing.T) {
+    recorder := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "")
+    store := recorder.newStorage(t)
+
+    presigned, methodErr := store.PresignedUrl(newRuntime(), "reports/report.pdf", storagecontract.PresignOptions{Method: http.MethodDelete})
+    if "" != presigned || false == exception.ChainIs(methodErr, storagecontract.ErrPresignUnsupported) {
+        t.Fatalf("expected the method refused as unsupported, got %q %v", presigned, methodErr)
+    }
+
+    for name, expiry := range map[string]bound.Duration{"unlimited": bound.UnlimitedDuration(), "eight days": bound.Of(8 * 24 * time.Hour)} {
+        presigned, expiryErr := store.PresignedUrl(newRuntime(), "reports/report.pdf", storagecontract.PresignOptions{Expiry: expiry})
+        if "" != presigned || nil == expiryErr || true == exception.ChainIs(expiryErr, storagecontract.ErrPresignUnsupported) {
+            t.Fatalf("%s: expected the expiry refused, got %q %v", name, presigned, expiryErr)
+        }
+
+        if "PresignOptions.Expiry" != exception.FromError(expiryErr).Context()["field"] {
+            t.Fatalf("%s: expected the refusal to name PresignOptions.Expiry, got %v", name, exception.FromError(expiryErr).Context())
+        }
+    }
+
+    if methodList := recorder.methods(); 0 != len(methodList) {
+        t.Fatalf("expected no request, got %v", methodList)
+    }
+}
+
+func TestStorage_GetSendsTheRangeAsked(t *testing.T) {
+    recorder := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "0123456789")
+    store := recorder.newStorage(t)
+
+    object, getErr := store.Get(newRuntime(), "digits.txt", storagecontract.GetOptions{Range: storagecontract.ByteRange{Offset: 5, Length: 3}})
+    if nil != getErr {
+        t.Fatalf("get: %v", getErr)
+    }
+
+    content, _ := io.ReadAll(object.Body)
+    _ = object.Body.Close()
+
+    if "567" != string(content) || 10 != object.Info.Size {
+        t.Fatalf("expected the three bytes from the offset of an object of 10, got %q of %d", string(content), object.Info.Size)
+    }
+
+    recorder.mutex.Lock()
+    requestList := append([]scriptedObjectRequest(nil), recorder.requestList...)
+    recorder.mutex.Unlock()
+
+    if 2 != len(requestList) || http.MethodHead != requestList[0].method || http.MethodGet != requestList[1].method || "bytes=5-" != requestList[1].rangeHeader {
+        t.Fatalf("expected one HEAD then one GET from the offset, got %+v", requestList)
+    }
+
+    rangeRecorder := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "0123456789")
+    refused, refusedErr := rangeRecorder.newStorage(t).Get(newRuntime(), "digits.txt", storagecontract.GetOptions{Range: storagecontract.ByteRange{Offset: 10}})
+    if false == exception.ChainIs(refusedErr, storagecontract.ErrRangeNotSatisfiable) || nil != refused.Body {
+        t.Fatalf("expected a range at the end refused with no body, got %v", refusedErr)
+    }
+
+    if methodList := rangeRecorder.methods(); false == reflect.DeepEqual([]string{http.MethodHead}, methodList) {
+        t.Fatalf("expected no GET for a refused range, got %v", methodList)
+    }
+}
+
+func TestStorage_GetReadsTheFirstBytesOfTheObject(t *testing.T) {
+    recorder := newScriptedObjectServer(t, http.StatusOK, http.StatusOK, "0123456789")
+
+    object, getErr := recorder.newStorage(t).Get(newRuntime(), "digits.txt", storagecontract.GetOptions{Range: storagecontract.ByteRange{Length: 3}})
+    if nil != getErr {
+        t.Fatalf("get: %v", getErr)
+    }
+
+    content, _ := io.ReadAll(object.Body)
+    _ = object.Body.Close()
+
+    if "012" != string(content) || 10 != object.Info.Size {
+        t.Fatalf("expected the first three bytes of an object of 10, got %q of %d", string(content), object.Info.Size)
+    }
+
+    recorder.mutex.Lock()
+    requestList := append([]scriptedObjectRequest(nil), recorder.requestList...)
+    recorder.mutex.Unlock()
+
+    if 2 != len(requestList) || http.MethodHead != requestList[0].method || http.MethodGet != requestList[1].method || "" != requestList[1].rangeHeader {
+        t.Fatalf("expected one HEAD then one GET without a Range header, got %+v", requestList)
+    }
+}
+
+func TestStorage_GetRefusesANegativeRangeBeforeAskingTheBucket(t *testing.T) {
+    recorder := newScriptedObjectServer(t, http.StatusNotFound, http.StatusOK, "")
+    store := recorder.newStorage(t)
+
+    for name, byteRange := range map[string]storagecontract.ByteRange{"a negative offset": {Offset: -1}, "a negative length": {Length: -1}} {
+        object, getErr := store.Get(newRuntime(), "absent.pdf", storagecontract.GetOptions{Range: byteRange})
+        if nil == getErr || true == exception.ChainIs(getErr, storagecontract.ErrObjectNotFound) || nil != object.Body {
+            t.Fatalf("%s: expected the range refused, not the key found absent, got %v", name, getErr)
+        }
+
+        if "GetOptions.Range" != exception.FromError(getErr).Context()["field"] {
+            t.Fatalf("%s: expected the refusal to name GetOptions.Range, got %v", name, exception.FromError(getErr).Context())
+        }
+    }
+
+    if methodList := recorder.methods(); 0 != len(methodList) {
+        t.Fatalf("expected no request for a negative range, got %v", methodList)
+    }
+}
+
+func TestStorage_EveryDoorRefusesANilRuntimeFirst(t *testing.T) {
+    recorder := newRecordingObjectServer(t)
+    store := recorder.newStorage(t)
+
+    _, getErr := store.Get(nil, "a.txt", storagecontract.GetOptions{})
+    _, statErr := store.Stat(nil, "a.txt", storagecontract.StatOptions{})
+    _, presignErr := store.PresignedUrl(nil, "a.txt", storagecontract.PresignOptions{})
+    for door, doorErr := range map[string]error{
+        "Put":          store.Put(nil, "a.txt", strings.NewReader("x"), 1, storagecontract.PutOptions{}),
+        "Get":          getErr,
+        "Stat":         statErr,
+        "Delete":       store.Delete(nil, "a.txt", storagecontract.DeleteOptions{}),
+        "PresignedUrl": presignErr,
+    } {
+        if nil == doorErr || false == strings.Contains(doorErr.Error(), "the runtime is nil or carries no context") {
+            t.Fatalf("%s: expected the nil runtime refused, got %v", door, doorErr)
+        }
+    }
+
+    recorder.mutex.Lock()
+    defer recorder.mutex.Unlock()
+    if 0 != len(recorder.requestList) {
+        t.Fatalf("expected no request sent, got %d", len(recorder.requestList))
+    }
+}

@@ -1,0 +1,103 @@
+package httpclient
+
+import (
+    "context"
+    "net/http"
+    "net/http/httptest"
+    "testing"
+)
+
+func TestResponseHelpers_StatusClassificationAndString(t *testing.T) {
+    response := NewResponse(201, ResponseConfig{Status: "201 Created", Headers: http.Header{}, Body: []byte("ok")})
+
+    if false == response.IsSuccess() {
+        t.Fatalf("expected success")
+    }
+    if true == response.IsClientError() {
+        t.Fatalf("expected not client error")
+    }
+    if true == response.IsServerError() {
+        t.Fatalf("expected not server error")
+    }
+    if "ok" != response.String() {
+        t.Fatalf("unexpected string")
+    }
+
+    response = NewResponse(404, ResponseConfig{Status: "404 Not Found", Headers: http.Header{}, Body: []byte("no")})
+    if true == response.IsSuccess() {
+        t.Fatalf("expected not success")
+    }
+    if false == response.IsClientError() {
+        t.Fatalf("expected client error")
+    }
+
+    response = NewResponse(500, ResponseConfig{Status: "500 Internal Server Error", Headers: http.Header{}, Body: []byte("error")})
+    if false == response.IsServerError() {
+        t.Fatalf("expected server error")
+    }
+}
+
+func TestResponse_StatusHeadersAndRequestCarryWhatTheExchangeProduced(t *testing.T) {
+    requestedUrl := ""
+
+    server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        requestedUrl = request.URL.String()
+
+        writer.Header().Set("X-Budget", "17")
+        writer.WriteHeader(http.StatusCreated)
+        _, _ = writer.Write([]byte("made"))
+    }))
+    defer server.Close()
+
+    client := NewDefaultHttpClient()
+    defer client.CloseWithContext(context.Background())
+
+    response, requestErr := client.Get(testRuntime(), server.URL+"/things", RequestOptions{Query: map[string]string{"page": "2"}})
+    if nil != requestErr {
+        t.Fatalf("unexpected request error: %v", requestErr)
+    }
+
+    if "201 Created" != response.Status() {
+        t.Fatalf("expected the reason phrase the server sent, got %q", response.Status())
+    }
+
+    if "17" != response.Headers().Get("X-Budget") {
+        t.Fatalf("expected the response headers to carry the server's own, got %v", response.Headers())
+    }
+
+    if nil == response.Request() {
+        t.Fatalf("expected the response to carry the request that produced it")
+    }
+
+    if server.URL+"/things?page=2" != response.Request().URL.String() {
+        t.Fatalf("expected the request to carry the url the exchange actually reached, got %q", response.Request().URL.String())
+    }
+
+    if "/things?page=2" != requestedUrl {
+        t.Fatalf("expected the server to have been asked for the resolved url, got %q", requestedUrl)
+    }
+}
+
+func TestResponse_HeadersHandsBackTheLiveMapWhereTheStreamingSiblingClones(t *testing.T) {
+    headers := http.Header{}
+    headers.Set("X-Budget", "17")
+
+    response := NewResponse(200, ResponseConfig{Status: "200 OK", Headers: headers, Body: []byte("ok")})
+
+    response.Headers().Set("X-Budget", "mutated")
+
+    if "mutated" != headers.Get("X-Budget") {
+        t.Fatalf("expected the buffered response to hand back the live map it was given, got %q", headers.Get("X-Budget"))
+    }
+
+    streamHeaders := http.Header{}
+    streamHeaders.Set("X-Budget", "17")
+
+    streamResponse := NewStreamResponse(200, nil, StreamResponseConfig{Headers: streamHeaders.Clone()})
+
+    streamResponse.Headers().Set("X-Budget", "mutated")
+
+    if "17" != streamHeaders.Get("X-Budget") {
+        t.Fatalf("expected the streaming path's clone to keep the caller's map intact, got %q", streamHeaders.Get("X-Budget"))
+    }
+}

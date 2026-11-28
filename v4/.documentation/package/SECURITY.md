@@ -1,0 +1,696 @@
+# SECURITY
+
+The [`security`](../../security) package provides Melody’s HTTP security building blocks: firewall matching, request authentication, access control (path-based attributes), and role-based authorization.
+
+## Scope
+
+- Package: [`security/`](../../security)
+- Subpackages:
+    - [`security/contract/`](../../security/contract)
+    - [`security/config/`](../../security/config)
+
+## Subpackages
+
+- [`security/contract`](../../security/contract)\
+  Public contracts for firewalls, token sources, access decisions, and handlers.
+
+- [`security/config`](../../security/config)\
+  Builder-based configuration and compilation into a runtime-ready `security.CompiledConfiguration`.
+
+## Responsibilities
+
+- Model authentication state via `Token` implementations (`AuthenticatedToken`, `AnonymousToken`).
+- Define `Firewall` evaluation by applying `Rule` checks and resolving a request `Token` via a `TokenSource`.
+- Provide path-based access control rules (`AccessControlRule`) with deterministic match priority.
+- Provide role/attribute authorization via `AccessDecisionManager` and `Voter` implementations.
+- Provide event types and standard kernel listeners for:
+    - security context resolution (`RegisterKernelSecurityResolutionListener`)
+    - access control enforcement (`RegisterKernelAccessControlListener`) — registered as a **required** `kernel.request` listener allowed to skip the required listeners behind it (`eventcontract.ListenerConfig{Failure: eventcontract.ListenerFailureConfig{Required: true, MaySkipRequiredListeners: true}}`), so its own refusal ends the request; an answer or a refusal of another listener ahead of it ends the dispatch too, and is answered with the 500 unless that listener declares `Failure.MaySkipRequiredListeners`, as the rate limiter, the cors preflight and the firewall do; a failure of any listener ahead of it ends the dispatch and is answered with the 500, so if another listener stops event propagation or fails before it runs, the kernel fails closed rather than letting the request reach the handler with access control silently skipped; a refusal standing above that failure is answered 500 too, in every environment, the development message naming the refusal first, then the failure.
+
+Both listeners end a request with `KernelRequestEvent.Refuse`: a failed firewall check, a token source error, a failing or silent entry point, a missing decision manager, a denied decision, a missing security context or token. The kernel raises the refusal through `kernel.exception`, so an application's listener renders it like any other error (see [HTTP](HTTP.md#the-error-decision)), and with none answering it keeps its status. The answers of the firewall's own entry point and access denied handler stay responses: that rendering is the firewall's. A listener answering 200 to a refusal is fail-open by the application's own hand, and one that must not touch them inspects the status and declines.
+
+## Configuration
+
+### Compiled configuration
+
+Security is wired through a compiled configuration:
+
+- [`security.CompiledConfiguration`](../../security/compiled_configuration.go)
+- [`security.NewCompiledConfiguration`](../../security/compiled_configuration.go)
+
+The `security/config` subpackage provides the user-facing builder and the compilation entry point:
+
+- [`securityconfig.NewBuilder`](../../security/config/security_module.go)
+- [`securityconfig.Builder.BuildAndCompile`](../../security/config/security_module.go)
+- [`securityconfig.Compile`](../../security/config/compile.go)
+
+### Access control merge strategies
+
+When a firewall defines both global and local access control, `security/config` merges them according to:
+
+- [`securityconfig.AccessControlMergeStrategy`](../../security/config/security_module.go)
+    - [`AccessControlMergeLocalFirst`](../../security/config/security_module.go) — `localFirst`
+    - [`AccessControlMergeGlobalFirst`](../../security/config/security_module.go) — `globalFirst`
+    - [`AccessControlMergeOverrideOnly`](../../security/config/security_module.go) — `overrideOnly`
+
+A firewall no declared access control reaches, neither its own nor an inherited global one, under `overrideOnly`, with `FirewallOverride.GlobalAccessControlDisabled`, or under the default merge with no global control declared, would **enforce nothing behind it**: no rule would match and every request would reach its handler. `BuildAndCompile` refuses it, naming the firewall and `FirewallConfig.Override.AccessControl`; declare `FirewallOverride.AccessControl` holding a `PUBLIC_ACCESS` rule on `/` when the open firewall is meant, `NewAccessControlBuilder().AllowAnonymous("/")`, or a global control the firewall inherits.
+
+## Container integration
+
+The package defines the firewall manager service id:
+
+- [`security.ServiceFirewallManager`](../../security/service_resolver.go) (`"service.security.firewall_manager"`)
+
+Resolution helpers:
+
+- [`FirewallManagerMustFromResolver`](../../security/service_resolver.go)
+- [`FirewallManagerFromResolver`](../../security/service_resolver.go)
+
+## Match and authorization semantics
+
+### Security context resolution
+
+If a request matches a configured firewall, Melody always stores a security context in the runtime, even when token resolution fails.
+
+- Kernel listener: [`security.RegisterKernelSecurityResolutionListener`](../../security/security_resolution_listener.go)
+- Context type: [`security.SecurityContext`](../../security/security_context.go)
+- Token contract: [`securitycontract.Token`](../../security/contract/token.go)
+- Token source contract: [`securitycontract.TokenSource`](../../security/contract/token_source.go)
+- Role hierarchy contracts: [`securitycontract.RoleHierarchy`, `securitycontract.RoleHierarchyBinder`](../../security/contract/role_hierarchy.go)
+
+Token resolution outcomes:
+
+- **Authenticated token** when the resolved token returns `true == token.IsAuthenticated()` (for example [`security.AuthenticatedToken`](../../security/authenticated_token.go)).
+- **Anonymous token** when resolution returns `nil`, or when no credential was presented or the one presented failed a check (see [`security.AnonymousToken`](../../security/anonymous_token.go)).
+- **Unavailable token** when a credential was presented and the store or remote its check stands on could not answer: a token carrying [`securitycontract.AuthenticationUnavailable`](../../security/contract/token.go), such as [`security.NewUnavailableToken`](../../security/unavailable_token.go)'s. An error of `Resolve` carrying [`exception.MarkInfrastructureFailure`](../../exception/infrastructure_failure.go) is read as one, unless an http status answers outside what the mark wraps, which is kept. The resolution listener files ONE Error record for it, naming the firewall, the token source, the method and the path.
+- **Refused** when resolution returns any other error or panics, a panic carrying the mark included: the context holds an anonymous token and the request is refused on every route with the error's status, 500 for a plain one.
+
+Userland code must treat `token.IsAuthenticated()` as the canonical guard for accessing user identity or enforcing roles (or use [`security.IsGranted`](../../security/is_granted.go)).
+
+### Access control matching
+
+`accesscontrol.Control.Match(path)` — reached as `security.AccessControl` too, which aliases it — selects attributes based on the following priority:
+
+1. **Exact match** (`accesscontrol.NewExactRule`)
+2. **Prefix match** with **longest prefix wins**: `accesscontrol.NewSegmentPrefixRule` is bounded to a path SEGMENT — `/admin` governs `/admin` and `/admin/panel` but not `/administrator` — while `accesscontrol.NewRawPrefixRule` reaches across the boundary and claims `/administrator` too
+3. **Regex match** (`accesscontrol.NewRegexRule`) with **first match wins** (declaration order). The pattern is compiled **unanchored** and tested as a substring of the canonicalized path — `/public` matches `/admin/public-notes` as readily as `/public` — deliberately, mirroring the path regex of other frameworks; a rule meant to name one section must anchor itself: `^/public(/|$)`
+4. **Fallback** rule with an empty prefix (only `accesscontrol.NewRawPrefixRule("")` builds one; the segment reach refuses an empty path)
+
+A path no rule claims would reach its handler without an authorization decision: `Match` answers `false`, and the access control listener lets the request through. So `BuildAndCompile` refuses a control in which no rule claims every path, `security access control holds no rule claiming every path, …`, naming `GlobalConfig.AccessControl`, or the firewall and `FirewallConfig.Override.AccessControl` for the control a firewall enforces after the merge. The fallback is the door, never a switch: a segment or raw prefix rule on `/`, the empty raw prefix `accesscontrol.NewRawPrefixRule("", …)`, a last `^/` regex rule, or, in a firewall behind a prefix matcher, a prefix rule claiming the firewall's whole prefix. A role on it refuses what no rule names; `PUBLIC_ACCESS` keeps the rest open on purpose, stated. The global control is judged on its own, since it answers every path outside the firewalls.
+
+A rule's attributes are a conjunction: the decision manager grants a request only when every attribute of the matched rule is granted, the first refused one refusing it (`DecideAll`), so a rule naming `ROLE_A` and `ROLE_B` admits a caller who holds both, not either, where Symfony's `roles: [ROLE_A, ROLE_B]` reads either. For either-of, give both roles a common one through the role hierarchy (`ROLE_A` and `ROLE_B` each implying `ROLE_REPORTS`) and require that one.
+
+The framework's [`AccessDecisionManager`](../../security/access_decision_manager.go) is built with a named strategy, `DecisionStrategyAffirmative` (one grant), `DecisionStrategyConsensus` (more grants than denials) or `DecisionStrategyUnanimous` (no denial and one grant); `DecisionStrategyUnspecified`, the zero value, is refused at construction (`access decision strategy is missing`), and `DecideAll` and `DecideAny` answer the same refusal, `access decision strategy is missing`, `invalid access decision strategy` or `access decision manager is nil`, for a struct literal or a nil manager, so a strategy left out is never read as any strategy. An empty attribute is refused before any voter, and a vote result outside `VoteAbstain`, `VoteDenied` and `VoteGranted` refuses the decision with `security voter answered an invalid vote result`, naming the voter's position and the value, so neither `AllowIfAllAbstain` nor any strategy reads it as an abstention. Its [`AccessDecisionManagerConfig`](../../security/access_decision_manager.go) carries the two outcomes no vote decides, both refused by the zero value: `AllowIfAllAbstain` grants an attribute every supporting voter abstained on, an attribute no voter supports staying refused, and `AllowIfTied` grants a consensus whose granted and denied counts are equal and not zero, the other strategies not reading it. When a firewall has a role hierarchy, the compiler wraps the manager's role voters through `WithVoters`, which keeps the strategy and the config.
+
+The rule that decided a request is kept on the security context, [`SecurityContext.MatchedRule`](../../security/security_context.go): its `PathPrefix` names an exact or prefix rule and is empty for a regex rule, whose `Pattern` names it instead; `Matching` answers the mode, which tells an exact rule from a segment or raw prefix over the same path; `Rule` answers the rule as the control compiled it, its path folded and its attributes trimmed, and `RuleIndex`, `Source` and `Firewall` where it was declared.
+
+Every rule path begins with a slash: `admin` could never match the canonicalized request path, so the exact, segment and raw constructors refuse it at declaration (`access control rule path must begin with a slash`), and so do `Require` and `AllowAnonymous`. For the same reason a path carrying an empty, `.` or `..` segment, `//admin` or `/x/../admin`, is refused (`access control rule path must be canonical`), since the request path is matched cleaned. A raw prefix rule refuses a trailing slash as well: stored without it, `/api/` would claim `/api-internal`, so the reach is declared instead, a segment prefix rule or the raw prefix without the slash. A `Rule` carries its attributes only when a constructor built it, and `NewControl` refuses the zero `Rule`.
+
+The matcher folds the request path (`//admin`, `/x/../admin`) to its canonical spelling before matching. The fold alone would not be sufficient — the router matches the path as sent — which is why the http kernel refuses a non-canonical request path before anything routes or authorizes it (`requestPathIsCanonical`); the matcher's own fold and trim remain, but they are not a defence on their own: they make the matcher answer for the folded spelling where the router serves the sent one, in either direction — the trimmed `/public ` was answered with the public rule of `/public` while the router carried it to a protected catch-all handler — so a caller consulting `AccessControl` without the kernel's guard must refuse a non-canonical or whitespace-padded path itself. The path the listener hands the matcher, and the one the firewall path matcher reads, is the spelling the router matched — [`RequestPathAsRouted`](../../http/router_utility.go), where an encoded separator stays inside its
+segment — not the decoded `URL.Path`: decoded, `/public%2F` read `/public/` and was folded onto the public rule of `/public` while the router served the catch-all handler behind it. This ordering is validated by tests in [`security/access_control_test.go`](../../security/access_control_test.go).
+
+### A store that cannot answer
+
+An unavailable token is not authenticated, so code that never heard of it fails closed. Access control reads the capability before `IsAuthenticated()`, on the matched rule only:
+
+| Request | Matched rule | Answer |
+|---|---|---|
+| credential, store down | protected | `503 service unavailable` with `Retry-After`; `security.authorization.denied` with reason `authentication_unavailable`; the entry point is not consulted |
+| authenticated, a voter's or the decision manager's store down | protected | `503 service unavailable` with `Retry-After`; `security.authorization.denied` with reason `authorization_unavailable`; the access denied handler is not consulted |
+| credential, store down | `PUBLIC_ACCESS`, or no rule | served; the handler reads a not-authenticated token and may ask [`security.AuthenticationUnavailableCause`](../../security/unavailable_token.go) |
+| no credential or a bad one | protected | the entry point, or `401`, as before |
+| a marked error inside an http status, `NewHttpError(429, {Cause: marked})` | any | that status: the application's own answer is kept; a status beneath the mark, a store's own, is not served |
+
+The refusal carries [`security.ErrAuthenticationUnavailable`](../../security/unavailable_token.go) and the cause in its chain, so a `kernel.exception` listener recognises it; it is marked logged, since the resolution listener filed the cause. `Retry-After` is the firewall's `UnavailableRetryAfter`, a `bound.Duration` on `securityconfig.GlobalConfig`, `securityconfig.FirewallOverride` (absent inherits the global one) and `security.CompiledFirewallConfig`: 5s when left out, 1s to 1h in whole seconds, unlimited refused, each refusal at `SetGlobal`, `AddFirewall`, `Compile` and `NewCompiledFirewall` naming the field. A token that says both unavailable and authenticated is refused, not served. The body says `service unavailable`; the cause is rendered in debug mode only.
+
+A decision that could not be made is the same outage one step later. A voter whose decision reads a store answers the store's error from [`Vote`](../../security/contract/voter.go), reading the store through the runtime it is handed, and the framework's `AccessDecisionManager` reads it: the error ends the decision whatever the strategy, since a missing vote cannot be counted as an abstention, marked unless it answers a `4xx`, the voter's own refusal, or is already marked, so a fault or an outage, a `5xx` or no status, answers `503`; `DecideAny` grants on any attribute granted and otherwise answers the first error `exception.AnswersUnavailable` reads as unavailable before the `403`, any other error being the `403`. The framework's manager refuses a nil runtime, a typed nil one and one carrying no context before the attribute list is read and before any voter, with `the runtime is nil or carries no context`, a plain error refused as a denial; a done context is not judged there, since a role decision stays decidable, and a voter reading a store answers the store's error. `AuthenticatorManager.Authenticate` and `Firewall.Check` refuse such a runtime the same way before their first authenticator or rule, the manager answering no authenticator used. When `DecideAll` answers an error `exception.AnswersUnavailable` reads as unavailable, a custom decision manager's included, access control files one Error record naming the firewall, the method and the path, none when the cause was already filed, and refuses with the firewall's `503` and `Retry-After`, reason `authorization_unavailable` and [`security.ErrAuthorizationUnavailable`](../../security/unavailable_token.go) in the chain. An unmarked error is a denial, answered through the access denied handler as before.
+
+The mark is [`exception.MarkInfrastructureFailure`](../../exception/infrastructure_failure.go), the one every layer uses: the security machinery reads it as the unavailable token and answers with the firewall's delay, and a marked error that reaches the error renderer from outside security, an application's storage, cache or handler, is answered `503` with the kernel's delay, `ApplicationConfig.HttpKernel.UnavailableRetryAfter` or `MELODY_HTTP_UNAVAILABLE_RETRY_AFTER`, 5s when left out (see [HTTP.md](HTTP.md)).
+
+### Role checks
+
+`IsGranted(runtimeInstance, role)` checks for a resolved `SecurityContext` token in the runtime and returns whether the token has the requested role.
+
+- [`IsGranted`](../../security/is_granted.go)
+
+## Usage
+
+The example below demonstrates a typical Melody application flow:
+
+- a module contributes security configuration via `application.SecurityModule`;
+- a single firewall matches all `/admin` requests;
+- authentication is resolved from an API key header;
+- access control requires `ROLE_ADMIN` for `/admin` and allows anonymous access to `/`.
+
+```go
+package main
+
+import (
+    "errors"
+
+    applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/security"
+    securityconfig "github.com/precision-soft/melody/v4/security/config"
+    securitycontract "github.com/precision-soft/melody/v4/security/contract"
+)
+
+type apiKeyLoginHandler struct{}
+
+func (instance *apiKeyLoginHandler) Login(
+    runtimeInstance containercontract.Runtime,
+    request httpcontract.Request,
+    input securitycontract.LoginInput,
+) (*securitycontract.LoginResult, error) {
+    _ = runtimeInstance
+    _ = request
+
+    if nil == input.Token {
+        return nil, errors.New("token is required")
+    }
+
+    return &securitycontract.LoginResult{
+        Token:    input.Token,
+        Response: nil,
+    }, nil
+}
+
+type apiKeyLogoutHandler struct{}
+
+func (instance *apiKeyLogoutHandler) Logout(
+    runtimeInstance containercontract.Runtime,
+    request httpcontract.Request,
+    input securitycontract.LogoutInput,
+) (*securitycontract.LogoutResult, error) {
+    _ = runtimeInstance
+    _ = request
+    _ = input
+
+    return &securitycontract.LogoutResult{Response: nil}, nil
+}
+
+type adminSecurityModule struct{}
+
+func (instance *adminSecurityModule) Name() string {
+    return "example.security"
+}
+
+func (instance *adminSecurityModule) Description() string {
+    return "example security module"
+}
+
+func (instance *adminSecurityModule) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
+    _ = kernelInstance
+}
+
+func (instance *adminSecurityModule) RegisterSecurity(builder *securityconfig.Builder) {
+    matcher := security.NewSegmentPrefixMatcher("/admin")
+
+    authenticator := security.NewApiKeyHeaderAuthenticator("secret", security.ApiKeyHeaderAuthenticatorConfig{
+        UserIdentifier: "system",
+        Roles:          []string{"ROLE_ADMIN"},
+    })
+
+    authenticatorManager := security.NewAuthenticatorManager([]securitycontract.Authenticator{
+        authenticator,
+    })
+
+    tokenSource := security.NewAuthenticatorTokenSource(
+        authenticatorManager,
+        security.AuthenticatorTokenSourceConfig{},
+    )
+
+    accessControl := securityconfig.NewAccessControlBuilder().
+        Require("/admin", []string{"ROLE_ADMIN"}).
+        AllowAnonymous("/").
+        Build()
+
+    roleVoter := security.NewRoleVoter()
+    accessDecisionManager := security.NewAccessDecisionManager(
+        securitycontract.DecisionStrategyAffirmative,
+        []securitycontract.Voter{roleVoter},
+        security.AccessDecisionManagerConfig{},
+    )
+
+    builder.SetGlobal(securityconfig.GlobalConfig{
+        AccessControl:         accessControl,
+        AccessDecisionManager: accessDecisionManager,
+    })
+
+    builder.AddFirewall(
+        "admin",
+        matcher,
+        tokenSource,
+        securityconfig.FirewallConfig{
+            Login:  securityconfig.LoginConfig{Path: "/login", Handler: &apiKeyLoginHandler{}},
+            Logout: securityconfig.LogoutConfig{Path: "/logout", Handler: &apiKeyLogoutHandler{}},
+        },
+    )
+}
+
+var _ applicationcontract.HttpModule = (*adminSecurityModule)(nil)
+```
+
+### Sign-in and sign-out doors
+
+A firewall serves a door it declares itself, on `kernel.request`, once its token source resolved and before access control: `POST /login` under the firewall above reaches `apiKeyLoginHandler.Login` with no route and no access rule involved. A firewall that declares no door behaves as if the path were any other.
+
+- **Declaration.** [`LoginConfig`](../../security/config/login_config.go) and [`LogoutConfig`](../../security/config/login_config.go) are declared by `Path` and `Handler` together; each refusal below panics at boot naming the field. The path is literal and canonical, `"/"` first, read as the router reads it, so `/login/` and `/login` are one door. `Methods` is `POST` when left out and refuses a safe method, since a state change on one is forgeable by a link; the refusal has no door, by design, a sign-out on `GET` included: an image tag on another site signs the visitor out, and a legacy link to it is served by a `GET` route of the application's own that renders a form posting to the door. `TargetPath` is `/` when left out and refuses anything but a path within the application.
+- **No route stands on a door's path.** Every route a request on that path could reach, literal, parametrized or catch-all, whatever its method, host or scheme, is reported at boot. A `GET` on the path answers what any path with no route answers, so the sign-in page lives elsewhere: page `/login`, door `/login/check`.
+- **The door is named.** `Name` is `security.<firewall>.login` or `.logout` when left out, and the door is a route definition no handler answers: the url generator, the route manifest, `debug:router` and openapi read it, `Attributes` such as `ExposedRouteAttributes` included, and `Router.Match` answers no handler for it, only its name and attributes on the door's own path and methods.
+- **Reach.** A door its own firewall's prefix does not claim, or one an earlier firewall's prefix claims, is refused at boot, since the first matching firewall wins. Over any other matcher the reach is not known and the boot warning `security.firewallDoorReachUnknown` says so; a request the door did not serve is an ordinary 404.
+- **The limiter.** A login door declares a `Limiter`, so credential guessing is bounded per key; a door without one is refused at `AddFirewall` naming `FirewallConfig.Login.Limiter`. `LimiterDisabled` declares the door unmetered on purpose, when a limiter in front of the application meters it; it is refused beside a `Limiter` or a `LimiterConfig`, naming `FirewallConfig.Login.LimiterDisabled`.
+- **Order at the login door.** The forgery check, so a forged sign-in is refused before it spends any of the client's budget; its session load and its read of the form, bounded by the door's body cap, therefore run before `Limiter` too, so a sign-in the token check refuses is answered `403` and is not metered; `Limiter`, unless `LimiterDisabled`, meters the door's own requests through the same decision as [`RegisterRateLimitRequestListener`](../../http/middleware/rate_limit_listener.go); without an `Authenticator`, the source's unavailable token refused; the session read; with an `Authenticator`, the `Authenticator` and the session rotation; `Handler`; the token it returns published on the security context; the answer.
+- **The authenticator.** With an [`Authenticator`](../../security/contract/authenticator.go) the door reads the credentials, rotates the session id before `Handler` writes the identity and hands the retired id over as `LoginInput.PreviousSessionId`. Without one `Handler` receives the token source's token and rotates itself, through [`http.RegenerateRequestSession`](../../http/session.go); an unavailable token is refused before `Handler` with the firewall's `503` and `Retry-After`, and no event, since the handler would answer "invalid credentials" for a credential nobody could check. `Supports` answering false and an unauthenticated token are refused credentials: `401 invalid credentials` and `security.login.failure`. A second factor refused is the same. A second factor refused on a locked account raises `security.login.failure` too and is `429 too many attempts` with the lockout's `Retry-After` and `ErrSecondFactorLocked` as its cause. A second factor not presented, a [`TwoFactorPending`](../../security/contract/two_factor.go) token, is `401` with [`ErrSecondFactorRequired`](../../security/login_door_listener.go) as its cause and no event, since nothing failed. Any other authenticator error is refused as it stands and raises `security.login.failure` only when it answers `401` or `403`, a refused credential, so a malformed request, a fault or an outage counts as no failed attempt; a failed dispatch of the event keeps the status and is filed as one Error record, at the door, at its `Handler` and in `AuthenticatorTokenSource` alike. A second factor not yet presented, an error carrying `ErrSecondFactorRequired`, raises none. Report refused credentials as an unauthenticated token, or as an error answering `401` or `403`. An authenticator that could not check the credential, an error carrying [`exception.MarkInfrastructureFailure`](../../exception/infrastructure_failure.go) with no http status in its chain or a token carrying `securitycontract.AuthenticationUnavailable`, is refused with the firewall's `503` and `Retry-After` before the session rotation, and the door files ONE Error record naming the firewall, the door, the method and the path, none when the cause was already filed. A `Handler` returning a marked error is refused the same way, after the rotation, the rotated session ended, and raises no `security.login.failure`. Any other `Handler` error is refused as it stands and raises `security.login.failure` only when it answers `401` or `403`. The token always answers `503`; a marked error keeps an http status that answers outside what the mark wraps.
+- **The session at the doors.** The sign-in door reads the request's session through [`http.RequestSession`](../../http/request_session.go) before its `Authenticator` and its `Handler`, and the logout door reads it before its `Handler`. A session its storage could not load or rotate, an error [`exception.AnswersUnavailable`](../../exception/infrastructure_failure.go) reads as unavailable, is refused with the firewall's `503` and `Retry-After`, reason `session_unavailable` and [`session.ErrSessionUnavailable`](../../session/manager.go) in the chain, before the `Authenticator`, so no credential is checked, no second factor is spent and no `security.login.failure` is raised, and before the logout `Handler`, so nothing is cleared and the client is told to come back. A door without an `Authenticator` whose `Handler` returns the session rotation's error, or whose token source answers the unavailable token for a session it could not read, is refused the same way. Any other session error is refused as it stands, a `500`. The outage is filed once: by the read for a load, by the door for a rotation. Under the opt-in empty session of [SESSION.md](SESSION.md), the empty session a read answers is refused the same way at both doors, since a sign-in has nowhere to put the identity and a sign-out cannot end what the storage cannot reach; a token source that reads the session answers [`NewUnavailableToken`](../../security/unavailable_token.go) with [`session.SessionUnavailableCause`](../../session/unavailable_session.go)'s cause, so a protected route answers `503` and does not send a signed-in visitor to sign in.
+- **The logout door.** `Handler` runs with the request's token, anonymous when nobody signed in, which is served too. Once it returned the door ends the request's session, whether or not the handler did, and any session the handler rotated or published, and publishes the anonymous token. A handler's error keeps the session and raises `security.logout.failure` with it. The entry is deleted at the end of the request, and the door raises its outcome after the delete, through [`http.OnSessionPersisted`](../../http/session_persisted_callback.go): `security.logout.success` once the delete landed, or no entry was named, and `security.logout.failure` with the delete's error when it did not. A delete the storage could not answer, or the storage timeout cut, replaces the response with `503` and `Retry-After` and keeps the cookie, so the client's retry ends the session still stored and raises the one success, and any other failed delete answers `500` with the cookie expired (see [HTTP.md](HTTP.md)). A `security.logout.success` listener's failure answers its error, the session ended and the cookie expired; a `security.logout.failure` listener's failure is logged, so the storage's answer and its `Retry-After` stand.
+- **The answer.** A `Response` from the handler is served. With none, an html client is redirected to `TargetPath`, and any other gets `200 {"authenticated":true}` at the login door and `204` at the logout door. No request parameter chooses the redirect: a handler that wants one validates it and answers its own [`RedirectResponse`](../../http/response.go), which refuses an external target by panic.
+- **Refusals.** A refusal goes through [`KernelRequestEvent.Refuse`](../../http/kernel_event.go), so an application's `kernel.exception` listener renders it, and access control stands aside; a limiter's `OnLimitExceeded` that answers a response is served as it is. A refused sign-in ends the session rotated for it, by the door behind an `Authenticator` or by a `Handler` that rotated itself, so a `security.login.success` listener's failure leaves no signed-in session behind. A session read or rotation whose storage could not answer refuses the door `503` with the firewall's `Retry-After` before `Handler`, with no sign-in event, and a limiter whose store could not answer refuses `503` with the kernel's `Retry-After`, without its `OnLimitExceeded`.
+- **Cross-site requests.** Each door runs the firewall's [forgery check](#cross-site-request-forgery) first, before `Limiter` at the login door: a request stating another origin is refused `403` without a session cookie and on a stateless firewall too, since a sign-in is where a credential is exchanged; then the rule a route meets. `CsrfDisabled` turns it off for one door, and `TrustedOrigins` admits a named origin.
+
+| Symfony (from memory, not checked against its source) | Here |
+|---|---|
+| `form_login.check_path`, `login_path` | `Login.Path`; the page is an ordinary route |
+| the authenticator of the firewall | `Login.Authenticator` |
+| the success handler, `default_target_path` | `Login.Handler`, `Login.TargetPath`; no `_target_path` |
+| `session_fixation_strategy: migrate` | the door rotates when it authenticated |
+| `logout: { path, target, invalidate_session }` | `Logout{Path, TargetPath}`, the session always ended |
+| `enable_csrf` | the firewall's forgery check, a masked synchronizer token where the browser states no origin |
+
+### Cross-site request forgery
+
+Every firewall checks the requests it matches and no door answered, on `kernel.request`, after its token source and before access control, so a public route and one no rule matches are checked too. The check reads what the browser states, `Sec-Fetch-Site` first, else `Origin` against the request's scheme and `Host`, and the token only where the browser states nothing.
+
+| step | the request | outcome |
+|---|---|---|
+| 0 | the firewall's mode is `CsrfModeDisabled`, the route's `Protection.CsrfDisabled` is set, or the firewall's token source answers `Stateless()` true | passes |
+| 1 | a safe method, `GET`, `HEAD`, `OPTIONS` or `TRACE`, exactly | passes |
+| 2 | no session cookie presented | passes |
+| 3 | the browser states another origin, not in `TrustedOrigins` | `403 cross-site request refused`, reason `csrf_cross_site` |
+| 4 | the browser states the same origin, or a trusted one, in `CsrfModeOrigin` | passes |
+| 5 | anything else: the session holds nothing but the csrf secret | passes |
+| 6 | the token, from the header, else the field of a urlencoded body, verifies | passes; else `403 csrf token refused`, reason `csrf_token_missing` or `csrf_token_invalid` |
+
+A session the storage cannot answer at step 5 is refused `503` with the firewall's `Retry-After`, reason `session_unavailable`. Every `403` carries [`security.ErrCsrfRefused`](../../security/csrf.go) in its chain, `reason`, `firewallName`, `csrfMode`, `fetchSite` and `origin` in its context, never the token, and is answered the same in every environment.
+
+- **Modes.** [`CsrfConfig`](../../security/csrf.go) on `GlobalConfig.Csrf`, inherited field by field by `FirewallConfig.Csrf` ([`FirewallCsrfConfig`](../../security/config/security_module.go)): `Mode` is `CsrfModeOrigin` when left out, `CsrfModeToken` asks the token of a same-origin request too, `CsrfModeDisabled` checks nothing; `HeaderName` is `X-CSRF-Token` and `FieldName` `_csrf_token` when left out; `TrustedOrigins` are `scheme://host[:port]` origins read as the request's own, nil inheriting the global list and an empty one trusting none. No `.env` key exists: the doors are Go.
+- **The token.** [`http.CsrfToken(request)`](../../http/csrf.go) answers a masked token of the session's secret, 32 random bytes kept under `http.SessionKeyCsrf` (`_csrf`), issued on the first call; every answer is another text that verifies, so the token does not leak through a compressed page. [`http.VerifyCsrfToken`](../../http/csrf.go) checks one, [`http.RotateCsrfToken`](../../http/csrf.go) drops the secret, and [`http.RegenerateRequestSession`](../../http/session.go) drops it at the sign-in.
+- **The token route.** `FirewallConfig.Csrf.TokenPath`, opt-in, serves `GET` (and `HEAD`) on that literal path before access control: `200 {"token":"…"}` with `Cache-Control: no-store`. It is published as a third door, `security.<firewall>.csrfToken` unless `TokenName` says otherwise, so a route on its path fails the boot. A token path on a firewall that checks nothing is refused at boot.
+- **The doors.** route `RouteOptions.Protection.CsrfDisabled`, refused on a route that serves only safe methods; door `LoginConfig.CsrfDisabled` and `LogoutConfig.CsrfDisabled`, `CompiledFirewallConfig.LoginCsrfDisabled` and `LogoutCsrfDisabled` on a firewall compiled by hand; firewall `FirewallConfig.Csrf.Mode: security.CsrfModeDisabled`; global `GlobalConfig.Csrf.Mode: security.CsrfModeDisabled`; the narrow door `TrustedOrigins`; by declaration a token source answering `Stateless()` true.
+- **The field is read through the request's form read.** Only when the token is asked (step 6), the header is absent and the body is urlencoded does the check call `request.Post()`, which parses the urlencoded body of every method that is not safe, `DELETE` and any extension method included, the very set the check guards, at priority 50 before access control, bounded by the route's [body cap](HTTP.md#request-body-limits); a body past the cap or one that does not parse is refused with the read's own `413` or `400`, not `403`, since it is malformed before it is forged. A stateless firewall, a safe method, a cookie-less request, a request carrying the header and one stating its own origin in `CsrfModeOrigin` never read the body.
+- **A multipart body is never read.** A form that uploads sends the token in the header, or passes on the browser's statement in `CsrfModeOrigin`; a plain html multipart form that must work in `CsrfModeToken` sets `Protection.CsrfDisabled` on its route and calls `http.VerifyCsrfToken` on the token part its handler read, put first in the form, so an upload is not buffered before authorization.
+- **Not covered.** A request no firewall matches; a credential the browser attaches that is not the session cookie, Basic authentication, a client certificate or a cookie of the application's own, on a firewall whose source reads it.
+- **Behind a proxy.** The origin is compared with the `Host` the application received and the scheme the [forwarded-headers policy](HTTP.md#forwarded-headers-and-trusted-proxies) resolved: a proxy that rewrites `Host` makes every browser write cross-site, so keep the `Host` or list the public origin in `TrustedOrigins`.
+
+### Token authentication (stateless Bearer)
+
+For stateless APIs, [`BearerTokenSource`](../../security/bearer_token_source.go) extracts an `Authorization: Bearer <token>` header and delegates validation to a pluggable [`TokenValidator`](../../security/contract/token_validator.go). Two validators ship in the package:
+
+- [`JwtTokenValidator`](../../security/jwt_token_validator.go) — verifies HS256 JWTs against the keys of a [`JwtKeySet`](../../security/contract/jwt_key_set.go) (stdlib only, no external dependency), checks `exp`/`nbf`, and maps the subject and roles claims to [`Claims`](../../security/contract/token_validator.go). The `exp` (expiry) claim is **required by default** — a token without `exp` is rejected unless `JwtConfig{AllowWithoutExpiry: true}` is set, so a missing expiry never silently yields a non-expiring token. Out-of-range or non-finite `exp`/`nbf`/`iat` `NumericDate` values are rejected as malformed rather than saturating on the int64 conversion. A token with an empty, absent, or non-string subject is rejected (it must never authenticate as the empty principal `""`). A future `iat` is refused by default; `JwtConfig.AllowFutureIssuedAt` is the door that accepts it (RFC 7519 treats `iat` as informational). A `JwtConfig.RevocationEpochStore` reads a revocation boundary per user and device, and `AllowFutureIssuedAt` beside it is refused at construction, since the boundary is measured on `iat` and
+  a future one would outlive it; a typed-nil store is refused. A fractional `iat` is read rounded down, so a token issued inside the second a boundary was drawn in is refused by it. The header `typ` must be absent or `JWT` (case-insensitive) — any other type is refused, which is the domain separation from the internal-auth envelope's own `typ` under a shared or reused secret. [`NewJwtSecretKeySet(secret, JwtSecretKeySetConfig{})`](../../security/jwt_secret_key_set.go) is the key set of one shared secret: it refuses a secret shorter than `JwtSecretKeySetConfig.MinimumSecretLength` at construction, naming the argument `secret` and the length, never the value, a `bound.Count` of 32 bytes when left out, the length of the hash RFC 7518 section 3.2 asks of an HS256 key, at least 32, unlimited refused, keeps its own copy of the secret and answers its one key whatever `kid` a token names. The validator verifies the time claims against `JwtConfig.Clock` (nil means the system clock; inject a frozen clock in tests), and takes `Leeway` as a `bound.Duration` of 5s when left out, `bound.Of(time.Duration(0))` for strict, at most 5m, unlimited refused, which widens the `exp`, `nbf` and `iat` checks, and `RevocationEpochSkew` as a `bound.Duration` of 0 when left out, unlimited refused, which widens the revocation boundary; a negative value of either is refused at construction naming the field, since it would narrow every time window or the boundary instead of widening it. Under a `RevocationEpochStore` the leeway widens neither the boundary nor the future check of `iat`, which tolerates the skew and the claim's one-second resolution alone: a token an ahead issuer stamped before a revocation carries an `iat` past the boundary, so tolerating more than the boundary was widened by would let it outlive the revocation. Set the skew to the clock difference of the issuers. With the secret key set, self-contained; no per-request lookup.
+
+- [`OpaqueTokenValidator`](../../security/opaque_token_validator.go) — looks the token up in a [`TokenStore`](../../security/contract/token_store.go), so tokens are revocable (a stored token with an empty subject is rejected). [`InMemoryTokenStore`](../../security/in_memory_token_store.go) ships for tests/dev; the `integrations/rueidis` `NewTokenStore` is a production Redis-backed [`RevocableTokenStore`](../../security/contract/token_store.go) (the `TokenStore` lookup interface plus `Put`/`Delete`/`DeleteByUser`/`PurgeExpired`, every door taking the caller's runtime first and answering an error: a store that could not answer is marked with `exception.MarkInfrastructureFailure`, a runtime whose context is already done is refused marked on both stores, a refused argument is not; a revocation that must outlive the request runs on a runtime whose context is `context.WithoutCancel` of the request's, through the store bound again to that runtime, see [Bound token store](#bound-token-store)), keeping the full revocation surface behind the interface so the firewall wiring is identical. Behind a load balancer use the Redis store: the in-memory store is per-process, so a token issued or revoked on one instance is invisible to the others (revocation would not take effect cluster-wide). A revocation is a boundary, not a walk: [`RevokeBefore(runtime, userIdentifier, instant, RevocationOptions)`](../../security/contract/token_store.go) publishes one instant for a user, or, through `RevocationOptions.DeviceIdentifier`, for one device of a
+  user, and every later lookup refuses a token issued before the later of the two. That is what `DeleteByUser` cannot give — it walks the user index with `SSCAN`, which does not promise to return a member added while the walk is in progress, so a token issued during the revocation survives it; treat `DeleteByUser` as cleanup and `RevokeBefore` as the thing that ends sessions. A device identifier that is not valid UTF-8 is refused by both stores, at `Put` naming `Claims.DeviceIdentifier` and at `RevokeBefore` naming `RevocationOptions.DeviceIdentifier`, as the user identifier is: the redis store keeps the claims as json, which rewrites an invalid byte, so a boundary written under the raw device would never meet its tokens. The instant a token is compared against is `Claims.IssuedAt`, stamped by the store on every write, so a token stored before revocation epochs existed carries none and is refused as soon as a boundary exists for its user. Run `PurgeExpired` on a schedule from a single instance (e.g. a cron command) rather than from every instance — Redis expires the token keys natively; the purge only reconciles the user index. `Put` takes the ttl as a [`bound.Duration`](../../bound) read against the contract's `TokenTtlRule()`: both stores refuse an absent ttl and one under a second, naming the ttl, so a caller whose computed remaining lifetime has already elapsed fails loudly instead of storing the token forever, and `bound.UnlimitedDuration()` is the deliberate spelling of
+  "no expiry". On the in-memory store a revocation boundary is NEVER dropped because its user holds no stored tokens (stateless JWTs are validated against boundaries without ever being stored); `InMemoryTokenStoreConfig.RevocationEpochRetention` bounds their life, 7 days when left out, the Redis store's default, at least 1s, and `bound.UnlimitedDuration()` keeps them until the process exits, the safe reading when token lifetimes are not bounded. `InMemoryTokenStoreConfig.SweepInterval` drops the lapsed and the revoked stored tokens from a write (`Put`, `Delete`, `DeleteByUser`, `RevokeBefore`) once the interval has passed since the last sweep, 1m when left out, at least 1s since each sweep walks every stored token under the store's lock, `bound.UnlimitedDuration()` leaving it to `PurgeExpired`. The sweep keeps every revocation boundary; only `PurgeExpired` drops one past `RevocationEpochRetention`. `InMemoryTokenStoreConfig.MaxEntries` bounds the tokens stored at once, 100,000 when left out, at least 1, `bound.UnlimitedCount()` for a store bounded by its tokens' lifetimes alone: at the ceiling, after the lapsed and the revoked tokens are swept, a `Put` of a token the store does not hold is refused with `ErrTokenStoreFull`, marked as an infrastructure failure, so the issue door answers `503` with `Retry-After` and no live token is evicted; `RevokeBefore` is never refused at the ceiling. A store failure during lookup answers the unavailable token, `503` with `Retry-After` on a protected route, told apart from the anonymous token and the routine Info a bad token earns. An application's own validator or enricher reaches the same branch by returning its outage through [`exception.MarkInfrastructureFailure`](../../exception/infrastructure_failure.go); an unmarked error is anonymous and filed at Info, and [`exception.IsInfrastructureFailure`](../../exception/infrastructure_failure.go) reads the mark. Roles enrichment runs only via the bearer source's enricher, not the validator. `Put` and `RevokeBefore` refuse a user or a device identifier longer than `InMemoryTokenStoreConfig.MaxIdentifierBytes`, the Redis store's `TokenStoreConfig.MaxIdentifierBytes` its twin: 255 bytes when left out, at least 1, `bound.UnlimitedCount()` for identifiers the application bounds itself, the refusal naming the identifier's field and its length, never its bytes; `RevocationEpoch` refuses no identifier and answers, for one no write could have stored, the user's boundary alone.
+
+A missing or refused token resolves to an anonymous token, so the firewall's entry point decides the response; a store that cannot answer is the unavailable token and its `503`. [`JsonEntryPoint`](../../security/json_entry_point.go) (401) and [`JsonAccessDeniedHandler`](../../security/json_access_denied_handler.go) (403) return JSON instead of redirecting — set them globally for pure-API apps.
+
+```go
+func (instance *apiSecurityModule) RegisterSecurity(builder *securityconfig.Builder) {
+    validator := security.NewJwtTokenValidator(
+        security.NewJwtSecretKeySet([]byte(jwtSecret), security.JwtSecretKeySetConfig{}),
+        security.JwtConfig{},
+    )
+
+    builder.SetGlobal(securityconfig.GlobalConfig{
+        AccessControl:         accessControl,
+        RoleHierarchy:         roleHierarchy,
+        AccessDecisionManager: accessDecisionManager,
+        EntryPoint:            security.NewJsonEntryPoint(security.JsonEntryPointConfig{}),
+        AccessDeniedHandler:   security.NewJsonAccessDeniedHandler(),
+    })
+
+    builder.AddFirewall(
+        "api",
+        security.NewSegmentPrefixMatcher("/api"),
+        security.NewBearerTokenSource(validator, security.BearerTokenSourceConfig{}),
+        securityconfig.FirewallConfig{},
+    )
+}
+```
+
+The example application wires a stateless `/secure` firewall (`config/security.go`), a protected handler (`handler/secure/me_handler.go`), and a demo JWT minting command (`cli/auth_token_command.go`, `auth:token`). A stateless firewall must be registered before a broader catch-all firewall, since the first matching firewall wins.
+
+#### Key sets
+
+[`NewJwtTokenValidator(keySet, config)`](../../security/jwt_token_validator.go) takes the key set as its first argument, a nil or typed-nil one refused naming the argument `keySet`. Per token the validator refuses an `alg` other than `HS256` ([`JwtAlgorithmHs256`](../../security/jwt_token_validator.go)) and a refused `typ` before the set is asked — one algorithm, no door, by design: an algorithm the token names is the confusion `alg: none` and an RSA key read as an HMAC secret came from, so another algorithm is another `securitycontract.TokenValidator` behind `NewBearerTokenSource`, never a widened list — then asks [`VerificationKeys(runtimeInstance, JwtKeyQuery{KeyId, Algorithm})`](../../security/contract/jwt_key_set.go) under the request's runtime, with the header's `kid` (`""` when absent) and `alg`, and tries each answered key in the order answered, a key only under the algorithm it names, so a token cannot choose how its key is used. A set that answers no key of the token's algorithm says the key is not known: the token is refused, `jwt key is not known` naming the `keyId`, and the request is anonymous, `401` on a protected route. A set that answers an error could not be asked: the refusal is marked with `exception.MarkInfrastructureFailure`, so the bearer source answers the unavailable token, `503` with `Retry-After`. `JwtConfig.MaxCandidateKeys` bounds the keys one token is tried against, 8 when left out, at least 1, unlimited refused: a set answering more is refused as a failure of the set, marked, naming `keys` and `maximum`. A key of the token's algorithm whose secret is shorter than 32 bytes, an empty one included, verifies nothing: the token is refused as a failure of the set, marked, naming the argument `keySet`, the `keyId` and the length, never the value, as `HmacTokenSource` judges a custom provider's secret. A rotating or remote key source implements `securitycontract.JwtKeySet`.
+
+#### Bound token store
+
+[`BoundTokenStore`](../../security/bound_token_store.go) is an `EpochRevocableTokenStore` bound to one runtime: its seven doors, `Lookup`, `Put`, `Delete`, `DeleteByUser`, `PurgeExpired`, `RevokeBefore` and `RevocationEpoch`, take no runtime and run under the bound one. Bind once at the top of a handler, a command or a listener and call it as often as needed; the view is a value of that request, run or delivery, never kept in a service or a field, and the wiring generator refuses a constructor argument of its type.
+
+```go
+boundStore := security.TokenStoreFromRuntime(runtimeInstance, rueidis.ServiceTokenStore)
+if putErr := boundStore.Put(tokenString, claims, bound.Of(time.Hour)); nil != putErr {
+    return nil, putErr
+}
+
+/* a compensation that must outlive the request binds again over a detached runtime */
+detachedRuntime := runtime.WithContext(runtimeInstance, context.WithoutCancel(runtimeInstance.Context()))
+deleteErr := security.TokenStoreFor(detachedRuntime, boundStore.TokenStore()).Delete(tokenString)
+```
+
+`TokenStoreFor(runtimeInstance, store)` binds a store a service holds and allocates nothing; `TokenStoreFromRuntime(runtimeInstance, serviceName)` resolves the store the application registered under its own name, the framework registering none, and panics on a name nothing registered as `runtime.MustFromRuntime` does. `Runtime()` and `TokenStore()` answer the two halves, for a callee that binds something else to the runtime or the store to another runtime. A zero view, or one over a nil or typed-nil store, refuses every door with `token store instance is nil`; a nil runtime is refused by the store itself. A store that implements only one half of the composed contract is called through that contract.
+
+#### Resolving roles after validation (enrichment hook)
+
+When the token only carries an opaque scope (e.g. a tenant/application identifier) and the real roles live in a database, implement the generic [`TokenEnricher`](../../security/contract/token_enricher.go) and hand it to [`NewBearerTokenSource`](../../security/bearer_token_source.go) as `BearerTokenSourceConfig.Enricher`, left out for none. It runs **after** the signature is validated and turns the token's `Claims.Scope` into the final roles/attributes. The library ships only the interface and the wiring — any tenant- or product-specific resolution lives in your enricher, keeping the security package generic. An enrichment error is not propagated to the handler: it falls back to an anonymous token (the firewall then decides the response), logged at Info as a routine rejection, or, when its cause chain carries the package's infrastructure mark, answers the unavailable token, `503` with `Retry-After` on a protected route — mark a directory that could not answer, which is the failure that degrades every bearer at once.
+
+The enriched [`AuthenticatedToken`](../../security/authenticated_token.go) carries the resolved `Scope()` and `Attributes()` alongside `Roles()` (both accessors return defensive copies), so attribute-based access control downstream can read the tenant/attribute data the enricher attached — not only the roles.
+
+To feed the enricher, the JWT validator can copy an object claim into `Claims.Scope` via `JwtConfig.ScopeClaim`:
+
+```go
+validator := security.NewJwtTokenValidator(
+    security.NewJwtSecretKeySet([]byte(jwtSecret), security.JwtSecretKeySetConfig{}),
+    security.JwtConfig{ScopeClaim: "scope"}, // copies the `scope` object claim into Claims.Scope
+)
+
+// scopeRoleEnricher resolves roles from the token scope (here, a static map;
+// in a real app this would be a database lookup keyed by Claims.Scope).
+source := security.NewBearerTokenSource(validator, security.BearerTokenSourceConfig{Enricher: scopeRoleEnricher{}})
+```
+
+`Claims` exposes generic `Scope` and `Attributes` maps for this purpose; the library assigns no meaning to their keys.
+
+### Internal service-to-service authentication (HMAC)
+
+For machine-to-machine calls between trusted services, [`HmacTokenSource`](../../security/hmac_token_source.go) verifies an HMAC-signed envelope carried on the `X-Melody-Internal-Auth` header and resolves it to the *calling service* as the principal. The matching client helper is [`HmacEnvelopeSigner`](../../security/hmac_signer.go). The envelope binds the call to its method, path and query string, an issued/expiry window, a single-use nonce, and a hash of the request body, so a captured envelope cannot be replayed against another route, after expiry, twice, or with a tampered body or query. Replay is rejected by a pluggable [`NonceGuard`](../../security/contract/nonce_guard.go) (defaults to an in-process [`MemoryNonceGuard`](../../security/memory_nonce_guard.go); supply a shared guard such as the Redis-backed [`rueidis.NewNonceGuard`](../../../integrations/rueidis/v4/nonce_guard.go) for multi-instance deployments, so a nonce replayed against a different instance is still detected).
+The envelope signs under its own header `typ` (`melody-internal`), which the decoder requires and the JWT validator refuses — the structural separation between the two HS256 credentials, so their safety no longer rests on the secrets merely happening to differ. Signer and verifier stamp and measure on injectable clocks (`HmacEnvelopeSignerConfig.Clock`, `HmacTokenSourceConfig.Clock`; nil means the system clock), the verifier hands its clock to the in-process nonce guard it defaults, and a nonce-guard failure answers the unavailable token — a shared guard's backend going down answers every internal caller `503` with `Retry-After` at once, and the resolution listener's Error record is where the incident surfaces, while a forged or expired envelope stays anonymous at Info. A query-string mismatch journals the parameter names with every value redacted. The signed path is the spelling the router matched — each segment decoded on its own, a separator encoded inside a segment kept as `%2F`, in upper case whatever case the request line used — so a
+caller signs `/files/café` for `/files/caf%C3%A9` and `/files/a%2Fb` for the one-segment resource `a/b`. A request whose segment decodes to a literal `%2F` (sent as `%252F`) is refused: its routed spelling is the encoded separator's, and no envelope can say which of the two resources it names.
+
+Five `HmacTokenSourceConfig` knobs tune the verifier; the zero value of each is its default. **`MinimumSecretLength`** is the fewest bytes a secret the provider resolves may hold, a `bound.Count` of 32 when left out, at least 32, unlimited refused: a shorter secret verifies nothing, the envelope answers the unavailable token, since the caller's credential may be sound and the server cannot check it, and the provider's misconfiguration is journaled at Error as an infrastructure failure naming the key id, never the secret. [`NewStaticHmacSecretProvider`](../../security/hmac_secret_provider.go) refuses such a key at construction through `HmacKeyRing.MinimumSecretLength`, and [`HmacEnvelopeSigner`](../../security/hmac_signer.go) refuses one through `HmacEnvelopeSignerConfig.MinimumSecretLength`, at construction for the current key and at `Sign` for a key a provider rotates to, so the per-envelope check is what holds a custom provider to the floor. **`MaxFutureExpiry`** caps how far in the future an envelope's expiry may sit (measured from the verifier's clock): the nonce guard remembers each nonce until its envelope expires and the `Leeway` passes, so without a cap a holder of a valid secret could mint far-future-expiry envelopes and pin unbounded memory in an in-process guard. It is a `bound.Duration` of 1h when left out, at least 1s, and unlimited is refused; tighten it (for example a few minutes above the signer's `Ttl`, itself 30s when left out, at least 1s) on multi-instance deployments. **`Leeway`** tolerates clock skew on the issued and expiry checks, a `bound.Duration` of 5s when left out, `bound.Of(time.Duration(0))` for strict, at most 5m, unlimited refused; the nonce guard remembers a nonce for the leeway too, since an envelope past its expiry by less than the leeway is still honoured and must still be refused as a replay. The in-process [`MemoryNonceGuard`](../../security/memory_nonce_guard.go) is built from a `MemoryNonceGuardConfig`: `MaxEntries` bounds the nonces it remembers, 100,000 when left out, and at the ceiling a new nonce is refused as the guard's error, which the verifier answers as the unavailable token, never evicting a live nonce into replayability; `PurgeInterval` is the sweep cadence, 1s; `Clock` nil is the system clock. A [`NonceGuard`](../../security/contract/nonce_guard.go) takes the ttl of `Remember` as a `bound.Duration` read against `NonceTtlRule()`: at least 1ms, the residual lifetime of an envelope presented in its last second, with an absent and an unlimited ttl refused as the error. **`VerifyBodyBeforeNonce`** selects the order of the body and nonce checks. When `false` (the default) the nonce is consumed before the body is read, so a captured valid envelope can force at most one body buffering — but an on-path party who replays the header with a mutated body burns the nonce and fails the legitimate request as a replay. When `true` the body hash is verified first, so a body mismatch is rejected without consuming the nonce, at
+the cost of letting a captured envelope force body buffering until it expires. Flip the configured default for one route with `RouteOptions.Protection.HmacCheckOrder` ([`HmacCheckOrderNonceFirst` or `HmacCheckOrderBodyFirst`](../../http/contract/route_option.go)), which wins in either direction; `HmacCheckOrderInherited`, the zero value, keeps the source's. **`ServiceIdentity`** binds an envelope to its intended callee: set it to this service's own name and the verifier rejects any envelope whose signed `Audience` (set by the caller via [`HmacEnvelopeSignerConfig.Audience`](../../security/hmac_signer.go)) does not equal it, so a shared caller's envelope captured en route to one service cannot be replayed against a sibling service that trusts the same caller and serves the same endpoint. Both ends default empty and the audience is then not checked (backward compatible); once the callee sets it, callers must sign a matching audience.
+
+The signed payload optionally carries an **originating actor** (F1) via [`Actor`](../../security/actor.go) / [`AuthenticatedToken.OnBehalfOf()`](../../security/authenticated_token.go), so service B authorizes and audits the call as the upstream user/client that started it, without that user re-authenticating to B. Read it back with [`ActorFromToken`](../../security/actor.go).
+
+**Key-id ↔ application binding (trust model).** Each key id is issued to **exactly one application**. The secret provider ([`NewStaticHmacSecretProvider`](../../security/hmac_secret_provider.go), built from an `HmacKeyRing{CurrentKeyId, Keys}` whose entries are `HmacKey{Application, Secret}`) records that binding, the [`HmacApplicationRegistry`](../../security/hmac_application_registry.go) maps an application to the roles its verified principal receives, and the verifier **refuses an envelope whose key id is not bound to the application it claims**. This is what stops a holder of one valid secret from claiming a higher-privileged application (and forging an arbitrary actor): a secret is only ever as privileged as the single application its key id is issued to. Because the key id is attacker-visible, the binding only isolates applications when their secret material is distinct, so `NewStaticHmacSecretProvider` rejects the same secret bytes registered under key ids belonging to different applications. Every door of [`HmacSecretProvider`](../../security/hmac_secret_provider.go) takes the caller's runtime first, every door of `HmacApplicationRegistry` the caller's runtime, and both answer an error beside the lookup: `false` says the key id or the application is unknown and refuses the envelope, anonymous, while an error says the provider could not answer, and the verifier answers the unavailable token, `503` with `Retry-After` on a protected route; the verifier hands the provider and the registry the same request runtime. [`NewHmacEnvelopeSigner(runtimeInstance, secrets, application, config)`](../../security/hmac_signer.go), `application` the caller's own name it signs for, is built at boot, inside a container provider registered `BuiltAtBoot`, under the runtime `resolver.Runtime()` answers, with `BootFailure: container.BootFailureFailsBoot` over a static provider, where every refusal is configuration, and with the default mode over a provider that reaches a secret store, where an outage is a boot warning and the first resolution builds the signer again; it asks any provider under that runtime for its current key and fails fast at construction when that key is missing, shorter than the floor or not bound to the application it signs for, or when the provider cannot answer; `Sign(runtime, method, path, body, security.SignOptions{Actor: actor})` hands the provider the caller's runtime, judges the binding again whenever the current key id changes, and returns a provider that could not answer marked as an infrastructure failure. Rotate by issuing a
+second key id bound to the same application, rolling `CurrentKeyId` to it, then retiring the old key id once every caller has moved.
+
+**The wire key stays `app`.** The signed envelope carries the application under the json field `app` although the Go names say `Application`: a fleet upgrades service by service, and a third-major signer must verify on a fourth-major verifier and back. The wire format is frozen across majors; the Go spelling is not.
+
+The embedded actor stays self-asserted: an *authenticated* application is trusted to state who it acts on behalf of, exactly as it is trusted with its own secret. Binding the application identity bounds actor forgery to what each application is already trusted to assert — keep one key id per application and rotate the shared secrets like any other credential.
+
+### Two-factor authentication (TOTP)
+
+The [`security/totp`](../../security/totp) subpackage implements RFC 6238 TOTP with stdlib crypto only: [`GenerateSecret`](../../security/totp/totp.go) returns an unpadded base32 secret, [`Verify`](../../security/totp/totp.go) checks a code at `Options.Clock` (nil means the system clock) accepting the configured step skew on either side, [`OtpauthUri`](../../security/totp/totp.go) builds the `otpauth://` enrollment URI an authenticator app consumes (typically rendered as a QR code), and [`GenerateCodeAt`](../../security/totp/totp.go) renders the code of an instant for a client or a test. The zero [`Options`](../../security/totp/totp.go) is the interoperable default: `Period` 30s, at least 1s and at most 24h in whole seconds; `Digits` 6, from 6 to 8; `Skew` 1 step, 0 for the current step alone, at most 10. Each is a [`bound`](../../bound) limit, unlimited is refused on all three, and a value outside its range is answered as the error of `Verify`, `GenerateCodeAt`, `OtpauthUri` and `Options.Resolve`, naming the field, where the third major clamped it. [`GenerateRecoveryCodes`](../../security/totp/totp.go) produces single-use recovery codes formatted `xxxxx-xxxxx` (the caller stores them encrypted and removes each on use).
+
+[`TotpSecondFactorAuthenticator`](../../security/totp_second_factor_authenticator.go) decorates any primary [`Authenticator`](../../security/contract/authenticator.go), so it slots into the existing `AuthenticatorManager` unchanged: when the primary credential is accepted and the user has an enrollment in the application-supplied [`TwoFactorEnrollmentStore`](../../security/contract/two_factor.go), a valid code on the `X-2FA-Code` header (configurable via `CodeHeaderName`) is additionally required. A missing, invalid, or replayed code yields a non-authenticated [`TwoFactorPendingToken`](../../security/two_factor_pending_token.go) — read the awaiting principal with [`PendingUserFromToken`](../../security/two_factor_pending_token.go) to prompt for a code instead of treating the request as anonymous. An invalid or replayed code, or a recovery code the store refused, yields the rejected form ([`NewTwoFactorRejectedToken`](../../security/two_factor_pending_token.go), `SecondFactorRejected()`
+true through the optional [`TwoFactorRejection`](../../security/contract/two_factor.go) door): `AuthenticatorTokenSource` dispatches `security.login.failure` for it, carrying `security second factor rejected`, and dispatches nothing for a code not yet supplied, which is the ordinary challenge, nor for an authenticator that could not check the credential: a marked error or an unavailable token, answered as [a store that cannot answer](#a-store-that-cannot-answer). An enrollment lookup, a recovery redemption or a replay guard that fails returns its error marked with `exception.MarkInfrastructureFailure`, so a sign-in during an outage is `503` with `Retry-After` on a protected route and at the door, and served on a public route, where it was `500` everywhere. A store that does not implement `TwoFactorRecoveryStore` ignores the recovery header, so a recovery code sent to it answers that plain challenge. An accepted code is single-use within its validity window through the same [`NonceGuard`](../../security/contract/nonce_guard.go) contract the HMAC source uses (`ReplayGuard`, defaulting to an
+in-process guard — supply a shared one for multi-instance deployments). The authenticator verifies on `TotpSecondFactorAuthenticatorConfig.Clock` (nil means the system clock — inject a frozen clock for deterministic tests), copying it into the `Totp` config it hands `totp.Verify` and into the in-process replay guard it defaults; a `Totp.Clock` set in its config is refused naming `TotpSecondFactorAuthenticatorConfig.Totp.Clock`, so no clock is silently overridden, and a `Totp` config outside its ranges is refused at construction, naming the field.
+
+**Throttle.** Every presented factor, a TOTP code or a recovery code, is counted per account BEFORE it is verified, in one atomic step, so concurrent guesses can not all read a count below the allowance. Past `MaxFailedAttempts` (5 by default, at least 1) inside `LockoutWindow` (5m by default, at least 1s, unlimited refused; a fixed window opened by the first presented factor and never extended), the factor is refused unread, a right one included, as the locked token of [`NewTwoFactorLockedToken`](../../security/two_factor_pending_token.go): `SecondFactorLocked()` is true and `SecondFactorRetryAfter()` the window's remainder rounded up to a whole second, the whole window when the store can not say. The login door and `AuthenticatorTokenSource` answer it `429 too many attempts` with that `Retry-After`, [`ErrSecondFactorLocked`](../../security/login_door_listener.go) as its cause and `reason: second_factor_locked` ([`ReasonSecondFactorLocked`](../../security/login_door_listener.go)) in its context, after dispatching `security.login.failure`; on a firewall whose source is `AuthenticatorTokenSource` the request is refused on every route, a public one included, since it carried a factor for a locked account. The same status in every environment. An accepted factor resets the count; a reset that fails never undoes the sign-in, it is one Warning record and the count lapses with its window. A request with no factor, an account not enrolled and a primary that refused count nothing. The count lives in `FailedAttemptStore` ([`securitycontract.FailedAttemptStore`](../../security/contract/failed_attempt_store.go)); nil is a [`CacheFailedAttemptStore`](../../security/cache_failed_attempt_store.go) over the application's cache (`service.cache`), so it is shared between replicas exactly when that cache is: the in-process default is per process. The counter's key is [`DefaultFailedAttemptKeyPrefix`](../../security/cache_failed_attempt_store.go) (`melody:2fa:failed:`) and the sha-256 of the account, so no identifier is written into the key space; beside it a second key (`FailedAttemptDeadlineKeySuffix`, `:until`) holds the window's deadline, written by the count that opens the window, since a cache counter answers its count and not its ttl. The two writes are not atomic: a deadline the opening count could not write refuses that sign-in `503`, a deadline missing for any reason (evicted, not landed yet) answers the whole window as `Retry-After`, and the count stands either way. A cache `Clear` forgets every count, and the in-memory backend may evict a counter past its `MaxItems`. A store that fails refuses the factor `503` with the firewall's `Retry-After`, fail closed: there is no fail-open door. Whoever holds the password can keep the account's owner out for the window; [`ResetFailedAttempts`](../../security/totp_second_factor_authenticator.go) is the administrator's unlock. `MaxFailedAttempts: bound.UnlimitedCount()` turns the throttle off for one authenticator and nothing is counted, for an application whose own throttle fronts it; there is no environment key, since the application builds its authenticators.
+
+A **single-use recovery code** can stand in for a TOTP code when the enrollment store also implements the optional [`TwoFactorRecoveryStore`](../../security/contract/two_factor.go) (`RedeemRecoveryCode`): a code supplied on the `X-2FA-Recovery-Code` header (configurable via `RecoveryHeaderName`, deliberately distinct from the TOTP header) is redeemed and **atomically consumed by the store**, so each recovery code authenticates at most once. The store owns the atomicity of the check-and-consume (a transaction or a conditional update) — the authenticator records no replay-guard entry for a recovery code, relying on consumption for single use. A store that does not implement the interface simply leaves recovery unavailable; TOTP verification is unaffected. A recovery code shares the TOTP code's count (the throttle above).
+
+```go
+// enrollmentStore is application-owned: FindTotpSecret(runtime, userIdentifier);
+// it also implements TwoFactorRecoveryStore to accept recovery codes
+secondFactor := security.NewTotpSecondFactorAuthenticator(primaryAuthenticator, enrollmentStore, security.TotpSecondFactorAuthenticatorConfig{})
+
+token, authenticateErr := secondFactor.Authenticate(runtimeInstance, request)
+
+if pendingUser, pending := security.PendingUserFromToken(token); true == pending {
+    // primary credential accepted — prompt pendingUser for a TOTP code
+}
+```
+
+### Impersonation (switch user)
+
+[`ImpersonationTokenSource`](../../security/impersonation_token_source.go) decorates any [`TokenSource`](../../security/contract/token_source.go): when the request carries the `X-Switch-User` header (configurable via `HeaderName`), the inner token is authenticated and holds the switch role (defaults to `securitycontract.RoleAllowedToSwitch`), and the application-supplied [`ImpersonatedUserResolver`](../../security/contract/impersonation.go) resolves the target to an authenticated token, the result is an [`ImpersonationToken`](../../security/impersonation_token.go) whose visible principal (identifier, scope, attributes) is the impersonated user. A request without the header, a caller that is not authenticated, or one without the switch role keeps its own token; once the caller holds the switch role, a resolver error or a target that is unknown or not authenticated answers an anonymous token rather than the caller's broader one, and the denial is logged; a resolver error carrying the infrastructure mark answers the unavailable token instead. An unavailable inner token is passed through untouched. Its [`Stateless`](../../security/contract/token_source.go) answers its inner source's, the switch header being one the caller writes.
+
+The switch role is read through the hierarchy of the firewall holding the source: `Compile` hands each firewall's effective hierarchy, its own or the global one, to a source carrying [`securitycontract.RoleHierarchyBinder`](../../security/contract/role_hierarchy.go), so an admin who holds `ROLE_ALLOWED_TO_SWITCH` only through the hierarchy may switch, and a firewall without a hierarchy reads the token's own roles. `ImpersonationTokenSourceConfig.RoleHierarchy` decides over the bind when it is set. One source holds one hierarchy: a source held by firewalls with different ones, a firewall without any included, is refused at `Compile` naming both firewalls unless that field is set, and hierarchies are compared by identity, so two equal values built apart are different. A decorator around the source forwards `BindRoleHierarchy`, or the source reads the raw roles behind it, and so does a source in a firewall compiled by hand through `NewCompiledFirewall`, which binds nothing; both set the field.
+
+[`ImpersonationRoleMode`](../../security/impersonation_token.go) selects whose roles the token authorizes with: `RoleModeImpersonated` (the default, zero value) takes on the target's roles for their full context; `RoleModeImpersonator` keeps the admin's own rights while acting in the target's context. In either mode the admin stays readable through [`ImpersonatorFromToken`](../../security/impersonation_token.go) for auditing, and the token's `OnBehalfOf()` encodes both identities into the originating actor — the impersonated user (with the effective roles of the active mode) carrying the admin as its `Impersonator` — so an impersonation started in one service stays auditable in the next (transports round-trip it via `ActorData.Impersonator`). A nested impersonation keeps its chain: the admin who impersonated `a`, then as `a` impersonated `b`, is carried as `b` behind `a` behind the admin.
+
+```go
+// userResolver is application-owned: ResolveImpersonatedUser(runtime, identifier)
+source := security.NewImpersonationTokenSource(innerTokenSource, userResolver, security.ImpersonationTokenSourceConfig{
+    RoleMode: security.RoleModeImpersonated,
+})
+
+if admin, impersonating := security.ImpersonatorFromToken(token); true == impersonating {
+    // audit admin.UserIdentifier() acting as token.UserIdentifier()
+}
+```
+
+### Originating-actor propagation
+
+An [`Actor`](../../security/contract/actor.go) is the originating principal that started an action upstream (for example the human user or client that called service A), distinct from the authenticated transport principal carrying the request now (service B). Actors have an identifier, a type (`ActorTypeUser`, `ActorTypeApiClient`, `ActorTypeSystem`), roles, and attributes. Tokens that can carry one implement [`ActorAware`](../../security/contract/actor.go) — consumers type-assert via [`ActorFromToken`](../../security/actor.go) rather than the core `Token` interface being widened, so existing implementations keep compiling. [`NewAuthenticatedToken`](../../security/authenticated_token.go) takes the actor it carries as its third argument, nil for none; a typed-nil actor is refused.
+
+The `Actor` interface does not round-trip through JSON, so transports (JWT claims, the HMAC envelope) encode the serializable [`ActorData`](../../security/contract/actor.go) carrier ([`ActorToData`](../../security/actor.go) / [`NewActorFromData`](../../security/actor.go), also available as `Claims.OriginatingActor`). A nested `ActorData.Impersonator` is rebuilt too, so a propagated impersonation stays readable through [`ActorImpersonating`](../../security/contract/actor.go).
+
+```go
+actor := security.NewActor("user-17", securitycontract.ActorTypeUser, security.ActorConfig{Roles: []string{"ROLE_USER"}})
+
+token := security.NewAuthenticatedToken("service-a", []string{"ROLE_INTERNAL"}, actor)
+
+if originating, present := security.ActorFromToken(token); true == present {
+    // authorize/audit as originating.Identifier(), not only the transport principal
+}
+```
+
+### Session fixation
+
+An application that carries its authenticated identity in the session (rather than in a stateless Bearer token) must **rotate the session id on any privilege change, above all at login**. Otherwise an attacker who can plant a known session id in the victim's browser before authentication — through a fixation vector such as a link, a subdomain-scoped cookie, or an XSS write — holds a cookie that becomes fully authenticated the moment the victim logs in.
+
+[`(*session.Manager).RegenerateSession`](../../session/manager.go) is the defence — declared on [`sessioncontract.Manager`](../../session/contract/manager.go): it mints a fresh id, carries the current values over, and removes the storage entry the previous id pointed at, so the planted id no longer resolves to anything. Call it in the login handler **before** writing the identity into the session, and publish the returned session with [`http.SetRequestSession`](../../http/request_session.go) — the response path reads the published session to decide what to save, and a rotation that is not republished fails safe rather than silently reverting: the previous entry is already gone and the rotated-away object is latched cleared, so the response path takes the clearing branch, expires the browser cookie and hands the client a fresh session on its next request. The planted id is
+retired either way; what a forgotten republish costs is the identity write, and it shows as a login that logs the user out.
+
+```go
+rotated, rotateErr := sessionManager.RegenerateSession(runtimeInstance, sessionInstance)
+if nil != rotateErr {
+    return nil, rotateErr
+}
+
+if publishErr := melodyhttp.SetRequestSession(request, rotated); nil != publishErr {
+    return nil, publishErr
+}
+
+/* sessionKeyUserId is application-owned; the framework defines no session key for the identity */
+rotated.Set(sessionKeyUserId, user.Id())
+```
+
+Inside an http handler the two steps above are one call: [`http.RegenerateRequestSession(request)`](../../http/session.go) rotates the id and republishes the rotated session on the request, and the response path saves that session and emits its cookie. Reach for it rather than the manager — rotating without republishing destroys the id the browser holds without ever telling it the new one — and write the identity to the session it returns.
+
+The rotation drops the session's csrf secret, `_csrf`, so a token rendered before the sign-in does not verify after it.
+
+Rotate on the way out too: logout should clear the session ([`Session.Clear`](../../session/session.go)), which deletes the stored entry and expires the browser cookie. See [SESSION](SESSION.md#rotating-the-session-id) for the full contract and its footguns, and the [session cookie](HTTP.md#session-cookie) section for the `Secure`/`SameSite` attributes that keep the rotated cookie from leaking in the first place.
+
+### Boot warnings
+
+A configuration the framework admits but that is very likely a mistake is named once in the configured journal, at `WARNING`, with its name under the `bootWarning` context key ([`applicationcontract.BootWarningContextKey`](../../application/contract/boot_warning_module.go)) and the configuration under `firewall`, `entry` or `configurationKey` (`environmentKey` and `environment` for the environment default); a secret value is never written. The boot collects them, from [`Builder.BootWarnings`](../../security/config/security_module.go) among others, and an http process and a command each write them once into the configured journal, when the run starts, or before the exit record of a process that dies before then, since the hazard may be what killed it.
+
+| name                                               | raised for                                                                                                                                                                                                                 | written by   |
+|----------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------|
+| `security.firewallDoorReachUnknown`                | a firewall door behind a matcher that is no prefix, whose reach the boot cannot state (`firewall`, `entry`, `matcher`)                                                                                                     | http and cli |
+| `http.session.unboundedTtlOnBoundedDefaultStorage` | the default in-memory session storage beside `MELODY_HTTP_SESSION_TTL=unlimited`, held by `MELODY_HTTP_SESSION_MAX_SESSIONS` alone (`configurationKey`, `maxSessions`)                                                     | http         |
+| `application.environment.processVariableIgnored`   | a process environment variable named like a resolved parameter and holding another value, or like a retired key, inert since melody reads only the `.env` artifacts (`environmentVariable`, `successor` for a retired key) | http and cli |
+| `http.static.cacheMaxAgeIgnored`                   | a static cache max age set beside `MELODY_STATIC_CACHE_DISABLED=true`, ignored since the disabled cache sends no header (`environmentKeys`, `parameterNames` and `overridden` for an override)                             | http         |
+| `messagebus.retryPolicyServiceIgnored`             | a service registered under the third major's `service.messagebus.retry_policy`, read by nothing since the policy is `ApplicationConfig.MessageBus.Retry` (`serviceName`)                                                   | http and cli |
+| `application.service.builtAtBootFailed`            | a service registered `BuiltAtBoot` with the default `BootFailureWarns` whose provider failed at boot, built again by its first resolution (`serviceName`, `cause`)                                                         | http         |
+| `aws.s3.plaintextEndpoint`                         | an aws/s3 client over plain http to an endpoint off this machine, declared by the aws/s3 module (`endpoint`)                                                                                                               | http and cli |
+| `security.csrfDisabledOnLoginFirewall`             | a firewall that declares a login door and checks no request for forgery, its mode `CsrfModeDisabled` (`firewall`, `declaredBy`: `firewall` or `global`)                                                                    |
+
+A module adds codes of its own through [`BootWarningModule`](APPLICATION.md): it declares each code before the configuration resolves, and adds the warnings its configuration calls for, which are written beside the framework's. A code has one owner: a name the framework or another module holds, a warning under a name the module did not declare and an empty message fail the boot, naming the module. The [aws/s3 module](../../../integrations/aws/s3/v4/README.md) declares `aws.s3.plaintextEndpoint`, written by http and cli.
+
+A process, http or cli, leaves out the codes `MELODY_BOOT_WARNINGS_IGNORED` lists, comma-separated: one key for both shapes, so a `.env` they share silences a code in each. The configuration refuses an empty or repeated code and the boot a code neither the framework nor a registered module writes. No key silences every boot warning: each code is listed by name, so a code a later release adds is written until it is read. The `written by` column says which shape can raise a code; a code listed for the other shape silences nothing there. See [CONFIG](CONFIG.md#boot-warnings-ignored).
+
+### Refused at boot
+
+A configuration whose hazard has no legitimate reading is refused where it is constructed, naming the field; a secret value is never written.
+
+| field                                                                                        | refused when                                                                                                                                                                                                                                 |
+|----------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `FirewallConfig.Override.AccessControl`                                                      | no declared access control reaches the firewall, at `BuildAndCompile` (`firewallName`)                                                                                                                                                       |
+| `FirewallConfig.Override.AccessDecisionManager`                                              | the firewall's access control holds a rule that is not `PUBLIC_ACCESS` and no decision manager reaches it, neither its own nor `GlobalConfig.AccessDecisionManager`, at `BuildAndCompile` (`firewallName`, `ruleIndex`, `rule`, `attribute`) |
+| `AddFirewall` matcher                                                                        | an earlier prefix firewall claims every path of its own, so it is never selected, at `BuildAndCompile` (`firewallName`, `entry`, `shadowedBy`, `shadowedByPrefix`)                                                                           |
+| `GlobalConfig.AccessControl`, `FirewallConfig.Override.AccessControl`, `AddFirewall` matcher | a rule path or firewall prefix holds a percent escape other than `%2F`, at `BuildAndCompile` (`field`, `entry`, `firewallName`)                                                                                                              |
+| `MELODY_STATIC_EXCLUDED_PATHS`                                                               | an entry holds a percent escape other than `%2F`, when the configuration resolves, in every mode (`environmentKey`, `index`, `excludedPath`)                                                                                                 |
+| `NewPathPrefixMatcher.prefix`                                                                | the prefix does not begin with a slash or carries an empty, `.` or `..` segment, so the firewall would never be selected; `""`, the catch-all, is admitted                                                                                   |
+| `NewSegmentPrefixMatcher.prefix`                                                             | the prefix is empty, relative or not canonical                                                                                                                                                                                               |
+| `NewJwtSecretKeySet` argument `secret`                                                       | the secret is empty, or shorter than `JwtSecretKeySetConfig.MinimumSecretLength`, 32 bytes by default                                                                                                                                        |
+| `HmacKeyRing.Keys`                                                                           | a key's secret is shorter than `HmacKeyRing.MinimumSecretLength`, 32 bytes by default (`keyId`)                                                                                                                                              |
+| `cors.Config.AllowOrigins`                                                                   | a credentialed service holds an origin without a scheme (`entry`)                                                                                                                                                                            |
+| `cors.Config.AllowOrigins`                                                                   | an origin without a scheme without `Config.SchemelessOriginsAdmitted` (`index`, `entry`, `door`)                                                                                                                                             |
+| `cors.Config.AllowOrigins`                                                                   | an entry is blank, or `"*"` stands beside other entries (`index`), or the list stands beside `AllowOrigin`                                                                                                                               |
+| `SessionCookiePolicy.Secure`                                                                 | the policy sets `SameSite=None` with `SessionCookieSecureNever`, at `NewKernel`, so at `NewApplication`                                                                                                                                      |
+| `NewSmtpTransport` argument `address`                                                        | the address is empty, padded, not `host:port` with both halves, or names a port the dial cannot read                                                                                                                                         |
+| `GlobalConfig.Csrf`, `FirewallConfig.Csrf`                                                   | an unknown `Mode`, a `HeaderName` that is no http token, a blank `FieldName` or one holding a control character, a `TrustedOrigins` entry that is not `scheme://host[:port]` (`index`), at `SetGlobal` and `AddFirewall` (`firewallName`)    |
+| `FirewallConfig.Csrf.TokenPath`                                                              | a path that is not literal, one on the login or the logout path, or one on a firewall that checks nothing (`cause`: `mode` or `stateless`)                                                                                                   |
+| `RouteOptions.Protection.CsrfDisabled`                                                       | the route serves only safe methods, at registration (`pattern`, `methods`)                                                                                                                                                                   |
+| `MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE`                                                        | a true value, which would serve the empty session over a Go field that answers the outage `503`, at boot (`environmentKey`, `admitted`)                                                                                                      |
+| `session.FileStorageConfig.FileMode`, `DirectoryMode`                                        | a mode granting others any bit, at `NewFileStorage` and `NewFileStorageOverFile` (`field`, `value`)                                                                                                                                          |
+| `encrypt.ModuleConfig.Cipher`, `CommandContextConfig.Cipher`                                 | `encrypt.NewFakeCipher()` outside `MELODY_ENV=dev`, at registration (`field`, `cipher`, `environment`, `admitted`)                                                                                                                           |
+
+## Footguns & caveats
+
+- A firewall is selected by the FIRST matcher that matches. [`NewSegmentPrefixMatcher`](../../security/matcher.go) claims a tree at a segment boundary, `/api` claiming `/api` and `/api/users` and never `/api-admin`, and is the matcher a firewall over a tree means. [`NewPathPrefixMatcher`](../../security/matcher.go) compares a string prefix: `/api` claims `/api-admin` and `/apiary` as well as `/api/users`. A firewall declared after one that claims every path of its own is never selected, so its access control never runs and its requests are resolved and authorized by the earlier firewall: a raw `/api` declared before `/api-admin` serves `/api-admin/users` under the access control of `/api`. Declare the narrower firewall first, bound the earlier one with `NewSegmentPrefixMatcher`, or hold the tree with a global rule. An empty raw prefix and the segment prefix `/` claim every path. `BuildAndCompile` refuses such a firewall, naming it and the earlier one.
+- A firewall prefix is written canonical, beginning with a slash: the kernel refuses a request path that is not canonical before any firewall is selected, so a prefix like `api`, ` /api`, `/api//users` or `/api/../users` would never be selected, and its token source and access control would never run. Both firewall matchers refuse such a prefix at construction, naming the argument, as the access control rule constructors refuse such a path.
+- A path is declared the way the router reads it: decoded, with `%2F` for a separator inside a segment. A rule, a firewall prefix or a static exclusion written with another percent escape (`/caf%C3%A9`, `/a%20b`) claims only a resource whose name literally holds the percent sign, never the request the client spells that way; write `/café` and `/a b`. A declared path holding one is refused: a rule or a prefix at `BuildAndCompile`, a static exclusion when the configuration resolves.
+- A CORS service grants the origins its `AllowOrigins` lists and no other: nil or empty grants none, and every origin is granted only by `[]string{cors.AllowOriginAll}` written out, for public answers without credentials, which it refuses beside the wildcard.
+- A credentialed CORS service (`AllowCredentials: true`) reads an allowed origin written without a scheme, `example.com` or `*.example.com`, as admitting that host under ANY scheme, `http://` included, so a page served in clear text, or by anyone who can answer for that host on the network path, receives the credentialed answer. Write the scheme out (`https://example.com`, `https://*.example.com`): `cors.NewService` refuses such an entry, naming `Config.AllowOrigins` and the entry. Without credentials, `Config.SchemelessOriginsAdmitted` admits it with its any-scheme reading, for a development origin served in clear; a credentialed service refuses it all the same. An `AllowOrigin` function decides each origin itself.
+- An HS256 secret, of [`NewJwtSecretKeySet`](../../security/jwt_secret_key_set.go) or of an internal-auth [`HmacKey`](../../security/hmac_secret_provider.go), holds at least 32 random bytes, the length of the hash, as RFC 7518 section 3.2 asks: a shorter one is refused at construction, and a `MinimumSecretLength` field on `JwtSecretKeySetConfig`, `HmacKeyRing`, `HmacTokenSourceConfig` and `HmacEnvelopeSignerConfig` raises the floor, never lowers it; no door lowers it, by design, since a key shorter than its hash is the brute-forceable key RFC 7518 rules out, and a test or legacy secret is lengthened rather than admitted.
+- `AccessControl` uses a deterministic match priority: exact match first, then longest prefix match (including segment-prefix rules), then regex rules in the order they were registered, then the empty-prefix fallback. See [`(*Control).Match`](../../security/accesscontrol/control.go). A `"/"` prefix rule claims every path in the prefix pass, so a regex rule beside it would never decide: [`NewControl`](../../security/accesscontrol/control.go) refuses the pair, a firewall's rules merged with the global ones included, and an application that wants a catch-all under its regex rules declares the empty raw prefix or a last `^/` regex rule.
+- Internal-auth HMAC key ids are bound to a single application: do not share one key id (or its secret) across applications — the verifier rejects any envelope whose key id is not bound to its claimed application, and a shared secret would otherwise let one service impersonate another. Supply a shared [`NonceGuard`](../../security/contract/nonce_guard.go) behind a load balancer; the default in-process guard only prevents replay within one instance. The internal-auth nonce guard and the TOTP replay guard have no door, by design, and the framework ships no guard that remembers nothing: a nil `NonceGuard` or `ReplayGuard` is the in-process guard, since an envelope or a code accepted twice is the replay each exists to refuse.
+- A session-backed login that does not call [`RegenerateSession`](../../session/manager.go) is vulnerable to **session fixation**: the id the victim arrived with stays valid and authenticated. Rotating is a per-application responsibility — the framework cannot do it for you, because only the login handler knows when the privilege change happens. See [Session fixation](#session-fixation).
+- A token source declares through [`Stateless`](../../security/contract/token_source.go) whether it reads only a credential the caller presents on every request, nothing a browser attaches by itself; the firewall's forgery check reads the answer, a stateless firewall checking none of its routes: the bearer and HMAC sources answer true, the resolver and authenticator sources answer what their config declares, false by default, and a custom source that reads a session or any cookie, or cannot know, answers false, the protected answer.
+- A custom token source that swallows an outage to an anonymous token keeps compiling and keeps answering `401`, telling a caller with a sound credential to sign in again. Answer [`security.NewUnavailableToken(err)`](../../security/unavailable_token.go) for it, or return the error through [`exception.MarkInfrastructureFailure`](../../exception/infrastructure_failure.go); a [`TokenResolver`](../../security/contract/token.go) returns the marked error, its own form, or the unavailable token.
+- An outbound [`httpclient`](../../httpclient/transport_config.go) verifies the server's certificate unless its `TransportConfig.TlsConfig` says `InsecureSkipVerify`: that field, set in Go, is the only off door, and no `.env` key reaches it. A private authority belongs in `RootCAs`, not in an off switch.
+- The container's journal carries request paths, actor ids and error contexts, so it is created owner-and-group only, `0640` under `0750` directories: a local user outside the process's group reads none of it. `MELODY_LOG_FILE_MODE` and `MELODY_LOG_DIRECTORY_MODE` widen the creation modes for a shipper that cannot join the group; a mode that leaves out the owner's own access refuses the boot, and a journal created before the upgrade keeps its mode until rotated (see [Journal modes](CONFIG.md#journal-modes)). The other files the framework writes take the same posture, each with its own door in Go: the session file storage creates its directory `0700` and its file and journal `0600` (`session.FileStorageConfig.DirectoryMode` / `FileMode`), the local object storage `0750` and `0640` (`storage.LocalStorageConfig.DirectoryMode` / `FileMode`), and the cache directory is created `0750` (`MELODY_CACHE_DIRECTORY_MODE`); a directory that already exists keeps its own mode.
+- An application's own `kernel.exception` listener that builds its own response drops the `Retry-After` of the `503` unless it copies it: [`http.SetRetryAfter(response, httpException.RetryAfter())`](../../http/response.go).
+- `SecurityContextSetOnRuntime` stores the context in the runtime scope under `security/contract.ServiceSecurityContext`; it refuses a runtime that is neither a request's nor a run's, the boot runtime and a detached one included. The application reserves the name for a request, so a run scope that never installed it refuses a raw `Get` of it under `ErrRuntimeKindRefused`, while `SecurityContextFromRuntime` asks `Has` first and answers false.
+- `JwtTokenValidator` requires the `exp` claim by default: a signed token without `exp` is rejected unless you set `JwtConfig{AllowWithoutExpiry: true}`. This differs from RFC 7519, which treats registered claims as optional — so a token that looks valid but omits `exp` resolves to an anonymous token, not an authenticated one.
+- [`ApiKeyHeaderAuthenticator`](../../security/api_key_authenticator.go) compares the supplied header against the expected value with [`crypto/subtle.ConstantTimeCompare`](https://pkg.go.dev/crypto/subtle#ConstantTimeCompare) so timing differences do not leak the expected key. A wrong key answers an anonymous token and dispatches `security.login.failure`, as every authenticator does that supported the request and answered no user, so an audit or lockout listener sees a guessed key; with the header present the first supporting authenticator decides, and the next one never runs.
+
+## Userland API
+
+### Contracts (`security/contract`)
+
+#### Types
+
+- [`Rule`](../../security/contract/rule.go)
+- [`Matcher`](../../security/contract/matcher.go)
+- [`Token`](../../security/contract/token.go)
+- [`AuthenticationUnavailable`](../../security/contract/token.go) — the capability of the token a source answers when a store or remote its check stands on could not answer
+- [`TokenSource`](../../security/contract/token_source.go)
+- [`Authenticator`](../../security/contract/authenticator.go)
+- [`TokenValidator`](../../security/contract/token_validator.go)
+- [`TokenEnricher`](../../security/contract/token_enricher.go)
+- [`Claims`](../../security/contract/token_validator.go)
+- [`TokenStore`](../../security/contract/token_store.go)
+- [`RevocableTokenStore`](../../security/contract/token_store.go)
+- [`RevocationEpochStore`](../../security/contract/token_store.go)
+- [`EpochRevocableTokenStore`](../../security/contract/token_store.go)
+- [`Firewall`](../../security/contract/firewall.go)
+- [`FirewallManager`](../../security/contract/firewall_manager.go)
+- [`AccessDecisionManager`](../../security/contract/access_decision_manager.go)
+- [`Voter`](../../security/contract/voter.go)
+- [`EntryPoint`](../../security/contract/entry_point.go)
+- [`AccessDeniedHandler`](../../security/contract/access_denied_handler.go)
+- [`LoginHandler`](../../security/contract/login_handler.go)
+- [`LogoutHandler`](../../security/contract/logout_handler.go)
+- [`FailedAttemptStore`](../../security/contract/failed_attempt_store.go) — counts the second factors an account presented, `Increment` inside a fixed window read against `FailedAttemptWindowRule`, `Reset`
+
+#### Constants
+
+- [`ServiceSecurityContext`](../../security/contract/const.go)
+- Events: [`EventSecurityAuthorizationGranted`, `EventSecurityAuthorizationDenied`, `EventSecurityLoginSuccess`, `EventSecurityLoginFailure`, `EventSecurityLogoutSuccess`, `EventSecurityLogoutFailure`](../../security/contract/const.go)
+- [`AttributePublicAccess`](../../security/contract/const.go)
+
+### Types
+
+- [`accesscontrol.Control`](../../security/accesscontrol/control.go) — carries `Match` and `Rules`; `security.AccessControl` is an alias for it
+- [`accesscontrol.Rule`](../../security/accesscontrol/rule.go) — carries `PathPrefix`, `Pattern`, `Attributes` and `Matching`; `security.AccessControlRule` is an alias for it
+- [`accesscontrol.Matching`](../../security/accesscontrol/matching.go) — the four reaches a rule can be declared with
+- [`accesscontrol.RuleConfig`](../../security/accesscontrol/rule.go)
+- [`AccessControl`](../../security/access_control.go) — alias for `accesscontrol.Control`
+- [`AccessControlRule`](../../security/access_control.go) — alias for `accesscontrol.Rule`
+- [`RoleHierarchy`](../../security/role_hierarchy.go)
+- Tokens: [`AnonymousToken`](../../security/anonymous_token.go), [`UnavailableToken`](../../security/unavailable_token.go), [`AuthenticatedToken`](../../security/authenticated_token.go), [`Token`](../../security/token.go)
+- Unavailable authentication: [`AuthenticationUnavailableCause(token)`](../../security/unavailable_token.go) answers the cause a token carrying the capability holds, [`ErrAuthenticationUnavailable`](../../security/unavailable_token.go) is in the chain of the `503` for a credential, [`ErrAuthorizationUnavailable`](../../security/unavailable_token.go) in the chain of the `503` for a decision, [`exception.MarkInfrastructureFailure`](../../exception/infrastructure_failure.go) and [`exception.IsInfrastructureFailure`](../../exception/infrastructure_failure.go) mark and read an outage, [`config.ResolveUnavailableRetryAfter`](../../config/limit.go) decides a delay against the field's rule
+- Auth: [`ApiKeyHeaderRule`](../../security/rule.go), [`ApiKeyHeaderAuthenticator`](../../security/api_key_authenticator.go), [`AuthenticatorManager`](../../security/authenticator_manager.go), [`AuthenticatorTokenSource`](../../security/token_source.go)
+- Token auth: [`BearerTokenSource`](../../security/bearer_token_source.go), [`JwtTokenValidator`](../../security/jwt_token_validator.go), [`JwtConfig`](../../security/jwt_token_validator.go), [`JwtSecretKeySet`](../../security/jwt_secret_key_set.go), [`JwtKeySet`, `JwtKeyQuery`, `JwtKey`](../../security/contract/jwt_key_set.go), [`OpaqueTokenValidator`](../../security/opaque_token_validator.go), [`InMemoryTokenStore`](../../security/in_memory_token_store.go), [`BoundTokenStore`](../../security/bound_token_store.go), [`JsonEntryPoint`](../../security/json_entry_point.go), [`JsonAccessDeniedHandler`](../../security/json_access_denied_handler.go)
+- Matchers: [`SegmentPrefixMatcher`](../../security/matcher.go) ([`(*SegmentPrefixMatcher).Prefix()`](../../security/matcher.go) answers the folded prefix), [`PathPrefixMatcher`](../../security/matcher.go) ([`(*PathPrefixMatcher).Prefix()`](../../security/matcher.go) answers the raw prefix)
+- Authorization: [`AccessDecisionManager`](../../security/access_decision_manager.go), [`RoleVoter`](../../security/voter.go), [`RoleHierarchyVoter`](../../security/role_hierarchy_voter.go)
+- Token source: [`ResolverTokenSource`](../../security/token_source.go)
+- Events: [`AuthorizationGrantedEvent`, `AuthorizationDeniedEvent`](../../security/authorization_granted_event.go), [`LoginSuccessEvent`](../../security/login_success_event.go), [`LoginFailureEvent`](../../security/login_failure_event.go), [`LogoutSuccessEvent`](../../security/logout_success_event.go), [`LogoutFailureEvent`](../../security/logout_failure_event.go)
+- Configuration: [`CompiledConfiguration`, `CompiledFirewall`](../../security/compiled_configuration.go), [`Source`](../../security/security_context.go), [`FirewallRegistry`](../../security/firewall_registry.go), [`FirewallManager`](../../security/firewall_manager.go)
+- Context: [`SecurityContext`](../../security/security_context.go)
+
+### Constructors
+
+- [`NewAccessControl(rules []AccessControlRule)`](../../security/access_control.go) — nil is the empty control, which claims no path
+- [`accesscontrol.NewRule(path string, matching Matching, config RuleConfig)`](../../security/accesscontrol/rule.go) — the mode is named at the call site and the zero value is refused
+- [`accesscontrol.NewExactRule(path string, config RuleConfig)`](../../security/accesscontrol/rule.go)
+- [`accesscontrol.NewSegmentPrefixRule(path string, config RuleConfig)`](../../security/accesscontrol/rule.go) — the path and its descendants under a `/` boundary
+- [`accesscontrol.NewRawPrefixRule(path string, config RuleConfig)`](../../security/accesscontrol/rule.go) — every path beginning with the spelling; refuses `PUBLIC_ACCESS`
+- [`accesscontrol.NewRegexRule(pattern string, config RuleConfig)`](../../security/accesscontrol/rule.go) — unanchored substring match; a rule meant to name one section anchors itself, and `PUBLIC_ACCESS` is refused unless every branch of the pattern is anchored to the path start
+- [`accesscontrol.NewControl(rules []Rule)`](../../security/accesscontrol/control.go)
+- [`NewRoleHierarchy(hierarchy map[string][]string)`](../../security/role_hierarchy.go)
+- [`NewAnonymousToken()`](../../security/anonymous_token.go)
+- [`NewUnavailableToken(cause error)`](../../security/unavailable_token.go) — a nil or typed-nil cause refused by panic naming the argument
+- [`NewAuthenticatedToken(userIdentifier string, roles []string, actor securitycontract.Actor)`](../../security/authenticated_token.go) — actor nil for none
+- [`NewAuthenticatedTokenFromClaims(claims securitycontract.Claims)`](../../security/authenticated_token.go) — the token of validated claims, scope, attributes and actor included, for an application's own `TokenSource`
+- [`NewToken(user securitycontract.Token)`](../../security/token.go)
+- [`NewSegmentPrefixMatcher(prefix string)`](../../security/matcher.go) — the prefix and its tree under a `/` boundary; an empty, relative or non-canonical prefix is refused
+- [`NewPathPrefixMatcher(prefix string)`](../../security/matcher.go) — a string prefix; a prefix no canonical request path can carry is refused
+- [`NewApiKeyHeaderRule(matcher securitycontract.Matcher, expectedValue string, config ApiKeyHeaderRuleConfig)`](../../security/rule.go) — `HeaderName` is [`DefaultApiKeyHeaderName`](../../security/api_key_authenticator.go) (`X-Api-Key`) when empty; a nil matcher or an empty expected value refused naming the argument
+- [`NewApiKeyHeaderAuthenticator(expectedValue string, config ApiKeyHeaderAuthenticatorConfig)`](../../security/api_key_authenticator.go) — `HeaderName` is `DefaultApiKeyHeaderName` when empty; an empty expected value refused naming the argument
+- [`NewHmacTokenSource(secrets HmacSecretProvider, applications HmacApplicationRegistry, config HmacTokenSourceConfig)`](../../security/hmac_token_source.go) — a nil secrets provider or application registry refused naming the argument
+- [`NewTotpSecondFactorAuthenticator(primary securitycontract.Authenticator, enrollments securitycontract.TwoFactorEnrollmentStore, config TotpSecondFactorAuthenticatorConfig)`](../../security/totp_second_factor_authenticator.go) — a nil primary or enrollment store refused naming the argument; `MaxFailedAttempts` (5), `LockoutWindow` (5m) and `FailedAttemptStore` (the application's cache) throttle the presented factors, a limit outside its rule or a typed nil store refused naming the field
+- [`(*TotpSecondFactorAuthenticator).ResetFailedAttempts(runtimeInstance containercontract.Runtime, userIdentifier string)`](../../security/totp_second_factor_authenticator.go) — unlocks an account; nothing to forget with the throttle off
+- [`NewCacheFailedAttemptStore(config CacheFailedAttemptStoreConfig)`](../../security/cache_failed_attempt_store.go) — `Cache` nil is the application's, `KeyPrefix` empty is `DefaultFailedAttemptKeyPrefix`, `Clock` nil is the system clock; a typed nil refused naming the field
+- [`NewTwoFactorLockedToken(pending securitycontract.Token, retryAfter time.Duration)`](../../security/two_factor_pending_token.go) — rejected and locked; a negative `retryAfter` refused naming the argument
+- [`NewImpersonationTokenSource(inner securitycontract.TokenSource, users securitycontract.ImpersonatedUserResolver, config ImpersonationTokenSourceConfig)`](../../security/impersonation_token_source.go) — a nil inner source or user resolver refused naming the argument
+- [`NewAuthenticatorManager(authenticators []securitycontract.Authenticator)`](../../security/authenticator_manager.go)
+- [`NewAuthenticatorTokenSource(authenticatorManager *AuthenticatorManager, config AuthenticatorTokenSourceConfig)`](../../security/token_source.go) — `Stateless` declares that every authenticator reads only what the caller presents on every request, false by default
+- [`NewBearerTokenSource(validator securitycontract.TokenValidator, config BearerTokenSourceConfig)`](../../security/bearer_token_source.go) — `Enricher`, left out for none, a typed nil refused naming `BearerTokenSourceConfig.Enricher`
+- [`NewJwtTokenValidator(keySet securitycontract.JwtKeySet, config JwtConfig)`](../../security/jwt_token_validator.go) — a nil or typed-nil key set refused naming the argument; `MaxCandidateKeys` (8) outside its rule refused naming the field
+- [`NewJwtSecretKeySet(secret []byte, config JwtSecretKeySetConfig)`](../../security/jwt_secret_key_set.go) — an empty or short secret refused naming the argument; `MinimumSecretLength` (32) outside its rule refused naming the field
+- [`NewOpaqueTokenValidator(store securitycontract.TokenStore)`](../../security/opaque_token_validator.go)
+- [`NewInMemoryTokenStore(config InMemoryTokenStoreConfig)`](../../security/in_memory_token_store.go)
+- [`TokenStoreFor(runtimeInstance containercontract.Runtime, storeInstance securitycontract.EpochRevocableTokenStore)`](../../security/bound_token_store.go)
+- [`TokenStoreFromRuntime(runtimeInstance containercontract.Runtime, serviceName string)`](../../security/bound_token_store.go)
+- [`NewMemoryNonceGuard(config MemoryNonceGuardConfig)`](../../security/memory_nonce_guard.go)
+- [`NewStaticHmacSecretProvider(ring HmacKeyRing)`](../../security/hmac_secret_provider.go)
+- [`NewActor(identifier string, actorType string, config ActorConfig)`](../../security/actor.go) — `Roles`, `Attributes` and `Impersonator`, left out for none, a typed-nil impersonator refused naming `ActorConfig.Impersonator`
+- [`NewImpersonationToken(impersonated securitycontract.Token, impersonator securitycontract.Token, roleMode ImpersonationRoleMode)`](../../security/impersonation_token.go)
+- [`NewResolverTokenSource(resolver securitycontract.TokenResolver, config ResolverTokenSourceConfig)`](../../security/token_source.go) — `Stateless` declares that the resolver reads only what the caller presents on every request, false by default
+- [`NewJsonEntryPoint(config JsonEntryPointConfig)`](../../security/json_entry_point.go) — `Challenge`, the `WWW-Authenticate` value of the 401, [`DefaultJsonEntryPointChallenge`](../../security/json_entry_point.go) (`Bearer`) when left out; a control character or a line break refused naming `JsonEntryPointConfig.Challenge`
+- [`NewJsonAccessDeniedHandler()`](../../security/json_access_denied_handler.go)
+- [`NewAccessDecisionManager(strategy securitycontract.DecisionStrategy, voters []securitycontract.Voter, config AccessDecisionManagerConfig)`](../../security/access_decision_manager.go) — `DecisionStrategyUnspecified`, the zero value, refused; `AccessDecisionManagerConfig{AllowIfAllAbstain, AllowIfTied}`, the zero value refusing where no vote decided; `WithVoters(voters)` answers a copy under the same strategy and config
+- [`NewRoleVoter()`](../../security/voter.go)
+- [`NewRoleHierarchyVoter(roleHierarchy *RoleHierarchy, delegate *RoleVoter)`](../../security/role_hierarchy_voter.go)
+- [`NewSecurityContext(firewall *CompiledFirewall, token securitycontract.Token)`](../../security/security_context.go)
+- [`NewFirewall(rules []securitycontract.Rule)`](../../security/firewall.go)
+- [`NewFirewallManager(compiledConfiguration *CompiledConfiguration)`](../../security/firewall_manager.go)
+- [`NewFirewallRegistry(compiledConfiguration *CompiledConfiguration)`](../../security/firewall_registry.go)
+- [`NewCompiledFirewall(CompiledFirewallConfig)`](../../security/compiled_configuration.go) — `Name` and `Matcher` required, a nil `Rules` entry refused by its index, a `Source` left empty read as `SourceNone`, `UnavailableRetryAfter` outside its rule refused naming the field; [`(*CompiledFirewall).UnavailableRetryAfter()`](../../security/compiled_configuration.go) answers the resolved delay
+- [`NewCompiledConfiguration(...)`](../../security/compiled_configuration.go)
+
+### Kernel listeners
+
+- [`RegisterKernelSecurityResolutionListener(kernelcontract.Kernel, *FirewallRegistry)`](../../security/security_resolution_listener.go)
+- [`RegisterKernelAccessControlListener(kernelcontract.Kernel, *FirewallRegistry)`](../../security/access_control_listener.go)
+
+### Container and runtime helpers
+
+- [`const ServiceFirewallManager`](../../security/service_resolver.go)
+- [`FirewallManagerMustFromRuntime(containercontract.Runtime)`](../../security/service_resolver.go)
+- [`FirewallManagerMustFromResolver(context.Context, containercontract.Resolver)`](../../security/service_resolver.go)
+- [`FirewallManagerFromRuntime(containercontract.Runtime)`](../../security/service_resolver.go) — answers `nil` when the manager cannot be resolved, as `FirewallManagerFromResolver` does
+- [`FirewallManagerFromResolver(context.Context, containercontract.Resolver)`](../../security/service_resolver.go)
+- [`SecurityContextSetOnRuntime(containercontract.Runtime, *SecurityContext)`](../../security/service_resolver.go)
+- [`SecurityContextFromRuntime(containercontract.Runtime)`](../../security/service_resolver.go)
+
+### Configuration (`security/config`)
+
+- Builder:
+    - [`NewBuilder()`](../../security/config/security_module.go)
+    - [`(*Builder).SetGlobal(GlobalConfig)`](../../security/config/security_module.go)
+    - [`(*Builder).AddFirewall(name, matcher, tokenSource, FirewallConfig)`](../../security/config/security_module.go)
+    - [`(*Builder).BuildAndCompile() *security.CompiledConfiguration`](../../security/config/security_module.go)
+    - [`(*Builder).BootWarnings() []BootWarning`](../../security/config/security_module.go) — the hazards the last `BuildAndCompile` found, see [Boot warnings](#boot-warnings); [`BootWarning`](../../security/config/boot_warning.go) carries `Name`, `Message` and `Context`
+- Configuration structs:
+    - [`type GlobalConfig`](../../security/config/security_module.go) — `AccessControl`, `RoleHierarchy`, `AccessDecisionManager`, `EntryPoint`, `AccessDeniedHandler`, `UnavailableRetryAfter`, `Csrf`
+    - [`type FirewallConfig`](../../security/config/security_module.go) — `Rules`, `Login`, `Logout`, `Csrf`, `Override`
+    - [`type FirewallCsrfConfig`](../../security/config/security_module.go) — `Mode`, `HeaderName`, `FieldName`, `TrustedOrigins`, `TokenPath`, `TokenName`
+    - [`type CsrfConfig`](../../security/csrf.go) — `Mode` (`CsrfModeOrigin`, `CsrfModeToken`, `CsrfModeDisabled`), `HeaderName`, `FieldName`, `TrustedOrigins`; [`ResolveCsrfConfig`](../../security/csrf.go), [`RequestIsCrossSite`](../../security/csrf.go), `ErrCsrfRefused`, `CsrfReasonCrossSite`, `CsrfReasonTokenMissing`, `CsrfReasonTokenInvalid`; `CompiledFirewall.Csrf()` and `CsrfExempt()`
+    - [`type LoginConfig`](../../security/config/login_config.go) — `Path`, `Handler`, `Name`, `Attributes`, `Authenticator`, `Methods`, `TargetPath`, `CsrfDisabled`, `Limiter`, `LimiterDisabled`, `LimiterConfig`
+    - [`type LogoutConfig`](../../security/config/login_config.go) — `Path`, `Handler`, `Name`, `Attributes`, `Methods`, `TargetPath`, `CsrfDisabled`
+    - [`type FirewallOverride`](../../security/config/security_module.go) — `GlobalAccessControlDisabled`, `MergeStrategy`, `AccessControl`, `RoleHierarchy`, `AccessDecisionManager`, `EntryPoint`, `AccessDeniedHandler`, `UnavailableRetryAfter`
+- Access control builder: [`NewAccessControlBuilder()` / `(*AccessControlBuilder).Require(pathPrefix, []string)` / `(*AccessControlBuilder).AllowAnonymous(...)` / `(*AccessControlBuilder).Build()`](../../security/config/access_control_builder.go)
+- Compile: [`Compile(configuration)`](../../security/config/compile.go)

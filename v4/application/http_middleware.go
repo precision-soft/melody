@@ -1,0 +1,264 @@
+package application
+
+import (
+    "fmt"
+    "reflect"
+    "runtime"
+
+    applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/http/middleware"
+    middlewarepipeline "github.com/precision-soft/melody/v4/http/middleware/pipeline"
+    "github.com/precision-soft/melody/v4/http/static"
+    "github.com/precision-soft/melody/v4/internal"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+)
+
+const (
+    MiddlewareGroupHttp = "http"
+
+    /* MiddlewarePrioritySecurityHeaders puts the security headers outside the static file server, so a served file carries them too. */
+    MiddlewarePrioritySecurityHeaders = -2000
+    MiddlewareNameSecurityHeaders     = "security_headers"
+
+    /* MiddlewarePriorityStatic puts the static file server outermost, below the default priority: a request for a file that exists is answered before anything registered through Use observes it, so the rate limiter, the compressor and any access log written as a middleware are skipped for it, while the framework's own access log, a kernel.terminate listener, still records it. A middleware that must see static requests registers below this priority. */
+    MiddlewarePriorityStatic = -1000
+    MiddlewareNameStatic     = "static"
+
+    /* MiddlewarePriorityDefault is the priority a MiddlewareRegistration that leaves Priority out registers at. */
+    MiddlewarePriorityDefault = 0
+)
+
+type HttpMiddleware struct {
+    staticConfig    static.Config
+    securityHeaders *middleware.SecurityHeaders
+    definitions     []middlewarepipeline.HttpMiddlewareDefinition
+    customIndex     int
+    lastBuildReport *middlewarepipeline.MiddlewareBuildReport
+}
+
+type httpMiddlewareChain = []httpcontract.Middleware
+
+func NewHttpMiddleware(staticConfig static.Config) *HttpMiddleware {
+    return &HttpMiddleware{
+        definitions:  make([]middlewarepipeline.HttpMiddlewareDefinition, 0),
+        staticConfig: staticConfig,
+        customIndex:  0,
+    }
+}
+
+/* Use registers under no module: a refusal of what it registers names no module. The application hands each module, and its own registrations, a registrar bound to the owner's name through forModule. */
+func (instance *HttpMiddleware) Use(registration applicationcontract.MiddlewareRegistration) {
+    instance.useFor("", registration)
+}
+
+/* forModule answers a registrar whose registrations carry the owner's name, so a module declares nothing to be named in a refusal */
+func (instance *HttpMiddleware) forModule(moduleName string) applicationcontract.HttpMiddlewareRegistrar {
+    return &moduleMiddlewareRegistrar{
+        target:     instance,
+        moduleName: moduleName,
+    }
+}
+
+func (instance *HttpMiddleware) useFor(moduleName string, registration applicationcontract.MiddlewareRegistration) {
+    instance.useMiddlewares(moduleName, registration.Priority, registration.Middlewares)
+    instance.useFactories(moduleName, registration.Priority, registration.Factories)
+}
+
+/* registrationContext answers the context of a refusal made at registration, naming the module when one registers */
+func registrationContext(moduleName string, field string, index int) exceptioncontract.Context {
+    context := exceptioncontract.Context{"field": field, "index": index}
+
+    if "" != moduleName {
+        context["moduleName"] = moduleName
+    }
+
+    return context
+}
+
+type moduleMiddlewareRegistrar struct {
+    target     *HttpMiddleware
+    moduleName string
+}
+
+func (instance *moduleMiddlewareRegistrar) Use(registration applicationcontract.MiddlewareRegistration) {
+    instance.target.useFor(instance.moduleName, registration)
+}
+
+var _ applicationcontract.HttpMiddlewareRegistrar = (*moduleMiddlewareRegistrar)(nil)
+
+func (instance *HttpMiddleware) useMiddlewares(moduleName string, priority int, middlewares []httpcontract.Middleware) {
+    for middlewareIndex, currentMiddleware := range middlewares {
+        middlewareInstance := currentMiddleware
+
+        if true == internal.IsNilInterface(middlewareInstance) {
+            exception.Panic(exception.NewError("middleware is nil in a middleware registration", registrationContext(moduleName, "MiddlewareRegistration.Middlewares", middlewareIndex), nil))
+        }
+
+        instance.customIndex = instance.customIndex + 1
+        name := fmt.Sprintf("middleware.%d.%d", instance.customIndex, priority)
+
+        definition := middlewarepipeline.HttpMiddlewareDefinition{
+            Name:     name,
+            Priority: priority,
+            Groups:   []string{MiddlewareGroupHttp},
+            Factory: func(_ kernelcontract.Kernel) (httpcontract.Middleware, error) {
+                return middlewareInstance, nil
+            },
+            AllowDuplicates: true,
+            FunctionName:    registeredFunctionName(middlewareInstance),
+            Module:          moduleName,
+        }
+
+        instance.definitions = append(instance.definitions, definition)
+    }
+}
+
+func (instance *HttpMiddleware) useFactories(moduleName string, priority int, factories []middlewarepipeline.MiddlewareFactory) {
+    for factoryIndex, currentFactory := range factories {
+        factoryInstance := currentFactory
+
+        if nil == factoryInstance {
+            exception.Panic(exception.NewError("middleware factory is nil in a middleware registration", registrationContext(moduleName, "MiddlewareRegistration.Factories", factoryIndex), nil))
+        }
+
+        instance.customIndex = instance.customIndex + 1
+        name := fmt.Sprintf("factory.%d.%d", instance.customIndex, priority)
+
+        definition := middlewarepipeline.HttpMiddlewareDefinition{
+            Name:     name,
+            Priority: priority,
+            Groups:   []string{MiddlewareGroupHttp},
+            Factory: func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
+                /* a factory that yields nil, or a typed nil, is refused at the build: an application factory has no way to declare a middleware inactive, so a nil is a wiring mistake that would otherwise run every request without it. A conditional middleware is left unregistered at the composition root. */
+                middlewareInstance, factoryErr := factoryInstance(kernelInstance)
+                /* the builder refuses the build with it, naming the middleware */
+                if nil != factoryErr {
+                    return nil, factoryErr
+                }
+
+                if true == internal.IsNilInterface(middlewareInstance) {
+                    nilContext := exceptioncontract.Context{
+                        "middlewareName": name,
+                    }
+
+                    if "" != moduleName {
+                        nilContext["moduleName"] = moduleName
+                    }
+
+                    return nil, exception.NewError(
+                        "middleware factory returned nil",
+                        nilContext,
+                        nil,
+                    )
+                }
+
+                return middlewareInstance, nil
+            },
+            AllowDuplicates: true,
+            FunctionName:    registeredFunctionName(factoryInstance),
+            Module:          moduleName,
+        }
+
+        instance.definitions = append(instance.definitions, definition)
+    }
+}
+
+/* LastBuildReport answers the report of the last pipeline build, an empty report before the first. */
+func (instance *HttpMiddleware) LastBuildReport() *middlewarepipeline.MiddlewareBuildReport {
+    if nil == instance.lastBuildReport {
+        return &middlewarepipeline.MiddlewareBuildReport{}
+    }
+
+    return instance.lastBuildReport
+}
+
+func (instance *HttpMiddleware) all(kernelInstance kernelcontract.Kernel) httpMiddlewareChain {
+    builder := middlewarepipeline.NewBuilder(instance.defaultDefinitions(kernelInstance))
+    builder.Add(instance.definitions)
+
+    middlewares, report, buildErr := builder.Build(kernelInstance, MiddlewareGroupHttp)
+    if nil != buildErr {
+        exception.Panic(
+            exception.NewError("failed to build middleware pipeline", nil, buildErr),
+        )
+    }
+
+    instance.lastBuildReport = report
+
+    return middlewares
+}
+
+/* describe answers what all() would build without running any factory or touching the last build report, so a console command can list the pipeline of a process that never serves */
+func (instance *HttpMiddleware) describe(kernelInstance kernelcontract.Kernel) ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
+    builder := middlewarepipeline.NewBuilder(instance.defaultDefinitions(kernelInstance))
+    builder.Add(instance.definitions)
+
+    return builder.Describe(kernelInstance.Environment(), MiddlewareGroupHttp)
+}
+
+/* buildForInspection runs the real build for an explicit --build request, answering the error instead of panicking and leaving the last build report to the serving path */
+func (instance *HttpMiddleware) buildForInspection(kernelInstance kernelcontract.Kernel) ([]httpcontract.Middleware, error) {
+    builder := middlewarepipeline.NewBuilder(instance.defaultDefinitions(kernelInstance))
+    builder.Add(instance.definitions)
+
+    middlewares, _, buildErr := builder.Build(kernelInstance, MiddlewareGroupHttp)
+
+    return middlewares, buildErr
+}
+
+/* registeredFunctionName resolves the name of the function value a registration hands in, at registration time — the one moment the value is certainly present and running nothing */
+func registeredFunctionName(value any) string {
+    reflectedValue := reflect.ValueOf(value)
+    if reflect.Func != reflectedValue.Kind() {
+        return ""
+    }
+
+    pointer := reflectedValue.Pointer()
+    if 0 == pointer {
+        return ""
+    }
+
+    function := runtime.FuncForPC(pointer)
+    if nil == function {
+        return ""
+    }
+
+    return function.Name()
+}
+
+func (instance *HttpMiddleware) defaultDefinitions(kernelInstance kernelcontract.Kernel) []middlewarepipeline.HttpMiddlewareDefinition {
+    definitions := make([]middlewarepipeline.HttpMiddlewareDefinition, 0, 5)
+
+    if nil != instance.securityHeaders {
+        securityHeaders := instance.securityHeaders
+
+        definitions = append(definitions, middlewarepipeline.HttpMiddlewareDefinition{
+            Name:     MiddlewareNameSecurityHeaders,
+            Priority: MiddlewarePrioritySecurityHeaders,
+            Groups:   []string{MiddlewareGroupHttp},
+            Factory: func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
+                return securityHeaders.Middleware(), nil
+            },
+            FunctionName: registeredFunctionName(securityHeaders.Middleware),
+        })
+    }
+
+    staticDefinition := middlewarepipeline.HttpMiddlewareDefinition{
+        Name:     MiddlewareNameStatic,
+        Priority: MiddlewarePriorityStatic,
+        Groups:   []string{MiddlewareGroupHttp},
+        Factory: func(kernelInstance kernelcontract.Kernel) (httpcontract.Middleware, error) {
+            return middleware.StaticMiddleware(instance.staticConfig), nil
+        },
+        FunctionName: registeredFunctionName(middleware.StaticMiddleware),
+    }
+
+    definitions = append(definitions, staticDefinition)
+
+    return definitions
+}
+
+var _ applicationcontract.HttpMiddlewareRegistrar = (*HttpMiddleware)(nil)

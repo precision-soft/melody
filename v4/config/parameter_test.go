@@ -1,0 +1,485 @@
+package config
+
+import (
+    "context"
+    "errors"
+    "fmt"
+    "strings"
+    "sync"
+    "testing"
+    "time"
+
+    "github.com/precision-soft/melody/v4/exception"
+)
+
+func TestParameter_Duration_ParsesStringAndNativeValues(t *testing.T) {
+    cases := []struct {
+        name     string
+        value    any
+        expected time.Duration
+    }{
+        {"string", "1500ms", 1500 * time.Millisecond},
+        {"stringWithSurroundingSpace", "  2s  ", 2 * time.Second},
+        {"native", 3 * time.Second, 3 * time.Second},
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            parameter := newParameter("SESSION_TTL", testCase.value, testCase.value, false)
+
+            durationValue, durationErr := parameter.Duration()
+            if nil != durationErr {
+                t.Fatalf("expected the value to convert, got %v", durationErr)
+            }
+
+            if testCase.expected != durationValue {
+                t.Fatalf("expected %v, got %v", testCase.expected, durationValue)
+            }
+        })
+    }
+}
+
+func TestParameter_Duration_RejectsUnparsableAndUnsetValues(t *testing.T) {
+    cases := []struct {
+        name  string
+        value any
+    }{
+        {"unparsableString", "not-a-duration"},
+        {"bareNumberString", "30"},
+        {"bareInt", int(5)},
+        {"bareInt64", int64(5)},
+        {"unset", nil},
+        {"unsupportedType", true},
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            parameter := newParameter("SESSION_TTL", testCase.value, testCase.value, false)
+
+            _, durationErr := parameter.Duration()
+            if nil == durationErr {
+                t.Fatalf("expected a conversion error for %v", testCase.value)
+            }
+        })
+    }
+}
+
+func TestParameter_Float_ParsesStringAndNativeValues(t *testing.T) {
+    cases := []struct {
+        name     string
+        value    any
+        expected float64
+    }{
+        {"string", "1.5", 1.5},
+        {"stringWithSurroundingSpace", " 2.25 ", 2.25},
+        {"native", float64(3.5), 3.5},
+        {"int", int(4), 4},
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            parameter := newParameter("SAMPLE_RATE", testCase.value, testCase.value, false)
+
+            floatValue, floatErr := parameter.Float()
+            if nil != floatErr {
+                t.Fatalf("expected the value to convert, got %v", floatErr)
+            }
+
+            if testCase.expected != floatValue {
+                t.Fatalf("expected %v, got %v", testCase.expected, floatValue)
+            }
+        })
+    }
+}
+
+func TestParameter_Float_RejectsUnparsableAndUnsetValues(t *testing.T) {
+    cases := []struct {
+        name  string
+        value any
+    }{
+        {"unparsableString", "not-a-float"},
+        {"unset", nil},
+        {"unsupportedType", true},
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            parameter := newParameter("SAMPLE_RATE", testCase.value, testCase.value, false)
+
+            _, floatErr := parameter.Float()
+            if nil == floatErr {
+                t.Fatalf("expected a conversion error for %v", testCase.value)
+            }
+        })
+    }
+}
+
+func TestParameter_ConversionErrorsOmitTheRawValue(t *testing.T) {
+    secretValue := "P4ssPhrase"
+
+    parameter := newParameter("AIRBNB_CLIENT_SECRET", secretValue, secretValue, false)
+
+    _, durationErr := parameter.Duration()
+    if nil == durationErr {
+        t.Fatalf("expected a conversion error")
+    }
+
+    _, floatErr := parameter.Float()
+    if nil == floatErr {
+        t.Fatalf("expected a conversion error")
+    }
+
+    for _, err := range []error{durationErr, floatErr} {
+        context := contextOfError(t, err)
+
+        assertContextOmitsSecret(t, context, secretValue)
+
+        if "AIRBNB_CLIENT_SECRET" != context["environmentKey"] {
+            t.Fatalf("expected the environment key in the context, got %v", context["environmentKey"])
+        }
+
+        if true == strings.Contains(fmt.Sprintf("%v", err), secretValue) {
+            t.Fatalf("error message leaked the value: %v", err)
+        }
+    }
+}
+
+func TestParameter_ValueDoesNotRaceResolve(t *testing.T) {
+    configuration, newConfigurationErr := NewConfiguration(
+        &Environment{
+            values: map[string]string{
+                "APP_TAG": "tag",
+            },
+        },
+        "/srv/app",
+        ConfigurationConfig{},
+    )
+    if nil != newConfigurationErr {
+        t.Fatalf("expected the configuration to build, got %v", newConfigurationErr)
+    }
+
+    configuration.RegisterRuntime("app.tag", "tag")
+
+    parameter := configuration.Get("app.tag")
+    if nil == parameter {
+        t.Fatalf("expected the registered parameter to exist")
+    }
+
+    var waitGroup sync.WaitGroup
+
+    waitGroup.Add(1)
+    go func() {
+        defer waitGroup.Done()
+
+        for iteration := 0; iteration < 200; iteration = iteration + 1 {
+            resolveErr := configuration.Resolve()
+            if nil != resolveErr {
+                t.Errorf("unexpected resolve error: %v", resolveErr)
+
+                return
+            }
+        }
+    }()
+
+    waitGroup.Add(1)
+    go func() {
+        defer waitGroup.Done()
+
+        for iteration := 0; iteration < 200; iteration = iteration + 1 {
+            _ = parameter.Value()
+            _ = parameter.String()
+        }
+    }()
+
+    waitGroup.Wait()
+}
+
+func TestParameter_SecretConversionWithholdsTheValue(t *testing.T) {
+    secretParameter := newParameter("APP_TOKEN", "sk_live_51H", "sk_live_51H", false)
+    secretParameter.isSecret.Store(true)
+
+    _, intErr := secretParameter.Int()
+    if nil == intErr {
+        t.Fatalf("expected the conversion to fail")
+    }
+    if true == strings.Contains(intErr.Error(), "sk_live_51H") {
+        t.Fatalf("expected the secret value to stay out of the error text")
+    }
+
+    var exceptionErr *exception.Error
+    if false == errors.As(intErr, &exceptionErr) {
+        t.Fatalf("expected an exception error")
+    }
+    if nil != exceptionErr.CauseErr() {
+        t.Fatalf("expected the quoting cause to be withheld for a secret")
+    }
+
+    ordinaryParameter := newParameter("APP_POOL", "1O0", "1O0", false)
+
+    _, ordinaryErr := ordinaryParameter.Int()
+    if nil == ordinaryErr {
+        t.Fatalf("expected the conversion to fail")
+    }
+    if false == errors.As(ordinaryErr, &exceptionErr) || nil == exceptionErr.CauseErr() {
+        t.Fatalf("expected the ordinary parameter to keep its diagnostic cause")
+    }
+}
+
+func TestParameter_ReadingADeferredParameterRefusesLoudly(t *testing.T) {
+    parameter := newParameter("APP_GREETING", "%app.user%", "%app.user%", false)
+    parameter.deferred.Store(true)
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected the accessor to refuse a deferred parameter")
+        }
+
+        recoveredErr, isException := recoveredValue.(*exception.Error)
+        if false == isException {
+            t.Fatalf("expected an exception error, got %T", recoveredValue)
+        }
+
+        if false == strings.Contains(recoveredErr.Error(), "deferred to boot") {
+            t.Fatalf("unexpected refusal message: %q", recoveredErr.Error())
+        }
+
+        if "APP_GREETING" != recoveredErr.Context()["environmentKey"] {
+            t.Fatalf("expected the refusal to name the environment key, got %#v", recoveredErr.Context()["environmentKey"])
+        }
+    }()
+
+    _ = parameter.String()
+}
+
+func TestParameter_ASettledDeferredParameterReadsNormally(t *testing.T) {
+    parameter := newParameter("APP_GREETING", "%app.user%", "%app.user%", false)
+    parameter.deferred.Store(true)
+
+    parameter.storeValue("hello operator")
+    parameter.deferred.Store(false)
+
+    if "hello operator" != parameter.String() {
+        t.Fatalf("unexpected value %q", parameter.String())
+    }
+}
+
+func TestParameter_MustString_PanicRefusalNamesTheParameterAndTheTypeItFound(t *testing.T) {
+    parameter := newParameter("APP_POOL_SIZE", 12, 12, false)
+    parameter.name = "app.pool.size"
+
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            t.Fatalf("expected MustString to panic for a non-string value")
+        }
+
+        recoveredErr, isException := recoveredValue.(*exception.Error)
+        if false == isException {
+            t.Fatalf("expected an exception error, got %T", recoveredValue)
+        }
+
+        if "cannot convert parameter value to string" != recoveredErr.Error() {
+            t.Fatalf("unexpected refusal message: %q", recoveredErr.Error())
+        }
+
+        context := recoveredErr.Context()
+
+        if "APP_POOL_SIZE" != context["environmentKey"] {
+            t.Fatalf("expected the refusal to name the environment key, got %#v", context["environmentKey"])
+        }
+
+        if "app.pool.size" != context["parameterName"] {
+            t.Fatalf("expected the refusal to name the registration name, got %#v", context["parameterName"])
+        }
+
+        if "int" != context["valueType"] {
+            t.Fatalf("expected the refusal to name the type it found, got %#v", context["valueType"])
+        }
+
+        if true == strings.Contains(fmt.Sprintf("%v", context), "12") {
+            t.Fatalf("expected the refused value itself to stay out of the context, got %#v", context)
+        }
+    }()
+
+    _ = parameter.MustString()
+}
+
+func TestParameter_MustString_ReturnsTheStoredString(t *testing.T) {
+    parameter := newParameter("APP_NAME", "melody", "melody", false)
+
+    if "melody" != parameter.MustString() {
+        t.Fatalf("expected the stored string, got %q", parameter.MustString())
+    }
+}
+
+func TestParameter_ConversionCauseNamesTheRuntimeParameter(t *testing.T) {
+    parameter := newParameter("", "not-a-duration", "not-a-duration", false)
+    parameter.name = "app.timeout"
+
+    _, durationErr := parameter.Duration()
+    if nil == durationErr {
+        t.Fatalf("expected the conversion to fail")
+    }
+
+    var causeErr *exception.Error
+    outerErr, isOuter := durationErr.(*exception.Error)
+    if false == isOuter {
+        t.Fatalf("expected an exception error, got %T", durationErr)
+    }
+
+    if false == errors.As(outerErr.Unwrap(), &causeErr) {
+        t.Fatalf("expected an exception cause, got %T", outerErr.Unwrap())
+    }
+
+    if "app.timeout" != causeErr.Context()["parameterName"] {
+        t.Fatalf("expected the cause to name the runtime parameter, got %#v", causeErr.Context()["parameterName"])
+    }
+}
+
+func TestParameter_Bool_ReadsBothShapesAndRefusesTheRest(t *testing.T) {
+    nativeParameter := newParameter("APP_FEATURE", true, true, false)
+
+    nativeValue, nativeErr := nativeParameter.Bool()
+    if nil != nativeErr {
+        t.Fatalf("unexpected error: %v", nativeErr)
+    }
+    if false == nativeValue {
+        t.Fatalf("expected the native bool to be handed back")
+    }
+
+    for _, textualValue := range []string{"true", "1", "false", "0"} {
+        textualParameter := newParameter("APP_FEATURE", textualValue, textualValue, false)
+
+        parsedValue, parsedErr := textualParameter.Bool()
+        if nil != parsedErr {
+            t.Fatalf("unexpected error for %q: %v", textualValue, parsedErr)
+        }
+
+        expected := "true" == textualValue || "1" == textualValue
+        if expected != parsedValue {
+            t.Fatalf("expected %q to read as %v, got %v", textualValue, expected, parsedValue)
+        }
+    }
+
+    unparsableParameter := newParameter("APP_FEATURE", "yes-please", "yes-please", false)
+    _, unparsableErr := unparsableParameter.Bool()
+    if nil == unparsableErr || "cannot convert parameter value to bool" != unparsableErr.Error() {
+        t.Fatalf("expected the conversion refusal, got %v", unparsableErr)
+    }
+
+    foreignParameter := newParameter("APP_FEATURE", 12, 12, false)
+    _, foreignErr := foreignParameter.Bool()
+    if nil == foreignErr || "cannot convert parameter value to bool" != foreignErr.Error() {
+        t.Fatalf("expected a value of another type to be refused, got %v", foreignErr)
+    }
+
+    var foreignExceptionErr *exception.Error
+    if false == errors.As(foreignErr, &foreignExceptionErr) {
+        t.Fatalf("expected an exception error")
+    }
+
+    foreignCause := foreignExceptionErr.CauseErr()
+    if nil == foreignCause {
+        t.Fatalf("expected the shared parser's cause to be carried")
+    }
+
+    var foreignCauseErr *exception.Error
+    if false == errors.As(foreignCause, &foreignCauseErr) {
+        t.Fatalf("expected the cause to be an exception error, got %v", foreignCause)
+    }
+
+    causeContext := foreignCauseErr.Context()
+    if "APP_FEATURE" != causeContext["parameterName"] {
+        t.Fatalf("expected the cause to name the parameter, got %#v", causeContext["parameterName"])
+    }
+    if "bool" != causeContext["expectedType"] {
+        t.Fatalf("expected the cause to name the target type, got %#v", causeContext["expectedType"])
+    }
+    if nil == causeContext["value"] {
+        t.Fatalf("expected the cause to carry the value it refused, got %#v", causeContext)
+    }
+}
+
+func TestParameter_Bool_KeepsASecretValueOutOfTheCause(t *testing.T) {
+    secretParameter := newParameter("APP_SECRET", 12, 12, false)
+    secretParameter.isSecret.Store(true)
+
+    _, secretErr := secretParameter.Bool()
+    if nil == secretErr {
+        t.Fatalf("expected the refusal")
+    }
+
+    var secretExceptionErr *exception.Error
+    if false == errors.As(secretErr, &secretExceptionErr) {
+        t.Fatalf("expected an exception error")
+    }
+
+    if nil != secretExceptionErr.CauseErr() {
+        t.Fatalf("expected a secret's parser cause to be withheld, got %v", secretExceptionErr.CauseErr())
+    }
+}
+
+func TestParameter_IntReadsTheSameGrammarItsSiblingsRead(t *testing.T) {
+    source := &testEnvironmentSource{values: map[string]string{}}
+
+    environment, environmentErr := NewEnvironment(context.Background(), source)
+    if nil != environmentErr {
+        t.Fatalf("new environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := NewConfiguration(environment, t.TempDir(), ConfigurationConfig{})
+    if nil != configurationErr {
+        t.Fatalf("new configuration error: %v", configurationErr)
+    }
+
+    configuration.RegisterRuntime("app.batch_size", int64(500))
+
+    intValue, intErr := configuration.MustGet("app.batch_size").Int()
+    if nil != intErr {
+        t.Fatalf("expected the int64 a sibling accessor already converts, got: %v", intErr)
+    }
+
+    if 500 != intValue {
+        t.Fatalf("expected 500, got %d", intValue)
+    }
+
+    configuration.RegisterRuntime("app.retry_count", "  7 ")
+
+    stringSourced, stringSourcedErr := configuration.MustGet("app.retry_count").Int()
+    if nil != stringSourcedErr || 7 != stringSourced {
+        t.Fatalf("expected the string spelling to keep converting, got %d and %v", stringSourced, stringSourcedErr)
+    }
+
+    configuration.RegisterRuntime("app.not_a_number", "seven")
+
+    if _, refusalErr := configuration.MustGet("app.not_a_number").Int(); nil == refusalErr {
+        t.Fatal("expected a value that is not a number to stay refused")
+    }
+}
+
+func TestParameter_TemplateOfAKeyedParameterIsTheEnvForm(t *testing.T) {
+    for _, values := range []map[string]string{{}, {HttpAddressKey: ":9090"}} {
+        configuration := mustConfigurationFromValues(t, values)
+
+        if "%env("+HttpAddressKey+")%" != configuration.Get(KernelHttpAddress).Template() {
+            t.Fatalf("expected the env form, got %v (values %v)", configuration.Get(KernelHttpAddress).Template(), values)
+        }
+    }
+}
+
+func TestParameter_IsDefault_FollowsTheArtifact(t *testing.T) {
+    if false == mustConfigurationFromValues(t, map[string]string{}).Get(KernelHttpAddress).IsDefault() {
+        t.Fatalf("expected a framework parameter no artifact sets to be the default")
+    }
+
+    if true == mustConfigurationFromValues(t, map[string]string{HttpAddressKey: ":9090"}).Get(KernelHttpAddress).IsDefault() {
+        t.Fatalf("expected a framework parameter an artifact sets not to be the default")
+    }
+
+    configuration := mustConfigurationFromValues(t, map[string]string{"MELODY_X_SWITCH": ""})
+    mustDeclare(t, configuration, "x", switchKey("true"))
+    if false == configuration.Get("melody.x.switch").IsDefault() {
+        t.Fatalf("expected a blank line under a rule to leave the default speaking")
+    }
+}

@@ -1,0 +1,77 @@
+package subscriber
+
+import (
+    "encoding/json"
+
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
+    "github.com/precision-soft/melody/v4/exception"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
+)
+
+const (
+    ServiceCatalogNotificationHub = "service.example.catalog_notification_hub"
+
+    /* CatalogNotificationTopic carries the nomenclature's changes, written behind the editor's role */
+    CatalogNotificationTopic = "default"
+
+    /* UserDirectoryNotificationTopic carries the account directory's changes, written behind the administrator's role */
+    UserDirectoryNotificationTopic = "user-directory"
+
+    /* the event name the page listens for, not "message", so the page tells it apart from the message bus notifications on the same socket */
+    catalogNotificationEvent = "catalog"
+)
+
+/* catalogNotification is what a browser is told when the nomenclature changes: what happened, not the new record, which the page fetches from the read endpoint. */
+type catalogNotification struct {
+    Action    string `json:"action"`
+    Subject   string `json:"subject"`
+    SubjectId string `json:"subjectId"`
+}
+
+/* CatalogNotificationHubFromRuntime resolves the hub through the container, the single door that does so. Resolving runs the provider, which moves the hub's reporting off the emergency logger and tells the container the hub must be closed in order. */
+func CatalogNotificationHubFromRuntime(runtimeInstance melodycontainercontract.Runtime) (*melodyhttp.ServerSentEventHub, error) {
+    hub, hubErr := melodyruntime.FromRuntime[*melodyhttp.ServerSentEventHub](
+        runtimeInstance,
+        ServiceCatalogNotificationHub,
+    )
+    if nil != hubErr {
+        return nil, hubErr
+    }
+
+    if nil == hub {
+        return nil, exception.NewError("the catalog notification hub resolved to nothing", nil, nil)
+    }
+
+    return hub, nil
+}
+
+/* notifyCatalogChange tells every page open on the topic that what it lists changed, from the event listeners beside the cache invalidation and the journal entry. A broadcast cannot fail, so the only error is an unreachable hub, a wiring mistake, which is reported so the pages do not go silent unexplained. */
+func notifyCatalogChange(
+    runtimeInstance melodycontainercontract.Runtime,
+    topic string,
+    action string,
+    subject string,
+    subjectId string,
+) error {
+    hub, hubErr := CatalogNotificationHubFromRuntime(runtimeInstance)
+    if nil != hubErr {
+        return hubErr
+    }
+
+    payload, encodeErr := json.Marshal(catalogNotification{
+        Action:    action,
+        Subject:   subject,
+        SubjectId: subjectId,
+    })
+    if nil != encodeErr {
+        return encodeErr
+    }
+
+    hub.Broadcast(runtimeInstance, topic, melodyhttp.ServerSentEvent{
+        Event: catalogNotificationEvent,
+        Data:  string(payload),
+    })
+
+    return nil
+}

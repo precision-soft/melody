@@ -1,0 +1,73 @@
+package config
+
+import (
+    amqp "github.com/precision-soft/melody/integrations/amqp/v4"
+    "github.com/precision-soft/melody/v4/.example/message"
+    "github.com/precision-soft/melody/v4/.example/messagehandler"
+    "github.com/precision-soft/melody/v4/.example/subscriber"
+    melodybound "github.com/precision-soft/melody/v4/bound"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
+    melodymessagebus "github.com/precision-soft/melody/v4/messagebus"
+    melodymessagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
+)
+
+const (
+    messageBusTransportAsync = "async"
+    messageBusQueue          = "welcome_email"
+    messageBusWelcomeType    = "welcome_email"
+)
+
+func (instance *Module) buildMessageBus() {
+    transport := instance.buildMessageBusTransport()
+
+    locator := melodymessagebus.NewHandlerLocator()
+    melodymessagebus.RegisterHandler(locator, messagehandler.HandleWelcomeEmail)
+    melodymessagebus.RegisterHandler(locator, func(runtimeInstance melodycontainercontract.Runtime, notification message.Notification, envelope melodymessagebuscontract.Envelope) error {
+        /* resolved rather than captured, for the reason written at CatalogNotificationHubFromRuntime: a consumer that holds the hub the composition root built leaves the provider — and with it the logger swap and the container's teardown edge — unrun. */
+        hub, hubErr := subscriber.CatalogNotificationHubFromRuntime(runtimeInstance)
+        if nil != hubErr {
+            return hubErr
+        }
+
+        hub.Broadcast(runtimeInstance, notification.Topic, melodyhttp.ServerSentEvent{
+            Event: "notification",
+            Data:  notification.Text,
+        })
+
+        return nil
+    })
+
+    routing := melodymessagebus.NewRouting()
+    melodymessagebus.RouteType[message.WelcomeEmail](routing, messageBusTransportAsync, transport)
+
+    instance.messageBusTransport = transport
+    instance.messageBusDispatch = melodymessagebus.NewManager(
+        "default",
+        []melodymessagebuscontract.Middleware{
+            melodymessagebus.NewSendMessageMiddleware(routing),
+            melodymessagebus.NewHandleMessageMiddleware(locator, melodymessagebus.HandleMiddlewareConfig{}),
+        },
+    )
+    instance.messageBusConsume = melodymessagebus.NewManager(
+        "default.consume",
+        []melodymessagebuscontract.Middleware{
+            melodymessagebus.NewHandleMessageMiddleware(locator, melodymessagebus.HandleMiddlewareConfig{}),
+        },
+    )
+}
+
+func (instance *Module) buildMessageBusTransport() melodymessagebuscontract.Transport {
+    dsn := instance.parameterValue(parameterAmqpDsn)
+    if "" == dsn {
+        return melodymessagebus.NewInMemoryTransport(melodymessagebus.InMemoryTransportConfig{BufferSize: melodybound.Of(64)})
+    }
+
+    /* the transport is handed a dialer and dials nothing at boot: it owns and closes each connection it dials, and redials after a loss. A dsn that cannot be dialed surfaces at the first publish, through the transport's retry loop. */
+    registry := amqp.NewMessageRegistry()
+    amqp.RegisterMessage[message.WelcomeEmail](registry, messageBusWelcomeType)
+
+    return amqp.NewTransport(messageBusQueue, registry, amqp.FromDialer(instance.amqpProvider().Dialer(dsn)), amqp.TransportConfig{
+        Prefetch: melodybound.Of(10),
+    })
+}

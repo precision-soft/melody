@@ -1,0 +1,154 @@
+package config
+
+import (
+    "context"
+
+    melodyawss3 "github.com/precision-soft/melody/integrations/aws/s3/v4"
+    bunormmigrate "github.com/precision-soft/melody/integrations/bunorm/migrate/v4"
+    melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v4/encrypt"
+    melodycron "github.com/precision-soft/melody/integrations/cron/v4"
+    melodyopentelemetry "github.com/precision-soft/melody/integrations/opentelemetry/v4"
+    melodyotlp "github.com/precision-soft/melody/integrations/opentelemetry/v4/otlp"
+    melodyoutbox "github.com/precision-soft/melody/integrations/outbox/v4"
+    melodywebsocket "github.com/precision-soft/melody/integrations/websocket/v4"
+    "github.com/precision-soft/melody/v4/.example/migration"
+    "github.com/precision-soft/melody/v4/.example/twofactor"
+    melodyapplication "github.com/precision-soft/melody/v4/application"
+    melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    melodyexception "github.com/precision-soft/melody/v4/exception"
+    melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodylogging "github.com/precision-soft/melody/v4/logging"
+)
+
+func (instance *Module) otlpModuleConfig(endpoint string) melodyotlp.ModuleConfig {
+    return melodyotlp.ModuleConfig{
+        Endpoint: endpoint,
+        Config: melodyotlp.Config{
+            Protocol:       melodyotlp.ProtocolGrpc,
+            ServiceName:    "melody.example",
+            ServiceVersion: instance.applicationVersion,
+            Insecure:       true,
+        },
+    }
+}
+
+/* Configure wires the application. The context is the signal context main hands the application, because the module binds the database registry's lazy opens to it; the version is the one the build stamped, which the health route and the otlp exporter report. */
+func Configure(ctx context.Context, app *melodyapplication.Application, applicationVersion string) {
+    moduleInstance := NewExampleModule(ctx, app.Configuration())
+    moduleInstance.applicationVersion = applicationVersion
+
+    /* observability module first so its metrics middleware wraps outermost, ahead of the example timing middleware. */
+    app.RegisterModule(melodyopentelemetry.NewModule(melodyopentelemetry.ModuleConfig{
+        Middlewares:       []melodyhttpcontract.Middleware{moduleInstance.metricsMiddleware},
+        HandlerDecorators: []melodyapplicationcontract.HttpHandlerDecorator{moduleInstance.lifecycleDecorator},
+        Prometheus:        moduleInstance.prometheusMetrics,
+        MetricsPath:       metricsPath,
+        MetricsRouteName:  "example.metrics",
+    }))
+
+    app.RegisterModule(moduleInstance)
+
+    if otelEndpoint := moduleInstance.parameterValue(parameterOtelExporterEndpoint); "" != otelEndpoint {
+        app.RegisterModule(melodyotlp.NewModule(moduleInstance.otlpModuleConfig(otelEndpoint)))
+    }
+
+    /* the encrypt module installs the cipher the encrypted columns read in every process mode, and its bulk command resolves its database through the factory at its first run, after Boot, so a boot without MYSQL_HOST stays clean and the first run reports the missing service. */
+    app.RegisterModule(melodyencrypt.NewModule(melodyencrypt.ModuleConfig{
+        DatabaseFactory: moduleInstance.encryptDatabaseFactory,
+        Cipher:          moduleInstance.cipher,
+        SealBindings:    twofactor.SealBindings(),
+    }))
+
+    if amqpModule := moduleInstance.amqpModule(); nil != amqpModule {
+        app.RegisterModule(amqpModule)
+    }
+
+    if true == moduleInstance.catalogueWired {
+        app.RegisterModule(melodyoutbox.NewModule(moduleInstance.outboxModuleConfig()))
+    }
+
+    app.RegisterModule(bunormmigrate.NewModule(migrateModuleConfig()))
+
+    /* cron's Configuration is kernel-dependent (reads parameters), so it is supplied as a factory evaluated at command-registration time. */
+    app.RegisterModule(melodycron.NewModule(melodycron.ModuleConfig{
+        Configuration: newCronConfiguration,
+        /* the catalogue entries name the account the generated crontab runs them as; the in-process worker runs them as its own user */
+        Runner: melodycron.RunnerConfig{Commands: cronRunnerCommands(), EntryUserIgnored: true},
+    }))
+
+    moduleInstance.registerHubShutdown(app)
+    moduleInstance.registerTrustedProxyShutdown(app)
+
+    app.RegisterModule(melodywebsocket.NewModule(websocketModuleConfig()))
+
+    if nil != moduleInstance.storageClient {
+        app.RegisterModule(melodyawss3.NewModule(moduleInstance.storageModuleConfig()))
+    }
+
+    if true == moduleInstance.redisConfigured() {
+        app.RegisterModuleProvider(newRedisInfrastructure(moduleInstance.namespace(), moduleInstance.redisProvider, moduleInstance.redisParameters))
+    }
+}
+
+/* migrateModuleConfig registers the db:* family whether or not a database is configured; without one every db:* command fails at Run naming the registry service. The archive's db:archive:* family is a context, which pins it to the archive's manager, and the base family is pinned to databaseManagerName. */
+func migrateModuleConfig() bunormmigrate.ModuleConfig {
+    return bunormmigrate.ModuleConfig{
+        Migrations: migration.Migrations,
+        Contexts: []bunormmigrate.ContextConfig{
+            {
+                Name:       databaseArchiveManagerName,
+                Migrations: migration.ArchiveMigrations,
+            },
+        },
+        Command: bunormmigrate.CommandConfig{
+            ManagerRegistryServiceId: serviceDatabaseRegistry,
+            ManagerName:              databaseManagerName,
+        },
+    }
+}
+
+/* httpShutdownRegistrar is the one door of the application registerHubShutdown needs */
+type httpShutdownRegistrar interface {
+    OnHttpShutdown(hook func(shutdownContext context.Context))
+}
+
+/* hubShutdownWarningLogger journals a hub close that outlived the http shutdown's budget, the hook carrying no runtime of its own; a variable so a test can capture it. */
+var hubShutdownWarningLogger = melodylogging.EmergencyLogger
+
+/* registerHubShutdown closes the hub its provider built when the http server begins to shut down: http.Server.Shutdown neither cancels an in-flight request's context nor tracks a hijacked connection, so a connected SSE or websocket client would otherwise hold the whole shutdown timeout. It is also the backplane's first close, through the hub's CloseWithContext, bounded by the shutdown's context: the hub drains and closes the backplane it holds, and hands it to a closer of its own when a publish outlives the budget, which the hook journals. The container's teardown closes the hub again through the same idempotent door, the only close a process without an http server reaches. */
+func (instance *Module) registerHubShutdown(registrar httpShutdownRegistrar) {
+    registrar.OnHttpShutdown(func(shutdownContext context.Context) {
+        serverSentEventHub := instance.builtServerSentEventHub.Load()
+        if nil == serverSentEventHub {
+            return
+        }
+
+        closeErr := serverSentEventHub.CloseWithContext(shutdownContext)
+        if nil != closeErr {
+            hubShutdownWarningLogger().Warning(
+                "the server sent event hub did not close within the http shutdown budget",
+                melodyexception.LogContext(closeErr, melodyexception.LogContextOptions{}),
+            )
+        }
+    })
+}
+
+/* registerTrustedProxyShutdown waits, as the http server shuts down and within its budget, for the retry of a failed balancer lookup running off the request path, so its warning reaches the journal before the container's teardown closes it */
+func (instance *Module) registerTrustedProxyShutdown(registrar httpShutdownRegistrar) {
+    registrar.OnHttpShutdown(func(shutdownContext context.Context) {
+        if nil == instance.trustedProxyResolver {
+            return
+        }
+
+        closed := make(chan struct{})
+        go func() {
+            instance.trustedProxyResolver.Close()
+            close(closed)
+        }()
+
+        select {
+        case <-closed:
+        case <-shutdownContext.Done():
+        }
+    })
+}

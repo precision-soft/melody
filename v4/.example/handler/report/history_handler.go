@@ -1,0 +1,101 @@
+package report
+
+import (
+    "errors"
+    nethttp "net/http"
+    "strconv"
+    "time"
+
+    "github.com/precision-soft/melody/v4/.example/presenter"
+    "github.com/precision-soft/melody/v4/.example/reporting"
+    melodybag "github.com/precision-soft/melody/v4/bag"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+)
+
+/* errInvalidLimit is the one refusal of every limit this door cannot serve: not a number, zero or negative. */
+var errInvalidLimit = errors.New("limit must be a positive whole number")
+
+const (
+    historyLimitParameter = "limit"
+
+
+    /* historyMaximumLimit is the door's own cap: the archive grows for the life of a volume, and a limit without a ceiling would let any signed-in caller choose how much of it this process loads at once. */
+    historyMaximumLimit = 100
+)
+
+/* ApiHistoryHandler answers the archive of catalogue readings, newest first, and beside it the current reading: the one the schedule left in the cache, or one taken now on a cold cache and left there. It never writes the archive, so a caller cannot fill the archive by asking to see it. */
+func ApiHistoryHandler() melodyhttpcontract.Handler {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        reportService, resolveErr := melodyruntime.FromRuntimeByType[*reporting.CatalogReportService](runtimeInstance)
+        if nil != resolveErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the reading archive is unavailable", resolveErr), nil
+        }
+
+        limit, limitErr := historyLimitOf(request, reportService.PageSize())
+        if nil != limitErr {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, limitErr.Error()), nil
+        }
+
+        /* a failure of the archive is rendered through the presenter, the envelope every sibling read door answers a repository failure in */
+        readingList, readErr := reportService.RecentReadings(runtimeInstance, limit)
+        if nil != readErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the reading archive is unavailable", readErr), nil
+        }
+
+        current, currentErr := reportService.Reading(runtimeInstance)
+        if nil != currentErr {
+            return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the current reading is unavailable", currentErr), nil
+        }
+
+        payload := make([]map[string]any, 0, len(readingList))
+        for _, reading := range readingList {
+            payload = append(payload, map[string]any{
+                "taken_at":      reading.TakenAt.UTC().Format(time.RFC3339),
+                "headline":      reading.Headline,
+                "payload":       reading.Payload,
+                "product_count": reading.ProductCount,
+                "journal_count": reading.JournalCount,
+            })
+        }
+
+        return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, map[string]any{
+            "current": map[string]any{
+                "taken_at":   current.RecordedAt.UTC().Format(time.RFC3339),
+                "headline":   current.Headline,
+                "payload":    current.Payload,
+                "from_cache": current.FromCache,
+            },
+            "readings": payload,
+            "limit":    limit,
+        }), nil
+    }
+}
+
+/* historyLimitOf reads the caller's limit, capped by the report's page size and the door's own cap, and answers that cap when they gave none. It reads the first value with StringAt, so a repeated key at this door answers like a single one. */
+func historyLimitOf(request melodyhttpcontract.Request, pageSize int) (int, error) {
+    raw, present, indexErr := melodybag.StringAt(request.Query(), historyLimitParameter, 0)
+    if nil != indexErr {
+        return 0, errInvalidLimit
+    }
+
+    if false == present || "" == raw {
+        return min(pageSize, historyMaximumLimit), nil
+    }
+
+    limit, parseErr := strconv.Atoi(raw)
+    if nil != parseErr {
+        return 0, errInvalidLimit
+    }
+
+    if 0 >= limit {
+        return 0, errInvalidLimit
+    }
+
+    if ceiling := min(pageSize, historyMaximumLimit); ceiling < limit {
+        return ceiling, nil
+    }
+
+    return limit, nil
+}

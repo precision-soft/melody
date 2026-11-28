@@ -1,0 +1,266 @@
+# Melody AMQP integration (v4)
+
+A durable, transport-agnostic [`messagebus`](https://github.com/precision-soft/melody) transport backed by RabbitMQ (AMQP 0-9-1), built on [`rabbitmq/amqp091-go`](https://github.com/rabbitmq/amqp091-go).
+
+It implements `messagebus/contract.Transport`, so a Melody message bus can route messages to RabbitMQ for asynchronous, cross-process handling, and the `melody:messagebus:consume` worker can drain them.
+
+## Version lines
+
+This integration ships for the third and the fourth major (`github.com/precision-soft/melody/integrations/amqp/v4`); no v1 or v2 bindings are currently planned.
+
+## Installation
+
+```bash
+go get github.com/precision-soft/melody/integrations/amqp/v4
+```
+
+```go
+import amqp "github.com/precision-soft/melody/integrations/amqp/v4"
+```
+
+## Parameters
+
+The module registers no parameter and declares no key: the application declares its own key for the dsn, `Secret` since the dsn carries the credentials, and builds the connection and the transports from that key's parameter before it registers the module. A transport whose `Prefetch` is left out takes 10.
+
+## Usage
+
+### Open a connection
+
+```go
+provider := amqp.NewProvider(configuration.Kernel().Namespace(), amqp.ProviderConfig{})
+
+/* AMQP_DSN is declared in ApplicationConfig.EnvironmentKeys, feeding app.amqp.dsn, Secret */
+connection, openErr := provider.Open(runtimeInstance, configuration.MustGet("app.amqp.dsn").String())
+if nil != openErr {
+    return openErr
+}
+defer func() {
+    _ = connection.CloseWithContext(closeContext)
+}()
+```
+
+`Open` dials under the runtime's context and answers the connection's owner, `*amqp.Connection`: `connection.Raw()` reaches the client's `*amqp091.Connection`, and `connection.CloseWithContext(closeContext)` is its one close, idempotent, arming a deadline on the socket and returning within the close timeout the owner carries, within the caller's deadline, plus a 250 ms grace, even behind a shutdown the client already began, since the client's plain `Close` is an RPC over the send locks and never returns over a wedged socket. A connection dialled outside a provider is wrapped with `amqp.NewConnection(raw, amqp.ConnectionConfig{CloseTimeout: …})`, 30s when left out.
+
+`NewProvider(namespace, ProviderConfig)` takes the application namespace first, `MELODY_NAMESPACE` read as `configuration.Kernel().Namespace()`, a namespace outside `config.ValidateNamespace` panicking naming the argument: a backplane built through the provider derives its default exchange from it, `<namespace>.sse`. A transport's queue, exchange and routing key are the application's own and never take the namespace, since renaming them is a broker migration.
+
+`ProviderConfig` takes six fields, each left out its default:
+
+| Field | Default | Rule |
+|---|---|---|
+| `Heartbeat` | 10s | the interval the client and the broker prove the connection alive at; at least 1s since the client reads a shorter one as the server's choice, unlimited refused |
+| `Reconnect` | the package backoff | the backoff every transport and backplane built through the provider starts from (see [Auto-reconnect](#auto-reconnect)) |
+| `CloseTimeout` | 30s | each stretch of a close that cannot observe its signal; at least 1ms, unlimited refused; carried by every connection the provider opens and inherited by the transports and backplanes it builds |
+| `DialTimeout` | 30s | one dial and its handshake, within the caller's context; at least 1ms, unlimited refused; it replaces the dsn's `connection_timeout`, which only the client's own dial reads |
+| `TlsConfig` | the client's | the TLS session of an `amqps` dsn, copied at `NewProvider` and cloned for every dial; a dsn that is not `amqps` beside it is refused naming the field |
+| `ConnectionName` | the client's | what the broker's management view shows, beside the client's own properties; at most 255 bytes with no control character |
+
+A value outside its rule panics at `NewProvider` naming the field. A plain `amqp://` dsn whose host is not `localhost` or a loopback address is named once per host of the provider by the warning `amqp.plaintextDsn` (`PlaintextDsnBootWarningName`), naming the host and never the dsn: the credentials and every message cross the network in clear. `Open` writes it in the runtime's journal; a `Dialer` writes it at a dial, in the journal of the first runtime the transport served (its first `Send` or `Receive`), and for a server-sent-event backplane, whose listener dials before any runtime reaches it, through `ServerSentEventBackplaneConfig.Logger`. The once is the provider's, so two applications in one process each write their own line. An `amqps` dsn is the remedy; the module declares the code, so `MELODY_BOOT_WARNINGS_IGNORED` may name it for a broker reached over a network the deployment trusts; the backplane's line does not read that key, having no configuration, and is left out only by an `amqps` dsn. A context already done refuses before the dial; one that ends during the dial or the handshake closes the socket, and the refusal carries the context's cause beside the redacted dial error.
+
+### Register message types
+
+The transport serializes the message body as JSON and stores the message type name in the `x-message-type` header so the consumer can reconstruct the concrete Go type.
+
+```go
+registry := amqp.NewMessageRegistry()
+amqp.RegisterMessage[WelcomeEmail](registry, "welcome_email")
+```
+
+Register the same value type your handlers are registered for (the message bus locates handlers by exact Go type).
+
+### Build a transport
+
+```go
+transport := amqp.NewTransport("welcome_email", registry, amqp.FromConnection(connection), amqp.TransportConfig{
+    Prefetch: bound.Of(10),
+})
+```
+
+The queue, the registry and the connection source are the constructor's arguments, an empty queue, a nil registry or the zero `ConnectionSource` refused naming the argument. A source is built by exactly one of two doors: `amqp.FromConnection(connection)` lends the transport a connection it never closes, whose loss is terminal, and `amqp.FromDialer(dialer)` hands it a dialer it runs on first use and after every loss, owning and closing each connection it dials (see [Auto-reconnect](#auto-reconnect)); a nil connection or dialer is refused at the door. `Prefetch` is the unacknowledged deliveries the broker hands the consumer at once: 10 when left out, at least 1 and at most 65535, the wire's limit, refused above it since `channel.Qos` would wrap 65536 onto 0, which RabbitMQ reads as unlimited. `PublishReturnBuffer` buffers the broker's returns, 16 when left out, at least 1. A limit outside its rule panics at construction naming the field.
+
+### Configure a publisher
+
+Wire the transport into a dispatch bus by routing your message types to it, then dispatch:
+
+```go
+locator := messagebus.NewHandlerLocator()
+messagebus.RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, welcome WelcomeEmail, envelope messagebuscontract.Envelope) error {
+    return nil
+})
+
+routing := messagebus.NewRouting()
+messagebus.RouteType[WelcomeEmail](routing, "async", transport)
+
+dispatchBus := messagebus.NewManager(
+    "default",
+    []messagebuscontract.Middleware{
+        messagebus.NewSendMessageMiddleware(routing),
+        messagebus.NewHandleMessageMiddleware(locator, messagebus.HandleMiddlewareConfig{}),
+    },
+)
+
+dispatchBus.Dispatch(runtimeInstance, WelcomeEmail{UserId: 1, Address: "user@example.com"}, messagebuscontract.DispatchOptions{})
+```
+
+A routed type is published to RabbitMQ and the dispatch returns immediately; an unrouted type falls through to the handle middleware and runs inline.
+
+### Configure a consumer
+
+Build a handle-only bus and the consume command, then run it as a long-lived worker:
+
+```go
+consumeBus := messagebus.NewManager(
+    "default.consume",
+    []messagebuscontract.Middleware{
+        messagebus.NewHandleMessageMiddleware(locator, messagebus.HandleMiddlewareConfig{}),
+    },
+)
+
+consumeCommand := messagebus.NewConsumeCommand(
+    consumeBus,
+    map[string]messagebuscontract.Transport{"async": transport},
+    messagebus.ConsumeCommandConfig{Retry: messagebus.RetryPolicy{MaxRetries: bound.Of(3)}},
+)
+```
+
+Register `consumeCommand` in your application's command list (so it shows up as `melody:messagebus:consume`), then run it:
+
+```bash
+app melody:messagebus:consume --transport=async
+app melody:messagebus:consume --transport=async --concurrency=8
+```
+
+`--transport` selects which entry of the transports map to drain; `--concurrency` runs that many worker goroutines reading the same queue.
+
+### Routing keys
+
+The transport binds one queue and uses a single, static routing key — there is no per-message routing key. Message types are routed to transports in the bus layer (the `Routing` built above), not by an AMQP routing key.
+
+- **No `Exchange` (default):** the transport publishes to the default exchange using the queue name as the routing key — a direct delivery to the queue. The `RoutingKey` field is ignored.
+- **With `Exchange` set:** the transport declares it as a `direct` exchange, binds its queue to the exchange with `RoutingKey`, and publishes to `(Exchange, RoutingKey)`. To deliver different message types to different queues, build one transport per destination (each with its own `Queue`/`RoutingKey`) and map the types to them.
+
+### Plug-and-play registration
+
+Register the connection and the transports through the module, and resolve them from many services:
+
+```go
+ctx := resolver.Runtime().Context()
+
+connection := amqp.ConnectionMustFromResolver(ctx, resolver)
+transport := amqp.TransportMustFromResolver(ctx, resolver, "async")
+```
+
+Code that holds a runtime reads the connection with `amqp.ConnectionMustFromRuntime(runtimeInstance)`; the transports are read by the provider that builds the bus.
+
+One `RegisterModule` call wires the connection service and the named transport services, each a factory run at first resolution, so a transport over the shared connection resolves it:
+
+```go
+app.RegisterModule(amqp.NewModule(amqp.ModuleConfig{
+    Connection: func(resolver containercontract.Resolver) (*amqp.Connection, error) {
+        return provider.Open(resolver.Runtime(), dsn)
+    },
+    ConnectionBuiltAtBoot: true,
+    ConnectionBootFailure: container.BootFailureFailsBoot,
+    Transports: map[string]func(resolver containercontract.Resolver) (*amqp.Transport, error){
+        "async": func(resolver containercontract.Resolver) (*amqp.Transport, error) {
+            connection := amqp.ConnectionMustFromResolver(resolver.Runtime().Context(), resolver)
+
+            return provider.NewTransport("welcome_email", registry, amqp.FromConnection(connection), amqp.TransportConfig{}), nil
+        },
+    },
+}))
+```
+
+The container closes the connection through its owner's close, under the teardown's budget and the close timeout the owner carries, every transport first; the module has no close timeout of its own. A nil entry of `Transports`, the trace of a discarded constructor error, fails the boot naming the transport, and a factory answering no transport and no error fails its resolution; an empty `ModuleConfig{}` registers nothing. `ConnectionBuiltAtBoot` builds the connection inside `Boot`, under the boot runtime, so an unreachable broker is known before the first request, `ConnectionBootFailure` being the registrar's boot failure mode of that build, `BootFailureWarns` when left out; `ConnectionBuiltAtBoot` with no `Connection`, and a `ConnectionBootFailure` with no connection built at boot, are refused at boot naming the field. In the warning mode a cli process builds the connection at its first use; `BootFailureFailsBoot` dials in every process, a command included, and fails its boot when the broker does not answer. A broker that does not answer at all holds the boot for the provider's `ProviderConfig.DialTimeout`, 30s when left out, before the warning or the refusal.
+
+### Auto-reconnect
+
+A transport handed `FromConnection` stops its consumer when that connection drops (run it under a process supervisor). To let the transport recover on its own, hand it a dialer instead — `Provider.Dialer(dsn)` builds one from the DSN, refusing an empty dsn, or a TLS configuration beside a plain one, when it is built:
+
+```go
+provider := amqp.NewProvider(configuration.Kernel().Namespace(), amqp.ProviderConfig{})
+
+transport := amqp.NewTransport("welcome_email", registry, amqp.FromDialer(provider.Dialer(dsn)), amqp.TransportConfig{
+    Prefetch: bound.Of(10),
+})
+```
+
+The transport dials on first use. When the consume channel is lost, the delivery loop re-dials and re-subscribes with bounded exponential backoff and resumes on the **same** output channel, so the `melody:messagebus:consume` worker keeps running across a broker restart. The publish path drops a dead channel and retries once. A `Dialer` is `func(dialContext context.Context) (*amqp.Connection, error)`: the transport runs it on a goroutine of its own and cancels its context when `CloseWithContext` stops waiting for it, so a dialer of your own dials under that context; one answering neither a connection nor an error is refused as a failed dial. `CloseWithContext` stops the reconnect loop and closes only connections the transport itself dialed — never one handed through `FromConnection`.
+
+The backoff window is tunable through a [`ReconnectConfig`](./reconnect_config.go), whose one field `Backoff` is a `bound.Backoff`: `Initial` 1s and `Max` 30s, at least 1ms, unlimited refused, and `Factor` 2, exactly 1 a constant backoff; the wait after attempt n is `Initial × Factor^(n-1)`, capped at `Max`. Set it once for every transport and backplane the provider builds with `ProviderConfig.Reconnect` — the provider-level value only reaches the ones built through `provider.NewTransport(...)` / `provider.NewServerSentEventBackplane(...)`, not the standalone `amqp.NewTransport(...)` constructor — and override it for a single transport through `TransportConfig.Reconnect`:
+
+```go
+provider := amqp.NewProvider(configuration.Kernel().Namespace(), amqp.ProviderConfig{
+    Reconnect: amqp.ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(2 * time.Second), Max: bound.Of(time.Minute), Factor: 1.5}},
+})
+
+transport := provider.NewTransport("welcome_email", registry, amqp.FromDialer(provider.Dialer(dsn)), amqp.TransportConfig{
+    Reconnect: amqp.ReconnectConfig{Backoff: bound.Backoff{Initial: bound.Of(500 * time.Millisecond), Max: bound.Of(10 * time.Second)}},
+})
+```
+
+A field left out keeps what the layer under it resolved — the provider's for a component it built, the default for the provider's own and for a standalone component. The merged backoff is judged whole: an initial backoff above the cap is refused naming both fields, including a cap a transport lowers under an inherited initial, and a `Backoff.Factor` below 1 or NaN is refused, since it would decay the wait toward zero and turn an outage into a reconnect storm. The backoff only resets once a subscription has lived at least the initial backoff. `CloseTimeout` is inherited the same way: a transport or a backplane built through the provider takes the provider's when its own is left out.
+
+The **write** of a `Send` is bounded by `TransportConfig.CallTimeout` (30s when left out, sized like the close join to a full amqp handshake, at least 1ms, unlimited refused). The amqp client discards the context it is handed for the write and holds its send locks across the blocking socket write, so a broker that stops reading its socket — a resource alarm, a half-dead peer — would otherwise hold that send, every later send and `CloseWithContext` for good; the confirmation wait that follows the write is bounded by the same budget, and a confirmation cut short by it is ambiguous — the message is on the wire — and is not retried. A write that outlives the timeout fails as a channel fault: on a connection the transport dialed itself (a `Dialer`) the connection is cut with a socket deadline — the one door the client leaves open once its locks are held — and the send's one retry redials; on a connection you passed in, which the transport must not cut, sends are refused at once until that write
+returns, by your hand or never, and `CloseWithContext` reports the write it could not end. The same applies to a shared connection you close yourself: close it through `connection.CloseWithContext(ctx)`, which arms a deadline on the socket and returns within the bound (the close timeout the owner carries, the provider's `CloseTimeout`, 30s by default, within your deadline) plus a 250 ms grace even behind a shutdown the client already began, because the client's plain `Close` is an RPC over the same locks and never returns over a wedged socket. The connection the module registers is closed by the container the same way, under the teardown's budget. A write the cut of a dialed connection did not free is left to end with that connection: its channel is not closed, and sends are refused at once until the write returns.
+
+`CallTimeout` bounds a send and, in `CloseWithContext`, only the wait for the publishes in flight; every other stretch of the close — the consume join, the channel closes, the close of a connection the transport dialed itself and of a dial that lands after the close began — is bounded by `CloseTimeout`, so a short `CallTimeout` does not shorten a teardown and `CloseTimeout` is the one knob of how long a connection's close may take. The backplane splits its close the same way.
+
+The publish channel runs in **publisher-confirm mode**: `Send` (and the retry re-publish) reports success only after the broker acknowledged the message, and a mandatory publish that comes back as unroutable (for example the queue was deleted) or is nacked by the broker (for example a `max-length` policy with `reject-publish`) surfaces as an error instead of being silently discarded. A nack is not retried in line on its healthy channel, but the retry re-publish keeps trying through it under the reconnect backoff, up to its attempt count, instead of giving the delivery up at the first nack. This also protects the retry path — a re-published message is confirmed before the original delivery is acked, so a broker-side discard can never drop a message between requeues. Confirm mode and the mandatory flag have no door, by design: a publish that may vanish in silence is the loss the transport exists to prevent, and an application that accepts it publishes through a channel of its own.
+
+A failed `Send` is marked with `exception.MarkInfrastructureFailure` — an outage, answered 503 with Retry-After by the http kernel and handed back uncharged by the outbox relay — unless it is the broker's verdict on the message (an unroutable return, a channel the broker closed over a live connection), a failure the caller's own context explains, or a send on a transport that is closing. A nack (a `reject-publish` overflow, an internal queue error, a quorum queue without a majority) says the broker could not take the message now and nothing about the message, so it is an outage like an unreachable broker and is marked; the outbox relay's probe still charges the nacked row when the same transport delivers the next row, so one transport fanning out to several queues, one of them full, still charges the full queue's head row. A nack does not mean no queue took the message: a publish an exchange routes to several queues is nacked when one of them, full under `reject-publish`, refuses it, and is still enqueued in every other, so each further attempt on a nack — the retry re-publish's, the outbox relay's outage passes — delivers one more copy to those queues.
+
+## Dead-lettering and retries
+
+By default the transport declares a dead-letter exchange (`<queue>.dlx`) and queue (`<queue>.dlq`), and points the main queue at it via `x-dead-letter-exchange`; `DeadLetterDisabled: true` declares neither. A queue declared earlier without that argument makes the default declare fail with `PRECONDITION_FAILED` (406), the error's context naming `TransportConfig.DeadLetterDisabled`: drain and delete the queue so it is declared again, or keep its arguments with the door, deleting the `<queue>.dlx` exchange and the `<queue>.dlq` queue the refused default declare left behind. With the door already set, a 406 names no door: the queue differs in another argument.
+
+The `<queue>.dlq` queue grows without end by default. `TransportConfig.DeadLetterMaxLength` (a `bound.Count`, at least 1) declares it with `x-max-length`, the broker dropping the oldest dead letter past it, and `TransportConfig.DeadLetterTtl` (a `bound.Duration`, 1ms to the 32-bit millisecond limit, whole milliseconds) with `x-message-ttl`; each left out declares no argument, so a transport that sets neither declares the queue exactly as before, and the main queue never carries them. Either one beside `DeadLetterDisabled` is refused naming the field. Setting, changing or dropping a cap on a `.dlq` the broker already holds is a migration of that queue: the declare fails with `PRECONDITION_FAILED` (406), the error's context naming both fields under `fields`, until the operator drains and deletes `<queue>.dlq` or applies the cap through a broker policy and leaves the fields out.
+
+- A handler success acknowledges the delivery (`Ack`).
+- A handler failure is retried under the consumer's `RetryPolicy` (max retries, base delay, optional dead-letter transport). The transport re-publishes the message carrying an incremented `x-redelivery-count` header, so the retry count survives across deliveries instead of relying on the broker's one-shot `redelivered` flag; a `DelayStamp` parks the message in a delay queue that dead-letters back to the main queue, so retries are spaced out by the configured backoff (see [Delay buckets](#delay-buckets) below). Once the retries are exhausted the message is `Nack`ed without requeue so the broker routes it to the dead-letter exchange.
+- A message replayed from `<queue>.dlq` into the main queue keeps the counters the transport wrote on it: `x-redelivery-count`, the retries it spent, and `x-dead-letter-attempt-count`, the hand-overs to the failure transport that failed. Republished as it is, it arrives with its retry budget spent and is dead-lettered again at its first failure. A replay deletes both headers, and the broker's `x-death`, which the transport does not read but which grows with every cycle, and keeps `x-message-type`, which names the type the body decodes to. The three names are fixed in this major.
+
+### Delay buckets
+
+RabbitMQ expires only the **head** of a queue, so a single delay queue holding heterogeneous per-message TTLs stalls short delays behind long ones. The transport therefore declares one queue per delay tier — `<queue>.delay.<milliseconds>ms` — each with a uniform **queue-level** `x-message-ttl` and `x-dead-letter-routing-key` back to the main queue. A delayed message is parked in the largest bucket that does not exceed its requested delay, so every message in a bucket shares one TTL and no head-of-queue expiry can block another.
+
+The consequence to plan for: **an effective delay quantizes DOWN to its bucket.** With the default tiers a requested 45s delay fires at 5s, and 55m fires at 10m. [`TransportConfig.DelayBuckets`](./transport.go) overrides the tiers (ascending, between 1ms and the 32-bit millisecond wire limit, at most 8; a violation panics at construction — an over-limit bucket's queue name would promise a delay its clamped TTL cannot honour, and a sub-millisecond one collapses tiers onto a `0ms` queue) — add tiers wherever your retry policy needs the delay honoured more closely. The cap of 8 is fixed: each tier is a queue the transport declares and binds on the broker, so the tier list is topology a deployment migrates, and eight tiers ten times apart already span a millisecond to the wire limit.
+
+| Requested delay | Default bucket | Queue                     |
+|-----------------|----------------|---------------------------|
+| `< 5s`          | none           | `<queue>.delay`           |
+| `5s` – `< 1m`   | `5s`           | `<queue>.delay.5000ms`    |
+| `1m` – `< 10m`  | `1m`           | `<queue>.delay.60000ms`   |
+| `10m` – `< 1h`  | `10m`          | `<queue>.delay.600000ms`  |
+| `>= 1h`         | `1h`           | `<queue>.delay.3600000ms` |
+
+A delay **below the smallest bucket** keeps the legacy `<queue>.delay` queue with a precise per-message `expiration`, where head-of-line waiting is bounded by that smallest bucket. That queue is always declared, so messages parked by an older deployment still drain. A per-message expiration is clamped to ~49.7 days, the range RabbitMQ's 32-bit millisecond parse allows.
+
+- `Receive` answers a subscription; when the consume loop ends for good — the connection gone with no dialer, a channel it could not reopen — its `Err()` names why, and the consume command reports it. A stop through the runtime or `CloseWithContext` ends it with no reason.
+- A delivery that cannot be decoded (missing or unknown `x-message-type`, bad body) is `Nack`ed without requeue. It is dead-lettered by default; with `DeadLetterDisabled` the broker discards it.
+
+## Server-Sent Events backplane
+
+`NewServerSentEventBackplane(hub, ServerSentEventBackplaneConfig{...})` makes the core `http.ServerSentEventHub` fan its broadcasts out across every application instance behind a load balancer over a fanout exchange — without it, a `Broadcast` reaches only the clients connected to the instance that emitted it. Each instance binds its own exclusive, auto-deleted queue to the exchange (default `<namespace>.sse` through `Provider.NewServerSentEventBackplane`, `melody.sse` through the package's own constructor, an `Exchange` set used verbatim), so a published broadcast reaches every instance; the events of other instances are forwarded into the hub via `DeliverLocal`, and a tagged per-instance origin makes each instance skip the echo of its own broadcasts. Replication is best-effort in BOTH directions by design: the consumer runs auto-ack over a transient queue, and `Publish` runs no confirm mode — an event the broker discards after accepting the frame is gone with no error, so the hub's backplane-failure counter counts local publish refusals, not broker-side outcomes (the redis backplane behaves identically over pub/sub). A
+server-sent event is ephemeral fan-out state; the next event or a client refresh corrects a missed one. Over `FromDialer` the subscription and publisher re-establish after a broker restart; over `FromConnection`, a lost connection stops the receive half permanently, and that terminal stop is reported through the configured `Logger` — or on the emergency stderr channel when none was configured. Each of the two stretches a publish spends time in — the wait for its turn behind the broadcasts ahead of it, and the write — is bounded by `ServerSentEventBackplaneConfig.CallTimeout` (1s when left out, the same budget the redis backplane gives one round trip, at least 1ms, unlimited refused), so one attempt over an open channel costs at most two of these budgets — a `Publish` that opens or reopens its channel first, or retries once, pays the channel round trips beyond them, which the amqp client bounds by nothing but the socket: the amqp client discards the context a publish is handed and a broker that
+stops reading its socket would otherwise hold the write — and with it every later broadcast and the hub's shutdown, which waits for the publishes in flight — for good. `Publish` runs under the context of the runtime the broadcast was handed: a done context is refused before the event is encoded, with `sse backplane publish refused: the caller's context is done` and the context's cause, and a nil runtime is refused naming `door` `amqp.ServerSentEventBackplane.Publish`; the wait for the turn ends at the earlier of `CallTimeout` and that context, while a write once begun is waited for under `CallTimeout` alone, since giving it up on the caller's word would cut the connection it rides. A broadcast that runs out of budget, or whose caller's context ends, while waiting for its turn is told so and marks nothing; a write that outlives the timeout fails and is not retried; on a connection the backplane dialed itself the connection is cut and redialed on the next publish, on a connection you passed in publishes are refused until that write returns. The backplane carries `CloseWithContext(context.Context) error` and no module registration door, and needs none: the hub owns it — the hub's `CloseWithContext`, which the container reaches when the hub is registered, closes the backplane it carries — so register the hub, or call `hub.CloseWithContext(closeContext)` at shutdown; closing the backplane directly is allowed and idempotent.
+
+```go
+hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
+backplane := amqp.NewServerSentEventBackplane(hub, amqp.FromDialer(provider.Dialer(dsn)), amqp.ServerSentEventBackplaneConfig{
+    CallTimeout: bound.Of(2 * time.Second),
+})
+defer func() {
+    _ = backplane.CloseWithContext(ctx)
+}()
+```
+
+`NewServerSentEventBackplane` calls `hub.SetBackplane` itself, a nil hub or the zero `ConnectionSource` refused naming the argument, so after construction `hub.Broadcast(runtimeInstance, topic, event)` replicates automatically; a limit outside its rule panics naming the field before the backplane is installed on the hub, so a refused config leaves the hub without one. Its `Reconnect` and `CloseTimeout` are inherited from the provider as a transport's are; `ServerSentEventBackplaneConfig.CloseTimeout` bounds each stretch of `CloseWithContext` that cannot observe its signal, the provider's when built through one and 30s otherwise, at least 1ms, unlimited refused. A nil `Logger` is the emergency logger, standard error, and a typed nil is refused naming `ServerSentEventBackplaneConfig.Logger`. `CloseWithContext` tears the subscription down and closes only a connection the backplane itself dialed (never one handed through `FromConnection`), and cancels a dial in flight. The same hub backs the WebSocket integration, so both transports fan out cluster-wide.
+
+## Footguns & caveats
+
+- The transport uses one channel for publishing and one for consuming, created lazily. `Ack`/`Nack` operate on the consume channel, so they must be called from the process that received the message.
+- With auto-reconnect, a message received just before a reconnect carries a delivery tag from the old channel. Each delivery is stamped with the consume-channel generation it arrived on; once the channel rotates, an `Ack`/`Nack` for an older generation is skipped as a no-op rather than acking the stale tag against the new channel — which would otherwise ack an unrelated delivery (silent loss) or trip a 406 channel close. The broker redelivers the still-unacked message. Combined with the at-least-once requeue, this means **handlers must be idempotent**.
+- Behind a load balancer the consumer runs on several instances as competing consumers on the same queue; this is the normal AMQP fan-out and is safe. Because redelivery can land a message on a different instance than first processed it, idempotency must be keyed on the message, not on local state.
+- Queue/exchange topology is declared on first use and assumed stable. Redeclaring with conflicting arguments will fail at the broker.
+- Most stamps are process-local and are not serialized over the wire; beyond the message body and its type name, exactly four pieces of stamp data cross the broker. The envelope's headers, every `messagebus.HeadersStamp` merged, cross as AMQP long-string headers named `ApplicationHeaderPrefix` + the name, `x-melody-header-<name>`, and are rebuilt as one `HeadersStamp` on receive from every prefixed string header the header rule admits; a prefixed header of another AMQP type is skipped with one warning naming the header and its Go type, and one whose name or value fails the rule with one warning naming the header, never its value. `TransportConfig.Headers` bounds what one publish writes (32 headers and 8 KiB by default, unlimited refused); its `MaxNameLength` is refused at `NewTransport` above `amqp.HeaderNameMaximumLength`, 239, what a 255-byte header key holds behind the prefix, naming `TransportConfig.Headers.MaxNameLength`: headers outside `messagebus.ValidateHeaders` are refused before any dial or write, caused by `messagebus.ErrHeadersRefused`, never truncated and never marked as an outage, so a relay's or a consumer's outage backoff is not armed by them; what a delivery carries is never bounded on receive. Every republish the transport makes, a redelivery or a delay, rebuilds the publishing from the received envelope, bounded by the larger of `TransportConfig.Headers` and the count and bytes the delivery arrived with, so a message is always requeued with the headers it was received with, whatever limits its producer had, and a handler cannot grow it past both; a header the handler added that fails the name and value rule is dropped with one warning naming the header, never its value, so the requeue still carries its counts; the dead letter and the delay's expiry are the broker's and keep what was sent. A producer-assigned `messagebus.MessageIdStamp` is carried as the AMQP `MessageId` property and round-tripped back into a `MessageIdStamp` on receive, so a consumer can deduplicate redeliveries from an at-least-once producer (for example the outbox row id) and an application-driven requeue re-publishes under the same id. The redelivery count crosses in the `x-redelivery-count` header (surfaced as a `messagebus.RedeliveryStamp`) and the dead-letter attempt count in the `x-dead-letter-attempt-count` header (surfaced as a `messagebus.DeadLetterAttemptStamp`). All other stamps stay process-local. The transport also adds a `DeliveryStamp` and a `messagebus.ReceivedStamp` on receive.
+- The integration test (`transport_test.go`) is skipped unless `AMQP_DSN` is set. A RabbitMQ service is available in `.dev/docker/docker-compose.yml`.
