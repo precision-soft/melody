@@ -31,10 +31,10 @@ type LocalStorageConfig struct {
     /* SweepBatchSize is how many names of a key's directory the sweep reads at a time; 256 when left out, at least 1, unlimited refused since a batch is held in memory. */
     SweepBatchSize bound.Count
 
-    /* FileMode is the permission every object and its metadata object are created with: DefaultLocalStorageFileMode when left out; permission bits only, the owner's read and write required. */
+    /* FileMode is the creation mode of every object and its metadata object, which the process umask narrows: DefaultLocalStorageFileMode when left out; permission bits only, the owner's read and write required. */
     FileMode os.FileMode
 
-    /* DirectoryMode is the permission the base directory and every missing directory of a key are created with: DefaultLocalStorageDirectoryMode when left out; permission bits only, the owner's read, write and search required. */
+    /* DirectoryMode is the creation mode of the base directory and every missing directory of a key, which the process umask narrows: DefaultLocalStorageDirectoryMode when left out; permission bits only, the owner's read, write and search required. */
     DirectoryMode os.FileMode
 }
 

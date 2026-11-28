@@ -50,7 +50,7 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
     registrar.RegisterService(
         ServiceTracerProvider,
         func(resolver containercontract.Resolver) (*providerHandle, error) {
-            provider, providerErr := NewTracerProvider(resolver.Runtime(), instance.config.Endpoint, instance.config.Config)
+            provider, providerErr := newTracerProvider(resolver.Runtime(), instance.config.Endpoint, instance.config.Config)
             if nil != providerErr {
                 return nil, providerErr
             }

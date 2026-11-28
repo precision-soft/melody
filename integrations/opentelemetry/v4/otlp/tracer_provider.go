@@ -60,12 +60,19 @@ func (instance Config) Format(state fmt.State, verb rune) {
     _, _ = state.Write([]byte(instance.String()))
 }
 
-/* NewTracerProvider builds a batching TracerProvider wired to an OTLP exporter of endpoint, host:port without a scheme, for example "otel-collector:4317", under the runtime's context; a nil runtime, a runtime whose context is already done, an empty endpoint, a sampling or a batch timeout outside its rule is answered as the error, naming the field. The caller owns its lifecycle and runs Shutdown on exit to flush pending spans; the Module in this package does so by registering it as a container-managed service. */
+/* NewTracerProvider builds a batching TracerProvider wired to an OTLP exporter of endpoint, host:port without a scheme, for example "otel-collector:4317", under the runtime's context; a nil runtime, a runtime whose context is already done, an empty endpoint, a sampling or a batch timeout outside its rule is answered as the error, naming the field. The caller owns its lifecycle and runs Shutdown on exit to flush pending spans; the Module in this package does so by registering it as a container-managed service. An Insecure export to a collector off this machine is written in the runtime's journal under InsecureCollectorBootWarningName, the Module writing it as a boot warning instead. */
 func NewTracerProvider(runtimeInstance containercontract.Runtime, endpoint string, config Config) (*sdktrace.TracerProvider, error) {
     if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance, "otlp.NewTracerProvider"); nil != runtimeErr {
         return nil, runtimeErr
     }
 
+    journalInsecureCollector(runtimeInstance, endpoint, config)
+
+    return newTracerProvider(runtimeInstance, endpoint, config)
+}
+
+/* newTracerProvider is NewTracerProvider without the journal line, for the Module, which declares the warning at boot and hands the resolver's runtime, never nil */
+func newTracerProvider(runtimeInstance containercontract.Runtime, endpoint string, config Config) (*sdktrace.TracerProvider, error) {
     ctx := runtimeInstance.Context()
 
     if "" == endpoint {

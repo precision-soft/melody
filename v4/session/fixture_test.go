@@ -5,6 +5,7 @@ import (
     "errors"
     "os"
     "sync"
+    "syscall"
     "testing"
     "time"
 
@@ -395,6 +396,14 @@ func sessionRuntimeUnder(ctx context.Context) containercontract.Runtime {
 
 func defaultSessionFileModes() sessionFileModes {
     return sessionFileModes{file: DefaultFileStorageFileMode, directory: DefaultFileStorageDirectoryMode}
+}
+
+/* the umask is process-wide: no session test runs in parallel, so a test asserting a created mode sets it to zero and restores it */
+func withZeroUmask(t *testing.T) {
+    t.Helper()
+
+    previousUmask := syscall.Umask(0)
+    t.Cleanup(func() { syscall.Umask(previousUmask) })
 }
 
 func requirePermission(t *testing.T, path string, expected os.FileMode) {

@@ -49,7 +49,7 @@ type FirewallCsrfConfig struct {
 
 /* FirewallOverride is what one firewall declares against the global configuration; the zero value inherits the global access control, local rules first, and overrides nothing. A typed nil among the dependencies is refused naming the field. */
 type FirewallOverride struct {
-    /* GlobalAccessControlDisabled cuts this firewall off the global access control; a firewall that then declares no AccessControl is refused, security.NewAccessControl(nil) keeping it open on purpose. */
+    /* GlobalAccessControlDisabled cuts this firewall off the global access control; a firewall that then declares no AccessControl is refused, a PUBLIC_ACCESS rule on "/" keeping it open on purpose, NewAccessControlBuilder().AllowAnonymous("/"). */
     GlobalAccessControlDisabled bool
 
     /* MergeStrategy orders the merged rule list: "" and AccessControlMergeLocalFirst put the firewall's rules before the global ones, AccessControlMergeGlobalFirst after them, AccessControlMergeOverrideOnly drops the global ones; anything else is refused naming the field. */

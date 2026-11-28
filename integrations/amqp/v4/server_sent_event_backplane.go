@@ -75,6 +75,9 @@ type ServerSentEventBackplane struct {
     ctx    context.Context
     cancel context.CancelFunc
     wait   sync.WaitGroup
+
+    /* the journal a dial judges its dsn through: the backplane's logger, since its listener dials before any runtime reaches it */
+    plaintextDial dialJournalHolder
 }
 
 /* ServerSentEventBackplaneConfig declares the backplane beside its hub and its connection source: Exchange is used verbatim, <namespace>.sse when empty: the namespace of the provider that built the backplane, melody for the package's own constructor, a nil Logger is the emergency logger and a typed nil is refused. A limit outside its rule is refused before the backplane is installed on the hub or its listener starts, naming the field. */
@@ -142,6 +145,8 @@ func newServerSentEventBackplane(hub *melodyhttp.ServerSentEventHub, source Conn
         ctx:           ctx,
         cancel:        cancel,
     }
+
+    backplane.plaintextDial.journal.Store(&plaintextJournal{logger: logger})
 
     hub.SetBackplane(backplane)
 
@@ -585,7 +590,7 @@ func (instance *ServerSentEventBackplane) declareExchange(channel *amqp091.Chann
 func (instance *ServerSentEventBackplane) dialWithContext() (*amqp091.Connection, error) {
     outcome := make(chan dialOutcome, 1)
     go func() {
-        outcome <- runDialer(instance.ctx, instance.dialer, "amqp sse backplane dialer panicked", map[string]any{"exchange": instance.exchange})
+        outcome <- runDialer(instance.plaintextDial.dialContext(instance.ctx), instance.dialer, "amqp sse backplane dialer panicked", map[string]any{"exchange": instance.exchange})
     }()
 
     select {

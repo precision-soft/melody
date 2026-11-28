@@ -17,7 +17,7 @@ const (
     DefaultHeaderMaxCount      = 32
     DefaultHeaderMaxBytes      = 8 * 1024
 
-    /* HeaderNameMaximumLength is the longest name MaxNameLength admits, an amqp field-table key being a short string; a received name is read up to it, since a writer may have been configured that far. */
+    /* HeaderNameMaximumLength is the longest name MaxNameLength admits, an amqp field-table key being a short string; a transport that writes the name behind a prefix refuses above its own lower ceiling. A received name is read up to it, since a writer may have been configured that far. */
     HeaderNameMaximumLength = 255
 )
 

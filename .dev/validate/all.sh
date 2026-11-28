@@ -422,7 +422,7 @@ run_defaults_checks() {
     local UNIT_KEY_STRING=""
     if [[ "true" = "${VALIDATION_CACHE_ENABLED_BOOLEAN}" ]]; then
         UNIT_KEY_STRING="$(validation_cache_key "lane defaults" "unit v4 line" \
-            "$(validation_cache_object_list v4/.documentation/DEFAULTS.md .dev/validate/defaults.baseline .dev/validate/defaults.sh .dev/validate/typecheck)" \
+            "$(validation_cache_object_list v4/.documentation/DEFAULTS.md .dev/validate/defaults.baseline .dev/validate/defaults.not-doors .dev/validate/defaults.sh .dev/validate/typecheck)" \
             "$(validation_cache_closure_digest_list "${LINE_MODULE_LIST[@]}")")"
     fi
 
@@ -1355,9 +1355,9 @@ main() {
     fi
 
     # gated like the api surface check, on the paths its answer moves with: a v4-line go source outside the
-    # example applications, the inventory, its baseline, the lane and the type checker it builds
+    # example applications, the inventory, its baseline, its door write-offs, the lane and the type checker it builds
     if grep -qE '^(v4|integrations/.+/v4)/.*\.go$' <<<"${PUBLISHED_STAGED_NAME_LIST_STRING}" ||
-        grep -qE '^(v4/\.documentation/DEFAULTS\.md|\.dev/validate/defaults\.(sh|baseline)|\.dev/validate/typecheck/.*)$' <<<"${STAGED_NAME_LIST_STRING}"; then
+        grep -qE '^(v4/\.documentation/DEFAULTS\.md|\.dev/validate/defaults\.(sh|baseline|not-doors)|\.dev/validate/typecheck/.*)$' <<<"${STAGED_NAME_LIST_STRING}"; then
         run_defaults_checks
     else
         info "skip defaults inventory check (no staged v4-line go source, DEFAULTS.md, defaults lane or type checker change)"

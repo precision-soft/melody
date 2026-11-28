@@ -2068,6 +2068,7 @@ func TestFileStorage_AContextThatEndsDuringTheWriteDoesNotTearIt(t *testing.T) {
 
 func savedAndClosedSessionStorage(t *testing.T, path string, config FileStorageConfig, fileMode os.FileMode, directoryMode os.FileMode) {
     t.Helper()
+    withZeroUmask(t)
 
     storage, storageErr := NewFileStorage(path, config)
     if nil != storageErr {
@@ -2158,6 +2159,8 @@ func TestNewFileStorage_RefusesAModeOutsideItsRuleNamingTheField(t *testing.T) {
 }
 
 func TestFileStorage_SaveRecreatesARemovedDirectoryAtTheConfiguredMode(t *testing.T) {
+    withZeroUmask(t)
+
     directory := filepath.Join(t.TempDir(), "nested")
     path := filepath.Join(directory, "sessions.json")
 

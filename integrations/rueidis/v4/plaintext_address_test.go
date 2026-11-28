@@ -25,14 +25,6 @@ func (instance *plaintextAddressEnvironmentSource) Load(ctx context.Context) (ma
     return instance.values, nil
 }
 
-/* the judged addresses live for the process, so each test starts from none */
-func forgetJudgedPlaintextAddresses(t *testing.T) {
-    t.Helper()
-
-    judgedPlaintextAddresses.Clear()
-    t.Cleanup(judgedPlaintextAddresses.Clear)
-}
-
 func newPlaintextAddressRuntime(t *testing.T, ctx context.Context, values map[string]string) (containercontract.Runtime, *capturingLogger) {
     t.Helper()
 
@@ -81,12 +73,11 @@ func TestPlaintextAddressesOf_OnlyAnAddressOffThisMachineIsNamed(t *testing.T) {
     }
 }
 
-func TestWarnPlaintextAddresses_NamesEachAddressOnce(t *testing.T) {
-    forgetJudgedPlaintextAddresses(t)
-
+func TestPlaintextAddressJudge_NamesEachAddressOnce(t *testing.T) {
     runtimeInstance, logger := newPlaintextAddressRuntime(t, t.Context(), nil)
+    judge := &plaintextAddressJudge{}
     for range 2 {
-        warnPlaintextAddresses(runtimeInstance, []string{"redis.example.com:6379", "localhost:6379", "replica.example.com:6379"})
+        judge.judge(runtimeInstance, []string{"redis.example.com:6379", "localhost:6379", "replica.example.com:6379"})
     }
 
     warnings := plaintextAddressWarnings(logger)
@@ -95,23 +86,38 @@ func TestWarnPlaintextAddresses_NamesEachAddressOnce(t *testing.T) {
     }
 }
 
-func TestWarnPlaintextAddresses_HonoursTheBootWarningIgnoreKey(t *testing.T) {
+func TestPlaintextAddressJudge_HonoursTheBootWarningIgnoreKey(t *testing.T) {
     for name, testCase := range map[string]struct {
         values   map[string]string
         expected int
     }{
-        "no key":               {values: map[string]string{}, expected: 1},
+        "no key":               {values: map[string]string{}, expected: 2},
         "the code ignored":     {values: map[string]string{melodyconfig.BootWarningsIgnoredKey: PlaintextAddressBootWarningName}, expected: 0},
-        "another code ignored": {values: map[string]string{melodyconfig.BootWarningsIgnoredKey: "security.firewallDoorReachUnknown"}, expected: 1},
+        "another code ignored": {values: map[string]string{melodyconfig.BootWarningsIgnoredKey: "security.firewallDoorReachUnknown"}, expected: 2},
     } {
-        forgetJudgedPlaintextAddresses(t)
-
         runtimeInstance, logger := newPlaintextAddressRuntime(t, t.Context(), testCase.values)
-        warnPlaintextAddresses(runtimeInstance, []string{"redis.example.com:6379"})
+        (&plaintextAddressJudge{}).judge(runtimeInstance, []string{"redis.example.com:6379", "replica.example.com:6379"})
 
         if testCase.expected != len(plaintextAddressWarnings(logger)) {
             t.Fatalf("%s: expected %d warnings, got %+v", name, testCase.expected, plaintextAddressWarnings(logger))
         }
+    }
+}
+
+/* the once is the provider's: a second application's provider over the same address writes its own line */
+func TestProvider_JudgesEachAddressOncePerProvider(t *testing.T) {
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+    runtimeInstance, logger := newPlaintextAddressRuntime(t, cancelledContext, nil)
+
+    for _, provider := range []*Provider{NewProvider("melody", ProviderConfig{}), NewProvider("melody", ProviderConfig{})} {
+        for range 2 {
+            _, _ = provider.Open(runtimeInstance, ConnectionParameters{Address: "redis.example.com:6379"})
+        }
+    }
+
+    if 2 != len(plaintextAddressWarnings(logger)) {
+        t.Fatalf("expected one warning per provider, got %+v", plaintextAddressWarnings(logger))
     }
 }
 
@@ -124,8 +130,6 @@ func TestProviderOpen_WritesThePlaintextAddressWarningWithoutTls(t *testing.T) {
         "without tls": {client: ClientConfig{}, expected: 1},
         "with tls":    {client: ClientConfig{TlsConfig: &tls.Config{MinVersion: tls.VersionTLS12}}, expected: 0},
     } {
-        forgetJudgedPlaintextAddresses(t)
-
         cancelledContext, cancel := context.WithCancel(context.Background())
         cancel()
         runtimeInstance, logger := newPlaintextAddressRuntime(t, cancelledContext, nil)

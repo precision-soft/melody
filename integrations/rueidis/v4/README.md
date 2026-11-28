@@ -90,7 +90,7 @@ Every attempt is reported in the journal `ProviderConfig.Logger` names: a warnin
 | `ClientConfig`  | `ClientSideCacheEnabled` | `false`   |                                                  |
 | `ClientConfig`  | `ClientSideCacheBytes`   | `128 MiB` | at least `1`, unlimited refused, needs the cache |
 
-`Open` without `ClientConfig.TlsConfig` over an address that is not `localhost` or a loopback address writes, once per address and process, the warning `rueidis.plaintextAddress` (`PlaintextAddressBootWarningName`) in the runtime's journal, naming the address and never a credential: the password and every value cross the network in clear. A `TlsConfig` is the remedy; the module declares the code, so `MELODY_BOOT_WARNINGS_IGNORED` may name it for a store reached over a network the deployment trusts.
+`Open` without `ClientConfig.TlsConfig` over an address that is not `localhost` or a loopback address writes, once per address of the provider, so two applications in one process each write their own line, the warning `rueidis.plaintextAddress` (`PlaintextAddressBootWarningName`) in the runtime's journal, naming the address and never a credential: the password and every value cross the network in clear. A `TlsConfig` is the remedy; the module declares the code, so `MELODY_BOOT_WARNINGS_IGNORED` may name it for a store reached over a network the deployment trusts.
 
 ## Distributed lock
 

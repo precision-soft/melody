@@ -35,6 +35,7 @@ func NewProvider(namespace string, config ProviderConfig) *Provider {
         client:    resolved.client,
         retry:     resolved.retry,
         logger:    logger,
+        plaintext: &plaintextAddressJudge{},
     }
 }
 
@@ -44,6 +45,7 @@ type Provider struct {
     client    resolvedClient
     retry     resolvedRetry
     logger    loggingcontract.Logger
+    plaintext *plaintextAddressJudge
 }
 
 /* resolvedLogger is the journal the retry reports in: the configured one, else the emergency logger, so a re-dial is never silent */
@@ -55,14 +57,14 @@ func (instance *Provider) resolvedLogger() loggingcontract.Logger {
     return instance.logger
 }
 
-/* Open opens the client under the caller's runtime and answers its owner: the runtime's context ends the retry wait and bounds the boot ping, and the owner's CloseWithContext is the one close; connection.Client() reaches the raw client for commands. An address off this machine dialled without ClientConfig.TlsConfig is named once per address in the runtime's journal, under PlaintextAddressBootWarningName. */
+/* Open opens the client under the caller's runtime and answers its owner: the runtime's context ends the retry wait and bounds the boot ping, and the owner's CloseWithContext is the one close; connection.Client() reaches the raw client for commands. An address off this machine dialled without ClientConfig.TlsConfig is named once per address of the provider in the runtime's journal, under PlaintextAddressBootWarningName. */
 func (instance *Provider) Open(runtimeInstance containercontract.Runtime, parameters ConnectionParameters) (*Connection, error) {
     if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "rueidis.Provider.Open"); nil != nilErr {
         return nil, nilErr
     }
 
     if nil == instance.client.tlsConfig {
-        warnPlaintextAddresses(runtimeInstance, parseAddressList(parameters.Address))
+        instance.plaintext.judge(runtimeInstance, parseAddressList(parameters.Address))
     }
 
     openContext := runtimeInstance.Context()

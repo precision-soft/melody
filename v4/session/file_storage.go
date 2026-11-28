@@ -45,10 +45,10 @@ type FileStorageConfig struct {
     /* Clock is where every expiry instant is read; nil is the system clock, and the file persists the wall reading. */
     Clock clockcontract.Clock
 
-    /* FileMode is the permission of the session file over a path, set on every snapshot it writes, and of the journal it creates: DefaultFileStorageFileMode when left out; permission bits only, the owner's read and write required, any bit of others refused; unused over an open handle. */
+    /* FileMode is the permission of the session file over a path, set exactly on every snapshot it writes, and the creation mode of the journal, which the process umask narrows: DefaultFileStorageFileMode when left out; permission bits only, the owner's read and write required, any bit of others refused; unused over an open handle. */
     FileMode os.FileMode
 
-    /* DirectoryMode is the permission every missing directory of the path is created with: DefaultFileStorageDirectoryMode when left out; permission bits only, the owner's read, write and search required, any bit of others refused; an existing directory keeps its own, and it is unused over an open handle. */
+    /* DirectoryMode is the creation mode of every missing directory of the path, which the process umask narrows: DefaultFileStorageDirectoryMode when left out; permission bits only, the owner's read, write and search required, any bit of others refused; an existing directory keeps its own, and it is unused over an open handle. */
     DirectoryMode os.FileMode
 }
 

@@ -54,5 +54,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Documentation
 
+- `README.md`: the defaults table states the crontab's mode, `0644` for a crontab the generator creates or empties, an existing file keeping its own, and why it has no door.
 - `README.md`: a Doors section with the v4 spellings, `LogDisabled`, `LogFileName`, `LogFileNameRaw`, `Instances`, `User` and `EntryUserIgnored`, the generator's `DirectoryMode` and `LogsDirectoryCheckDisabled`, `--prune` and `lock.NewExclusiveCommand`, and the reasons the `LogFileName` escape and the busybox day pair have no door.
 - configuration: the GoDoc of `EntryConfig` states that a nil `Schedule`, like a field left out, runs the entry every minute, where it said the field was required.

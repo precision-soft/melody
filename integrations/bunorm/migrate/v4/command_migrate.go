@@ -5,6 +5,7 @@ import (
     "fmt"
     "strconv"
     "strings"
+    "time"
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
@@ -95,7 +96,7 @@ func (instance *MigrateCommand) runMigrate(
         printAppliedGroup(outputInstance, managerName, tables.migrations, group, migrateErr)
 
         if _, ranNotRecorded := appliedNamesOnFailure(group, migrateErr); "" != ranNotRecorded {
-            writeRanNotRecordedMarker(ctx, db, tables, ranNotRecorded, outputInstance)
+            writeRanNotRecordedMarker(ctx, db, tables, ranNotRecorded, outputInstance, instance.base.unlockTimeout)
         }
 
         return migrateErr
@@ -207,10 +208,14 @@ func ranNotRecordedMarkerPrefix(migrationsTable string) string {
 }
 
 /* writeRanNotRecordedMarker records the migration for the next run; a marker that cannot be written leaves the warning the only record, and says so */
-func writeRanNotRecordedMarker(ctx context.Context, database bun.IDB, tables migrationTables, migrationName string, outputInstance *commandOutput) {
+func writeRanNotRecordedMarker(ctx context.Context, database bun.IDB, tables migrationTables, migrationName string, outputInstance *commandOutput, markerTimeout time.Duration) {
     marker := &ranNotRecordedMarker{TableName: ranNotRecordedMarkerPrefix(tables.migrations) + migrationName}
 
-    if _, insertErr := database.NewInsert().Model(marker).ModelTableExpr(tables.locks).Exec(ctx); nil != insertErr {
+    /* the marker must not ride the command context: a stop that cancels it between the Up and the mark is the commonest cause of the failed mark, and the insert would fail for the same reason */
+    markerContext, cancelMarker := context.WithTimeout(context.WithoutCancel(ctx), markerTimeout)
+    defer cancelMarker()
+
+    if _, insertErr := database.NewInsert().Model(marker).ModelTableExpr(tables.locks).Exec(markerContext); nil != insertErr {
         outputInstance.printWarning("the marker of " + migrationName + " could not be written in " + tables.locks + ", so the next run will not refuse to run it again: " + insertErr.Error())
     }
 }

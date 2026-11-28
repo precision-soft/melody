@@ -301,6 +301,8 @@ func TestLocalStorage_RejectsSizeMismatch(t *testing.T) {
 }
 
 func TestLocalStorage_WritesObjectsWithRestrictivePermissions(t *testing.T) {
+    withZeroUmask(t)
+
     base := t.TempDir()
     local := NewLocalStorage(base, LocalStorageConfig{})
     runtimeInstance := testRuntime()
@@ -1630,6 +1632,7 @@ func requireStoragePermission(t *testing.T, path string, expected os.FileMode) {
 
 func storedUnderModes(t *testing.T, config LocalStorageConfig, fileMode os.FileMode, directoryMode os.FileMode) {
     t.Helper()
+    withZeroUmask(t)
 
     base := filepath.Join(t.TempDir(), "base")
     local := NewLocalStorage(base, config)

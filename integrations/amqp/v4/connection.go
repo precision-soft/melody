@@ -108,6 +108,7 @@ func NewProvider(namespace string, config ProviderConfig) *Provider {
         dialTimeout:    dialTimeout.Value,
         tlsConfig:      tlsConfig,
         connectionName: config.ConnectionName,
+        plaintextHosts: &plaintextHostJudge{},
         parent: componentParent{
             namespace:    namespace,
             reconnect:    reconnect,
@@ -136,6 +137,7 @@ type Provider struct {
     tlsConfig      *tls.Config
     connectionName string
     parent         componentParent
+    plaintextHosts *plaintextHostJudge
 }
 
 /* componentParent is what a transport or a backplane takes for the fields its config leaves out. */
@@ -172,7 +174,7 @@ func (instance *Provider) NewServerSentEventBackplane(hub *melodyhttp.ServerSent
     return newServerSentEventBackplane(hub, source, config, instance.parent)
 }
 
-/* Open dials one connection under the runtime's context, bounded by DialTimeout, and answers its owner, which carries the provider's CloseTimeout; connection.Raw() reaches the client's connection. A plain amqp dsn off this machine is named once per host in the runtime's journal, under PlaintextDsnBootWarningName. */
+/* Open dials one connection under the runtime's context, bounded by DialTimeout, and answers its owner, which carries the provider's CloseTimeout; connection.Raw() reaches the client's connection. A plain amqp dsn off this machine is named once per host of the provider in the runtime's journal, under PlaintextDsnBootWarningName. */
 func (instance *Provider) Open(runtimeInstance containercontract.Runtime, dsn string) (*Connection, error) {
     if nilErr := containercontract.RefuseNilRuntime(runtimeInstance, "amqp.Provider.Open"); nil != nilErr {
         return nil, nilErr
@@ -182,18 +184,20 @@ func (instance *Provider) Open(runtimeInstance containercontract.Runtime, dsn st
         return nil, dsnErr
     }
 
-    warnPlaintextDsn(runtimeInstance, dsn)
+    instance.plaintextHosts.judge(plaintextJournalOf(runtimeInstance), dsn)
 
     return instance.dial(runtimeInstance.Context(), dsn)
 }
 
-/* Dialer answers the dial a reconnecting component runs on a goroutine of its own, outside any runtime, under the context the component cancels when it stops waiting; a dsn the provider would refuse is refused here, at wiring. */
+/* Dialer answers the dial a reconnecting component runs on a goroutine of its own, outside any runtime, under the context the component cancels when it stops waiting; a dsn the provider would refuse is refused here, at wiring. A plain amqp dsn off this machine is named once per host at a dial, in the journal of the runtime the transport or the backplane last served, under PlaintextDsnBootWarningName. */
 func (instance *Provider) Dialer(dsn string) Dialer {
     if dsnErr := instance.refuseDsn(dsn); nil != dsnErr {
         exception.Panic(exception.FromError(dsnErr))
     }
 
     return func(dialContext context.Context) (*Connection, error) {
+        instance.plaintextHosts.judge(plaintextJournalFrom(dialContext), dsn)
+
         return instance.dial(dialContext, dsn)
     }
 }

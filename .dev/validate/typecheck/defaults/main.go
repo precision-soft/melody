@@ -23,6 +23,9 @@ const (
     configPackagePath = "github.com/precision-soft/melody/v4/config"
     internalPath      = "github.com/precision-soft/melody/v4/internal"
 
+    /* the row every comparison with the development environment's value is named by: the one value of MELODY_ENV that opens what other environments keep shut */
+    developmentEnvironmentKey = "v4/config.EnvironmentDevelopment"
+
     kindLimit      = "limit"
     kindProtection = "protection"
     kindRefusal    = "refusal"
@@ -145,6 +148,8 @@ type inventory struct {
     doorFieldMap    map[string]string
     /* the first sentence of a door field's comment, for a draft row */
     doorFieldTextMap map[string]string
+    /* every comparison with the development environment's value, by the declaration that holds it */
+    developmentSiteMap map[string]string
     packageErrorList []string
 }
 
@@ -230,6 +235,7 @@ func measure(root string, moduleList []string, environment []string) (*inventory
         environmentMap: map[string]string{},
         doorFieldMap:   map[string]string{},
         doorFieldTextMap: map[string]string{},
+        developmentSiteMap: map[string]string{},
     }
 
     for _, moduleDirectory := range moduleList {
@@ -329,6 +335,23 @@ func measurePackage(absoluteRoot string, packagePath string, loadedPackage *pack
                     measureEnvironmentKeyLiteral(typed, information, measured, positionOf)
                 case *ast.CallExpr:
                     measureCall(packagePath, ownerName, typed, information, measured, siteCount, positionOf)
+                case *ast.ReturnStmt:
+                    for _, result := range typed.Results {
+                        measureModeLiteral(packagePath, ownerName, result, information, measured, siteCount, positionOf)
+                    }
+                case *ast.BinaryExpr:
+                    if (token.EQL == typed.Op || token.NEQ == typed.Op) && (true == refersToDevelopment(typed.X, information) || true == refersToDevelopment(typed.Y, information)) {
+                        measured.developmentSiteMap[packagePath+"."+ownerName] = positionOf(typed.Pos())
+                    }
+                case *ast.CaseClause:
+                    /* the package that declares the value validates it against the others: that switch opens nothing */
+                    if configPackagePath != loadedPackage.PkgPath {
+                        for _, expression := range typed.List {
+                            if true == refersToDevelopment(expression, information) {
+                                measured.developmentSiteMap[packagePath+"."+ownerName] = positionOf(expression.Pos())
+                            }
+                        }
+                    }
                 }
 
                 return true
@@ -462,12 +485,17 @@ func measureEnvironmentKeyLiteral(literal *ast.CompositeLit, information *types.
 }
 
 func measureCall(packagePath string, ownerName string, call *ast.CallExpr, information *types.Info, measured *inventory, siteCount map[string]int, positionOf func(token.Pos) string) {
-    selector, isSelector := call.Fun.(*ast.SelectorExpr)
-    if false == isSelector {
+    var calledName *ast.Ident
+    switch typed := call.Fun.(type) {
+    case *ast.SelectorExpr:
+        calledName = typed.Sel
+    case *ast.Ident:
+        calledName = typed
+    default:
         return
     }
 
-    function, isFunction := information.Uses[selector.Sel].(*types.Func)
+    function, isFunction := information.Uses[calledName].(*types.Func)
     if false == isFunction {
         return
     }
@@ -483,6 +511,11 @@ func measureCall(packagePath string, ownerName string, call *ast.CallExpr, infor
 
     modeArgumentIndex, isModeFunction := modeFunctionSet[function.Name()]
     if false == isModeFunction || nil == function.Pkg() || "os" != function.Pkg().Path() || len(call.Args) <= modeArgumentIndex {
+        /* a mode handed to any other function, a helper that creates or chmods later, is a site all the same */
+        for _, argument := range call.Args {
+            measureModeLiteral(packagePath, ownerName, argument, information, measured, siteCount, positionOf)
+        }
+
         return
     }
 
@@ -516,6 +549,72 @@ func figureOf(value constant.Value, valueType types.Type) string {
     }
 
     return "(" + value.ExactString() + ")"
+}
+
+/* measureModeLiteral reads a constant file mode handed to any function or returned: a site of its own unless it names a mode constant, which is an item where it is declared */
+func measureModeLiteral(packagePath string, ownerName string, expression ast.Expr, information *types.Info, measured *inventory, siteCount map[string]int, positionOf func(token.Pos) string) {
+    typeAndValue := information.Types[expression]
+    if nil == typeAndValue.Value || false == isFileMode(typeAndValue.Type) || true == namesModeConstant(expression, information) {
+        return
+    }
+
+    /* a value with no bit of the owner is the zero value of an error return or an access mask, not a mode anything is created with */
+    if bits, isExact := constant.Uint64Val(constant.ToInt(typeAndValue.Value)); false == isExact || 0 == bits&0o700 {
+        return
+    }
+
+    siteCount["mode "+ownerName]++
+    key := fmt.Sprintf("%s.%s#%d", packagePath, ownerName, siteCount["mode "+ownerName])
+    measured.itemMap[key] = item{kind: kindMode, key: key, position: positionOf(expression.Pos()), boundText: types.ExprString(expression)}
+}
+
+func namesModeConstant(expression ast.Expr, information *types.Info) bool {
+    names := false
+    ast.Inspect(expression, func(node ast.Node) bool {
+        if identifier, isIdentifier := node.(*ast.Ident); true == isIdentifier {
+            if constantObject, isConstant := information.Uses[identifier].(*types.Const); true == isConstant && true == isFileMode(constantObject.Type()) {
+                names = true
+            }
+        }
+
+        return false == names
+    })
+
+    return names
+}
+
+/* anchorIsExported answers whether every name after an anchor's package path is exported, the one shape userland can reach */
+func anchorIsExported(anchor string) bool {
+    declaration := anchor[strings.LastIndex(anchor, "/")+1:]
+    dotIndex := strings.Index(declaration, ".")
+    if 0 > dotIndex {
+        return false
+    }
+
+    for _, name := range strings.Split(declaration[dotIndex+1:], ".") {
+        if false == token.IsExported(name) {
+            return false
+        }
+    }
+
+    return true
+}
+
+/* refersToDevelopment answers whether an expression is config.EnvironmentDevelopment */
+func refersToDevelopment(expression ast.Expr, information *types.Info) bool {
+    var identifier *ast.Ident
+    switch typed := ast.Unparen(expression).(type) {
+    case *ast.Ident:
+        identifier = typed
+    case *ast.SelectorExpr:
+        identifier = typed.Sel
+    default:
+        return false
+    }
+
+    constantObject, isConstant := information.Uses[identifier].(*types.Const)
+
+    return true == isConstant && nil != constantObject.Pkg() && configPackagePath == constantObject.Pkg().Path() && "EnvironmentDevelopment" == constantObject.Name()
 }
 
 /* isFileMode answers whether a type is fs.FileMode, which os.FileMode aliases */
@@ -829,8 +928,21 @@ func check(measured *inventory, rowList []row, notDoorList []notDoorLine) []fail
         }
     }
 
+    failureList = append(failureList, checkDevelopmentSites(measured, rowList)...)
+
     notDoorSet := map[string]bool{}
     for _, line := range notDoorList {
+        if environmentKey, isEnvironmentLine := strings.CutPrefix(line.field, doorEnv+":"); true == isEnvironmentLine {
+            if _, isKey := measured.environmentMap[environmentKey]; false == isKey {
+                failureList = append(failureList, failure{kind: kindDoor, key: line.field, message: fmt.Sprintf("not-doors:%d names no declared env key: delete the line", line.lineNumber)})
+            } else if true == citedDoor[line.field] {
+                failureList = append(failureList, failure{kind: kindDoor, key: line.field, message: fmt.Sprintf("not-doors:%d writes off an env key a row cites as a door: one of the two is wrong", line.lineNumber)})
+            }
+            notDoorSet[line.field] = true
+
+            continue
+        }
+
         if _, isField := measured.doorFieldMap[line.field]; false == isField {
             failureList = append(failureList, failure{kind: kindDoor, key: line.field, message: fmt.Sprintf("not-doors:%d names no field the band reads as a door: delete the line", line.lineNumber)})
 
@@ -842,9 +954,45 @@ func check(measured *inventory, rowList []row, notDoorList []notDoorLine) []fail
         notDoorSet[line.field] = true
     }
 
+    /* every env key is a door of some value: a row cites it, or a not-doors line says why it sets nothing a row tracks */
+    for _, environmentKey := range sortedKeyList(measured.environmentMap) {
+        if false == citedDoor[doorEnv+":"+environmentKey] && false == notDoorSet[doorEnv+":"+environmentKey] {
+            failureList = append(failureList, failure{kind: kindDoor, key: doorEnv + ":" + environmentKey, message: fmt.Sprintf("declared at %s, no row cites it as an env: door and no not-doors line says why it is none", measured.environmentMap[environmentKey])})
+        }
+    }
+
     for _, field := range sortedKeyList(measured.doorFieldMap) {
         if false == citedDoor[field] && false == notDoorSet[field] {
             failureList = append(failureList, failure{kind: kindDoor, key: field, message: fmt.Sprintf("declared at %s, no row names it as a door and no not-doors line says why it is none", measured.doorFieldMap[field])})
+        }
+    }
+
+    return failureList
+}
+
+/* checkDevelopmentSites asks the development environment's row to name every declaration that compares with the value, so a site that opens something in development alone cannot appear without the row changing */
+func checkDevelopmentSites(measured *inventory, rowList []row) []failure {
+    if 0 == len(measured.developmentSiteMap) {
+        return nil
+    }
+
+    var developmentRow *row
+    for index := range rowList {
+        if developmentEnvironmentKey == rowList[index].key {
+            developmentRow = &rowList[index]
+
+            break
+        }
+    }
+
+    if nil == developmentRow || kindSwitch != developmentRow.kind {
+        return []failure{{kind: kindSwitch, key: developmentEnvironmentKey, message: fmt.Sprintf("%d declaration(s) compare with the development environment's value and no switch row names them", len(measured.developmentSiteMap))}}
+    }
+
+    failureList := []failure{}
+    for _, site := range sortedKeyList(measured.developmentSiteMap) {
+        if false == strings.Contains(developmentRow.reason, site) {
+            failureList = append(failureList, failure{kind: kindSwitch, key: developmentEnvironmentKey, message: fmt.Sprintf("line %d: %s compares with the development environment's value at %s and the reason does not name it", developmentRow.lineNumber, site, measured.developmentSiteMap[site])})
         }
     }
 
@@ -890,6 +1038,8 @@ func checkRow(measured *inventory, current row, citedDoor map[string]bool) []fai
             canonical, isResolved := measured.canonicalAnchor(rowDoor.anchor)
             if false == isResolved {
                 fail(kindAnchor, fmt.Sprintf("the door %s:%s names no declaration", rowDoor.class, rowDoor.anchor))
+            } else if false == anchorIsExported(rowDoor.anchor) {
+                fail(kindAnchor, fmt.Sprintf("the door %s:%s names an unexported declaration: userland cannot reach it, name the field or the function it is reached through", rowDoor.class, rowDoor.anchor))
             } else if doorValue == rowDoor.class && true == measured.isReader(rowDoor.anchor) {
                 fail(kindAnchor, fmt.Sprintf("the door value:%s is a function that takes nothing: it answers a value and sets none, name what takes it", rowDoor.anchor))
             }
@@ -898,6 +1048,7 @@ func checkRow(measured *inventory, current row, citedDoor map[string]bool) []fai
             hasOffOrValue = hasOffOrValue || doorUse != rowDoor.class
             hasValue = hasValue || doorValue == rowDoor.class
         case doorEnv:
+            citedDoor[doorEnv+":"+rowDoor.anchor] = true
             if _, isKey := measured.environmentMap[rowDoor.anchor]; false == isKey {
                 fail(kindAnchor, fmt.Sprintf("the door env:%s names no declared env key", rowDoor.anchor))
             }

@@ -129,6 +129,7 @@ Every door is Go-side; the generator's flags choose where it writes, never wheth
 | `EntryConfig.User` | the generator's `--user`; the in-process runner refuses an entry naming one, since it runs every entry as the process user, unless `RunnerConfig.EntryUserIgnored` is `true` |
 | `GeneratorConfig.DirectoryMode` (`ModuleConfig.Generator`) | `cron.DefaultGeneratorDirectoryMode`, `0755`, for every directory the generator creates: the destination's parents, the logs directory and a log file's subdirectory; permission bits only, the owner's read, write and search required, refused at registration naming `ModuleConfig.Generator.DirectoryMode`; a creation mode, narrowed by the umask, an existing directory keeping its own |
 | `GeneratorConfig.LogsDirectoryCheckDisabled` | `false`; `true` skips the judgement of the logs directory a root-run generator makes, for a host whose mode bits misjudge the entries' users: network accounts, or a directory the deployment hands over after the run |
+| the crontab's mode | `0644` for a crontab the generator creates or empties, an existing file keeping its own; no door: cron refuses a crontab in `/etc/cron.d` writable beyond its owner, and the entries' users read it |
 | `--prune` | off; on, it empties the destinations of dir(`--out`) that carry this application's ownership line and this run no longer writes |
 | `lock.NewExclusiveCommand` | none; wrapping a command serialises its overlapping runs |
 

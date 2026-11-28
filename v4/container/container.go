@@ -84,11 +84,11 @@ func CloseFailureStackBytesRule() bound.Rule[int] {
 
 /* TeardownWalkConfig bounds the reflection walk that infers the teardown edges of a service from the pointers its value holds. A bound ends the walk, never its correctness: an edge not reached is an edge not gained, and TeardownDependencyNames or TeardownDependencyTypes declare one the walk cannot reach. */
 type TeardownWalkConfig struct {
-    /* Depth bounds how many pointers, fields and elements deep the walk descends: 12 when left out, at least 1, unlimited refused. */
+    /* Depth bounds how many pointers, fields and elements deep the walk descends: 12 when left out, at least 1, unlimited refused. A cut here is the horizon the walk was given and is not reported, only the Nodes budget is. */
     Depth bound.Count
-    /* Elements bounds the fields of a struct and the elements of an array the walk enters: 256 when left out, at least 1, unlimited refused. */
+    /* Elements bounds the fields of a struct and the elements of an array the walk enters: 256 when left out, at least 1, unlimited refused. A cut here is the horizon the walk was given and is not reported, only the Nodes budget is. */
     Elements bound.Count
-    /* Nodes bounds the items one walk queues: 65,536 when left out, at least 1, unlimited refused. A walk the budget ends is named in the warning the application writes at close. */
+    /* Nodes bounds the items one walk queues: 65,536 when left out, at least 1, unlimited refused. A walk the budget ends is named in the warning the application writes at close, the one cut of the three that is reported. */
     Nodes bound.Count
 }
 

@@ -27,6 +27,9 @@ import (
 /* ApplicationHeaderPrefix opens the AMQP header of every envelope header: "x-melody-header-<name>". */
 const ApplicationHeaderPrefix = "x-melody-header-"
 
+/* HeaderNameMaximumLength is the longest envelope header name this transport writes: an amqp field-table key is a short string of at most 255 bytes, and the name rides behind ApplicationHeaderPrefix. */
+const HeaderNameMaximumLength = 255 - len(ApplicationHeaderPrefix)
+
 const transportHeadersField = "TransportConfig.Headers"
 
 const (
@@ -133,6 +136,14 @@ func newTransport(queue string, registry *MessageRegistry, source ConnectionSour
     headerLimits, headerLimitsErr := melodymessagebus.ResolveHeaderLimits(config.Headers, transportHeadersField)
     if nil != headerLimitsErr {
         exception.Panic(exception.FromError(headerLimitsErr))
+    }
+
+    if headerMaxNameLength := configuredHeaderLimit(config.Headers.MaxNameLength, melodymessagebus.DefaultHeaderMaxNameLength); HeaderNameMaximumLength < headerMaxNameLength {
+        exception.Panic(exception.NewError(
+            "amqp transport header name length exceeds what an amqp header key holds behind the header prefix",
+            exceptioncontract.Context{"field": transportHeadersField + ".MaxNameLength", "value": headerMaxNameLength, "maximum": HeaderNameMaximumLength},
+            nil,
+        ))
     }
 
     delayBuckets := resolveDelayBuckets(config.DelayBuckets)
@@ -243,12 +254,16 @@ type Transport struct {
     wait sync.WaitGroup
 
     consumeMutex sync.Mutex
+
+    plaintextDial dialJournalHolder
 }
 
 func (instance *Transport) Send(
     runtimeInstance containercontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
 ) error {
+    instance.plaintextDial.remember(runtimeInstance)
+
     publishing, buildErr := instance.buildPublishing(envelopeInstance, "", false)
     if nil != buildErr {
         return buildErr
@@ -263,6 +278,8 @@ func (instance *Transport) Send(
 func (instance *Transport) Receive(
     runtimeInstance containercontract.Runtime,
 ) (messagebuscontract.Subscription, error) {
+    instance.plaintextDial.remember(runtimeInstance)
+
     channel, generation, deliveries, subscribeErr := instance.subscribeWithRetry(runtimeInstance)
     if nil != subscribeErr {
         return nil, subscribeErr
@@ -617,7 +634,7 @@ func (instance *Transport) connect() (*amqp091.Connection, error) {
 
 /* dialInterruptibly cancels the dial's context when the close stops waiting for it; the drain stays for a dialer that ignores its context. */
 func (instance *Transport) dialInterruptibly() (*amqp091.Connection, error) {
-    dialContext, cancelDial := context.WithCancel(context.Background())
+    dialContext, cancelDial := context.WithCancel(instance.plaintextDial.dialContext(context.Background()))
     outcome := make(chan dialOutcome, 1)
     go func() {
         outcome <- runDialer(dialContext, instance.dialer, "amqp dialer panicked", map[string]any{"queue": instance.queue})

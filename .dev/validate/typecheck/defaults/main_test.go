@@ -46,6 +46,8 @@ type EnvironmentKey struct {
 
 const SampleSizeKey = "MELODY_SAMPLE_SIZE"
 
+const EnvironmentDevelopment = "dev"
+
 const notAnEnvironmentName = "MELODY_NOT"
 `,
         "v4/internal/warning.go": `package internal
@@ -59,6 +61,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
 )
 
@@ -100,6 +103,8 @@ var backoffRule = bound.BackoffRule{Name: "SampleConfig.Backoff", InitialDefault
 
 var moduleKey = configcontract.EnvironmentKey{Key: "MELODY_MODULE_KEY"}
 
+func Configure(size int) {}
+
 func namedRule(name string) bound.Rule[int] {
     return bound.Rule[int]{Name: name, Default: 1}
 }
@@ -110,6 +115,43 @@ func Write(path string) error {
 
 func Read(path string, mode os.FileMode) error {
     return os.MkdirAll(path, mode)
+}
+
+func writeThrough(path string, mode os.FileMode) error {
+    return os.WriteFile(path, nil, mode)
+}
+
+func WriteHelper(path string) error {
+    if nil != writeThrough(path, sampleFileMode) {
+        return nil
+    }
+
+    return writeThrough(path, 0o644)
+}
+
+func modeOf() os.FileMode {
+    return 0o600
+}
+
+func maskOf() (os.FileMode, error) {
+    if nil != writeThrough("", 0o2) {
+        return 0, nil
+    }
+
+    return modeOf(), nil
+}
+
+func Opens(environment string) bool {
+    return config.EnvironmentDevelopment == environment
+}
+
+func Selects(environment string) int {
+    switch environment {
+    case config.EnvironmentDevelopment:
+        return 1
+    }
+
+    return 0
 }
 
 type registrar struct{}
@@ -142,10 +184,13 @@ var cleanRowList = []string{
     "| `v4/sample.SampleConfig.Size` | limit | memory | 8 | `value:v4/sample.SampleConfig.Size` | class T | — |",
     "| `v4/sample.SampleConfig.Width` | limit | memory | 8 | `value:v4/sample.SampleConfig.Size` | a terminal is never wider | — |",
     "| `v4/sample.SampleConfig.Open` | limit | memory | 8 | `off:v4/sample.SampleConfig.Size` | — | — |",
-    "| `v4/sample.SampleConfig.Backoff` | limit | a retry storm | 1 | `value:v4/sample.backoffRule` | class T | — |",
-    "| `v4/sample.namedRule#1` | limit | memory | 1 | `value:v4/sample.namedRule`, `env:MELODY_SAMPLE_SIZE` | class T | — |",
+    "| `v4/sample.SampleConfig.Backoff` | limit | a retry storm | 1 | `value:v4/sample.Configure` | class T | — |",
+    "| `v4/sample.namedRule#1` | limit | memory | 1 | `value:v4/sample.Configure`, `env:MELODY_SAMPLE_SIZE` | class T | — |",
     "| `v4/sample.Write#1` | mode | a world-readable directory | 0750 | none | the owner's | — |",
     "| `v4/sample.sampleFileMode` | mode | a world-readable file | 0640 | `env:MELODY_MODULE_KEY` | — | — |",
+    "| `v4/sample.WriteHelper#1` | mode | a world-readable file | 0644 | none | handed to a helper | — |",
+    "| `v4/sample.modeOf#1` | mode | a world-readable file | 0600 | none | returned | — |",
+    "| `v4/config.EnvironmentDevelopment` | switch | a development aid left open | shut | `env:MELODY_SAMPLE_SIZE` | opens v4/sample.Opens and v4/sample.Selects | — |",
     "| `sample.warning` | warning | a silent misconfiguration | written | `env:MELODY_SAMPLE_SIZE` | — | — |",
     "| `sample.moduleWarning` | warning | a silent misconfiguration | written | none | written always | — |",
     "| `v4/sample.SampleConfig.Disabled` | protection | the sample | on | `off:v4/sample.SampleConfig.Disabled` | — | — |",
@@ -321,7 +366,7 @@ func TestCheck_ARepeatedKeyAndAMalformedRowFail(t *testing.T) {
 
     malformed := append(append([]string{}, cleanRowList...), "| `v4/sample.Read` | refusal | short |")
     failureList := runCheck(t, rootDirectory, malformed)
-    expectFailure(t, failureList, kindRow, "line 16", "the table has 7")
+    expectFailure(t, failureList, kindRow, "line 19", "the table has 7")
 
     unknownKind := append(append([]string{}, cleanRowList...), "| `v4/sample.Read` | guess | — | — | none | by design | — |")
     expectFailure(t, runCheck(t, rootDirectory, unknownKind), kindRow, "v4/sample.Read", "is none of")
@@ -336,14 +381,18 @@ func TestMeasure_ReadsWhatTheBandEnumerates(t *testing.T) {
         t.Fatalf("measure: %v", measureErr)
     }
 
-    for _, key := range []string{"v4/sample.SampleConfig.Size", "v4/sample.SampleConfig.Width", "v4/sample.SampleConfig.Open", "v4/sample.SampleConfig.Backoff", "v4/sample.namedRule#1", "v4/sample.Write#1", "v4/sample.sampleFileMode", "sample.warning", "sample.moduleWarning"} {
+    for _, key := range []string{"v4/sample.SampleConfig.Size", "v4/sample.SampleConfig.Width", "v4/sample.SampleConfig.Open", "v4/sample.SampleConfig.Backoff", "v4/sample.namedRule#1", "v4/sample.Write#1", "v4/sample.sampleFileMode", "v4/sample.WriteHelper#1", "v4/sample.modeOf#1", "sample.warning", "sample.moduleWarning"} {
         if _, isItem := measured.itemMap[key]; false == isItem {
             t.Fatalf("expected the item %s, got %v", key, sortedKeyList(measured.itemMap))
         }
     }
 
-    if 9 != len(measured.itemMap) {
-        t.Fatalf("expected 9 items (the mode handed in as a variable is not one), got %v", sortedKeyList(measured.itemMap))
+    if 11 != len(measured.itemMap) {
+        t.Fatalf("expected 11 items (neither the mode handed in as a variable, the mode constant handed to a helper, the access mask nor the zero of an error return is one), got %v", sortedKeyList(measured.itemMap))
+    }
+
+    if "v4/sample/sample.go" != strings.Split(measured.developmentSiteMap["v4/sample.Opens"], ":")[0] || "" == measured.developmentSiteMap["v4/sample.Selects"] || 2 != len(measured.developmentSiteMap) {
+        t.Fatalf("expected the comparison and the case clause with the development value as sites, got %v", measured.developmentSiteMap)
     }
 
     if true != measured.itemMap["v4/sample.SampleConfig.Open"].unlimitedAdmitted || true == measured.itemMap["v4/sample.SampleConfig.Size"].unlimitedAdmitted {
@@ -482,4 +531,39 @@ func TestCheck_AnEnvironmentDoorOnASwitchPasses(t *testing.T) {
 
     protected := replaceRow(cleanRowList, "| `v4/sample.SampleConfig.Disabled`", "| `v4/sample.SampleConfig.Disabled` | protection | a feature on | on | `off:v4/sample.SampleConfig.Disabled`, `env:MELODY_SAMPLE_SIZE` | — | — |")
     expectFailure(t, runCheck(t, rootDirectory, protected), kindRow, "v4/sample.SampleConfig.Disabled", "a protection is turned off in Go only")
+}
+
+func TestCheck_EveryComparisonWithTheDevelopmentValueIsNamedByItsRow(t *testing.T) {
+    rootDirectory := writeFixtureRepository(t)
+
+    rowList := replaceRow(cleanRowList, "| `v4/config.EnvironmentDevelopment`", "| `v4/config.EnvironmentDevelopment` | switch | a development aid left open | shut | `env:MELODY_SAMPLE_SIZE` | opens v4/sample.Opens | — |")
+    expectFailure(t, runCheck(t, rootDirectory, rowList), kindSwitch, "v4/config.EnvironmentDevelopment", "v4/sample.Selects compares with the development environment's value")
+
+    expectFailure(t, runCheck(t, rootDirectory, replaceRow(cleanRowList, "| `v4/config.EnvironmentDevelopment`", "")), kindSwitch, "v4/config.EnvironmentDevelopment", "2 declaration(s) compare")
+}
+
+func TestCheck_AModeHandedToAHelperOrReturnedNeedsItsRow(t *testing.T) {
+    rootDirectory := writeFixtureRepository(t)
+
+    expectFailure(t, runCheck(t, rootDirectory, replaceRow(cleanRowList, "| `v4/sample.WriteHelper#1`", "")), kindMode, "v4/sample.WriteHelper#1", "has no row")
+    expectFailure(t, runCheck(t, rootDirectory, replaceRow(cleanRowList, "| `v4/sample.modeOf#1`", "")), kindMode, "v4/sample.modeOf#1", "has no row")
+}
+
+func TestCheck_AnUnexportedDoorAnchorFails(t *testing.T) {
+    rowList := replaceRow(cleanRowList, "| `v4/sample.SampleConfig.Backoff`", "| `v4/sample.SampleConfig.Backoff` | limit | a retry storm | 1 | `value:v4/sample.backoffRule` | class T | — |")
+    expectFailure(t, runCheck(t, writeFixtureRepository(t), rowList), kindAnchor, "v4/sample.SampleConfig.Backoff", "names an unexported declaration")
+}
+
+func TestCheck_EveryEnvironmentKeyIsCitedOrWrittenOff(t *testing.T) {
+    rootDirectory := writeFixtureRepository(t)
+    uncited := replaceRow(cleanRowList, "| `v4/sample.sampleFileMode`", "| `v4/sample.sampleFileMode` | mode | a world-readable file | 0640 | none | the owner's | — |")
+
+    expectFailure(t, runCheck(t, rootDirectory, uncited), kindDoor, "env:MELODY_MODULE_KEY", "no row cites it as an env: door")
+
+    if failureList := runCheckWithNotDoors(t, rootDirectory, uncited, append(append([]string{}, cleanNotDoorList...), "env:MELODY_MODULE_KEY ~ names the module")); 0 != len(failureList) {
+        t.Fatalf("expected a written-off key to pass, got %+v", failureList)
+    }
+
+    expectFailure(t, runCheckWithNotDoors(t, rootDirectory, cleanRowList, append(append([]string{}, cleanNotDoorList...), "env:MELODY_MODULE_KEY ~ names the module")), kindDoor, "env:MELODY_MODULE_KEY", "a row cites as a door")
+    expectFailure(t, runCheckWithNotDoors(t, rootDirectory, cleanRowList, append(append([]string{}, cleanNotDoorList...), "env:MELODY_GONE ~ gone")), kindDoor, "env:MELODY_GONE", "names no declared env key")
 }

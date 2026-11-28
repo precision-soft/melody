@@ -53,7 +53,7 @@ type ApplicationConfig struct {
     ContainerCreationWaiters bound.Count
     /* ContainerTeardownSequential closes the container's services one after the other instead of in waves, for services whose Close methods touch shared external state the container cannot see; the field is the default of kernel.container_teardown_sequential, which reads MELODY_CONTAINER_TEARDOWN_SEQUENTIAL unless overridden. */
     ContainerTeardownSequential bool
-    /* ContainerTeardownWalk bounds the walk that infers the container's teardown edges, handed to ContainerConfig.TeardownWalk: 12 deep, 256 fields or elements, 65,536 items when left out, unlimited refused, refused naming the ContainerConfig field. */
+    /* ContainerTeardownWalk bounds the walk that infers the container's teardown edges, handed to ContainerConfig.TeardownWalk: 12 deep, 256 fields or elements, 65,536 items when left out, unlimited refused, refused naming the ContainerConfig field; only an ended item budget is written at close. */
     ContainerTeardownWalk container.TeardownWalkConfig
     /* ContainerCloseFailureStackBytes bounds what one failed close contributes to the teardown error, handed to ContainerConfig.CloseFailureStackBytes: 2,048 when left out, at least 4, unlimited admitted. */
     ContainerCloseFailureStackBytes bound.Count

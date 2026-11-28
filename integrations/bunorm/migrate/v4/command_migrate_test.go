@@ -951,6 +951,34 @@ func TestMigrateCommand_AMarkFailureReportsTheLastMigrationAsRanNotRecorded(t *t
     }
 }
 
+/* a stop that cancels the command context between the Up and the mark is the commonest cause of the failed mark; the marker insert must still reach the database, under its own deadline */
+func TestWriteRanNotRecordedMarker_WritesOnACancelledCommandContext(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+
+    markerContextErr := errors.New("the marker insert never reached the driver")
+    markerHasDeadline := false
+    recorder.execContextHook = func(ctx context.Context, query string) {
+        if true == isLockInsert(query) && true == strings.Contains(query, "ranNotRecorded:bun_migrations:20240103000000") {
+            markerContextErr = ctx.Err()
+            _, markerHasDeadline = ctx.Deadline()
+        }
+    }
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    outputInstance, buffer := newBufferedOutput(true)
+    writeRanNotRecordedMarker(cancelledContext, database, migrationTables{migrations: "bun_migrations", locks: DefaultLocksTable}, "20240103000000", outputInstance, optionsUnlockTimeoutRule.Default)
+
+    if nil != markerContextErr || false == markerHasDeadline {
+        t.Fatalf("expected the marker written on a live context with a deadline, got %v, deadline=%v; output %q", markerContextErr, markerHasDeadline, buffer.String())
+    }
+
+    if true == strings.Contains(buffer.String(), "could not be written") {
+        t.Fatalf("expected no warning for a written marker, got %q", buffer.String())
+    }
+}
+
 /* a marker an earlier run left refuses the next run before any Up, naming the migration and the flag; under --force the marker is deleted and the run goes on */
 func TestMigrateCommand_AStandingRanNotRecordedMarkerRefusesTheRunUntilForce(t *testing.T) {
     for _, force := range []bool{false, true} {

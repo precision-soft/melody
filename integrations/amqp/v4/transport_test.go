@@ -4939,6 +4939,22 @@ func TestTransport_AHeaderFailingTheWriteRuleIsSkippedWithAWarningNamingIt(t *te
     }
 }
 
+/* a name rides behind ApplicationHeaderPrefix in a key of at most 255 bytes: a length the messagebus rule admits beyond what the key holds is refused at construction, not at the publish */
+func TestNewTransport_RefusesAHeaderNameLengthBeyondTheKeyBehindThePrefix(t *testing.T) {
+    if 239 != HeaderNameMaximumLength {
+        t.Fatalf("expected the ceiling 255 less the prefix, 239, got %d", HeaderNameMaximumLength)
+    }
+
+    expectPanicNamingField(t, "TransportConfig.Headers.MaxNameLength", func() {
+        NewTransport("melody.amqp.v4.headers.name-ceiling", NewMessageRegistry(), refusingSource(), TransportConfig{Headers: melodymessagebus.HeaderLimitsConfig{MaxNameLength: bound.Of(HeaderNameMaximumLength + 1)}})
+    })
+
+    transport := NewTransport("melody.amqp.v4.headers.name-ceiling", NewMessageRegistry(), refusingSource(), TransportConfig{Headers: melodymessagebus.HeaderLimitsConfig{MaxNameLength: bound.Of(HeaderNameMaximumLength)}})
+    if HeaderNameMaximumLength != transport.headerMaxNameLength {
+        t.Fatalf("expected the ceiling admitted, got %d", transport.headerMaxNameLength)
+    }
+}
+
 func TestNewTransport_RefusesUnlimitedHeaderLimitsNamingTheField(t *testing.T) {
     expectPanicNamingField(t, "TransportConfig.Headers.MaxBytes", func() {
         NewTransport("melody.amqp.v4.headers.limits", NewMessageRegistry(), refusingSource(), TransportConfig{Headers: melodymessagebus.HeaderLimitsConfig{MaxBytes: bound.UnlimitedCount()}})
