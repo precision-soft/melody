@@ -28,6 +28,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Breaking** — `storage.go`: `Storage.Exists` is removed with the contract's door; `storage.Exists(storage.For(runtime, store), key)` answers it from `Stat`.
 - **Breaking** — `storage.go`: `Storage.Get(runtime, key, storagecontract.GetOptions)` answers a `storagecontract.Object`, its `Info` read from the `HEAD` the get already sends, and `Storage.PresignedUrl(runtime, key, storagecontract.PresignConfig)` takes the expiry as a `bound.Duration`, 15 minutes when left out where `0` was refused by minio, and a value outside 1s to 7 days is refused naming `PresignConfig.Expiry`. See the framework's `UPGRADE.md`.
 - **Breaking** — `module.go`, `plaintext_endpoint.go`, `provider.go`: the module is named `aws.s3`, its boot warning `aws.s3.plaintextEndpoint`, and a `Config` prints as `aws.s3.Config{…}`, after the module's path, where they said `awss3`, so a journal filter on `awss3.plaintextEndpoint` matches nothing and `MELODY_BOOT_WARNINGS_IGNORED` naming it is refused at boot as an unknown code. The Go package stays `awss3`.
+- `plaintext_endpoint.go`: the warning's code is written under `applicationcontract.BootWarningContextKey`, the framework's key, in place of a private copy of it.
 
 ### Fixed
 

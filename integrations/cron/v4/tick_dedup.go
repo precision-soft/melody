@@ -9,9 +9,11 @@ import (
     "slices"
     "strconv"
     "sync"
+    "sync/atomic"
     "time"
     "unicode"
 
+    applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/bound"
     melodyconfig "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -28,7 +30,7 @@ type TickDedupConfig struct {
     /* Disabled turns the dedup off for every entry: each replica runs every due entry, as a runner with no locker does. */
     Disabled bool
 
-    /* Locker holds the markers: the application's service.lock.locker when left out. With neither, the runner deduplicates nothing and Run says so in one warning, TickDedupNoLockerBootWarningName. A lease locker, the rueidis one, is the fit: a session locker, the mysql and pgsql ones, pins one connection per held tick and loses the marker with its process; over a locker that does not answer lockcontract.SharedLeaseLocker Run says so in one warning, TickDedupLockerNotSharedLeaseBootWarningName. A typed nil is refused. */
+    /* Locker holds the markers: the application's service.lock.locker when left out. With neither, the runner deduplicates nothing and Run says so in one warning, TickDedupNoLockerBootWarningName. A lease locker, the rueidis one, is the fit: a session locker, the mysql and pgsql ones, pins one connection per held tick and loses the marker with its process; over a locker that does not answer lockcontract.SharedLeaseLocker Run says so in one warning, TickDedupLockerNotSharedLeaseBootWarningName, and over one that cannot be asked in TickDedupLockerAskFailedBootWarningName. A typed nil is refused. */
     Locker lockcontract.Locker
 
     /* KeyPrefix opens every marker's name, followed by the command name, a digest of the command name, the schedule and the arguments, and the tick's unix minute: the application namespace and ":cron:tick:" when left out, melody:cron:tick: under the default namespace. A prefix holding whitespace or a control character is refused. */
@@ -225,6 +227,8 @@ type tickDedupRun struct {
     locker    lockcontract.Locker
     lockerErr error
     keyPrefix string
+    /* askPending is set when the Run's ask failed, so the first tick that reaches the locker asks once more */
+    askPending atomic.Bool
 }
 
 /* resolveTickDedupRun finds the locker once per Run: the configured one, else service.lock.locker when the run's scope has it, else none. */
@@ -275,17 +279,20 @@ func (instance *RunnerCommand) hasDedupedEntry() bool {
     return false
 }
 
-/* TickDedupNoLockerBootWarningName is the code of the warning Run writes when the tick dedup has no locker, the code a process lists in MELODY_BOOT_WARNINGS_IGNORED to leave it out */
+/* TickDedupNoLockerBootWarningName is the code of the warning Run writes when the tick dedup has no locker, the code a process lists in MELODY_BOOT_WARNINGS_IGNORED to leave it out, declared by DeclareRunnerBootWarnings, which the module calls */
 const TickDedupNoLockerBootWarningName = "cron.tickDedup.noLocker"
 
-/* TickDedupLockerNotSharedLeaseBootWarningName is the code of the warning Run writes when the tick dedup's locker does not answer lockcontract.SharedLeaseLocker, the code a process lists in MELODY_BOOT_WARNINGS_IGNORED to leave it out */
+/* TickDedupLockerNotSharedLeaseBootWarningName is the code of the warning Run writes when the tick dedup's locker does not answer lockcontract.SharedLeaseLocker, the code a process lists in MELODY_BOOT_WARNINGS_IGNORED to leave it out, declared by DeclareRunnerBootWarnings, which the module calls */
 const TickDedupLockerNotSharedLeaseBootWarningName = "cron.tickDedup.lockerNotSharedLease"
 
-const bootWarningContextKey = "bootWarning"
+/* TickDedupLockerAskFailedBootWarningName is the code of the warning Run writes when the tick dedup's locker cannot be asked whether its leases are shared, the code a process lists in MELODY_BOOT_WARNINGS_IGNORED to leave it out, declared by DeclareRunnerBootWarnings, which the module calls */
+const TickDedupLockerAskFailedBootWarningName = "cron.tickDedup.lockerAskFailed"
 
 const tickDedupNoLockerWarningMessage = "cron runner has no tick dedup locker: on several replicas every tick runs once per replica; name RunnerConfig.TickDedup.Locker, register service.lock.locker, or set RunnerConfig.TickDedup.Disabled"
 
 const tickDedupLockerNotSharedLeaseWarningMessage = "cron runner tick dedup locker is not a lease shared by the replicas: a session locker pins one connection per held tick for its window and loses the marker with its process, an in-process locker deduplicates inside this process alone; register a shared lease locker, the rueidis one, name one in RunnerConfig.TickDedup.Locker, or set RunnerConfig.TickDedup.Disabled"
+
+const tickDedupLockerAskFailedWarningMessage = "cron runner could not ask its tick dedup locker whether its leases are shared by the replicas: the first tick that reaches the locker asks it once more, and a registered locker that cannot be resolved fails its ticks"
 
 /* warnWithoutTickDedupLocker writes the one warning of a runner that deduplicates nothing because it has no locker. */
 func (instance *RunnerCommand) warnWithoutTickDedupLocker(runtimeInstance containercontract.Runtime, dedupRun *tickDedupRun) {
@@ -296,20 +303,67 @@ func (instance *RunnerCommand) warnWithoutTickDedupLocker(runtimeInstance contai
     writeTickDedupWarning(runtimeInstance, TickDedupNoLockerBootWarningName, tickDedupNoLockerWarningMessage, map[string]any{"serviceName": lock.ServiceLocker})
 }
 
-/* warnOverALockerThatIsNotASharedLease writes the one warning of a runner that deduplicates over a locker whose locks are not leases shared by the replicas; a locker that cannot be asked is left to the ticks, which report the outage. */
+/* warnOverALockerThatIsNotASharedLease writes the one warning of a runner that deduplicates over a locker whose locks are not leases shared by the replicas; a locker that cannot be asked writes the ask-failed warning instead and is asked once more at the first tick that reaches it. */
 func (instance *RunnerCommand) warnOverALockerThatIsNotASharedLease(runtimeInstance containercontract.Runtime, dedupRun *tickDedupRun) {
-    if nil == dedupRun || nil != dedupRun.lockerErr || false == instance.hasDedupedEntry() {
+    if nil == dedupRun || false == instance.hasDedupedEntry() {
         return
     }
 
+    if nil != dedupRun.lockerErr {
+        instance.warnTickDedupLockerAskFailed(runtimeInstance, dedupRun, dedupRun.lockerErr)
+
+        return
+    }
+
+    if askErr := instance.askAndWarnOverALockerThatIsNotASharedLease(runtimeInstance, dedupRun); nil != askErr {
+        instance.warnTickDedupLockerAskFailed(runtimeInstance, dedupRun, askErr)
+        dedupRun.askPending.Store(true)
+    }
+}
+
+/* reaskAtTheFirstTickThatReachedTheLocker asks the locker the Run could not ask, once, and follows the not shared lease rule on the answer. */
+func (instance *RunnerCommand) reaskAtTheFirstTickThatReachedTheLocker(runtimeInstance containercontract.Runtime, dedupRun *tickDedupRun) {
+    if false == dedupRun.askPending.CompareAndSwap(true, false) {
+        return
+    }
+
+    _ = instance.askAndWarnOverALockerThatIsNotASharedLease(runtimeInstance, dedupRun)
+}
+
+func (instance *RunnerCommand) askAndWarnOverALockerThatIsNotASharedLease(runtimeInstance containercontract.Runtime, dedupRun *tickDedupRun) error {
     shared, askErr := askLeasesAcrossReplicas(runtimeInstance, dedupRun.locker)
-    if nil != askErr || true == shared {
-        return
+    if nil != askErr {
+        return askErr
     }
 
-    warningContext := map[string]any{
-        "locker": fmt.Sprintf("%T", dedupRun.locker),
-        "window": instance.tickDedup.window.String(),
+    if true == shared {
+        return nil
+    }
+
+    warningContext := instance.tickDedupLockerWarningContext(dedupRun)
+    warningContext["window"] = instance.tickDedup.window.String()
+
+    if resolved, resolveErr := resolvedLocker(runtimeInstance, dedupRun.locker); nil == resolveErr {
+        warningContext["resolvedLocker"] = fmt.Sprintf("%T", resolved)
+    }
+
+    writeTickDedupWarning(runtimeInstance, TickDedupLockerNotSharedLeaseBootWarningName, tickDedupLockerNotSharedLeaseWarningMessage, warningContext)
+
+    return nil
+}
+
+func (instance *RunnerCommand) warnTickDedupLockerAskFailed(runtimeInstance containercontract.Runtime, dedupRun *tickDedupRun, askErr error) {
+    warningContext := exception.LogContext(askErr, exception.LogContextConfig{Extra: instance.tickDedupLockerWarningContext(dedupRun)})
+
+    writeTickDedupWarning(runtimeInstance, TickDedupLockerAskFailedBootWarningName, tickDedupLockerAskFailedWarningMessage, warningContext)
+}
+
+/* tickDedupLockerWarningContext names the locker's type and where it came from: the field that configured it, else the registered service */
+func (instance *RunnerCommand) tickDedupLockerWarningContext(dedupRun *tickDedupRun) map[string]any {
+    warningContext := map[string]any{}
+
+    if nil != dedupRun.locker {
+        warningContext["locker"] = fmt.Sprintf("%T", dedupRun.locker)
     }
 
     if nil == instance.tickDedup.locker {
@@ -318,7 +372,18 @@ func (instance *RunnerCommand) warnOverALockerThatIsNotASharedLease(runtimeInsta
         warningContext["field"] = "RunnerConfig.TickDedup.Locker"
     }
 
-    writeTickDedupWarning(runtimeInstance, TickDedupLockerNotSharedLeaseBootWarningName, tickDedupLockerNotSharedLeaseWarningMessage, warningContext)
+    return warningContext
+}
+
+/* a panic resolving the locker the lazy one wraps is an unknown name, so the record leaves it out */
+func resolvedLocker(runtimeInstance containercontract.Runtime, locker lockcontract.Locker) (resolved lockcontract.Locker, resolveErr error) {
+    defer func() {
+        if recovered := recover(); nil != recovered {
+            resolved, resolveErr = nil, fmt.Errorf("the locker panicked when resolved: %v", recovered)
+        }
+    }()
+
+    return lock.ResolvedLocker(runtimeInstance, locker)
 }
 
 /* a panic in the asked locker is an unknown answer, as the ticks treat a locker panic as a locker failure, so Run does not die of a diagnostic */
@@ -332,15 +397,19 @@ func askLeasesAcrossReplicas(runtimeInstance containercontract.Runtime, locker l
     return lockcontract.LeasesAcrossReplicas(runtimeInstance, locker)
 }
 
-/* writeTickDedupWarning writes a coded warning through the runtime's logger, left out when the runtime's configuration lists the code */
+/* writeTickDedupWarning writes a coded warning through the runtime's logger, left out when the runtime's configuration lists the code; a panic writing it is dropped, as the tick side drops its warning's, so Run does not die of a diagnostic */
 func writeTickDedupWarning(runtimeInstance containercontract.Runtime, code string, message string, warningContext map[string]any) {
+    defer func() {
+        _ = recover()
+    }()
+
     configuration, configurationErr := melodyconfig.ConfigFromRuntime(runtimeInstance)
     if nil == configurationErr && nil != configuration && true == slices.Contains(configuration.Kernel().BootWarningsIgnored(), code) {
         return
     }
 
     if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
-        warningContext[bootWarningContextKey] = code
+        warningContext[applicationcontract.BootWarningContextKey] = code
 
         logger.Warning(message, warningContext)
     }
@@ -410,6 +479,8 @@ func (instance *RunnerCommand) claimTick(runtimeInstance containercontract.Runti
 
         return tickVerdictFailed, acquireErr
     }
+
+    instance.reaskAtTheFirstTickThatReachedTheLocker(runtimeInstance, dedupRun)
 
     if false == acquired {
         return tickVerdictSkip, nil

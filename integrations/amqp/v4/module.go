@@ -17,7 +17,7 @@ type ModuleConfig struct {
     /* ConnectionBuiltAtBoot builds the connection inside Boot, under the boot runtime, so an unreachable broker is known before the first request. */
     ConnectionBuiltAtBoot bool
 
-    /* ConnectionBootFailure is the boot failure mode of a connection built at boot, the registrar's own: BootFailureWarns when left out. */
+    /* ConnectionBootFailure is the boot failure mode of a connection built at boot, the registrar's own: BootFailureWarns when left out, under which a cli process builds the connection at its first use; BootFailureFailsBoot dials in every process, a command included. */
     ConnectionBootFailure containercontract.BootFailureMode
 
     /* Transports are the providers of the transport services, by service name; a transport over a dialer is a provider that answers it. */

@@ -373,3 +373,12 @@ func TestInternalSignCommandAsksTheProviderUnderTheBootRuntimeAtBootAndTheRunsRu
         }
     }
 }
+
+/* the ttl left out is the boot signer's, read at the run, so the help hides the zero the flag would print as its default */
+func TestInternalSignCommand_TheHelpPrintsNoZeroTtlDefault(t *testing.T) {
+    help := renderCommandHelp(t, &InternalSignCommand{})
+
+    if true == strings.Contains(help, "default: 0s") || false == strings.Contains(help, "--ttl duration") {
+        t.Fatalf("expected the --ttl line without a 0s default, got %s", help)
+    }
+}

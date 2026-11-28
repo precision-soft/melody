@@ -62,7 +62,7 @@ func plaintextDsnWarnings(logger *recordingLogger) []logRecord {
 
     warnings := []logRecord{}
     for _, record := range logger.records {
-        if PlaintextDsnBootWarningName == record.context[bootWarningContextKey] {
+        if PlaintextDsnBootWarningName == record.context[applicationcontract.BootWarningContextKey] {
             warnings = append(warnings, record)
         }
     }

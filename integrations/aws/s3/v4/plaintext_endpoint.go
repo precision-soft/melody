@@ -19,8 +19,6 @@ import (
 /* PlaintextEndpointBootWarningName is the code of the warning a storage over a plaintext endpoint off this machine writes, the code a process lists in MELODY_BOOT_WARNINGS_IGNORED to leave it out */
 const PlaintextEndpointBootWarningName = "aws.s3.plaintextEndpoint"
 
-const bootWarningContextKey = "bootWarning"
-
 const plaintextEndpointWarningMessage = "object storage endpoint is plain http off this machine: credentials and objects cross the network in clear and every presigned url is http; leave Config.Insecure unset for an https endpoint"
 
 /* the hazard is the endpoint, not the storage value: two storages over one host, or the module's boot record and a storage's first use, name it once per process */
@@ -99,7 +97,7 @@ func (instance *plaintextEndpointWarning) write(runtimeInstance containercontrac
     }
 
     warning := instance.bootWarning()
-    context := loggingcontract.Context{bootWarningContextKey: warning.Name}
+    context := loggingcontract.Context{applicationcontract.BootWarningContextKey: warning.Name}
     for key, value := range warning.Context {
         context[key] = value
     }

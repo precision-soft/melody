@@ -115,8 +115,14 @@ func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel
 
 /* the codes are declared whatever the locker, which only Run reads, so MELODY_BOOT_WARNINGS_IGNORED may name them in every environment the module is registered in */
 func (instance *Module) RegisterBootWarnings(registrar applicationcontract.BootWarningRegistrar) {
+    DeclareRunnerBootWarnings(registrar)
+}
+
+/* DeclareRunnerBootWarnings declares the codes of the warnings the runner's Run writes; the module calls it, and an application that registers NewRunnerCommand without the module calls it from its own BootWarningModule, so MELODY_BOOT_WARNINGS_IGNORED may name them. */
+func DeclareRunnerBootWarnings(registrar applicationcontract.BootWarningRegistrar) {
     registrar.DeclareBootWarning(TickDedupNoLockerBootWarningName, applicationcontract.BootWarningConfig{})
     registrar.DeclareBootWarning(TickDedupLockerNotSharedLeaseBootWarningName, applicationcontract.BootWarningConfig{})
+    registrar.DeclareBootWarning(TickDedupLockerAskFailedBootWarningName, applicationcontract.BootWarningConfig{})
 }
 
 var (

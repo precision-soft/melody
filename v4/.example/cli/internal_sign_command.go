@@ -64,9 +64,10 @@ func (instance *InternalSignCommand) Flags() []melodyclicontract.Flag {
             Usage: "the propagated actor's attributes, comma-separated key=value pairs, each key named once; empty for none; refused without --actor",
         },
         &melodyclicontract.DurationFlag{
-            Name:      internalSignFlagTtl,
-            Usage:     "how long the envelope stays valid, as a go duration of at least 1s; defaults to the signer's 30s. It is not capped here: the firewall refuses an envelope whose expiry sits past its horizon, and an operator may mint one to see that refusal",
-            Validator: internalSignTtl,
+            Name:        internalSignFlagTtl,
+            Usage:       "how long the envelope stays valid, as a go duration of at least 1s; defaults to the signer's 30s. It is not capped here: the firewall refuses an envelope whose expiry sits past its horizon, and an operator may mint one to see that refusal",
+            Validator:   internalSignTtl,
+            HideDefault: true,
         },
     }
 }

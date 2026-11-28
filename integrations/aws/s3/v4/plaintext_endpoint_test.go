@@ -9,6 +9,7 @@ import (
     "github.com/minio/minio-go/v7"
     "github.com/minio/minio-go/v7/pkg/credentials"
 
+    applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     melodyconfig "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
@@ -168,7 +169,7 @@ func TestNewStorage_APlaintextEndpointOffThisMachineIsNamedOnceAtTheFirstUse(t *
     }
 
     warnings := logger.captured()
-    if 1 != len(warnings) || PlaintextEndpointBootWarningName != warnings[0][bootWarningContextKey] || "s3.example.com" != warnings[0]["endpoint"] {
+    if 1 != len(warnings) || PlaintextEndpointBootWarningName != warnings[0][applicationcontract.BootWarningContextKey] || "s3.example.com" != warnings[0]["endpoint"] {
         t.Fatalf("expected one warning naming the endpoint, got %v", warnings)
     }
 
@@ -302,7 +303,7 @@ func TestStorage_StatWritesThePlaintextEndpointWarning(t *testing.T) {
     }
 
     warnings := logger.captured()
-    if 1 != len(warnings) || PlaintextEndpointBootWarningName != warnings[0][bootWarningContextKey] {
+    if 1 != len(warnings) || PlaintextEndpointBootWarningName != warnings[0][applicationcontract.BootWarningContextKey] {
         t.Fatalf("expected one warning at the first Stat, got %v", warnings)
     }
 }

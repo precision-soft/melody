@@ -20,10 +20,11 @@ import (
 
 const defaultPollInterval = 1 * time.Second
 
-/* RelayIntervalFlagName and RelayIdleBackoffFlagName are the relay command's duration flags a deployment names in its scripts */
+/* RelayIntervalFlagName, RelayIdleBackoffFlagName and RelayLimitFlagName are the relay command's flags a deployment names in its scripts */
 const (
     RelayIntervalFlagName    = "interval"
     RelayIdleBackoffFlagName = "idle-backoff"
+    RelayLimitFlagName       = "limit"
 )
 
 /* RelayCommandConfig configures the melody:outbox:relay command's run loop. The poll interval, the idle backoff and the batch limit stay the run's flags. */
@@ -93,16 +94,18 @@ func (instance *RelayCommand) Flags() []clicontract.Flag {
     return []clicontract.Flag{
         &clicontract.DurationFlag{
             Name:      RelayIntervalFlagName,
-            Usage:     "poll interval between batches (Go duration, default 1s)",
+            Usage:     "poll interval between batches (Go duration)",
+            Value:     defaultPollInterval,
             Validator: positiveDuration(RelayIntervalFlagName),
         },
         &clicontract.DurationFlag{
-            Name:      RelayIdleBackoffFlagName,
-            Usage:     "sleep when a batch drained nothing (Go duration, defaults to the poll interval)",
-            Validator: positiveDuration(RelayIdleBackoffFlagName),
+            Name:        RelayIdleBackoffFlagName,
+            Usage:       "sleep when a batch drained nothing (Go duration, defaults to the poll interval)",
+            Validator:   positiveDuration(RelayIdleBackoffFlagName),
+            HideDefault: true,
         },
         &clicontract.IntFlag{
-            Name:   "limit",
+            Name:   RelayLimitFlagName,
             Usage:  "stop after draining this many batches; 0 means run until interrupted",
             Config: output.DecimalIntegerConfig,
         },
@@ -115,7 +118,7 @@ func (instance *RelayCommand) Run(
 ) error {
     interval, idleBackoff := relayDurations(commandContext)
 
-    limit := commandContext.Int("limit")
+    limit := commandContext.Int(RelayLimitFlagName)
 
     /* stop on SIGINT/SIGTERM: the cancelled context aborts an in-flight batch mid-drain (RunOnce threads it through every repository and transport call), and whatever stayed claimed re-surfaces once its VisibilityTimeout lapses; a signal that lands between batches exits before the next claim. */
     runContext, stop := signal.NotifyContext(runtimeInstance.Context(), os.Interrupt, syscall.SIGTERM)
@@ -205,12 +208,9 @@ func (instance *RelayCommand) logRunError(logger loggingcontract.Logger, runErr 
     )
 }
 
-/* relayDurations answers the poll interval, defaultPollInterval when left out, and the idle backoff, the interval when left out; the flags' validators refused a value that is not positive at the parse. */
+/* relayDurations answers the poll interval, its flag's declared default when left out, and the idle backoff, the interval when left out; the flags' validators refused a value that is not positive at the parse. */
 func relayDurations(commandContext *clicontract.CommandContext) (time.Duration, time.Duration) {
-    interval := defaultPollInterval
-    if true == commandContext.IsSet(RelayIntervalFlagName) {
-        interval = commandContext.Duration(RelayIntervalFlagName)
-    }
+    interval := commandContext.Duration(RelayIntervalFlagName)
 
     idleBackoff := interval
     if true == commandContext.IsSet(RelayIdleBackoffFlagName) {

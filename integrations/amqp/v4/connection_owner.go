@@ -59,14 +59,15 @@ func (instance *Connection) Raw() *amqp091.Connection {
     return instance.raw
 }
 
-/* CloseWithContext closes the connection once, under a deadline on the socket, the close timeout within what is left of the caller's deadline, and returns within that bound plus a short grace; every later call answers the first one's error. The client's plain Close is an RPC sharing the send locks with every publish, so on a connection whose peer stopped reading an unbounded close would never return. */
+/* CloseWithContext closes the connection once, under a deadline on the socket, the close timeout within what is left of the caller's deadline, and returns within that bound plus a short grace; every later call answers the first one's error, and a connection the client already closed, a broker that dropped it among them, closes as nil. The client's plain Close is an RPC sharing the send locks with every publish, so on a connection whose peer stopped reading an unbounded close would never return. */
 func (instance *Connection) CloseWithContext(closeContext context.Context) error {
     if nil == instance || nil == instance.raw {
         return nil
     }
 
     instance.closeOnce.Do(func() {
-        instance.closeErr, _ = closeConnectionWithin(closeContext, teardownStretchWithin(closeContext, instance.closeTimeout), instance.closeTimeout, instance.raw)
+        closeErr, _ := closeConnectionWithin(closeContext, teardownStretchWithin(closeContext, instance.closeTimeout), instance.closeTimeout, instance.raw)
+        instance.closeErr = ignoringAlreadyClosed(closeErr)
     })
 
     return instance.closeErr

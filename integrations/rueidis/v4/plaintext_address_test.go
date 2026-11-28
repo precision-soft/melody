@@ -56,7 +56,7 @@ func newPlaintextAddressRuntime(t *testing.T, ctx context.Context, values map[st
 func plaintextAddressWarnings(logger *capturingLogger) []capturedRecord {
     warnings := []capturedRecord{}
     for _, record := range logger.records {
-        if PlaintextAddressBootWarningName == record.context[bootWarningContextKey] {
+        if PlaintextAddressBootWarningName == record.context[applicationcontract.BootWarningContextKey] {
             warnings = append(warnings, record)
         }
     }

@@ -13,8 +13,6 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-const bootWarningContextKey = "bootWarning"
-
 /* InsecureCollectorBootWarningName is the code of the warning a module exporting without transport security to a collector off this machine writes, the code a process lists in MELODY_BOOT_WARNINGS_IGNORED to leave it out */
 const InsecureCollectorBootWarningName = "opentelemetry.otlp.insecureCollector"
 
@@ -68,7 +66,7 @@ func journalInsecureCollector(runtimeInstance containercontract.Runtime, endpoin
         return
     }
 
-    journalContext := loggingcontract.Context{bootWarningContextKey: InsecureCollectorBootWarningName}
+    journalContext := loggingcontract.Context{applicationcontract.BootWarningContextKey: InsecureCollectorBootWarningName}
     for key, value := range warning.Context {
         journalContext[key] = value
     }

@@ -118,6 +118,7 @@ func exampleProcessServiceInventoryOf(major exampleMajor) map[string]processServ
         inventory["service.example.redis.second_factor_budget_limiter"] = processServiceClassification{typeName: "*rueidis.RateLimiter", category: processServiceStore}
         inventory["service.example.redis.second_factor_replay_guard"] = processServiceClassification{typeName: "*rueidis.NonceGuard", category: processServiceStore}
         inventory["service.example.redis.internal_nonce_guard"] = processServiceClassification{typeName: "*rueidis.NonceGuard", category: processServiceStore}
+        inventory["service.amqp.connection"] = processServiceClassification{typeName: "*amqp.Connection", category: processServiceConnection}
 
         /* the fourth major's collaborators take the connection, which holds the client, so no client is registered */
         delete(inventory, "service.rueidis.client")

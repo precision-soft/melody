@@ -379,3 +379,35 @@ func TestLazyLocker_AnswersTheResolutionFailureWhenAsked(t *testing.T) {
         t.Fatalf("expected a provider answering a typed nil locker to be an error when asked, got %v and %v", shared, err)
     }
 }
+
+func TestResolvedLocker_AnswersTheLockerTheLazyOneResolvesAndAnyOtherItself(t *testing.T) {
+    runtimeInstance := testRuntimeWithContext(context.Background())
+    inMemoryLocker := NewInMemoryLocker(InMemoryLockerConfig{})
+
+    inMemoryLazyLocker, provided := registeredLazyLocker(func() (lockcontract.Locker, error) {
+        return inMemoryLocker, nil
+    })
+
+    resolved, resolveErr := ResolvedLocker(runtimeInstance, inMemoryLazyLocker)
+    if nil != resolveErr || inMemoryLocker != resolved {
+        t.Fatalf("expected the lazy locker to answer the in-memory locker it resolves, got %T and %v", resolved, resolveErr)
+    }
+
+    if _, askErr := lockcontract.LeasesAcrossReplicas(runtimeInstance, inMemoryLazyLocker); nil != askErr || 1 != provided.Load() {
+        t.Fatalf("expected the ask to reuse the one resolution, got %v and %d", askErr, provided.Load())
+    }
+
+    if resolved, resolveErr = ResolvedLocker(runtimeInstance, inMemoryLocker); nil != resolveErr || inMemoryLocker != resolved {
+        t.Fatalf("expected a locker that is not lazy to answer itself, got %T and %v", resolved, resolveErr)
+    }
+
+    providerErr := errors.New("lock store not reachable yet")
+    failingLazyLocker, _ := registeredLazyLocker(func() (lockcontract.Locker, error) {
+        return nil, providerErr
+    })
+
+    if resolved, resolveErr = ResolvedLocker(runtimeInstance, failingLazyLocker); nil != resolved || false == errors.Is(resolveErr, providerErr) {
+        t.Fatalf("expected the resolution failure, got %T and %v", resolved, resolveErr)
+    }
+}
+

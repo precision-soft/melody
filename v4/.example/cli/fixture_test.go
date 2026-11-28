@@ -1,6 +1,7 @@
 package cli
 
 import (
+    "bytes"
     "context"
     "database/sql"
     "database/sql/driver"
@@ -272,6 +273,18 @@ func parseCommandFlags(command melodyclicontract.Command, arguments []string, wr
     runErr := commandContext.Run(context.Background(), append([]string{"test"}, arguments...))
 
     return commandContext, runErr
+}
+
+/* renderCommandHelp answers the engine's --help of the command's flags, the lines an operator reads */
+func renderCommandHelp(t *testing.T, command melodyclicontract.Command) string {
+    t.Helper()
+
+    help := &bytes.Buffer{}
+    if _, runErr := parseCommandFlags(command, []string{"--help"}, help); nil != runErr {
+        t.Fatalf("expected the help to render, got %v", runErr)
+    }
+
+    return help.String()
 }
 
 func sortedKeys[V any](values map[string]V) []string {

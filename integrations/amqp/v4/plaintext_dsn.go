@@ -9,6 +9,7 @@ import (
     "sync"
     "sync/atomic"
 
+    applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
@@ -18,8 +19,6 @@ import (
 
 /* PlaintextDsnBootWarningName is the code of the warning a connection opened over an amqp dsn off this machine writes, the code a process lists in MELODY_BOOT_WARNINGS_IGNORED to leave it out */
 const PlaintextDsnBootWarningName = "amqp.plaintextDsn"
-
-const bootWarningContextKey = "bootWarning"
 
 const plaintextDsnWarningMessage = "amqp dsn is plain amqp off this machine: credentials and messages cross the network in clear; use an amqps dsn, with ProviderConfig.TlsConfig for a private authority"
 
@@ -108,7 +107,7 @@ func (instance *plaintextHostJudge) judge(journal *plaintextJournal, dsn string)
         return
     }
 
-    journal.logger.Warning(plaintextDsnWarningMessage, loggingcontract.Context{bootWarningContextKey: PlaintextDsnBootWarningName, "host": host})
+    journal.logger.Warning(plaintextDsnWarningMessage, loggingcontract.Context{applicationcontract.BootWarningContextKey: PlaintextDsnBootWarningName, "host": host})
 }
 
 /* dialJournalHolder keeps the journal a component hands its dials: the first runtime it served that holds a logger */

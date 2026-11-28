@@ -50,3 +50,12 @@ func TestExclusiveTickCommand_RefusesAHoldThatIsNotADurationAtTheParse(t *testin
         }
     }
 }
+
+/* the declared 2s is the one default the help prints, the usage text stating none of its own */
+func TestExclusiveTickCommand_TheHelpPrintsTheDeclaredHoldOnce(t *testing.T) {
+    help := renderCommandHelp(t, &ExclusiveTickCommand{})
+
+    if 1 != strings.Count(help, "2s") || false == strings.Contains(help, "(default: 2s)") {
+        t.Fatalf("expected the help to print the declared 2s hold once, as its default, got %s", help)
+    }
+}

@@ -32,7 +32,7 @@ func (instance *ExclusiveTickCommand) Flags() []melodyclicontract.Flag {
     return []melodyclicontract.Flag{
         &melodyclicontract.DurationFlag{
             Name:  exclusiveTickFlagHold,
-            Usage: "how long the tick holds the lock (Go duration, default 2s)",
+            Usage: "how long the tick holds the lock (Go duration)",
             Value: exclusiveTickDefaultHold,
         },
     }

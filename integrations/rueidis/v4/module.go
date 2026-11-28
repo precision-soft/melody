@@ -18,7 +18,7 @@ type ModuleConfig struct {
     /* ConnectionBuiltAtBoot builds the connection inside Boot, under the boot runtime, so an unreachable store is known before the first request. */
     ConnectionBuiltAtBoot bool
 
-    /* ConnectionBootFailure is the boot failure mode of a connection built at boot, the registrar's own: BootFailureWarns when left out. */
+    /* ConnectionBootFailure is the boot failure mode of a connection built at boot, the registrar's own: BootFailureWarns when left out, under which a cli process builds the connection at its first use; BootFailureFailsBoot connects in every process, a command included. */
     ConnectionBootFailure containercontract.BootFailureMode
 
     /* Locker registers the locker service built from it; nil registers none, &LockerConfig{} the default locker. */

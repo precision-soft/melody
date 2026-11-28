@@ -498,6 +498,26 @@ func TestConnection_CloseWithContextIsIdempotentAndCarriesTheProvidersTimeout(t 
     }
 }
 
+/* the broker side drops, so the client runs its own shutdown and marks the connection closed: the owner's close then reads the client's ErrClosed as closed, as the transport's close does */
+func TestConnection_ClosingAConnectionTheBrokerAlreadyClosedAnswersNil(t *testing.T) {
+    fake := dialFakeBroker(t)
+
+    _ = fake.brokerSide.Close()
+
+    deadline := time.Now().Add(2 * time.Second)
+    for false == fake.connection.IsClosed() {
+        if true == time.Now().After(deadline) {
+            t.Fatal("the client never began its shutdown after the broker side dropped")
+        }
+
+        time.Sleep(5 * time.Millisecond)
+    }
+
+    if closeErr := NewConnection(fake.connection, ConnectionConfig{}).CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("expected a connection the broker already closed to close as nil, got %v", closeErr)
+    }
+}
+
 func TestConnection_ANilOwnerAndANilRawCloseAsNothing(t *testing.T) {
     var nilOwner *Connection
     if closeErr := nilOwner.CloseWithContext(context.Background()); nil != closeErr || nil != nilOwner.Raw() {

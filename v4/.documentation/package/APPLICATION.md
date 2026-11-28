@@ -373,6 +373,8 @@ func run(ctx context.Context, embeddedEnvironmentFiles fs.FS, embeddedPublicFile
   `RegisterBootWarnings(registrar)` runs after the parameters are registered, before the configuration resolves. A declared code is one `MELODY_BOOT_WARNINGS_IGNORED` may list, in the http and the cli process alike; a warning added under it is written once with the framework's [boot warnings](SECURITY.md#boot-warnings) and honours that key. The code is declared even when the module's configuration calls for no warning, so the key may name it in every environment the module is registered in.
 - [`BootWarningRegistrar`](../../application/contract/boot_warning_module.go)\
   `DeclareBootWarning(name, config)`, [`BootWarningConfig`](../../application/contract/boot_warning_module.go), which holds no field yet, and `AddBootWarning(warning)`. A name the framework or another module holds, a warning under a name the module did not declare and an empty message fail the boot, naming the module.
+- [`BootWarningContextKey`](../../application/contract/boot_warning_module.go)\
+  `bootWarning`, the context key every boot warning carries its code under, the framework's and a module's alike; a module that writes a coded warning outside the boot, as the cron runner's `Run` does, writes the code under it.
 - [`BootWarning`](../../application/contract/boot_warning_module.go)\
   `Name`, `Message` and `Context`; the context names the configuration and never a value that may be a secret.
 - [`EnvironmentKeyModule`](../../application/contract/environment_key_module.go)\

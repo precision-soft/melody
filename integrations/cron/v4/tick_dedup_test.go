@@ -11,6 +11,7 @@ import (
     "testing"
     "time"
 
+    applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/bound"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
@@ -464,7 +465,7 @@ func TestTickDedup_WithoutALockerDispatchesAsBefore(t *testing.T) {
                 t.Fatalf("expected the warning %v, got %v", testCase.expected, found)
             }
 
-            if true == found && (TickDedupNoLockerBootWarningName != record.context[bootWarningContextKey] || lock.ServiceLocker != record.context["serviceName"]) {
+            if true == found && (TickDedupNoLockerBootWarningName != record.context[applicationcontract.BootWarningContextKey] || lock.ServiceLocker != record.context["serviceName"]) {
                 t.Fatalf("expected the warning to carry its code and the service name, got %v", record.context)
             }
         })
@@ -940,7 +941,7 @@ func TestTickDedup_ALockerThatIsNotASharedLeaseIsNamedOnceAtRun(t *testing.T) {
             }
 
             if true == found {
-                if TickDedupLockerNotSharedLeaseBootWarningName != record.context[bootWarningContextKey] || fmt.Sprintf("%T", testCase.locker) != record.context["locker"] || "5m0s" != record.context["window"] {
+                if TickDedupLockerNotSharedLeaseBootWarningName != record.context[applicationcontract.BootWarningContextKey] || fmt.Sprintf("%T", testCase.locker) != record.context["locker"] || "5m0s" != record.context["window"] {
                     t.Fatalf("expected the record to carry the code, the locker type and the window, got %v", record.context)
                 }
             }
@@ -1014,7 +1015,7 @@ func TestTickDedup_TheWarningsAreLeftOutUnderTheIgnoreKey(t *testing.T) {
             t.Fatalf("%s: expected the warning %v, got %v", name, testCase.expected, found)
         }
 
-        if true == found && testCase.code != record.context[bootWarningContextKey] {
+        if true == found && testCase.code != record.context[applicationcontract.BootWarningContextKey] {
             t.Fatalf("%s: expected the record to carry its code, got %v", name, record.context)
         }
     }
@@ -1094,3 +1095,151 @@ func TestTickDedup_ARegisteredLockerThatCannotBeResolvedIsNotAsked(t *testing.T)
         t.Fatalf("expected no warning over a locker that cannot be resolved")
     }
 }
+
+func countRecordsByMessage(captured *capturingRunnerLogger, message string) int {
+    written := 0
+    for _, entry := range captured.entries {
+        if message == entry.message {
+            written++
+        }
+    }
+
+    return written
+}
+
+/* the ask fails at Run, the store not up yet: the coded ask-failed warning names it, and the first tick that reached the locker asks once more and names the locker that is not a shared lease */
+func TestRunnerCommand_ALockerThatCannotBeAskedAtRunIsAskedAgainAtTheFirstTickThatReachedIt(t *testing.T) {
+    job := &countingCommand{commandName: "job:every-minute"}
+    locker := &sharedLeaseTickLocker{recordingTickLocker: recordingTickLocker{inner: newSessionTickLocker()}, failedAsks: 1}
+    captured := &capturingRunnerLogger{}
+    runtimeInstance := newTickDedupWarningRuntime(captured, nil, nil)
+
+    runner := newTickDedupRunner(job, EntryConfig{}, RunnerConfig{TickDedup: TickDedupConfig{Locker: locker}})
+    runner.now = func() time.Time {
+        return tickDedupMinute
+    }
+
+    if runErr := newRunnerDispatch(runner, runtimeInstance, nil).Run(context.Background(), []string{runner.Name(), "--once"}); nil != runErr {
+        t.Fatalf("unexpected error running --once: %v", runErr)
+    }
+
+    _, _ = dispatchMinute(t, runner, runtimeInstance, tickDedupMinute.Add(time.Minute))
+
+    record, found := captured.recordByMessageProbe(tickDedupLockerAskFailedWarningMessage)
+    if false == found || 1 != countRecordsByMessage(captured, tickDedupLockerAskFailedWarningMessage) || TickDedupLockerAskFailedBootWarningName != record.context[applicationcontract.BootWarningContextKey] || fmt.Sprintf("%T", locker) != record.context["locker"] || false == strings.Contains(fmt.Sprint(record.context), "not up yet") {
+        t.Fatalf("expected one coded ask-failed warning naming the locker and the cause, got %v", captured.entries)
+    }
+
+    if 1 != countRecordsByMessage(captured, tickDedupLockerNotSharedLeaseWarningMessage) || 2 != locker.asks.Load() {
+        t.Fatalf("expected the not shared lease warning once after the re-ask, got %d warnings and %d asks", countRecordsByMessage(captured, tickDedupLockerNotSharedLeaseWarningMessage), locker.asks.Load())
+    }
+}
+
+/* the re-ask that answers a shared lease writes nothing more, and an ask that fails at the re-ask too is not asked a third time */
+func TestRunnerCommand_TheReAskHappensOnceAndFollowsTheNormalRule(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        locker     *sharedLeaseTickLocker
+        notShared  int
+        askFailed  int
+        totalAsks  int64
+    }{
+        "the re-ask answers a shared lease": {locker: &sharedLeaseTickLocker{recordingTickLocker: recordingTickLocker{inner: newSessionTickLocker()}, failedAsks: 1, shared: true}, notShared: 0, askFailed: 1, totalAsks: 2},
+        "the re-ask fails too":              {locker: &sharedLeaseTickLocker{recordingTickLocker: recordingTickLocker{inner: newSessionTickLocker()}, failedAsks: 5}, notShared: 0, askFailed: 1, totalAsks: 2},
+    } {
+        t.Run(name, func(t *testing.T) {
+            job := &countingCommand{commandName: "job:every-minute"}
+            captured := &capturingRunnerLogger{}
+            runtimeInstance := newTickDedupWarningRuntime(captured, nil, nil)
+
+            runner := newTickDedupRunner(job, EntryConfig{}, RunnerConfig{TickDedup: TickDedupConfig{Locker: testCase.locker}})
+            runner.now = func() time.Time {
+                return tickDedupMinute
+            }
+
+            if runErr := newRunnerDispatch(runner, runtimeInstance, nil).Run(context.Background(), []string{runner.Name(), "--once"}); nil != runErr {
+                t.Fatalf("unexpected error running --once: %v", runErr)
+            }
+
+            for _, minute := range []time.Time{tickDedupMinute.Add(time.Minute), tickDedupMinute.Add(2 * time.Minute)} {
+                _, _ = dispatchMinute(t, runner, runtimeInstance, minute)
+            }
+
+            if testCase.notShared != countRecordsByMessage(captured, tickDedupLockerNotSharedLeaseWarningMessage) || testCase.askFailed != countRecordsByMessage(captured, tickDedupLockerAskFailedWarningMessage) || testCase.totalAsks != testCase.locker.asks.Load() {
+                t.Fatalf("expected %d not shared, %d ask failed and %d asks, got %d, %d and %d", testCase.notShared, testCase.askFailed, testCase.totalAsks, countRecordsByMessage(captured, tickDedupLockerNotSharedLeaseWarningMessage), countRecordsByMessage(captured, tickDedupLockerAskFailedWarningMessage), testCase.locker.asks.Load())
+            }
+        })
+    }
+}
+
+/* a registered locker that cannot be resolved at Run cannot be asked: the ask-failed warning names the service and the cause, and no tick reaches a locker to ask again */
+func TestTickDedup_ARegisteredLockerThatCannotBeResolvedWritesTheAskFailedWarning(t *testing.T) {
+    job := &countingCommand{commandName: "job:every-minute"}
+    captured := &capturingRunnerLogger{}
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    serviceContainer.MustRegister(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return captured, nil
+        },
+        container.RegisterOptions{},
+    )
+    serviceContainer.MustRegister(
+        lock.ServiceLocker,
+        func(resolver containercontract.Resolver) (lockcontract.Locker, error) {
+            return nil, errors.New("lock store not reachable")
+        },
+        container.RegisterOptions{},
+    )
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
+
+    runner := newTickDedupRunner(job, EntryConfig{}, RunnerConfig{})
+    runner.warnOverALockerThatIsNotASharedLease(runtimeInstance, runner.resolveTickDedupRun(runtimeInstance))
+
+    record, found := captured.recordByMessageProbe(tickDedupLockerAskFailedWarningMessage)
+    if false == found || lock.ServiceLocker != record.context["serviceName"] || false == strings.Contains(fmt.Sprint(record.context), "lock store not reachable") {
+        t.Fatalf("expected the ask-failed warning naming the service and the cause, got %v", captured.entries)
+    }
+}
+
+/* over the lazy locker the record names the configured wrapper and, beside it, the locker it resolved to */
+func TestTickDedup_TheNotSharedLeaseWarningNamesTheLockerTheLazyOneResolvedTo(t *testing.T) {
+    job := &countingCommand{commandName: "job:every-minute"}
+    captured := &capturingRunnerLogger{}
+    runtimeInstance := newTickDedupWarningRuntime(captured, lock.NewInMemoryLocker(lock.InMemoryLockerConfig{}), nil)
+    lazyLocker := lock.NewLazyLocker(runtimeInstance.Scope())
+
+    runner := newTickDedupRunner(job, EntryConfig{}, RunnerConfig{TickDedup: TickDedupConfig{Locker: lazyLocker}})
+    runner.warnOverALockerThatIsNotASharedLease(runtimeInstance, runner.resolveTickDedupRun(runtimeInstance))
+
+    record, found := captured.recordByMessageProbe(tickDedupLockerNotSharedLeaseWarningMessage)
+    if false == found || fmt.Sprintf("%T", lazyLocker) != record.context["locker"] || "*lock.InMemoryLocker" != record.context["resolvedLocker"] {
+        t.Fatalf("expected the record to name the lazy locker and the in-memory locker it resolved to, got %v", record.context)
+    }
+}
+
+/* the Run warnings are diagnostics: a logger that panics writing them leaves the Run to its ticks, as the tick side's warning does */
+func TestTickDedup_ALoggerPanickingAtTheRunWarningsStillRunsTheRun(t *testing.T) {
+    for name, locker := range map[string]lockcontract.Locker{
+        "not shared lease": newSessionTickLocker(),
+        "ask failed":       &sharedLeaseTickLocker{failedAsks: 1},
+        "no locker":        nil,
+    } {
+        t.Run(name, func(t *testing.T) {
+            job := &countingCommand{commandName: "job:every-minute"}
+            runtimeInstance := newTickDedupWarningRuntime(&panickingLogger{}, nil, nil)
+            runner := newTickDedupRunner(job, EntryConfig{}, RunnerConfig{TickDedup: TickDedupConfig{Locker: locker}})
+
+            defer func() {
+                if recovered := recover(); nil != recovered {
+                    t.Fatalf("expected the warnings' panicking logger contained, got %v", recovered)
+                }
+            }()
+
+            dedupRun := runner.resolveTickDedupRun(runtimeInstance)
+            runner.warnWithoutTickDedupLocker(runtimeInstance, dedupRun)
+            runner.warnOverALockerThatIsNotASharedLease(runtimeInstance, dedupRun)
+        })
+    }
+}
+

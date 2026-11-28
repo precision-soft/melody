@@ -17,7 +17,7 @@ type ModuleConfig struct {
     /* StoreBuiltAtBoot builds the store inside Boot, under the boot runtime, so a factory that ensures the schema does it before the first request, its failure following StoreBootFailure. */
     StoreBuiltAtBoot bool
 
-    /* StoreBootFailure is the boot failure mode of a store built at boot, the registrar's own: BootFailureWarns when left out. */
+    /* StoreBootFailure is the boot failure mode of a store built at boot, the registrar's own: BootFailureWarns when left out, under which a cli process builds the store at its first use; BootFailureFailsBoot builds it in every process, a command included. */
     StoreBootFailure containercontract.BootFailureMode
 
     Relay func(resolver containercontract.Resolver) (*Relay, error)

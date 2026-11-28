@@ -3,6 +3,7 @@ package cron
 import (
     "bytes"
     "context"
+    "errors"
     "fmt"
     "os"
     "sort"
@@ -699,11 +700,15 @@ type sharedLeaseTickLocker struct {
     shared bool
     err    error
     panics bool
-    asks   atomic.Int64
+    /* failedAsks is how many first asks answer an error before the locker answers shared as told */
+    failedAsks int64
+    asks       atomic.Int64
 }
 
 func (instance *sharedLeaseTickLocker) LeasesAcrossReplicas(runtimeInstance containercontract.Runtime) (bool, error) {
-    instance.asks.Add(1)
+    if asked := instance.asks.Add(1); asked <= instance.failedAsks {
+        return false, errors.New("the locker's store is not up yet")
+    }
 
     if true == instance.panics {
         panic("the shared lease ask panicked")

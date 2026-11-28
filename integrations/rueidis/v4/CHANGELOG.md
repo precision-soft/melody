@@ -58,6 +58,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Breaking** — `client_config.go`: `ClientConfig.ConnWriteTimeout` is renamed `ClientConfig.ConnectionWriteTimeout`; the value still reaches the library's `ConnWriteTimeout`.
 - **Breaking** — `client_config.go`: `ClientConfig.SelectDb` is renamed `ClientConfig.SelectDatabase`, and the connection's journal context names it `selectDatabase`; the value still reaches the library's `SelectDB`.
 - **Breaking** — `retry_config.go`, `reconnect_config.go`: `RetryConfig.InitialDelay`, `MaxDelay` and `BackoffMultiplier` are one `RetryConfig.Backoff bound.Backoff` (500ms, 5s, 2), and `ReconnectConfig.InitialBackoff`, `MaxBackoff` and `BackoffFactor` one `ReconnectConfig.Backoff` (1s, 30s, 2), resolved by `bound.ResolveBackoff` and refused naming `RetryConfig.Backoff.<field>` and `ReconnectConfig.Backoff.<field>`; a retry `Max` below its `Initial` is refused where the first wait was capped; the open retry and the backplane's re-subscription wait `ResolvedBackoff.Delay(attempt)`, the sequences on the defaults unchanged.
+- `plaintext_address.go`: the warning's code is written under `applicationcontract.BootWarningContextKey`, the framework's key, in place of a private copy of it.
 
 ### Removed
 
@@ -74,4 +75,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - `token_store.go`: `PurgeExpired` walks every node of the client on that node's own cursor, as the cache backend does, where a cluster client routed each step of the one `SCAN` to an arbitrary node and stale index members were left behind.
 - rate limit: a store failure whose `Unwrap` chain reaches itself no longer holds the limiter that classifies it. The provider's open returns on such a failure too, from a TLS verifier for one.
+- `README.md`, `module.go`: under `BootFailureWarns` a cli process builds the connection at its first use, and `BootFailureFailsBoot` connects in every process, a command included; the two documents were silent on it.
 

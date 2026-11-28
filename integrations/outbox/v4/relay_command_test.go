@@ -220,7 +220,7 @@ func TestRelayCommand_StopsOnContextCancellation(t *testing.T) {
 }
 
 func TestRelayCommand_RefusesADurationFlagThatIsNotAPositiveDurationAtTheParse(t *testing.T) {
-    for _, flagName := range []string{"interval", "idle-backoff"} {
+    for _, flagName := range []string{RelayIntervalFlagName, RelayIdleBackoffFlagName} {
         for value, expected := range map[string]string{
             "not-a-duration": "for flag -" + flagName,
             "":               "for flag -" + flagName,
@@ -273,6 +273,81 @@ func TestRelayCommand_ReadsTheIntervalAndTheIdleBackoffWithTheirFallbacks(t *tes
             }
             if testCase.expectedInterval != interval || testCase.expectedIdleBackoff != idleBackoff {
                 t.Fatalf("expected interval %s and idle backoff %s, got %s and %s", testCase.expectedInterval, testCase.expectedIdleBackoff, interval, idleBackoff)
+            }
+        })
+    }
+}
+
+/* the engine prints a duration flag's default from its Value: the interval declares its 1s, and the idle backoff, whose default is the interval read at the run, hides the zero it would print */
+func TestRelayCommand_TheHelpPrintsTheDeclaredDefaultAndNoZeroDefault(t *testing.T) {
+    var help strings.Builder
+
+    engineCommand := &clicontract.CommandContext{
+        Name:      "probe",
+        Flags:     (&RelayCommand{}).Flags(),
+        Writer:    &help,
+        ErrWriter: &help,
+        Action: func(context.Context, *clicontract.CommandContext) error {
+            return nil
+        },
+    }
+
+    if runErr := engineCommand.Run(context.Background(), []string{"probe", "--help"}); nil != runErr {
+        t.Fatalf("expected the help to render, got %v", runErr)
+    }
+
+    if true == strings.Contains(help.String(), "default: 0s") || 1 != strings.Count(help.String(), "(default: 1s)") {
+        t.Fatalf("expected the help to print the interval's 1s once and no 0s default, got %s", help.String())
+    }
+}
+
+/* `--interval=` with nothing after the sign, what `--interval=$UNSET` becomes in a script, is refused at the parse naming the flag */
+func TestRelayCommand_RefusesADurationFlagWithNothingAfterTheSign(t *testing.T) {
+    for _, flagName := range []string{RelayIntervalFlagName, RelayIdleBackoffFlagName} {
+        relayCommand := NewRelayCommand(RelayCommandConfig{})
+        capturing := &capturingCommand{Command: relayCommand, runtimeInstance: relayTestRuntime()}
+
+        commandErr := melodycli.DispatchCommand(context.Background(), capturing, capturing.runtimeInstance, []string{relayCommand.Name(), "--" + flagName + "=", "--" + RelayLimitFlagName, "1"}, io.Discard, melodycli.DispatchConfig{})
+        if nil == commandErr || false == strings.Contains(commandErr.Error(), "flag needs an argument: --"+flagName+"=") {
+            t.Fatalf("expected --%s= refused at the parse naming the flag, got %v", flagName, commandErr)
+        }
+        if nil != capturing.capturedErr {
+            t.Fatalf("expected the run never reached for --%s=, got %v", flagName, capturing.capturedErr)
+        }
+    }
+}
+
+/* through the run loop: an empty batch sleeps the idle backoff and a batch that published sleeps the interval, the other one an hour that would outlast the bound */
+func TestRelayCommand_RunSleepsTheIdleBackoffAfterAnEmptyBatchAndTheIntervalAfterAFullOne(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        due       []Pending
+        arguments []string
+    }{
+        "empty batch": {due: nil, arguments: []string{"--" + RelayIntervalFlagName, "1h", "--" + RelayIdleBackoffFlagName, "1ms"}},
+        "full batch":  {due: []Pending{{Id: 1, TypeName: "string", Payload: []byte("hello"), DeliveryAttempts: 1}}, arguments: []string{"--" + RelayIntervalFlagName, "1ms", "--" + RelayIdleBackoffFlagName, "1h"}},
+    } {
+        t.Run(name, func(t *testing.T) {
+            serviceContainer := container.NewContainer(container.ContainerConfig{})
+            cancellableContext, cancel := context.WithCancel(context.Background())
+            defer cancel()
+            runtimeInstance := runtime.NewRun(cancellableContext, serviceContainer.NewScope())
+
+            relay := NewRelay(&fakeRepository{due: testCase.due}, &fakeTransport{}, &stringCodec{}, RelayConfig{})
+
+            done := make(chan error, 1)
+            go func() {
+                done <- runRelayCommand(t, runtimeInstance, relay, append(testCase.arguments, "--"+RelayLimitFlagName, "2"))
+            }()
+
+            select {
+            case runErr := <-done:
+                if nil != runErr {
+                    t.Fatalf("expected the two batches to drain, got %v", runErr)
+                }
+            case <-time.After(2 * time.Second):
+                cancel()
+                <-done
+                t.Fatalf("expected the run to sleep the short delay between its two batches, it slept the hour")
             }
         })
     }
@@ -407,7 +482,7 @@ func TestRelayCommand_ADeadlineExplainedErrorStillExitsClean(t *testing.T) {
 
 /* the `--limit` flag parses in base ten, as the standard integer flags do: with the engine's inferred base --limit=010 would read as eight and --limit=08 would be refused */
 func TestRelayCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
-    for _, flagName := range []string{"limit"} {
+    for _, flagName := range []string{RelayLimitFlagName} {
         for spelling, expected := range map[string]int{"010": 10, "08": 8} {
             observed := -1
 

@@ -6,6 +6,7 @@ import (
     "strings"
     "sync"
 
+    applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
@@ -15,8 +16,6 @@ import (
 
 /* PlaintextAddressBootWarningName is the code of the warning a client opened without ClientConfig.TlsConfig over an address off this machine writes, the code a process lists in MELODY_BOOT_WARNINGS_IGNORED to leave it out */
 const PlaintextAddressBootWarningName = "rueidis.plaintextAddress"
-
-const bootWarningContextKey = "bootWarning"
 
 const plaintextAddressWarningMessage = "redis address is dialled in clear off this machine: the password and every value cross the network in clear; set ClientConfig.TlsConfig"
 
@@ -78,6 +77,6 @@ func (instance *plaintextAddressJudge) judge(runtimeInstance containercontract.R
             continue
         }
 
-        logger.Warning(plaintextAddressWarningMessage, loggingcontract.Context{bootWarningContextKey: PlaintextAddressBootWarningName, "address": address})
+        logger.Warning(plaintextAddressWarningMessage, loggingcontract.Context{applicationcontract.BootWarningContextKey: PlaintextAddressBootWarningName, "address": address})
     }
 }

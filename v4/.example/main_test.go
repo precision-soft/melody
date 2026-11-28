@@ -2,11 +2,14 @@ package main
 
 import (
     "context"
+    "io/fs"
     nethttp "net/http"
     "net/http/httptest"
     "os"
     "reflect"
+    "strings"
     "testing"
+    "testing/fstest"
     "time"
 
     melodyamqp "github.com/precision-soft/melody/integrations/amqp/v4"
@@ -142,6 +145,39 @@ func TestFrameworkDoors_RefuseATokenTheFrameworkDidNotBuild(t *testing.T) {
     }
 }
 
+/* a loopback port nothing listens on: the boot's dial of the broker is refused at once, never held for the dial timeout */
+const closedLoopbackAmqpDsn = "amqp://guest:guest@127.0.0.1:1/"
+
+/* environmentFilesWithAmqpDsn answers the committed .env alone, with AMQP_DSN set to the dsn handed, so an embedded boot reads neither a developer's .env.local nor the stack's broker; the local build reads the files on disk whatever it is handed */
+func environmentFilesWithAmqpDsn(t *testing.T, dsn string) fs.FS {
+    t.Helper()
+
+    source := embeddedEnvironmentFiles
+    if nil == source {
+        source = os.DirFS(".")
+    }
+
+    content, readErr := fs.ReadFile(source, ".env")
+    if nil != readErr {
+        t.Fatalf("read the committed .env: %v", readErr)
+    }
+
+    lines := strings.Split(string(content), "\n")
+    replaced := 0
+    for index, line := range lines {
+        if true == strings.HasPrefix(line, "AMQP_DSN=") {
+            lines[index] = "AMQP_DSN=" + dsn
+            replaced++
+        }
+    }
+
+    if 1 != replaced {
+        t.Fatalf("expected the committed .env to set AMQP_DSN once, found %d", replaced)
+    }
+
+    return fstest.MapFS{".env": &fstest.MapFile{Data: []byte(strings.Join(lines, "\n"))}}
+}
+
 /* the example served under a server of its owner's: the handler the application hands out answers the health route, the owner begins the shutdown before its server's and closes the application after it */
 func TestApplicationHttpHandler_ServesTheHealthRouteUnderAnotherServer(t *testing.T) {
     /* the test binary's own flags would read as a cli command; without them the process runs the .env's default mode, http */
@@ -153,7 +189,7 @@ func TestApplicationHttpHandler_ServesTheHealthRouteUnderAnotherServer(t *testin
         context.Background(),
         application.ApplicationConfig{
             Version:            applicationVersion,
-            EnvironmentFiles:   embeddedEnvironmentFiles,
+            EnvironmentFiles:   environmentFilesWithAmqpDsn(t, closedLoopbackAmqpDsn),
             PublicFiles:        embeddedPublicFiles,
             EnvironmentKeys:    config.EnvironmentKeys(),
             ParameterOverrides: config.ParameterOverrides(),
@@ -174,9 +210,10 @@ func TestApplicationHttpHandler_ServesTheHealthRouteUnderAnotherServer(t *testin
         t.Fatalf("expected the websocket module to register /ws, got %v %v", websocketRoute, found)
     }
 
-    /* the .env sets AMQP_DSN, so the amqp module registers its connection as the boot's check of the broker */
-    if false == applicationInstance.Boot().ServiceContainer().Has(melodyamqp.ServiceConnection) {
-        t.Fatal("expected the amqp module registered beside AMQP_DSN")
+    /* the amqp module registers its connection, the boot's check of the broker, exactly when the resolved AMQP_DSN is set: the embedded build reads the test's refused loopback port, the local build the files on disk, a developer's .env.local included */
+    amqpDsn := applicationInstance.Configuration().MustGet("app.amqp.dsn").String()
+    if ("" != amqpDsn) != applicationInstance.Boot().ServiceContainer().Has(melodyamqp.ServiceConnection) {
+        t.Fatalf("expected the amqp module registered exactly beside AMQP_DSN, the dsn %q", amqpDsn)
     }
 
     server := httptest.NewServer(handler)

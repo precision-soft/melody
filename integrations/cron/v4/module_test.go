@@ -2,6 +2,7 @@ package cron
 
 import (
     "errors"
+    "slices"
     "strings"
     "testing"
     "time"
@@ -339,15 +340,23 @@ func (instance *spyBootWarningRegistrar) AddBootWarning(warning applicationcontr
 }
 
 func TestModule_DeclaresTheTickDedupWarningCodes(t *testing.T) {
-    if "cron.tickDedup.noLocker" != TickDedupNoLockerBootWarningName || "cron.tickDedup.lockerNotSharedLease" != TickDedupLockerNotSharedLeaseBootWarningName {
-        t.Fatalf("expected the codes cron.tickDedup.noLocker and cron.tickDedup.lockerNotSharedLease, got %s and %s", TickDedupNoLockerBootWarningName, TickDedupLockerNotSharedLeaseBootWarningName)
+    if "cron.tickDedup.noLocker" != TickDedupNoLockerBootWarningName || "cron.tickDedup.lockerNotSharedLease" != TickDedupLockerNotSharedLeaseBootWarningName || "cron.tickDedup.lockerAskFailed" != TickDedupLockerAskFailedBootWarningName {
+        t.Fatalf("expected the codes cron.tickDedup.noLocker, cron.tickDedup.lockerNotSharedLease and cron.tickDedup.lockerAskFailed, got %s, %s and %s", TickDedupNoLockerBootWarningName, TickDedupLockerNotSharedLeaseBootWarningName, TickDedupLockerAskFailedBootWarningName)
     }
 
     registrar := &spyBootWarningRegistrar{}
     NewModule(ModuleConfig{}).RegisterBootWarnings(registrar)
 
-    if 2 != len(registrar.declared) || TickDedupNoLockerBootWarningName != registrar.declared[0] || TickDedupLockerNotSharedLeaseBootWarningName != registrar.declared[1] {
-        t.Fatalf("expected the two tick dedup codes declared, got %v", registrar.declared)
+    expected := []string{TickDedupNoLockerBootWarningName, TickDedupLockerNotSharedLeaseBootWarningName, TickDedupLockerAskFailedBootWarningName}
+    if false == slices.Equal(expected, registrar.declared) {
+        t.Fatalf("expected the three tick dedup codes declared, got %v", registrar.declared)
+    }
+
+    /* an application registering the runner without the module declares the same codes through its own BootWarningModule */
+    alone := &spyBootWarningRegistrar{}
+    DeclareRunnerBootWarnings(alone)
+    if false == slices.Equal(expected, alone.declared) {
+        t.Fatalf("expected the runner's codes declared without the module, got %v", alone.declared)
     }
 
     for _, config := range registrar.configs {

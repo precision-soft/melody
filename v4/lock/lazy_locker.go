@@ -17,7 +17,7 @@ type lazyLocker struct {
     locker *container.LazyService[lockcontract.Locker]
 }
 
-/* NewLazyLocker returns a Locker that resolves the registered service.lock.locker on first use, under the runtime handed to the lock's first Acquire, Release or Refresh, whose context bounds the wait on a locker another goroutine is building and whose kind the locker's provider reads; a successful resolution is reused for every later lock. CreateLock resolves nothing and answers no error: a resolution failure is reported by the lock method that met it, so LeaderGate and RunExclusive see a store outage as the acquire error they already handle, and the resolution is retried on the next method call. */
+/* NewLazyLocker returns a Locker that resolves the registered service.lock.locker on first use, under the runtime handed to the lock's first Acquire, Release or Refresh, or to the first LeasesAcrossReplicas or ResolvedLocker that asks it, whose context bounds the wait on a locker another goroutine is building and whose kind the locker's provider reads; a successful resolution is reused for every later lock. CreateLock resolves nothing and answers no error: a resolution failure is reported by the lock method that met it, so LeaderGate and RunExclusive see a store outage as the acquire error they already handle, and the resolution is retried on the next method call. */
 func NewLazyLocker(resolver containercontract.Resolver) lockcontract.Locker {
     return &lazyLocker{
         locker: container.Lazy[lockcontract.Locker](resolver, ServiceLocker),
@@ -41,6 +41,15 @@ func (instance *lazyLocker) LeasesAcrossReplicas(runtimeInstance containercontra
     }
 
     return lockcontract.LeasesAcrossReplicas(runtimeInstance, locker)
+}
+
+/* ResolvedLocker answers the locker a lazy locker resolves to under the runtime handed, the resolution every later lock reuses, and any other locker itself, so a diagnostic names the backend behind the wrapper. */
+func ResolvedLocker(runtimeInstance containercontract.Runtime, locker lockcontract.Locker) (lockcontract.Locker, error) {
+    if lazy, isLazy := locker.(*lazyLocker); true == isLazy && nil != lazy {
+        return lazy.resolveLocker(runtimeInstance)
+    }
+
+    return locker, nil
 }
 
 func (instance *lazyLocker) resolveLocker(runtimeInstance containercontract.Runtime) (lockcontract.Locker, error) {
