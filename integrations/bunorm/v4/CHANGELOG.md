@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- `encrypt/encrypt_database_command.go`: `EncryptDatabaseModeFlagName` (`mode`) and its values `EncryptDatabaseModeEncrypt`, `EncryptDatabaseModeReencrypt` and `EncryptDatabaseModeDecrypt`, the bulk command's mode flag exported so a deployment names it, and the decrypt mode that rewrites the columns as plaintext, as constants.
 - `split.go`: `SplitterConfig.PrimaryFallbackDisabled` refuses the read of an unreachable replica with its failure, naming the field, instead of opening the primary; the replica is still remembered for `ReplicaRetryInterval`, and the journal's warning says the reads are refused.
 - This major includes every change of the third major up to v3.6.0; that history is in the third major's changelog, and the third-major fixes released after it are listed below as carried.
 - `audit/storage.go`: **Breaking**: `NewFileStorage(path, FileStorageConfig)`; `FileStorageConfig.FileMode` is the mode the audit file is created with, `DefaultFileStorageFileMode` (`0640`) when left out, as before; a mode with a bit outside `0777` or without the owner's read and write panics naming the field and the value in octal.

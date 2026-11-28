@@ -6,8 +6,9 @@
 # The tool under .dev/validate/typecheck/defaults reads every v4-line module, the framework and every
 # integrations/**/v4, through go/packages and go/types, and enumerates what no reader can be trusted to keep
 # whole by hand: every bound.Rule and bound.BackoffRule literal, every boot-warning code, every fs.FileMode
-# constant and constant mode handed to the os file calls, every declared env key, and every door field of a
-# configuration struct. It then reads the document and refuses:
+# constant and constant mode handed to the os file calls, every declared env key, and every door candidate of a
+# configuration struct: every bool, every field typed by an enumeration of the line's own, every *Disabled field
+# and every bound limit. It then reads the document and refuses:
 #
 #   - an enumerated default with no row, and a row whose key the code no longer declares;
 #   - a row without its door, a `none` door without a reason, a limit refusing unlimited without a reason or
@@ -15,7 +16,10 @@
 #   - an anchor, a key or a door, that names no declaration, and an env: door naming no declared key;
 #   - an env: door on a protection row whose reason does not say the key hardens it: a protection is turned
 #     off in Go only;
-#   - a door field no row names;
+#   - a door candidate no row names and no line of .dev/validate/defaults.not-doors writes off with its reason,
+#     and a not-doors line naming no candidate or a field a row names;
+#   - a protects-against cell still a draft, a limit whose default cell states no figure, and a value: door
+#     naming a function that takes nothing, which answers a value and sets none;
 #   - a repeated key and a malformed row.
 #
 # Every failure is printed `kind ~ key ~ message`; a line of .dev/validate/defaults.baseline with the same
@@ -55,6 +59,9 @@ ensure_service_running "${SERVICE_NAME_STRING}"
 
 if [[ ! -f "${REPOSITORY_ROOT_DIRECTORY_STRING}/v4/.documentation/DEFAULTS.md" ]]; then
     fail "the inventory v4/.documentation/DEFAULTS.md does not exist — the band checks the code against it"
+fi
+if [[ ! -f "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/defaults.not-doors" ]]; then
+    fail "the not-doors file .dev/validate/defaults.not-doors does not exist — it writes off, with a reason, each door candidate that turns nothing off"
 fi
 if [[ ! -f "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/defaults.baseline" ]]; then
     fail "the baseline .dev/validate/defaults.baseline does not exist — an empty file is the baseline of a tree with nothing held"

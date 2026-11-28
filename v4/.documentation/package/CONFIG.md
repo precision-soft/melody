@@ -71,6 +71,7 @@ Keys and parameters are two tables. A key is not a parameter: `Get("MELODY_HTTP_
 | `MELODY_HTTP_SESSION_MAX_SESSIONS`        | `kernel.http.session_max_sessions`        | `100000`                                           |
 | `MELODY_HTTP_SHUTDOWN_TIMEOUT`            | `kernel.http.shutdown_timeout`            | `""` (the application's, then `5s`)                |
 | `MELODY_TEARDOWN_TIMEOUT`                 | `kernel.teardown_timeout`                 | `""` (the application's, then `10s`)               |
+| `MELODY_SCOPE_TEARDOWN_TIMEOUT`           | `kernel.scope_teardown_timeout`           | `""` (the application's, then `3s`)                |
 | `MELODY_CONTAINER_CREATION_WAITERS`       | `kernel.container_creation_waiters`       | `""` (the application's, then `1024`)              |
 | `MELODY_CONTAINER_TEARDOWN_SEQUENTIAL`    | `kernel.container_teardown_sequential`    | `""` (the application's, then `false`)             |
 | `MELODY_HTTP_PUBLIC_URL`                  | `kernel.http.public_url`                  | `""` (the application's, then none)                |

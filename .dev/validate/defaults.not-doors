@@ -1,0 +1,44 @@
+# The fields of a configuration .dev/validate/defaults.sh reads as door candidates that turn nothing off.
+#
+#   <package path>.<Type>.<Field> ~ reason
+#
+# Read by .dev/validate/defaults.sh. Every exported bool, every field typed by an enumeration of the line's own,
+# every *Disabled field and every bound limit of a configuration struct is a door candidate: a row names it, or
+# a line here says why it loosens nothing. A line naming no candidate, or a field a row names, fails the band.
+
+integrations/aws/s3/v4.BucketCheckConfig.BootFailure ~ hardens only: the zero value warns, the other mode fails the boot
+integrations/aws/s3/v4.BucketCheckConfig.Enabled ~ turns an extra boot check on; off checks nothing the default checked
+integrations/bunorm/v4.ProviderDefinition.IsDefault ~ selects the default connection among the registered ones
+integrations/bunorm/v4/audit.EntityOptions.CaptureDeleteBeforeImage ~ widens the trail: the delete is recorded either way, on it carries the row's values too
+integrations/bunorm/v4/audit.RecorderConfig.OwnsStorage ~ ownership of a close: who closes the storage, nothing guarded
+integrations/cron/v4.EntryConfig.LogFileNameRaw ~ the spelling of a derived log file name; the name is confined to the logs directory either way
+integrations/cron/v4.RunnerConfig.Dialect ~ selects which scheduler's day-field grammar the schedule follows; neither runs more than it reads
+integrations/outbox/v4.ModuleConfig.StoreBootFailure ~ hardens only: the zero value warns, the other mode fails the boot
+integrations/outbox/v4.ModuleConfig.StoreBuiltAtBoot ~ moves the build into Boot; off builds at first use, nothing guarded
+integrations/rueidis/v4.ClientConfig.ClientSideCacheEnabled ~ a performance feature of the client library; off caches nothing
+integrations/rueidis/v4.ModuleConfig.ConnectionBootFailure ~ hardens only: the zero value warns, the other mode fails the boot
+integrations/rueidis/v4.ModuleConfig.ConnectionBuiltAtBoot ~ moves the dial into Boot; off dials at first use, nothing guarded
+integrations/websocket/v4.StreamHandlerConfig.BinaryWrites ~ the frame type of a write, text or binary
+v4/application.ApplicationConfig.ContainerTeardownSequential ~ the order of the teardown, waves or one by one; every service is closed either way
+v4/cache.ManagerConfig.OwnsBackend ~ ownership of a close: who closes the backend, nothing guarded
+v4/cache/contract.CounterOptions.RefreshTtl ~ the expiry policy of a counter the caller asks for, fixed or sliding
+v4/container.ContainerConfig.TeardownSequential ~ the order of the teardown, waves or one by one; every service is closed either way
+v4/container/contract.OverrideOptions.ClosedWithScope ~ ownership of a close: the scope closes the installed value, the root refuses it
+v4/container/contract.RegisterOptions.BootFailure ~ hardens only: the zero value warns, the other mode fails the boot
+v4/container/contract.RegisterOptions.BuiltAtBoot ~ moves the build into Boot; off builds at first use, nothing guarded
+v4/exception.FromErrorConfig.Level ~ the journal level of a record
+v4/http/middleware/pipeline.HttpMiddlewareDefinition.ReplaceExisting ~ replaces a definition the same deployment declared, refused beside AllowDuplicates; no framework middleware is removed by it
+v4/http/static.Config.Mode ~ selects the file system, a directory or an embedded tree; both are confined the same way
+v4/http/static.Config.WeakEtag ~ the form of the validator, weak or strong
+v4/internal/plaintext.Options.LabelKeys ~ the spelling of the keys of a rendered body
+v4/logging.JsonLoggerConfig.MinLevel ~ the lowest level written; redaction applies at every level
+v4/mailer.SmtpConfig.ImplicitTls ~ selects TLS from the first byte in place of STARTTLS; neither form is plaintext, AllowPlaintext is the door
+v4/mailer.SmtpConfig.RequireAuthentication ~ hardens only: on refuses a send without a username, off is the default
+v4/messagebus/contract.NackConfig.Requeue ~ the outcome of one negative acknowledgement, chosen per call
+v4/security.CompiledFirewallConfig.AccessControlSource ~ the diagnostic of where a compiled firewall's access control came from
+v4/security.CompiledFirewallConfig.AccessDecisionManagerSource ~ the diagnostic of where a compiled firewall's decision manager came from
+v4/security.CompiledFirewallConfig.AccessDeniedHandlerSource ~ the diagnostic of where a compiled firewall's denied handler came from
+v4/security.CompiledFirewallConfig.EntryPointSource ~ the diagnostic of where a compiled firewall's entry point came from
+v4/security.CompiledFirewallConfig.RoleHierarchySource ~ the diagnostic of where a compiled firewall's role hierarchy came from
+v4/security/config.FirewallOverride.MergeStrategy ~ orders the access rules the deployment writes itself, global and local; every rule it keeps is the deployment's own
+v4/session.ManagerConfig.OwnsStorage ~ ownership of a close: who closes the storage, nothing guarded

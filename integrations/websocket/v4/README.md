@@ -56,7 +56,7 @@ app.RegisterModule(melodywebsocket.NewModule(melodywebsocket.ModuleConfig{
                 return runtime.FromRuntime[*melodyhttp.ServerSentEventHub](runtimeInstance, serviceServerSentEventHub)
             },
             Path:    "/ws",
-            Handler: melodywebsocket.StreamHandlerConfig{IdleTimeout: bound.Of(15 * time.Second), OriginPatterns: []string{"*"}},
+            Handler: melodywebsocket.StreamHandlerConfig{IdleTimeout: bound.Of(15 * time.Second), OriginPatterns: []string{"app.example.com"}},
         },
     },
 }))
@@ -67,7 +67,7 @@ app.RegisterModule(melodywebsocket.NewModule(melodywebsocket.ModuleConfig{
 - The hub is shared with Server-Sent Events: a single `hub.Broadcast(runtimeInstance, topic, event)` reaches both Server-Sent Events and WebSocket subscribers of that topic.
 - Only the event `Data` is written to the socket — the `Event`/`Id`/`Retry` fields of a `ServerSentEvent` are not. Encode structured payloads (for example JSON) into `Data` before broadcasting.
 - Outbound frames are **text** by default; set `StreamHandlerConfig.BinaryWrites = true` to write `websocket.MessageBinary` instead ([`writeMessageType`](./handler.go)). It is an all-or-nothing switch for the whole connection — pick binary when `Data` carries a non-UTF-8 payload (Protobuf, MessagePack, raw bytes), since a text frame's payload must be valid UTF-8. It does not affect `OnMessage`, whose `InboundMessage.Binary` reports whatever the client sent, nor `Send`, whose `OutboundMessage.Binary` chooses the frame type of each reply.
-- `OriginPatterns` is passed to `websocket.Accept`; set it for browser clients on other origins.
+- `OriginPatterns` is passed to `websocket.Accept`: left empty, only a page of the same origin may open the socket; a pattern admits the hosts it matches, and `*` admits every origin, so any page a visitor opens can ride the visitor's session cookie into the socket.
 - `StreamHandlerConfig.ReadLimit` caps a single inbound message's byte size: left out it is 32 KiB, written on every connection, and `bound.UnlimitedCount()` disables the limit entirely; raise it only if you expect larger frames.
 - `TopicResolver` returning an empty topic **refuses the connection** before the upgrade: an empty topic is only ever an extraction that failed (the nil-resolver default is the distinct `"default"`), and subscribing such connections would pool every mis-resolved client on one shared topic.
 - A connection against a hub that has already **shut down** is refused before the upgrade — the handler reads `ServerSentEventHub.IsClosed`. `Subscribe` on a shut-down hub hands back a subscriber whose channel is already closed, so upgrading would give the client a `101` and an instant, unexplained close; the refusal is recorded instead. Connect once the hub is running.

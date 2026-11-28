@@ -121,7 +121,7 @@ func (instance *Migrator) judgeSpecificationAgainstTheSchema(ctx context.Context
         return specification, keyErr
     }
 
-    if migrateModeDecrypt == mode {
+    if EncryptDatabaseModeDecrypt == mode {
         if modeErr := instance.judgeTheDecryptSession(ctx, resolved); nil != modeErr {
             return specification, modeErr
         }

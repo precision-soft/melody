@@ -24,16 +24,17 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
+/* PruneFlagName and LogsDirectoryFlagName are the generator's flags a deployment names in its scripts: the opt-in emptying of stale destinations, and the directory every entry's log is confined to */
 const (
     flagNameOutput               = "out"
-    flagNameLogsDirectory        = "logs-directory"
+    LogsDirectoryFlagName        = "logs-directory"
     flagNameBinary               = "binary"
     flagNameDefaultUser          = "user"
     flagNameHeartbeatPath        = "heartbeat-path"
     flagNameHeartbeatCommand     = "heartbeat-command"
     flagNameHeartbeatDestination = "heartbeat-destination"
     flagNameTemplate             = "template"
-    flagNamePrune                = "prune"
+    PruneFlagName                = "prune"
     flagNameImage                = "image"
     flagNameNamespace            = "namespace"
     flagNameRestartPolicy        = "restart-policy"
@@ -128,7 +129,7 @@ func (instance *GenerateCommand) ownFlags() []clicontract.Flag {
             Usage: "path where the crontab will be written; overrides the melody.cron.destination_file parameter",
         },
         &clicontract.StringFlag{
-            Name:  flagNameLogsDirectory,
+            Name:  LogsDirectoryFlagName,
             Usage: "directory used in the log redirection of generated entries; overrides the melody.cron.logs_directory parameter",
         },
         &clicontract.StringFlag{
@@ -156,7 +157,7 @@ func (instance *GenerateCommand) ownFlags() []clicontract.Flag {
             Usage: "name of the registered template that will render the entries; overrides the melody.cron.template parameter (default: crontab). Built-in templates: crontab, crontab-no-user, k8s",
         },
         &clicontract.BoolFlag{
-            Name:  flagNamePrune,
+            Name:  PruneFlagName,
             Usage: "empty the destinations in dir(--out) that this generator wrote earlier for this application and this run no longer produces, so an entry retired or moved between versions stops running. Only files carrying the current template's ownership line for this application are touched — a file another application wrote, or one written before the line named the application, is left alone — and destinations outside dir(--out) are never swept",
         },
         &clicontract.StringFlag{
@@ -342,7 +343,7 @@ func (instance *GenerateCommand) resolveRunOptions(
     }
     options.outputPath = absoluteOutputPath
 
-    logsDirectory := resolveDefaultPath(commandContext, configuration, flagNameLogsDirectory, ParameterLogsDirectory)
+    logsDirectory := resolveDefaultPath(commandContext, configuration, LogsDirectoryFlagName, ParameterLogsDirectory)
     if "" != logsDirectory {
         absoluteLogsDirectory, logsDirectoryAbsErr := filepath.Abs(logsDirectory)
         if nil != logsDirectoryAbsErr {
@@ -388,7 +389,7 @@ func (instance *GenerateCommand) resolveRunOptions(
     options.heartbeatCommand = commandContext.StringSlice(flagNameHeartbeatCommand)
     options.heartbeatRequested = commandContext.StringSlice(flagNameHeartbeatDestination)
     options.heartbeatEnabled = 0 < len(options.heartbeatCommand) || "" != options.heartbeatPath
-    options.prune = commandContext.Bool(flagNamePrune)
+    options.prune = commandContext.Bool(PruneFlagName)
 
     options.image = resolveDefault(commandContext, configuration, flagNameImage, ParameterImage)
     options.namespace = resolveDefault(commandContext, configuration, flagNameNamespace, ParameterNamespace)
@@ -582,7 +583,7 @@ func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]s
     if "" == options.applicationName {
         return nil, exception.NewError(
             "cron: --prune needs the name the application runs under to tell its own destinations from another application's, and the cli configuration carries none",
-            exceptioncontract.Context{"flag": flagNamePrune},
+            exceptioncontract.Context{"flag": PruneFlagName},
             nil,
         )
     }
@@ -596,7 +597,7 @@ func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]s
     if false == strings.HasSuffix(marker, " for "+options.applicationName) {
         return nil, exception.NewError(
             "cron: --prune sweeps only on an ownership line that names this application, and the template's line does not; give the dialect a line ending in \" for \" and the application's cli name, or generate without --prune",
-            exceptioncontract.Context{"flag": flagNamePrune, "ownershipMarker": marker, "application": options.applicationName},
+            exceptioncontract.Context{"flag": PruneFlagName, "ownershipMarker": marker, "application": options.applicationName},
             nil,
         )
     }
@@ -1222,7 +1223,7 @@ func entryLogPath(
             "cron: command wants log redirection but no logs directory is configured; set --logs-directory, set the MELODY_CRON_LOGS_DIRECTORY key, or set EntryConfig.LogDisabled=true",
             exceptioncontract.Context{
                 "command":   commandName,
-                "flag":      flagNameLogsDirectory,
+                "flag":      LogsDirectoryFlagName,
                 "parameter": ParameterLogsDirectory,
             },
             ErrNoLogsDirectory,

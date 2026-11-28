@@ -7,3 +7,4 @@
 # as the open rows are repaired; a line left at the freeze is a decision the owner took, with its reason.
 
 row ~ integrations/cron/v4.TickDedupConfig ~ Q-2 / G3R-3: the dedup over a locker without a lease is an open decision of the owner
+row ~ v4/http.requestSession.load ~ owner decision pending: Q-G5G-8 (MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE turns the fail-closed outage answer off from the environment)

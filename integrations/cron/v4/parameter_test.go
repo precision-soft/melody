@@ -89,8 +89,8 @@ func TestEnvironmentKeys_DeclaresTheTenKeysAndTheirParameters(t *testing.T) {
 }
 
 func TestEnvironmentKeys_TheLogsDirectoryIsSpelledOut(t *testing.T) {
-    if "MELODY_CRON_LOGS_DIRECTORY" != KeyLogsDirectory || "melody.cron.logs_directory" != ParameterLogsDirectory || "logs-directory" != flagNameLogsDirectory {
-        t.Fatalf("expected the spelled-out key, parameter and flag, got %q, %q, %q", KeyLogsDirectory, ParameterLogsDirectory, flagNameLogsDirectory)
+    if "MELODY_CRON_LOGS_DIRECTORY" != KeyLogsDirectory || "melody.cron.logs_directory" != ParameterLogsDirectory || "logs-directory" != LogsDirectoryFlagName {
+        t.Fatalf("expected the spelled-out key, parameter and flag, got %q, %q, %q", KeyLogsDirectory, ParameterLogsDirectory, LogsDirectoryFlagName)
     }
 
     for _, key := range environmentKeys(KeyDefaults{}) {

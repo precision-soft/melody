@@ -56,15 +56,32 @@ const BootWarningNameSample = "sample.warning"
 
 import (
     "os"
+    "time"
 
     "github.com/precision-soft/melody/v4/bound"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
 )
 
+type SampleMode string
+
+type SampleLabel string
+
+const SampleModeOpen SampleMode = "open"
+
 type SampleConfig struct {
-    Size     bound.Count
-    Disabled bool
-    Name     string
+    Size            bound.Count
+    Disabled        bool
+    Name            string
+    Trusted         bool
+    Verbose         bool
+    Mode            SampleMode
+    HeadersDisabled []string
+    Label           SampleLabel
+    Wait            time.Duration
+}
+
+func SizeOf() int {
+    return 8
 }
 
 type SampleResult struct {
@@ -132,10 +149,31 @@ var cleanRowList = []string{
     "| `sample.warning` | warning | a silent misconfiguration | written | `env:MELODY_SAMPLE_SIZE` | — | — |",
     "| `sample.moduleWarning` | warning | a silent misconfiguration | written | none | written always | — |",
     "| `v4/sample.SampleConfig.Disabled` | protection | the sample | on | `off:v4/sample.SampleConfig.Disabled` | — | — |",
+    "| `v4/sample.SampleConfig.Trusted` | protection | a forged header | not trusted | `off:v4/sample.SampleConfig.Trusted`, `value:v4/sample.SampleConfig.Mode`, `off:v4/sample.SampleConfig.HeadersDisabled` | — | — |",
+}
+
+/* cleanNotDoorList writes off the one candidate field that turns nothing off */
+var cleanNotDoorList = []string{
+    "v4/sample.SampleConfig.Verbose ~ prints more, loosens nothing",
 }
 
 func runCheck(t *testing.T, rootDirectory string, rowList []string) []failure {
     t.Helper()
+
+    return runCheckWithNotDoors(t, rootDirectory, rowList, cleanNotDoorList)
+}
+
+func runCheckWithNotDoors(t *testing.T, rootDirectory string, rowList []string, notDoorTextList []string) []failure {
+    t.Helper()
+
+    notDoorPath := filepath.Join(rootDirectory, "defaults.not-doors")
+    if writeErr := os.WriteFile(notDoorPath, []byte("# head\n"+strings.Join(notDoorTextList, "\n")+"\n"), 0o644); nil != writeErr {
+        t.Fatalf("write the not-doors file: %v", writeErr)
+    }
+    notDoorList, notDoorErr := readNotDoors(notDoorPath)
+    if nil != notDoorErr {
+        t.Fatalf("read the not-doors file: %v", notDoorErr)
+    }
 
     documentPath := filepath.Join(rootDirectory, "DEFAULTS.md")
     if writeErr := os.WriteFile(documentPath, []byte("# Defaults\n\n"+tableHead+strings.Join(rowList, "\n")+"\n"), 0o644); nil != writeErr {
@@ -152,7 +190,7 @@ func runCheck(t *testing.T, rootDirectory string, rowList []string) []failure {
         t.Fatalf("read: %v", readErr)
     }
 
-    return append(parseFailureList, check(measured, rowListRead)...)
+    return append(parseFailureList, check(measured, rowListRead, notDoorList)...)
 }
 
 func replaceRow(rowList []string, prefix string, replacement string) []string {
@@ -283,7 +321,7 @@ func TestCheck_ARepeatedKeyAndAMalformedRowFail(t *testing.T) {
 
     malformed := append(append([]string{}, cleanRowList...), "| `v4/sample.Read` | refusal | short |")
     failureList := runCheck(t, rootDirectory, malformed)
-    expectFailure(t, failureList, kindRow, "line 15", "the table has 7")
+    expectFailure(t, failureList, kindRow, "line 16", "the table has 7")
 
     unknownKind := append(append([]string{}, cleanRowList...), "| `v4/sample.Read` | guess | — | — | none | by design | — |")
     expectFailure(t, runCheck(t, rootDirectory, unknownKind), kindRow, "v4/sample.Read", "is none of")
@@ -324,8 +362,13 @@ func TestMeasure_ReadsWhatTheBandEnumerates(t *testing.T) {
         t.Fatalf("a constant whose name does not end in Key is no env key")
     }
 
-    if fieldList := sortedKeyList(measured.doorFieldMap); 2 != len(fieldList) || "v4/sample.SampleConfig.Disabled" != fieldList[0] || "v4/sample.SampleConfig.Size" != fieldList[1] {
-        t.Fatalf("expected the two door fields of the configuration, not the result's, got %v", fieldList)
+    expectedFieldList := []string{"v4/sample.SampleConfig.Disabled", "v4/sample.SampleConfig.HeadersDisabled", "v4/sample.SampleConfig.Mode", "v4/sample.SampleConfig.Size", "v4/sample.SampleConfig.Trusted", "v4/sample.SampleConfig.Verbose"}
+    if fieldList := sortedKeyList(measured.doorFieldMap); strings.Join(expectedFieldList, ",") != strings.Join(fieldList, ",") {
+        t.Fatalf("expected every bool, the enumerated mode, the *Disabled list and the limit of the configuration, not the result's, the name, the label nor the standard library's duration, got %v", fieldList)
+    }
+
+    if _, isDoor := measured.doorFieldMap["v4/sample.SampleConfig.Label"]; true == isDoor {
+        t.Fatalf("a named string type with no constant is no enumeration")
     }
 }
 
@@ -358,4 +401,85 @@ func TestReadBaseline_RefusesALineWithoutItsReason(t *testing.T) {
     if _, readErr := readBaseline(baselinePath); nil == readErr || false == strings.Contains(readErr.Error(), ":4:") {
         t.Fatalf("expected line 4 refused, got %v", readErr)
     }
+}
+
+func TestCheck_EveryBoolEnumerationAndDisabledFieldIsADoorUnlessWrittenOff(t *testing.T) {
+    rootDirectory := writeFixtureRepository(t)
+
+    withoutRow := replaceRow(cleanRowList, "| `v4/sample.SampleConfig.Trusted`", "")
+    failureList := runCheck(t, rootDirectory, withoutRow)
+    expectFailure(t, failureList, kindDoor, "v4/sample.SampleConfig.Trusted", "no not-doors line")
+    expectFailure(t, failureList, kindDoor, "v4/sample.SampleConfig.Mode", "no not-doors line")
+    expectFailure(t, failureList, kindDoor, "v4/sample.SampleConfig.HeadersDisabled", "no not-doors line")
+
+    expectFailure(t, runCheckWithNotDoors(t, rootDirectory, cleanRowList, nil), kindDoor, "v4/sample.SampleConfig.Verbose", "no not-doors line")
+}
+
+func TestCheck_ANotDoorLineMustNameAnUncitedCandidate(t *testing.T) {
+    rootDirectory := writeFixtureRepository(t)
+
+    stale := append(append([]string{}, cleanNotDoorList...), "v4/sample.SampleConfig.Name ~ a name")
+    expectFailure(t, runCheckWithNotDoors(t, rootDirectory, cleanRowList, stale), kindDoor, "v4/sample.SampleConfig.Name", "names no field")
+
+    contradicted := append(append([]string{}, cleanNotDoorList...), "v4/sample.SampleConfig.Trusted ~ loosens nothing")
+    expectFailure(t, runCheckWithNotDoors(t, rootDirectory, cleanRowList, contradicted), kindDoor, "v4/sample.SampleConfig.Trusted", "one of the two is wrong")
+}
+
+func TestReadNotDoors_RefusesALineWithoutItsReasonAndARepeat(t *testing.T) {
+    notDoorPath := filepath.Join(t.TempDir(), "defaults.not-doors")
+
+    if writeErr := os.WriteFile(notDoorPath, []byte("# head\nv4/sample.A ~ prints\nv4/sample.B ~ \n"), 0o644); nil != writeErr {
+        t.Fatalf("write: %v", writeErr)
+    }
+    if _, readErr := readNotDoors(notDoorPath); nil == readErr || false == strings.Contains(readErr.Error(), ":3:") {
+        t.Fatalf("expected line 3 refused, got %v", readErr)
+    }
+
+    if writeErr := os.WriteFile(notDoorPath, []byte("v4/sample.A ~ prints\nv4/sample.A ~ prints again\n"), 0o644); nil != writeErr {
+        t.Fatalf("write: %v", writeErr)
+    }
+    if _, readErr := readNotDoors(notDoorPath); nil == readErr || false == strings.Contains(readErr.Error(), "repeats line 1") {
+        t.Fatalf("expected the repeat refused, got %v", readErr)
+    }
+}
+
+func TestCheck_ADraftProtectsAgainstCellFails(t *testing.T) {
+    rootDirectory := writeFixtureRepository(t)
+
+    drafted := replaceRow(cleanRowList, "| `v4/sample.SampleConfig.Disabled`", "| `v4/sample.SampleConfig.Disabled` | protection | the door: turns it off | on | `off:v4/sample.SampleConfig.Disabled` | — | — |")
+    expectFailure(t, runCheck(t, rootDirectory, drafted), kindRow, "v4/sample.SampleConfig.Disabled", "is a draft")
+
+    named := replaceRow(cleanRowList, "| `v4/sample.SampleConfig.Disabled`", "| `v4/sample.SampleConfig.Disabled` | protection | Disabled | on | `off:v4/sample.SampleConfig.Disabled` | — | — |")
+    expectFailure(t, runCheck(t, rootDirectory, named), kindRow, "v4/sample.SampleConfig.Disabled", "is a draft")
+}
+
+func TestCheck_ALimitWithoutAFigureFails(t *testing.T) {
+    rootDirectory := writeFixtureRepository(t)
+
+    blank := replaceRow(cleanRowList, "| `v4/sample.SampleConfig.Size`", "| `v4/sample.SampleConfig.Size` | limit | memory | defaultSize | `value:v4/sample.SampleConfig.Size` | class T | — |")
+    expectFailure(t, runCheck(t, rootDirectory, blank), kindLimit, "v4/sample.SampleConfig.Size", "states no figure")
+
+    for _, admitted := range []string{"unlimited", "no default: refused when absent"} {
+        stated := replaceRow(cleanRowList, "| `v4/sample.SampleConfig.Size`", "| `v4/sample.SampleConfig.Size` | limit | memory | "+admitted+" | `value:v4/sample.SampleConfig.Size` | class T | — |")
+        if failureList := runCheck(t, rootDirectory, stated); 0 != len(failureList) {
+            t.Fatalf("expected %q admitted, got %+v", admitted, failureList)
+        }
+    }
+}
+
+func TestCheck_AValueDoorOnAReaderFails(t *testing.T) {
+    rowList := replaceRow(cleanRowList, "| `v4/sample.SampleConfig.Size`", "| `v4/sample.SampleConfig.Size` | limit | memory | 8 | `value:v4/sample.SampleConfig.Size`, `value:v4/sample.SizeOf` | class T | — |")
+    expectFailure(t, runCheck(t, writeFixtureRepository(t), rowList), kindAnchor, "v4/sample.SampleConfig.Size", "sets none")
+}
+
+func TestCheck_AnEnvironmentDoorOnASwitchPasses(t *testing.T) {
+    rootDirectory := writeFixtureRepository(t)
+
+    switched := replaceRow(cleanRowList, "| `v4/sample.SampleConfig.Disabled`", "| `v4/sample.SampleConfig.Disabled` | switch | a feature on | on | `off:v4/sample.SampleConfig.Disabled`, `env:MELODY_SAMPLE_SIZE` | — | — |")
+    if failureList := runCheck(t, rootDirectory, switched); 0 != len(failureList) {
+        t.Fatalf("expected an env door on an operational switch admitted, got %+v", failureList)
+    }
+
+    protected := replaceRow(cleanRowList, "| `v4/sample.SampleConfig.Disabled`", "| `v4/sample.SampleConfig.Disabled` | protection | a feature on | on | `off:v4/sample.SampleConfig.Disabled`, `env:MELODY_SAMPLE_SIZE` | — | — |")
+    expectFailure(t, runCheck(t, rootDirectory, protected), kindRow, "v4/sample.SampleConfig.Disabled", "a protection is turned off in Go only")
 }

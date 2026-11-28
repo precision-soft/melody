@@ -171,7 +171,7 @@ func (instance *Migrator) migrateEncrypt(ctx context.Context, specification Tabl
         return migrateStats{}, bindingsErr
     }
 
-    pinned, resolved, release, judgeErr := instance.judged(ctx, specification, migrateModeEncrypt)
+    pinned, resolved, release, judgeErr := instance.judged(ctx, specification, EncryptDatabaseModeEncrypt)
     if nil != judgeErr {
         return migrateStats{}, judgeErr
     }
@@ -219,7 +219,7 @@ func (instance *Migrator) migrateReencrypt(ctx context.Context, specification Ta
         return migrateStats{}, bindingsErr
     }
 
-    pinned, resolved, release, judgeErr := instance.judged(ctx, specification, migrateModeReencrypt)
+    pinned, resolved, release, judgeErr := instance.judged(ctx, specification, EncryptDatabaseModeReencrypt)
     if nil != judgeErr {
         return migrateStats{}, judgeErr
     }
@@ -274,7 +274,7 @@ func (instance *Migrator) migrateDecrypt(ctx context.Context, specification Tabl
         }
     }
 
-    pinned, resolved, release, judgeErr := instance.judged(ctx, specification, migrateModeDecrypt)
+    pinned, resolved, release, judgeErr := instance.judged(ctx, specification, EncryptDatabaseModeDecrypt)
     if nil != judgeErr {
         return migrateStats{}, judgeErr
     }

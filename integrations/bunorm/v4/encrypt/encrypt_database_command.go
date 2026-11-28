@@ -17,10 +17,12 @@ import (
     "github.com/uptrace/bun"
 )
 
+/* the --mode flag of the bulk command and its three values; decrypt rewrites every processed column as plaintext */
 const (
-    migrateModeEncrypt   = "encrypt"
-    migrateModeReencrypt = "reencrypt"
-    migrateModeDecrypt   = "decrypt"
+    EncryptDatabaseModeFlagName  = "mode"
+    EncryptDatabaseModeEncrypt   = "encrypt"
+    EncryptDatabaseModeReencrypt = "reencrypt"
+    EncryptDatabaseModeDecrypt   = "decrypt"
 )
 
 /* EncryptDatabaseCommandConfig declares what the bulk command runs against beside its cipher: exactly one of Database, a prebuilt handle, and DatabaseResolver, run at the first command run under the run's runtime and memoized on success, a failure returned from the run and retried on the next one, so a registry-backed database is opened once the container is booted; both or neither is refused naming the two fields. CommandName names the command, melody:encrypt:database when left out, so a multi-context binary exposes one per compartment. */
@@ -130,7 +132,7 @@ func (instance *EncryptDatabaseCommand) Flags() []clicontract.Flag {
         &clicontract.StringFlag{Name: "table", Usage: "table to process"},
         &clicontract.StringFlag{Name: "primary-key", Value: "id", Usage: "orderable primary key column used for pagination"},
         &clicontract.StringSliceFlag{Name: "column", Usage: "encrypted column to process (repeatable)"},
-        &clicontract.StringFlag{Name: "mode", Value: migrateModeEncrypt, Usage: "encrypt | reencrypt | decrypt"},
+        &clicontract.StringFlag{Name: EncryptDatabaseModeFlagName, Value: EncryptDatabaseModeEncrypt, Usage: "encrypt | reencrypt | decrypt"},
         &clicontract.StringFlag{Name: "target-key", Usage: "key id to re-encrypt under (mode=reencrypt)"},
         &clicontract.IntFlag{Name: "batch", Value: defaultMigrateBatchSize, Usage: "rows per batch", Config: output.DecimalIntegerConfig},
         &clicontract.BoolFlag{Name: "deterministic", Usage: "seal the columns deterministically (searchable); without it a rotation keeps each stored value's mode, and a run onto the key a bound seal or an unbound column's seal already carries converts it to random"},
@@ -159,7 +161,7 @@ func (instance *EncryptDatabaseCommand) Run(
         )
     }
 
-    mode := commandContext.String("mode")
+    mode := commandContext.String(EncryptDatabaseModeFlagName)
     targetKey := commandContext.String("target-key")
     ctx := runtimeInstance.Context()
 
@@ -173,15 +175,15 @@ func (instance *EncryptDatabaseCommand) Run(
         return exception.NewError("--table, --primary-key and at least one --column are required, none of them empty", map[string]any{"table": specification.Table, "primaryKey": specification.PrimaryKey, "columns": specification.Columns}, nil)
     }
 
-    if migrateModeReencrypt == mode && "" == targetKey {
+    if EncryptDatabaseModeReencrypt == mode && "" == targetKey {
         return exception.NewError("mode reencrypt requires --target-key", nil, nil)
     }
 
-    if migrateModeReencrypt != mode && "" != targetKey {
+    if EncryptDatabaseModeReencrypt != mode && "" != targetKey {
         return exception.NewError("--target-key is read by mode reencrypt alone", map[string]any{"mode": mode}, nil)
     }
 
-    if migrateModeDecrypt == mode && true == specification.Deterministic {
+    if EncryptDatabaseModeDecrypt == mode && true == specification.Deterministic {
         return exception.NewError("--deterministic is not read by mode decrypt", map[string]any{"mode": mode}, nil)
     }
 
@@ -197,11 +199,11 @@ func (instance *EncryptDatabaseCommand) Run(
     var runErr error
 
     switch mode {
-    case migrateModeEncrypt:
+    case EncryptDatabaseModeEncrypt:
         stats, runErr = migrator.migrateEncrypt(ctx, specification)
-    case migrateModeReencrypt:
+    case EncryptDatabaseModeReencrypt:
         stats, runErr = migrator.migrateReencrypt(ctx, specification, targetKey)
-    case migrateModeDecrypt:
+    case EncryptDatabaseModeDecrypt:
         stats, runErr = migrator.migrateDecrypt(ctx, specification)
     default:
         return exception.NewError("unknown mode", map[string]any{"mode": mode}, nil)

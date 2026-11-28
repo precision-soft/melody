@@ -13,6 +13,7 @@ import (
     "regexp"
     "sort"
     "strings"
+    "time"
 
     "golang.org/x/tools/go/packages"
 )
@@ -29,7 +30,7 @@ const (
     kindConstant   = "constant"
     kindMode       = "mode"
     kindWarning    = "warning"
-    kindFolded     = "folded"
+    kindSwitch     = "switch"
 
     /* the failure kinds that are not row kinds */
     kindRow    = "row"
@@ -50,7 +51,7 @@ var rowKindSet = map[string]bool{
     kindConstant:   true,
     kindMode:       true,
     kindWarning:    true,
-    kindFolded:     true,
+    kindSwitch:     true,
 }
 
 /* the kinds an item enumerated from the code carries; a row of another kind is a hand row, kept alive by its anchor */
@@ -66,6 +67,7 @@ var environmentDoorKindSet = map[string]bool{
     kindMode:     true,
     kindWarning:  true,
     kindConstant: true,
+    kindSwitch:   true,
 }
 
 var modeFunctionSet = map[string]int{
@@ -78,7 +80,13 @@ var modeFunctionSet = map[string]int{
 
 var bareClassReferencePattern = regexp.MustCompile(`^class [A-Z]$`)
 
-var doorFieldNamePattern = regexp.MustCompile(`(Disabled|Admitted)$|^Allow`)
+/* a limit's default cell states a figure, unlimited, or that the value has no default */
+var limitDefaultFigurePattern = regexp.MustCompile(`[0-9]|unlimited|no default`)
+
+/* a field so named is a door whatever its type: a list of what a route turns off is as much a door as a bool */
+var doorFieldNamePattern = regexp.MustCompile(`Disabled$`)
+
+const melodyModulePathPrefix = "github.com/precision-soft/melody"
 
 /* a door field is a field of a configuration: a struct named like one; a result such as a decision or a payload carries no door */
 var configurationTypeNamePattern = regexp.MustCompile(`(Config|Configuration|Options|Policy|Override|Definition|Binding|Ring)$`)
@@ -104,6 +112,8 @@ type door struct {
 type row struct {
     key        string
     kind       string
+    protects   string
+    defaultCell string
     doorList   []door
     doorNone   bool
     reason     string
@@ -138,10 +148,18 @@ type inventory struct {
     packageErrorList []string
 }
 
+/* notDoorLine is one field of a configuration the band would read as a door, written off with the reason it turns nothing off */
+type notDoorLine struct {
+    field      string
+    reason     string
+    lineNumber int
+}
+
 func main() {
     rootFlag := flag.String("root", ".", "the repository root the module directories are relative to")
     documentFlag := flag.String("document", "v4/.documentation/DEFAULTS.md", "the inventory document, relative to the root")
     baselineFlag := flag.String("baseline", ".dev/validate/defaults.baseline", "the baseline, relative to the root")
+    notDoorFlag := flag.String("not-doors", ".dev/validate/defaults.not-doors", "the fields that are no door, with their reason, relative to the root")
     draftFlag := flag.Bool("draft", false, "print a draft row for every enumerated item the document has no row for, instead of checking")
     flag.Parse()
 
@@ -163,8 +181,14 @@ func main() {
         os.Exit(2)
     }
 
+    notDoorList, notDoorErr := readNotDoors(filepath.Join(*rootFlag, *notDoorFlag))
+    if nil != notDoorErr {
+        fmt.Fprintf(os.Stderr, "%v\n", notDoorErr)
+        os.Exit(2)
+    }
+
     if true == *draftFlag {
-        printDraft(measured, rowList)
+        printDraft(measured, rowList, notDoorList)
 
         return
     }
@@ -175,7 +199,7 @@ func main() {
         os.Exit(2)
     }
 
-    failureList := append(parseFailureList, check(measured, rowList)...)
+    failureList := append(parseFailureList, check(measured, rowList, notDoorList)...)
     openList, staleList := applyBaseline(failureList, baselineList)
 
     for _, open := range openList {
@@ -400,7 +424,7 @@ func measureRuleLiteral(packagePath string, ownerName string, literal *ast.Compo
         }
         switch fieldIdentifier.Name {
         case "Default", "Minimum", "Maximum", "InitialDefault", "MaxDefault":
-            measuredItem.boundText += fieldIdentifier.Name + "=" + types.ExprString(keyValue.Value) + " "
+            measuredItem.boundText += fieldIdentifier.Name + "=" + types.ExprString(keyValue.Value) + figureOf(value, information.TypeOf(keyValue.Value)) + " "
         case "DefaultUnlimited", "UnlimitedAdmitted":
             measuredItem.boundText += fieldIdentifier.Name + " "
         }
@@ -479,6 +503,21 @@ func measureCall(packagePath string, ownerName string, call *ast.CallExpr, infor
     measured.itemMap[key] = item{kind: kindMode, key: key, position: positionOf(call.Pos()), boundText: function.Name() + " " + types.ExprString(call.Args[modeArgumentIndex])}
 }
 
+/* figureOf renders a constant bound as the figure a row's default cell states, a duration in its own unit; a bound the code computes renders nothing */
+func figureOf(value constant.Value, valueType types.Type) string {
+    if nil == value {
+        return ""
+    }
+
+    if named, isNamed := types.Unalias(valueType).(*types.Named); true == isNamed && nil != named.Obj().Pkg() && "time" == named.Obj().Pkg().Path() && "Duration" == named.Obj().Name() {
+        if nanoseconds, isExact := constant.Int64Val(value); true == isExact {
+            return "(" + time.Duration(nanoseconds).String() + ")"
+        }
+    }
+
+    return "(" + value.ExactString() + ")"
+}
+
 /* isFileMode answers whether a type is fs.FileMode, which os.FileMode aliases */
 func isFileMode(candidate types.Type) bool {
     named, isNamed := types.Unalias(candidate).(*types.Named)
@@ -527,7 +566,7 @@ func measureConstants(packagePath string, loadedPackage *packages.Package, measu
     }
 }
 
-/* measureDoorFields lists every exported field of an exported configuration struct that is a door by its name or its type: a *Disabled, *Admitted or Allow* bool, a bound limit */
+/* measureDoorFields lists every exported field of an exported configuration struct that may be a door: every bool, every mode typed by an enumeration of the line's own, every *Disabled field whatever its type, every bound limit. A field that turns nothing off is written off in the not-doors file with its reason. */
 func measureDoorFields(packagePath string, packageTypes *types.Package, measured *inventory, positionOf func(token.Pos) string, commentMap map[token.Pos]string) {
     scope := packageTypes.Scope()
     for _, objectName := range scope.Names() {
@@ -547,8 +586,11 @@ func measureDoorFields(packagePath string, packageTypes *types.Package, measured
                 continue
             }
 
-            isDoor := isBoundType(field.Type(), "Limit") || isBoundType(field.Type(), "Backoff")
-            if basic, isBasic := field.Type().Underlying().(*types.Basic); true == isBasic && types.Bool == basic.Kind() && true == doorFieldNamePattern.MatchString(field.Name()) {
+            isDoor := isBoundType(field.Type(), "Limit") || isBoundType(field.Type(), "Backoff") || true == doorFieldNamePattern.MatchString(field.Name())
+            if basic, isBasic := field.Type().Underlying().(*types.Basic); true == isBasic && types.Bool == basic.Kind() {
+                isDoor = true
+            }
+            if true == isEnumeration(field.Type()) {
                 isDoor = true
             }
 
@@ -560,11 +602,65 @@ func measureDoorFields(packagePath string, packageTypes *types.Package, measured
     }
 }
 
+/* isEnumeration answers whether a type is a named string or integer type of the line whose package declares constants of it: a mode, whose values are the doors */
+func isEnumeration(candidate types.Type) bool {
+    named, isNamed := types.Unalias(candidate).(*types.Named)
+    if false == isNamed || nil == named.Obj().Pkg() || false == strings.HasPrefix(named.Obj().Pkg().Path(), melodyModulePathPrefix) {
+        return false
+    }
+
+    basic, isBasic := named.Underlying().(*types.Basic)
+    if false == isBasic || 0 == basic.Info()&(types.IsString|types.IsInteger) {
+        return false
+    }
+
+    scope := named.Obj().Pkg().Scope()
+    for _, objectName := range scope.Names() {
+        if constantObject, isConstant := scope.Lookup(objectName).(*types.Const); true == isConstant && true == constantObject.Exported() && true == types.Identical(constantObject.Type(), named) {
+            return true
+        }
+    }
+
+    return false
+}
+
 /* resolveAnchor answers whether `<package path>.<Symbol>[.<Field or Method>…]` names a declaration; the package path is everything before the first dot after its last slash */
 func (instance *inventory) resolveAnchor(anchor string) bool {
     _, isResolved := instance.canonicalAnchor(anchor)
 
     return isResolved
+}
+
+/* isReader answers whether an anchor names a function or a method that takes no argument */
+func (instance *inventory) isReader(anchor string) bool {
+    lastSlash := strings.LastIndex(anchor, "/")
+    firstDot := strings.Index(anchor[lastSlash+1:], ".")
+    if -1 == firstDot {
+        return false
+    }
+
+    packageTypes, isPackage := instance.packageMap[anchor[:lastSlash+1+firstDot]]
+    if false == isPackage {
+        return false
+    }
+
+    segmentList := strings.Split(anchor[lastSlash+1+firstDot+1:], ".")
+    object := packageTypes.Scope().Lookup(segmentList[0])
+    for _, segment := range segmentList[1:] {
+        if nil == object {
+            return false
+        }
+        object, _, _ = types.LookupFieldOrMethod(object.Type(), true, packageTypes, segment)
+    }
+
+    function, isFunction := object.(*types.Func)
+    if false == isFunction {
+        return false
+    }
+
+    signature, isSignature := function.Type().(*types.Signature)
+
+    return true == isSignature && 0 == signature.Params().Len()
 }
 
 /* canonicalAnchor resolves an anchor and answers the declaration it names as `<package path>.<Type>.<Field>` when it ends on a field reached through other types, so a door cited through a nested path counts for the field's own struct */
@@ -654,6 +750,8 @@ func readDocument(documentPath string) ([]row, []failure, error) {
         parsed := row{
             key:        strings.Trim(cellList[0], "`"),
             kind:       cellList[1],
+            protects:   cellList[2],
+            defaultCell: cellList[3],
             reason:     cellList[5],
             lineNumber: lineNumber,
         }
@@ -708,7 +806,7 @@ func backtickSpanList(cell string) []string {
 }
 
 /* check runs the band's checks: every item has its row, every row its columns, every anchor its declaration, every door field its row */
-func check(measured *inventory, rowList []row) []failure {
+func check(measured *inventory, rowList []row, notDoorList []notDoorLine) []failure {
     failureList := []failure{}
     seenLine := map[string]int{}
     citedDoor := map[string]bool{}
@@ -731,9 +829,22 @@ func check(measured *inventory, rowList []row) []failure {
         }
     }
 
+    notDoorSet := map[string]bool{}
+    for _, line := range notDoorList {
+        if _, isField := measured.doorFieldMap[line.field]; false == isField {
+            failureList = append(failureList, failure{kind: kindDoor, key: line.field, message: fmt.Sprintf("not-doors:%d names no field the band reads as a door: delete the line", line.lineNumber)})
+
+            continue
+        }
+        if true == citedDoor[line.field] {
+            failureList = append(failureList, failure{kind: kindDoor, key: line.field, message: fmt.Sprintf("not-doors:%d writes off a field a row names as a door: one of the two is wrong", line.lineNumber)})
+        }
+        notDoorSet[line.field] = true
+    }
+
     for _, field := range sortedKeyList(measured.doorFieldMap) {
-        if false == citedDoor[field] {
-            failureList = append(failureList, failure{kind: kindDoor, key: field, message: fmt.Sprintf("declared at %s, no row names it as a door", measured.doorFieldMap[field])})
+        if false == citedDoor[field] && false == notDoorSet[field] {
+            failureList = append(failureList, failure{kind: kindDoor, key: field, message: fmt.Sprintf("declared at %s, no row names it as a door and no not-doors line says why it is none", measured.doorFieldMap[field])})
         }
     }
 
@@ -747,7 +858,7 @@ func checkRow(measured *inventory, current row, citedDoor map[string]bool) []fai
     }
 
     if false == rowKindSet[current.kind] {
-        fail(kindRow, fmt.Sprintf("the kind %q is none of limit, protection, refusal, redaction, constant, mode, warning, folded", current.kind))
+        fail(kindRow, fmt.Sprintf("the kind %q is none of limit, protection, refusal, redaction, constant, mode, warning, switch", current.kind))
 
         return failureList
     }
@@ -764,6 +875,9 @@ func checkRow(measured *inventory, current row, citedDoor map[string]bool) []fai
     if false == current.doorNone && 0 == len(current.doorList) {
         fail(kindRow, "the door is empty: name an anchor or write none")
     }
+    if true == strings.HasPrefix(current.protects, "the door:") || current.protects == current.key[strings.LastIndex(current.key, ".")+1:] {
+        fail(kindRow, "the protects-against cell is a draft: write what goes wrong without the default")
+    }
     if true == current.doorNone && "" == current.reason {
         fail(kindRow, "the door is none and the reason is empty")
     }
@@ -776,6 +890,8 @@ func checkRow(measured *inventory, current row, citedDoor map[string]bool) []fai
             canonical, isResolved := measured.canonicalAnchor(rowDoor.anchor)
             if false == isResolved {
                 fail(kindAnchor, fmt.Sprintf("the door %s:%s names no declaration", rowDoor.class, rowDoor.anchor))
+            } else if doorValue == rowDoor.class && true == measured.isReader(rowDoor.anchor) {
+                fail(kindAnchor, fmt.Sprintf("the door value:%s is a function that takes nothing: it answers a value and sets none, name what takes it", rowDoor.anchor))
             }
             citedDoor[rowDoor.anchor] = true
             citedDoor[canonical] = true
@@ -793,6 +909,10 @@ func checkRow(measured *inventory, current row, citedDoor map[string]bool) []fai
         default:
             fail(kindRow, fmt.Sprintf("the door %q has no class off:, value:, use: or env:", rowDoor.anchor))
         }
+    }
+
+    if kindLimit == current.kind && false == limitDefaultFigurePattern.MatchString(current.defaultCell) {
+        fail(kindLimit, "the default cell states no figure: write the value that applies when nothing is configured")
     }
 
     if kindLimit == current.kind && true == isItem {
@@ -813,6 +933,42 @@ func checkRow(measured *inventory, current row, citedDoor map[string]bool) []fai
     }
 
     return failureList
+}
+
+/* readNotDoors reads `field ~ reason` lines; a line without its reason, or a field written off twice, is refused */
+func readNotDoors(notDoorPath string) ([]notDoorLine, error) {
+    file, openErr := os.Open(notDoorPath)
+    if nil != openErr {
+        return nil, fmt.Errorf("open the not-doors file %s: %w", notDoorPath, openErr)
+    }
+    defer file.Close()
+
+    lineList := []notDoorLine{}
+    seenLine := map[string]int{}
+    lineNumber := 0
+    scanner := bufio.NewScanner(file)
+    for scanner.Scan() {
+        lineNumber++
+        line := strings.TrimSpace(scanner.Text())
+        if "" == line || true == strings.HasPrefix(line, "#") {
+            continue
+        }
+
+        partList := strings.SplitN(line, "~", 2)
+        if 2 != len(partList) || "" == strings.TrimSpace(partList[0]) || "" == strings.TrimSpace(partList[1]) {
+            return nil, fmt.Errorf("%s:%d: a not-doors line is field ~ reason, the reason written", notDoorPath, lineNumber)
+        }
+
+        field := strings.TrimSpace(partList[0])
+        if firstLine, isSeen := seenLine[field]; true == isSeen {
+            return nil, fmt.Errorf("%s:%d: %s repeats line %d", notDoorPath, lineNumber, field, firstLine)
+        }
+        seenLine[field] = lineNumber
+
+        lineList = append(lineList, notDoorLine{field: field, reason: strings.TrimSpace(partList[1]), lineNumber: lineNumber})
+    }
+
+    return lineList, scanner.Err()
 }
 
 /* readBaseline reads `kind ~ key ~ reason` lines; a line without its reason is refused */
@@ -887,8 +1043,11 @@ func applyBaseline(failureList []failure, baselineList []baselineLine) ([]failur
 }
 
 /* printDraft prints a draft row for every enumerated item and door field the document does not name, grouped by package, for the hand that writes the rows */
-func printDraft(measured *inventory, rowList []row) {
+func printDraft(measured *inventory, rowList []row, notDoorList []notDoorLine) {
     namedSet := map[string]bool{}
+    for _, line := range notDoorList {
+        namedSet[line.field] = true
+    }
     for _, current := range rowList {
         namedSet[current.key] = true
         for _, rowDoor := range current.doorList {
