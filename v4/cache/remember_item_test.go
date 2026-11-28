@@ -27,12 +27,12 @@ type rememberItemRecordingCache struct {
     onRoundTrip func()
 }
 
-func (instance *rememberItemRecordingCache) Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration, _ cachecontract.SetOptions) error {
+func (instance *rememberItemRecordingCache) Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration, options cachecontract.SetOptions) error {
     instance.mutex.Lock()
     instance.setList = append(instance.setList, rememberItemTestSet{key: key, ttl: ttl})
     instance.mutex.Unlock()
 
-    return instance.Manager.Set(runtimeInstance, key, value, ttl, cachecontract.SetOptions{})
+    return instance.Manager.Set(runtimeInstance, key, value, ttl, options)
 }
 
 func (instance *rememberItemRecordingCache) RoundTrip(value any, target any) error {

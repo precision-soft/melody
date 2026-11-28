@@ -26,7 +26,7 @@ func TestNewMeta_ZeroConfigFillsTheVersionsAndNormalisesTheOption(t *testing.T) 
         t.Fatalf("expected empty arguments and no duration, got %v and %d", meta.Arguments, meta.DurationMilliseconds)
     }
 
-    optionVersioned := NewMeta("cmd", MetaConfig{Option: Options{ApplicationVersion: "1.2.3"}, Version: Version{Application: "ignored"}})
+    optionVersioned := NewMeta("cmd", MetaConfig{Options: Options{ApplicationVersion: "1.2.3"}, Version: Version{Application: "ignored"}})
     if "1.2.3" != optionVersioned.Version.Application {
         t.Fatalf("expected the option's application version, got %q", optionVersioned.Version.Application)
     }
@@ -58,14 +58,14 @@ func TestNewMeta_CopiesTheArguments(t *testing.T) {
 
 func TestNewMeta_TheJsonFlagsCarryTheLimitAndTheOffsetAsGiven(t *testing.T) {
     for _, testCase := range []struct {
-        option   Options
+        options   Options
         expected string
     }{
         {Options{}, `"limit":null,"offset":null`},
         {Options{Limit: bound.UnlimitedCount(), Offset: bound.Of(0)}, `"limit":"unlimited","offset":0`},
         {Options{Limit: bound.Of(5), Offset: bound.Of(10)}, `"limit":5,"offset":10`},
     } {
-        encoded, marshalErr := json.Marshal(NewMeta("command", MetaConfig{Option: testCase.option, StartedAt: time.Now()}).Flags)
+        encoded, marshalErr := json.Marshal(NewMeta("command", MetaConfig{Options: testCase.options, StartedAt: time.Now()}).Flags)
         if nil != marshalErr {
             t.Fatalf("unexpected marshal error: %v", marshalErr)
         }

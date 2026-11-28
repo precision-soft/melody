@@ -10,16 +10,16 @@ import (
 /* MetaConfig is what an envelope's meta is built from beside the command; a field left out is empty, and an empty Melody or Go version is the running binary's. */
 type MetaConfig struct {
     Arguments []string
-    Option    Options
+    Options    Options
     StartedAt time.Time
     Duration  time.Duration
     Version   Version
 }
 
 func NewMeta(command string, config MetaConfig) Meta {
-    option := config.Option
+    option := config.Options
     version := config.Version
-    normalized := normalizeOptionChoices(option)
+    normalized := normalizeOptionsChoices(option)
 
     if "" == version.Melody {
         version.Melody = melodyversion.BuildVersion()

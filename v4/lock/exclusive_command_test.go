@@ -284,8 +284,8 @@ func TestNewExclusiveCommand_RefusesAStopRenewalLimitBelowTheRefreshInterval(t *
 func TestNewExclusiveCommand_HandsItsStopRenewalLimitToTheRun(t *testing.T) {
     command := NewExclusiveCommand(&recordingCommand{name: "job"}, NewInMemoryLocker(InMemoryLockerConfig{}), ExclusiveCommandConfig{Ttl: bound.Of(time.Minute), StopRenewalLimit: bound.Of(5 * time.Minute)})
 
-    if bound.Of(5*time.Minute) != command.exclusiveConfig.StopRenewalLimit {
-        t.Fatalf("expected the limit handed to the run, got %v", command.exclusiveConfig.StopRenewalLimit)
+    if bound.Of(5*time.Minute) != command.exclusiveOptions.StopRenewalLimit {
+        t.Fatalf("expected the limit handed to the run, got %v", command.exclusiveOptions.StopRenewalLimit)
     }
 }
 
@@ -305,8 +305,8 @@ func TestNewExclusiveCommand_ALockerAnsweringNoLockIsRefusedAtConstruction(t *te
 
 func TestNewExclusiveCommand_HandsTheProbeIntervalOnAndRefusesItBesideALeaseTtl(t *testing.T) {
     command := NewExclusiveCommand(&recordingCommand{name: "probe:session"}, &sessionStyleLocker{inner: NewInMemoryLocker(InMemoryLockerConfig{})}, ExclusiveCommandConfig{Ttl: bound.UnlimitedDuration(), ProbeInterval: bound.Of(5 * time.Second)})
-    if bound.Of(5*time.Second) != command.exclusiveConfig.ProbeInterval {
-        t.Fatalf("expected the probe interval handed to the run, got %s", command.exclusiveConfig.ProbeInterval)
+    if bound.Of(5*time.Second) != command.exclusiveOptions.ProbeInterval {
+        t.Fatalf("expected the probe interval handed to the run, got %s", command.exclusiveOptions.ProbeInterval)
     }
 
     defer func() {

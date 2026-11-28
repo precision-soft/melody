@@ -457,9 +457,9 @@ func (instance *versionProbeCliCommand) Run(
     runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
-    option := output.ParseOptionFromCommand(commandContext)
+    option := output.ParseOptionsFromCommand(commandContext)
     instance.optionVersion = option.ApplicationVersion
-    instance.metaVersion = output.NewMeta(instance.Name(), output.MetaConfig{Option: option, StartedAt: time.Now()}).Version.Application
+    instance.metaVersion = output.NewMeta(instance.Name(), output.MetaConfig{Options: option, StartedAt: time.Now()}).Version.Application
 
     return nil
 }

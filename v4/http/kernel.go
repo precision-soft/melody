@@ -966,7 +966,7 @@ func renderExceptionSafely(
     request httpcontract.Request,
     err error,
     requestLogger loggingcontract.Logger,
-    renderConfig ExceptionRenderOptions,
+    renderOptions ExceptionRenderOptions,
 ) (rendered httpcontract.Response) {
     defer func() {
         recoveredValue := recover()
@@ -990,7 +990,7 @@ func renderExceptionSafely(
         rendered = JsonErrorResponse(nethttp.StatusInternalServerError, "internal server error")
     }()
 
-    return RenderExceptionResponse(runtimeInstance, request, err, renderConfig)
+    return RenderExceptionResponse(runtimeInstance, request, err, renderOptions)
 }
 
 /* resolved before the request logger is installed over it, so the scope still answers the container's */

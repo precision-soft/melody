@@ -77,7 +77,7 @@ func (instance *MiddlewareCommand) Run(
 ) error {
     startedAt := time.Now()
 
-    option, normalizeOptionErr := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
+    option, normalizeOptionErr := output.NormalizeOptions(output.ParseOptionsFromCommand(commandContext))
     if nil != normalizeOptionErr {
         return normalizeOptionErr
     }
@@ -86,7 +86,7 @@ func (instance *MiddlewareCommand) Run(
         instance.Name(),
         output.MetaConfig{
             Arguments: commandContext.Args().Slice(),
-            Option:    option,
+            Options:    option,
             StartedAt: startedAt,
         },
     )
@@ -124,7 +124,7 @@ type middlewareListItem struct {
 
 /* populateDescription is the default listing: nothing is built and no factory runs. */
 func (instance *MiddlewareCommand) populateDescription(
-    option output.Options,
+    options output.Options,
     envelope *output.Envelope,
 ) {
     descriptions, report, describeErr := instance.descriptionProvider()
@@ -182,10 +182,10 @@ func (instance *MiddlewareCommand) populateDescription(
         }
     }
 
-    output.ApplySortOrder(items, option.Order)
+    output.ApplySortOrder(items, options.Order)
 
     total := len(items)
-    windowed, windowItemsErr := output.WindowItems(items, option.Limit, option.Offset)
+    windowed, windowItemsErr := output.WindowItems(items, options.Limit, options.Offset)
     if nil != windowItemsErr {
         envelope.SetError(
             "debug.optionRefused",
@@ -200,7 +200,7 @@ func (instance *MiddlewareCommand) populateDescription(
 
     items = windowed
 
-    if output.FormatTable == option.Format {
+    if output.FormatTable == options.Format {
         builder := output.NewTableBuilder()
 
         summary := fmt.Sprintf(
@@ -248,15 +248,15 @@ func (instance *MiddlewareCommand) populateDescription(
         items,
         output.ListPayloadConfig{
             Total:  total,
-            Limit:  option.Limit,
-            Offset: option.Offset,
+            Limit:  options.Limit,
+            Offset: options.Offset,
         },
     )
 }
 
 /* populateBuiltChain runs the real build under a recover, so a panicking factory is rendered as a failure. */
 func (instance *MiddlewareCommand) populateBuiltChain(
-    option output.Options,
+    options output.Options,
     envelope *output.Envelope,
 ) {
     middlewares, buildErr := instance.runBuildProviderRecovered()
@@ -294,10 +294,10 @@ func (instance *MiddlewareCommand) populateBuiltChain(
         )
     }
 
-    output.ApplySortOrder(items, option.Order)
+    output.ApplySortOrder(items, options.Order)
 
     total := len(items)
-    windowed, windowItemsErr := output.WindowItems(items, option.Limit, option.Offset)
+    windowed, windowItemsErr := output.WindowItems(items, options.Limit, options.Offset)
     if nil != windowItemsErr {
         envelope.SetError(
             "debug.optionRefused",
@@ -312,7 +312,7 @@ func (instance *MiddlewareCommand) populateBuiltChain(
 
     items = windowed
 
-    if output.FormatTable == option.Format {
+    if output.FormatTable == options.Format {
         builder := output.NewTableBuilder()
 
         summary := fmt.Sprintf(
@@ -351,8 +351,8 @@ func (instance *MiddlewareCommand) populateBuiltChain(
         items,
         output.ListPayloadConfig{
             Total:  total,
-            Limit:  option.Limit,
-            Offset: option.Offset,
+            Limit:  options.Limit,
+            Offset: options.Offset,
         },
     )
 }

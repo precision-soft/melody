@@ -74,7 +74,7 @@ type RunnerCommand struct {
 
 type runReporting struct {
     commandContext *clicontract.CommandContext
-    option         output.Options
+    options         output.Options
     reportIdle     bool
 }
 
@@ -348,7 +348,7 @@ func (instance *RunnerCommand) Run(
     applicationVersion := output.ApplicationVersionOf(commandContext)
     instance.applicationVersion.Store(&applicationVersion)
 
-    option, normalizeOptionErr := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
+    option, normalizeOptionErr := output.NormalizeOptions(output.ParseOptionsFromCommand(commandContext))
     if nil != normalizeOptionErr {
         return normalizeOptionErr
     }
@@ -377,7 +377,7 @@ func (instance *RunnerCommand) Run(
         location,
         &runReporting{
             commandContext: commandContext,
-            option:         option,
+            options:         option,
             reportIdle:     commandContext.Bool(flagNameReportIdle),
         },
     )
@@ -427,7 +427,7 @@ func (instance *RunnerCommand) declareSchedule(runtimeInstance containercontract
 /* renderRunReport writes one evaluated minute as the envelope every melody command writes: meta, data, warnings, error. Under json each minute is one closed document on its own line, a stream a consumer follows at constant memory; under text it is one line. The writer is guarded because two minutes' documents may complete in any order and must not interleave. */
 func (instance *RunnerCommand) renderRunReport(
     commandContext *clicontract.CommandContext,
-    option output.Options,
+    options output.Options,
     startedAt time.Time,
     report dueReport,
     runErr error,
@@ -435,7 +435,7 @@ func (instance *RunnerCommand) renderRunReport(
     instance.writeMutex.Lock()
     defer instance.writeMutex.Unlock()
 
-    if false == output.IsJsonFormat(option.Format) {
+    if false == output.IsJsonFormat(options.Format) {
         _, _ = fmt.Fprintf(
             commandContext.Writer,
             "%s  dispatched %d of %d configured entries%s%s\n",
@@ -449,7 +449,7 @@ func (instance *RunnerCommand) renderRunReport(
         return runErr
     }
 
-    meta := output.NewMeta(instance.Name(), output.MetaConfig{Option: option, StartedAt: startedAt, Duration: time.Since(startedAt)})
+    meta := output.NewMeta(instance.Name(), output.MetaConfig{Options: options, StartedAt: startedAt, Duration: time.Since(startedAt)})
     envelope := output.NewEnvelope(meta)
 
     envelope.Data = report
@@ -476,7 +476,7 @@ func (instance *RunnerCommand) renderRunReport(
         )
     }
 
-    renderErr := output.Render(commandContext.Writer, envelope, option)
+    renderErr := output.Render(commandContext.Writer, envelope, options)
     if nil != runErr {
         return runErr
     }
@@ -572,7 +572,7 @@ func (instance *RunnerCommand) runLoop(runtimeInstance containercontract.Runtime
                     return
                 }
 
-                _ = instance.renderRunReport(reporting.commandContext, reporting.option, minuteStartedAt, report, runErr)
+                _ = instance.renderRunReport(reporting.commandContext, reporting.options, minuteStartedAt, report, runErr)
             }(wait, instance.nowInZone(location))
         }
     }

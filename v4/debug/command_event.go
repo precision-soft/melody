@@ -52,7 +52,7 @@ func (instance *EventCommand) Run(
 ) error {
     startedAt := time.Now()
 
-    option, normalizeOptionErr := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
+    option, normalizeOptionErr := output.NormalizeOptions(output.ParseOptionsFromCommand(commandContext))
     if nil != normalizeOptionErr {
         return normalizeOptionErr
     }
@@ -61,7 +61,7 @@ func (instance *EventCommand) Run(
         instance.Name(),
         output.MetaConfig{
             Arguments: commandContext.Args().Slice(),
-            Option:    option,
+            Options:    option,
             StartedAt: startedAt,
         },
     )

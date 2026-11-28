@@ -7,7 +7,7 @@ import (
 )
 
 func TestNormalizeOption_ImpliesNoColorForTheJsonFormat(t *testing.T) {
-    normalized, normalizeErr := NormalizeOption(
+    normalized, normalizeErr := NormalizeOptions(
         Options{
             Format:  FormatJson,
             NoColor: false,
@@ -23,7 +23,7 @@ func TestNormalizeOption_ImpliesNoColorForTheJsonFormat(t *testing.T) {
 }
 
 func TestNormalizeOption_KeepsColorForTheTableFormat(t *testing.T) {
-    normalized, normalizeErr := NormalizeOption(
+    normalized, normalizeErr := NormalizeOptions(
         Options{
             Format:  FormatTable,
             NoColor: false,
@@ -39,7 +39,7 @@ func TestNormalizeOption_KeepsColorForTheTableFormat(t *testing.T) {
 }
 
 func TestNormalizeOption_DefaultsAnEmptyFormatAndOrder(t *testing.T) {
-    normalized, normalizeErr := NormalizeOption(Options{})
+    normalized, normalizeErr := NormalizeOptions(Options{})
     if nil != normalizeErr {
         t.Fatalf("expected the zero option admitted, got %v", normalizeErr)
     }
@@ -55,7 +55,7 @@ func TestNormalizeOption_DefaultsAnEmptyFormatAndOrder(t *testing.T) {
 func TestNormalizeOption_RefusesACountItsRuleDoesNotAdmit(t *testing.T) {
     cases := []struct {
         name   string
-        option Options
+        options Options
         field  string
     }{
         {"negativeLimit", Options{Limit: bound.Of(-1)}, "Options.Limit"},
@@ -66,7 +66,7 @@ func TestNormalizeOption_RefusesACountItsRuleDoesNotAdmit(t *testing.T) {
 
     for _, testCase := range cases {
         t.Run(testCase.name, func(t *testing.T) {
-            _, normalizeErr := NormalizeOption(testCase.option)
+            _, normalizeErr := NormalizeOptions(testCase.options)
             assertRefusedOptionField(t, normalizeErr, testCase.field)
         })
     }
@@ -80,7 +80,7 @@ func TestNormalizeOption_AdmitsAZeroLimitAndTheUnlimitedCounts(t *testing.T) {
         {TableMaxWidth: bound.Of(1)},
         {TableMaxWidth: bound.UnlimitedCount()},
     } {
-        if _, normalizeErr := NormalizeOption(option); nil != normalizeErr {
+        if _, normalizeErr := NormalizeOptions(option); nil != normalizeErr {
             t.Fatalf("expected %#v admitted, got %v", option, normalizeErr)
         }
     }
@@ -102,7 +102,7 @@ func TestParseOptionFromCommand_ReadsTheStandardFlags(t *testing.T) {
         t.Fatalf("expected the command line to parse, got %v", runErr)
     }
 
-    parsed := ParseOptionFromCommand(parsedCommand)
+    parsed := ParseOptionsFromCommand(parsedCommand)
 
     if FormatJson != parsed.Format {
         t.Fatalf("expected format %q, got %q", FormatJson, parsed.Format)
@@ -139,7 +139,7 @@ func TestParseOptionFromCommand_LeavesAnUnsetCountAbsent(t *testing.T) {
         t.Fatalf("expected the command line to parse, got %v", runErr)
     }
 
-    parsed := ParseOptionFromCommand(parsedCommand)
+    parsed := ParseOptionsFromCommand(parsedCommand)
 
     if false == parsed.Limit.IsAbsent() || false == parsed.Offset.IsAbsent() || false == parsed.TableMaxWidth.IsAbsent() {
         t.Fatalf("expected the counts left out to stay absent, got %#v", parsed)
@@ -152,13 +152,13 @@ func TestParseOptionFromCommand_ReadsAZeroLimitAsAValue(t *testing.T) {
         t.Fatalf("expected the command line to parse, got %v", runErr)
     }
 
-    if bound.Of(0) != ParseOptionFromCommand(parsedCommand).Limit {
+    if bound.Of(0) != ParseOptionsFromCommand(parsedCommand).Limit {
         t.Fatalf("expected --limit=0 to be the value 0")
     }
 }
 
 func TestParseOptionFromCommand_ReturnsTheDefaultsForANilCommand(t *testing.T) {
-    parsed := ParseOptionFromCommand(nil)
+    parsed := ParseOptionsFromCommand(nil)
 
     if (Options{}) != parsed {
         t.Fatalf("expected the zero option, which reads as the default, got %#v", parsed)
@@ -166,7 +166,7 @@ func TestParseOptionFromCommand_ReturnsTheDefaultsForANilCommand(t *testing.T) {
 }
 
 func TestNormalizeOption_ClampsANegativeVerbosityLevel(t *testing.T) {
-    normalized, normalizeErr := NormalizeOption(Options{Format: FormatTable, Order: SortOrderAscending, VerbosityLevel: -5})
+    normalized, normalizeErr := NormalizeOptions(Options{Format: FormatTable, Order: SortOrderAscending, VerbosityLevel: -5})
     if nil != normalizeErr {
         t.Fatalf("expected the option admitted, got %v", normalizeErr)
     }

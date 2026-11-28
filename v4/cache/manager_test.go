@@ -417,8 +417,8 @@ func (instance *cacheTestTypedNilErrorBackend) Get(runtimeInstance containercont
     return payload, exists, instance.typedNilError()
 }
 
-func (instance *cacheTestTypedNilErrorBackend) Set(runtimeInstance containercontract.Runtime, key string, payload []byte, ttl bound.Duration, _ cachecontract.SetOptions) error {
-    _ = instance.inner.Set(runtimeInstance, key, payload, ttl, cachecontract.SetOptions{})
+func (instance *cacheTestTypedNilErrorBackend) Set(runtimeInstance containercontract.Runtime, key string, payload []byte, ttl bound.Duration, options cachecontract.SetOptions) error {
+    _ = instance.inner.Set(runtimeInstance, key, payload, ttl, options)
     return instance.typedNilError()
 }
 

@@ -44,16 +44,16 @@ type UrlGenerator struct {
     publicBase    *url.URL
 }
 
-func (instance *UrlGenerator) GeneratePath(routeName string, pathConfig httpcontract.PathOptions) (string, error) {
-    generatedPath, generateErr := instance.generateRoutePath(routeName, pathConfig.Parameters)
+func (instance *UrlGenerator) GeneratePath(routeName string, pathOptions httpcontract.PathOptions) (string, error) {
+    generatedPath, generateErr := instance.generateRoutePath(routeName, pathOptions.Parameters)
     if nil != generateErr {
         return "", generateErr
     }
 
-    return composeReference(url.URL{}, generatedPath, pathConfig), nil
+    return composeReference(url.URL{}, generatedPath, pathOptions), nil
 }
 
-func (instance *UrlGenerator) GenerateUrl(routeName string, pathConfig httpcontract.PathOptions) (string, error) {
+func (instance *UrlGenerator) GenerateUrl(routeName string, pathOptions httpcontract.PathOptions) (string, error) {
     if nil == instance.publicBase {
         return "", exception.NewError(
             "an absolute url needs the public url",
@@ -62,21 +62,21 @@ func (instance *UrlGenerator) GenerateUrl(routeName string, pathConfig httpcontr
         )
     }
 
-    generatedPath, generateErr := instance.generateRoutePath(routeName, pathConfig.Parameters)
+    generatedPath, generateErr := instance.generateRoutePath(routeName, pathOptions.Parameters)
     if nil != generateErr {
         return "", generateErr
     }
 
-    return composeReference(url.URL{Scheme: instance.publicBase.Scheme, Host: instance.publicBase.Host}, instance.publicBase.EscapedPath()+generatedPath, pathConfig), nil
+    return composeReference(url.URL{Scheme: instance.publicBase.Scheme, Host: instance.publicBase.Host}, instance.publicBase.EscapedPath()+generatedPath, pathOptions), nil
 }
 
 /* composeReference writes the escaped path, the query without its empty key and the fragment through url.URL, so each part is escaped where it stands. */
-func composeReference(reference url.URL, escapedPath string, pathConfig httpcontract.PathOptions) string {
+func composeReference(reference url.URL, escapedPath string, pathOptions httpcontract.PathOptions) string {
     reference.Path, _ = url.PathUnescape(escapedPath)
     reference.RawPath = escapedPath
 
     queryValues := url.Values{}
-    for key, values := range pathConfig.Query {
+    for key, values := range pathOptions.Query {
         if "" == key {
             continue
         }
@@ -87,7 +87,7 @@ func composeReference(reference url.URL, escapedPath string, pathConfig httpcont
     }
 
     reference.RawQuery = queryValues.Encode()
-    reference.Fragment = pathConfig.Fragment
+    reference.Fragment = pathOptions.Fragment
 
     return reference.String()
 }

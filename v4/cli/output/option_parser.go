@@ -7,7 +7,7 @@ import (
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
 )
 
-func ParseOptionFromCommand(commandContext *clicontract.CommandContext) Options {
+func ParseOptionsFromCommand(commandContext *clicontract.CommandContext) Options {
     option := Options{}
 
     if nil == commandContext {
@@ -52,17 +52,17 @@ func countFlag(commandContext *clicontract.CommandContext, flagName string) boun
     return bound.Of(commandContext.Int(flagName))
 }
 
-/* NormalizeOption reads an unknown format as table and an unknown order as ascending, turns colour off for json and a negative verbosity to 0, and refuses a Limit, an Offset or a TableMaxWidth its rule does not admit, naming the field. */
-func NormalizeOption(option Options) (Options, error) {
-    normalized := normalizeOptionChoices(option)
+/* NormalizeOptions reads an unknown format as table and an unknown order as ascending, turns colour off for json and a negative verbosity to 0, and refuses a Limit, an Offset or a TableMaxWidth its rule does not admit, naming the field. */
+func NormalizeOptions(options Options) (Options, error) {
+    normalized := normalizeOptionsChoices(options)
 
     for _, field := range []struct {
         limit bound.Count
         rule  bound.Rule[int]
     }{
-        {limit: normalized.Limit, rule: OptionLimitRule()},
-        {limit: normalized.Offset, rule: OptionOffsetRule()},
-        {limit: normalized.TableMaxWidth, rule: OptionTableMaxWidthRule()},
+        {limit: normalized.Limit, rule: OptionsLimitRule()},
+        {limit: normalized.Offset, rule: OptionsOffsetRule()},
+        {limit: normalized.TableMaxWidth, rule: OptionsTableMaxWidthRule()},
     } {
         if _, resolveErr := bound.Resolve(field.limit, field.rule); nil != resolveErr {
             return Options{}, resolveErr
@@ -72,8 +72,8 @@ func NormalizeOption(option Options) (Options, error) {
     return normalized, nil
 }
 
-func normalizeOptionChoices(option Options) Options {
-    normalized := option
+func normalizeOptionsChoices(options Options) Options {
+    normalized := options
 
     if false == isFormatSupported(normalized.Format) {
         normalized.Format = FormatTable

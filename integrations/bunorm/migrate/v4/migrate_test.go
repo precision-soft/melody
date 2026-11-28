@@ -285,7 +285,7 @@ func TestMigrationPrinter_EscapesTheMigrationNameOnTheEmptyAndSuccessLines(t *te
 
 func TestRunQueries_ReadsTheOptionCarriedByTheContext(t *testing.T) {
     var carried bytes.Buffer
-    ctx := withRunnerOption(context.Background(), RunnerOptions{Writer: &carried, NoColor: true})
+    ctx := withRunnerOptions(context.Background(), RunnerOptions{Writer: &carried, NoColor: true})
 
     if runErr := RunQueries(ctx, nil, "up", "20240101000000_probe", nil, RunnerOptions{}); nil != runErr {
         t.Fatalf("run: %v", runErr)
@@ -365,7 +365,7 @@ func TestRunQueries_EscapesTheDirectionOnEveryLine(t *testing.T) {
 /* an explicit option that names no writer prints under the command's posture, so a migration that passes one to set the colour alone does not print past the writer its command chose */
 func TestUp_AnOptionWithoutAWriterPrintsUnderTheCommandsPosture(t *testing.T) {
     var commandWriter bytes.Buffer
-    ctx := withRunnerOption(context.Background(), RunnerOptions{Writer: &commandWriter, NoColor: true})
+    ctx := withRunnerOptions(context.Background(), RunnerOptions{Writer: &commandWriter, NoColor: true})
 
     if upErr := Up(ctx, nil, "probe", nil, RunnerOptions{NoColor: true}); nil != upErr {
         t.Fatalf("expected the empty set to succeed, got %v", upErr)
@@ -379,7 +379,7 @@ func TestUp_AnOptionWithoutAWriterPrintsUnderTheCommandsPosture(t *testing.T) {
 func TestRunQueries_AZeroOptionFollowsTheCommandsColourPosture(t *testing.T) {
     for _, commandNoColor := range []bool{true, false} {
         var commandWriter bytes.Buffer
-        ctx := withRunnerOption(context.Background(), RunnerOptions{Writer: &commandWriter, NoColor: commandNoColor})
+        ctx := withRunnerOptions(context.Background(), RunnerOptions{Writer: &commandWriter, NoColor: commandNoColor})
 
         if runErr := RunQueries(ctx, nil, "up", "probe", nil, RunnerOptions{}); nil != runErr {
             t.Fatalf("expected the empty set to succeed, got %v", runErr)
@@ -393,7 +393,7 @@ func TestRunQueries_AZeroOptionFollowsTheCommandsColourPosture(t *testing.T) {
 
 func TestRunQueries_AnOptionTurningColourOffWinsOverAColourPosture(t *testing.T) {
     var commandWriter bytes.Buffer
-    ctx := withRunnerOption(context.Background(), RunnerOptions{Writer: &commandWriter})
+    ctx := withRunnerOptions(context.Background(), RunnerOptions{Writer: &commandWriter})
 
     if runErr := RunQueries(ctx, nil, "up", "probe", nil, RunnerOptions{NoColor: true}); nil != runErr {
         t.Fatalf("expected the empty set to succeed, got %v", runErr)

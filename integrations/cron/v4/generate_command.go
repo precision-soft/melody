@@ -245,7 +245,7 @@ func (instance *GenerateCommand) runWithConfiguration(
     configuration configcontract.Configuration,
 ) (runErr error) {
     startedAt := time.Now()
-    option, normalizeOptionErr := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
+    option, normalizeOptionErr := output.NormalizeOptions(output.ParseOptionsFromCommand(commandContext))
     if nil != normalizeOptionErr {
         return normalizeOptionErr
     }
@@ -724,7 +724,7 @@ func fileCarriesOwnershipMarker(path string, marker string) (bool, error) {
 /* reportWrites is the generator's one report door, reached from the run's defer on every path: text lines, or the single machine-readable document under --format=json carrying the failure beside what was already written. The summary is the command's whole result, so --quiet does not silence it. The run's failure stays the returned verdict; a rendering failure becomes one only when the run succeeded, and in text mode the failure travels alone for the cli entry point to print. */
 func (instance *GenerateCommand) reportWrites(
     commandContext *clicontract.CommandContext,
-    option output.Options,
+    options output.Options,
     startedAt time.Time,
     writes []destinationWrite,
     pruned []string,
@@ -732,8 +732,8 @@ func (instance *GenerateCommand) reportWrites(
     warnings []reportWarning,
     runErr error,
 ) error {
-    if true == output.IsJsonFormat(option.Format) {
-        meta := output.NewMeta(instance.Name(), output.MetaConfig{Option: option, StartedAt: startedAt, Duration: time.Since(startedAt)})
+    if true == output.IsJsonFormat(options.Format) {
+        meta := output.NewMeta(instance.Name(), output.MetaConfig{Options: options, StartedAt: startedAt, Duration: time.Since(startedAt)})
         envelope := output.NewEnvelope(meta)
 
         if nil == writes {
@@ -767,7 +767,7 @@ func (instance *GenerateCommand) reportWrites(
             )
         }
 
-        renderErr := output.Render(commandContext.Writer, envelope, option)
+        renderErr := output.Render(commandContext.Writer, envelope, options)
         if nil != runErr {
             return runErr
         }

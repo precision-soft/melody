@@ -28,16 +28,16 @@ type cacheTestCountingBackend struct {
     manyErr   error
 }
 
-func (instance *cacheTestCountingBackend) Set(runtimeInstance containercontract.Runtime, key string, payload []byte, ttl bound.Duration, _ cachecontract.SetOptions) error {
+func (instance *cacheTestCountingBackend) Set(runtimeInstance containercontract.Runtime, key string, payload []byte, ttl bound.Duration, options cachecontract.SetOptions) error {
     instance.setCalls.Add(1)
 
-    return instance.Backend.Set(runtimeInstance, key, payload, ttl, cachecontract.SetOptions{})
+    return instance.Backend.Set(runtimeInstance, key, payload, ttl, options)
 }
 
-func (instance *cacheTestCountingBackend) SetMultiple(runtimeInstance containercontract.Runtime, items map[string][]byte, ttl bound.Duration, _ cachecontract.SetOptions) error {
+func (instance *cacheTestCountingBackend) SetMultiple(runtimeInstance containercontract.Runtime, items map[string][]byte, ttl bound.Duration, options cachecontract.SetOptions) error {
     instance.setCalls.Add(1)
 
-    return instance.Backend.SetMultiple(runtimeInstance, items, ttl, cachecontract.SetOptions{})
+    return instance.Backend.SetMultiple(runtimeInstance, items, ttl, options)
 }
 
 func (instance *cacheTestCountingBackend) Get(runtimeInstance containercontract.Runtime, key string) ([]byte, bool, error) {

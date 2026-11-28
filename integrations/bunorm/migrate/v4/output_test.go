@@ -224,7 +224,7 @@ func TestCommandOutput_TwoNamesSharingTheirFirstRunesPrintApart(t *testing.T) {
 
 func TestCommandOutput_ANameWrapsWhereTheTableWouldPassItsMaximumWidth(t *testing.T) {
     instance, buffer := newBufferedOutput(true)
-    instance.option.TableMaxWidth = bound.Of(30)
+    instance.options.TableMaxWidth = bound.Of(30)
     instance.printMigrationsBlock("pending", "PENDING", []string{strings.Repeat("m", 60)})
 
     for _, line := range strings.Split(strings.TrimSpace(buffer.String()), "\n")[1:] {
@@ -571,7 +571,7 @@ func TestCommandOutput_PrintMigrationsBlockEscapesTheNames(t *testing.T) {
    every message the run had accumulated before it fell over. */
 func TestCommandOutput_FinishRunRendersAFailureDocumentForAPanickingRun(t *testing.T) {
     buffer := &bytes.Buffer{}
-    outputInstance := newCommandOutput(buffer, nil, mustNormalizeOption(t, output.Options{Format: output.FormatJson}))
+    outputInstance := newCommandOutput(buffer, nil, mustNormalizeOptions(t, output.Options{Format: output.FormatJson}))
 
     outputInstance.printSuccess("applied 2 migrations")
 
@@ -613,7 +613,7 @@ func TestCommandOutput_FinishRunRendersAFailureDocumentForAPanickingRun(t *testi
    survive: kept only in a context slot it collapses to its bare message at the render boundary. */
 func TestCommandOutput_FinishRunCarriesAnErrorShapedPanicAsTheCause(t *testing.T) {
     buffer := &bytes.Buffer{}
-    outputInstance := newCommandOutput(buffer, nil, mustNormalizeOption(t, output.Options{Format: output.FormatJson}))
+    outputInstance := newCommandOutput(buffer, nil, mustNormalizeOptions(t, output.Options{Format: output.FormatJson}))
 
     panicValue := exception.NewError(
         "the migration lock table is missing",
@@ -647,7 +647,7 @@ func TestCommandOutput_FinishRunCarriesAnErrorShapedPanicAsTheCause(t *testing.T
    the reason the command failed is the one the operator needs. */
 func TestCommandOutput_FinishRunKeepsTheRunsOwnFailureWhenAPanicFollowsIt(t *testing.T) {
     buffer := &bytes.Buffer{}
-    outputInstance := newCommandOutput(buffer, nil, mustNormalizeOption(t, output.Options{Format: output.FormatJson}))
+    outputInstance := newCommandOutput(buffer, nil, mustNormalizeOptions(t, output.Options{Format: output.FormatJson}))
 
     runFailure := exception.NewError("the migration lock is held", nil, nil)
 
@@ -667,7 +667,7 @@ func TestCommandOutput_FinishRunKeepsTheRunsOwnFailureWhenAPanicFollowsIt(t *tes
 /* The ordinary paths must be untouched: no panic renders exactly what finish rendered before. */
 func TestCommandOutput_FinishRunLeavesTheOrdinaryPathsUnchanged(t *testing.T) {
     successBuffer := &bytes.Buffer{}
-    successOutput := newCommandOutput(successBuffer, nil, mustNormalizeOption(t, output.Options{Format: output.FormatJson}))
+    successOutput := newCommandOutput(successBuffer, nil, mustNormalizeOptions(t, output.Options{Format: output.FormatJson}))
     successOutput.printSuccess("applied 2 migrations")
 
     if runErr := successOutput.finishRun("db:migrate", time.Now(), nil, nil); nil != runErr {
@@ -678,7 +678,7 @@ func TestCommandOutput_FinishRunLeavesTheOrdinaryPathsUnchanged(t *testing.T) {
     }
 
     failureBuffer := &bytes.Buffer{}
-    failureOutput := newCommandOutput(failureBuffer, nil, mustNormalizeOption(t, output.Options{Format: output.FormatJson}))
+    failureOutput := newCommandOutput(failureBuffer, nil, mustNormalizeOptions(t, output.Options{Format: output.FormatJson}))
 
     runFailure := exception.NewError("the migration lock is held", nil, nil)
     if runErr := failureOutput.finishRun("db:migrate", time.Now(), runFailure, nil); nil == runErr {
@@ -832,10 +832,10 @@ func TestIsNilInterface_AnswersTheNilInterfaceAndTheTypedNil(t *testing.T) {
     }
 }
 
-func mustNormalizeOption(t *testing.T, option output.Options) output.Options {
+func mustNormalizeOptions(t *testing.T, options output.Options) output.Options {
     t.Helper()
 
-    normalized, normalizeErr := output.NormalizeOption(option)
+    normalized, normalizeErr := output.NormalizeOptions(options)
     if nil != normalizeErr {
         t.Fatalf("expected the option admitted, got %v", normalizeErr)
     }
@@ -887,7 +887,7 @@ func TestErrorDetailsOf_ReturnsOnACyclicChain(t *testing.T) {
 /* the details block follows the migrations block's rule: the value column fits the longest value and wraps past the table's maximum width onto rows under an empty key, so the name is printed whole */
 func TestCommandOutput_PrintDetailsBlockWrapsALongNameUnderTheTableWidth(t *testing.T) {
     instance, buffer := newBufferedOutput(true)
-    instance.option.TableMaxWidth = bound.Of(30)
+    instance.options.TableMaxWidth = bound.Of(30)
 
     instance.printDetailsBlock(map[string]string{"name": "20260907000001_create_a_very_long_table"})
 
@@ -912,7 +912,7 @@ func TestCommandOutput_PrintDetailsBlockWrapsALongNameUnderTheTableWidth(t *test
 /* a maximum narrower than the key and its borders keeps the value column at its header's width, every value printed whole */
 func TestCommandOutput_PrintDatabaseBlockKeepsTheHeaderWidthUnderATinyMaximum(t *testing.T) {
     instance, buffer := newBufferedOutput(true)
-    instance.option.TableMaxWidth = bound.Of(1)
+    instance.options.TableMaxWidth = bound.Of(1)
 
     databaseName := "shop"
     instance.printDatabaseBlock(&databaseIdentity{CurrentDatabase: &databaseName, Hostname: "db", Port: 3306, CurrentUser: "app", Version: "8.4"})

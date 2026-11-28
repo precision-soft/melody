@@ -7,7 +7,7 @@ import (
 )
 
 func TestOption_TheZeroValueReadsAsTheDefault(t *testing.T) {
-    normalized, normalizeErr := NormalizeOption(Options{})
+    normalized, normalizeErr := NormalizeOptions(Options{})
     if nil != normalizeErr {
         t.Fatalf("expected the zero option admitted, got %v", normalizeErr)
     }
@@ -30,17 +30,17 @@ func TestOption_TheZeroValueReadsAsTheDefault(t *testing.T) {
 }
 
 func TestOption_TheRulesDefaultToNoLimitNoOffsetAndA120CellTable(t *testing.T) {
-    limit, limitErr := bound.Resolve(bound.Count{}, OptionLimitRule())
+    limit, limitErr := bound.Resolve(bound.Count{}, OptionsLimitRule())
     if nil != limitErr || false == limit.Unlimited {
         t.Fatalf("expected an absent limit to read as no limit, got %+v (%v)", limit, limitErr)
     }
 
-    offset, offsetErr := bound.Resolve(bound.Count{}, OptionOffsetRule())
+    offset, offsetErr := bound.Resolve(bound.Count{}, OptionsOffsetRule())
     if nil != offsetErr || true == offset.Unlimited || 0 != offset.Value {
         t.Fatalf("expected an absent offset to read as 0, got %+v (%v)", offset, offsetErr)
     }
 
-    tableMaxWidth, tableMaxWidthErr := bound.Resolve(bound.Count{}, OptionTableMaxWidthRule())
+    tableMaxWidth, tableMaxWidthErr := bound.Resolve(bound.Count{}, OptionsTableMaxWidthRule())
     if nil != tableMaxWidthErr || true == tableMaxWidth.Unlimited || 120 != tableMaxWidth.Value {
         t.Fatalf("expected an absent table width to read as 120, got %+v (%v)", tableMaxWidth, tableMaxWidthErr)
     }

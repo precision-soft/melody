@@ -306,7 +306,7 @@ func TestMain(mainInstance *testing.M) {
     os.Exit(mainInstance.Run())
 }
 
-func fullVerbosityTableOption() output.Options {
+func fullVerbosityTableOptions() output.Options {
     return output.Options{
         Format:         output.FormatTable,
         VerbosityLevel: 3,
@@ -337,16 +337,16 @@ func newCyclicSliceErrorContext() exceptioncontract.Context {
 func runErrorContextProbe(probeName string) {
     switch probeName {
     case "cyclicMapContext":
-        resolveErrorContextJson(exception.NewError("boom", newCyclicErrorContext(), nil), fullVerbosityTableOption())
+        resolveErrorContextJson(exception.NewError("boom", newCyclicErrorContext(), nil), fullVerbosityTableOptions())
 
     case "cyclicSliceContext":
-        resolveErrorContextJson(exception.NewError("boom", newCyclicSliceErrorContext(), nil), fullVerbosityTableOption())
+        resolveErrorContextJson(exception.NewError("boom", newCyclicSliceErrorContext(), nil), fullVerbosityTableOptions())
 
     case "cyclicNamedMapContext":
-        resolveErrorContextJson(exception.NewError("boom", newCyclicNamedMapErrorContext(), nil), fullVerbosityTableOption())
+        resolveErrorContextJson(exception.NewError("boom", newCyclicNamedMapErrorContext(), nil), fullVerbosityTableOptions())
 
     case "cyclicNamedSliceContext":
-        resolveErrorContextJson(exception.NewError("boom", newCyclicNamedSliceErrorContext(), nil), fullVerbosityTableOption())
+        resolveErrorContextJson(exception.NewError("boom", newCyclicNamedSliceErrorContext(), nil), fullVerbosityTableOptions())
 
     default:
         os.Exit(97)
@@ -394,7 +394,7 @@ func TestResolveErrorContextJson_SelfReferentialSliceContextTerminates(t *testin
 }
 
 func TestResolveErrorContextJson_RendersTheCycleAsAMarker(t *testing.T) {
-    result := resolveErrorContextJson(exception.NewError("boom", newCyclicErrorContext(), nil), fullVerbosityTableOption())
+    result := resolveErrorContextJson(exception.NewError("boom", newCyclicErrorContext(), nil), fullVerbosityTableOptions())
 
     /* encoding/json escapes the marker's angle brackets */
     encodedMarker, markerErr := json.Marshal(errorContextCycleMarker)
@@ -510,7 +510,7 @@ func TestResolveErrorContextJson_SelfReferentialNamedMapContextTerminates(t *tes
 }
 
 func TestResolveErrorContextJson_RendersTheNamedMapCycleAsAMarker(t *testing.T) {
-    result := resolveErrorContextJson(exception.NewError("boom", newCyclicNamedMapErrorContext(), nil), fullVerbosityTableOption())
+    result := resolveErrorContextJson(exception.NewError("boom", newCyclicNamedMapErrorContext(), nil), fullVerbosityTableOptions())
 
     encodedMarker, markerErr := json.Marshal(errorContextCycleMarker)
     if nil != markerErr {
@@ -679,7 +679,7 @@ func TestResolveErrorContextJson_ReadsAnHttpExceptionContext(t *testing.T) {
     httpException := exception.NewHttpException(503, "backend down")
     httpException.SetContextValue("backend", "redis")
 
-    result := resolveErrorContextJson(httpException, fullVerbosityTableOption())
+    result := resolveErrorContextJson(httpException, fullVerbosityTableOptions())
 
     if false == strings.Contains(result, "redis") {
         t.Fatalf("expected the http exception context, got %q", result)
@@ -689,7 +689,7 @@ func TestResolveErrorContextJson_ReadsAnHttpExceptionContext(t *testing.T) {
 func TestResolveErrorContextJson_ReadsTheFirstContextBelowAnEmptyProvider(t *testing.T) {
     inner := exception.NewError("dial", exceptioncontract.Context{"host": "redis"}, nil)
 
-    result := resolveErrorContextJson(exception.NewHttpError(503, exception.HttpErrorConfig{Message: "backend down", Cause: inner}), fullVerbosityTableOption())
+    result := resolveErrorContextJson(exception.NewHttpError(503, exception.HttpErrorConfig{Message: "backend down", Cause: inner}), fullVerbosityTableOptions())
 
     if "{\"host\":\"redis\"}" != result {
         t.Fatalf("expected the inner context below the empty provider, got %q", result)
@@ -698,7 +698,7 @@ func TestResolveErrorContextJson_ReadsTheFirstContextBelowAnEmptyProvider(t *tes
     outer := exception.NewHttpError(503, exception.HttpErrorConfig{Message: "backend down", Cause: inner})
     outer.SetContextValue("outer", "yes")
 
-    result = resolveErrorContextJson(outer, fullVerbosityTableOption())
+    result = resolveErrorContextJson(outer, fullVerbosityTableOptions())
 
     if "{\"outer\":\"yes\"}" != result {
         t.Fatalf("expected the nearest context that has keys to win, got %q", result)
@@ -735,7 +735,7 @@ func TestResolveErrorContextJson_SelfReferentialNamedSliceContextTerminates(t *t
 }
 
 func TestResolveErrorContextJson_RendersTheNamedSliceCycleAsAMarker(t *testing.T) {
-    result := resolveErrorContextJson(exception.NewError("boom", newCyclicNamedSliceErrorContext(), nil), fullVerbosityTableOption())
+    result := resolveErrorContextJson(exception.NewError("boom", newCyclicNamedSliceErrorContext(), nil), fullVerbosityTableOptions())
 
     encodedMarker, markerErr := json.Marshal(errorContextCycleMarker)
     if nil != markerErr {

@@ -69,7 +69,7 @@ func (instance *ContainerCommand) Run(
 ) error {
     startedAt := time.Now()
 
-    option, normalizeOptionErr := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
+    option, normalizeOptionErr := output.NormalizeOptions(output.ParseOptionsFromCommand(commandContext))
     if nil != normalizeOptionErr {
         return normalizeOptionErr
     }
@@ -78,7 +78,7 @@ func (instance *ContainerCommand) Run(
         instance.Name(),
         output.MetaConfig{
             Arguments: commandContext.Args().Slice(),
-            Option:    option,
+            Options:    option,
             StartedAt: startedAt,
         },
     )
@@ -148,7 +148,7 @@ type containerServiceDescriptionItem struct {
 /* describeServiceList is the default listing and runs no provider; a container without the descriptions door is listed by name with a warning. */
 func (instance *ContainerCommand) describeServiceList(
     serviceContainer containercontract.Container,
-    option output.Options,
+    options output.Options,
     envelope *output.Envelope,
 ) {
     items := ([]containerServiceDescriptionItem)(nil)
@@ -191,10 +191,10 @@ func (instance *ContainerCommand) describeServiceList(
         }
     }
 
-    output.ApplySortOrder(items, option.Order)
+    output.ApplySortOrder(items, options.Order)
 
     total := len(items)
-    windowed, windowItemsErr := output.WindowItems(items, option.Limit, option.Offset)
+    windowed, windowItemsErr := output.WindowItems(items, options.Limit, options.Offset)
     if nil != windowItemsErr {
         envelope.SetError(
             "debug.optionRefused",
@@ -220,7 +220,7 @@ func (instance *ContainerCommand) describeServiceList(
         }
     }
 
-    if output.FormatTable == option.Format {
+    if output.FormatTable == options.Format {
         builder := output.NewTableBuilder()
 
         summary := fmt.Sprintf(
@@ -276,8 +276,8 @@ func (instance *ContainerCommand) describeServiceList(
         items,
         output.ListPayloadConfig{
             Total:  total,
-            Limit:  option.Limit,
-            Offset: option.Offset,
+            Limit:  options.Limit,
+            Offset: options.Offset,
         },
     )
 }
@@ -512,24 +512,24 @@ type containerServiceDetails struct {
 /* errorCauseChainDepth bounds the links the report walks, for the cause chain and its context alike: a cycle guard for an Unwrap of the application's own that never ends, on a development command whose reader wants the first causes, so no deployment tunes it. */
 const errorCauseChainDepth = 9
 
-func resolveErrorContextJson(resolveErr error, option output.Options) string {
+func resolveErrorContextJson(resolveErr error, options output.Options) string {
     if nil == resolveErr {
-        return emptyErrorContextJsonForFormat(option)
+        return emptyErrorContextJsonForFormat(options)
     }
 
     /* the context is read through the ContextProvider contract from the first link that has one, breadth-first over the chain and bounded like it: a provider without a context answers an empty map */
     contextValue := firstErrorContextInChain(resolveErr)
     if nil == contextValue {
-        return emptyErrorContextJsonForFormat(option)
+        return emptyErrorContextJsonForFormat(options)
     }
 
     /* sanitized before marshalling, because both fallbacks below print the value they were handed */
-    keepNoiseKeys := 3 <= option.VerbosityLevel
+    keepNoiseKeys := 3 <= options.VerbosityLevel
     redactedContext := sanitizeErrorContextValueTracked(contextValue, map[errorContextVisitKey]struct{}{}, 0, keepNoiseKeys)
 
     normalizedContextBytes, normalizeMarshalErr := json.Marshal(redactedContext)
     if nil != normalizeMarshalErr {
-        return unrepresentableErrorContextForFormat(redactedContext, option)
+        return unrepresentableErrorContextForFormat(redactedContext, options)
     }
 
     normalizedContext := (any)(nil)
@@ -537,17 +537,17 @@ func resolveErrorContextJson(resolveErr error, option output.Options) string {
     if nil != normalizeUnmarshalErr {
         fallbackString := fmt.Sprintf("%s", normalizedContextBytes)
 
-        return truncateErrorContextForFormat(fallbackString, option)
+        return truncateErrorContextForFormat(fallbackString, options)
     }
 
     sanitizedContext := sanitizeErrorContextValueTracked(normalizedContext, map[errorContextVisitKey]struct{}{}, 0, keepNoiseKeys)
 
     contextJsonBytes, marshalErr := json.Marshal(sanitizedContext)
     if nil != marshalErr {
-        return unrepresentableErrorContextForFormat(sanitizedContext, option)
+        return unrepresentableErrorContextForFormat(sanitizedContext, options)
     }
 
-    return truncateErrorContextForFormat(string(contextJsonBytes), option)
+    return truncateErrorContextForFormat(string(contextJsonBytes), options)
 }
 
 /* firstErrorContextInChain answers the context of the first link that carries one, within the cause chain's depth bound, and nil when none does. */
@@ -562,8 +562,8 @@ func firstErrorContextInChain(resolveErr error) map[string]any {
 }
 
 /* emptyErrorContextJsonForFormat answers the absence of a context in the format's grammar: "{}" in json, so the field always parses, and an empty cell in the table. */
-func emptyErrorContextJsonForFormat(option output.Options) string {
-    if output.FormatTable == option.Format {
+func emptyErrorContextJsonForFormat(options output.Options) string {
+    if output.FormatTable == options.Format {
         return ""
     }
 
@@ -571,11 +571,11 @@ func emptyErrorContextJsonForFormat(option output.Options) string {
 }
 
 /* unrepresentableErrorContextForFormat answers a context json.Marshal refuses in the format's grammar: in json an object carrying the rendering under a key, so the field always parses; in the table the bare rendering. */
-func unrepresentableErrorContextForFormat(contextValue any, option output.Options) string {
+func unrepresentableErrorContextForFormat(contextValue any, options output.Options) string {
     rendered := fmt.Sprintf("%v", contextValue)
 
-    if output.FormatTable == option.Format {
-        return truncateErrorContextForFormat(rendered, option)
+    if output.FormatTable == options.Format {
+        return truncateErrorContextForFormat(rendered, options)
     }
 
     rawBytes, marshalErr := json.Marshal(
@@ -584,7 +584,7 @@ func unrepresentableErrorContextForFormat(contextValue any, option output.Option
         },
     )
     if nil != marshalErr {
-        return emptyErrorContextJsonForFormat(option)
+        return emptyErrorContextJsonForFormat(options)
     }
 
     return string(rawBytes)
@@ -600,12 +600,12 @@ func normalizeErrorCauseChain(causeChain []string) []string {
 }
 
 /* truncateErrorContextForFormat truncates the table cell only: a cut json fragment would not parse. */
-func truncateErrorContextForFormat(value string, option output.Options) string {
-    if output.FormatTable != option.Format {
+func truncateErrorContextForFormat(value string, options output.Options) string {
+    if output.FormatTable != options.Format {
         return value
     }
 
-    return truncateTableCellValueByVerbosity(value, option.VerbosityLevel)
+    return truncateTableCellValueByVerbosity(value, options.VerbosityLevel)
 }
 
 /* resolveErrorCauseChain walks the causes below the resolution error's own message, so the report names why the build failed. */
@@ -634,7 +634,7 @@ func (instance *ContainerCommand) populateServiceList(
     ctx context.Context,
     serviceContainer containercontract.Container,
     runScope containercontract.Scope,
-    option output.Options,
+    options output.Options,
     envelope *output.Envelope,
 ) {
     registrations := ([]sweepRegistration)(nil)
@@ -657,11 +657,11 @@ func (instance *ContainerCommand) populateServiceList(
         return strings.Compare(left.name, right.name)
     })
 
-    output.ApplySortOrder(registrations, option.Order)
+    output.ApplySortOrder(registrations, options.Order)
 
     total := len(registrations)
 
-    selected, windowItemsErr := output.WindowItems(registrations, option.Limit, option.Offset)
+    selected, windowItemsErr := output.WindowItems(registrations, options.Limit, options.Offset)
     if nil != windowItemsErr {
         envelope.SetError(
             "debug.optionRefused",
@@ -691,13 +691,13 @@ func (instance *ContainerCommand) populateServiceList(
 
         typeName := ""
         errorString := ""
-        errorContextJson := emptyErrorContextJsonForFormat(option)
+        errorContextJson := emptyErrorContextJsonForFormat(options)
         errorCauseChain := []string{}
 
         if nil != getErr {
             errorString = getErr.Error()
             errorCauseChain = normalizeErrorCauseChain(resolveErrorCauseChain(getErr))
-            errorContextJson = resolveErrorContextJson(getErr, option)
+            errorContextJson = resolveErrorContextJson(getErr, options)
         }
 
         if nil != serviceInstance {
@@ -732,7 +732,7 @@ func (instance *ContainerCommand) populateServiceList(
 
     reportServiceSweepFailures(errorItems, envelope)
 
-    if output.FormatTable == option.Format {
+    if output.FormatTable == options.Format {
         builder := output.NewTableBuilder()
         shown := len(okItems) + len(errorItems)
 
@@ -786,7 +786,7 @@ func (instance *ContainerCommand) populateServiceList(
                 for _, item := range errorItems {
                     errorBlock.AddRow([]string{output.TableRowSeparatorToken})
 
-                    rows := buildContainerServiceTableRows(item, option)
+                    rows := buildContainerServiceTableRows(item, options)
                     for _, row := range rows {
                         errorBlock.AddRow([]string{row[0], row[1], row[2]})
                     }
@@ -802,7 +802,7 @@ func (instance *ContainerCommand) populateServiceList(
                 for _, item := range errorItems {
                     errorBlock.AddRow([]string{output.TableRowSeparatorToken})
 
-                    errorLines := buildContainerServiceErrorLines(item, option.VerbosityLevel)
+                    errorLines := buildContainerServiceErrorLines(item, options.VerbosityLevel)
 
                     for index := 0; index < len(errorLines); index++ {
                         nameCell := ""
@@ -833,8 +833,8 @@ func (instance *ContainerCommand) populateServiceList(
         combined,
         output.ListPayloadConfig{
             Total:  total,
-            Limit:  option.Limit,
-            Offset: option.Offset,
+            Limit:  options.Limit,
+            Offset: options.Offset,
         },
     )
 }
@@ -1078,7 +1078,7 @@ func truncateTableCellValueByVerbosity(value string, verbosityLevel int) string 
 
 func buildContainerServiceTableRows(
     item containerServiceListItem,
-    option output.Options,
+    options output.Options,
 ) [][]string {
     typeValue := item.TypeName
     if "" != item.ErrorString {
@@ -1091,7 +1091,7 @@ func buildContainerServiceTableRows(
         }
     }
 
-    errorLines := buildContainerServiceErrorLines(item, option.VerbosityLevel)
+    errorLines := buildContainerServiceErrorLines(item, options.VerbosityLevel)
 
     rowCount := len(errorLines)
     if 1 > rowCount {
@@ -1264,7 +1264,7 @@ func (instance *ContainerCommand) populateSingleService(
     serviceContainer containercontract.Container,
     runScope containercontract.Scope,
     serviceName string,
-    option output.Options,
+    options output.Options,
     envelope *output.Envelope,
 ) {
     /* a name a scoped registration answers to resolves as scoped, even where a container service shares it */
@@ -1283,13 +1283,13 @@ func (instance *ContainerCommand) populateSingleService(
 
     typeName := ""
     errorString := ""
-    errorContextJson := emptyErrorContextJsonForFormat(option)
+    errorContextJson := emptyErrorContextJsonForFormat(options)
     errorCauseChain := []string{}
 
     if nil != getErr {
         errorString = getErr.Error()
         errorCauseChain = normalizeErrorCauseChain(resolveErrorCauseChain(getErr))
-        errorContextJson = resolveErrorContextJson(getErr, option)
+        errorContextJson = resolveErrorContextJson(getErr, options)
 
         /* a registered service that fails to build is a wiring error, not notFound; a registration of either lifetime counts as present */
         errorCode := "debug.buildFailed"
@@ -1338,7 +1338,7 @@ func (instance *ContainerCommand) populateSingleService(
         Teardown:         view.forService(serviceName, lifetime),
     }
 
-    if output.FormatTable == option.Format {
+    if output.FormatTable == options.Format {
         builder := output.NewTableBuilder()
         builder.AddSummaryLine(
             fmt.Sprintf(

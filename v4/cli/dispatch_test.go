@@ -360,7 +360,7 @@ func TestDispatchCommand_CarriesTheApplicationVersion(t *testing.T) {
             nameValue:        "probe",
             descriptionValue: "probe",
             runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
-                observed = output.ParseOptionFromCommand(commandContext).ApplicationVersion
+                observed = output.ParseOptionsFromCommand(commandContext).ApplicationVersion
 
                 return nil
             },

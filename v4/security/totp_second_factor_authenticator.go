@@ -99,10 +99,10 @@ func NewTotpSecondFactorAuthenticator(primary securitycontract.Authenticator, en
         exception.Panic(exception.FromError(clockErr))
     }
 
-    totpConfig := config.Totp
-    totpConfig.Clock = clockInstance
+    totpOptions := config.Totp
+    totpOptions.Clock = clockInstance
 
-    totpResolved, resolveErr := totpConfig.Resolve()
+    totpResolved, resolveErr := totpOptions.Resolve()
     if nil != resolveErr {
         exception.Panic(exception.FromError(resolveErr))
     }
@@ -142,7 +142,7 @@ func NewTotpSecondFactorAuthenticator(primary securitycontract.Authenticator, en
         enrollments:        enrollments,
         codeHeaderName:     codeHeaderName,
         recoveryHeaderName: recoveryHeaderName,
-        totpConfig:         totpConfig,
+        totpOptions:         totpOptions,
         codeValidityWindow: time.Duration(2*totpResolved.Skew+1) * totpResolved.Period,
         replayGuard:        replayGuard,
         maxFailedAttempts:  maxFailedAttempts.Value,
@@ -156,7 +156,7 @@ type TotpSecondFactorAuthenticator struct {
     enrollments        securitycontract.TwoFactorEnrollmentStore
     codeHeaderName     string
     recoveryHeaderName string
-    totpConfig         totp.Options
+    totpOptions         totp.Options
     codeValidityWindow time.Duration
     replayGuard        securitycontract.NonceGuard
     maxFailedAttempts  int
@@ -328,7 +328,7 @@ func (instance *TotpSecondFactorAuthenticator) authenticateWithTotpCode(
     secret string,
     code string,
 ) (securitycontract.Token, error) {
-    verified, verifyErr := totp.Verify(secret, code, instance.totpConfig)
+    verified, verifyErr := totp.Verify(secret, code, instance.totpOptions)
     if nil != verifyErr {
         return nil, exception.NewError("could not verify the two-factor code", nil, verifyErr)
     }

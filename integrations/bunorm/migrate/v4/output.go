@@ -22,7 +22,7 @@ import (
 type commandOutput struct {
     writer    *errorTrackingWriter
     arguments []string
-    option    output.Options
+    options    output.Options
 
     /* under --format=json every print records instead of writing, and finish renders the one machine-readable document */
     messages   []string
@@ -67,11 +67,11 @@ func (instance *commandOutput) lostReport(command string, lostWrite error) error
 }
 
 /* newCommandOutput takes the command's positional arguments beside its writer and flags, since the machine document carries them. */
-func newCommandOutput(writer io.Writer, arguments []string, option output.Options) *commandOutput {
+func newCommandOutput(writer io.Writer, arguments []string, options output.Options) *commandOutput {
     return &commandOutput{
         writer:    &errorTrackingWriter{writer: writer},
         arguments: append([]string{}, arguments...),
-        option:    option,
+        options:    options,
     }
 }
 
@@ -106,17 +106,17 @@ func (instance *errorTrackingWriter) lostWrite() error {
     return instance.firstErr
 }
 
-/* runnerOptionForCommand derives the per-query printer posture from the command's parsed flags: the command's writer and colour choice in text mode, a discarded writer under json — the document is the only byte the command may emit there. */
-func runnerOptionForCommand(writer io.Writer, option output.Options) RunnerOptions {
-    if true == output.IsJsonFormat(option.Format) {
+/* runnerOptionsForCommand derives the per-query printer posture from the command's parsed flags: the command's writer and colour choice in text mode, a discarded writer under json — the document is the only byte the command may emit there. */
+func runnerOptionsForCommand(writer io.Writer, options output.Options) RunnerOptions {
+    if true == output.IsJsonFormat(options.Format) {
         return RunnerOptions{Writer: io.Discard, NoColor: true}
     }
 
-    return RunnerOptions{Writer: writer, NoColor: option.NoColor}
+    return RunnerOptions{Writer: writer, NoColor: options.NoColor}
 }
 
 func (instance *commandOutput) isJson() bool {
-    return output.IsJsonFormat(instance.option.Format)
+    return output.IsJsonFormat(instance.options.Format)
 }
 
 /* wantsDetail decides whether the detail blocks are collected, apart from --verbose: verbosity shapes the text, while the json document is the machine contract and always carries them. The cost is one query per json run, the database identity block. */
@@ -125,7 +125,7 @@ func (instance *commandOutput) wantsDetail() bool {
         return true
     }
 
-    return instance.option.Verbose
+    return instance.options.Verbose
 }
 
 /* finishRun renders the command's document from the outcome the run had, a panic included, and is the door every command of this family defers to, so a run that died is never rendered as a success. recovered is passed in because recover answers only when called directly by the deferred function; the panic is re-raised unchanged once the document says what happened. */
@@ -167,7 +167,7 @@ func (instance *commandOutput) finish(command string, startedAt time.Time, runEr
         return nil
     }
 
-    meta := output.NewMeta(command, output.MetaConfig{Arguments: instance.arguments, Option: instance.option, StartedAt: startedAt, Duration: time.Since(startedAt)})
+    meta := output.NewMeta(command, output.MetaConfig{Arguments: instance.arguments, Options: instance.options, StartedAt: startedAt, Duration: time.Since(startedAt)})
     envelope := output.NewEnvelope(meta)
 
     data := map[string]any{}
@@ -216,7 +216,7 @@ func (instance *commandOutput) finish(command string, startedAt time.Time, runEr
     }
 
     /* the document renders through the tracking writer too, which swallows the write it lost; the renderer's own answer is read first and the remembered write failure second, so a json report cut short is refused the way the text report is */
-    renderErr := output.Render(instance.writer, envelope, instance.option)
+    renderErr := output.Render(instance.writer, envelope, instance.options)
     if lostWrite := instance.writer.lostWrite(); nil == renderErr && nil != lostWrite {
         renderErr = instance.lostReport(command, lostWrite)
     }
@@ -297,7 +297,7 @@ func (instance *commandOutput) printSuccess(message string) {
 
     escapedMessage := escapeControlCharacters(message, false)
 
-    if false == instance.option.NoColor {
+    if false == instance.options.NoColor {
         _, _ = fmt.Fprintf(instance.writer, "%s%s%s\n", cli.AnsiGreen, escapedMessage, cli.AnsiReset)
     } else {
         _, _ = fmt.Fprintln(instance.writer, escapedMessage)
@@ -313,7 +313,7 @@ func (instance *commandOutput) printWarning(message string) {
 
     escapedMessage := escapeControlCharacters(message, false)
 
-    if false == instance.option.NoColor {
+    if false == instance.options.NoColor {
         _, _ = fmt.Fprintf(instance.writer, "%s%sWARNING: %s%s\n", cli.AnsiYellow, cli.AnsiBold, escapedMessage, cli.AnsiReset)
     } else {
         _, _ = fmt.Fprintf(instance.writer, "WARNING: %s\n", escapedMessage)
@@ -335,7 +335,7 @@ func (instance *commandOutput) printError(err error) {
     /* the message came off the wire, so its control characters are escaped before the terminal sees them; the json branch above hands it to the document, whose printer escapes the C1 block the encoder leaves raw and writes a byte that is not valid UTF-8 as U+FFFD, the encoder's documented answer */
     escapedMessage := escapeControlCharacters(err.Error(), false)
 
-    if false == instance.option.NoColor {
+    if false == instance.options.NoColor {
         _, _ = fmt.Fprintf(instance.writer, "%s%sERROR: %s%s\n", cli.AnsiRed, cli.AnsiBold, escapedMessage, cli.AnsiReset)
     } else {
         _, _ = fmt.Fprintf(instance.writer, "ERROR: %s\n", escapedMessage)
@@ -452,7 +452,7 @@ func (instance *commandOutput) printMigrationsBlock(key string, title string, na
 
 /* tableMaxWidth answers the table width the command's option asks, 0 for unlimited */
 func (instance *commandOutput) tableMaxWidth() int {
-    resolved, resolveErr := bound.Resolve(instance.option.TableMaxWidth, output.OptionTableMaxWidthRule())
+    resolved, resolveErr := bound.Resolve(instance.options.TableMaxWidth, output.OptionsTableMaxWidthRule())
     if nil != resolveErr || true == resolved.Unlimited {
         return 0
     }

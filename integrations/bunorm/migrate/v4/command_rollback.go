@@ -40,8 +40,8 @@ func (instance *RollbackCommand) runRollback(
     outputInstance *commandOutput,
 ) (runErr error) {
     /* the per-query lines print through the command output's writer, so a write the report lost there is remembered by finish too */
-    runnerOption := runnerOptionForCommand(outputInstance.writer, outputInstance.option)
-    ctx := withRunnerOption(runtimeInstance.Context(), runnerOption)
+    runnerOption := runnerOptionsForCommand(outputInstance.writer, outputInstance.options)
+    ctx := withRunnerOptions(runtimeInstance.Context(), runnerOption)
     /* under --format=json the per-query lines are discarded, so an empty migration's warning goes to the document's warnings instead */
     if true == outputInstance.isJson() {
         ctx = withEmptyMigrationWarner(ctx, outputInstance.printWarning)

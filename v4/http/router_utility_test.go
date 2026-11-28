@@ -1455,6 +1455,37 @@ func TestCloseDiscardedResponseBody_LogsAFailedCloseOnItsLogger(t *testing.T) {
     }
 }
 
+func TestCloseDiscardedResponseBody_WithoutALoggerReportsOnTheEmergencyLogger(t *testing.T) {
+    response := TextResponse(nethttp.StatusOK, "discarded")
+    response.SetBodyReader(&failingCloser{Reader: strings.NewReader("discarded")})
+
+    written := captureEmergencyLogger(t, func() {
+        CloseDiscardedResponseBody(response, DiscardedBodyOptions{})
+    })
+
+    if false == strings.Contains(written, "failed to close discarded response body") {
+        t.Fatalf("expected the failed close on the emergency logger, got %q", written)
+    }
+}
+
+func TestCloseDiscardedResponseBody_ATypedNilLoggerClosesTheBodyThenPanicsNamingTheField(t *testing.T) {
+    var typedNil *errorContextRecordingLogger
+    response, body := responseWithClosingBody(nethttp.StatusOK, "discarded")
+
+    assertPanicsNamingField(
+        t,
+        func() {
+            CloseDiscardedResponseBody(response, DiscardedBodyOptions{Logger: typedNil})
+        },
+        "discarded response body logger is a typed nil",
+        "DiscardedBodyOptions.Logger",
+    )
+
+    if 1 != body.closed {
+        t.Fatalf("expected the body closed before the refusal, got %d closes", body.closed)
+    }
+}
+
 
 func TestWriteResponse_ReadsATypedNilResponseAsTheEmptyDefault(t *testing.T) {
     var unassignedResponse *Response

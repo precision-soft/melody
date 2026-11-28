@@ -551,7 +551,7 @@ func TestMigrateCommand_HandsItsPostureToTheMigrationsThroughTheContext(t *testi
         Name:    "20240101000000",
         Comment: "create_users",
         Up: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
-            _, carriedByTheContext = runnerOptionFromContext(ctx)
+            _, carriedByTheContext = runnerOptionsFromContext(ctx)
 
             return RunQueries(ctx, database, "up", "20240101000000", []Query{{Name: "create-users", Sql: "CREATE TABLE users (id BIGINT)"}}, RunnerOptions{})
         },

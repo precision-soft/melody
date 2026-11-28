@@ -15,12 +15,12 @@ type JsonPrinter struct {
 func (instance *JsonPrinter) Print(
     writer io.Writer,
     envelope Envelope,
-    option Options,
+    options Options,
 ) error {
     document := &bytes.Buffer{}
     encoder := json.NewEncoder(document)
 
-    if FormatJsonPretty == option.Format {
+    if FormatJsonPretty == options.Format {
         encoder.SetIndent("", "  ")
     }
 

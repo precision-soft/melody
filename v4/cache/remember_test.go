@@ -807,8 +807,8 @@ func (instance testValueKindCache) Get(runtimeInstance containercontract.Runtime
     return instance.inner.Get(runtimeInstance, key, target)
 }
 
-func (instance testValueKindCache) Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration, _ cachecontract.SetOptions) error {
-    return instance.inner.Set(runtimeInstance, key, value, ttl, cachecontract.SetOptions{})
+func (instance testValueKindCache) Set(runtimeInstance containercontract.Runtime, key string, value any, ttl bound.Duration, options cachecontract.SetOptions) error {
+    return instance.inner.Set(runtimeInstance, key, value, ttl, options)
 }
 
 func (instance testValueKindCache) Delete(runtimeInstance containercontract.Runtime, key string) error {
@@ -831,8 +831,8 @@ func (instance testValueKindCache) RoundTrip(value any, target any) error {
     return instance.inner.RoundTrip(value, target)
 }
 
-func (instance testValueKindCache) SetMultiple(runtimeInstance containercontract.Runtime, items map[string]any, ttl bound.Duration, _ cachecontract.SetOptions) error {
-    return instance.inner.SetMultiple(runtimeInstance, items, ttl, cachecontract.SetOptions{})
+func (instance testValueKindCache) SetMultiple(runtimeInstance containercontract.Runtime, items map[string]any, ttl bound.Duration, options cachecontract.SetOptions) error {
+    return instance.inner.SetMultiple(runtimeInstance, items, ttl, options)
 }
 
 func (instance testValueKindCache) DeleteMultiple(runtimeInstance containercontract.Runtime, keys []string) error {
@@ -951,8 +951,8 @@ func (instance *testPanickingSetCache) RoundTrip(value any, target any) error {
     return instance.inner.RoundTrip(value, target)
 }
 
-func (instance *testPanickingSetCache) SetMultiple(runtimeInstance containercontract.Runtime, items map[string]any, ttl bound.Duration, _ cachecontract.SetOptions) error {
-    return instance.inner.SetMultiple(runtimeInstance, items, ttl, cachecontract.SetOptions{})
+func (instance *testPanickingSetCache) SetMultiple(runtimeInstance containercontract.Runtime, items map[string]any, ttl bound.Duration, options cachecontract.SetOptions) error {
+    return instance.inner.SetMultiple(runtimeInstance, items, ttl, options)
 }
 
 func (instance *testPanickingSetCache) DeleteMultiple(runtimeInstance containercontract.Runtime, keys []string) error {

@@ -288,7 +288,7 @@ func suggestCliCommand(
         "cli:suggest",
         output.MetaConfig{
             Arguments: []string{commandName},
-            Option:    option,
+            Options:    option,
             StartedAt: startedAt,
         },
     )

@@ -6,6 +6,6 @@ type Printer interface {
     Print(
         writer io.Writer,
         envelope Envelope,
-        option Options,
+        options Options,
     ) error
 }

@@ -96,7 +96,7 @@ func NewExclusiveCommand(
         command:  command,
         locker:   locker,
         lockName: config.LockName,
-        exclusiveConfig: ExclusiveOptions{
+        exclusiveOptions: ExclusiveOptions{
             Ttl:              ttl.Limit(),
             StopRenewalLimit: config.StopRenewalLimit,
             ProbeInterval:    config.ProbeInterval,
@@ -110,7 +110,7 @@ type ExclusiveCommand struct {
     locker          lockcontract.Locker
     /* empty is the default name, resolved per run */
     lockName        string
-    exclusiveConfig ExclusiveOptions
+    exclusiveOptions ExclusiveOptions
 }
 
 /* resolvedLockName answers the declared name verbatim, else the default under the runtime's namespace */
@@ -144,7 +144,7 @@ func (instance *ExclusiveCommand) Run(
         runtimeInstance,
         instance.locker,
         lockName,
-        instance.exclusiveConfig,
+        instance.exclusiveOptions,
         func(childRuntime containercontract.Runtime) error {
             return instance.command.Run(childRuntime, commandContext)
         },

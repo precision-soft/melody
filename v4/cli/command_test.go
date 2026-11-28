@@ -514,7 +514,7 @@ func newEnvelopeErrorCommand() *testCommand {
         descriptionValue: "hello command",
         flagsValue:       output.DebugFlags(),
         runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
-            option, normalizeOptionErr := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
+            option, normalizeOptionErr := output.NormalizeOptions(output.ParseOptionsFromCommand(commandContext))
             if nil != normalizeOptionErr {
                 return normalizeOptionErr
             }
@@ -523,7 +523,7 @@ func newEnvelopeErrorCommand() *testCommand {
                 output.NewMeta(
                     "hello",
                     output.MetaConfig{
-                        Option:    option,
+                        Options:    option,
                         StartedAt: time.Now(),
                     },
                 ),

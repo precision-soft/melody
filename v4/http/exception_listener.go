@@ -153,11 +153,11 @@ type ExceptionRenderOptions struct {
 }
 
 /* RenderExceptionResponse renders the answer an error earns: an error exception.AnswersUnavailable reads as unavailable is 503 service unavailable with Retry-After, whatever status lies beneath the mark; otherwise the status and message of the http exception its chain carries, its client-facing code, key and parameters, its validation errors projected for the client, and in debug mode the context and cause of the nearest melody error; any other error is a 500. The built-in listener answers with it and the kernel's final step renders with it; an application listener that wants the framework body for some errors calls it. */
-func RenderExceptionResponse(runtimeInstance containercontract.Runtime, request httpcontract.Request, err error, renderConfig ExceptionRenderOptions) httpcontract.Response {
-    debugMode := renderConfig.DebugMode
+func RenderExceptionResponse(runtimeInstance containercontract.Runtime, request httpcontract.Request, err error, renderOptions ExceptionRenderOptions) httpcontract.Response {
+    debugMode := renderOptions.DebugMode
 
     /* resolved for every error, so a refused delay meets its caller at the first error rendered rather than at the first outage */
-    unavailableRetryAfter, retryAfterErr := config.ResolveUnavailableRetryAfter(renderConfig.UnavailableRetryAfter, "ExceptionRenderOptions.UnavailableRetryAfter")
+    unavailableRetryAfter, retryAfterErr := config.ResolveUnavailableRetryAfter(renderOptions.UnavailableRetryAfter, "ExceptionRenderOptions.UnavailableRetryAfter")
     if nil != retryAfterErr {
         exception.Panic(exception.FromError(retryAfterErr))
     }

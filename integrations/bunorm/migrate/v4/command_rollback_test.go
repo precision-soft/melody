@@ -268,7 +268,7 @@ func TestRollbackCommand_HandsItsPostureToTheMigrationsThroughTheContext(t *test
             return nil
         },
         Down: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
-            _, carriedByTheContext = runnerOptionFromContext(ctx)
+            _, carriedByTheContext = runnerOptionsFromContext(ctx)
 
             return RunQueries(ctx, database, "down", "20240101000000", []Query{{Name: "drop-users", Sql: "DROP TABLE users"}}, RunnerOptions{})
         },

@@ -123,14 +123,14 @@ func TestRule_EveryFrameworkRuleCarriesItsDocumentedValues(t *testing.T) {
         Minimum: time.Millisecond,
         UnlimitedAdmitted: true,
     })
-    expectRule(t, "output.OptionLimitRule", output.OptionLimitRule(), bound.Rule[int]{
+    expectRule(t, "output.OptionsLimitRule", output.OptionsLimitRule(), bound.Rule[int]{
         Name: "Options.Limit",
         DefaultUnlimited: true,
     })
-    expectRule(t, "output.OptionOffsetRule", output.OptionOffsetRule(), bound.Rule[int]{
+    expectRule(t, "output.OptionsOffsetRule", output.OptionsOffsetRule(), bound.Rule[int]{
         Name: "Options.Offset",
     })
-    expectRule(t, "output.OptionTableMaxWidthRule", output.OptionTableMaxWidthRule(), bound.Rule[int]{
+    expectRule(t, "output.OptionsTableMaxWidthRule", output.OptionsTableMaxWidthRule(), bound.Rule[int]{
         Name: "Options.TableMaxWidth",
         Default: 120,
         Minimum: 1,

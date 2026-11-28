@@ -9,14 +9,14 @@ import (
 func Render(
     writer io.Writer,
     envelope Envelope,
-    option Options,
+    options Options,
 ) error {
-    printer, selectPrinterErr := SelectPrinter(option)
+    printer, selectPrinterErr := SelectPrinter(options)
     if nil != selectPrinterErr {
         return selectPrinterErr
     }
 
-    printErr := printer.Print(writer, envelope, option)
+    printErr := printer.Print(writer, envelope, options)
     if nil != printErr {
         /* the envelope's own failure survives a printing failure, which would otherwise replace the reason the command failed */
         reportedErr := envelopeExitError(envelope)

@@ -152,9 +152,9 @@ func (instance *ttlRecordingCache) RoundTrip(value any, target any) error {
     return assignCachedTestValue("", target, value)
 }
 
-func (instance *ttlRecordingCache) SetMultiple(runtimeInstance melodycontainercontract.Runtime, items map[string]any, ttl melodybound.Duration, _ melodycachecontract.SetOptions) error {
+func (instance *ttlRecordingCache) SetMultiple(runtimeInstance melodycontainercontract.Runtime, items map[string]any, ttl melodybound.Duration, options melodycachecontract.SetOptions) error {
     for key, value := range items {
-        if setErr := instance.Set(runtimeInstance, key, value, ttl, melodycachecontract.SetOptions{}); nil != setErr {
+        if setErr := instance.Set(runtimeInstance, key, value, ttl, options); nil != setErr {
             return setErr
         }
     }

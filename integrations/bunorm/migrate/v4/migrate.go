@@ -42,13 +42,13 @@ func emptyMigrationWarnerFromContext(ctx context.Context) func(message string) {
     return warn
 }
 
-/* withRunnerOption returns a context carrying the option RunQueries reads first; the migrate commands derive it from their parsed flags and run the migrator under it. */
-func withRunnerOption(ctx context.Context, option RunnerOptions) context.Context {
-    return context.WithValue(ctx, runnerOptionContextKey{}, option)
+/* withRunnerOptions returns a context carrying the option RunQueries reads first; the migrate commands derive it from their parsed flags and run the migrator under it. */
+func withRunnerOptions(ctx context.Context, options RunnerOptions) context.Context {
+    return context.WithValue(ctx, runnerOptionContextKey{}, options)
 }
 
-/* runnerOptionFromContext answers the option a migrate command put on the context, and false when the context carries none — a migration invoked outside any command, or one that dropped the context it receives. */
-func runnerOptionFromContext(ctx context.Context) (RunnerOptions, bool) {
+/* runnerOptionsFromContext answers the option a migrate command put on the context, and false when the context carries none — a migration invoked outside any command, or one that dropped the context it receives. */
+func runnerOptionsFromContext(ctx context.Context) (RunnerOptions, bool) {
     if nil == ctx {
         return RunnerOptions{}, false
     }
@@ -59,11 +59,11 @@ func runnerOptionFromContext(ctx context.Context) (RunnerOptions, bool) {
 }
 
 /* RunQueries executes the queries in order, printing each under the direction and the migration's name, and stops at the first failure naming the step. The posture is the option's where set, the command's otherwise: a migration passes on the context it is given, which carries the command's writer and colour, and one that drops it prints to standard output. It takes that context, never a runtime, since its caller is a bun migration function, whose signature is bun's. */
-func RunQueries(ctx context.Context, db *bun.DB, direction string, migrationName string, queries []Query, option RunnerOptions) error {
-    commandOption, _ := runnerOptionFromContext(ctx)
+func RunQueries(ctx context.Context, db *bun.DB, direction string, migrationName string, queries []Query, options RunnerOptions) error {
+    commandOption, _ := runnerOptionsFromContext(ctx)
 
     /* an option that names no writer takes the one the command prints under, so a migration that passes its own option to set the colour alone does not print its per-query lines past the writer its command chose, into the middle of a --format=json document */
-    writer := option.Writer
+    writer := options.Writer
     if nil == writer {
         writer = commandOption.Writer
     }
@@ -71,7 +71,7 @@ func RunQueries(ctx context.Context, db *bun.DB, direction string, migrationName
         writer = os.Stdout
     }
     total := len(queries)
-    printer := &migrationPrinter{writer: writer, noColor: option.NoColor || commandOption.NoColor, warn: emptyMigrationWarnerFromContext(ctx)}
+    printer := &migrationPrinter{writer: writer, noColor: options.NoColor || commandOption.NoColor, warn: emptyMigrationWarnerFromContext(ctx)}
 
     /* an empty set is almost always a builder that produced nothing rather than a migration with nothing to do, and the migrator marks the migration applied on success — burying it, since an applied migration never runs again. The run still succeeds, so the caller decides; what it must not do is read like the queries ran. */
     if 0 == total {
@@ -104,13 +104,13 @@ func RunQueries(ctx context.Context, db *bun.DB, direction string, migrationName
 }
 
 /* Up is RunQueries in the up direction, on the context of the bun migration function that calls it. */
-func Up(ctx context.Context, db *bun.DB, migrationName string, queries []Query, option RunnerOptions) error {
-    return RunQueries(ctx, db, "up", migrationName, queries, option)
+func Up(ctx context.Context, db *bun.DB, migrationName string, queries []Query, options RunnerOptions) error {
+    return RunQueries(ctx, db, "up", migrationName, queries, options)
 }
 
 /* Down is RunQueries in the down direction, on the context of the bun migration function that calls it. */
-func Down(ctx context.Context, db *bun.DB, migrationName string, queries []Query, option RunnerOptions) error {
-    return RunQueries(ctx, db, "down", migrationName, queries, option)
+func Down(ctx context.Context, db *bun.DB, migrationName string, queries []Query, options RunnerOptions) error {
+    return RunQueries(ctx, db, "down", migrationName, queries, options)
 }
 
 type migrationPrinter struct {

@@ -165,7 +165,7 @@ func (instance *baseCommand) managerFlag() clicontract.Flag {
 }
 
 func (instance *baseCommand) optionFromCommand(commandContext *clicontract.CommandContext) (output.Options, error) {
-    return output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
+    return output.NormalizeOptions(output.ParseOptionsFromCommand(commandContext))
 }
 
 func (instance *baseCommand) resolveRegistry(runtimeInstance containercontract.Runtime) (*bunorm.ManagerRegistry, error) {

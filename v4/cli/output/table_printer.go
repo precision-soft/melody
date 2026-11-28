@@ -80,12 +80,12 @@ func (instance *errorTrackingWriter) Write(payload []byte) (int, error) {
 func (instance *TablePrinter) Print(
     writer io.Writer,
     envelope Envelope,
-    option Options,
+    options Options,
 ) error {
     tracking := &errorTrackingWriter{writer: writer}
     writer = tracking
 
-    if false == option.Quiet {
+    if false == options.Quiet {
         _, _ = fmt.Fprintf(writer, "COMMAND: %s\n", escapeLine(envelope.Meta.Command))
         _, _ = fmt.Fprintf(
             writer,
@@ -131,7 +131,7 @@ func (instance *TablePrinter) Print(
         for _, warning := range envelope.Warnings {
             _, _ = fmt.Fprintf(writer, "- %s\n", escapeLine(warning.Message))
 
-            if true == option.Verbose && nil != warning.Details && 0 != len(warning.Details) {
+            if true == options.Verbose && nil != warning.Details && 0 != len(warning.Details) {
                 keys := make([]string, 0, len(warning.Details))
                 for key := range warning.Details {
                     keys = append(keys, key)

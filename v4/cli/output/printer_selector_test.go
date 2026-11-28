@@ -74,12 +74,12 @@ func TestSelectPrinter_RefusesATableWidthBelowOneWhateverTheFormat(t *testing.T)
     }
 }
 
-func mustSelectPrinter(t *testing.T, option Options) Printer {
+func mustSelectPrinter(t *testing.T, options Options) Printer {
     t.Helper()
 
-    printer, selectErr := SelectPrinter(option)
+    printer, selectErr := SelectPrinter(options)
     if nil != selectErr {
-        t.Fatalf("expected a printer for %#v, got %v", option, selectErr)
+        t.Fatalf("expected a printer for %#v, got %v", options, selectErr)
     }
 
     return printer

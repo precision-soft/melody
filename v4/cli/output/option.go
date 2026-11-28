@@ -24,7 +24,7 @@ type Options struct {
     ApplicationVersion string
 }
 
-func OptionLimitRule() bound.Rule[int] {
+func OptionsLimitRule() bound.Rule[int] {
     return bound.Rule[int]{
         Name:             "Options.Limit",
         DefaultUnlimited: true,
@@ -32,7 +32,7 @@ func OptionLimitRule() bound.Rule[int] {
     }
 }
 
-func OptionOffsetRule() bound.Rule[int] {
+func OptionsOffsetRule() bound.Rule[int] {
     return bound.Rule[int]{
         Name:    "Options.Offset",
         Default: 0,
@@ -40,7 +40,7 @@ func OptionOffsetRule() bound.Rule[int] {
     }
 }
 
-func OptionTableMaxWidthRule() bound.Rule[int] {
+func OptionsTableMaxWidthRule() bound.Rule[int] {
     return bound.Rule[int]{
         Name:              "Options.TableMaxWidth",
         Default:           defaultTableMaxWidth,

@@ -867,16 +867,17 @@ func sessionIdLogReference(sessionId string) string {
 
 /* DiscardedBodyOptions is what one CloseDiscardedResponseBody declares beside the response. */
 type DiscardedBodyOptions struct {
-    /* Logger receives a failed close; left out, the emergency logger does, and a typed nil panics naming this field. */
+    /* Logger receives a failed close; left out, the emergency logger does, and a typed nil panics naming this field after the body is closed. */
     Logger loggingcontract.Logger
 }
 
 const discardedBodyLoggerField = "DiscardedBodyOptions.Logger"
 
-/* CloseDiscardedResponseBody closes an unserved response's body, logging a failure to the options' logger, the emergency logger when none is handed; a typed-nil logger is a wiring defect and panics naming the field before the body is touched. */
+/* CloseDiscardedResponseBody closes an unserved response's body, logging a failure to the options' logger, the emergency logger when none is handed; a typed-nil logger is a wiring defect and panics naming the field once the body is closed. */
 func CloseDiscardedResponseBody(response httpcontract.Response, options DiscardedBodyOptions) {
     logger, loggerErr := logging.ResolveOptionalLogger(options.Logger, "discarded response body", discardedBodyLoggerField)
     if nil != loggerErr {
+        closeDiscardedResponseBody(response, nil)
         exception.Panic(exception.FromError(loggerErr))
     }
 

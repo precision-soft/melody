@@ -349,7 +349,7 @@ func (instance *versionRecordingCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *versionRecordingCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
-    instance.observed = output.ParseOptionFromCommand(commandContext).ApplicationVersion
+    instance.observed = output.ParseOptionsFromCommand(commandContext).ApplicationVersion
 
     return nil
 }
@@ -2487,7 +2487,7 @@ func (instance *outputWritingProbeCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *outputWritingProbeCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
-    option, normalizeOptionErr := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
+    option, normalizeOptionErr := output.NormalizeOptions(output.ParseOptionsFromCommand(commandContext))
     if nil != normalizeOptionErr {
         return normalizeOptionErr
     }
@@ -3137,7 +3137,7 @@ func driveOneIdleLoopMinute(t *testing.T, reportIdle bool) (*bytes.Buffer, chan 
         return idleMinute
     }
 
-    option, normalizeOptionErr := output.NormalizeOption(output.Options{Format: output.FormatJson})
+    option, normalizeOptionErr := output.NormalizeOptions(output.Options{Format: output.FormatJson})
     if nil != normalizeOptionErr {
         t.Fatalf("expected the json option admitted, got %v", normalizeOptionErr)
     }
@@ -3145,7 +3145,7 @@ func driveOneIdleLoopMinute(t *testing.T, reportIdle bool) (*bytes.Buffer, chan 
     buffer := &bytes.Buffer{}
     reporting := &runReporting{
         commandContext: parsedContextValues{WriterValue: buffer}.parse(),
-        option:         option,
+        options:         option,
         reportIdle:     reportIdle,
     }
 

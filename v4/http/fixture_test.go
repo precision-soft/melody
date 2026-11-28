@@ -8,6 +8,7 @@ import (
     "net"
     nethttp "net/http"
     "net/http/httptest"
+    "os"
     "strconv"
     "strings"
     "sync"
@@ -777,4 +778,33 @@ func subscribeTestTopic(t *testing.T, hub *ServerSentEventHub, topic string) *Se
     }
 
     return subscriber
+}
+
+/* the emergency logger binds os.Stderr when it is created, so it is recreated over the pipe and closed again after */
+func captureEmergencyLogger(t *testing.T, action func()) string {
+    t.Helper()
+
+    readEnd, writeEnd, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("pipe: %v", pipeErr)
+    }
+
+    savedStandardError := os.Stderr
+    logging.CloseEmergencyLogger()
+    os.Stderr = writeEnd
+    _ = logging.EmergencyLogger()
+    os.Stderr = savedStandardError
+
+    action()
+
+    logging.CloseEmergencyLogger()
+    _ = writeEnd.Close()
+
+    written, readErr := io.ReadAll(readEnd)
+    _ = readEnd.Close()
+    if nil != readErr {
+        t.Fatalf("read: %v", readErr)
+    }
+
+    return string(written)
 }
