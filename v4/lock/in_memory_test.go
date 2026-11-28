@@ -30,8 +30,8 @@ func TestInMemoryLocker_MutualExclusionAndRelease(t *testing.T) {
     locker := NewInMemoryLocker(InMemoryLockerConfig{})
     runtimeInstance := testRuntime()
 
-    first := mustCreateLock(locker.CreateLock("picking:1", bound.Of(time.Minute)))
-    second := mustCreateLock(locker.CreateLock("picking:1", bound.Of(time.Minute)))
+    first := mustCreateLock(locker.CreateLock("picking:1", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
+    second := mustCreateLock(locker.CreateLock("picking:1", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
 
     acquired, acquireErr := first.Acquire(runtimeInstance)
     if nil != acquireErr || false == acquired {
@@ -58,13 +58,13 @@ func TestInMemoryLocker_ExpiryReleasesLock(t *testing.T) {
     locker := NewInMemoryLocker(InMemoryLockerConfig{Clock: frozen})
     runtimeInstance := testRuntime()
 
-    held := mustCreateLock(locker.CreateLock("picking:2", bound.Of(5*time.Second)))
+    held := mustCreateLock(locker.CreateLock("picking:2", lockcontract.CreateLockOptions{Ttl: bound.Of(5*time.Second)}))
     acquired, _ := held.Acquire(runtimeInstance)
     if false == acquired {
         t.Fatalf("expected initial acquire to succeed")
     }
 
-    contender := mustCreateLock(locker.CreateLock("picking:2", bound.Of(5*time.Second)))
+    contender := mustCreateLock(locker.CreateLock("picking:2", lockcontract.CreateLockOptions{Ttl: bound.Of(5*time.Second)}))
     stillHeld, _ := contender.Acquire(runtimeInstance)
     if true == stillHeld {
         t.Fatalf("expected contender to fail before expiry")
@@ -83,20 +83,20 @@ func TestInMemoryLocker_RefreshFailsWhenLockIsNoLongerHeld(t *testing.T) {
     locker := NewInMemoryLocker(InMemoryLockerConfig{Clock: frozen})
     runtimeInstance := testRuntime()
 
-    held := mustCreateLock(locker.CreateLock("picking:4", bound.Of(5*time.Second)))
+    held := mustCreateLock(locker.CreateLock("picking:4", lockcontract.CreateLockOptions{Ttl: bound.Of(5*time.Second)}))
 
     acquired, _ := held.Acquire(runtimeInstance)
     if false == acquired {
         t.Fatalf("expected initial acquire to succeed")
     }
 
-    if refreshErr := held.Refresh(runtimeInstance, bound.Of(5*time.Second)); nil != refreshErr {
+    if refreshErr := held.Refresh(runtimeInstance, lockcontract.RefreshOptions{Ttl: bound.Of(5*time.Second)}); nil != refreshErr {
         t.Fatalf("expected refresh while held to succeed: %v", refreshErr)
     }
 
     frozen.Advance(30 * time.Second)
 
-    if refreshErr := held.Refresh(runtimeInstance, bound.Of(5*time.Second)); nil == refreshErr {
+    if refreshErr := held.Refresh(runtimeInstance, lockcontract.RefreshOptions{Ttl: bound.Of(5*time.Second)}); nil == refreshErr {
         t.Fatalf("expected refresh to fail once the lock has expired")
     }
 }
@@ -105,7 +105,7 @@ func TestInMemoryLocker_RefreshFailsAfterRelease(t *testing.T) {
     locker := NewInMemoryLocker(InMemoryLockerConfig{})
     runtimeInstance := testRuntime()
 
-    held := mustCreateLock(locker.CreateLock("picking:5", bound.Of(time.Minute)))
+    held := mustCreateLock(locker.CreateLock("picking:5", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
 
     acquired, _ := held.Acquire(runtimeInstance)
     if false == acquired {
@@ -116,7 +116,7 @@ func TestInMemoryLocker_RefreshFailsAfterRelease(t *testing.T) {
         t.Fatalf("unexpected release error: %v", releaseErr)
     }
 
-    if refreshErr := held.Refresh(runtimeInstance, bound.Of(time.Minute)); nil == refreshErr {
+    if refreshErr := held.Refresh(runtimeInstance, lockcontract.RefreshOptions{Ttl: bound.Of(time.Minute)}); nil == refreshErr {
         t.Fatalf("expected refresh to fail after release")
     }
 }
@@ -126,8 +126,8 @@ func TestInMemoryLocker_PurgeExpiredDropsElapsedHolders(t *testing.T) {
     locker := NewInMemoryLocker(InMemoryLockerConfig{Clock: frozen})
     runtimeInstance := testRuntime()
 
-    short := mustCreateLock(locker.CreateLock("picking:short", bound.Of(5*time.Second)))
-    long := mustCreateLock(locker.CreateLock("picking:long", bound.Of(time.Hour)))
+    short := mustCreateLock(locker.CreateLock("picking:short", lockcontract.CreateLockOptions{Ttl: bound.Of(5*time.Second)}))
+    long := mustCreateLock(locker.CreateLock("picking:long", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Hour)}))
 
     if acquired, _ := short.Acquire(runtimeInstance); false == acquired {
         t.Fatalf("expected short acquire to succeed")
@@ -142,7 +142,7 @@ func TestInMemoryLocker_PurgeExpiredDropsElapsedHolders(t *testing.T) {
         t.Fatalf("expected exactly one expired holder to be purged, got %d", purged)
     }
 
-    if refreshErr := long.Refresh(runtimeInstance, bound.Of(time.Hour)); nil != refreshErr {
+    if refreshErr := long.Refresh(runtimeInstance, lockcontract.RefreshOptions{Ttl: bound.Of(time.Hour)}); nil != refreshErr {
         t.Fatalf("expected the unexpired lock to remain held: %v", refreshErr)
     }
 }
@@ -151,7 +151,7 @@ func TestInMemoryLocker_ReacquireIsReentrantForSameLock(t *testing.T) {
     locker := NewInMemoryLocker(InMemoryLockerConfig{})
     runtimeInstance := testRuntime()
 
-    held := mustCreateLock(locker.CreateLock("picking:3", bound.Of(time.Minute)))
+    held := mustCreateLock(locker.CreateLock("picking:3", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
 
     firstAcquire, _ := held.Acquire(runtimeInstance)
     secondAcquire, _ := held.Acquire(runtimeInstance)
@@ -173,8 +173,8 @@ func TestInMemoryLocker_CounterIsAlignmentSafeAtomic(t *testing.T) {
 
     locker := NewInMemoryLocker(InMemoryLockerConfig{})
 
-    first := mustCreateLock(locker.CreateLock("token:1", bound.Of(time.Minute))).(*inMemoryLock)
-    second := mustCreateLock(locker.CreateLock("token:2", bound.Of(time.Minute))).(*inMemoryLock)
+    first := mustCreateLock(locker.CreateLock("token:1", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)})).(*inMemoryLock)
+    second := mustCreateLock(locker.CreateLock("token:2", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)})).(*inMemoryLock)
     if second.token != first.token+1 {
         t.Fatalf("expected CreateLock to hand out monotonic tokens, got %d then %d", first.token, second.token)
     }
@@ -184,14 +184,14 @@ func TestInMemoryLock_RefreshRejectsNonPositiveTtl(t *testing.T) {
     locker := NewInMemoryLocker(InMemoryLockerConfig{})
     runtimeInstance := testRuntime()
 
-    handle := mustCreateLock(locker.CreateLock("job", bound.Of(time.Minute)))
+    handle := mustCreateLock(locker.CreateLock("job", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
 
     acquired, acquireErr := handle.Acquire(runtimeInstance)
     if nil != acquireErr || false == acquired {
         t.Fatalf("expected to acquire the lock, got %v / %v", acquired, acquireErr)
     }
 
-    if refreshErr := handle.Refresh(runtimeInstance, bound.Of(time.Duration(0))); nil == refreshErr {
+    if refreshErr := handle.Refresh(runtimeInstance, lockcontract.RefreshOptions{Ttl: bound.Of(time.Duration(0))}); nil == refreshErr {
         t.Fatalf("expected refresh with a ttl below the minimum to be rejected")
     }
 }
@@ -201,12 +201,12 @@ func TestInMemoryLocker_AnAbsentTtlLapsesAfterThirtySeconds(t *testing.T) {
     locker := NewInMemoryLocker(InMemoryLockerConfig{Clock: frozen})
     runtimeInstance := testRuntime()
 
-    held := mustCreateLock(locker.CreateLock("picking:absent", bound.Duration{}))
+    held := mustCreateLock(locker.CreateLock("picking:absent", lockcontract.CreateLockOptions{}))
     if acquired, acquireErr := held.Acquire(runtimeInstance); nil != acquireErr || false == acquired {
         t.Fatalf("expected the absent ttl to be acquired: %v %v", acquired, acquireErr)
     }
 
-    contender := mustCreateLock(locker.CreateLock("picking:absent", bound.Of(time.Minute)))
+    contender := mustCreateLock(locker.CreateLock("picking:absent", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
 
     frozen.Advance(30*time.Second - time.Nanosecond)
     if acquired, _ := contender.Acquire(runtimeInstance); true == acquired {
@@ -222,19 +222,19 @@ func TestInMemoryLocker_AnAbsentTtlLapsesAfterThirtySeconds(t *testing.T) {
 func TestInMemoryLocker_CreateLockRefusesAnUnlimitedTtlNamingIt(t *testing.T) {
     locker := NewInMemoryLocker(InMemoryLockerConfig{})
 
-    lock, createErr := locker.CreateLock("picking:unlimited", bound.UnlimitedDuration())
-    if nil != lock || false == errors.Is(createErr, lockcontract.ErrUnlimitedTtlRefused) || "Locker.CreateLock.ttl" != exception.LogContext(createErr, exception.LogContextConfig{})["field"] {
+    lock, createErr := locker.CreateLock("picking:unlimited", lockcontract.CreateLockOptions{Ttl: bound.UnlimitedDuration()})
+    if nil != lock || false == errors.Is(createErr, lockcontract.ErrUnlimitedTtlRefused) || "CreateLockOptions.Ttl" != exception.LogContext(createErr, exception.LogContextConfig{})["field"] {
         t.Fatalf("expected an unlimited ttl to be refused naming it, got %v %v", lock, createErr)
     }
 
-    if acquired, acquireErr := mustCreateLock(locker.CreateLock("picking:unlimited", bound.Of(time.Minute))).Acquire(testRuntime()); nil != acquireErr || false == acquired {
+    if acquired, acquireErr := mustCreateLock(locker.CreateLock("picking:unlimited", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)})).Acquire(testRuntime()); nil != acquireErr || false == acquired {
         t.Fatalf("expected the refused lock to have taken nothing: %v %v", acquired, acquireErr)
     }
 }
 
 func TestInMemoryLocker_CreateLockRefusesATtlBelowTheMinimum(t *testing.T) {
-    lock, createErr := NewInMemoryLocker(InMemoryLockerConfig{}).CreateLock("picking:tiny", bound.Of(time.Microsecond))
-    if nil != lock || nil == createErr || "Locker.CreateLock.ttl" != exception.LogContext(createErr, exception.LogContextConfig{})["field"] {
+    lock, createErr := NewInMemoryLocker(InMemoryLockerConfig{}).CreateLock("picking:tiny", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Microsecond)})
+    if nil != lock || nil == createErr || "CreateLockOptions.Ttl" != exception.LogContext(createErr, exception.LogContextConfig{})["field"] {
         t.Fatalf("expected a ttl under 1ms to be refused naming it, got %v %v", lock, createErr)
     }
 }
@@ -244,28 +244,88 @@ func TestInMemoryLocker_AnUnlimitedRefreshIsRefusedAndTheLeaseKept(t *testing.T)
     locker := NewInMemoryLocker(InMemoryLockerConfig{Clock: frozen})
     runtimeInstance := testRuntime()
 
-    held := mustCreateLock(locker.CreateLock("picking:refresh-unlimited", bound.Of(time.Minute)))
+    held := mustCreateLock(locker.CreateLock("picking:refresh-unlimited", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
     if acquired, _ := held.Acquire(runtimeInstance); false == acquired {
         t.Fatal("expected the initial acquire to succeed")
     }
 
-    refreshErr := held.Refresh(runtimeInstance, bound.UnlimitedDuration())
-    if nil == refreshErr || "Lock.Refresh.ttl" != exception.LogContext(refreshErr, exception.LogContextConfig{})["field"] {
+    refreshErr := held.Refresh(runtimeInstance, lockcontract.RefreshOptions{Ttl: bound.UnlimitedDuration()})
+    if nil == refreshErr || "RefreshOptions.Ttl" != exception.LogContext(refreshErr, exception.LogContextConfig{})["field"] {
         t.Fatalf("expected an unlimited refresh to be refused naming the refresh ttl, got %v", refreshErr)
     }
 
-    if acquired, _ := mustCreateLock(locker.CreateLock("picking:refresh-unlimited", bound.Of(time.Minute))).Acquire(runtimeInstance); true == acquired {
+    if acquired, _ := mustCreateLock(locker.CreateLock("picking:refresh-unlimited", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)})).Acquire(runtimeInstance); true == acquired {
         t.Fatal("expected the refused refresh to leave the lock held")
     }
 
     frozen.Advance(time.Minute - time.Nanosecond)
-    if acquired, _ := mustCreateLock(locker.CreateLock("picking:refresh-unlimited", bound.Of(time.Minute))).Acquire(runtimeInstance); true == acquired {
+    if acquired, _ := mustCreateLock(locker.CreateLock("picking:refresh-unlimited", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)})).Acquire(runtimeInstance); true == acquired {
         t.Fatal("expected the lock to be held until its own minute lapses")
     }
 
     frozen.Advance(time.Nanosecond)
-    if acquired, _ := mustCreateLock(locker.CreateLock("picking:refresh-unlimited", bound.Of(time.Minute))).Acquire(runtimeInstance); false == acquired {
+    if acquired, _ := mustCreateLock(locker.CreateLock("picking:refresh-unlimited", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)})).Acquire(runtimeInstance); false == acquired {
         t.Fatal("expected the refused refresh to leave the lease to lapse at its own minute")
+    }
+}
+
+func TestInMemoryLock_RefreshWithoutATtlKeepsTheLocksOwn(t *testing.T) {
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
+    locker := NewInMemoryLocker(InMemoryLockerConfig{Clock: frozen})
+    runtimeInstance := testRuntime()
+
+    held := mustCreateLock(locker.CreateLock("picking:refresh-absent", lockcontract.CreateLockOptions{Ttl: bound.Of(5 * time.Minute)}))
+    if acquired, _ := held.Acquire(runtimeInstance); false == acquired {
+        t.Fatal("expected the initial acquire to succeed")
+    }
+
+    frozen.Advance(time.Minute)
+    if refreshErr := held.Refresh(runtimeInstance, lockcontract.RefreshOptions{}); nil != refreshErr {
+        t.Fatalf("expected the refresh without a ttl to succeed, got %v", refreshErr)
+    }
+
+    contender := mustCreateLock(locker.CreateLock("picking:refresh-absent", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
+
+    frozen.Advance(31 * time.Second)
+    if acquired, _ := contender.Acquire(runtimeInstance); true == acquired {
+        t.Fatal("expected the refresh without a ttl to write more than the rule's 30s")
+    }
+
+    frozen.Advance(5*time.Minute - 31*time.Second - time.Nanosecond)
+    if acquired, _ := contender.Acquire(runtimeInstance); true == acquired {
+        t.Fatal("expected the refreshed lock to be held until its own 5m lapse")
+    }
+
+    frozen.Advance(time.Nanosecond)
+    if acquired, acquireErr := contender.Acquire(runtimeInstance); nil != acquireErr || false == acquired {
+        t.Fatalf("expected the refreshed lock to lapse 5m after the refresh: %v %v", acquired, acquireErr)
+    }
+}
+
+func TestInMemoryLock_RefreshWithATtlWritesIt(t *testing.T) {
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
+    locker := NewInMemoryLocker(InMemoryLockerConfig{Clock: frozen})
+    runtimeInstance := testRuntime()
+
+    held := mustCreateLock(locker.CreateLock("picking:refresh-explicit", lockcontract.CreateLockOptions{Ttl: bound.Of(5 * time.Minute)}))
+    if acquired, _ := held.Acquire(runtimeInstance); false == acquired {
+        t.Fatal("expected the initial acquire to succeed")
+    }
+
+    if refreshErr := held.Refresh(runtimeInstance, lockcontract.RefreshOptions{Ttl: bound.Of(2 * time.Second)}); nil != refreshErr {
+        t.Fatalf("expected the refresh with a ttl to succeed, got %v", refreshErr)
+    }
+
+    contender := mustCreateLock(locker.CreateLock("picking:refresh-explicit", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
+
+    frozen.Advance(2*time.Second - time.Nanosecond)
+    if acquired, _ := contender.Acquire(runtimeInstance); true == acquired {
+        t.Fatal("expected the lock to be held until the refreshed 2s lapse")
+    }
+
+    frozen.Advance(time.Nanosecond)
+    if acquired, acquireErr := contender.Acquire(runtimeInstance); nil != acquireErr || false == acquired {
+        t.Fatalf("expected the refresh's 2s to replace the lock's 5m: %v %v", acquired, acquireErr)
     }
 }
 
@@ -322,7 +382,7 @@ func TestNewInMemoryLocker_ZeroConfigUsesTheSystemClockAndRefusesATypedNilClock(
 
     every := NewInMemoryLocker(InMemoryLockerConfig{PurgeInterval: bound.Of(1)})
     runtimeInstance := testRuntime()
-    expired := mustCreateLock(every.CreateLock("picking:expired", bound.Of(time.Second)))
+    expired := mustCreateLock(every.CreateLock("picking:expired", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Second)}))
     if acquired, acquireErr := expired.Acquire(runtimeInstance); nil != acquireErr || false == acquired {
         t.Fatalf("expected the first acquire to succeed, got %v %v", acquired, acquireErr)
     }
@@ -333,7 +393,7 @@ func TestNewInMemoryLocker_ZeroConfigUsesTheSystemClockAndRefusesATypedNilClock(
     every.holders["picking:expired"] = holder
     every.mutex.Unlock()
 
-    if acquired, acquireErr := mustCreateLock(every.CreateLock("picking:other", bound.Of(time.Second))).Acquire(runtimeInstance); nil != acquireErr || false == acquired {
+    if acquired, acquireErr := mustCreateLock(every.CreateLock("picking:other", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Second)})).Acquire(runtimeInstance); nil != acquireErr || false == acquired {
         t.Fatalf("expected the second acquire to succeed, got %v %v", acquired, acquireErr)
     }
 

@@ -41,7 +41,7 @@ func TestPlatformCheck_ReportsTheLockHeldElsewhere(t *testing.T) {
     locker := melodylock.NewInMemoryLocker(melodylock.InMemoryLockerConfig{})
     runtimeInstance, _ := newPlatformCheckRuntime(t, locker)
 
-    holder, createErr := locker.CreateLock("example.platform.check", melodybound.Of(time.Minute))
+    holder, createErr := locker.CreateLock("example.platform.check", melodylockcontract.CreateLockOptions{Ttl: melodybound.Of(time.Minute)})
     if nil != createErr {
         t.Fatalf("create the holder's lock: %v", createErr)
     }
@@ -132,7 +132,7 @@ func servePlatformCheck(t *testing.T, runtimeInstance melodycontainercontract.Ru
 func assertPlatformCheckLockIsFree(t *testing.T, locker melodylockcontract.Locker) {
     t.Helper()
 
-    probe, createErr := locker.CreateLock("example.platform.check", melodybound.Of(time.Minute))
+    probe, createErr := locker.CreateLock("example.platform.check", melodylockcontract.CreateLockOptions{Ttl: melodybound.Of(time.Minute)})
     if nil != createErr {
         t.Fatalf("create the probe lock: %v", createErr)
     }
@@ -151,8 +151,8 @@ type cancellingLocker struct {
     liveRelease   bool
 }
 
-func (instance *cancellingLocker) CreateLock(name string, ttl melodybound.Duration) (melodylockcontract.Lock, error) {
-    lock, createErr := instance.locker.CreateLock(name, ttl)
+func (instance *cancellingLocker) CreateLock(name string, options melodylockcontract.CreateLockOptions) (melodylockcontract.Lock, error) {
+    lock, createErr := instance.locker.CreateLock(name, options)
     if nil != createErr {
         return nil, createErr
     }
@@ -193,6 +193,6 @@ func (instance *cancellingLock) Release(runtimeInstance melodycontainercontract.
     return instance.lock.Release(runtimeInstance)
 }
 
-func (instance *cancellingLock) Refresh(runtimeInstance melodycontainercontract.Runtime, ttl melodybound.Duration) error {
-    return instance.lock.Refresh(runtimeInstance, ttl)
+func (instance *cancellingLock) Refresh(runtimeInstance melodycontainercontract.Runtime, options melodylockcontract.RefreshOptions) error {
+    return instance.lock.Refresh(runtimeInstance, options)
 }

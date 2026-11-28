@@ -547,13 +547,13 @@ type recordingTickLocker struct {
     releases atomic.Int32
 }
 
-func (instance *recordingTickLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *recordingTickLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     instance.mutex.Lock()
     instance.names = append(instance.names, name)
-    instance.ttls = append(instance.ttls, ttl)
+    instance.ttls = append(instance.ttls, options.Ttl)
     instance.mutex.Unlock()
 
-    innerLock, createErr := instance.inner.CreateLock(name, ttl)
+    innerLock, createErr := instance.inner.CreateLock(name, options)
     if nil != createErr {
         return nil, createErr
     }
@@ -592,8 +592,8 @@ func (instance *recordingTickLock) Release(runtimeInstance containercontract.Run
     return instance.inner.Release(runtimeInstance)
 }
 
-func (instance *recordingTickLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
-    return instance.inner.Refresh(runtimeInstance, ttl)
+func (instance *recordingTickLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
+    return instance.inner.Refresh(runtimeInstance, options)
 }
 
 const (
@@ -609,7 +609,7 @@ type failingTickLocker struct {
     err  error
 }
 
-func (instance *failingTickLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *failingTickLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     if failingTickLockerRefusesCreateLock == instance.mode {
         return nil, instance.err
     }
@@ -638,7 +638,7 @@ func (instance *failingTickLock) Release(runtimeInstance containercontract.Runti
     return nil
 }
 
-func (instance *failingTickLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *failingTickLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     return nil
 }
 
@@ -652,7 +652,7 @@ func newSessionTickLocker() *sessionTickLocker {
     return &sessionTickLocker{held: make(map[string]bool)}
 }
 
-func (instance *sessionTickLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *sessionTickLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     return &sessionTickLock{owner: instance, name: name}, nil
 }
 
@@ -690,7 +690,7 @@ func (instance *sessionTickLock) Release(runtimeInstance containercontract.Runti
     return nil
 }
 
-func (instance *sessionTickLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *sessionTickLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     return nil
 }
 

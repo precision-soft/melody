@@ -254,7 +254,7 @@ A failure the tree still carries is held by a line of `.dev/validate/defaults.ba
 
 | key | kind | protects against | default | door | reason | documented |
 |---|---|---|---|---|---|---|
-| `v4/lock/contract.Locker.CreateLock.ttl` | limit | state held, or a decision kept, forever | 30s min 1ms unlimited admitted | `value:v4/lock/contract.Locker.CreateLock` | — | [LOCK.md](package/LOCK.md) |
+| `v4/lock/contract.CreateLockOptions.Ttl` | limit | state held, or a decision kept, forever | 30s min 1ms unlimited admitted; a refresh that leaves its ttl out: the lock's own ttl | `value:v4/lock/contract.CreateLockOptions.Ttl`, `value:v4/lock/contract.RefreshOptions.Ttl` | — | [LOCK.md](package/LOCK.md) |
 
 ## `v4/logging`
 

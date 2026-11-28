@@ -101,8 +101,8 @@ func (instance *Locker) LeasesAcrossReplicas(runtimeInstance containercontract.R
 }
 
 /* CreateLock answers a lease lock, refusing an unlimited ttl through lockcontract.ResolveLeaseTtl, since a redis lease that never lapses outlives a crashed holder. */
-func (instance *Locker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
-    if _, ttlErr := lockcontract.ResolveLeaseTtl(ttl); nil != ttlErr {
+func (instance *Locker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
+    if _, ttlErr := lockcontract.ResolveLeaseTtl(options.Ttl); nil != ttlErr {
         return nil, ttlErr
     }
 
@@ -110,7 +110,7 @@ func (instance *Locker) CreateLock(name string, ttl bound.Duration) (lockcontrac
         client:      instance.client,
         name:        name,
         key:         instance.keyPrefix + name,
-        ttl:         ttl,
+        ttl:         options.Ttl,
         callTimeout: instance.callTimeout,
     }, nil
 }
@@ -243,7 +243,12 @@ func (instance *redisLock) Release(runtimeInstance containercontract.Runtime) er
     return nil
 }
 
-func (instance *redisLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *redisLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
+    ttl := options.Ttl
+    if true == ttl.IsAbsent() {
+        ttl = instance.ttl
+    }
+
     resolvedTtl, ttlErr := lockcontract.ResolveLeaseRefreshTtl(ttl)
     if nil != ttlErr {
         return ttlErr

@@ -13,6 +13,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
+    lockcontract "github.com/precision-soft/melody/v4/lock/contract"
 )
 
 func TestNewConnection_ANilClientOrAMalformedNamespaceIsRefused(t *testing.T) {
@@ -156,8 +157,8 @@ func TestConnection_TwoNamespacesOnOneClientShareNothing(t *testing.T) {
     store := NewConnection(client, "store")
 
     name := "twin-" + strings.ReplaceAll(t.Name(), "/", "-")
-    shopLock := mustCreateLock(NewLocker(shop, LockerConfig{}).CreateLock(name, bound.Of(10*time.Second)))
-    storeLock := mustCreateLock(NewLocker(store, LockerConfig{}).CreateLock(name, bound.Of(10*time.Second)))
+    shopLock := mustCreateLock(NewLocker(shop, LockerConfig{}).CreateLock(name, lockcontract.CreateLockOptions{Ttl: bound.Of(10*time.Second)}))
+    storeLock := mustCreateLock(NewLocker(store, LockerConfig{}).CreateLock(name, lockcontract.CreateLockOptions{Ttl: bound.Of(10*time.Second)}))
     defer func() {
         _ = shopLock.Release(runtimeInstance)
         _ = storeLock.Release(runtimeInstance)

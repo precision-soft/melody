@@ -14,8 +14,8 @@ Locking is opt-in. The core defines the contract and an in-memory `Locker` (sing
 ## Responsibilities
 
 - Define the abstraction:
-    - [`Lock`](../../lock/contract/lock.go) — `Acquire` (non-blocking try), `Release`, `Refresh(ttl)`, the ttl a `bound.Duration`
-    - [`Locker`](../../lock/contract/lock.go) — `CreateLock(name, ttl) (Lock, error)`, the ttl a `bound.Duration`; a lease locker refuses an unlimited one there, its cause `ErrUnlimitedTtlRefused`; it reaches no store
+    - [`Lock`](../../lock/contract/lock.go) — `Acquire` (non-blocking try), `Release`, `Refresh(runtime, RefreshOptions)`, its `Ttl` a `bound.Duration`, the lock's creation ttl when left out
+    - [`Locker`](../../lock/contract/lock.go) — `CreateLock(name, CreateLockOptions) (Lock, error)`, its `Ttl` a `bound.Duration`; a lease locker refuses an unlimited one there, its cause `ErrUnlimitedTtlRefused`; it reaches no store
     - [`SharedLeaseLocker`](../../lock/contract/lock.go) — optional: `LeasesAcrossReplicas(runtimeInstance) (bool, error)`, answered true by a locker whose locks are leases every replica reaches (the Redis one), forwarded by the lazy locker, not answered by the in-memory, MySQL and PostgreSQL lockers; it refuses nothing, the cron tick dedup warns over a locker without it
     - [`LeasesAcrossReplicas(runtimeInstance, locker)`](../../lock/contract/lock.go) — the answer of a locker, false for one that does not answer `SharedLeaseLocker`
     - [`LockTtlRule()`](../../lock/contract/lock.go), [`ResolveLeaseTtl`](../../lock/contract/lock.go) and [`ResolveLeaseRefreshTtl`](../../lock/contract/lock.go) — the one reading every locker gives the ttl
@@ -41,7 +41,7 @@ Locking is opt-in. The core defines the contract and an in-memory `Locker` (sing
   connection, which is why their reentrancy is described under Footguns & caveats in terms of that connection rather than of a token. Three kinds follow: the Redis backend holds leases every replica reaches and answers `SharedLeaseLocker`, the in-memory one holds leases inside the process, and the MySQL and PostgreSQL ones hold session locks; the last two do not answer it.
 - **A `Lock` value is safe to drive from more than one goroutine**: every backend serialises its own three doors on the handle. The cost of that serialisation is that the doors WAIT for one another — a `Refresh` issued while an `Acquire` or a `Release` is in flight on the same handle is held until it returns, bounded by that call's own budget — so a lease shorter than twice that budget should be renewed from the goroutine that acquired it. What the serialisation does NOT buy is safety across handles for the same name — that is what the lock itself is for — nor a guarantee that work started under a lease is still inside it when the lease lapses, which is what `Refresh` exists to tell you.
 - `Release` is best-effort and idempotent: releasing a lock this instance no longer holds is a no-op and reports no error (the Redis convention). `Refresh` is the authoritative liveness check — it returns an error when the lease has been lost. Use `Refresh`, not `Release`, to detect a lost lock.
-- `ttl` is the lease duration, a `bound.Duration` read against [`LockTtlRule()`](../../lock/contract/lock.go): 30s when left out, at least 1ms, `bound.UnlimitedDuration()` the session-style lock that holds until its connection drops. The lease lockers, [`InMemoryLocker`](../../lock/in_memory.go) and the Redis backend, resolve it through [`ResolveLeaseTtl`](../../lock/contract/lock.go) at `Acquire` and [`ResolveLeaseRefreshTtl`](../../lock/contract/lock.go) at `Refresh`, and answer a ttl below 1ms or an unlimited one as the error, naming `Locker.CreateLock.ttl` or `Lock.Refresh.ttl`, so every lock they hand out lapses once its holder stops renewing it and a refresh cannot turn a leased lock into a permanent one. The in-memory locker opportunistically purges expired holders during `Acquire`, every `InMemoryLockerConfig.PurgeInterval` acquisitions; call `PurgeExpired()` (for example from a periodic task) to reclaim memory for locks that expire without an explicit `Release`. The Redis backend sets the key TTL; the MySQL and PostgreSQL backends have no TTL (their locks are held until release or connection close), so they ignore the ttl, every state of it admitted, and their `Refresh` has nothing to extend — it instead verifies the lock is still held on its connection and returns an error if it has been lost, matching the lost-lock signal of the other backends.
+- [`CreateLockOptions`](../../lock/contract/lock.go)`.Ttl` is the lease duration, a `bound.Duration` read against [`LockTtlRule()`](../../lock/contract/lock.go): 30s when left out, at least 1ms, `bound.UnlimitedDuration()` the session-style lock that holds until its connection drops. [`RefreshOptions`](../../lock/contract/lock.go)`.Ttl` is the lease a `Refresh` writes from now, the ttl the lock was created with when left out. The lease lockers, [`InMemoryLocker`](../../lock/in_memory.go) and the Redis backend, resolve them through [`ResolveLeaseTtl`](../../lock/contract/lock.go) at `Acquire` and [`ResolveLeaseRefreshTtl`](../../lock/contract/lock.go) at `Refresh`, and answer a ttl below 1ms or an unlimited one as the error, naming `CreateLockOptions.Ttl` or `RefreshOptions.Ttl`, so every lock they hand out lapses once its holder stops renewing it and a refresh cannot turn a leased lock into a permanent one. The in-memory locker opportunistically purges expired holders during `Acquire`, every `InMemoryLockerConfig.PurgeInterval` acquisitions; call `PurgeExpired()` (for example from a periodic task) to reclaim memory for locks that expire without an explicit `Release`. The Redis backend sets the key TTL; the MySQL and PostgreSQL backends have no TTL (their locks are held until release or connection close), so they ignore both options, every state of their ttl admitted, and their `Refresh` has nothing to extend — it instead verifies the lock is still held on its connection and returns an error if it has been lost, matching the lost-lock signal of the other backends.
 
 ## Usage
 
@@ -201,7 +201,7 @@ A backend implements [`Locker`](../../lock/contract/lock.go) and its [`Lock`](..
 A test or a backend probe that drives the doors itself releases on a runtime detached from its cancellation, as the helpers do: a backend that runs the release under the runtime's context, the redis locker among them, refuses a request that already ended, and the lock stays held until its ttl. The mysql and pgsql lockers detach the release themselves, and the in-memory one reads no context:
 
 ```go
-pickingLock, createErr := locker.CreateLock("picking:order:42", bound.Of(30*time.Second))
+pickingLock, createErr := locker.CreateLock("picking:order:42", lockcontract.CreateLockOptions{Ttl: bound.Of(30 * time.Second)})
 if nil != createErr {
     return createErr
 }
@@ -233,9 +233,11 @@ defer pickingLock.Release(runtime.WithContext(runtimeInstance, context.WithoutCa
 
 - [`Lock`](../../lock/contract/lock.go) — the door a locker implements; userland runs under `RunExclusive` or `LeaderGate`
 - [`Locker`](../../lock/contract/lock.go)
+- [`CreateLockOptions`](../../lock/contract/lock.go) — `Ttl`, read against `LockTtlRule()`
+- [`RefreshOptions`](../../lock/contract/lock.go) — `Ttl`, the lock's creation ttl when left out
 - [`LockTtlRule()`](../../lock/contract/lock.go) — 30s, at least 1ms, unlimited admitted
 - [`ResolveLeaseTtl(ttl bound.Duration) (time.Duration, error)`](../../lock/contract/lock.go) — the reading of a lease locker at `Acquire`, unlimited refused
-- [`ResolveLeaseRefreshTtl(ttl bound.Duration) (time.Duration, error)`](../../lock/contract/lock.go) — the same at `Refresh`, a refusal naming `Lock.Refresh.ttl`
+- [`ResolveLeaseRefreshTtl(ttl bound.Duration) (time.Duration, error)`](../../lock/contract/lock.go) — the same at `Refresh`, a refusal naming `RefreshOptions.Ttl`
 
 ### Types and constructors (`lock`)
 

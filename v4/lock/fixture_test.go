@@ -99,8 +99,8 @@ type sessionStyleLocker struct {
     inner lockcontract.Locker
 }
 
-func (instance *sessionStyleLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
-    return instance.inner.CreateLock(name, bound.Duration{})
+func (instance *sessionStyleLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
+    return instance.inner.CreateLock(name, lockcontract.CreateLockOptions{})
 }
 
 /* ttlRecordingLocker records the ttl every CreateLock is handed before it reaches the inner locker, so a test can pin what a door resolved its configuration to. */
@@ -110,12 +110,12 @@ type ttlRecordingLocker struct {
     ttls  []bound.Duration
 }
 
-func (instance *ttlRecordingLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *ttlRecordingLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     instance.mutex.Lock()
-    instance.ttls = append(instance.ttls, ttl)
+    instance.ttls = append(instance.ttls, options.Ttl)
     instance.mutex.Unlock()
 
-    return instance.inner.CreateLock(name, ttl)
+    return instance.inner.CreateLock(name, options)
 }
 
 func (instance *ttlRecordingLocker) firstTtl(t *testing.T) bound.Duration {
@@ -143,7 +143,7 @@ func mustCreateLock(lock lockcontract.Lock, createErr error) lockcontract.Lock {
 /* noLockLocker answers neither a lock nor an error, the slip a locker of the application's own can make */
 type noLockLocker struct{}
 
-func (instance *noLockLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *noLockLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     return nil, nil
 }
 
@@ -188,8 +188,8 @@ type refreshRecordingLocker struct {
     ttls  []bound.Duration
 }
 
-func (instance *refreshRecordingLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
-    lock, createErr := instance.inner.CreateLock(name, ttl)
+func (instance *refreshRecordingLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
+    lock, createErr := instance.inner.CreateLock(name, options)
     if nil != createErr {
         return nil, createErr
     }
@@ -209,10 +209,10 @@ type refreshRecordingLock struct {
     locker *refreshRecordingLocker
 }
 
-func (instance *refreshRecordingLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *refreshRecordingLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     instance.locker.mutex.Lock()
-    instance.locker.ttls = append(instance.locker.ttls, ttl)
+    instance.locker.ttls = append(instance.locker.ttls, options.Ttl)
     instance.locker.mutex.Unlock()
 
-    return instance.Lock.Refresh(runtimeInstance, ttl)
+    return instance.Lock.Refresh(runtimeInstance, options)
 }

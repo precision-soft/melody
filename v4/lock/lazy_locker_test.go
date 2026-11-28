@@ -3,6 +3,8 @@ package lock
 import (
     "context"
     "errors"
+    "reflect"
+    "sync"
     "sync/atomic"
     "testing"
     "time"
@@ -34,7 +36,7 @@ func TestLazyLocker_DefersResolutionToTheFirstLockMethodThenDelegates(t *testing
 
     lazyLockerInstance := NewLazyLocker(serviceContainer)
 
-    lock := mustCreateLock(lazyLockerInstance.CreateLock("job", bound.Of(time.Minute)))
+    lock := mustCreateLock(lazyLockerInstance.CreateLock("job", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
     if true == resolved {
         t.Fatalf("expected no resolution before the lock's first method")
     }
@@ -52,7 +54,7 @@ func TestLazyLocker_DefersResolutionToTheFirstLockMethodThenDelegates(t *testing
         t.Fatalf("expected the delegated lock to acquire")
     }
 
-    contender := mustCreateLock(inMemoryLocker.CreateLock("job", bound.Of(time.Minute)))
+    contender := mustCreateLock(inMemoryLocker.CreateLock("job", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
 
     contended, contendErr := contender.Acquire(testRuntimeWithContext(context.Background()))
     if nil != contendErr || true == contended {
@@ -81,7 +83,7 @@ func TestLazyLocker_ReportsResolutionFailureThroughTheLockContractAndRetries(t *
 
     lazyLockerInstance := NewLazyLocker(serviceContainer)
 
-    lock := mustCreateLock(lazyLockerInstance.CreateLock("job", bound.Of(time.Minute)))
+    lock := mustCreateLock(lazyLockerInstance.CreateLock("job", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
     if nil == lock {
         t.Fatalf("expected a lock even while the locker cannot be resolved")
     }
@@ -101,7 +103,7 @@ func TestLazyLocker_ReportsResolutionFailureThroughTheLockContractAndRetries(t *
         t.Fatalf("expected the resolution failure to surface through Release")
     }
 
-    if nil == lock.Refresh(runtimeInstance, bound.Of(time.Minute)) {
+    if nil == lock.Refresh(runtimeInstance, lockcontract.RefreshOptions{Ttl: bound.Of(time.Minute)}) {
         t.Fatalf("expected the resolution failure to surface through Refresh")
     }
 
@@ -141,7 +143,7 @@ func TestLazyLocker_TheRunContextBoundsTheWaitOnALockerAnotherGoroutineBuilds(t 
     <-providerEntered
 
     lazyLockerInstance := NewLazyLocker(serviceContainer)
-    lock := mustCreateLock(lazyLockerInstance.CreateLock("job", bound.Of(time.Minute)))
+    lock := mustCreateLock(lazyLockerInstance.CreateLock("job", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
 
     runContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -172,10 +174,85 @@ type countingLocker struct {
     creates atomic.Int64
 }
 
-func (instance *countingLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *countingLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     instance.creates.Add(1)
 
-    return instance.inner.CreateLock(name, ttl)
+    return instance.inner.CreateLock(name, options)
+}
+
+type optionsRecordingLocker struct {
+    mutex          sync.Mutex
+    createOptions  []lockcontract.CreateLockOptions
+    refreshOptions []lockcontract.RefreshOptions
+}
+
+func (instance *optionsRecordingLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.createOptions = append(instance.createOptions, options)
+
+    return &optionsRecordingLock{locker: instance}, nil
+}
+
+type optionsRecordingLock struct {
+    locker *optionsRecordingLocker
+}
+
+func (instance *optionsRecordingLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
+    return true, nil
+}
+
+func (instance *optionsRecordingLock) Release(runtimeInstance containercontract.Runtime) error {
+    return nil
+}
+
+func (instance *optionsRecordingLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
+    instance.locker.mutex.Lock()
+    defer instance.locker.mutex.Unlock()
+
+    instance.locker.refreshOptions = append(instance.locker.refreshOptions, options)
+
+    return nil
+}
+
+func TestLazyLocker_HandsTheOptionsToTheInnerLocker(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+
+    locker := &optionsRecordingLocker{}
+    container.MustRegister[lockcontract.Locker](
+        serviceContainer,
+        ServiceLocker,
+        func(resolver containercontract.Resolver) (lockcontract.Locker, error) {
+            return locker, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    lock := mustCreateLock(NewLazyLocker(serviceContainer).CreateLock("job", lockcontract.CreateLockOptions{Ttl: bound.Of(7 * time.Second)}))
+    runtimeInstance := testRuntimeWithContext(context.Background())
+
+    if _, acquireErr := lock.Acquire(runtimeInstance); nil != acquireErr {
+        t.Fatalf("unexpected acquire error: %v", acquireErr)
+    }
+
+    if refreshErr := lock.Refresh(runtimeInstance, lockcontract.RefreshOptions{}); nil != refreshErr {
+        t.Fatalf("unexpected refresh error: %v", refreshErr)
+    }
+
+    if refreshErr := lock.Refresh(runtimeInstance, lockcontract.RefreshOptions{Ttl: bound.Of(3 * time.Second)}); nil != refreshErr {
+        t.Fatalf("unexpected refresh error: %v", refreshErr)
+    }
+
+    expectedCreate := []lockcontract.CreateLockOptions{{Ttl: bound.Of(7 * time.Second)}}
+    if false == reflect.DeepEqual(expectedCreate, locker.createOptions) {
+        t.Fatalf("expected the inner locker to receive %v, got %v", expectedCreate, locker.createOptions)
+    }
+
+    expectedRefresh := []lockcontract.RefreshOptions{{}, {Ttl: bound.Of(3 * time.Second)}}
+    if false == reflect.DeepEqual(expectedRefresh, locker.refreshOptions) {
+        t.Fatalf("expected the inner lock to receive %v unchanged, got %v", expectedRefresh, locker.refreshOptions)
+    }
 }
 
 func TestLazyLocker_ADeferredLockCreatesItsRealLockOnce(t *testing.T) {
@@ -191,14 +268,14 @@ func TestLazyLocker_ADeferredLockCreatesItsRealLockOnce(t *testing.T) {
         container.RegisterOptions{},
     )
 
-    lock := mustCreateLock(NewLazyLocker(serviceContainer).CreateLock("job", bound.Of(time.Minute)))
+    lock := mustCreateLock(NewLazyLocker(serviceContainer).CreateLock("job", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
     runtimeInstance := testRuntimeWithContext(context.Background())
 
     if _, acquireErr := lock.Acquire(runtimeInstance); nil != acquireErr {
         t.Fatalf("unexpected acquire error: %v", acquireErr)
     }
 
-    if refreshErr := lock.Refresh(runtimeInstance, bound.Of(time.Minute)); nil != refreshErr {
+    if refreshErr := lock.Refresh(runtimeInstance, lockcontract.RefreshOptions{Ttl: bound.Of(time.Minute)}); nil != refreshErr {
         t.Fatalf("unexpected refresh error: %v", refreshErr)
     }
 
@@ -235,7 +312,7 @@ func TestLazyLocker_TheLockerIsCreatedUnderTheFirstMethodsRuntime(t *testing.T) 
                 container.RegisterOptions{},
             )
 
-            lock := mustCreateLock(NewLazyLocker(serviceContainer).CreateLock("job", bound.Of(time.Minute)))
+            lock := mustCreateLock(NewLazyLocker(serviceContainer).CreateLock("job", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
             if _, acquireErr := lock.Acquire(testCase.make(t.Context(), serviceContainer.NewScope())); nil != acquireErr {
                 t.Fatalf("acquire: %v", acquireErr)
             }
@@ -258,7 +335,7 @@ func TestLazyLocker_TheInnerLockersRefusalIsTheErrorOfTheFirstAcquire(t *testing
         container.RegisterOptions{},
     )
 
-    lock, createErr := NewLazyLocker(serviceContainer).CreateLock("job", bound.UnlimitedDuration())
+    lock, createErr := NewLazyLocker(serviceContainer).CreateLock("job", lockcontract.CreateLockOptions{Ttl: bound.UnlimitedDuration()})
     if nil != createErr {
         t.Fatalf("expected the lazy locker to answer its lock, got %v", createErr)
     }
@@ -280,7 +357,7 @@ func TestLazyLocker_AnInnerLockerAnsweringNoLockIsTheErrorOfEveryDoor(t *testing
         container.RegisterOptions{},
     )
 
-    lock, createErr := NewLazyLocker(serviceContainer).CreateLock("job", bound.Of(time.Second))
+    lock, createErr := NewLazyLocker(serviceContainer).CreateLock("job", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Second)})
     if nil != createErr {
         t.Fatalf("expected the lazy locker to answer its lock, got %v", createErr)
     }
@@ -333,7 +410,7 @@ func TestLazyLocker_ForwardsTheSharedLeaseAnswerOfTheLockerItResolves(t *testing
         t.Fatalf("expected the lazy locker to forward the shared lease answer, got %v and %v", shared, err)
     }
 
-    lock := mustCreateLock(sharedLazyLocker.CreateLock("job", bound.Of(time.Minute)))
+    lock := mustCreateLock(sharedLazyLocker.CreateLock("job", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
     if _, acquireErr := lock.Acquire(runtimeInstance); nil != acquireErr {
         t.Fatalf("unexpected acquire error: %v", acquireErr)
     }

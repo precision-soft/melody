@@ -24,7 +24,7 @@ func testRuntimeWithContext(ctx context.Context) containercontract.Runtime {
 
 type acquireFailingLocker struct{}
 
-func (instance *acquireFailingLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *acquireFailingLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     return &acquireFailingLock{}, nil
 }
 
@@ -38,7 +38,7 @@ func (instance *acquireFailingLock) Release(runtimeInstance containercontract.Ru
     return nil
 }
 
-func (instance *acquireFailingLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *acquireFailingLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     return nil
 }
 
@@ -46,8 +46,8 @@ type refreshFailingLocker struct {
     inner lockcontract.Locker
 }
 
-func (instance *refreshFailingLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
-    return &refreshFailingLock{inner: mustCreateLock(instance.inner.CreateLock(name, ttl))}, nil
+func (instance *refreshFailingLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
+    return &refreshFailingLock{inner: mustCreateLock(instance.inner.CreateLock(name, options))}, nil
 }
 
 type refreshFailingLock struct {
@@ -62,14 +62,14 @@ func (instance *refreshFailingLock) Release(runtimeInstance containercontract.Ru
     return instance.inner.Release(runtimeInstance)
 }
 
-func (instance *refreshFailingLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *refreshFailingLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     return exception.NewError("lease lost", nil, nil)
 }
 
 /* contextCancelledAcquireLock stands in for a backend round trip cut short by a SIGTERM: Acquire fails with the runtime cancellation wrapped in a store error, as a real locker reports an in-flight Acquire whose context is cancelled. */
 type contextCancelledAcquireLocker struct{}
 
-func (instance *contextCancelledAcquireLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *contextCancelledAcquireLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     return &contextCancelledAcquireLock{}, nil
 }
 
@@ -83,7 +83,7 @@ func (instance *contextCancelledAcquireLock) Release(runtimeInstance containerco
     return nil
 }
 
-func (instance *contextCancelledAcquireLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *contextCancelledAcquireLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     return nil
 }
 
@@ -115,7 +115,7 @@ func TestRunExclusive_SkipsWhenHeldByAnotherHolder(t *testing.T) {
     locker := NewInMemoryLocker(InMemoryLockerConfig{})
     runtimeInstance := testRuntime()
 
-    holder := mustCreateLock(locker.CreateLock("cron:held", bound.Of(time.Minute)))
+    holder := mustCreateLock(locker.CreateLock("cron:held", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
     acquired, _ := holder.Acquire(runtimeInstance)
     if false == acquired {
         t.Fatalf("expected external holder to acquire")
@@ -233,7 +233,7 @@ func TestRunExclusive_ReleasesEvenWhenCallerContextIsCancelled(t *testing.T) {
     }
 
     /* the release must have gone through on the detached runtime despite the cancelled caller context */
-    contender := mustCreateLock(locker.CreateLock("cron:sigterm", bound.Of(time.Minute)))
+    contender := mustCreateLock(locker.CreateLock("cron:sigterm", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
     acquired, _ := contender.Acquire(testRuntime())
     if false == acquired {
         t.Fatalf("expected the lock to be released despite the cancelled caller context")
@@ -246,8 +246,8 @@ type recordingRefreshLocker struct {
     refreshTtl chan bound.Duration
 }
 
-func (instance *recordingRefreshLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
-    return &recordingRefreshLock{inner: mustCreateLock(instance.inner.CreateLock(name, ttl)), refreshTtl: instance.refreshTtl}, nil
+func (instance *recordingRefreshLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
+    return &recordingRefreshLock{inner: mustCreateLock(instance.inner.CreateLock(name, options)), refreshTtl: instance.refreshTtl}, nil
 }
 
 type recordingRefreshLock struct {
@@ -263,13 +263,13 @@ func (instance *recordingRefreshLock) Release(runtimeInstance containercontract.
     return instance.inner.Release(runtimeInstance)
 }
 
-func (instance *recordingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *recordingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     select {
-    case instance.refreshTtl <- ttl:
+    case instance.refreshTtl <- options.Ttl:
     default:
     }
 
-    return instance.inner.Refresh(runtimeInstance, ttl)
+    return instance.inner.Refresh(runtimeInstance, options)
 }
 
 /* blockingRefreshLock blocks inside Refresh until its runtime context is cancelled, standing in for a backend whose connection has been blackholed by a network partition. */
@@ -277,7 +277,7 @@ type blockingRefreshLocker struct {
     entered chan struct{}
 }
 
-func (instance *blockingRefreshLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *blockingRefreshLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     return &blockingRefreshLock{entered: instance.entered}, nil
 }
 
@@ -294,7 +294,7 @@ func (instance *blockingRefreshLock) Release(runtimeInstance containercontract.R
     return nil
 }
 
-func (instance *blockingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *blockingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     if false == instance.closed {
         instance.closed = true
         close(instance.entered)
@@ -388,7 +388,7 @@ type createLockForbiddenLocker struct {
     t *testing.T
 }
 
-func (instance *createLockForbiddenLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *createLockForbiddenLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     instance.t.Fatalf("a lock was created for %q under a refused configuration", name)
 
     return nil, nil
@@ -520,7 +520,7 @@ type slowSucceedingRefreshLocker struct {
     delay time.Duration
 }
 
-func (instance *slowSucceedingRefreshLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *slowSucceedingRefreshLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     return &slowSucceedingRefreshLock{delay: instance.delay}, nil
 }
 
@@ -536,7 +536,7 @@ func (instance *slowSucceedingRefreshLock) Release(runtimeInstance containercont
     return nil
 }
 
-func (instance *slowSucceedingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *slowSucceedingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     select {
     case <-time.After(instance.delay):
         return nil
@@ -647,7 +647,7 @@ func TestRunExclusive_APersistentlyFailingRenewalStillLosesTheLease(t *testing.T
 /* intermittentRefreshLock fails the first renewal and answers every one after it, which is what a store that dropped a connection and reconnected looks like from here. */
 type intermittentRefreshLocker struct{}
 
-func (instance *intermittentRefreshLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *intermittentRefreshLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     return &intermittentRefreshLock{}, nil
 }
 
@@ -663,7 +663,7 @@ func (instance *intermittentRefreshLock) Release(runtimeInstance containercontra
     return nil
 }
 
-func (instance *intermittentRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *intermittentRefreshLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     if 1 == instance.attempts.Add(1) {
         return exception.NewError("refresh dropped by the store", nil, nil)
     }
@@ -710,7 +710,7 @@ type slowAcquireCountingLocker struct {
     refreshCount atomic.Int64
 }
 
-func (instance *slowAcquireCountingLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *slowAcquireCountingLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     return &slowAcquireCountingLock{locker: instance}, nil
 }
 
@@ -727,7 +727,7 @@ func (instance *slowAcquireCountingLock) Release(runtimeInstance containercontra
     return nil
 }
 
-func (instance *slowAcquireCountingLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *slowAcquireCountingLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     instance.locker.refreshCount.Add(1)
     return exception.NewError("lease lost", nil, nil)
 }
@@ -767,7 +767,7 @@ func TestRunExclusive_LeaseIsDatedFromTheAcquireIssueInstant(t *testing.T) {
 /* releaseFailingLocker acquires and refreshes cleanly and fails every release — the shape of a store hiccup exactly at release time. */
 type releaseFailingLocker struct{}
 
-func (instance *releaseFailingLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *releaseFailingLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     return &releaseFailingLock{}, nil
 }
 
@@ -781,7 +781,7 @@ func (instance *releaseFailingLock) Release(runtimeInstance containercontract.Ru
     return exception.NewError("store unreachable at release", nil, nil)
 }
 
-func (instance *releaseFailingLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *releaseFailingLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     return nil
 }
 
@@ -835,7 +835,7 @@ func TestRunExclusive_LostLeaseKeepsTheCallbackErrorInTheChain(t *testing.T) {
 /* panickingRefreshLocker acquires cleanly and panics on every renewal — the shape of a backend defect surfacing on the refresh goroutine, which carries no recover of the caller's. */
 type panickingRefreshLocker struct{}
 
-func (instance *panickingRefreshLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *panickingRefreshLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     return &panickingRefreshLock{}, nil
 }
 
@@ -851,7 +851,7 @@ func (instance *panickingRefreshLock) Release(runtimeInstance containercontract.
 
 var errPanickingRefreshBackend = exception.NewError("backend exploded", nil, nil)
 
-func (instance *panickingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *panickingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     panic(errPanickingRefreshBackend)
 }
 
@@ -988,7 +988,7 @@ type slowThenFailingRefreshLocker struct {
     refreshCount atomic.Int64
 }
 
-func (instance *slowThenFailingRefreshLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *slowThenFailingRefreshLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     return &slowThenFailingRefreshLock{locker: instance}, nil
 }
 
@@ -1004,7 +1004,7 @@ func (instance *slowThenFailingRefreshLock) Release(runtimeInstance containercon
     return nil
 }
 
-func (instance *slowThenFailingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *slowThenFailingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     if 1 == instance.locker.refreshCount.Add(1) {
         time.Sleep(instance.locker.firstDelay)
         return nil
@@ -1071,7 +1071,7 @@ func TestRunExclusive_RefusesATypedNilScopeBeforeAcquiring(t *testing.T) {
         )
     }, "run exclusive runtime scope is nil")
 
-    acquired, acquireErr := mustCreateLock(locker.CreateLock("typed-nil-scope", bound.Of(time.Minute))).Acquire(testRuntimeWithContext(context.Background()))
+    acquired, acquireErr := mustCreateLock(locker.CreateLock("typed-nil-scope", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)})).Acquire(testRuntimeWithContext(context.Background()))
     if nil != acquireErr || false == acquired {
         t.Fatalf("expected no lock to be held by the refused run, got acquired=%v err=%v", acquired, acquireErr)
     }
@@ -1100,13 +1100,13 @@ func (instance *refreshHoldingLock) Release(runtimeInstance containercontract.Ru
     return instance.inner.Release(runtimeInstance)
 }
 
-func (instance *refreshHoldingLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *refreshHoldingLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     instance.refreshInFlight.Add(1)
     defer instance.refreshInFlight.Add(-1)
 
     time.Sleep(50 * time.Millisecond)
 
-    return instance.inner.Refresh(runtimeInstance, ttl)
+    return instance.inner.Refresh(runtimeInstance, options)
 }
 
 type refreshHoldingLocker struct {
@@ -1114,8 +1114,8 @@ type refreshHoldingLocker struct {
     last  *refreshHoldingLock
 }
 
-func (instance *refreshHoldingLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
-    instance.last = &refreshHoldingLock{inner: mustCreateLock(instance.inner.CreateLock(name, ttl))}
+func (instance *refreshHoldingLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
+    instance.last = &refreshHoldingLock{inner: mustCreateLock(instance.inner.CreateLock(name, options))}
 
     return instance.last, nil
 }
@@ -1155,7 +1155,7 @@ func TestRunExclusive_ACallbackPanicJoinsTheRefreshBeforeReleasing(t *testing.T)
         t.Fatalf("expected exactly one release, got %d", locker.last.releases.Load())
     }
 
-    acquired, acquireErr := mustCreateLock(locker.inner.CreateLock("callback-panics", bound.Of(time.Minute))).Acquire(runtimeInstance)
+    acquired, acquireErr := mustCreateLock(locker.inner.CreateLock("callback-panics", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)})).Acquire(runtimeInstance)
     if nil != acquireErr || false == acquired {
         t.Fatalf("expected the lock to be released after the panic, got acquired=%v err=%v", acquired, acquireErr)
     }
@@ -1164,7 +1164,7 @@ func TestRunExclusive_ACallbackPanicJoinsTheRefreshBeforeReleasing(t *testing.T)
 /* hangingUntilCancelledRefreshLocker answers the acquire and never answers a renewal until the renewal's context ends, the shape of a store that accepted the call and went silent */
 type hangingUntilCancelledRefreshLocker struct{}
 
-func (instance *hangingUntilCancelledRefreshLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *hangingUntilCancelledRefreshLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     return &hangingUntilCancelledRefreshLock{}, nil
 }
 
@@ -1178,7 +1178,7 @@ func (instance *hangingUntilCancelledRefreshLock) Release(runtimeInstance contai
     return nil
 }
 
-func (instance *hangingUntilCancelledRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *hangingUntilCancelledRefreshLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     <-runtimeInstance.Context().Done()
 
     return runtimeInstance.Context().Err()
@@ -1242,8 +1242,8 @@ type contextIgnoringRefreshLocker struct {
     delay time.Duration
 }
 
-func (instance *contextIgnoringRefreshLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
-    return &contextIgnoringRefreshLock{inner: mustCreateLock(instance.inner.CreateLock(name, ttl)), delay: instance.delay}, nil
+func (instance *contextIgnoringRefreshLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
+    return &contextIgnoringRefreshLock{inner: mustCreateLock(instance.inner.CreateLock(name, options)), delay: instance.delay}, nil
 }
 
 type contextIgnoringRefreshLock struct {
@@ -1259,10 +1259,10 @@ func (instance *contextIgnoringRefreshLock) Release(runtimeInstance containercon
     return instance.inner.Release(testRuntimeWithContext(context.Background()))
 }
 
-func (instance *contextIgnoringRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *contextIgnoringRefreshLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     time.Sleep(instance.delay)
 
-    return instance.inner.Refresh(testRuntimeWithContext(context.Background()), ttl)
+    return instance.inner.Refresh(testRuntimeWithContext(context.Background()), options)
 }
 
 /* the renewal issued at half the ttl ignores its context and answers success only after the demotion instant: the callback is still told to stop at the instant, and the late success does not save the lease */
@@ -1333,7 +1333,7 @@ type releaseDeadlineLocker struct {
     releaseErr chan error
 }
 
-func (instance *releaseDeadlineLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *releaseDeadlineLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     return &releaseDeadlineLock{remaining: instance.remaining, releaseErr: instance.releaseErr}, nil
 }
 
@@ -1363,7 +1363,7 @@ func (instance *releaseDeadlineLock) Release(runtimeInstance containercontract.R
     return nil
 }
 
-func (instance *releaseDeadlineLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *releaseDeadlineLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     return nil
 }
 
@@ -1416,7 +1416,7 @@ func TestRunExclusive_RenewsTheLeaseWhileTheCallbackWindsDownAfterAStop(t *testi
         t.Fatalf("expected the lease renewed while the callback wound down, got %d renewals after the stop", renewed)
     }
 
-    if acquired, _ := mustCreateLock(inner.CreateLock("job:wind-down", bound.Of(time.Second))).Acquire(testRuntimeWithContext(context.Background())); false == acquired {
+    if acquired, _ := mustCreateLock(inner.CreateLock("job:wind-down", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Second)})).Acquire(testRuntimeWithContext(context.Background())); false == acquired {
         t.Fatal("expected the lock released once the callback returned")
     }
 }

@@ -286,8 +286,8 @@ type fakeLocker struct {
     createErr error
 }
 
-func (instance *fakeLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
-    instance.ttls = append(instance.ttls, ttl)
+func (instance *fakeLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
+    instance.ttls = append(instance.ttls, options.Ttl)
     instance.names = append(instance.names, name)
 
     if nil != instance.createErr {
@@ -305,6 +305,7 @@ type fakeLock struct {
     acquire            bool
     refreshErr         error
     refreshCalls       int
+    refreshTtls        []bound.Duration
     releaseErr         error
     releaseCalls       int
     releaseContextErr  error
@@ -326,8 +327,9 @@ func (instance *fakeLock) Release(runtimeInstance containercontract.Runtime) err
     return instance.releaseErr
 }
 
-func (instance *fakeLock) Refresh(_ containercontract.Runtime, _ bound.Duration) error {
+func (instance *fakeLock) Refresh(_ containercontract.Runtime, options lockcontract.RefreshOptions) error {
     instance.refreshCalls++
+    instance.refreshTtls = append(instance.refreshTtls, options.Ttl)
 
     return instance.refreshErr
 }
@@ -672,6 +674,34 @@ func TestRelay_RefreshesLeaseAndDrainsWholeBatch(t *testing.T) {
     }
     if 2 != published {
         t.Fatalf("expected both messages published, got %d", published)
+    }
+}
+
+func TestRelay_RefreshesTheLeaseWithItsLockTtl(t *testing.T) {
+    lock := &fakeLock{acquire: true}
+    repository := &fakeRepository{due: []Pending{
+        {Id: 1, TypeName: "string", Payload: []byte("a")},
+        {Id: 2, TypeName: "string", Payload: []byte("b")},
+    }}
+
+    relay := NewRelay(repository, &fakeTransport{}, &stringCodec{}, RelayConfig{
+        Locker: &fakeLocker{lock: lock},
+    })
+    /* a lease shorter than the rule admits, set past the door so the refresh cadence is observable within the test */
+    relay.config.LockTtl = 2 * time.Nanosecond
+
+    if _, runErr := relay.RunOnce(relayTestRuntime()); nil != runErr {
+        t.Fatalf("run once: %v", runErr)
+    }
+
+    if 0 == len(lock.refreshTtls) {
+        t.Fatal("expected the batch to refresh the lease")
+    }
+
+    for _, refreshTtl := range lock.refreshTtls {
+        if bound.Of(2*time.Nanosecond) != refreshTtl {
+            t.Fatalf("expected every refresh to carry the relay's lock ttl, got %v", lock.refreshTtls)
+        }
     }
 }
 
@@ -1910,7 +1940,7 @@ func TestRelay_AnOutageAfterARecoveryWritesARecordOfItsOwn(t *testing.T) {
 /* a locker answering neither a lock nor an error is the run's error, never a nil lock acquired */
 type noLockLocker struct{}
 
-func (instance *noLockLocker) CreateLock(_ string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *noLockLocker) CreateLock(_ string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     return nil, nil
 }
 
@@ -2223,7 +2253,7 @@ func TestRelay_TwoNamedRelaysOverOneLockerDoNotExcludeEachOther(t *testing.T) {
     locker := lock.NewInMemoryLocker(lock.InMemoryLockerConfig{})
     runtimeInstance := relayTestRuntime()
 
-    ordersLock, createErr := locker.CreateLock("melody:outbox:relay:orders", bound.Of(time.Minute))
+    ordersLock, createErr := locker.CreateLock("melody:outbox:relay:orders", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)})
     if nil != createErr {
         t.Fatalf("create the orders lock: %v", createErr)
     }

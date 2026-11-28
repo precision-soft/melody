@@ -118,7 +118,7 @@ func TestRule_EveryFrameworkRuleCarriesItsDocumentedValues(t *testing.T) {
         UnlimitedAdmitted: true,
     })
     expectRule(t, "lockcontract.LockTtlRule", lockcontract.LockTtlRule(), bound.Rule[time.Duration]{
-        Name: "Locker.CreateLock.ttl",
+        Name: "CreateLockOptions.Ttl",
         Default: 30 * time.Second,
         Minimum: time.Millisecond,
         UnlimitedAdmitted: true,

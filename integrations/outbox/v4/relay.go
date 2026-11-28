@@ -704,7 +704,7 @@ func (instance *Relay) acquireLease(runtimeInstance containercontract.Runtime) (
         return noopRelease, noopRefresh, true, nil
     }
 
-    lock, createErr := melodylock.CreateLock(instance.config.Locker, instance.lockName(runtimeInstance), bound.Of(instance.config.LockTtl))
+    lock, createErr := melodylock.CreateLock(instance.config.Locker, instance.lockName(runtimeInstance), lockcontract.CreateLockOptions{Ttl: bound.Of(instance.config.LockTtl)})
     if nil != createErr {
         return noopRelease, noopRefresh, false, createErr
     }
@@ -721,7 +721,7 @@ func (instance *Relay) acquireLease(runtimeInstance containercontract.Runtime) (
     return func() {
             instance.releaseLease(runtimeInstance, lock)
         }, func(refreshRuntime containercontract.Runtime) error {
-            return lock.Refresh(refreshRuntime, bound.Of(instance.config.LockTtl))
+            return lock.Refresh(refreshRuntime, lockcontract.RefreshOptions{Ttl: bound.Of(instance.config.LockTtl)})
         }, true, nil
 }
 

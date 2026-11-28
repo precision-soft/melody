@@ -11,6 +11,7 @@ import (
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
+    lockcontract "github.com/precision-soft/melody/v4/lock/contract"
 )
 
 type recordingCommand struct {
@@ -78,7 +79,7 @@ func TestExclusiveCommand_SkipsQuietlyWhenHeld(t *testing.T) {
     locker := NewInMemoryLocker(InMemoryLockerConfig{})
     runtimeInstance := testRuntime()
 
-    holder := mustCreateLock(locker.CreateLock("melody:command:outbox:dispatch", bound.Of(time.Minute)))
+    holder := mustCreateLock(locker.CreateLock("melody:command:outbox:dispatch", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
     acquired, _ := holder.Acquire(runtimeInstance)
     if false == acquired {
         t.Fatalf("expected external holder to acquire the default lock name")
@@ -110,7 +111,7 @@ func TestExclusiveCommand_CustomLockNameSharesTheLock(t *testing.T) {
     locker := NewInMemoryLocker(InMemoryLockerConfig{})
     runtimeInstance := testRuntime()
 
-    holder := mustCreateLock(locker.CreateLock("custom:lease", bound.Of(time.Minute)))
+    holder := mustCreateLock(locker.CreateLock("custom:lease", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
     acquired, _ := holder.Acquire(runtimeInstance)
     if false == acquired {
         t.Fatalf("expected external holder to acquire the custom lock name")
@@ -144,7 +145,7 @@ func TestExclusiveCommand_TheDefaultLockNameCarriesTheNamespace(t *testing.T) {
         t.Run(testCase.name, func(t *testing.T) {
             locker := NewInMemoryLocker(InMemoryLockerConfig{})
 
-            holder := mustCreateLock(locker.CreateLock(testCase.heldName, bound.Of(time.Minute)))
+            holder := mustCreateLock(locker.CreateLock(testCase.heldName, lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
             if acquired, _ := holder.Acquire(runtimeInstance); false == acquired {
                 t.Fatalf("expected the external holder to acquire %q", testCase.heldName)
             }
@@ -194,7 +195,7 @@ func TestExclusiveCommand_ContentionSkipNamesThePeerInstance(t *testing.T) {
     locker := NewInMemoryLocker(InMemoryLockerConfig{})
     runtimeInstance, logger := runtimeWithRecordingLogger(context.Background())
 
-    holder := mustCreateLock(locker.CreateLock("melody:command:outbox:dispatch", bound.Of(time.Minute)))
+    holder := mustCreateLock(locker.CreateLock("melody:command:outbox:dispatch", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
     if acquired, _ := holder.Acquire(runtimeInstance); false == acquired {
         t.Fatalf("expected the external holder to acquire the lock")
     }

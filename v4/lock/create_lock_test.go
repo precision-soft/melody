@@ -7,10 +7,11 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
+    lockcontract "github.com/precision-soft/melody/v4/lock/contract"
 )
 
 func TestCreateLock_ALockerAnsweringNoLockIsRefusedNamingTheLock(t *testing.T) {
-    createdLock, createErr := CreateLock(&noLockLocker{}, "job:none", bound.Of(time.Second))
+    createdLock, createErr := CreateLock(&noLockLocker{}, "job:none", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Second)})
     if false == internal.IsNilInterface(createdLock) || false == namesNoLock(createErr) {
         t.Fatalf("expected no lock and the no-lock refusal, got %v %v", createdLock, createErr)
     }

@@ -48,8 +48,8 @@ func TestPgsqlLock_MutualExclusionAndRelease(t *testing.T) {
 
     name := "melody_pg_lock_test"
 
-    first := mustCreateLock(locker.CreateLock(name, bound.Duration{}))
-    second := mustCreateLock(locker.CreateLock(name, bound.Duration{}))
+    first := mustCreateLock(locker.CreateLock(name, lockcontract.CreateLockOptions{}))
+    second := mustCreateLock(locker.CreateLock(name, lockcontract.CreateLockOptions{}))
 
     acquired, acquireErr := first.Acquire(runtimeInstance)
     if nil != acquireErr || false == acquired {
@@ -79,9 +79,9 @@ func TestPgsqlLock_RefreshReportsLostLock(t *testing.T) {
     locker := NewLocker(pgLockDatabase(t), LockerConfig{})
     runtimeInstance := newLockRuntime()
 
-    lock := mustCreateLock(locker.CreateLock("melody_pg_lock_refresh_test", bound.Duration{}))
+    lock := mustCreateLock(locker.CreateLock("melody_pg_lock_refresh_test", lockcontract.CreateLockOptions{}))
 
-    if refreshErr := lock.Refresh(runtimeInstance, bound.Duration{}); nil == refreshErr {
+    if refreshErr := lock.Refresh(runtimeInstance, lockcontract.RefreshOptions{}); nil == refreshErr {
         t.Fatalf("expected refresh to fail before the lock is acquired")
     }
 
@@ -90,7 +90,7 @@ func TestPgsqlLock_RefreshReportsLostLock(t *testing.T) {
         t.Fatalf("expected acquire to succeed: %v %v", acquired, acquireErr)
     }
 
-    if refreshErr := lock.Refresh(runtimeInstance, bound.Duration{}); nil != refreshErr {
+    if refreshErr := lock.Refresh(runtimeInstance, lockcontract.RefreshOptions{}); nil != refreshErr {
         t.Fatalf("expected refresh to succeed while held: %v", refreshErr)
     }
 
@@ -98,7 +98,7 @@ func TestPgsqlLock_RefreshReportsLostLock(t *testing.T) {
         t.Fatalf("release: %v", releaseErr)
     }
 
-    if refreshErr := lock.Refresh(runtimeInstance, bound.Duration{}); nil == refreshErr {
+    if refreshErr := lock.Refresh(runtimeInstance, lockcontract.RefreshOptions{}); nil == refreshErr {
         t.Fatalf("expected refresh to fail after release")
     }
 }
@@ -108,7 +108,7 @@ func TestPgsqlLock_RefreshCarriesTheProbeFailureOfALostLock(t *testing.T) {
     locker := NewLocker(pgLockDatabase(t), LockerConfig{})
     runtimeInstance := newLockRuntime()
 
-    lock := mustCreateLock(locker.CreateLock("melody_pg_lock_lost_cause_test", bound.Duration{}))
+    lock := mustCreateLock(locker.CreateLock("melody_pg_lock_lost_cause_test", lockcontract.CreateLockOptions{}))
 
     acquired, acquireErr := lock.Acquire(runtimeInstance)
     if nil != acquireErr || false == acquired {
@@ -120,7 +120,7 @@ func TestPgsqlLock_RefreshCarriesTheProbeFailureOfALostLock(t *testing.T) {
         t.Fatalf("close the pinned connection: %v", closeErr)
     }
 
-    refreshErr := lock.Refresh(runtimeInstance, bound.Duration{})
+    refreshErr := lock.Refresh(runtimeInstance, lockcontract.RefreshOptions{})
     if nil == refreshErr {
         t.Fatalf("expected refresh to report the lost lock")
     }
@@ -138,7 +138,7 @@ func TestPgsqlLock_FailuresNameTheAdvisoryKeyBesideTheName(t *testing.T) {
         t.Fatal(closeErr)
     }
 
-    lock := mustCreateLock(NewLocker(database, LockerConfig{}).CreateLock("melody:very:long:lock:name", bound.Duration{}))
+    lock := mustCreateLock(NewLocker(database, LockerConfig{}).CreateLock("melody:very:long:lock:name", lockcontract.CreateLockOptions{}))
 
     _, acquireErr := lock.Acquire(newLockRuntime())
     if nil == acquireErr {
@@ -160,7 +160,7 @@ func TestPgsqlLock_ReacquiringAHeldLockKeepsItsSession(t *testing.T) {
     locker := NewLocker(pgLockDatabase(t), LockerConfig{})
     runtimeInstance := newLockRuntime()
 
-    lock := mustCreateLock(locker.CreateLock("melody_pg_lock_reacquire_test", bound.Duration{}))
+    lock := mustCreateLock(locker.CreateLock("melody_pg_lock_reacquire_test", lockcontract.CreateLockOptions{}))
     defer func() {
         _ = lock.Release(runtimeInstance)
     }()
@@ -189,7 +189,7 @@ func TestPgsqlLock_ReacquiringAfterTheSessionEndedTakesTheLockAfresh(t *testing.
     runtimeInstance := newLockRuntime()
 
     name := "melody_pg_lock_reacquire_after_end_test"
-    lock := mustCreateLock(locker.CreateLock(name, bound.Duration{}))
+    lock := mustCreateLock(locker.CreateLock(name, lockcontract.CreateLockOptions{}))
     defer func() {
         _ = lock.Release(runtimeInstance)
     }()
@@ -220,7 +220,7 @@ func TestPgsqlLock_ReacquiringAfterTheSessionEndedTakesTheLockAfresh(t *testing.
         t.Fatalf("expected the dead session's pin to be replaced")
     }
 
-    contended, contendedErr := mustCreateLock(locker.CreateLock(name, bound.Duration{})).Acquire(runtimeInstance)
+    contended, contendedErr := mustCreateLock(locker.CreateLock(name, lockcontract.CreateLockOptions{})).Acquire(runtimeInstance)
     if nil != contendedErr || true == contended {
         t.Fatalf("expected the new session to hold the lock against another: %v %v", contended, contendedErr)
     }
@@ -232,12 +232,12 @@ func TestNewLocker_TheReleaseTimeoutReachesEveryLockAndAnAbsentOneTakesTheDefaul
         _ = database.Close()
     })
 
-    configured := mustCreateLock(NewLocker(database, LockerConfig{ReleaseTimeout: bound.Of(750 * time.Millisecond)}).CreateLock("melody_pg_lock_timeout_test", bound.Duration{})).(*pgsqlLock)
+    configured := mustCreateLock(NewLocker(database, LockerConfig{ReleaseTimeout: bound.Of(750 * time.Millisecond)}).CreateLock("melody_pg_lock_timeout_test", lockcontract.CreateLockOptions{})).(*pgsqlLock)
     if 750*time.Millisecond != configured.releaseTimeout {
         t.Fatalf("expected the configured release timeout on the lock, got %s", configured.releaseTimeout)
     }
 
-    defaulted := mustCreateLock(NewLocker(database, LockerConfig{}).CreateLock("melody_pg_lock_timeout_test", bound.Duration{})).(*pgsqlLock)
+    defaulted := mustCreateLock(NewLocker(database, LockerConfig{}).CreateLock("melody_pg_lock_timeout_test", lockcontract.CreateLockOptions{})).(*pgsqlLock)
     if 5*time.Second != defaulted.releaseTimeout {
         t.Fatalf("expected the default release timeout 5s, got %s", defaulted.releaseTimeout)
     }
@@ -247,13 +247,13 @@ func TestPgsqlLock_AnUnlimitedTtlAcquiresAndRefreshes(t *testing.T) {
     locker := NewLocker(pgLockDatabase(t), LockerConfig{})
     runtimeInstance := newLockRuntime()
 
-    lock := mustCreateLock(locker.CreateLock("melody_pg_lock_unlimited", bound.UnlimitedDuration()))
+    lock := mustCreateLock(locker.CreateLock("melody_pg_lock_unlimited", lockcontract.CreateLockOptions{Ttl: bound.UnlimitedDuration()}))
     if acquired, acquireErr := lock.Acquire(runtimeInstance); nil != acquireErr || false == acquired {
         t.Fatalf("expected an unlimited ttl to acquire: %v %v", acquired, acquireErr)
     }
     defer lock.Release(runtimeInstance)
 
-    if refreshErr := lock.Refresh(runtimeInstance, bound.UnlimitedDuration()); nil != refreshErr {
+    if refreshErr := lock.Refresh(runtimeInstance, lockcontract.RefreshOptions{Ttl: bound.UnlimitedDuration()}); nil != refreshErr {
         t.Fatalf("expected an unlimited refresh to probe the held lock: %v", refreshErr)
     }
 }
@@ -267,7 +267,7 @@ func newReleaseRuntime(ctx context.Context) containercontract.Runtime {
 func acquireOnTheRecordingDouble(t *testing.T, connector *releaseRecordingConnector, config LockerConfig) (*pgsqlLock, int) {
     t.Helper()
 
-    lock := mustCreateLock(NewLocker(newReleaseRecordingDatabase(t, connector), config).CreateLock("melody_release_budget", bound.Duration{})).(*pgsqlLock)
+    lock := mustCreateLock(NewLocker(newReleaseRecordingDatabase(t, connector), config).CreateLock("melody_release_budget", lockcontract.CreateLockOptions{})).(*pgsqlLock)
 
     acquired, acquireErr := lock.Acquire(newReleaseRuntime(context.Background()))
     if nil != acquireErr || false == acquired {
@@ -423,7 +423,7 @@ func TestPgsqlLock_ANilOrTypedNilRuntimeReleasesOnTheLockersBudget(t *testing.T)
 }
 
 func TestLocker_CreateLockAdmitsAnUnlimitedTtlSoASessionGateIsAdmitted(t *testing.T) {
-    lock, createErr := (&Locker{}).CreateLock("session", bound.UnlimitedDuration())
+    lock, createErr := (&Locker{}).CreateLock("session", lockcontract.CreateLockOptions{Ttl: bound.UnlimitedDuration()})
     if nil != createErr || nil == lock {
         t.Fatalf("expected a session lock for an unlimited ttl, got %v %v", lock, createErr)
     }

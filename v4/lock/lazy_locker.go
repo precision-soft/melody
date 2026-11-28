@@ -3,7 +3,6 @@ package lock
 import (
     "sync"
 
-    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -25,11 +24,11 @@ func NewLazyLocker(resolver containercontract.Resolver) lockcontract.Locker {
 }
 
 /* CreateLock answers a lock that creates the inner one at its first use; the inner locker's refusal is the error of that first Acquire, Release or Refresh. */
-func (instance *lazyLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *lazyLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     return &deferredLock{
-        owner: instance,
-        name:  name,
-        ttl:   ttl,
+        owner:   instance,
+        name:    name,
+        options: options,
     }, nil
 }
 
@@ -82,11 +81,11 @@ func (instance *lazyLocker) resolveLocker(runtimeInstance containercontract.Runt
 }
 
 type deferredLock struct {
-    owner *lazyLocker
-    name  string
-    ttl   bound.Duration
-    mutex sync.Mutex
-    lock  lockcontract.Lock
+    owner   *lazyLocker
+    name    string
+    options lockcontract.CreateLockOptions
+    mutex   sync.Mutex
+    lock    lockcontract.Lock
 }
 
 /* the Locker is resolved outside the mutex, so a wait on its creation never blocks the lock's other callers */
@@ -104,7 +103,7 @@ func (instance *deferredLock) resolvedLock(runtimeInstance containercontract.Run
         return nil, resolveErr
     }
 
-    createdLock, createErr := CreateLock(locker, instance.name, instance.ttl)
+    createdLock, createErr := CreateLock(locker, instance.name, instance.options)
     if nil != createErr {
         return nil, createErr
     }
@@ -137,13 +136,14 @@ func (instance *deferredLock) Release(runtimeInstance containercontract.Runtime)
     return lock.Release(runtimeInstance)
 }
 
-func (instance *deferredLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+/* the options go on unresolved: the inner lock owns the reading of an absent ttl */
+func (instance *deferredLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     lock, resolveErr := instance.resolvedLock(runtimeInstance)
     if nil != resolveErr {
         return resolveErr
     }
 
-    return lock.Refresh(runtimeInstance, ttl)
+    return lock.Refresh(runtimeInstance, options)
 }
 
 var (

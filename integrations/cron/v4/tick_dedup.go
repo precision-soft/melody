@@ -462,7 +462,7 @@ func (instance *RunnerCommand) claimTick(runtimeInstance containercontract.Runti
         }
     }()
 
-    tickLock, createErr := lock.CreateLock(dedupRun.locker, claim.key, bound.Of(claim.hold))
+    tickLock, createErr := lock.CreateLock(dedupRun.locker, claim.key, lockcontract.CreateLockOptions{Ttl: bound.Of(claim.hold)})
     if nil != createErr {
         return tickVerdictFailed, createErr
     }

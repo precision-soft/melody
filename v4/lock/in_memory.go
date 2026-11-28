@@ -71,8 +71,8 @@ type inMemoryHolder struct {
 }
 
 /* CreateLock answers a lease lock, its ttl resolved through lockcontract.ResolveLeaseTtl here, so an absent one holds for 30s and an unlimited one is refused, and a holder that crashes lets the lock lapse. */
-func (instance *InMemoryLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
-    if _, ttlErr := lockcontract.ResolveLeaseTtl(ttl); nil != ttlErr {
+func (instance *InMemoryLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
+    if _, ttlErr := lockcontract.ResolveLeaseTtl(options.Ttl); nil != ttlErr {
         return nil, ttlErr
     }
 
@@ -81,7 +81,7 @@ func (instance *InMemoryLocker) CreateLock(name string, ttl bound.Duration) (loc
     return &inMemoryLock{
         locker: instance,
         name:   name,
-        ttl:    ttl,
+        ttl:    options.Ttl,
         token:  token,
     }, nil
 }
@@ -196,7 +196,12 @@ func (instance *inMemoryLock) Release(runtimeInstance containercontract.Runtime)
     return nil
 }
 
-func (instance *inMemoryLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *inMemoryLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
+    ttl := options.Ttl
+    if true == ttl.IsAbsent() {
+        ttl = instance.ttl
+    }
+
     resolvedTtl, ttlErr := lockcontract.ResolveLeaseRefreshTtl(ttl)
     if nil != ttlErr {
         return ttlErr

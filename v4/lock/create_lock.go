@@ -1,7 +1,6 @@
 package lock
 
 import (
-    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
@@ -9,8 +8,8 @@ import (
 )
 
 /* CreateLock asks the locker for the lock of a name and answers its refusal unchanged; a locker answering neither a lock nor an error is refused with "the locker answered no lock", naming the lock, so no caller calls a door of a nil lock. */
-func CreateLock(locker lockcontract.Locker, name string, ttl bound.Duration) (lockcontract.Lock, error) {
-    createdLock, createErr := locker.CreateLock(name, ttl)
+func CreateLock(locker lockcontract.Locker, name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
+    createdLock, createErr := locker.CreateLock(name, options)
     if nil != createErr {
         return nil, createErr
     }

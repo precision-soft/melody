@@ -88,8 +88,8 @@ type sequenceLocker struct {
     acquireErr error
 }
 
-func (instance *sequenceLocker) CreateLock(name string, ttl bound.Duration) (melodylockcontract.Lock, error) {
-    return &sequenceLock{sequence: instance.sequence, inner: mustCreateLock(instance.inner.CreateLock(name, ttl)), heldAway: instance.heldAway, acquireErr: instance.acquireErr}, nil
+func (instance *sequenceLocker) CreateLock(name string, options melodylockcontract.CreateLockOptions) (melodylockcontract.Lock, error) {
+    return &sequenceLock{sequence: instance.sequence, inner: mustCreateLock(instance.inner.CreateLock(name, options)), heldAway: instance.heldAway, acquireErr: instance.acquireErr}, nil
 }
 
 type sequenceLock struct {
@@ -124,8 +124,8 @@ func (instance *sequenceLock) Release(runtimeInstance melodycontainercontract.Ru
     return instance.inner.Release(runtimeInstance)
 }
 
-func (instance *sequenceLock) Refresh(runtimeInstance melodycontainercontract.Runtime, ttl bound.Duration) error {
-    return instance.inner.Refresh(runtimeInstance, ttl)
+func (instance *sequenceLock) Refresh(runtimeInstance melodycontainercontract.Runtime, options melodylockcontract.RefreshOptions) error {
+    return instance.inner.Refresh(runtimeInstance, options)
 }
 
 /* sequenceCache records the moment the reading lands in the cache, which is the moment Refresh took it: the product list the reading counts is cached through the same door, so the key is what tells the reading's own write apart */

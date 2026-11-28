@@ -63,8 +63,8 @@ type Locker struct {
     releaseTimeout time.Duration
 }
 
-/* CreateLock answers a session lock, which holds until its connection drops and has no lease, so the ttl is ignored and every state of it, unlimited included, is admitted: it answers no error. */
-func (instance *Locker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+/* CreateLock answers a session lock, which holds until its connection drops and has no lease, so the options are ignored and every state of their ttl, unlimited included, is admitted: it answers no error. */
+func (instance *Locker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     return &mysqlLock{
         database:       instance.database,
         name:           name,
@@ -197,7 +197,7 @@ func discardConnection(connection *sql.Conn) {
     })
 }
 
-func (instance *mysqlLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *mysqlLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 

@@ -13,6 +13,7 @@ import (
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     melodylock "github.com/precision-soft/melody/v4/lock"
+    lockcontract "github.com/precision-soft/melody/v4/lock/contract"
 )
 
 type recordingRegistrar struct {
@@ -223,7 +224,7 @@ func TestRegisterServices_TheRegisteredLockerAndTokenStoreDeriveTheirNamesFromTh
 
     NewModule(ModuleConfig{Connection: shopConnection, Locker: &LockerConfig{}, TokenStore: &TokenStoreConfig{}}).RegisterServices(&containerRegistrar{target: serviceContainer})
 
-    lock := mustCreateLock(melodylock.LockerMustFromResolver(t.Context(), serviceContainer).CreateLock("x", bound.Of(time.Minute)))
+    lock := mustCreateLock(melodylock.LockerMustFromResolver(t.Context(), serviceContainer).CreateLock("x", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
     if key := lock.(*redisLock).key; "shop:lock:x" != key {
         t.Fatalf("expected the registered locker to key shop:lock:x, got %q", key)
     }
@@ -235,7 +236,7 @@ func TestRegisterServices_TheRegisteredLockerAndTokenStoreDeriveTheirNamesFromTh
     disabledContainer := container.NewContainer(container.ContainerConfig{})
     NewModule(ModuleConfig{Connection: shopConnection, Locker: &LockerConfig{KeyPrefixDisabled: true}}).RegisterServices(&containerRegistrar{target: disabledContainer})
 
-    bareLock := mustCreateLock(melodylock.LockerMustFromResolver(t.Context(), disabledContainer).CreateLock("x", bound.Of(time.Minute)))
+    bareLock := mustCreateLock(melodylock.LockerMustFromResolver(t.Context(), disabledContainer).CreateLock("x", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
     if key := bareLock.(*redisLock).key; "x" != key {
         t.Fatalf("expected the registered locker with its prefix disabled to key the bare name, got %q", key)
     }

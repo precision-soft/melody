@@ -24,10 +24,10 @@ type switchableRefreshLocker struct {
     fail  atomic.Bool
 }
 
-func (instance *switchableRefreshLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *switchableRefreshLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     return &switchableRefreshLock{
         locker: instance,
-        inner:  mustCreateLock(instance.inner.CreateLock(name, ttl)),
+        inner:  mustCreateLock(instance.inner.CreateLock(name, options)),
     }, nil
 }
 
@@ -44,12 +44,12 @@ func (instance *switchableRefreshLock) Release(runtimeInstance containercontract
     return instance.inner.Release(runtimeInstance)
 }
 
-func (instance *switchableRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *switchableRefreshLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     if true == instance.locker.fail.Load() {
         return exception.NewError("lease lost", nil, nil)
     }
 
-    return instance.inner.Refresh(runtimeInstance, ttl)
+    return instance.inner.Refresh(runtimeInstance, options)
 }
 
 func fastGateConfig(ttl bound.Duration) LeaderGateConfig {
@@ -234,7 +234,7 @@ func TestLeaderGate_ReleasesOnShutdown(t *testing.T) {
     }
 
     /* the one-hour ttl must not matter: shutdown releases the lock immediately */
-    contender := mustCreateLock(locker.CreateLock("worker:release", bound.Of(time.Minute)))
+    contender := mustCreateLock(locker.CreateLock("worker:release", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)}))
     acquired, _ := contender.Acquire(testRuntime())
     if false == acquired {
         t.Fatalf("expected the lock to be free right after shutdown")
@@ -473,10 +473,10 @@ func (instance *countingRefreshLocker) refreshes() int64 {
     return instance.count.Load()
 }
 
-func (instance *countingRefreshLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *countingRefreshLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     return &countingRefreshLock{
         locker: instance,
-        inner:  mustCreateLock(instance.inner.CreateLock(name, ttl)),
+        inner:  mustCreateLock(instance.inner.CreateLock(name, options)),
     }, nil
 }
 
@@ -493,10 +493,10 @@ func (instance *countingRefreshLock) Release(runtimeInstance containercontract.R
     return instance.inner.Release(runtimeInstance)
 }
 
-func (instance *countingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *countingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     instance.locker.count.Add(1)
 
-    return instance.inner.Refresh(runtimeInstance, ttl)
+    return instance.inner.Refresh(runtimeInstance, options)
 }
 
 /* contextSensitiveAcquireLocker fails Acquire with the call's context error, as a real backend does once the context is cancelled. */
@@ -504,7 +504,7 @@ type contextSensitiveAcquireLocker struct {
     entered chan struct{}
 }
 
-func (instance *contextSensitiveAcquireLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *contextSensitiveAcquireLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     return &contextSensitiveAcquireLock{entered: instance.entered}, nil
 }
 
@@ -528,7 +528,7 @@ func (instance *contextSensitiveAcquireLock) Release(runtimeInstance containerco
     return nil
 }
 
-func (instance *contextSensitiveAcquireLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *contextSensitiveAcquireLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     return nil
 }
 
@@ -537,8 +537,8 @@ type hangingRefreshLocker struct {
     inner lockcontract.Locker
 }
 
-func (instance *hangingRefreshLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
-    return &hangingRefreshLock{inner: mustCreateLock(instance.inner.CreateLock(name, ttl))}, nil
+func (instance *hangingRefreshLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
+    return &hangingRefreshLock{inner: mustCreateLock(instance.inner.CreateLock(name, options))}, nil
 }
 
 type hangingRefreshLock struct {
@@ -553,7 +553,7 @@ func (instance *hangingRefreshLock) Release(runtimeInstance containercontract.Ru
     return instance.inner.Release(runtimeInstance)
 }
 
-func (instance *hangingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *hangingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     <-runtimeInstance.Context().Done()
 
     return exception.NewError("lock refresh never answered", nil, runtimeInstance.Context().Err())
@@ -687,8 +687,8 @@ type countedFailureLocker struct {
     attempts     atomic.Int64
 }
 
-func (instance *countedFailureLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
-    return &countedFailureLock{locker: instance, inner: mustCreateLock(instance.inner.CreateLock(name, ttl))}, nil
+func (instance *countedFailureLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
+    return &countedFailureLock{locker: instance, inner: mustCreateLock(instance.inner.CreateLock(name, options))}, nil
 }
 
 type countedFailureLock struct {
@@ -704,12 +704,12 @@ func (instance *countedFailureLock) Release(runtimeInstance containercontract.Ru
     return instance.inner.Release(runtimeInstance)
 }
 
-func (instance *countedFailureLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *countedFailureLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     if instance.locker.attempts.Add(1) <= instance.locker.failureCount {
         return exception.NewError("lease lost", nil, nil)
     }
 
-    return instance.inner.Refresh(runtimeInstance, ttl)
+    return instance.inner.Refresh(runtimeInstance, options)
 }
 
 /* A store that drops a connection and reconnects must not cost a term. The lease the gate last wrote is the store's own promise that nobody else gets this lock until it lapses — which is exactly why the cadence is half the lease — so a renewal lost while the lease runs costs nothing, and the one behind it lands. Leaving on the first failure would turn an eight-second failover into a cancelled term, a re-election, and leader work restarted from the beginning for a lock that is not in danger. */
@@ -856,8 +856,8 @@ type alternatingRefreshLocker struct {
     attempts atomic.Int64
 }
 
-func (instance *alternatingRefreshLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
-    return &alternatingRefreshLock{locker: instance, inner: mustCreateLock(instance.inner.CreateLock(name, ttl))}, nil
+func (instance *alternatingRefreshLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
+    return &alternatingRefreshLock{locker: instance, inner: mustCreateLock(instance.inner.CreateLock(name, options))}, nil
 }
 
 type alternatingRefreshLock struct {
@@ -873,12 +873,12 @@ func (instance *alternatingRefreshLock) Release(runtimeInstance containercontrac
     return instance.inner.Release(runtimeInstance)
 }
 
-func (instance *alternatingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *alternatingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     if 0 == instance.locker.attempts.Add(1)%2 {
         return exception.NewError("lease lost", nil, nil)
     }
 
-    return instance.inner.Refresh(runtimeInstance, ttl)
+    return instance.inner.Refresh(runtimeInstance, options)
 }
 
 /* The threshold counts failures that are CONSECUTIVE, so a renewal that lands has to clear the count. Without the reset the counter only ever climbs: a lossy link that drops one renewal in two — every one of them survived by the next — still reaches three eventually and ends a term that was never lost, which is the flapping the threshold exists to prevent rather than cause. Over the window below the gate accumulates far more than three individual failures and none of them are adjacent. */
@@ -1035,7 +1035,7 @@ func TestLeaderGate_PanickingOnElectedHookIsShieldedAndLogged(t *testing.T) {
     }
 
     /* the shutdown released the lock: a fresh campaign must win it immediately */
-    acquired, acquireErr := mustCreateLock(locker.CreateLock("worker:hook-panics", bound.Of(time.Minute))).Acquire(testRuntimeWithContext(context.Background()))
+    acquired, acquireErr := mustCreateLock(locker.CreateLock("worker:hook-panics", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)})).Acquire(testRuntimeWithContext(context.Background()))
     if nil != acquireErr || false == acquired {
         t.Fatalf("expected the lock to be released on shutdown, got acquired=%v err=%v", acquired, acquireErr)
     }
@@ -1198,7 +1198,7 @@ func TestLeaderGate_APanickingOnElectedEndsTheTermAndReleasesTheLock(t *testing.
     }
 
     /* the lock is free between the ended term and the next campaign, a whole RetryInterval away: another replica can take it now */
-    acquired, acquireErr := mustCreateLock(locker.CreateLock("worker:hook-panics-term", bound.Of(time.Minute))).Acquire(testRuntimeWithContext(context.Background()))
+    acquired, acquireErr := mustCreateLock(locker.CreateLock("worker:hook-panics-term", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)})).Acquire(testRuntimeWithContext(context.Background()))
     if nil != acquireErr || false == acquired {
         t.Fatalf("expected the lock to be released with the ended term, got acquired=%v err=%v", acquired, acquireErr)
     }
@@ -1283,7 +1283,7 @@ func TestLeaderGateRun_RefusesATypedNilScopeBeforeCampaigning(t *testing.T) {
         _ = gate.Run(&typedNilScopeRuntime{ctx: context.Background()})
     }, "leader gate runtime scope is nil")
 
-    acquired, acquireErr := mustCreateLock(locker.CreateLock("worker:typed-nil-scope", bound.Of(time.Minute))).Acquire(testRuntimeWithContext(context.Background()))
+    acquired, acquireErr := mustCreateLock(locker.CreateLock("worker:typed-nil-scope", lockcontract.CreateLockOptions{Ttl: bound.Of(time.Minute)})).Acquire(testRuntimeWithContext(context.Background()))
     if nil != acquireErr || false == acquired {
         t.Fatalf("expected no lock to be held by the refused run, got acquired=%v err=%v", acquired, acquireErr)
     }
@@ -1387,8 +1387,8 @@ type parkingReleaseLocker struct {
     enteredOnce    sync.Once
 }
 
-func (instance *parkingReleaseLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
-    return &parkingReleaseLock{locker: instance, inner: mustCreateLock(instance.inner.CreateLock(name, ttl))}, nil
+func (instance *parkingReleaseLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
+    return &parkingReleaseLock{locker: instance, inner: mustCreateLock(instance.inner.CreateLock(name, options))}, nil
 }
 
 type parkingReleaseLock struct {
@@ -1409,8 +1409,8 @@ func (instance *parkingReleaseLock) Release(runtimeInstance containercontract.Ru
     return instance.inner.Release(runtimeInstance)
 }
 
-func (instance *parkingReleaseLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
-    return instance.inner.Refresh(runtimeInstance, ttl)
+func (instance *parkingReleaseLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
+    return instance.inner.Refresh(runtimeInstance, options)
 }
 
 /* the term is left before the lock is released: while the release is still on its way to the store the lease is valid, and a gate that still claimed leadership then would answer IsLeader for a lock it is handing back */
@@ -1796,7 +1796,7 @@ type failingAcquireLocker struct {
     err error
 }
 
-func (instance *failingAcquireLocker) CreateLock(name string, ttl bound.Duration) (lockcontract.Lock, error) {
+func (instance *failingAcquireLocker) CreateLock(name string, options lockcontract.CreateLockOptions) (lockcontract.Lock, error) {
     return &failingAcquireLock{err: instance.err}, nil
 }
 
@@ -1812,7 +1812,7 @@ func (instance *failingAcquireLock) Release(runtimeInstance containercontract.Ru
     return nil
 }
 
-func (instance *failingAcquireLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
+func (instance *failingAcquireLock) Refresh(runtimeInstance containercontract.Runtime, options lockcontract.RefreshOptions) error {
     return nil
 }
 

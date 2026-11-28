@@ -124,7 +124,7 @@ func RunExclusive(
         return false, stopRenewalLimitErr
     }
 
-    lock, createErr := CreateLock(locker, name, ttl.Limit())
+    lock, createErr := CreateLock(locker, name, lockcontract.CreateLockOptions{Ttl: ttl.Limit()})
     if nil != createErr {
         return false, createErr
     }
@@ -572,7 +572,7 @@ func refreshOnce(
 
     refreshRuntime := runtime.WithContext(runtimeInstance, refreshContext)
 
-    return lock.Refresh(refreshRuntime, bound.Of(ttl))
+    return lock.Refresh(refreshRuntime, lockcontract.RefreshOptions{Ttl: bound.Of(ttl)})
 }
 
 /* refuseARuntimeThatCannotBeRewrapped refuses, before any lock is taken, a runtime whose scope is a typed nil. The runtime is re-wrapped through runtime.WithContext, which refuses a typed nil, and one of those re-wraps runs the release in a defer, where the refusal would be a second panic with the lock still held. */
