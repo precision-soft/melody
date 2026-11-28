@@ -59,7 +59,7 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 ### Messagebus: a header name's length is a limit of its own
 
-**What changed.** [`HeaderLimitsConfig.MaxNameLength`](../messagebus/headers.go) bounds the header names a transport or a store writes, `DefaultHeaderMaxNameLength` (64) when left out, 1 to `HeaderNameMaximumLength` (255), unlimited refused, beside `MaxCount` and `MaxBytes`; `HeaderNameMaxLength` is renamed `DefaultHeaderMaxNameLength`. A longer name is refused naming `<field>.MaxNameLength` where it was refused naming `<field>`, and `ValidateReceivedHeaders` and `IsWritableHeader` read a name up to 255 characters, so the amqp transport no longer skips a received name between 65 and 255 characters.
+**What changed.** [`HeaderLimitsConfig.MaxNameLength`](../messagebus/headers.go) bounds the header names a transport or a store writes, `DefaultHeaderMaxNameLength` (64) when left out, 1 to `HeaderNameMaximumLength` (255), unlimited refused, beside `MaxCount` and `MaxBytes`; `HeaderNameMaxLength` is renamed `DefaultHeaderMaxNameLength`. A longer name is refused naming `<field>.MaxNameLength` where it was refused naming `<field>`, and `IsWritableHeader` reads a name up to 255 characters, so the amqp transport no longer skips a received name between 65 and 255 characters.
 
 **Symptom.** `undefined: messagebus.HeaderNameMaxLength` at compile time; a refusal of a long name names `<field>.MaxNameLength`.
 

@@ -90,28 +90,6 @@ func TestValidateHeaders_TheZeroLimitsAreTheDefaults(t *testing.T) {
     }
 }
 
-func TestValidateReceivedHeaders_AppliesTheRuleWithoutTheCountAndTheBytes(t *testing.T) {
-    headers := map[string]string{"big": strings.Repeat("v", DefaultHeaderMaxBytes)}
-    for index := 0; index <= DefaultHeaderMaxCount; index++ {
-        headers[fmt.Sprintf("h%d", index)] = "value"
-    }
-
-    if validateErr := ValidateReceivedHeaders(headers, "TransportConfig.Headers"); nil != validateErr {
-        t.Fatalf("expected headers over the count and the bytes admitted, got %v", validateErr)
-    }
-
-    for _, refused := range []map[string]string{{"a b": "value"}, {"": "value"}, {"name": "a\tb"}, {"name": "\xff"}} {
-        validateErr := ValidateReceivedHeaders(refused, "TransportConfig.Headers")
-        if false == errors.Is(validateErr, ErrHeadersRefused) {
-            t.Fatalf("expected %q refused by the rule, got %v", refused, validateErr)
-        }
-
-        if "TransportConfig.Headers" != exception.LogContext(validateErr, exception.LogContextConfig{})["field"] {
-            t.Fatalf("expected the refusal to name the field, got %v", exception.LogContext(validateErr, exception.LogContextConfig{}))
-        }
-    }
-}
-
 func TestIsWritableHeader_AnswersTheNameAndValueRule(t *testing.T) {
     for _, probe := range []struct {
         name     string
@@ -191,15 +169,5 @@ func TestValidateHeaders_TheNameLengthIsTheConfiguredLimit(t *testing.T) {
 
     if false == errors.Is(ValidateHeaders(map[string]string{strings.Repeat("a", DefaultHeaderMaxNameLength+1): ""}, HeaderLimits{}), ErrHeadersRefused) {
         t.Fatalf("expected the zero limits to refuse a name above the default length")
-    }
-}
-
-func TestValidateReceivedHeaders_ReadsANameUpToTheMaximumLength(t *testing.T) {
-    if nil != ValidateReceivedHeaders(map[string]string{strings.Repeat("a", HeaderNameMaximumLength): "value"}, "TransportConfig.Headers") {
-        t.Fatalf("expected a name of the maximum length read")
-    }
-
-    if false == errors.Is(ValidateReceivedHeaders(map[string]string{strings.Repeat("a", HeaderNameMaximumLength+1): "value"}, "TransportConfig.Headers"), ErrHeadersRefused) {
-        t.Fatalf("expected a name above the maximum length refused")
     }
 }

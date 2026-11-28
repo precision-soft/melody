@@ -103,13 +103,6 @@ func ValidateHeaders(headers map[string]string, limits HeaderLimits) error {
     return nil
 }
 
-/* ValidateReceivedHeaders applies ValidateHeaders' name and value rule without its count, bytes and name length, which the broker or the row already bounded, a name read up to HeaderNameMaximumLength: the re-publish of a received envelope is never refused for a size it arrived with. */
-func ValidateReceivedHeaders(headers map[string]string, field string) error {
-    _, ruleErr := validateHeaderRule(headers, field, HeaderNameMaximumLength)
-
-    return ruleErr
-}
-
 /* IsWritableHeader answers whether one header meets ValidateHeaders' name and value rule, a name up to HeaderNameMaximumLength, so a transport skips on receive what no limits could write back. */
 func IsWritableHeader(name string, value string) bool {
     return true == validHeaderName(name, HeaderNameMaximumLength) && true == validHeaderValue(value)
