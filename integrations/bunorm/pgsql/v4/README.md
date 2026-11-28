@@ -120,11 +120,11 @@ The configuration is resolved at the registration, so a refused `ReleaseTimeout`
 
 ## Advanced connector customization
 
-For driver options not exposed by the typed configs, use a post-build hook set as `ProviderConfig.PostBuildHook`, with the [`pgsql.PostBuildHook`](./post_build_hook.go) signature. The hook runs during `Open`, after Melody defaults and typed configs are applied and before the SQL database is opened.
+For driver options not exposed by the typed configs, use a post-build hook set as `ProviderConfig.PostBuildHook`, with the [`pgsql.PostBuildHook`](./post_build_hook.go) signature. The hook runs during `Open`, after Melody defaults and typed configs are applied and before the SQL database is opened, handed the opener's runtime, its context ending at the connect timeout.
 
 ```go
 provider := pgsql.NewProvider(pgsql.ProviderConfig{
-    PostBuildHook: func(ctx context.Context, connector *pgdriver.Connector) error {
+    PostBuildHook: func(runtimeInstance containercontract.Runtime, connector *pgdriver.Connector) error {
         /* Insecure leaves TLSConfig nil, so the hook must not assume one is there */
         tlsConfig := connector.Config().TLSConfig
         if nil == tlsConfig {

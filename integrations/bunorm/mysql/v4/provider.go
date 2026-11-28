@@ -13,6 +13,7 @@ import (
     driver "github.com/go-sql-driver/mysql"
     "github.com/precision-soft/melody/integrations/bunorm/v4"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/logging"
@@ -74,7 +75,7 @@ func (instance *Provider) Open(runtimeInstance containercontract.Runtime, parame
         bunorm.RouteDiagnostics(logger)
     }
 
-    return instance.openWithRetry(ctx, parameters, resolvedLogger)
+    return instance.openWithRetry(runtimeInstance, parameters, resolvedLogger)
 }
 
 /* OpenForMigration opens the same database with the driver deadlines lifted: ReadTimeout and WriteTimeout are per-connection settings baked into the connector, sized for request traffic, and a DDL statement that legitimately runs past them — an ALTER TABLE adding constraints on a large table — is cut mid-statement with "invalid connection", outside any transaction MySQL would roll back. The connect timeout stays armed (a down database must still fail fast), the pool is kept to the two connections a sequential migration run needs, and no connection is recycled mid-run — a lifetime rotation under a running statement is the same cut by another name. It runs under the runtime as Open does. */
@@ -95,14 +96,15 @@ func (instance *Provider) migrationProvider() *Provider {
     return &derived
 }
 
-func (instance *Provider) openWithRetry(ctx context.Context, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *Provider) openWithRetry(runtimeInstance containercontract.Runtime, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    ctx := runtimeInstance.Context()
     attempt := 0
     maxAttempts := instance.retry.maxAttempts
 
     for {
         attempt = attempt + 1
 
-        database, openErr := instance.open(ctx, parameters, logger)
+        database, openErr := instance.open(runtimeInstance, parameters, logger)
         if nil == openErr {
             if 1 < attempt {
                 logger.Info(
@@ -219,7 +221,9 @@ func (instance *Provider) connectionTlsConfig(host string) *tls.Config {
     }
 }
 
-func (instance *Provider) open(ctx context.Context, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *Provider) open(runtimeInstance containercontract.Runtime, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    ctx := runtimeInstance.Context()
+
     /* an already-cancelled context is refused before the attempt: so a shutdown-cancelled lazy open pays no dial against a database nothing waits for. */
     if nil != ctx.Err() {
         return nil, exception.NewError(
@@ -254,7 +258,7 @@ func (instance *Provider) open(ctx context.Context, parameters bunorm.Connection
         hookContext, hookCancel := context.WithTimeout(ctx, instance.timeout.connectTimeout)
         defer hookCancel()
 
-        hookErr := instance.postBuildHook(hookContext, driverConfig)
+        hookErr := instance.postBuildHook(runtime.WithContext(runtimeInstance, hookContext), driverConfig)
         if nil != hookErr {
             return nil, exception.NewError(
                 "mysql database connector configuration failed",

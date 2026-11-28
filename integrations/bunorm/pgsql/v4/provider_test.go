@@ -80,7 +80,7 @@ func TestOpen_AnEmptyPortDialsTheDefaultAndAnUnlimitedReadDeadlineReachesTheConn
 
     provider := NewProvider(ProviderConfig{
         Timeout: TimeoutConfig{ReadTimeout: bound.UnlimitedDuration()},
-        PostBuildHook: func(ctx context.Context, connector *pgdriver.Connector) error {
+        PostBuildHook: func(runtimeInstance containercontract.Runtime, connector *pgdriver.Connector) error {
             seen = connector.Config()
 
             return errors.New("stop before the connection")
@@ -103,7 +103,7 @@ func TestOpen_TheConnectorReceivesEveryDeadlineTheTimeoutConfigNames(t *testing.
 
     provider := NewProvider(ProviderConfig{
         Timeout: TimeoutConfig{ConnectTimeout: bound.Of(7 * time.Second), ReadTimeout: bound.Of(11 * time.Second), WriteTimeout: bound.Of(13 * time.Second)},
-        PostBuildHook: func(ctx context.Context, connector *pgdriver.Connector) error {
+        PostBuildHook: func(runtimeInstance containercontract.Runtime, connector *pgdriver.Connector) error {
             seen = connector.Config()
 
             return errors.New("stop before the connection")
@@ -142,7 +142,7 @@ func TestNewProvider_TheZeroConfigurationResolvesToTheDefaults(t *testing.T) {
 }
 
 func TestNewProvider_KeepsTheConfiguredValues(t *testing.T) {
-    hook := func(ctx context.Context, connector *pgdriver.Connector) error {
+    hook := func(runtimeInstance containercontract.Runtime, connector *pgdriver.Connector) error {
         return nil
     }
 
@@ -188,7 +188,7 @@ func TestMigrationProvider_KeepsHookRetryAndTransportOverTheMigrationShape(t *te
 
     provider := NewProvider(ProviderConfig{
         TlsConfig: explicitTlsConfig,
-        PostBuildHook: func(ctx context.Context, connector *pgdriver.Connector) error {
+        PostBuildHook: func(runtimeInstance containercontract.Runtime, connector *pgdriver.Connector) error {
             hookCalled = true
             return nil
         },
@@ -209,7 +209,7 @@ func TestMigrationProvider_KeepsHookRetryAndTransportOverTheMigrationShape(t *te
     if nil == derived.postBuildHook {
         t.Fatalf("expected the post build hook to travel whole")
     }
-    _ = derived.postBuildHook(context.Background(), pgdriver.NewConnector())
+    _ = derived.postBuildHook(testRuntime(), pgdriver.NewConnector())
     if false == hookCalled {
         t.Fatalf("expected the derived provider to carry the same hook")
     }
@@ -227,13 +227,83 @@ func TestMigrationProvider_KeepsHookRetryAndTransportOverTheMigrationShape(t *te
     }
 }
 
+type postBuildHookContextKey struct{}
+
+/* a hook doing I/O resolves through the scope it opens under, so it is handed the opener's scope and kind over a context derived from the caller's */
+func TestProvider_ThePostBuildHookRunsUnderTheOpenersRuntime(t *testing.T) {
+    hookErr := errors.New("hook stops the open")
+    openerRuntime := testRuntimeUnder(context.WithValue(context.Background(), postBuildHookContextKey{}, "opener"))
+
+    var seenRuntime containercontract.Runtime
+    provider := NewProvider(ProviderConfig{
+        Insecure: true,
+        PostBuildHook: func(runtimeInstance containercontract.Runtime, connector *pgdriver.Connector) error {
+            seenRuntime = runtimeInstance
+
+            return hookErr
+        },
+        Retry: singleAttemptRetry,
+    })
+
+    if _, openErr := provider.Open(openerRuntime, newTestParameters("db.internal", "5432", "melody", "melody_user", "melody_password"), nil); false == errors.Is(openErr, hookErr) {
+        t.Fatalf("expected the hook's refusal to end the open, got %v", openErr)
+    }
+
+    if nil == seenRuntime {
+        t.Fatal("expected the hook to run")
+    }
+
+    if openerRuntime.Scope() != seenRuntime.Scope() {
+        t.Fatal("expected the hook handed the opener's scope")
+    }
+
+    if openerRuntime.Kind() != seenRuntime.Kind() {
+        t.Fatalf("expected the hook handed the opener's kind %v, got %v", openerRuntime.Kind(), seenRuntime.Kind())
+    }
+
+    if "opener" != seenRuntime.Context().Value(postBuildHookContextKey{}) {
+        t.Fatal("expected the hook's context derived from the opener's")
+    }
+}
+
+func TestProvider_ThePostBuildHooksContextEndsAtTheConnectTimeout(t *testing.T) {
+    hookErr := errors.New("hook stops the open")
+    connectTimeout := 3 * time.Second
+
+    var seenDeadline time.Time
+    var hasDeadline bool
+    provider := NewProvider(ProviderConfig{
+        Insecure: true,
+        Timeout: TimeoutConfig{ConnectTimeout: bound.Of(connectTimeout)},
+        PostBuildHook: func(runtimeInstance containercontract.Runtime, connector *pgdriver.Connector) error {
+            seenDeadline, hasDeadline = runtimeInstance.Context().Deadline()
+
+            return hookErr
+        },
+        Retry: singleAttemptRetry,
+    })
+
+    started := time.Now()
+    if _, openErr := provider.Open(testRuntime(), newTestParameters("db.internal", "5432", "melody", "melody_user", "melody_password"), nil); false == errors.Is(openErr, hookErr) {
+        t.Fatalf("expected the hook's refusal to end the open, got %v", openErr)
+    }
+
+    if false == hasDeadline {
+        t.Fatal("expected the hook's runtime to carry the connect timeout's deadline")
+    }
+
+    if seenDeadline.Before(started) || seenDeadline.After(time.Now().Add(connectTimeout)) {
+        t.Fatalf("expected the deadline within the connect timeout, got %v from %v", seenDeadline.Sub(started), started)
+    }
+}
+
 func TestProviderOpenBuildsConnectorAndAbortsOnPostBuildHookError(t *testing.T) {
     hookErr := errors.New("hook rejected the connector")
 
     var seenConnector *pgdriver.Connector
     provider := NewProvider(ProviderConfig{
         Insecure: true,
-        PostBuildHook: func(ctx context.Context, connector *pgdriver.Connector) error {
+        PostBuildHook: func(runtimeInstance containercontract.Runtime, connector *pgdriver.Connector) error {
             seenConnector = connector
 
             return hookErr
@@ -911,7 +981,7 @@ func openObservingTheTlsPosture(t *testing.T, config ProviderConfig) *tls.Config
     stopBeforeDial := errors.New("stop before the dial")
 
     var seenTlsConfig *tls.Config
-    config.PostBuildHook = func(ctx context.Context, connector *pgdriver.Connector) error {
+    config.PostBuildHook = func(runtimeInstance containercontract.Runtime, connector *pgdriver.Connector) error {
         seenTlsConfig = connector.Config().TLSConfig
 
         return stopBeforeDial
@@ -1084,7 +1154,7 @@ func TestComputeBackoffDelayReadsAZeroAttemptAsTheFirst(t *testing.T) {
 func TestProviderOpen_RefusesAnEmptyDatabaseUserOrHostBeforeBuildingTheConnector(t *testing.T) {
     provider := NewProvider(ProviderConfig{
         Insecure: true,
-        PostBuildHook: func(ctx context.Context, connector *pgdriver.Connector) error {
+        PostBuildHook: func(runtimeInstance containercontract.Runtime, connector *pgdriver.Connector) error {
             t.Fatal("the connector was built for a refused parameter set")
 
             return nil
@@ -1440,7 +1510,7 @@ func TestOpenWithRetry_ASingleAttemptDialsOnceAndFilesTheOutageAsUnreachable(t *
         Insecure: true,
         Timeout:  TimeoutConfig{ConnectTimeout: bound.Of(time.Second)},
         Retry:    RetryConfig{MaxAttempts: bound.Of(1)},
-        PostBuildHook: func(ctx context.Context, connector *pgdriver.Connector) error {
+        PostBuildHook: func(runtimeInstance containercontract.Runtime, connector *pgdriver.Connector) error {
             connector.Config().Dialer = func(ctx context.Context, network string, address string) (net.Conn, error) {
                 dials.Add(1)
 
@@ -1475,7 +1545,7 @@ func TestOpenWithRetry_ASingleAttemptDialsOnceAndFilesTheOutageAsUnreachable(t *
 
 func TestProvider_OpenReturnsOnACyclicChainFromAPostBuildHook(t *testing.T) {
     provider := NewProvider(ProviderConfig{
-        PostBuildHook: func(_ context.Context, _ *pgdriver.Connector) error {
+        PostBuildHook: func(_ containercontract.Runtime, _ *pgdriver.Connector) error {
             return newCyclicChainError()
         },
         Retry: RetryConfig{MaxAttempts: bound.Of(1)},
@@ -1569,7 +1639,7 @@ func TestOpenForMigration_TheConnectorReceivesTheConnectTimeoutAndTheLiftedDeadl
 
     provider := NewProvider(ProviderConfig{
         Timeout: TimeoutConfig{ConnectTimeout: bound.Of(7 * time.Second), ReadTimeout: bound.Of(11 * time.Second), WriteTimeout: bound.Of(13 * time.Second)},
-        PostBuildHook: func(ctx context.Context, connector *pgdriver.Connector) error {
+        PostBuildHook: func(runtimeInstance containercontract.Runtime, connector *pgdriver.Connector) error {
             seen = connector.Config()
 
             return errors.New("stop before the connection")
@@ -1590,7 +1660,7 @@ func TestOpen_ADoneContextIsRefusedBeforeTheHookRuns(t *testing.T) {
     hookCalls := 0
 
     provider := NewProvider(ProviderConfig{
-        PostBuildHook: func(ctx context.Context, connector *pgdriver.Connector) error {
+        PostBuildHook: func(runtimeInstance containercontract.Runtime, connector *pgdriver.Connector) error {
             hookCalls++
 
             return nil

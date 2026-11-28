@@ -12,7 +12,7 @@ type ProviderConfig struct {
 
     Retry RetryConfig
 
-    /* PostBuildHook reaches the driver configuration the typed fields do not, under the connect timeout; nil runs none. */
+    /* PostBuildHook reaches the driver configuration the typed fields do not, handed the opener's runtime under the connect timeout; nil runs none. */
     PostBuildHook PostBuildHook
 
     /* Insecure dials a plaintext connection where the default dials a verifying TLS session: the deliberate opt-out for a database reached over a trusted network or one that speaks no TLS. */

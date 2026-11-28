@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Breaking** — `post_build_hook.go`, `provider.go`, `README.md`: `PostBuildHook` takes the runtime first, `func(runtimeInstance, driverConfig) error`, handed the opener's runtime over a context ending at the connect timeout, where it took a bare `context.Context`.
 - **Breaking** — `lock.go`, `README.md`: `Locker.CreateLock(name, lockcontract.CreateLockOptions)` and the lock's `Refresh(runtimeInstance, lockcontract.RefreshOptions)` take the fourth major's options structs, both ignored by a session lock as the ttl was.
 - `lock.go`, `README.md`: the locker's GoDoc and the readme say a session lock is not a shared lease: the locker does not answer `lockcontract.SharedLeaseLocker`, and the cron tick dedup warns over it.
 - **Breaking** — `module.go`, `service_resolver.go`: `ModuleConfig.Locker` is a `*LockerConfig`, nil registering no locker and a pointer registering it, one handed with a nil database refused at `RegisterServices` naming `ModuleConfig.Locker`; `AsLocker`, the refusal of a locker configuration with the locker off, the exported `RegisterLockerService` and `ServiceRegistrar` are removed, the module being the door.

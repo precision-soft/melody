@@ -54,7 +54,7 @@ See the core [`LOCK.md`](../../../../v4/.documentation/package/LOCK.md) package 
 
 ## Provider
 
-The same module also ships the MySQL dialect [`Provider`](./provider.go) for the core [`bunorm`](../../v4) registry. [`mysql.NewProvider`](./provider.go) takes one [`ProviderConfig`](./provider_config.go); connection details (`Host`, `Port`, `Database`, `User`, `Password`) are supplied at open time through the [`bunorm.ConnectionParameters`](../../v4/connection_parameters.go) the manager registry passes to `Open`, an empty `Port` dialling `3306`. Pool, timeout and retry tuning lives in its [`Pool`](./pool_config.go), [`Timeout`](./timeout_config.go) and [`Retry`](./retry_config.go) fields, and its `PostBuildHook` reaches driver options the typed fields do not expose, through the [`mysql.PostBuildHook`](./post_build_hook.go) signature.
+The same module also ships the MySQL dialect [`Provider`](./provider.go) for the core [`bunorm`](../../v4) registry. [`mysql.NewProvider`](./provider.go) takes one [`ProviderConfig`](./provider_config.go); connection details (`Host`, `Port`, `Database`, `User`, `Password`) are supplied at open time through the [`bunorm.ConnectionParameters`](../../v4/connection_parameters.go) the manager registry passes to `Open`, an empty `Port` dialling `3306`. Pool, timeout and retry tuning lives in its [`Pool`](./pool_config.go), [`Timeout`](./timeout_config.go) and [`Retry`](./retry_config.go) fields, and its `PostBuildHook` reaches driver options the typed fields do not expose, through the [`mysql.PostBuildHook`](./post_build_hook.go) signature: the hook is handed the opener's runtime, its context ending at the connect timeout.
 
 ```go
 provider := mysql.NewProvider(mysql.ProviderConfig{

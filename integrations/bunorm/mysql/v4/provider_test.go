@@ -87,7 +87,7 @@ func TestOpen_TheDriverReceivesEveryDeadlineAndTheDefaultPort(t *testing.T) {
 
     provider := NewProvider(ProviderConfig{
         Timeout: TimeoutConfig{ConnectTimeout: bound.Of(7 * time.Second), ReadTimeout: bound.UnlimitedDuration(), WriteTimeout: bound.Of(13 * time.Second)},
-        PostBuildHook: func(ctx context.Context, driverConfig *driver.Config) error {
+        PostBuildHook: func(runtimeInstance containercontract.Runtime, driverConfig *driver.Config) error {
             seen = driverConfig
 
             return errors.New("stop before the connection")
@@ -122,7 +122,7 @@ func TestNewProvider_TheZeroConfigurationResolvesToTheDefaults(t *testing.T) {
 }
 
 func TestNewProvider_KeepsTheConfiguredValues(t *testing.T) {
-    hook := func(ctx context.Context, driverConfig *driver.Config) error {
+    hook := func(runtimeInstance containercontract.Runtime, driverConfig *driver.Config) error {
         return nil
     }
 
@@ -167,7 +167,7 @@ func TestMigrationProvider_KeepsHookRetryAndTransportOverTheMigrationShape(t *te
 
     provider := NewProvider(ProviderConfig{
         TlsConfig: explicitTlsConfig,
-        PostBuildHook: func(ctx context.Context, driverConfig *driver.Config) error {
+        PostBuildHook: func(runtimeInstance containercontract.Runtime, driverConfig *driver.Config) error {
             hookCalled = true
             return nil
         },
@@ -188,7 +188,7 @@ func TestMigrationProvider_KeepsHookRetryAndTransportOverTheMigrationShape(t *te
     if nil == derived.postBuildHook {
         t.Fatalf("expected the post build hook to travel whole")
     }
-    _ = derived.postBuildHook(context.Background(), driver.NewConfig())
+    _ = derived.postBuildHook(testRuntime(), driver.NewConfig())
     if false == hookCalled {
         t.Fatalf("expected the derived provider to carry the same hook")
     }
@@ -206,12 +206,80 @@ func TestMigrationProvider_KeepsHookRetryAndTransportOverTheMigrationShape(t *te
     }
 }
 
+type postBuildHookContextKey struct{}
+
+/* a hook doing I/O resolves through the scope it opens under, so it is handed the opener's scope and kind over a context derived from the caller's */
+func TestProvider_ThePostBuildHookRunsUnderTheOpenersRuntime(t *testing.T) {
+    hookErr := errors.New("hook stops the open")
+    openerRuntime := testRuntimeUnder(context.WithValue(context.Background(), postBuildHookContextKey{}, "opener"))
+
+    var seenRuntime containercontract.Runtime
+    provider := newTestProvider(ProviderConfig{
+        PostBuildHook: func(runtimeInstance containercontract.Runtime, driverConfig *driver.Config) error {
+            seenRuntime = runtimeInstance
+
+            return hookErr
+        },
+        Retry: singleAttemptRetry,
+    })
+
+    if _, openErr := provider.Open(openerRuntime, newTestParameters("db.internal", "3306", "melody", "melody_user", "melody_password"), nil); false == errors.Is(openErr, hookErr) {
+        t.Fatalf("expected the hook's refusal to end the open, got %v", openErr)
+    }
+
+    if nil == seenRuntime {
+        t.Fatal("expected the hook to run")
+    }
+
+    if openerRuntime.Scope() != seenRuntime.Scope() {
+        t.Fatal("expected the hook handed the opener's scope")
+    }
+
+    if openerRuntime.Kind() != seenRuntime.Kind() {
+        t.Fatalf("expected the hook handed the opener's kind %v, got %v", openerRuntime.Kind(), seenRuntime.Kind())
+    }
+
+    if "opener" != seenRuntime.Context().Value(postBuildHookContextKey{}) {
+        t.Fatal("expected the hook's context derived from the opener's")
+    }
+}
+
+func TestProvider_ThePostBuildHooksContextEndsAtTheConnectTimeout(t *testing.T) {
+    hookErr := errors.New("hook stops the open")
+    connectTimeout := 3 * time.Second
+
+    var seenDeadline time.Time
+    var hasDeadline bool
+    provider := newTestProvider(ProviderConfig{
+        Timeout: TimeoutConfig{ConnectTimeout: bound.Of(connectTimeout)},
+        PostBuildHook: func(runtimeInstance containercontract.Runtime, driverConfig *driver.Config) error {
+            seenDeadline, hasDeadline = runtimeInstance.Context().Deadline()
+
+            return hookErr
+        },
+        Retry: singleAttemptRetry,
+    })
+
+    started := time.Now()
+    if _, openErr := provider.Open(testRuntime(), newTestParameters("db.internal", "3306", "melody", "melody_user", "melody_password"), nil); false == errors.Is(openErr, hookErr) {
+        t.Fatalf("expected the hook's refusal to end the open, got %v", openErr)
+    }
+
+    if false == hasDeadline {
+        t.Fatal("expected the hook's runtime to carry the connect timeout's deadline")
+    }
+
+    if seenDeadline.Before(started) || seenDeadline.After(time.Now().Add(connectTimeout)) {
+        t.Fatalf("expected the deadline within the connect timeout, got %v from %v", seenDeadline.Sub(started), started)
+    }
+}
+
 func TestProviderOpenBuildsDriverConfigAndAbortsOnPostBuildHookError(t *testing.T) {
     hookErr := errors.New("hook rejected the connector")
 
     var seenConfig *driver.Config
     provider := newTestProvider(ProviderConfig{
-        PostBuildHook: func(ctx context.Context, driverConfig *driver.Config) error {
+        PostBuildHook: func(runtimeInstance containercontract.Runtime, driverConfig *driver.Config) error {
             seenConfig = driverConfig
 
             return hookErr
@@ -890,7 +958,7 @@ func openObservingTheTlsPosture(t *testing.T, config ProviderConfig) *tls.Config
     stopBeforeDial := errors.New("stop before the dial")
 
     var seenTlsConfig *tls.Config
-    config.PostBuildHook = func(ctx context.Context, driverConfig *driver.Config) error {
+    config.PostBuildHook = func(runtimeInstance containercontract.Runtime, driverConfig *driver.Config) error {
         seenTlsConfig = driverConfig.TLS
 
         return stopBeforeDial
@@ -1051,7 +1119,7 @@ func TestDialAddressOf_BracketsABareIpv6Literal(t *testing.T) {
 func TestProviderOpen_RefusesAnEmptyHostBeforeBuildingTheDriverConfig(t *testing.T) {
     provider := NewProvider(ProviderConfig{
         Insecure: true,
-        PostBuildHook: func(ctx context.Context, driverConfig *driver.Config) error {
+        PostBuildHook: func(runtimeInstance containercontract.Runtime, driverConfig *driver.Config) error {
             t.Fatal("the driver configuration was built for an empty host")
 
             return nil
@@ -1510,7 +1578,7 @@ func TestOpenWithRetry_ASingleAttemptDialsOnceAndFilesTheOutageAsUnreachable(t *
     provider := newTestProvider(ProviderConfig{
         Timeout: TimeoutConfig{ConnectTimeout: bound.Of(time.Second)},
         Retry:   RetryConfig{MaxAttempts: bound.Of(1)},
-        PostBuildHook: func(ctx context.Context, driverConfig *driver.Config) error {
+        PostBuildHook: func(runtimeInstance containercontract.Runtime, driverConfig *driver.Config) error {
             driverConfig.Net = network
 
             return nil
@@ -1560,7 +1628,7 @@ func TestOpen_AZeroIdleCapBootsOnThePingConnectionAndKeepsNoIdleConnectionAfter(
     provider := newTestProvider(ProviderConfig{
         Pool:  PoolConfig{MaxIdleConnections: bound.Of(0)},
         Retry: singleAttemptRetry,
-        PostBuildHook: func(ctx context.Context, driverConfig *driver.Config) error {
+        PostBuildHook: func(runtimeInstance containercontract.Runtime, driverConfig *driver.Config) error {
             driverConfig.Net = network
 
             return nil
@@ -1584,7 +1652,7 @@ func TestOpen_AZeroIdleCapBootsOnThePingConnectionAndKeepsNoIdleConnectionAfter(
 
 func TestProvider_OpenReturnsOnACyclicChainFromAPostBuildHook(t *testing.T) {
     provider := newTestProvider(ProviderConfig{
-        PostBuildHook: func(_ context.Context, _ *driver.Config) error {
+        PostBuildHook: func(_ containercontract.Runtime, _ *driver.Config) error {
             return newCyclicChainError()
         },
         Retry: RetryConfig{MaxAttempts: bound.Of(1)},
@@ -1678,7 +1746,7 @@ func TestOpenForMigration_TheDriverConfigReceivesTheConnectTimeoutAndTheLiftedDe
 
     provider := NewProvider(ProviderConfig{
         Timeout: TimeoutConfig{ConnectTimeout: bound.Of(7 * time.Second), ReadTimeout: bound.Of(11 * time.Second), WriteTimeout: bound.Of(13 * time.Second)},
-        PostBuildHook: func(ctx context.Context, driverConfig *driver.Config) error {
+        PostBuildHook: func(runtimeInstance containercontract.Runtime, driverConfig *driver.Config) error {
             seen = driverConfig
 
             return errors.New("stop before the connection")
@@ -1699,7 +1767,7 @@ func TestOpen_ADoneContextIsRefusedBeforeTheHookRuns(t *testing.T) {
     hookCalls := 0
 
     provider := NewProvider(ProviderConfig{
-        PostBuildHook: func(ctx context.Context, driverConfig *driver.Config) error {
+        PostBuildHook: func(runtimeInstance containercontract.Runtime, driverConfig *driver.Config) error {
             hookCalls++
 
             return nil

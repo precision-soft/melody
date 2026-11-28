@@ -1,12 +1,11 @@
 package mysql
 
 import (
-    "context"
-
     driver "github.com/go-sql-driver/mysql"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 type PostBuildHook func(
-    ctx context.Context,
+    runtimeInstance containercontract.Runtime,
     driverConfig *driver.Config,
 ) error

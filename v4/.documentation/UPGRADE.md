@@ -33,6 +33,14 @@ The fourth major starts from the third: the sections the third major shipped, in
 
 The fourth major takes the forms the third major kept compatible: a section that names a sibling interface, a deprecated door or a released signature on the third major describes here the form the fourth major carries instead, and this major's changelog marks each **Breaking**.
 
+### Bunorm mysql and pgsql: the post-build hook takes the runtime
+
+**What changed.** [`mysql.PostBuildHook`](../../integrations/bunorm/mysql/v4/post_build_hook.go) is `func(runtimeInstance, driverConfig) error` and [`pgsql.PostBuildHook`](../../integrations/bunorm/pgsql/v4/post_build_hook.go) is `func(runtimeInstance, connector) error`, where both took a bare `context.Context` first. The hook is handed the runtime the provider's `Open` or `OpenForMigration` runs under, its scope and its kind, over a context derived from the runtime's that ends at the connect timeout, the budget the hook's context carried before.
+
+**Symptom.** `cannot use hook (variable of type func(ctx context.Context, driverConfig *mysql.Config) error) as mysql.PostBuildHook value in struct literal`, and the same with `*pgdriver.Connector` for pgsql.
+
+**Remedy.** Take `runtimeInstance containercontract.Runtime` first and read `runtimeInstance.Context()` where the hook read `ctx`; a hook fetching a token resolves what it needs through the runtime's scope.
+
 ### Bunorm: the audit transaction and the cipher take their options in a struct
 
 **What changed.** [`audit.BeginTransaction`](../../integrations/bunorm/v4/audit/transaction.go) is `BeginTransaction(ctx, database, options)`, `audit.TransactionOptions` carrying the `Actor` the row is recorded for and the `Extras` encoded as json into it, an empty actor and no extras when left out, where both were positional arguments. [`encrypt.Cipher`](../../integrations/bunorm/v4/encrypt/cipher.go) declares `Encrypt(plaintext, options)` and `EncryptDeterministic(plaintext, options)`, `encrypt.EncryptOptions.KeyId` naming the key the value is sealed under, the provider's current key when left out; `EncryptWithKeyId` and `EncryptDeterministicWithKeyId` leave the interface. One reading moves: an empty `KeyId` seals under the current key, where the third major's `EncryptWithKeyId(value, "")` and `EncryptDeterministicWithKeyId(value, "")` refused it with `encryption key id must match`.
